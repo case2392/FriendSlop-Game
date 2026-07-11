@@ -25,7 +25,15 @@ await new Promise((res, rej) => {
   setTimeout(() => rej(new Error('server never started')), 5000);
 }).catch(e => fail(e.message));
 
-const browser = await chromium.launch({ executablePath: EXE });
+const browser = await chromium.launch({
+  executablePath: EXE,
+  args: [
+    // fake mic so voice chat can be exercised headlessly
+    '--use-fake-ui-for-media-stream',
+    '--use-fake-device-for-media-stream',
+    '--autoplay-policy=no-user-gesture-required',
+  ],
+});
 const pageErrors = [];
 
 async function newPage(name) {
@@ -97,10 +105,19 @@ await host.click('#addBotBtn');
 await host.click('#addBotBtn');
 await host.waitForFunction(() => window.__slop.meta.players.length === 4, null, { polling: 250 });
 
-await host.fill('#chatInput', 'nobody bust this time please');
-await host.press('#chatInput', 'Enter');
-await p2.waitForFunction(() => document.querySelector('#chatLog').textContent.includes('nobody bust'));
-console.log('✅ chat works in-world');
+// Voice chat: both players join voice; a real WebRTC connection should form
+// between the two pages (localhost is a secure context, mic is faked).
+await host.click('#voiceJoinBtn');
+await p2.click('#voiceJoinBtn');
+await host.waitForFunction(() => window.__slop.voice?.on === true, null, { polling: 250 });
+await p2.waitForFunction(() => window.__slop.voice?.on === true, null, { polling: 250 });
+await host.waitForFunction(
+  () => [...window.__slop.voice.peers.values()].some(p => p.pc.connectionState === 'connected'),
+  null, { timeout: 20000, polling: 250 },
+).catch(() => fail('voice peers never reached connected state'));
+const talkers = await host.evaluate(() => window.__slop.meta.players.filter(p => p.voice).length);
+if (talkers !== 2) fail(`expected 2 players flagged in voice, got ${talkers}`);
+console.log('✅ voice chat: WebRTC mesh connected between both pages');
 
 await host.waitForTimeout(1200); // let blobs mill about
 await host.screenshot({ path: SHOTS + '02-den.png' });

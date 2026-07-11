@@ -69,6 +69,7 @@ class Client {
     this.bjOutcomes = [];
     this.maxChamber = 0;
     this.keys = {};
+    this.rtc = [];
   }
   connect() {
     return new Promise((res, rej) => {
@@ -88,6 +89,7 @@ class Client {
           const o = m.extra?.bj?.outcome;
           if (o && this.bjOutcomes.at(-1) !== o) this.bjOutcomes.push(o);
         } else if (m.t === 'podium') this.podium = m;
+        else if (m.t === 'rtc') this.rtc.push(m);
         else if (m.t === 'error') this.errors.push(m.msg);
       });
     });
@@ -144,6 +146,21 @@ console.log('✅ the Den: 3 humans + 1 bot walking around');
 await host.until(c => c.states > 5, 'hub snapshots flowing');
 if (host.meta.phase !== 'hub' || host.meta.hubMode !== 'lobby') fail('should idle in hub lobby');
 console.log('✅ hub snapshots flowing (the Den is live)');
+
+// Voice chat plumbing: presence flags ride the meta, WebRTC signaling relays
+// point-to-point (and never leaks to a third player).
+host.send({ t: 'voice', on: true });
+p2.send({ t: 'voice', on: true });
+await p3.until(c => c.meta?.players.filter(p => p.voice).length === 2, 'voice flags in meta');
+host.send({ t: 'rtc', to: p2.welcome.id, data: { sdp: { type: 'offer', sdp: 'test-offer' } } });
+await p2.until(c => c.rtc.length === 1, 'rtc offer relayed');
+if (p2.rtc[0].from !== host.welcome.id) fail(`rtc "from" should be host id, got ${p2.rtc[0].from}`);
+if (p2.rtc[0].data?.sdp?.sdp !== 'test-offer') fail('rtc payload mangled in relay');
+if (p3.rtc.length) fail('rtc message leaked to a player it was not addressed to');
+host.send({ t: 'voice', on: false });
+p2.send({ t: 'voice', on: false });
+await p3.until(c => c.meta?.players.every(p => !p.voice), 'voice flags cleared');
+console.log('✅ voice presence + point-to-point rtc signaling relay');
 
 // The squad drives itself for the whole expedition with body language only.
 const driver = setInterval(() => {

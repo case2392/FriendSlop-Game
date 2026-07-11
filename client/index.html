@@ -50,11 +50,35 @@
 
   <div id="countdownBig" class="countdown hidden"></div>
 
-  <div class="chat game-chat">
-    <div id="chatLog" class="chat-log"></div>
-    <div class="chat-row">
-      <input id="chatInput" maxlength="120" placeholder="talk your trash… (enter)" autocomplete="off">
+  <!-- voice chat dock: join, mute, push-to-talk state, settings -->
+  <div id="voiceDock" class="voice-dock">
+    <button id="voiceJoinBtn" class="btn small green">🎙 JOIN VOICE</button>
+    <div id="voiceLive" class="voice-live hidden">
+      <button id="voiceMuteBtn" class="voice-btn" title="mute / unmute (M)">🎙</button>
+      <span id="voiceTxHint" class="voice-hint"></span>
+      <button id="voiceCfgBtn" class="voice-btn" title="voice settings">⚙️</button>
+      <button id="voiceLeaveBtn" class="voice-btn" title="leave voice">✕</button>
     </div>
+    <div id="voiceRoster" class="voice-roster"></div>
+    <div id="voiceErr" class="voice-err hidden"></div>
+  </div>
+
+  <div id="voicePanel" class="voice-panel hidden">
+    <h3>🎙 VOICE SETTINGS</h3>
+    <label class="vrow">Mic
+      <select id="voiceMicSel"></select>
+    </label>
+    <div class="vrow">
+      <span>Mode</span>
+      <label><input type="radio" name="voiceMode" value="open"> Open mic</label>
+      <label><input type="radio" name="voiceMode" value="ptt"> Push-to-talk <kbd>V</kbd></label>
+    </div>
+    <label class="vrow">Volume
+      <input id="voiceMasterVol" type="range" min="0" max="1" step="0.05">
+    </label>
+    <div id="voicePeerRows"></div>
+    <p class="voice-note">M mutes your mic · V talks in push-to-talk · voice is peer-to-peer between the boys</p>
+    <button id="voicePanelClose" class="btn small gray">CLOSE</button>
   </div>
 
   <div id="emoteBar" class="emote-bar"></div>

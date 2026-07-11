@@ -18,6 +18,14 @@ Vampire Survivors launched like this.
   2. **Steam Datagram Relay / steamworks P2P** (later): swap the WebSocket transport
      for `steamworks.js` networking so Steam relays traffic. Bigger lift; do it after
      the game has legs.
+- **Voice chat** is WebRTC peer-to-peer; the game server only relays the handshake.
+  Two deployment notes:
+  1. Browsers require a **secure context** (https or localhost) for mic access — so
+     put the public server behind TLS (you're doing that anyway per option 1). The
+     Electron build loads from localhost, which counts as secure: voice just works.
+  2. Voice uses a public STUN server for NAT traversal. Friends behind brutal
+     symmetric NATs may fail to connect P2P — if reports come in, add a cheap TURN
+     server (coturn on the same VPS) to the `ICE` config in `client/js/voice.js`.
 
 ## 1. Steamworks setup (one-time, ~$100)
 

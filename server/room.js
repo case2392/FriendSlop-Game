@@ -119,6 +119,7 @@ export class Room {
       players: this.list().map(p => ({
         id: p.id, name: p.name, color: p.color, isBot: p.isBot,
         connected: p.connected, coins: p.coins, axe: p.axeTier || 0,
+        voice: !!p.voiceOn,
       })),
       lastResults: this.lastResults,
     });
@@ -148,10 +149,22 @@ export class Room {
     this.broadcast({ t: 'emote', id: p.id, e });
   }
 
-  handleChat(p, msg) {
-    const clean = String(msg || '').slice(0, 120).trim();
-    if (!clean) return;
-    this.broadcast({ t: 'chat', id: p.id, name: p.name, msg: clean });
+  // voice presence: who's in voice chat (clients dial each other on this)
+  handleVoice(p, m) {
+    const on = !!(m && m.on);
+    if (!!p.voiceOn === on) return;
+    p.voiceOn = on;
+    this.sendMeta();
+  }
+
+  // WebRTC signaling relay — the server never touches audio, it just passes
+  // offers/answers/ICE candidates between two players in the same room
+  relayRtc(p, m) {
+    if (!m || typeof m !== 'object') return;
+    const target = this.players.get(Number(m.to));
+    if (!target || target.isBot || !target.connected || target.id === p.id) return;
+    if (JSON.stringify(m.data ?? null).length > 20000) return;
+    this.send(target, { t: 'rtc', from: p.id, data: m.data });
   }
 
   // ---- expedition flow -----------------------------------------------------

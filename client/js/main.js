@@ -2,6 +2,7 @@ import * as C from '/shared/constants.js';
 import * as net from './net.js';
 import { initAudio, sfx } from './sfx.js';
 import { initRender, frame, applySnapshot, resetArena, confetti, emoteAt, getCamYaw, turnCam } from './render.js';
+import * as voice from './voice.js';
 
 const $ = id => document.getElementById(id);
 
@@ -67,16 +68,98 @@ $('hudCode').onclick = () => {
 $('addBotBtn').onclick = () => { sfx.click(); net.send({ t: 'addbot' }); };
 $('kickBotBtn').onclick = () => { sfx.click(); net.send({ t: 'kickbot' }); };
 
-function sendChat() {
-  const v = $('chatInput').value.trim();
-  if (!v) return;
-  net.send({ t: 'chat', msg: v });
-  $('chatInput').value = '';
-  $('chatInput').blur(); // hands back on the wheel
+// ---- voice chat UI ---------------------------------------------------------------
+
+const VV = voice.V;
+S.voice = VV; // render + tests read speaking state from here
+
+function renderVoiceUI() {
+  $('voiceJoinBtn').classList.toggle('hidden', VV.on);
+  $('voiceJoinBtn').disabled = VV.connecting;
+  $('voiceJoinBtn').textContent = VV.connecting ? '🎙 …' : '🎙 JOIN VOICE';
+  $('voiceLive').classList.toggle('hidden', !VV.on);
+
+  const err = $('voiceErr');
+  err.classList.toggle('hidden', !VV.err);
+  err.textContent = VV.err || '';
+
+  if (VV.on) {
+    const tx = !VV.muted && (VV.mode === 'open' || VV.ptt);
+    const mb = $('voiceMuteBtn');
+    mb.textContent = VV.muted ? '🔇' : '🎙';
+    mb.classList.toggle('off', VV.muted);
+    const hint = $('voiceTxHint');
+    hint.textContent = VV.muted ? 'muted (M)'
+      : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : 'hold V to talk')
+      : (VV.speaking[S.selfId] ? 'talking…' : 'open mic');
+    hint.classList.toggle('hot', tx && !!VV.speaking[S.selfId]);
+  }
+
+  // roster chips: everyone in voice, lit while talking
+  const roster = $('voiceRoster');
+  roster.innerHTML = '';
+  if (VV.on) {
+    for (const p of S.meta?.players || []) {
+      if (!p.voice || !p.connected) continue;
+      const chip = document.createElement('span');
+      chip.className = 'voice-chip' + (VV.speaking[p.id] ? ' talking' : '');
+      chip.style.color = p.color;
+      chip.textContent = (VV.speaking[p.id] ? '🔊 ' : '') + p.name;
+      roster.appendChild(chip);
+    }
+  }
+
+  // per-player rows in the settings panel
+  const rows = $('voicePeerRows');
+  rows.innerHTML = '';
+  for (const [id, peer] of VV.peers) {
+    const p = S.meta?.players.find(q => q.id === id);
+    const row = document.createElement('div');
+    row.className = 'voice-peer-row';
+    const nm = document.createElement('span');
+    nm.className = 'vp-name';
+    nm.style.color = p?.color || '#fff';
+    nm.textContent = p?.name || `player ${id}`;
+    const vol = document.createElement('input');
+    vol.type = 'range'; vol.min = 0; vol.max = 1.5; vol.step = 0.05; vol.value = peer.vol;
+    vol.oninput = () => voice.setPeerVol(id, Number(vol.value));
+    const mute = document.createElement('button');
+    mute.className = 'voice-btn' + (peer.muted ? ' off' : '');
+    mute.textContent = peer.muted ? '🔇' : '🔊';
+    mute.onclick = () => voice.togglePeerMute(id);
+    row.append(nm, vol, mute);
+    rows.appendChild(row);
+  }
+
+  // mic list
+  const sel = $('voiceMicSel');
+  const cur = sel.value;
+  sel.innerHTML = '';
+  for (const m of VV.mics) {
+    const o = document.createElement('option');
+    o.value = m.deviceId; o.textContent = m.label;
+    if (m.deviceId === (VV.micId || cur)) o.selected = true;
+    sel.appendChild(o);
+  }
+  if (!VV.mics.length) {
+    const o = document.createElement('option');
+    o.textContent = 'default mic';
+    sel.appendChild(o);
+  }
+
+  document.querySelectorAll('input[name=voiceMode]').forEach(r => { r.checked = r.value === VV.mode; });
+  $('voiceMasterVol').value = VV.masterVol;
 }
-$('chatInput').addEventListener('keydown', e => {
-  if (e.key === 'Enter') sendChat();
-  e.stopPropagation();
+
+$('voiceJoinBtn').onclick = () => { initAudio(); sfx.click(); voice.joinVoice(); };
+$('voiceLeaveBtn').onclick = () => { sfx.click(); voice.leaveVoice(); $('voicePanel').classList.add('hidden'); };
+$('voiceMuteBtn').onclick = () => { sfx.click(); voice.toggleMute(); };
+$('voiceCfgBtn').onclick = () => { sfx.click(); $('voicePanel').classList.toggle('hidden'); voice.refreshMics(); };
+$('voicePanelClose').onclick = () => $('voicePanel').classList.add('hidden');
+$('voiceMicSel').onchange = e => voice.setMic(e.target.value);
+$('voiceMasterVol').oninput = e => voice.setMasterVol(Number(e.target.value));
+document.querySelectorAll('input[name=voiceMode]').forEach(r => {
+  r.onchange = () => voice.setMode(r.value);
 });
 
 function ruleStrip() {
@@ -146,12 +229,14 @@ window.addEventListener('keydown', e => {
   const k = e.key.toLowerCase();
   if (KEYMAP[k] && !keys[KEYMAP[k]]) { keys[KEYMAP[k]] = true; pushInput(); }
   else if (k === ' ' || k === 'shift') { e.preventDefault(); pushInput(true); }
-  else if (k === 'enter' && S.phase !== 'menu') $('chatInput').focus();
+  else if (k === 'v') voice.setPtt(true);
+  else if (k === 'm') voice.toggleMute();
   else if (/^[1-6]$/.test(k) && S.phase !== 'menu') net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
 });
 window.addEventListener('keyup', e => {
   const k = e.key.toLowerCase();
   if (KEYMAP[k] && keys[KEYMAP[k]]) { keys[KEYMAP[k]] = false; pushInput(); }
+  else if (k === 'v') voice.setPtt(false);
 });
 
 // ---- net handlers ------------------------------------------------------------------
@@ -161,7 +246,9 @@ net.on('welcome', m => {
   S.code = m.code;
   $('menuError').textContent = '';
   window.__slop = S; // debug/test handle
-  setTimeout(() => toast('🖱️ click the world to look around · WASD walk · SPACE dash', 5200), 800);
+  voice.initVoice(m.id, renderVoiceUI);
+  renderVoiceUI();
+  setTimeout(() => toast('🖱️ click the world to look around · WASD walk · SPACE dash · 🎙 voice bottom-left', 5200), 800);
 });
 
 net.on('error', m => {
@@ -175,21 +262,6 @@ net.on('_close', () => {
     S.phase = 'menu';
     $('menuError').textContent = 'Lost connection to the slop server.';
   }
-});
-
-net.on('chat', m => {
-  const log = $('chatLog');
-  const div = document.createElement('div');
-  const nm = document.createElement('span');
-  nm.className = 'cname';
-  const p = S.meta?.players.find(q => q.id === m.id);
-  nm.style.color = p?.color || '#fff';
-  nm.textContent = m.name + ': ';
-  div.appendChild(nm);
-  div.appendChild(document.createTextNode(m.msg));
-  log.appendChild(div);
-  while (log.children.length > 40) log.removeChild(log.firstChild);
-  log.scrollTop = log.scrollHeight;
 });
 
 net.on('emote', m => emoteAt(m.id, m.e));
@@ -221,6 +293,8 @@ net.on('state', m => {
 net.on('meta', m => {
   const prevScene = S.scene;
   S.meta = m;
+  voice.syncPeers(m.players);
+  renderVoiceUI();
   S.minigame = m.minigame;
   S.phase = m.phase;
   S.hubMode = m.hubMode;

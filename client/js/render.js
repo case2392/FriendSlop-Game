@@ -29,6 +29,7 @@ export function turnCam(d) { if (!yawLocked) camYaw += d; }
 let arena = null;
 let mapMode = 'flat';           // 'flat' | 'mountain'
 let curExtra = null;            // latest snapshot extra (for lifts/effects)
+let speakingIds = null;         // voice chat: who's talking (id -> true)
 const views = new Map();
 const gremViews = new Map();
 const chainPool = [];
@@ -55,18 +56,20 @@ function liftFor(id) {
 // ---- shared geometry / materials --------------------------------------------
 
 const GEO = {
-  torso: new THREE.CapsuleGeometry(15, 24, 6, 14),
-  leg: new THREE.CapsuleGeometry(7, 13, 4, 10),
-  arm: new THREE.CapsuleGeometry(5.5, 14, 4, 10),
-  head: new THREE.SphereGeometry(16, 20, 16),
+  // chunky toy proportions (Gamble With Friends / R.V. There Yet energy):
+  // fat egg body, big head, stubby little limbs, all smooth-shaded
+  torso: new THREE.SphereGeometry(23, 26, 20).scale(1, 1.18, 0.96),
+  leg: new THREE.CapsuleGeometry(8.5, 8, 6, 14),
+  arm: new THREE.CapsuleGeometry(7, 9, 6, 14),
+  head: new THREE.SphereGeometry(19.5, 26, 20).scale(1, 0.94, 1),
   // the 2004 de-make set
   torsoB: new THREE.BoxGeometry(26, 46, 36),
   legB: new THREE.BoxGeometry(12, 27, 14),
   armB: new THREE.BoxGeometry(10, 27, 12),
   headB: new THREE.BoxGeometry(26, 24, 28),
   eyeB: new THREE.BoxGeometry(3, 6, 6),
-  eyeH: new THREE.SphereGeometry(5, 10, 8),
-  pupilH: new THREE.SphereGeometry(2.6, 8, 6),
+  eyeH: new THREE.SphereGeometry(6.5, 14, 12).scale(1, 1.25, 1),
+  pupilH: new THREE.SphereGeometry(3.2, 10, 8),
   aura: new THREE.SphereGeometry(C.PLAYER_RADIUS + 12, 16, 12),
   link: new THREE.SphereGeometry(7, 8, 6),
   particle: new THREE.SphereGeometry(5, 6, 5),
@@ -167,6 +170,7 @@ function makeHat(i) {
     ring.position.y = 2;
     hat.add(ring);
   }
+  hat.scale.setScalar(1.25); // sized for the big toy head
   return hat;
 }
 
@@ -179,32 +183,32 @@ function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1, block
   const legL = new THREE.Group();
   const legR = new THREE.Group();
   for (const [pivot, side] of [[legL, -1], [legR, 1]]) {
-    pivot.position.set(0, 28, side * 9);
+    pivot.position.set(0, blocky ? 28 : 22, side * (blocky ? 9 : 10));
     const leg = new THREE.Mesh(blocky ? GEO.legB : GEO.leg, m.limb);
-    leg.position.y = -14;
+    leg.position.y = blocky ? -14 : -11;
     leg.castShadow = true;
     pivot.add(leg);
     root.add(pivot);
   }
 
   const torso = new THREE.Mesh(blocky ? GEO.torsoB : GEO.torso, m.suit);
-  torso.position.y = blocky ? 51 : 48;
+  torso.position.y = blocky ? 51 : 46;
   torso.castShadow = true;
   root.add(torso);
 
   const armL = new THREE.Group();
   const armR = new THREE.Group();
   for (const [pivot, side] of [[armL, -1], [armR, 1]]) {
-    pivot.position.set(0, 64, side * (blocky ? 24 : 20));
+    pivot.position.set(0, blocky ? 64 : 58, side * (blocky ? 24 : 22));
     const arm = new THREE.Mesh(blocky ? GEO.armB : GEO.arm, m.limb);
-    arm.position.y = -13;
+    arm.position.y = blocky ? -13 : -11;
     arm.castShadow = true;
     pivot.add(arm);
     root.add(pivot);
   }
 
   const head = new THREE.Mesh(blocky ? GEO.headB : GEO.head, m.skin);
-  head.position.y = blocky ? 89 : 90;
+  head.position.y = blocky ? 89 : 88;
   head.castShadow = true;
   if (blocky) {
     for (const side of [-1, 1]) {
@@ -215,15 +219,15 @@ function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1, block
   } else {
     for (const side of [-1, 1]) {
       const eye = new THREE.Mesh(GEO.eyeH, MAT.eyeWhite);
-      eye.position.set(12.5, 2, side * 6.5);
+      eye.position.set(15, 2.5, side * 8);
       const pupil = new THREE.Mesh(GEO.pupilH, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
-      pupil.position.set(3.6, 0.3, 0);
+      pupil.position.set(4.6, 0.4, 0);
       eye.add(pupil);
       head.add(eye);
     }
   }
   const hat = makeHat(hatIndex);
-  hat.position.y = 12;
+  hat.position.y = blocky ? 12 : 15;
   head.add(hat);
   root.add(head);
 
@@ -344,9 +348,10 @@ export function initRender(cv) {
     if (!yawLocked && document.pointerLockElement === canvas) camYaw += e.movementX * 0.0026;
   });
 
-  scene.add(new THREE.AmbientLight(0x9080b8, 1.35));
-  scene.add(new THREE.HemisphereLight(0x8878c0, 0x2a1f3a, 0.9));
-  const sun = new THREE.DirectionalLight(0xfff2e0, 2.0);
+  // bright + even (Gamble With Friends is basically lit like a toy commercial)
+  scene.add(new THREE.AmbientLight(0xb0a4d8, 1.6));
+  scene.add(new THREE.HemisphereLight(0xa898d8, 0x4a3a58, 1.1));
+  const sun = new THREE.DirectionalLight(0xfff2e0, 1.7);
   sun.position.set(500, 1500, 900);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -400,49 +405,57 @@ export function resetArena() {
 
 // ---- procedural textures ---------------------------------------------------------
 
+// Big flowing swirl carpet — the Gamble With Friends casino floor look:
+// cream base, fat black waves, hot pink + cyan ribbons weaving through.
 function carpetTexture() {
   const cv = document.createElement('canvas');
   cv.width = cv.height = 512;
   const g = cv.getContext('2d');
-  g.fillStyle = '#3d1230';
+  g.fillStyle = '#f2e6e0';
   g.fillRect(0, 0, 512, 512);
-  const colors = ['#a03b28', '#c76b1e', '#1f7a6e', '#7a1f4e'];
-  for (let ring = 0; ring < 2; ring++) {
-    for (let i = 0; i < 8; i++) {
-      const x = (i % 4) * 128 + 64 + (ring ? 64 : 0);
-      const y = Math.floor(i / 4) * 256 + 64 + ring * 128;
-      g.strokeStyle = colors[i % colors.length];
-      g.lineWidth = 10;
-      g.beginPath(); g.arc(x % 512, y % 512, 38, 0, Math.PI * 2); g.stroke();
-      g.fillStyle = colors[(i + 1) % colors.length];
-      g.beginPath(); g.arc(x % 512, y % 512, 16, 0, Math.PI * 2); g.fill();
-      g.strokeStyle = '#e8b93c88';
-      g.lineWidth = 4;
-      g.beginPath(); g.arc((x + 64) % 512, (y + 64) % 512, 52, 0.3, 2.4); g.stroke();
+  // sine ribbons tile in x; drawing each at y±512 keeps the vertical seam clean
+  const ribbon = (col, w, y0, amp, ph, freq = 1) => {
+    g.strokeStyle = col;
+    g.lineWidth = w;
+    g.lineCap = 'round';
+    for (const oy of [-512, 0, 512]) {
+      g.beginPath();
+      for (let x = -24; x <= 536; x += 8) {
+        const y = y0 + oy + Math.sin((x / 512) * Math.PI * 2 * freq + ph) * amp;
+        x === -24 ? g.moveTo(x, y) : g.lineTo(x, y);
+      }
+      g.stroke();
     }
-  }
+  };
+  ribbon('#221728', 58, 90, 46, 0.4);
+  ribbon('#ff6ec7', 30, 168, 38, 2.1);
+  ribbon('#221728', 64, 300, 52, 3.6);
+  ribbon('#31c9d8', 18, 388, 34, 1.2, 2);
+  ribbon('#ffd84d', 12, 452, 40, 5.0);
+  ribbon('#f2b8d8', 26, 20, 30, 4.2, 2);
   const tex = canvasTex(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-  tex.repeat.set(5, 3);
+  tex.repeat.set(3, 2);
   return tex;
 }
 
+// Bright white casino-mall walls with a faint pastel lattice.
 function wallpaperTexture() {
   const cv = document.createElement('canvas');
   cv.width = cv.height = 256;
   const g = cv.getContext('2d');
-  g.fillStyle = '#4a3550';
+  g.fillStyle = '#f6f0f4';
   g.fillRect(0, 0, 256, 256);
-  g.strokeStyle = '#6b4a66';
-  g.lineWidth = 3;
+  g.strokeStyle = '#e4d0e6';
+  g.lineWidth = 4;
   for (let x = -256; x < 512; x += 64) {
     g.beginPath(); g.moveTo(x, 0); g.lineTo(x + 128, 256); g.stroke();
     g.beginPath(); g.moveTo(x + 128, 0); g.lineTo(x, 256); g.stroke();
   }
-  g.fillStyle = '#c9a3402e';
+  g.fillStyle = '#ffd84d66';
   for (let x = 32; x < 256; x += 64) {
     for (let y = 32; y < 256; y += 64) {
-      g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.fill();
+      g.beginPath(); g.arc(x, y, 6, 0, Math.PI * 2); g.fill();
     }
   }
   const tex = canvasTex(cv);
@@ -909,27 +922,72 @@ function buildDenRoom(group) {
     t.position.set(x, 6, z);
     group.add(t);
   }
+  // white ceiling with a glass skylight grid (GWF atrium style)
   const ceil = new THREE.Mesh(
     new THREE.PlaneGeometry(1740, 1040),
-    new THREE.MeshStandardMaterial({ color: 0x241a3e, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ color: 0xf2ecf6, roughness: 1 }),
   );
   ceil.position.set(CX, 520, CZ);
   ceil.rotation.x = Math.PI / 2;
   group.add(ceil);
-  for (let i = 0; i < 6; i++) {
-    const panel = new THREE.Mesh(
-      new THREE.BoxGeometry(220, 6, 120),
-      new THREE.MeshBasicMaterial({ color: 0xbfa8ff }),
-    );
-    panel.position.set(300 + (i % 3) * 500, 516, 250 + Math.floor(i / 3) * 400);
-    group.add(panel);
+  for (let gx = 0; gx < 4; gx++) {
+    for (let gz = 0; gz < 3; gz++) {
+      const panel = new THREE.Mesh(
+        new THREE.BoxGeometry(240, 6, 160),
+        new THREE.MeshBasicMaterial({ color: 0xbfe6ff }),
+      );
+      panel.position.set(230 + gx * 380, 516, 190 + gz * 260);
+      group.add(panel);
+    }
   }
-  const moodA = new THREE.PointLight(0xff6ec7, 14000, 900);
+  // indoor palms in every corner, because casino
+  palmTree(group, 130, 130, 1.0);
+  palmTree(group, C.ARENA_W - 130, 130, 1.1);
+  palmTree(group, 130, C.ARENA_H - 130, 1.1);
+  palmTree(group, C.ARENA_W - 130, C.ARENA_H - 130, 0.95);
+  const moodA = new THREE.PointLight(0xff6ec7, 18000, 900);
   moodA.position.set(220, 300, 200);
   group.add(moodA);
-  const moodB = new THREE.PointLight(0x00e5ff, 12000, 900);
+  const moodB = new THREE.PointLight(0x00e5ff, 15000, 900);
   moodB.position.set(C.ARENA_W - 220, 300, 700);
   group.add(moodB);
+}
+
+// A chunky cartoon palm: leaning trunk segments + a mop of droopy leaves.
+const PALM_TRUNK = new THREE.MeshStandardMaterial({ color: 0xc79a5e, roughness: 0.9 });
+const PALM_LEAF = new THREE.MeshStandardMaterial({ color: 0x3fae52, roughness: 0.8, side: THREE.DoubleSide });
+const PALM_LEAF_GEO = new THREE.ConeGeometry(13, 110, 6).scale(1, 1, 0.28);
+function palmTree(group, x, z, s = 1) {
+  const palm = new THREE.Group();
+  const lean = Math.random() * 0.5 - 0.25;
+  let px = 0, py = 0;
+  for (let i = 0; i < 5; i++) {
+    const seg = new THREE.Mesh(new THREE.CylinderGeometry(9 - i, 11 - i, 62, 10), PALM_TRUNK);
+    px += lean * 16;
+    py += 55;
+    seg.position.set(px, py - 28, 0);
+    seg.rotation.z = -lean * 0.35;
+    seg.castShadow = true;
+    palm.add(seg);
+  }
+  for (let i = 0; i < 7; i++) {
+    const piv = new THREE.Group();
+    piv.position.set(px, py + 8, 0);
+    piv.rotation.y = (i / 7) * Math.PI * 2;
+    const leaf = new THREE.Mesh(PALM_LEAF_GEO, PALM_LEAF);
+    leaf.position.x = 46;
+    leaf.rotation.z = -Math.PI / 2 - 0.45; // tip out and drooping
+    leaf.castShadow = true;
+    piv.add(leaf);
+    palm.add(piv);
+  }
+  const coco = new THREE.Mesh(new THREE.SphereGeometry(11, 10, 8), PALM_TRUNK);
+  coco.position.set(px, py, 0);
+  palm.add(coco);
+  palm.position.set(x, 0, z);
+  palm.scale.setScalar(s);
+  group.add(palm);
+  return palm;
 }
 
 // The Pit Boss's felt table, zones, and card rig.
@@ -953,7 +1011,7 @@ function buildBjTable(group) {
   const bossChar = buildCharacter('#241d35', { hatIndex: 1, eyeColor: 0xff3030, scale: 1.45 });
   const boss = bossChar.root;
   const bowtie = new THREE.Mesh(new THREE.BoxGeometry(4, 6, 14), HAT_RED);
-  bowtie.position.set(13, 74, 0);
+  bowtie.position.set(21, 62, 0);
   boss.add(bowtie);
   boss.rotation.y = -Math.PI / 2;
   boss.position.set(C.HUB.TABLE.x, 0, C.HUB.TABLE.y - 215);
@@ -1158,17 +1216,31 @@ function buildArena(kind) {
     buildSlopchange(group, -405);
     arena.digLayers = []; // built on demand from extras
   } else if (kind === 'rv') {
-    skyDome(group, '#3a2248', '#c9743a', '#7a4a2a');
-    setMood(0xb06a3a, 2200, 5200);
-    addClouds(group, 5, 640, 0xffc9a0, 0.4);
+    // warm terracotta canyon at golden hour (R.V. There Yet's postcard look)
+    skyDome(group, '#8a4a8e', '#ff8a52', '#ffcf8a');
+    setMood(0xe08a54, 2400, 5600);
+    addClouds(group, 5, 640, 0xffd9b0, 0.5);
     const canyon = new THREE.Mesh(
-      roughen(new THREE.CylinderGeometry(2500, 2400, 1500, 22, 5, true), 110),
-      new THREE.MeshStandardMaterial({ color: 0x6b3a22, roughness: 1, flatShading: true, side: THREE.BackSide }),
+      roughen(new THREE.CylinderGeometry(2500, 2400, 1500, 26, 6, true), 70),
+      new THREE.MeshStandardMaterial({ color: 0xc4652f, roughness: 1, side: THREE.BackSide }),
     );
     canyon.position.set(CX, 500, CZ);
     group.add(canyon);
-    addDrifters(group, { count: 70, color: 0xd8a070, size: 5, opacity: 0.3, box: [0, 1600, 10, 300, 0, 900], vy: 6 });
-    floorBox(group, 1760, 1020, 0x5a4a33, noiseTexture('#5a4a33', '#463a26'));
+    // stacked hoodoo boulders around the rim, smooth clay-like
+    const hoodooMat = new THREE.MeshStandardMaterial({ color: 0xd4784a, roughness: 0.95 });
+    for (let i = 0; i < 7; i++) {
+      const a = (i / 7) * Math.PI * 2 + 0.4;
+      let hy = 0;
+      for (let s = 0; s < 3; s++) {
+        const r = 130 - s * 34 + Math.random() * 20;
+        const rock = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10).scale(1, 0.72, 1), hoodooMat);
+        rock.position.set(CX + Math.cos(a) * 1750, hy + r * 0.5, CZ + Math.sin(a) * 1350);
+        hy += r * 1.05;
+        group.add(rock);
+      }
+    }
+    addDrifters(group, { count: 70, color: 0xffb070, size: 5, opacity: 0.3, box: [0, 1600, 10, 300, 0, 900], vy: 6 });
+    floorBox(group, 1760, 1020, 0xb57a44, noiseTexture('#b57a44', '#9a6536'));
     arena.mudDiscs = [];
     // exit garage on the east wall
     const garage = new THREE.Mesh(
@@ -1183,11 +1255,11 @@ function buildArena(kind) {
     // the RV itself
     const rv = new THREE.Group();
     const body = new THREE.Mesh(new THREE.BoxGeometry(200, 105, 110),
-      new THREE.MeshStandardMaterial({ color: 0xe8e0cc, roughness: 0.5 }));
+      new THREE.MeshStandardMaterial({ color: 0xf5eedd, roughness: 0.55 }));
     body.position.y = 85;
     body.castShadow = true;
     const stripe = new THREE.Mesh(new THREE.BoxGeometry(202, 22, 112),
-      new THREE.MeshStandardMaterial({ color: 0xc76b1e, roughness: 0.5 }));
+      new THREE.MeshStandardMaterial({ color: 0xc2502a, roughness: 0.55 }));
     stripe.position.y = 78;
     const cab = new THREE.Mesh(new THREE.BoxGeometry(70, 70, 104),
       new THREE.MeshStandardMaterial({ color: 0xb8ae96, roughness: 0.5 }));
@@ -1208,10 +1280,10 @@ function buildArena(kind) {
     group.add(rv);
     arena.rv = rv;
   } else if (kind === 'cham') {
-    skyDome(group, '#0d0d2e', '#1c1c46', '#0d0d1e');
-    setMood(0x16163a, 2000, 5200);
+    skyDome(group, '#12124a', '#2a2a6e', '#141438');
+    setMood(0x1c1c52, 2000, 5200);
     addCave(group);
-    floorBox(group, 1760, 1020, 0x322a52, noiseTexture('#322a52', '#221b3a'));
+    floorBox(group, 1760, 1020, 0x3d3468, noiseTexture('#3d3468', '#2a2250'));
     const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTexture(), color: 0xd8e0ff, transparent: true, opacity: 0.95, fog: false }));
     moonSprite.scale.set(260, 260, 1);
     moonSprite.position.set(CX + 900, 1100, CZ - 1600);
@@ -1240,16 +1312,16 @@ function buildArena(kind) {
       // green murk drifting up from the tide
       addDrifters(group, { count: 80, color: 0x9dff2e, size: 6, opacity: 0.35, box: [-200, 1800, 0, 800, 100, 800], vy: 26 });
     } else {
-      // dawn on the mountain
-      skyDome(group, '#22335e', '#e8956a', '#6a4a5a');
-      setMood(0xc98a6a, 2600, 5600);
-      addClouds(group, 7, 620, 0xffd8c0, 0.5);
-      cliffMat = new THREE.MeshStandardMaterial({ color: 0x6b5a50, roughness: 1, flatShading: true });
+      // dawn on the mountain — pink alpenglow, soft clay rock
+      skyDome(group, '#3a4a94', '#ff9a6a', '#ffd0a0');
+      setMood(0xe09a72, 2600, 5600);
+      addClouds(group, 7, 620, 0xffd8c0, 0.55);
+      cliffMat = new THREE.MeshStandardMaterial({ color: 0x8a6a5c, roughness: 1 });
       // distant range
       for (let i = 0; i < 4; i++) {
         const mtn = new THREE.Mesh(
           roughen(new THREE.ConeGeometry(600 + Math.random() * 400, 900 + Math.random() * 500, 7), 60),
-          new THREE.MeshStandardMaterial({ color: 0x3a3450, roughness: 1, flatShading: true }),
+          new THREE.MeshStandardMaterial({ color: 0x584a80, roughness: 1, flatShading: true }),
         );
         mtn.position.set(-1400 + i * 1200 + Math.random() * 300, 260, -1700 - Math.random() * 700);
         group.add(mtn);
@@ -1424,7 +1496,7 @@ function updateRv(dt, ex) {
     for (const [x, y, r] of ex.mud) {
       const disc = new THREE.Mesh(
         new THREE.CylinderGeometry(r, r, 6, 30),
-        new THREE.MeshStandardMaterial({ color: 0x2e2214, roughness: 0.3 }),
+        new THREE.MeshStandardMaterial({ color: 0x6b4226, roughness: 0.25 }),
       );
       disc.position.set(x, 2, y);
       arena.group.add(disc);
@@ -1688,9 +1760,16 @@ function makeBlobView(b) {
   label.position.y = 132;
   group.add(label);
 
+  // voice chat: pops over your head while you're talking
+  const mic = makeTextSprite('🔊', { px: 60, stroke: false });
+  mic.position.y = 175;
+  mic.scale.set(46, 46, 1);
+  mic.visible = false;
+  group.add(mic);
+
   scene.add(group);
   return {
-    group, yaw, char, aura, label,
+    group, yaw, char, aura, label, mic,
     face: 0, phase: 0, spinY: 0,
     flailT: 0, emote: null,
     sp: { lL: mkSpring(), lR: mkSpring(), aL: mkSpring(), aR: mkSpring(), lean: mkSpring(), tip: mkSpring(), head: mkSpring() },
@@ -1824,6 +1903,12 @@ function updateBlobViews(dt) {
     v.group.position.copy(w);
 
     v.label.userData.set(b.money != null ? `${b.name} ${b.money}💰` : b.name, b.color);
+
+    v.mic.visible = !!speakingIds?.[id];
+    if (v.mic.visible) {
+      const pulse = 44 + Math.sin(time * 10) * 5;
+      v.mic.scale.set(pulse, pulse, 1);
+    }
 
     v.aura.visible = !!b.dashing;
     if (b.dashing) v.aura.material.opacity = 0.2 + Math.sin(time * 30) * 0.1;
@@ -2031,6 +2116,7 @@ export function applySnapshot(snap, meta, selfId) {
 export function frame(dt, S) {
   if (!renderer) return;
   time += dt;
+  speakingIds = S.voice?.speaking || null;
   resizeIfNeeded();
 
   ensureArena(S.scene);

@@ -81,6 +81,11 @@ optional `lives` — plus a renderer branch and an entry in `MINIGAME_INFO`.
   fireflies), and WebAudio-synthesized SFX.
 - Bots are first-class: hub walking, chamber AI per game, blackjack instincts
   (12% chaos agent), and they vote with their bodies like everyone else.
+- Social layer is **voice, not text**: WebRTC P2P mesh (fine at 8 players),
+  signaled over the game's own WebSocket (`voice`/`rtc` messages). Open mic or
+  push-to-talk (V), self-mute (M), mic picker, master + per-player volume, and
+  a 🔊 over whoever's talking. Voice needs a secure context (https/localhost) —
+  the Electron build and any TLS-fronted server both qualify.
 
 ## Tone
 

@@ -57,7 +57,26 @@ add **bots**: they dig, push, pounce, climb single-file, and vote at the
 casino with their own bodies.
 
 **Controls:** click the world to mouse-look · WASD to walk (camera-relative) ·
-SPACE/SHIFT to dash · 1–6 emotes (they play on your body — try 💀) · ENTER chat
+SPACE/SHIFT to dash · 1–6 emotes (they play on your body — try 💀) ·
+M mute mic · V push-to-talk
+
+## Voice chat
+
+No text box — the boys **talk**. Hit **🎙 JOIN VOICE** (bottom-left) and
+you're in: audio is **peer-to-peer WebRTC** between players, the game server
+only relays the handshake. A 🔊 pops over whoever's talking.
+
+The ⚙️ settings panel has everything you'd expect:
+
+- **Mic picker** — choose any input device, hot-swappable mid-game
+- **Open mic / Push-to-talk** — PTT is hold-**V**; **M** toggles mute in either mode
+- **Master volume** plus a **per-player volume slider and mute** (for that one loud friend)
+
+One rule from the browser, not from us: microphones only work on **HTTPS or
+localhost**. Playing on your LAN via plain `http://192.168.x.x:3000` won't get
+mic access — put the server behind a tunnel (Tailscale, cloudflared, ngrok) or
+any https reverse proxy and voice lights up. The Electron/Steam build doesn't
+have this problem.
 
 To play over the internet, run the server on any $5 VPS / Fly.io / Railway box
 and share the URL — it's a single Node process.

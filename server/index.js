@@ -92,7 +92,8 @@ wss.on('connection', ws => {
           }
           break;
         case 'emote': room.handleEmote(player, m.e); break;
-        case 'chat': room.handleChat(player, m.msg); break;
+        case 'voice': room.handleVoice(player, m); break;
+        case 'rtc': room.relayRtc(player, m); break;
       }
     }
   });
