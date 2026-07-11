@@ -1,5 +1,5 @@
-// Browser smoke test: three real Chromium pages host/join a room via the UI,
-// start a match, and screenshot every major screen.
+// Browser smoke test: two real Chromium pages walk their blobs through the
+// whole embodied loop — into the gate, through a chamber, onto a vote zone.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -17,7 +17,7 @@ process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 process.on('uncaughtException', e => { console.error('❌ FAIL:', e.message); process.exit(1); });
 
 const server = spawn(process.execPath, ['server/index.js'], {
-  env: { ...process.env, PORT: String(PORT), FRIENDSLOP_FAST: process.env.SLOW_SHOTS ? '' : '1' },
+  env: { ...process.env, PORT: String(PORT), FRIENDSLOP_FAST: '1' },
   stdio: ['ignore', 'pipe', 'inherit'],
 });
 await new Promise((res, rej) => {
@@ -38,83 +38,97 @@ async function newPage(name) {
   return page;
 }
 
+// Body autopilot: walk to wherever the current mode needs bodies.
+function makeAutopilot(page) {
+  const held = { a: false, d: false, w: false, s: false };
+  return async () => {
+    const want = await page.evaluate(() => {
+      const S = window.__slop;
+      if (!S || !S.snap || !S.meta) return null;
+      const me = S.snap.players.find(p => p[0] === S.selfId);
+      if (!me) return null;
+      const [, x, y] = me;
+      const HUB = { GATE: { x: 800, y: 150 }, STAND: { x: 980, y: 700 } };
+      let t = null;
+      if (S.phase === 'play') {
+        return { rand: true };
+      } else if (S.hubMode === 'lobby' || S.hubMode === 'gate') t = HUB.GATE;
+      else if (S.hubMode === 'blackjack') t = HUB.STAND;
+      if (!t) return null;
+      return { a: t.x < x - 25, d: t.x > x + 25, w: t.y < y - 25, s: t.y > y + 25 };
+    }).catch(() => null);
+    if (!want) return;
+    if (want.rand) {
+      await page.keyboard.press('wasd'[Math.floor(Math.random() * 4)]).catch(() => {});
+      if (Math.random() < 0.25) await page.keyboard.press(' ').catch(() => {});
+      return;
+    }
+    for (const k of Object.keys(held)) {
+      if (want[k] && !held[k]) { held[k] = true; await page.keyboard.down(k).catch(() => {}); }
+      if (!want[k] && held[k]) { held[k] = false; await page.keyboard.up(k).catch(() => {}); }
+    }
+  };
+}
+
 const host = await newPage('BigDog');
 await host.screenshot({ path: SHOTS + '01-menu.png' });
 
 await host.click('#hostBtn');
-await host.waitForSelector('#lobby:not(.hidden)');
-const code = (await host.textContent('#roomCode')).trim();
-if (!/^[A-Z2-9]{4}$/.test(code)) fail(`bad room code in UI: "${code}"`);
-console.log('✅ hosted room', code);
+await host.waitForSelector('#game:not(.hidden)');
+await host.waitForFunction(() => window.__slop?.meta?.phase === 'hub');
+const code = await host.evaluate(() => window.__slop.code);
+if (!/^[A-Z2-9]{4}$/.test(code)) fail(`bad room code: "${code}"`);
+console.log('✅ hosted — dropped straight into the 3D Den, room', code);
 
 const p2 = await newPage('Goober');
 await p2.fill('#codeInput', code);
 await p2.click('#joinBtn');
-await p2.waitForSelector('#lobby:not(.hidden)');
-console.log('✅ second player joined via UI');
+await p2.waitForSelector('#game:not(.hidden)');
+console.log('✅ second player joined into the Den');
 
-// two bots so the arena is lively
 await host.click('#addBotBtn');
 await host.click('#addBotBtn');
-await host.waitForFunction(() => document.querySelectorAll('.lobby-player').length === 4);
+await host.waitForFunction(() => window.__slop.meta.players.length === 4);
 
-await host.fill('#chatInput', 'prepare to lose everything');
-await host.click('#chatSend');
-await p2.waitForFunction(() => document.querySelector('#chatLog').textContent.includes('prepare to lose'));
-console.log('✅ lobby chat works');
-await host.screenshot({ path: SHOTS + '02-lobby.png' });
+await host.fill('#chatInput', 'nobody bust this time please');
+await host.press('#chatInput', 'Enter');
+await p2.waitForFunction(() => document.querySelector('#chatLog').textContent.includes('nobody bust'));
+console.log('✅ chat works in-world');
 
-await host.click('#startBtn');
-await host.waitForSelector('#betOverlay:not(.hidden)', { timeout: 10000 });
-console.log('✅ betting phase reached');
+await host.waitForTimeout(1200); // let blobs mill about
+await host.screenshot({ path: SHOTS + '02-den.png' });
 
-// host bets on player 2 through the UI
-await host.waitForSelector('.bet-target');
-const targets = await host.$$('.bet-target');
-await targets[1].click();
-await host.click('.bet-amounts .chip[data-frac="0.5"]');
-await host.waitForFunction(() => document.querySelector('#betCurrent').textContent.includes('🪙 on'));
-console.log('✅ bet placed via UI');
-await host.screenshot({ path: SHOTS + '03-betting.png' });
+const drive = [makeAutopilot(host), makeAutopilot(p2)];
+const driver = setInterval(() => drive.forEach(fn => fn()), 150);
 
-await host.waitForSelector('#betOverlay.hidden', { state: 'attached', timeout: 30000 });
-// hold a direction so our blob visibly moves; mash dash sometimes
-await host.keyboard.down('d');
-await p2.keyboard.down('a');
-const masher = setInterval(async () => {
-  try {
-    for (const pg of [host, p2]) {
-      const key = 'wasd'[Math.floor(Math.random() * 4)];
-      await pg.keyboard.press(key);
-      if (Math.random() < 0.3) await pg.keyboard.press(' ');
-    }
-  } catch { /* page may be closing */ }
-}, 400);
-
-await host.waitForFunction(() => {
-  const cv = document.getElementById('canvas');
-  return cv && !document.getElementById('game').classList.contains('hidden');
-});
-await host.waitForTimeout(process.env.SLOW_SHOTS ? 6000 : 2500);
+// Walking into the gate starts chamber 1.
+await host.waitForFunction(() => window.__slop.phase === 'play', null, { timeout: 30000 });
+console.log('✅ squad walked into the gate — chamber begins');
+await host.waitForTimeout(1100);
 await host.screenshot({ path: SHOTS + '04-gameplay.png' });
-console.log('✅ gameplay running, screenshot taken');
 
-await host.waitForSelector('#resultsOverlay:not(.hidden)', { timeout: 120000 });
-await host.waitForTimeout(400);
-await host.screenshot({ path: SHOTS + '05-results.png' });
-console.log('✅ results overlay shown');
+// Clear -> the table lights up.
+await host.waitForFunction(() => window.__slop.hubMode === 'blackjack', null, { timeout: 60000 });
+console.log('✅ chamber cleared — the Pit Boss deals in-world');
+await host.waitForTimeout(450); // cards mid-deal
+await host.screenshot({ path: SHOTS + '05-blackjack.png' });
 
-if (!process.env.SLOW_SHOTS) {
-  await host.waitForSelector('#podiumOverlay:not(.hidden)', { timeout: 180000 });
-  await host.waitForTimeout(400);
-  await host.screenshot({ path: SHOTS + '06-podium.png' });
-  console.log('✅ podium shown after 5 rounds');
-}
-clearInterval(masher);
+// Hand resolves purely by where the bodies stand.
+await host.waitForFunction(() => window.__slop.snap?.extra?.bj?.outcome != null, null, { timeout: 40000 });
+const outcome = await host.evaluate(() => window.__slop.snap.extra.bj.outcome);
+console.log(`✅ hand resolved by body-vote: ${outcome}`);
+
+// Ride to the end of the expedition.
+await host.waitForFunction(() => window.__slop.hubMode === 'celebrate', null, { timeout: 240000 });
+clearInterval(driver);
+await host.waitForTimeout(600);
+await host.screenshot({ path: SHOTS + '07-celebrate.png' });
+const esc = await host.evaluate(() => window.__slop.snap?.extra?.escaped);
+console.log(`✅ expedition over (escaped=${esc}) — celebration in the Den`);
 
 const realErrors = pageErrors.filter(e => !e.includes('favicon'));
-if (realErrors.length) fail('page errors:\n' + realErrors.join('\n'));
-console.log('✅ zero page/console errors across the whole match');
+if (realErrors.length) fail('page errors:\n' + realErrors.slice(0, 10).join('\n'));
+console.log('✅ zero page/console errors across the whole expedition');
 
 console.log('\n🎉 BROWSER SMOKE TEST PASSED — screenshots in test/screenshots/');
 await browser.close();

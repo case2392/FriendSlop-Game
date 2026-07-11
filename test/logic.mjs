@@ -1,7 +1,9 @@
-// End-to-end game logic test: 3 ws clients + 1 bot play a full match
-// against a real server running in fast mode. No browser required.
+// End-to-end expedition test with EMBODIED interactions: ws clients literally
+// steer their blobs into the gate zone and blackjack vote zones.
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import { Blackjack, handTotal } from '../server/blackjack.js';
+import * as C from '../shared/constants.js';
 
 const PORT = 3199;
 const url = `ws://localhost:${PORT}`;
@@ -10,6 +12,36 @@ function fail(msg) {
   console.error('❌ FAIL:', msg);
   process.exit(1);
 }
+
+// ---- blackjack unit checks --------------------------------------------------
+{
+  if (handTotal(['A♠', 'K♦']) !== 21) fail('natural should total 21');
+  if (handTotal(['A♠', 'A♦', '9♥']) !== 21) fail('double ace should soft-total 21');
+  if (handTotal(['A♠', 'A♦', 'A♥', 'K♣', 'Q♣']) !== 23) fail('aces should collapse to 1');
+
+  const outcomes = { win: 0, lose: 0, push: 0, natural: 0 };
+  for (let i = 0; i < 3000; i++) {
+    const bj = new Blackjack();
+    let guard = 0;
+    while (bj.state === 'voting' && guard++ < 20) {
+      bj.act(bj.squadTotal() <= 15 ? 'hit' : 'stand');
+    }
+    if (bj.state !== 'done' || !bj.outcome) fail('hand never resolved');
+    if (bj.squadTotal() > 30) fail('impossible squad total');
+    if (bj.squadTotal() <= 21 && bj.outcome !== 'natural' && bj.dealerTotal() < 17) {
+      fail('dealer quit under 17');
+    }
+    outcomes[bj.outcome]++;
+  }
+  for (const k of ['win', 'lose', 'push', 'natural']) {
+    if (!outcomes[k]) fail(`outcome ${k} never occurred in 3000 hands`);
+  }
+  const winRate = (outcomes.win + outcomes.natural) / 3000;
+  if (winRate < 0.30 || winRate > 0.60) fail(`suspicious win rate ${winRate}`);
+  console.log('✅ blackjack engine: 3000 hands valid,', JSON.stringify(outcomes));
+}
+
+// ---- live server ------------------------------------------------------------
 
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 process.on('uncaughtException', e => { console.error('❌ FAIL:', e.message); process.exit(1); });
@@ -29,10 +61,14 @@ class Client {
     this.name = name;
     this.meta = null;
     this.welcome = null;
+    this.snap = null;
     this.states = 0;
     this.podium = null;
     this.errors = [];
-    this.phasesSeen = new Set();
+    this.modesSeen = new Set();
+    this.bjOutcomes = [];
+    this.maxChamber = 0;
+    this.keys = {};
   }
   connect() {
     return new Promise((res, rej) => {
@@ -42,18 +78,40 @@ class Client {
       this.ws.on('message', raw => {
         const m = JSON.parse(raw);
         if (m.t === 'welcome') this.welcome = m;
-        else if (m.t === 'meta') { this.meta = m; this.phasesSeen.add(m.phase); }
-        else if (m.t === 'state') this.states++;
-        else if (m.t === 'podium') this.podium = m.standings;
+        else if (m.t === 'meta') {
+          this.meta = m;
+          this.modesSeen.add(m.phase === 'play' ? 'play' : m.hubMode);
+          this.maxChamber = Math.max(this.maxChamber, m.chamber ?? 0);
+        } else if (m.t === 'state') {
+          this.snap = m;
+          this.states++;
+          const o = m.extra?.bj?.outcome;
+          if (o && this.bjOutcomes.at(-1) !== o) this.bjOutcomes.push(o);
+        } else if (m.t === 'podium') this.podium = m;
         else if (m.t === 'error') this.errors.push(m.msg);
       });
     });
   }
   send(m) { this.ws.send(JSON.stringify(m)); }
-  async until(pred, what, ms = 30000) {
+  pos() {
+    const me = this.snap?.players.find(p => p[0] === this.welcome?.id);
+    return me ? { x: me[1], y: me[2] } : null;
+  }
+  steerToward(tx, ty) {
+    const p = this.pos();
+    if (!p) return;
+    const dx = tx - p.x, dy = ty - p.y;
+    const d = Math.hypot(dx, dy);
+    const move = d < 20 ? { mx: 0, my: 0 } : { mx: dx / d, my: dy / d };
+    const sig = JSON.stringify(move);
+    if (sig !== this._lastKeys) { this._lastKeys = sig; this.send({ t: 'input', ...move }); }
+  }
+  async until(pred, what, ms = 60000) {
     const t0 = Date.now();
     while (!pred(this)) {
-      if (Date.now() - t0 > ms) fail(`timeout waiting for: ${what} (phase=${this.meta?.phase}, round=${this.meta?.round})`);
+      if (Date.now() - t0 > ms) {
+        fail(`timeout waiting for: ${what} (phase=${this.meta?.phase}, mode=${this.meta?.hubMode}, chamber=${this.meta?.chamber})`);
+      }
       await new Promise(r => setTimeout(r, 40));
     }
   }
@@ -64,19 +122,15 @@ const p2 = new Client('SloppyJoe');
 const p3 = new Client('Beans');
 await Promise.all([host.connect(), p2.connect(), p3.connect()]);
 
-// -- lobby ---------------------------------------------------------------
 host.send({ t: 'create', name: host.name });
 await host.until(c => c.welcome, 'welcome');
 const code = host.welcome.code;
 if (!/^[A-Z2-9]{4}$/.test(code)) fail(`bad room code: ${code}`);
 
-// Joining a garbage room must fail politely.
 p3.send({ t: 'join', name: 'x', room: 'ZZZZ' });
 await p3.until(c => c.errors.length > 0, 'join error for bad code');
-console.log('✅ bad room code rejected:', p3.errors[0]);
+console.log('✅ bad room code rejected');
 p3.errors = [];
-// (p3 got no welcome, can join for real now)
-p3.welcome = null;
 
 p2.send({ t: 'join', name: p2.name, room: code });
 p3.send({ t: 'join', name: p3.name, room: code });
@@ -84,81 +138,71 @@ await p2.until(c => c.welcome, 'p2 welcome');
 await p3.until(c => c.welcome, 'p3 welcome');
 
 host.send({ t: 'addbot' });
-await host.until(c => c.meta?.players.length === 4, '4 players in lobby');
-console.log('✅ lobby: 3 humans + 1 bot:', host.meta.players.map(p => p.name).join(', '));
+await host.until(c => c.meta?.players.length === 4, '4 blobs in the Den');
+console.log('✅ the Den: 3 humans + 1 bot walking around');
 
-// Non-host can't start.
-p2.send({ t: 'start' });
-await new Promise(r => setTimeout(r, 300));
-if (host.meta.phase !== 'lobby') fail('non-host started the game!');
-console.log('✅ non-host cannot start');
+await host.until(c => c.states > 5, 'hub snapshots flowing');
+if (host.meta.phase !== 'hub' || host.meta.hubMode !== 'lobby') fail('should idle in hub lobby');
+console.log('✅ hub snapshots flowing (the Den is live)');
 
-host.send({ t: 'chat', msg: 'lets gooo' });
-
-// -- play a full match -----------------------------------------------------
-host.send({ t: 'start' });
-await host.until(c => c.meta?.phase === 'betting', 'betting phase');
-console.log(`✅ round 1 betting, minigame=${host.meta.minigame}`);
-
-// Everyone bets on p2. Also assert bad bets are clamped.
-host.send({ t: 'bet', target: p2.welcome.id, amount: 40 });
-p2.send({ t: 'bet', target: p2.welcome.id, amount: 999999 }); // clamps to coins
-p3.send({ t: 'bet', target: host.welcome.id, amount: 10 });
-await host.until(c => {
-  const b = c.meta?.players.find(p => p.id === p2.welcome.id)?.bet;
-  return b && b.amount === 100; // clamped to full stack
-}, 'bet clamped to coins');
-console.log('✅ bets placed and clamped, and visible to everyone');
-
-// Drive all humans with mashy inputs the whole match so physics gets exercised.
-const mash = setInterval(() => {
+// The squad drives itself for the whole expedition with body language only.
+const driver = setInterval(() => {
   for (const c of [host, p2, p3]) {
-    if (c.meta?.phase !== 'play') continue;
-    c.send({
-      t: 'input',
-      keys: {
-        up: Math.random() < 0.5, down: Math.random() < 0.5,
-        left: Math.random() < 0.5, right: Math.random() < 0.5,
-        dash: Math.random() < 0.2,
-      },
-    });
+    const m = c.meta;
+    if (!m) continue;
+    if (m.phase === 'play') {
+      // mash about
+      if (Math.random() < 0.6) {
+        const a = Math.random() * Math.PI * 2;
+        c.send({ t: 'input', mx: Math.cos(a), my: Math.sin(a), dash: Math.random() < 0.2 });
+        c._lastKeys = null;
+      }
+    } else if (m.hubMode === 'lobby' || m.hubMode === 'gate') {
+      c.steerToward(C.HUB.GATE.x, C.HUB.GATE.y);
+    } else if (m.hubMode === 'blackjack') {
+      c.steerToward(C.HUB.STAND.x, C.HUB.STAND.y); // the boys play it safe
+    }
   }
-}, 120);
+}, 100);
 
-await host.until(c => c.meta?.phase === 'play', 'play phase');
-await host.until(c => c.states > 5, 'state snapshots flowing');
-console.log('✅ play phase, snapshots flowing');
+// Walking into the gate must start chamber 1.
+await host.until(c => c.meta?.phase === 'play', 'gate walk-in starts chamber 1', 30000);
+if (host.meta.minigame !== 'gates') fail(`expedition should start at the gates, got ${host.meta.minigame}`);
+console.log('✅ walked into the gate — chamber 1 begins (THE GATES OF SLOP)');
 
-await host.until(c => c.meta?.phase === 'results', 'round 1 results', 60000);
-const r = host.meta.lastResults;
-if (!r || !r.rankings.length) fail('no results/rankings');
-if (!r.rankings.includes(r.winnerId)) fail('winner not in rankings');
-const total = host.meta.players.reduce((s, p) => s + p.coins, 0);
-console.log(`✅ round 1 results: winner=${r.winnerId}, pot=${r.pot}, potWon=${r.potWon}, jackpot=${r.jackpot}, totalCoins=${total}`);
+await host.until(c => c.meta?.phase === 'hub' && c.meta.hubMode === 'blackjack', 'clear -> blackjack at the table', 60000);
+const r1 = host.meta.lastResults;
+if (!r1?.teamWin) fail('gates should be trivially clearable in FAST mode');
+const mvpPay = (r1.payouts[r1.mvpId] || []).reduce((s, x) => s + x.amt, 0);
+if (mvpPay < 150) fail(`mvp should earn clear pay + bonus, got ${mvpPay}`);
+console.log(`✅ chamber cleared (mvp=${r1.mvpId}, +${mvpPay}) — the Pit Boss is dealing`);
 
-// Everyone bet during round 1, someone must have gained/lost coins.
-if (host.meta.players.every(p => p.coins === 100)) fail('economy did not move');
+await host.until(c => c.snap?.extra?.bj?.squad?.length >= 2, 'cards on the table');
+console.log(`✅ cards dealt: ${host.snap.extra.bj.squad.join(' ')} (${host.snap.extra.bj.squadTotal}) vs ${host.snap.extra.bj.dealerUp}`);
 
-// Ride it out to the podium (5 rounds).
-await host.until(c => c.podium, 'podium', 120000);
-clearInterval(mash);
-if (host.podium.length !== 4) fail(`podium has ${host.podium.length} entries`);
-const sorted = [...host.podium].every((p, i, a) => i === 0 || a[i - 1].coins >= p.coins);
+await host.until(c => c.bjOutcomes.length > 0, 'hand resolves via body votes', 30000);
+console.log(`✅ hand resolved by standing in a zone: ${host.bjOutcomes[0]}`);
+
+// Ride it out: bodies do everything until the podium.
+await host.until(c => c.podium, 'podium', 240000);
+clearInterval(driver);
+
+const pod = host.podium;
+console.log(`✅ podium: escaped=${pod.escaped}, cleared=${pod.cleared}/${pod.chambers}, standings=${pod.standings.map(s => `${s.name}:${s.coins}`).join(' | ')}`);
+if (pod.standings.length !== 4) fail('podium missing blobs');
+if (pod.standings.every(s => s.coins === 0)) fail('nobody earned anything all match');
+const sorted = pod.standings.every((s, i, a) => i === 0 || a[i - 1].coins >= s.coins);
 if (!sorted) fail('podium not sorted by coins');
-console.log('✅ podium:', host.podium.map(p => `${p.name}:${p.coins}`).join(' | '));
 
-// Everyone saw every phase.
 for (const c of [host, p2, p3]) {
-  for (const ph of ['betting', 'play', 'results', 'podium']) {
-    if (!c.phasesSeen.has(ph)) fail(`${c.name} never saw phase ${ph}`);
+  for (const mode of ['lobby', 'play', 'blackjack', 'celebrate']) {
+    if (!c.modesSeen.has(mode)) fail(`${c.name} never saw ${mode}`);
   }
 }
 
-// -- back to lobby, rematch possible ----------------------------------------
-await host.until(c => c.meta?.phase === 'lobby', 'back to lobby', 30000);
-console.log('✅ back to lobby after podium');
+await host.until(c => c.meta?.hubMode === 'lobby', 'back to the Den lobby', 30000);
+console.log('✅ back to the Den after the expedition');
 
-// Disconnect handling: p3 leaves, host stays host, room lives.
 p3.ws.close();
 await host.until(c => c.meta?.players.length === 3, 'p3 removed from lobby');
 console.log('✅ disconnect handled');

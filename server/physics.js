@@ -2,11 +2,10 @@ import * as C from '../shared/constants.js';
 
 // Advance one player's movement for dt seconds. Consumes edge-triggered dash input.
 export function stepMovement(p, dt) {
-  const ax = (p.input.right ? 1 : 0) - (p.input.left ? 1 : 0);
-  const ay = (p.input.down ? 1 : 0) - (p.input.up ? 1 : 0);
-  let mx = ax, my = ay;
-  const len = Math.hypot(mx, my) || 1;
-  mx /= len; my /= len;
+  let mx = Number(p.input.mx) || 0;
+  let my = Number(p.input.my) || 0;
+  const len = Math.hypot(mx, my);
+  if (len > 1) { mx /= len; my /= len; }
   if (p.freeze) { mx = 0; my = 0; }
 
   p.vx += mx * C.ACCEL * dt;
@@ -35,7 +34,7 @@ export function stepMovement(p, dt) {
   p.x += p.vx * dt;
   p.y += p.vy * dt;
 
-  if (ax || ay) p.face = Math.atan2(my, mx);
+  if (mx || my) p.face = Math.atan2(my, mx);
 }
 
 // Resolve pairwise circle collisions among alive players.
@@ -80,6 +79,28 @@ export function boundRect(p, w, h) {
   if (p.x > w - r) { p.x = w - r; p.vx = -Math.abs(p.vx) * C.WALL_BOUNCE; }
   if (p.y < r) { p.y = r; p.vy = Math.abs(p.vy) * C.WALL_BOUNCE; }
   if (p.y > h - r) { p.y = h - r; p.vy = -Math.abs(p.vy) * C.WALL_BOUNCE; }
+}
+
+// The chain. Consecutive blobs are tethered: when a link stretches past
+// maxLen, both ends get yanked together — positions corrected, momentum
+// shared so a dashing friend drags the whole squad.
+export function applyChain(chain, maxLen, iters = 3) {
+  for (let k = 0; k < iters; k++) {
+    for (let i = 0; i < chain.length - 1; i++) {
+      const a = chain[i], b = chain[i + 1];
+      const dx = b.x - a.x, dy = b.y - a.y;
+      const d = Math.hypot(dx, dy) || 0.001;
+      if (d <= maxLen) continue;
+      const pull = (d - maxLen) / d * 0.5;
+      a.x += dx * pull; a.y += dy * pull;
+      b.x -= dx * pull; b.y -= dy * pull;
+      if (k === 0) {
+        const mvx = (a.vx + b.vx) / 2, mvy = (a.vy + b.vy) / 2;
+        a.vx = a.vx * 0.65 + mvx * 0.35; a.vy = a.vy * 0.65 + mvy * 0.35;
+        b.vx = b.vx * 0.65 + mvx * 0.35; b.vy = b.vy * 0.65 + mvy * 0.35;
+      }
+    }
+  }
 }
 
 // Evenly space players in a circle around a point.

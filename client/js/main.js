@@ -1,7 +1,7 @@
 import * as C from '/shared/constants.js';
 import * as net from './net.js';
 import { initAudio, sfx } from './sfx.js';
-import { initRender, frame, applySnapshot, resetArena, confetti, emoteAt, blobs } from './render.js';
+import { initRender, frame, applySnapshot, resetArena, confetti, emoteAt, getCamYaw, turnCam } from './render.js';
 
 const $ = id => document.getElementById(id);
 
@@ -10,17 +10,16 @@ const S = {
   code: null,
   meta: null,
   snap: null,
-  minigame: null,
+  minigame: null,   // current/upcoming chamber id
+  scene: null,      // 'hub' or chamber id — what the renderer should draw
   phase: 'menu',
-  betTarget: null,
+  hubMode: null,
   lastCountdown: null,
-  podium: null,
+  celebrated: false,
 };
 
-// ---- screens ----------------------------------------------------------------
-
 function showScreen(name) {
-  for (const s of ['menu', 'lobby', 'game']) $(s).classList.toggle('hidden', s !== name);
+  for (const s of ['menu', 'game']) $(s).classList.toggle('hidden', s !== name);
 }
 
 function toast(msg, ms = 2600) {
@@ -33,8 +32,7 @@ function toast(msg, ms = 2600) {
 
 // ---- menu ---------------------------------------------------------------------
 
-const savedName = localStorage.getItem('slopName') || '';
-$('nameInput').value = savedName;
+$('nameInput').value = localStorage.getItem('slopName') || '';
 
 function myName() {
   const n = $('nameInput').value.trim() || 'Blob';
@@ -60,171 +58,46 @@ $('joinBtn').onclick = async () => {
 };
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn').click(); });
 
-// ---- lobby --------------------------------------------------------------------
+// ---- in-world UI ---------------------------------------------------------------
 
-$('roomCode').onclick = () => {
+$('hudCode').onclick = () => {
   navigator.clipboard?.writeText(S.code || '');
   toast('Code copied. Send it to the boys. 📋');
 };
 $('addBotBtn').onclick = () => { sfx.click(); net.send({ t: 'addbot' }); };
 $('kickBotBtn').onclick = () => { sfx.click(); net.send({ t: 'kickbot' }); };
-$('startBtn').onclick = () => { sfx.click(); net.send({ t: 'start' }); };
 
 function sendChat() {
   const v = $('chatInput').value.trim();
   if (!v) return;
   net.send({ t: 'chat', msg: v });
   $('chatInput').value = '';
+  $('chatInput').blur(); // hands back on the wheel
 }
-$('chatSend').onclick = sendChat;
-$('chatInput').addEventListener('keydown', e => { if (e.key === 'Enter') sendChat(); e.stopPropagation(); });
+$('chatInput').addEventListener('keydown', e => {
+  if (e.key === 'Enter') sendChat();
+  e.stopPropagation();
+});
 
-function renderLobby() {
+function ruleStrip() {
   const m = S.meta;
-  $('roomCode').textContent = S.code || '----';
-  const isHost = m.hostId === S.selfId;
-  $('addBotBtn').classList.toggle('hidden', !isHost);
-  $('kickBotBtn').classList.toggle('hidden', !isHost);
-  $('startBtn').classList.toggle('hidden', !isHost);
-  $('lobbyHint').textContent = isHost
-    ? (m.players.length < 2 ? 'You need at least 2 blobs. Add a bot or wait for friends.' : 'Ready when you are, host.')
-    : 'Waiting for the host to start…';
-
-  const wrap = $('lobbyPlayers');
-  wrap.innerHTML = '';
-  for (const p of m.players) {
-    const div = document.createElement('div');
-    div.className = 'lobby-player' + (p.id === m.hostId ? ' host' : '');
-    const dot = document.createElement('div');
-    dot.className = 'blob-dot';
-    dot.style.background = p.color;
-    const nm = document.createElement('div');
-    nm.className = 'pname';
-    nm.textContent = p.name;
-    const tag = document.createElement('div');
-    tag.className = 'ptag';
-    tag.textContent = p.id === m.hostId ? '👑 host' : (p.isBot ? 'bot' : (p.id === S.selfId ? 'you' : 'friend'));
-    div.append(dot, nm, tag);
-    wrap.appendChild(div);
-  }
-}
-
-// ---- betting ------------------------------------------------------------------
-
-function renderBetting() {
-  const m = S.meta;
+  if (!m) return '';
   const info = C.MINIGAME_INFO[m.minigame] || {};
-  $('betGameIcon').textContent = info.icon || '❓';
-  $('betGameName').textContent = `ROUND ${m.round}/${m.rounds}: ${info.name || ''}`;
-  $('betGameDesc').textContent = info.desc || '';
-  $('betJackpot').textContent = m.jackpot > 0 ? `JACKPOT: ${m.jackpot} 🪙` : '';
-
-  const me = m.players.find(p => p.id === S.selfId);
-  const wrap = $('betTargets');
-  wrap.innerHTML = '';
-  for (const p of m.players) {
-    if (!p.connected) continue;
-    const div = document.createElement('div');
-    div.className = 'bet-target' + (S.betTarget === p.id ? ' selected' : '');
-    const dot = document.createElement('div');
-    dot.className = 'blob-dot';
-    dot.style.background = p.color;
-    const nm = document.createElement('div');
-    nm.className = 'bname';
-    nm.textContent = p.id === S.selfId ? `${p.name} (you)` : p.name;
-    const coins = document.createElement('div');
-    coins.className = 'bcoins';
-    coins.textContent = `${p.coins} 🪙`;
-    const backers = document.createElement('div');
-    backers.className = 'backers';
-    const bs = m.players.filter(q => q.bet && q.bet.target === p.id);
-    backers.textContent = bs.length ? bs.map(q => `${q.name.split(' ')[0]}:${q.bet.amount}`).join(' ') : '';
-    div.append(dot, nm, coins, backers);
-    div.onclick = () => {
-      S.betTarget = p.id;
-      sfx.click();
-      renderBetting();
-    };
-    wrap.appendChild(div);
+  if (S.phase === 'play') {
+    return `<b>${info.icon || ''} ${info.name || ''}</b> — ${info.desc || ''}`;
   }
-  const myBet = me?.bet;
-  $('betCurrent').textContent = myBet
-    ? `${myBet.amount} 🪙 on ${m.players.find(p => p.id === myBet.target)?.name || '?'}`
-    : 'no bet yet, coward';
-}
-
-for (const btn of document.querySelectorAll('.bet-amounts .chip')) {
-  btn.onclick = () => {
-    const me = S.meta?.players.find(p => p.id === S.selfId);
-    if (!me) return;
-    if (!S.betTarget) { toast('Pick a blob to bet on first! 👆'); return; }
-    const amount = Math.max(1, Math.floor(me.coins * Number(btn.dataset.frac)));
-    net.send({ t: 'bet', target: S.betTarget, amount });
-    sfx.bet();
-  };
-}
-
-// ---- results / podium -----------------------------------------------------------
-
-function resultsRow(p, place, delta, coins, winner) {
-  const row = document.createElement('div');
-  row.className = 'results-row' + (winner ? ' winner' : '');
-  const pl = document.createElement('div');
-  pl.className = 'place';
-  pl.textContent = ['🥇', '🥈', '🥉'][place] || `${place + 1}.`;
-  const dot = document.createElement('div');
-  dot.className = 'blob-dot';
-  dot.style.background = p.color;
-  const nm = document.createElement('div');
-  nm.className = 'rname';
-  nm.textContent = p.name;
-  const d = document.createElement('div');
-  d.className = 'delta' + (delta < 0 ? ' neg' : '');
-  d.textContent = delta ? (delta > 0 ? `+${delta}` : `${delta}`) : '';
-  const c = document.createElement('div');
-  c.className = 'rcoins';
-  c.textContent = `${coins} 🪙`;
-  row.append(pl, dot, nm, d, c);
-  return row;
-}
-
-function renderResults() {
-  const m = S.meta;
-  const r = m.lastResults;
-  if (!r) return;
-  const info = C.MINIGAME_INFO[r.minigame] || {};
-  $('resultsTitle').textContent = `${info.icon || ''} ${info.name || ''} — RESULTS`;
-  const list = $('resultsList');
-  list.innerHTML = '';
-
-  r.rankings.forEach((id, i) => {
-    const p = m.players.find(q => q.id === id);
-    if (!p) return;
-    const pays = (r.payouts[id] || []).reduce((s, x) => s + x.amt, 0);
-    const betLoss = r.bets.find(b => b.id === id && b.target !== r.winnerId)?.amount || 0;
-    list.appendChild(resultsRow(p, i, pays - betLoss, p.coins, id === r.winnerId));
-  });
-
-  const potEl = $('resultsPot');
-  if (r.pot > 0 && r.potWon) {
-    const winners = r.bets.filter(b => b.target === r.winnerId)
-      .map(b => m.players.find(p => p.id === b.id)?.name).filter(Boolean);
-    potEl.textContent = `💰 POT OF ${r.pot} 🪙 WON BY: ${winners.join(', ')}`;
-  } else if (r.pot > 0) {
-    potEl.textContent = `😱 NOBODY called it — ${r.pot} 🪙 rolls into the JACKPOT!`;
-  } else {
-    potEl.textContent = 'No bets. Cowards, all of you.';
+  if (m.hubMode === 'lobby') {
+    return m.players.length < 2
+      ? `Welcome to <b>THE DEN</b>. You need at least 2 blobs — send the code <b>${S.code}</b> to the boys${m.hostId === S.selfId ? ' or hit <b>+ BOT</b>' : ''}.`
+      : `<b>${info.icon || ''} CHAMBER 1: ${info.name || ''}</b> — walk the squad into the glowing gate to descend.`;
   }
-
-  if (r.winnerId === S.selfId) { confetti(); sfx.win(); }
-  else if (r.rankings[r.rankings.length - 1] === S.selfId) sfx.lose();
-}
-
-function renderPodium(standings) {
-  const list = $('podiumList');
-  list.innerHTML = '';
-  standings.forEach((p, i) => list.appendChild(resultsRow(p, i, 0, p.coins, i === 0)));
-  if (standings[0]?.id === S.selfId) { confetti(); sfx.win(); }
+  if (m.hubMode === 'gate') {
+    return `<b>${info.icon || ''} CHAMBER ${m.chamber + 1}: ${info.name || ''}</b>${m.attempts > 0 ? ` (attempt ${m.attempts + 1})` : ''} — walk into the gate when the boys are ready.`;
+  }
+  if (m.hubMode === 'blackjack') {
+    return `<b>🎩 THE PIT BOSS DEALS.</b> Walk onto a floor zone to vote — <b>HIT 👊</b> left, <b>STAND ✋</b> right. Majority of bodies rules. Ties hit.`;
+  }
+  return '';
 }
 
 // ---- emotes ---------------------------------------------------------------------
@@ -240,23 +113,39 @@ C.EMOTES.forEach((e, i) => {
 
 // ---- input ------------------------------------------------------------------------
 
-const keys = { up: false, down: false, left: false, right: false };
+// WASD is camera-relative: W walks where you're looking (mouse-look via
+// pointer lock; Q/E also turn for the mouseless).
+const keys = { fwd: false, back: false, left: false, right: false, q: false, e: false };
 const KEYMAP = {
-  w: 'up', arrowup: 'up',
-  s: 'down', arrowdown: 'down',
+  w: 'fwd', arrowup: 'fwd',
+  s: 'back', arrowdown: 'back',
   a: 'left', arrowleft: 'left',
   d: 'right', arrowright: 'right',
+  q: 'q', e: 'e',
 };
 
+let lastSent = '';
 function pushInput(dash = false) {
-  net.send({ t: 'input', keys: { ...keys, dash } });
+  const f = (keys.fwd ? 1 : 0) - (keys.back ? 1 : 0);
+  const r = (keys.right ? 1 : 0) - (keys.left ? 1 : 0);
+  const yaw = getCamYaw();
+  let mx = Math.sin(yaw) * f + Math.cos(yaw) * r;
+  let my = -Math.cos(yaw) * f + Math.sin(yaw) * r;
+  const len = Math.hypot(mx, my);
+  if (len > 1) { mx /= len; my /= len; }
+  const msg = { t: 'input', mx: Math.round(mx * 100) / 100, my: Math.round(my * 100) / 100, dash };
+  const sig = JSON.stringify(msg);
+  if (dash || sig !== lastSent) { lastSent = sig; net.send(msg); }
 }
+// while walking, keep re-sending so mouse turns steer the run
+setInterval(() => { if (keys.fwd || keys.back || keys.left || keys.right) pushInput(); }, 90);
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
   const k = e.key.toLowerCase();
   if (KEYMAP[k] && !keys[KEYMAP[k]]) { keys[KEYMAP[k]] = true; pushInput(); }
   else if (k === ' ' || k === 'shift') { e.preventDefault(); pushInput(true); }
+  else if (k === 'enter' && S.phase !== 'menu') $('chatInput').focus();
   else if (/^[1-6]$/.test(k) && S.phase !== 'menu') net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
 });
 window.addEventListener('keyup', e => {
@@ -270,6 +159,8 @@ net.on('welcome', m => {
   S.selfId = m.id;
   S.code = m.code;
   $('menuError').textContent = '';
+  window.__slop = S; // debug/test handle
+  setTimeout(() => toast('🖱️ click the world to look around · WASD walk · SPACE dash', 5200), 800);
 });
 
 net.on('error', m => {
@@ -296,17 +187,21 @@ net.on('chat', m => {
   div.appendChild(nm);
   div.appendChild(document.createTextNode(m.msg));
   log.appendChild(div);
+  while (log.children.length > 40) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
 });
 
 net.on('emote', m => emoteAt(m.id, m.e));
 
-net.on('podium', m => { S.podium = m.standings; });
+net.on('podium', m => {
+  if (m.escaped) { confetti(); confetti(); sfx.win(); }
+  else sfx.lose();
+});
 
 net.on('state', m => {
   S.snap = m;
   applySnapshot(m, S.meta, S.selfId);
-  if (m.countdown !== S.lastCountdown) {
+  if (S.phase === 'play' && m.countdown !== S.lastCountdown) {
     S.lastCountdown = m.countdown;
     const el = $('countdownBig');
     if (m.countdown > 0) {
@@ -323,36 +218,28 @@ net.on('state', m => {
 });
 
 net.on('meta', m => {
-  const prevPhase = S.meta?.phase;
+  const prevScene = S.scene;
   S.meta = m;
   S.minigame = m.minigame;
   S.phase = m.phase;
-
-  if (m.phase === 'lobby') {
-    showScreen('lobby');
-    renderLobby();
-    return;
-  }
+  S.hubMode = m.hubMode;
+  S.scene = m.phase === 'play' ? m.minigame : 'hub';
 
   showScreen('game');
   $('hud').classList.remove('hidden');
-  const overlays = { betOverlay: m.phase === 'betting', resultsOverlay: m.phase === 'results', podiumOverlay: m.phase === 'podium' };
-  for (const [id, show] of Object.entries(overlays)) $(id).classList.toggle('hidden', !show);
+  $('hostTools').classList.toggle('hidden', !(m.hostId === S.selfId && m.hubMode === 'lobby' && m.phase === 'hub'));
 
-  if (m.phase === 'betting') {
-    if (prevPhase !== 'betting') { S.betTarget = null; S.snap = null; resetArena(); }
-    renderBetting();
-  } else if (m.phase === 'play' && prevPhase !== 'play') {
+  if (S.scene !== prevScene) {
+    S.snap = null;
     S.lastCountdown = null;
-  } else if (m.phase === 'results') {
-    renderResults();
-  } else if (m.phase === 'podium' && S.podium) {
-    renderPodium(S.podium);
+    resetArena();
+    if (m.phase === 'play') sfx.go();
   }
 
-  $('hudRound').textContent = m.round ? `ROUND ${m.round}/${m.rounds}` : '';
-  $('hudJackpot').textContent = m.jackpot > 0 ? `JACKPOT ${m.jackpot} 🪙` : '';
-  $('hudJackpot').classList.toggle('hidden', m.jackpot <= 0);
+  $('hudCode').textContent = S.code || '';
+  $('hudChamber').textContent = `CHAMBER ${Math.min(m.chamber + 1, m.chambers)}/${m.chambers}`;
+  const me = m.players.find(p => p.id === S.selfId);
+  $('hudMoney').textContent = `${me?.coins ?? 0} 💰`;
 });
 
 // ---- render loop ---------------------------------------------------------------------
@@ -363,16 +250,34 @@ function loop(now) {
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
 
-  if (S.phase === 'betting' || S.phase === 'results') {
-    const left = Math.max(0, Math.ceil((S.meta.phaseEnds - Date.now()) / 1000));
-    $('betTimer').textContent = `bets lock in ${left}…`;
-    $('resultsTimer').textContent = `next round in ${left}…`;
-    $('hudTimer').textContent = left;
-  } else if (S.phase === 'play') {
-    $('hudTimer').textContent = S.snap?.extra?.tl ?? (S.minigame === 'tater' ? '🥔' : '');
-  }
+  if (keys.q) turnCam(-dt * 2.6);
+  if (keys.e) turnCam(dt * 2.6);
 
-  if (S.phase !== 'menu' && S.phase !== 'lobby') frame(dt, S);
+  if (S.phase !== 'menu') {
+    const ex = S.snap?.extra;
+    const strip = ruleStrip();
+    $('ruleStrip').innerHTML = strip;
+    $('ruleStrip').classList.toggle('hidden', !strip);
+
+    if (S.phase === 'play') {
+      $('hudTimer').textContent = ex?.tl ?? '';
+      $('hudTimer').classList.toggle('hidden', ex?.tl == null);
+      $('hudGoal').textContent = ex?.goal || '';
+      const lives = ex?.lives;
+      $('hudLives').textContent = lives != null ? '❤️'.repeat(Math.max(0, lives)) : '';
+      $('hudLives').classList.toggle('hidden', lives == null);
+      $('hudGoal').classList.remove('hidden');
+    } else {
+      const cd = ex?.gate?.cd;
+      const bjLeft = ex?.bj?.voteLeft;
+      const t = cd != null ? Math.ceil(cd) : bjLeft != null ? Math.ceil(bjLeft) : '';
+      $('hudTimer').textContent = t;
+      $('hudTimer').classList.toggle('hidden', t === '');
+      $('hudGoal').classList.add('hidden');
+      $('hudLives').classList.add('hidden');
+    }
+    frame(dt, S);
+  }
   requestAnimationFrame(loop);
 }
 requestAnimationFrame(loop);

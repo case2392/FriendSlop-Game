@@ -1,7 +1,8 @@
-import Sumo from './sumo.js';
+import Gates from './gates.js';
+import Gut from './gut.js';
 import Tater from './tater.js';
-import Grab from './grab.js';
-import Floor from './floor.js';
+import Walk from './walk.js';
 
-export const MINIGAMES = [Sumo, Tater, Grab, Floor];
-export const BY_ID = Object.fromEntries(MINIGAMES.map(m => [m.id, m]));
+// The Slop Pit, in expedition order.
+export const CHAMBERS = [Gates, Gut, Tater, Walk];
+export const BY_ID = Object.fromEntries(CHAMBERS.map(m => [m.id, m]));

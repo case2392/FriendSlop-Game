@@ -9,11 +9,11 @@
 </head>
 <body>
 
-<!-- ============ MAIN MENU ============ -->
+<!-- ============ MAIN MENU (the only real 2D screen) ============ -->
 <div id="menu" class="screen">
   <div class="title-wrap">
     <h1 class="game-title"><span>F</span><span>R</span><span>I</span><span>E</span><span>N</span><span>D</span><span class="slop">S</span><span class="slop">L</span><span class="slop">O</span><span class="slop">P</span></h1>
-    <p class="tagline">bet on your friends. betray your friends. become the slop.</p>
+    <p class="tagline">chained to the boys. one way out of the pit. don't bust.</p>
   </div>
   <div class="menu-card">
     <input id="nameInput" maxlength="18" placeholder="your name, chief" autocomplete="off">
@@ -24,82 +24,35 @@
     </div>
     <p id="menuError" class="error-text"></p>
   </div>
-  <p class="footer-note">2–8 players · grab the boys and pick a room code</p>
+  <p class="footer-note">2–8 players · co-op · WASD to move, SPACE to dash — everything else, you walk to</p>
 </div>
 
-<!-- ============ LOBBY ============ -->
-<div id="lobby" class="screen hidden">
-  <div class="lobby-head">
-    <h2>ROOM CODE</h2>
-    <div id="roomCode" class="room-code" title="click to copy">----</div>
-    <p class="hint">send this to the boys</p>
-  </div>
-  <div id="lobbyPlayers" class="lobby-players"></div>
-  <div class="lobby-actions">
-    <button id="addBotBtn" class="btn gray">+ ADD BOT</button>
-    <button id="kickBotBtn" class="btn gray">− KICK BOT</button>
-    <button id="startBtn" class="btn big green">START THE SLOP</button>
-  </div>
-  <p id="lobbyHint" class="hint"></p>
-  <div class="chat">
-    <div id="chatLog" class="chat-log"></div>
-    <div class="chat-row">
-      <input id="chatInput" maxlength="120" placeholder="talk your trash…" autocomplete="off">
-      <button id="chatSend" class="btn small">SEND</button>
-    </div>
-  </div>
-</div>
-
-<!-- ============ GAME ============ -->
+<!-- ============ THE WORLD ============ -->
 <div id="game" class="screen hidden">
-  <canvas id="canvas" width="1600" height="900"></canvas>
+  <canvas id="canvas"></canvas>
 
   <div id="hud" class="hud hidden">
-    <div id="hudRound" class="hud-pill"></div>
+    <div id="hudCode" class="hud-pill gold" title="click to copy the room code"></div>
+    <div id="hudChamber" class="hud-pill"></div>
+    <div id="hudGoal" class="hud-pill green-pill"></div>
+    <div id="hudLives" class="hud-pill red-pill"></div>
     <div id="hudTimer" class="hud-pill big-num"></div>
-    <div id="hudJackpot" class="hud-pill gold"></div>
+    <div id="hudMoney" class="hud-pill gold"></div>
   </div>
+
+  <div id="hostTools" class="host-tools hidden">
+    <button id="addBotBtn" class="btn small gray">+ BOT</button>
+    <button id="kickBotBtn" class="btn small gray">− BOT</button>
+  </div>
+
+  <div id="ruleStrip" class="rule-strip hidden"></div>
 
   <div id="countdownBig" class="countdown hidden"></div>
 
-  <!-- Betting overlay -->
-  <div id="betOverlay" class="overlay hidden">
-    <div class="overlay-card">
-      <div id="betGameIcon" class="mg-icon"></div>
-      <h2 id="betGameName"></h2>
-      <p id="betGameDesc" class="mg-desc"></p>
-      <div class="bet-strip">
-        <h3>💰 WHO'S WINNING THIS? <span id="betJackpot" class="gold-text"></span></h3>
-        <div id="betTargets" class="bet-targets"></div>
-        <div class="bet-amounts">
-          <span>WAGER:</span>
-          <button class="btn chip" data-frac="0.1">10%</button>
-          <button class="btn chip" data-frac="0.25">25%</button>
-          <button class="btn chip" data-frac="0.5">50%</button>
-          <button class="btn chip allin" data-frac="1">ALL IN</button>
-          <span id="betCurrent" class="bet-current"></span>
-        </div>
-      </div>
-      <div id="betTimer" class="phase-timer"></div>
-    </div>
-  </div>
-
-  <!-- Results overlay -->
-  <div id="resultsOverlay" class="overlay hidden">
-    <div class="overlay-card">
-      <h2 id="resultsTitle">RESULTS</h2>
-      <div id="resultsList" class="results-list"></div>
-      <div id="resultsPot" class="results-pot"></div>
-      <div id="resultsTimer" class="phase-timer"></div>
-    </div>
-  </div>
-
-  <!-- Podium overlay -->
-  <div id="podiumOverlay" class="overlay hidden">
-    <div class="overlay-card">
-      <h2>🏆 FINAL SLOP STANDINGS 🏆</h2>
-      <div id="podiumList" class="results-list"></div>
-      <p class="hint">back to the lobby in a sec…</p>
+  <div class="chat game-chat">
+    <div id="chatLog" class="chat-log"></div>
+    <div class="chat-row">
+      <input id="chatInput" maxlength="120" placeholder="talk your trash… (enter)" autocomplete="off">
     </div>
   </div>
 

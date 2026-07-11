@@ -76,18 +76,17 @@ wss.on('connection', ws => {
       ws.send(JSON.stringify({ t: 'welcome', id: player.id, code: r.code }));
       r.sendMeta();
     } else if (room && player) {
+      const inLobby = room.phase === 'hub' && room.hubMode === 'lobby';
       switch (m.t) {
-        case 'input': room.handleInput(player, m.keys); break;
-        case 'bet': room.handleBet(player, m.target, m.amount); break;
-        case 'start': room.handleStart(player); break;
+        case 'input': room.handleInput(player, m); break;
         case 'addbot':
-          if (player.id === room.hostId && room.phase === 'lobby') {
+          if (player.id === room.hostId && inLobby) {
             const res = room.addBot();
             if (res.error) fail(res.error);
           }
           break;
         case 'kickbot':
-          if (player.id === room.hostId && room.phase === 'lobby') {
+          if (player.id === room.hostId && inLobby) {
             const bot = [...room.players.values()].reverse().find(p => p.isBot);
             if (bot) { room.players.delete(bot.id); room.sendMeta(); }
           }

@@ -10,6 +10,7 @@
     "test": "node test/logic.mjs && node test/smoke-browser.mjs"
   },
   "dependencies": {
+    "three": "^0.185.1",
     "ws": "^8.18.0"
   },
   "devDependencies": {
