@@ -56,19 +56,20 @@ function liftFor(id) {
 // ---- shared geometry / materials --------------------------------------------
 
 const GEO = {
-  // chunky little HUMANS (R.V. There Yet clay-person energy): big head with a
-  // real face, shirt torso, sleeves ending in hands, pants ending in shoes
-  torso: new THREE.CapsuleGeometry(17, 22, 8, 18),
-  sleeve: new THREE.CapsuleGeometry(6.8, 6, 6, 12),
-  forearm: new THREE.CapsuleGeometry(5.6, 9, 6, 12),
-  hand: new THREE.SphereGeometry(6.2, 12, 10),
-  thigh: new THREE.CapsuleGeometry(7.5, 12, 6, 12),
-  shoe: new THREE.SphereGeometry(8.5, 12, 10).scale(1.35, 0.75, 1.05),
-  head: new THREE.SphereGeometry(16.5, 26, 20),
-  nose: new THREE.SphereGeometry(4.6, 12, 10).scale(1.25, 1, 1),
-  ear: new THREE.SphereGeometry(3.6, 10, 8),
+  // chunky little HUMANS in faceted toy-diorama low poly: big gem-cut head
+  // with a real face, tapered barrel torso, sleeves ending in mitts, boots.
+  // Segment counts are LOW on purpose — the facets are the art style.
+  torso: new THREE.CylinderGeometry(13, 17.5, 36, 8),
+  sleeve: new THREE.CapsuleGeometry(6.8, 6, 2, 7),
+  forearm: new THREE.CapsuleGeometry(5.6, 9, 2, 7),
+  hand: new THREE.SphereGeometry(6.2, 7, 5),
+  thigh: new THREE.CapsuleGeometry(7.5, 12, 2, 7),
+  shoe: new THREE.SphereGeometry(8.5, 7, 5).scale(1.35, 0.75, 1.05),
+  head: new THREE.SphereGeometry(16.5, 9, 6),
+  nose: new THREE.SphereGeometry(4.6, 6, 4).scale(1.25, 1, 1),
+  ear: new THREE.SphereGeometry(3.6, 6, 4),
   brow: new THREE.BoxGeometry(2.4, 2.2, 6.5),
-  hair: new THREE.SphereGeometry(17.3, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
+  hair: new THREE.SphereGeometry(17.3, 9, 5, 0, Math.PI * 2, 0, Math.PI * 0.52),
   // the 2004 de-make set
   torsoB: new THREE.BoxGeometry(26, 46, 36),
   legB: new THREE.BoxGeometry(12, 27, 14),
@@ -85,8 +86,8 @@ const GEO = {
   card: new THREE.PlaneGeometry(66, 92),
 };
 const MAT = {
-  eyeWhite: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 }),
-  pupil: new THREE.MeshStandardMaterial({ color: 0x1a1426, roughness: 0.4 }),
+  eyeWhite: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, userData: { smooth: true } }),
+  pupil: new THREE.MeshStandardMaterial({ color: 0x1a1426, roughness: 0.4, userData: { smooth: true } }),
   link: new THREE.MeshStandardMaterial({ color: 0x4a4260, roughness: 0.35, metalness: 0.7 }),
   gremlin: new THREE.MeshStandardMaterial({ color: 0x2c2140, roughness: 0.6, flatShading: true }),
   gremlinEye: new THREE.MeshBasicMaterial({ color: 0xff3030 }),
@@ -105,7 +106,7 @@ function particleMat(color) {
 // crew of little dudes instead of a bag of gumballs.
 const SKINS = ['#f2c9a0', '#e8ab72', '#c98e55', '#9a6b42', '#f6d7b8', '#7a5236'];
 const HAIRS = ['#3a2a1e', '#191922', '#6b4a2e', '#8a8a92', '#b8862e', '#2e1c14'];
-const SHOE_MAT = new THREE.MeshStandardMaterial({ color: 0x2a2233, roughness: 0.6 });
+const SHOE_MAT = new THREE.MeshStandardMaterial({ color: 0x2a2233, roughness: 0.6, flatShading: true });
 
 const charMatCache = new Map();
 function charMats(color, skinIndex = 0, blocky = false) {
@@ -120,11 +121,12 @@ function charMats(color, skinIndex = 0, blocky = false) {
         limb: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#000000'), 0.25), roughness: 0.55, ...opts }),
       });
     } else {
+      // flat shading everywhere — clean toy-diorama facets
       charMatCache.set(key, {
-        shirt: new THREE.MeshStandardMaterial({ color: base, roughness: 0.6 }),
-        pants: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#14101f'), 0.45), roughness: 0.65 }),
-        skin: new THREE.MeshStandardMaterial({ color: SKINS[skinIndex % SKINS.length], roughness: 0.55 }),
-        hair: new THREE.MeshStandardMaterial({ color: HAIRS[skinIndex % HAIRS.length], roughness: 0.75 }),
+        shirt: new THREE.MeshStandardMaterial({ color: base, roughness: 0.6, flatShading: true }),
+        pants: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#14101f'), 0.45), roughness: 0.65, flatShading: true }),
+        skin: new THREE.MeshStandardMaterial({ color: SKINS[skinIndex % SKINS.length], roughness: 0.55, flatShading: true }),
+        hair: new THREE.MeshStandardMaterial({ color: HAIRS[skinIndex % HAIRS.length], roughness: 0.75, flatShading: true }),
       });
     }
   }
@@ -427,10 +429,11 @@ export function initRender(cv) {
     if (!yawLocked && document.pointerLockElement === canvas) camYaw += e.movementX * 0.0026;
   });
 
-  // bright + even (Gamble With Friends is basically lit like a toy commercial)
-  scene.add(new THREE.AmbientLight(0xb0a4d8, 1.6));
-  scene.add(new THREE.HemisphereLight(0xa898d8, 0x4a3a58, 1.1));
-  const sun = new THREE.DirectionalLight(0xfff2e0, 1.7);
+  // sunny illustrated look: strong warm sun + sky-blue fill. The facets are
+  // the art style, and facets only read when light has a direction.
+  scene.add(new THREE.AmbientLight(0xcabdf0, 1.0));
+  scene.add(new THREE.HemisphereLight(0x9ec8ff, 0xd8a878, 1.25));
+  const sun = new THREE.DirectionalLight(0xfff0d8, 2.3);
   sun.position.set(500, 1500, 900);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -1032,9 +1035,83 @@ function buildDenRoom(group) {
   group.add(moodB);
 }
 
+// ---- Chaos Canyon set dressing: faceted desert diorama pieces ---------------
+
+// A stacked terracotta butte: tapered 8-sided slabs, lighter toward the top.
+const MESA_TONES = [0xb3502a, 0xc4652f, 0xd4784a, 0xe08a56];
+function mesa(group, x, z, s = 1) {
+  const butte = new THREE.Group();
+  let y = 0;
+  const tiers = 3 + Math.floor(Math.random() * 2);
+  for (let t = 0; t < tiers; t++) {
+    const rTop = (250 - t * 55) * (0.82 + Math.random() * 0.3);
+    const h = 150 - t * 22;
+    const slab = new THREE.Mesh(
+      new THREE.CylinderGeometry(rTop, rTop * 1.22, h, 8),
+      new THREE.MeshStandardMaterial({ color: MESA_TONES[Math.min(t, MESA_TONES.length - 1)], roughness: 1, flatShading: true }),
+    );
+    slab.rotation.y = Math.random() * Math.PI;
+    slab.position.y = y + h / 2;
+    slab.castShadow = true;
+    butte.add(slab);
+    y += h * 0.92;
+  }
+  butte.position.set(x, 0, z);
+  butte.scale.setScalar(s);
+  group.add(butte);
+}
+
+// A saguaro: faceted trunk + two elbowed arms.
+const CACTUS_MAT = new THREE.MeshStandardMaterial({ color: 0x4fae4a, roughness: 0.85, flatShading: true });
+function cactus(group, x, z, s = 1) {
+  const cac = new THREE.Group();
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(13, 16, 130, 7), CACTUS_MAT);
+  trunk.position.y = 65;
+  trunk.castShadow = true;
+  cac.add(trunk);
+  const cap = new THREE.Mesh(new THREE.SphereGeometry(13, 7, 4), CACTUS_MAT);
+  cap.position.y = 130;
+  cac.add(cap);
+  for (const [side, hy] of [[-1, 60], [1, 82]]) {
+    const out = new THREE.Mesh(new THREE.CylinderGeometry(8, 9, 34, 6), CACTUS_MAT);
+    out.rotation.x = side * Math.PI / 2;
+    out.position.set(0, hy, side * 27);
+    cac.add(out);
+    const up = new THREE.Mesh(new THREE.CylinderGeometry(7.5, 8.5, 46, 6), CACTUS_MAT);
+    up.position.set(0, hy + 20, side * 42);
+    cac.add(up);
+    const knob = new THREE.Mesh(new THREE.SphereGeometry(8, 6, 4), CACTUS_MAT);
+    knob.position.set(0, hy + 43, side * 42);
+    cac.add(knob);
+  }
+  cac.position.set(x, 0, z);
+  cac.scale.setScalar(s);
+  group.add(cac);
+}
+
+// A weathered roadside billboard on two posts.
+function billboard(group, x, z, text, color) {
+  const posts = new THREE.MeshStandardMaterial({ color: 0x6b5a4a, roughness: 1, flatShading: true });
+  for (const dx of [-170, 170]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(9, 11, 260, 7), posts);
+    post.position.set(x + dx, 130, z);
+    group.add(post);
+  }
+  const board = new THREE.Mesh(
+    new THREE.BoxGeometry(480, 180, 14),
+    new THREE.MeshStandardMaterial({ color: 0xf2e2c4, roughness: 0.9, flatShading: true }),
+  );
+  board.position.set(x, 330, z);
+  board.castShadow = true;
+  group.add(board);
+  const sign = makeTextSprite(text, { px: 58, color, w: 1024 });
+  sign.position.set(x, 330, z + 20);
+  group.add(sign);
+}
+
 // A chunky cartoon palm: leaning trunk segments + a mop of droopy leaves.
-const PALM_TRUNK = new THREE.MeshStandardMaterial({ color: 0xc79a5e, roughness: 0.9 });
-const PALM_LEAF = new THREE.MeshStandardMaterial({ color: 0x3fae52, roughness: 0.8, side: THREE.DoubleSide });
+const PALM_TRUNK = new THREE.MeshStandardMaterial({ color: 0xc79a5e, roughness: 0.9, flatShading: true });
+const PALM_LEAF = new THREE.MeshStandardMaterial({ color: 0x3fae52, roughness: 0.8, side: THREE.DoubleSide, flatShading: true });
 const PALM_LEAF_GEO = new THREE.ConeGeometry(13, 110, 6).scale(1, 1, 0.28);
 function palmTree(group, x, z, s = 1) {
   const palm = new THREE.Group();
@@ -1073,8 +1150,8 @@ function palmTree(group, x, z, s = 1) {
 function buildBjTable(group) {
   const refs = {};
   const felt = new THREE.Mesh(
-    new THREE.CylinderGeometry(130, 138, 46, 32),
-    new THREE.MeshStandardMaterial({ color: 0x1c6b3a, roughness: 0.6 }),
+    new THREE.CylinderGeometry(130, 138, 46, 12),
+    new THREE.MeshStandardMaterial({ color: 0x148a4a, roughness: 0.6 }),
   );
   felt.position.set(C.HUB.TABLE.x, 23, C.HUB.TABLE.y);
   felt.castShadow = true;
@@ -1182,6 +1259,20 @@ function updateBjTable(dt, refs, bj) {
   }
 }
 
+// The whole world is faceted toy-diorama low poly: every environment material
+// gets flat shading (eyes and anything marked userData.smooth stay round).
+function facetify(root) {
+  root.traverse(o => {
+    if (!o.isMesh) return;
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.isMeshStandardMaterial && !m.flatShading && !m.userData.smooth) {
+        m.flatShading = true;
+        m.needsUpdate = true;
+      }
+    }
+  });
+}
+
 function buildArena(kind) {
   if (arena) clearGroup(arena.group);
   const group = new THREE.Group();
@@ -1193,25 +1284,26 @@ function buildArena(kind) {
   if (kind === 'hub') {
     buildDenRoom(group);
     addDrifters(group, { count: 60, color: 0xffd890, size: 4, opacity: 0.28, box: [100, 1500, 60, 440, 60, 840], vy: 7 });
-    // THE GATE (north)
-    const gmat = new THREE.MeshStandardMaterial({ color: 0x4a3d75, roughness: 0.7 });
-    for (const px of [C.HUB.GATE.x - 330, C.HUB.GATE.x + 330]) {
-      const p = new THREE.Mesh(new THREE.BoxGeometry(90, 360, 90), gmat);
-      p.position.set(px, 180, 40);
-      p.castShadow = true;
-      group.add(p);
+    // THE GATE (north): a big dumb faceted arch, like every good cartoon canyon
+    const archMat = new THREE.MeshStandardMaterial({ color: 0x52c25e, roughness: 0.8, flatShading: true });
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(330, 62, 6, 9, Math.PI), archMat);
+    arch.position.set(C.HUB.GATE.x, 20, 40);
+    arch.castShadow = true;
+    group.add(arch);
+    for (let i = 1; i < 8; i++) { // studs along the arch, because the arch demanded them
+      const a = (i / 8) * Math.PI;
+      const stud = new THREE.Mesh(new THREE.SphereGeometry(16, 6, 4), new THREE.MeshStandardMaterial({ color: 0x3a9a46, roughness: 0.8, flatShading: true }));
+      stud.position.set(C.HUB.GATE.x + Math.cos(a) * 330, 20 + Math.sin(a) * 330, 105);
+      group.add(stud);
     }
-    const beam = new THREE.Mesh(new THREE.BoxGeometry(760, 80, 100), gmat);
-    beam.position.set(C.HUB.GATE.x, 400, 40);
-    group.add(beam);
-    const opening = new THREE.Mesh(new THREE.BoxGeometry(560, 300, 18), new THREE.MeshBasicMaterial({ color: 0x05030c }));
+    const opening = new THREE.Mesh(new THREE.BoxGeometry(480, 300, 18), new THREE.MeshBasicMaterial({ color: 0x05030c }));
     opening.position.set(C.HUB.GATE.x, 150, 30);
     group.add(opening);
     const door = new THREE.Mesh(
-      new THREE.BoxGeometry(560, 260, 46),
+      new THREE.BoxGeometry(480, 250, 46),
       new THREE.MeshStandardMaterial({ color: 0x6b5a9e, roughness: 0.5, emissive: 0x2a1a4a, emissiveIntensity: 0.6 }),
     );
-    door.position.set(C.HUB.GATE.x, 130, 40);
+    door.position.set(C.HUB.GATE.x, 125, 40);
     door.castShadow = true;
     group.add(door);
     arena.door = door;
@@ -1223,7 +1315,7 @@ function buildArena(kind) {
     group.add(zone);
     arena.gateZone = zone;
     arena.gateSign = makeTextSprite(' ', { px: 46, color: '#00E5FF', w: 1024 });
-    arena.gateSign.position.set(C.HUB.GATE.x, 350, 60);
+    arena.gateSign.position.set(C.HUB.GATE.x, 440, 60);
     group.add(arena.gateSign);
     const marquee = makeTextSprite('✨ F R I E N D S L O P ✨', { px: 54, color: '#FF6EC7', w: 1024 });
     marquee.position.set(C.HUB.GATE.x, 500, 40);
@@ -1295,31 +1387,32 @@ function buildArena(kind) {
     buildSlopchange(group, -405);
     arena.digLayers = []; // built on demand from extras
   } else if (kind === 'rv') {
-    // warm terracotta canyon at golden hour (R.V. There Yet's postcard look)
-    skyDome(group, '#8a4a8e', '#ff8a52', '#ffcf8a');
-    setMood(0xe08a54, 2400, 5600);
-    addClouds(group, 5, 640, 0xffd9b0, 0.5);
+    // CHAOS CANYON: bright blue sky, stacked terracotta mesas, cacti —
+    // faceted toy-diorama low poly
+    skyDome(group, '#3f96e8', '#a8d8f0', '#f2d4a0');
+    setMood(0xd8a870, 2600, 6200);
+    addClouds(group, 6, 700, 0xffffff, 0.75);
     const canyon = new THREE.Mesh(
       roughen(new THREE.CylinderGeometry(2500, 2400, 1500, 26, 6, true), 70),
-      new THREE.MeshStandardMaterial({ color: 0xc4652f, roughness: 1, side: THREE.BackSide }),
+      new THREE.MeshStandardMaterial({ color: 0xc4652f, roughness: 1, flatShading: true, side: THREE.BackSide }),
     );
     canyon.position.set(CX, 500, CZ);
     group.add(canyon);
-    // stacked hoodoo boulders around the rim, smooth clay-like
-    const hoodooMat = new THREE.MeshStandardMaterial({ color: 0xd4784a, roughness: 0.95 });
-    for (let i = 0; i < 7; i++) {
-      const a = (i / 7) * Math.PI * 2 + 0.4;
-      let hy = 0;
-      for (let s = 0; s < 3; s++) {
-        const r = 130 - s * 34 + Math.random() * 20;
-        const rock = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10).scale(1, 0.72, 1), hoodooMat);
-        rock.position.set(CX + Math.cos(a) * 1750, hy + r * 0.5, CZ + Math.sin(a) * 1350);
-        hy += r * 1.05;
-        group.add(rock);
-      }
+    // stacked mesa buttes around the rim — chamfered slabs, lighter every tier
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2 + 0.35;
+      mesa(group, CX + Math.cos(a) * 1720, CZ + Math.sin(a) * 1320, 0.8 + Math.random() * 0.7);
     }
-    addDrifters(group, { count: 70, color: 0xffb070, size: 5, opacity: 0.3, box: [0, 1600, 10, 300, 0, 900], vy: 6 });
-    floorBox(group, 1760, 1020, 0xb57a44, noiseTexture('#b57a44', '#9a6536'));
+    // cacti dotted around the pit floor edges and the rim
+    for (let i = 0; i < 12; i++) {
+      const a = (i / 12) * Math.PI * 2 + 1.1;
+      cactus(group, CX + Math.cos(a) * (1150 + Math.random() * 350), CZ + Math.sin(a) * (800 + Math.random() * 300), 0.8 + Math.random() * 0.8);
+    }
+    cactus(group, 120, 90, 1.1); cactus(group, C.ARENA_W - 90, C.ARENA_H - 70, 0.9);
+    // the big dumb billboard
+    billboard(group, CX - 350, -640, 'R.V. SLOP YET? →', '#c23a2e');
+    addDrifters(group, { count: 70, color: 0xffcf90, size: 5, opacity: 0.3, box: [0, 1600, 10, 300, 0, 900], vy: 6 });
+    floorBox(group, 1760, 1020, 0xdca55e, noiseTexture('#dca55e', '#c28f4a'));
     arena.mudDiscs = [];
     // exit garage on the east wall
     const garage = new THREE.Mesh(
@@ -1395,7 +1488,7 @@ function buildArena(kind) {
       skyDome(group, '#3a4a94', '#ff9a6a', '#ffd0a0');
       setMood(0xe09a72, 2600, 5600);
       addClouds(group, 7, 620, 0xffd8c0, 0.55);
-      cliffMat = new THREE.MeshStandardMaterial({ color: 0x8a6a5c, roughness: 1 });
+      cliffMat = new THREE.MeshStandardMaterial({ color: 0x8a6a5c, roughness: 1, flatShading: true });
       // distant range
       for (let i = 0; i < 4; i++) {
         const mtn = new THREE.Mesh(
@@ -1442,6 +1535,7 @@ function buildArena(kind) {
     flag.position.copy(fp);
     group.add(flag);
   }
+  facetify(group);
   return arena;
 }
 
