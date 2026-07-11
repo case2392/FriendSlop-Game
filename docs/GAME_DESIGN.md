@@ -4,39 +4,35 @@
 
 ## The pitch
 
-2–8 friends are chunky humanoid slop-people in dumb hats, chained into one squad, escaping a living dungeon.
-It's a **co-op expedition**: four original chambers with shared team lives, a
-walkable 3D hub between them, and one hand of blackjack against the Pit Boss
-gating every advance. True friendslop: one common goal, constant physical
-comedy, and just enough gambling to start arguments.
+2–8 friends are chunky ragdolly slop-people in dumb hats escaping a living
+dungeon. It's a **co-op expedition of six chambers — each an homage to a
+friendslop classic** (Keep Digging, R.V. There Yet?, Mecha Chameleon, Gamble
+With Friends, Chained Together, PEAK) — with a walkable 3D hub between them.
+True friendslop: one common goal, constant physical comedy, and just enough
+gambling to start arguments.
 
 ## Design pillars
 
 1. **Embodied everything.** There are no menus mid-game. Start a chamber by
    walking the squad through the gate. Vote in blackjack by standing on a floor
    zone. If a mechanic can be a *place*, it's a place.
-2. **The chain is the game.** Every blob is tethered to the next (server-side
-   distance constraint, momentum-sharing). Every chamber is designed around
-   what a chain ruins: spreading out, fleeing, splitting up, leaving someone.
+2. **The chain is the twist, not the default.** Five chambers you're free.
+   Then CHAINED TOGETHER binds the squad (server-side distance constraints,
+   momentum-sharing) for one climb where a single slip drags everybody.
 3. **One common goal.** Nobody wins a chamber alone — team lives are shared,
    and The Great Escape requires every single blob on the ledge. Money is
    bragging rights, not victory.
-4. **A little gambling.** Exactly one hand of blackjack between chambers.
-   Win = advance, lose = run it back, push = re-deal. Majority of bodies
-   decides hit/stand; ties hit, because of course they do.
+4. **A little gambling.** One casino chamber, mid-expedition. The Boss deals
+   to the whole squad; majority of bodies decides hit/stand; ties hit,
+   because of course they do.
 
 ## The loop
 
 ```
-THE DEN (hub) ──walk into gate──▶ CHAMBER ──cleared──▶ PIT BOSS BLACKJACK
-   ▲                                 │ failed              │ win: next gate
-   └──────── run it back ◀───────────┴──── lose ◀──────────┘
+THE DEN ──walk into gate──▶ CHAMBER ──cleared──▶ next gate (×6) ──▶ ESCAPE
+   ▲                            │ failed
+   └──────── run it back ◀──────┘        (pit collapses after 20 attempts)
 ```
-
-- Expedition = chambers 1→4 in order. Clearing chamber 4 IS the escape
-  (no hand after it — the finale can't be undone by a card).
-- The pit collapses after 14 total chamber attempts — matches always end.
-- Celebration in the Den: confetti, floating standings, back to the lobby.
 
 ## The Den
 
@@ -59,12 +55,14 @@ is the design.
 
 ## Chambers
 
-| | Rules | Shared lives | MVP metric |
+| | Homage | Rules | Shared lives |
 |---|---|---|---|
-| 🚪 **THE GATES OF SLOP** | Cover all pressure plates simultaneously for a cumulative 8s. Gremlins shove and stagger you (a staggered blob still holds a plate — only displacement matters). Plate count and spread scale with squad size so the chain can always physically reach. | none (time race, 75s) | plate time |
-| 🌊 **THE BELCHING GUT** | Wave cycle: calm 4.5s → warning 3.2s (islands telegraph) → acid flood 2.2s. Caught outside an island = burn, stun, −1 life. Survive 4 waves; islands shrink and dwindle. Island size scales with squad. | 2 + 0.8/blob | clean waves |
-| 🥔 **GALLSTONE PANIC** | A lit gallstone (13s fuse) spawns on someone; touching a friend passes it; holder is faster. Dunk it in the relocating drain. Explosion: knockback + stun + −1 life. Dunk 4 to clear. | 2 + blob/3 | dunks |
-| 🕳️ **THE GREAT ESCAPE** | Tiles crack 0.5s after touch, crumble 1s later. Fall = −1 life + respawn at start (and you drop out of the chain while you run back). Everyone alive on the exit ledge = escape. | 2 + 0.7/blob | first across, then tiles scouted |
+| ⛏️ **THE DIG SITE** | Keep Digging | Dash tiles (2 hits) or loiter to dig; fall through holes; EVERYONE to the bottom of 3 floors in 110s. | time only |
+| 🚐 **ARE WE SLOP YET?** | R.V. There Yet? | Push a 7×-mass RV to the far exit in 110s. Mud kills its momentum; gremlins push back; dashes shove hard. MVP: shoulder time. | time only |
+| 🦎 **THE CHAMELEON** | Mecha Chameleon | ~2n statues mimic the squad; the real one twitches every ~4s. Dash it ×3. Wrong smash: −1 life + stun. | 2 + n/2 |
+| 🎩 **THE BOSS'S CASINO** | Gamble With Friends | Squad blackjack: bodies in HIT/STAND zones vote each decision (window 14s, all-in resolves early). Win 2 hands; 3 losses busts the squad. | 3 losses |
+| ⛓️ **CHAINED TOGETHER** | Chained Together | Chained (long links) up a cliff of ledges + vines while the slop tide rises. Tide catch: −1 life + rescue to a safe ledge. Everyone up top. | 2 + 0.7n |
+| 🏔️ **THE PEAK** | PEAK | Full-height free solo, falling slop globs knock you off. Bare rock slides; vines climb; every climber to the summit in 170s. | time only |
 
 Adding a chamber = one file in `server/minigames/` implementing
 `constructor(players)`, `tick(dt) → rankings|null`, `extras()`, `teamWin`,
@@ -83,4 +81,4 @@ optional `lives` — plus a renderer branch and an entry in `MINIGAME_INFO`.
 ## Tone
 
 Self-aware slop with casino-den maximalism. Little humanoids with swinging arms, per-player hats, and eyes that look where they walk.
-The Pit Boss never speaks. The chain never comes off.
+The Pit Boss never speaks. The chain comes off — except when it doesn't.

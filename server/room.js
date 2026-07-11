@@ -1,8 +1,7 @@
 import * as C from '../shared/constants.js';
 import { CHAMBERS } from './minigames/index.js';
-import { driveBot, driveHubBot, botVote, botName } from './bots.js';
-import { Blackjack } from './blackjack.js';
-import { stepMovement, collidePlayers, boundRect, applyChain } from './physics.js';
+import { driveBot, driveHubBot, botName } from './bots.js';
+import { stepMovement, collidePlayers, boundRect } from './physics.js';
 
 let nextPlayerId = 1;
 
@@ -14,7 +13,7 @@ export class Room {
     this.code = code;
     this.players = new Map();
     this.phase = 'hub';        // hub | play
-    this.hubMode = 'lobby';    // lobby | gate | blackjack | celebrate
+    this.hubMode = 'lobby';    // lobby | gate | celebrate
     this.chamberIdx = 0;
     this.attempts = 0;
     this.totalPlays = 0;
@@ -26,10 +25,6 @@ export class Room {
     this.lastResults = null;
     this.banner = null;          // {text, color, until}
     this.gateEndsAt = null;
-    this.bj = null;
-    this.bjVoteEnds = 0;
-    this.bjVoteStart = 0;
-    this.bjShowdownAt = 0;
     this.celebrateEnds = 0;
     this.standings = null;
     this.escaped = false;
@@ -233,8 +228,11 @@ export class Room {
         // Clearing the final chamber IS the escape.
         this.beginCelebrate(true);
       } else {
-        this.setBanner(`✅ CHAMBER CLEARED! MVP: ${mvp?.name ?? '?'} — now beat the Pit Boss to advance`, '#7CFC00', 8);
-        this.beginBlackjack();
+        this.chamberIdx++;
+        this.attempts = 0;
+        this.gameClass = CHAMBERS[this.chamberIdx];
+        this.setBanner(`✅ CHAMBER CLEARED! MVP: ${mvp?.name ?? '?'} — the gate to chamber ${this.chamberIdx + 1} is open`, '#7CFC00', 8);
+        this.hubMode = 'gate';
       }
     } else if (this.totalPlays >= C.MAX_TOTAL_PLAYS) {
       this.beginCelebrate(false);
@@ -245,87 +243,13 @@ export class Room {
     this.sendMeta();
   }
 
-  beginBlackjack() {
-    this.hubMode = 'blackjack';
-    this.bj = new Blackjack();
-    if (this.bj.state === 'done') {
-      this.bjShowdownAt = Date.now() + C.BJ_RESULT_TIME * 1000;
-      this.bjVoteEnds = 0;
-    } else {
-      this.bjVoteStart = Date.now();
-      this.bjVoteEnds = Date.now() + C.BJ_VOTE_TIME * 1000;
-      this.bjShowdownAt = 0;
-    }
-    for (const p of this.players.values()) delete p.bjChoice;
-    this.sendMeta();
-  }
 
-  bjZones() {
-    const crew = this.crew().filter(p => p.alive);
-    return {
-      hitIds: crew.filter(p => inCircle(p, C.HUB.HIT)).map(p => p.id),
-      standIds: crew.filter(p => inCircle(p, C.HUB.STAND)).map(p => p.id),
-    };
-  }
 
-  resolveBjVote() {
-    const { hitIds, standIds } = this.bjZones();
-    // Majority of bodies; ties with actual voters HIT (of course they do);
-    // an empty table plays it safe and stands.
-    const choice = hitIds.length > standIds.length ? 'hit'
-      : standIds.length > hitIds.length ? 'stand'
-      : hitIds.length > 0 ? 'hit' : 'stand';
-    const done = this.bj.act(choice);
-    if (done) {
-      this.bjShowdownAt = Date.now() + C.BJ_RESULT_TIME * 1000;
-      this.bjVoteEnds = 0;
-    } else {
-      this.bjVoteStart = Date.now();
-      this.bjVoteEnds = Date.now() + C.BJ_VOTE_TIME * 1000;
-      for (const p of this.players.values()) delete p.bjChoice;
-    }
-    this.sendMeta();
-  }
 
-  afterBlackjack() {
-    const outcome = this.bj?.outcome;
-    this.bjShowdownAt = 0;
-    if (outcome === 'push') {
-      this.setBanner('😤 PUSH — the Boss re-deals', '#FFD84D', 4);
-      this.beginBlackjack();
-      return;
-    }
-    if (outcome === 'win' || outcome === 'natural') {
-      const pay = outcome === 'natural' ? C.BJ_NATURAL_PAY : C.BJ_WIN_PAY;
-      for (const p of this.crew()) p.coins += pay;
-      this.chamberIdx++;
-      this.attempts = 0;
-      this.bj = null;
-      this.gameClass = CHAMBERS[this.chamberIdx];
-      this.setBanner(
-        outcome === 'natural'
-          ? `💎 NATURAL 21! +${pay}💰 each — the gate is open`
-          : `🎉 THE BOYS BEAT THE BOSS! +${pay}💰 — the gate is open`,
-        '#7CFC00', 7);
-      this.hubMode = 'gate';
-      this.sendMeta();
-      return;
-    }
-    // Lost the hand.
-    this.bj = null;
-    if (this.totalPlays >= C.MAX_TOTAL_PLAYS) {
-      this.beginCelebrate(false);
-      return;
-    }
-    this.setBanner('💀 BUSTED BY THE BOSS — run the chamber back', '#FF7676', 7);
-    this.hubMode = 'gate';
-    this.sendMeta();
-  }
 
   beginCelebrate(escaped) {
     this.hubMode = 'celebrate';
     this.escaped = escaped;
-    this.bj = null;
     this.celebrateEnds = Date.now() + C.CELEBRATE_TIME * 1000;
     this.standings = this.list()
       .slice()
@@ -366,7 +290,10 @@ export class Room {
     const crew = this.crew().filter(p => p.alive);
 
     for (const p of crew) {
-      if (p.isBot) driveHubBot(p, this, dt);
+      if (p.isBot) {
+        driveHubBot(p, this, dt);
+        if (Math.random() < dt * 0.04) this.handleEmote(p, C.EMOTES[Math.floor(Math.random() * C.EMOTES.length)]);
+      }
       stepMovement(p, dt);
       boundRect(p, C.ARENA_W, C.ARENA_H);
       // the Boss's table is solid
@@ -376,7 +303,6 @@ export class Room {
       if (d < minD && d > 0) { p.x = C.HUB.TABLE.x + dx / d * minD; p.y = C.HUB.TABLE.y + dy / d * minD; }
     }
     collidePlayers(crew);
-    applyChain(crew, C.LINK_LEN);
 
     if (this.banner && now > this.banner.until) this.banner = null;
 
@@ -394,15 +320,6 @@ export class Room {
         this.gateEndsAt = null;
       }
       if (this.gateEndsAt && now >= this.gateEndsAt) this.beginPlay();
-    } else if (this.hubMode === 'blackjack' && this.bj) {
-      if (this.bj.state === 'voting') {
-        const { hitIds, standIds } = this.bjZones();
-        const allIn = crew.length > 0 && hitIds.length + standIds.length === crew.length;
-        const minWindow = this.bjVoteStart + Math.min(2500, C.BJ_VOTE_TIME * 400);
-        if (now >= this.bjVoteEnds || (allIn && now >= minWindow)) this.resolveBjVote();
-      } else if (this.bjShowdownAt && now >= this.bjShowdownAt) {
-        this.afterBlackjack();
-      }
     } else if (this.hubMode === 'celebrate') {
       if (now >= this.celebrateEnds) this.backToLobby();
     }
@@ -443,13 +360,6 @@ export class Room {
         need: Math.max(2, Math.ceil(crew.length * 0.6)),
         total: crew.length,
         cd: this.gateEndsAt ? Math.max(0, Math.round((this.gateEndsAt - now) / 100) / 10) : null,
-      };
-    } else if (this.hubMode === 'blackjack' && this.bj) {
-      const { hitIds, standIds } = this.bjZones();
-      ex.bj = {
-        ...this.bj.publicState(),
-        hitIds, standIds,
-        voteLeft: this.bjVoteEnds ? Math.max(0, Math.round((this.bjVoteEnds - now) / 100) / 10) : null,
       };
     } else if (this.hubMode === 'celebrate') {
       ex.standings = this.standings;

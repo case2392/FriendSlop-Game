@@ -151,36 +151,37 @@ const driver = setInterval(() => {
     const m = c.meta;
     if (!m) continue;
     if (m.phase === 'play') {
-      // mash about
-      if (Math.random() < 0.6) {
+      if (m.minigame === 'casino') {
+        c.steerToward(C.HUB.STAND.x, C.HUB.STAND.y); // vote with the body
+      } else if (Math.random() < 0.6) {
         const a = Math.random() * Math.PI * 2;
         c.send({ t: 'input', mx: Math.cos(a), my: Math.sin(a), dash: Math.random() < 0.2 });
         c._lastKeys = null;
       }
     } else if (m.hubMode === 'lobby' || m.hubMode === 'gate') {
       c.steerToward(C.HUB.GATE.x, C.HUB.GATE.y);
-    } else if (m.hubMode === 'blackjack') {
-      c.steerToward(C.HUB.STAND.x, C.HUB.STAND.y); // the boys play it safe
     }
   }
 }, 100);
 
 // Walking into the gate must start chamber 1.
 await host.until(c => c.meta?.phase === 'play', 'gate walk-in starts chamber 1', 30000);
-if (host.meta.minigame !== 'gates') fail(`expedition should start at the gates, got ${host.meta.minigame}`);
-console.log('✅ walked into the gate — chamber 1 begins (THE GATES OF SLOP)');
+if (host.meta.minigame !== 'dig') fail(`expedition should start at THE DIG SITE, got ${host.meta.minigame}`);
+console.log('✅ walked into the gate — chamber 1 begins (THE DIG SITE)');
 
-await host.until(c => c.meta?.phase === 'hub' && c.meta.hubMode === 'blackjack', 'clear -> blackjack at the table', 60000);
+await host.until(c => c.meta?.phase === 'hub' && c.meta.chamber === 1, 'clear -> straight to chamber 2', 60000);
 const r1 = host.meta.lastResults;
-if (!r1?.teamWin) fail('gates should be trivially clearable in FAST mode');
+if (!r1?.teamWin) fail('dig should be trivially clearable in FAST mode');
 const mvpPay = (r1.payouts[r1.mvpId] || []).reduce((s, x) => s + x.amt, 0);
 if (mvpPay < 150) fail(`mvp should earn clear pay + bonus, got ${mvpPay}`);
-console.log(`✅ chamber cleared (mvp=${r1.mvpId}, +${mvpPay}) — the Pit Boss is dealing`);
+console.log(`✅ chamber cleared (mvp=${r1.mvpId}, +${mvpPay}) — advanced with NO toll booth`);
 
-await host.until(c => c.snap?.extra?.bj?.squad?.length >= 2, 'cards on the table');
-console.log(`✅ cards dealt: ${host.snap.extra.bj.squad.join(' ')} (${host.snap.extra.bj.squadTotal}) vs ${host.snap.extra.bj.dealerUp}`);
+// Ride until the casino chamber deals cards in-world.
+await host.until(c => c.meta?.phase === 'play' && c.meta.minigame === 'casino' && c.snap?.extra?.bj?.squad?.length >= 2,
+  "the Boss's Casino deals", 120000);
+console.log(`✅ THE BOSS'S CASINO: ${host.snap.extra.bj.squad.join(' ')} (${host.snap.extra.bj.squadTotal}) vs ${host.snap.extra.bj.dealerUp}`);
 
-await host.until(c => c.bjOutcomes.length > 0, 'hand resolves via body votes', 30000);
+await host.until(c => c.bjOutcomes.length > 0, 'hand resolves via body votes', 40000);
 console.log(`✅ hand resolved by standing in a zone: ${host.bjOutcomes[0]}`);
 
 // Ride it out: bodies do everything until the podium.
@@ -195,7 +196,7 @@ const sorted = pod.standings.every((s, i, a) => i === 0 || a[i - 1].coins >= s.c
 if (!sorted) fail('podium not sorted by coins');
 
 for (const c of [host, p2, p3]) {
-  for (const mode of ['lobby', 'play', 'blackjack', 'celebrate']) {
+  for (const mode of ['lobby', 'play', 'gate', 'celebrate']) {
     if (!c.modesSeen.has(mode)) fail(`${c.name} never saw ${mode}`);
   }
 }

@@ -1,38 +1,43 @@
 # 🫠 FRIENDSLOP
 
-> chained to the boys. one way out of the pit. don't bust.
+> six levels down. every one a classic. don't bust.
 
 A 2–8 player **3D co-op party game**. You and the boys are little slop-people
-(chunky humanoids in dumb hats), **physically chained together**, trying to
-escape a living dungeon called the Slop Pit. Between chambers you hang out in **The Den** — a walkable casino-carpet
-hub where everything is embodied: walk the squad into the glowing gate to start
-the next chamber, and settle your fate at the Pit Boss's blackjack table by
-literally **standing on the HIT or STAND floor zone**. Majority of bodies rules.
-Ties hit. Losing the hand means running the chamber back.
+(chunky ragdolly humanoids in dumb hats) escaping a living dungeon called the
+Slop Pit — **six chambers, each one an homage to a friendslop classic**.
+Between chambers you hang out in **The Den**, a walkable casino-carpet hub:
+no menus, no buttons — walk the squad into the glowing gate to start the next
+level.
 
 | | |
 |---|---|
-| ![the den](docs/screenshots/v3-den.png) | ![blackjack](docs/screenshots/v3-blackjack.png) |
-| ![gates](docs/screenshots/v3-gates.png) | ![gallstone panic](docs/screenshots/v3-tater.png) |
+| ![are we slop yet](docs/screenshots/v5-rv.png) | ![the chameleon](docs/screenshots/v5-cham.png) |
+| ![the casino](docs/screenshots/v5-casino.png) | ![the peak](docs/screenshots/v5-peak.png) |
 
 ## The expedition
 
-Four original chambers, in order, with **shared team lives**. Clear all four and
-the boys escape. Each clear pays every blob 💰 (plus MVP and unused-life
-bonuses) — most money at the end gets bragging rights, but escape is the win.
+Six chambers, in order, all co-op. Clear one and the gate to the next opens.
+Clear all six and the boys escape. Fail and you run it back — the pit collapses
+after 20 attempts, so every retry counts.
 
-1. 🚪 **THE GATES OF SLOP** — stretch the chain across all pressure plates *at
-   the same time* to grind the gate open, while gremlins bodycheck you off.
-2. 🌊 **THE BELCHING GUT** — when the stomach rumbles, drag the whole chain onto
-   a safe island before the acid wave. The islands shrink. The chain does not.
-3. 🥔 **GALLSTONE PANIC** — the pit coughs up lit explosives. Whoever's holding
-   one hauls the entire chain to the drain before it blows.
-4. 🕳️ **THE GREAT ESCAPE** — the crust crumbles under every step. Get EVERY
-   SINGLE BLOB to the exit ledge. Nobody gets left behind.
+1. ⛏️ **THE DIG SITE** — *an homage to Keep Digging.* Dash the ground to crack
+   it, drop through, repeat. Everyone must reach the bottom, three floors down.
+2. 🚐 **ARE WE SLOP YET?** — *R.V. There Yet?* The RV doesn't drive. PUSH IT
+   across the pit — through mud, past gremlins shoving it backwards.
+3. 🦎 **THE CHAMELEON** — *Mecha Chameleon.* One statue is alive and wearing a
+   friend's face. Watch for the twitch, dash the real one. Wrong smashes cost
+   shared lives. Three catches to clear.
+4. 🎩 **THE BOSS'S CASINO** — *Gamble With Friends.* The Pit Boss deals
+   blackjack to the whole squad. Vote with your BODY — stand in the HIT or
+   STAND floor zone. Majority rules, ties hit. Win 2 hands before busting out.
+5. ⛓️ **CHAINED TOGETHER** — *Chained Together.* The pit chains the squad for
+   this climb, and the slop tide is rising. Ledges hold, vines climb, one slip
+   drags everyone. The only chained level — by design.
+6. 🏔️ **THE PEAK** — *PEAK.* The finale free solo: no chain, a full-height
+   wall, falling slop. Every climber to the summit and the Slop Pit is history.
 
-After each clear (except the last — clearing the final chamber IS the escape),
-the Pit Boss deals one hand of blackjack to the whole squad. Win → the gate
-opens. Lose → run it back. The vote is a shouting match with legs.
+Money flows on every clear (+MVP and unused-life bonuses) — richest slop at
+the end gets bragging rights, but escape is the win.
 
 ## Play it right now
 
@@ -43,11 +48,11 @@ npm start          # → http://localhost:3000
 
 One person **HOSTS**, sends the 4-letter room code to the boys, everyone else
 **JOINS** — you all drop straight into the Den. Short on friends? The host can
-add **bots**: they walk to the gate, play every chamber, and vote at the table
-with their own bodies (they will absolutely drag you into the pit early).
+add **bots**: they dig, push, pounce, climb single-file, and vote at the
+casino with their own bodies.
 
 **Controls:** click the world to mouse-look · WASD to walk (camera-relative) ·
-SPACE/SHIFT to dash · Q/E to turn without a mouse · 1–6 emotes · ENTER chat
+SPACE/SHIFT to dash · 1–6 emotes (they play on your body — try 💀) · ENTER chat
 
 To play over the internet, run the server on any $5 VPS / Fly.io / Railway box
 and share the URL — it's a single Node process.
@@ -56,15 +61,14 @@ and share the URL — it's a single Node process.
 
 ```
 server/            authoritative game server (Node + ws, 30Hz sim, 20Hz snapshots)
-  room.js          the Den + expedition state machine (gate walks, body votes)
-  blackjack.js     the Pit Boss's deck (pure logic, unit-tested)
-  gremlins.js      chainless AI shovers
+  room.js          the Den + expedition state machine
+  blackjack.js     the Boss's deck (pure logic, unit-tested)
   minigames/       one file per chamber — same interface, easy to add more
-  bots.js          squad AI: chambers, hub walking, blackjack instincts
+  bots.js          squad AI for every chamber + hub life
 client/            Three.js 3D client — no build step, no assets, all procedural
-  js/render.js     the world: Den, chambers, chain, cards, particles, camera
+  js/render.js     the world: Den, six chambers, ragdoll characters, cards
   js/sfx.js        WebAudio-synthesized sound (zero audio files)
-shared/            constants shared by both sides (incl. hub zone layout)
+shared/            constants shared by both sides
 electron/          desktop shell for the Steam build
 docs/GAME_DESIGN.md  design doc · docs/STEAM.md  step-by-step Steam shipping guide
 test/              full-expedition integration test + Chromium smoke test
@@ -77,9 +81,8 @@ npm test
 ```
 
 - `test/logic.mjs` — unit-tests the blackjack engine (3000 hands), then plays a
-  full expedition over real WebSockets: clients *steer their blobs* into the
-  gate and vote zones, clear chambers, resolve hands, reach the podium, and
-  handle disconnects.
+  full expedition over real WebSockets: walks blobs into gates, digs, pushes,
+  body-votes at the casino, climbs, reaches the podium, handles disconnects.
 - `test/smoke-browser.mjs` — real Chromium pages host/join via the UI and walk
   the entire expedition on autopilot; fails on any console error.
 

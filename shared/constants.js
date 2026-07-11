@@ -12,7 +12,8 @@ export const DASH_CD = 1.6;            // seconds
 export const DASH_TIME = 0.18;         // seconds of "heavy" knockback state
 export const WALL_BOUNCE = 0.65;
 
-// The chain. Every blob is tethered to the next one. This is the whole game.
+// The chain. For four chambers you're free — then the pit chains the squad
+// together for the final climb. One slip drags everyone.
 export const LINK_LEN = 140;
 
 export const TICK_RATE = 30;           // server simulation Hz
@@ -26,18 +27,16 @@ export const CLEAR_PAY = 100;          // each blob, first time a chamber is cle
 export const RECLEAR_PAY = 25;         // each blob, clearing a chamber again after a lost hand
 export const MVP_BONUS = 50;
 export const LIFE_BONUS = 15;          // per unused team life on a clear
-export const BJ_WIN_PAY = 25;          // the pit pays out when you beat the boss
-export const BJ_NATURAL_PAY = 75;      // dealt a natural 21? the boys eat tonight
 
 // ---- match structure ----
-export const CHAMBER_COUNT = 4;
+export const CHAMBER_COUNT = 6;
 
 // Phase durations (seconds). FRIENDSLOP_FAST=1 shrinks these for tests.
 export const FAST = typeof process !== 'undefined' && process.env && process.env.FRIENDSLOP_FAST === '1';
 export const COUNTDOWN_TIME = FAST ? 1 : 3;
 export const BJ_VOTE_TIME = FAST ? 1.5 : 14;    // seconds per hit/stand body-vote
 export const BJ_RESULT_TIME = FAST ? 1.5 : 6;   // gloating window after the hand
-export const MAX_TOTAL_PLAYS = FAST ? 5 : 14;   // pit collapses eventually — match always ends
+export const MAX_TOTAL_PLAYS = FAST ? 7 : 20;   // pit collapses eventually — match always ends
 export const CELEBRATE_TIME = FAST ? 3 : 18;
 export const BANNER_TIME = FAST ? 1.5 : 6;
 
@@ -67,30 +66,50 @@ export const SLOP_COLORS = [
 
 export const EMOTES = ['😂', '😭', '💀', '🤬', '👑', '🤡'];
 
-// The four chambers of the Slop Pit, in expedition order.
+// The five chambers of the Slop Pit, in expedition order.
+// Every level is an homage to a friendslop classic (plus the Pit Boss's
+// blackjack table between levels — that one's for Gamble With Friends).
 export const MINIGAME_INFO = {
-  gates: {
-    name: 'THE GATES OF SLOP',
-    desc: 'Three pressure plates, one chained squad. Cover ALL THREE at the same time to grind the gate open — while gremlins bodycheck you off. Spread out. Communicate. Scream.',
-    goal: 'Hold all 3 plates to open the gate',
-    icon: '🚪',
+  dig: {
+    name: 'THE DIG SITE',
+    based: 'Keep Digging',
+    desc: 'Keep digging. DASH the ground to crack it, drop through the hole, repeat — three floors down. The squad escapes when EVERYONE reaches the bottom of the pit.',
+    goal: 'Everyone digs down 3 floors',
+    icon: '⛏️',
   },
-  gut: {
-    name: 'THE BELCHING GUT',
-    desc: 'The floor is a stomach and it is about to be sick. When the gut rumbles, drag the whole chain onto a safe island before the acid wave hits. The islands shrink. The chain does not.',
-    goal: 'Survive every acid wave',
-    icon: '🌊',
+  rv: {
+    name: 'ARE WE SLOP YET?',
+    based: 'R.V. There Yet?',
+    desc: 'The old RV is the only way through and it does not drive. PUSH IT. Mud bogs it down, gremlins shove it backwards, and the exit is all the way across the pit. All shoulders on the bumper.',
+    goal: 'Push the RV to the exit',
+    icon: '🚐',
   },
-  tater: {
-    name: 'GALLSTONE PANIC',
-    desc: 'The pit keeps coughing up lit gallstones. Whoever is holding one must haul the ENTIRE CHAIN to the drain and dunk it before it blows. Pass it off by touching a friend. Teamwork or kaboom.',
-    goal: 'Dunk the gallstones before they blow',
-    icon: '🥔',
+  cham: {
+    name: 'THE CHAMELEON',
+    based: 'Mecha Chameleon',
+    desc: 'One of those statues is ALIVE and wearing your friend\'s face. Watch for the twitch, then DASH it. Smash a wrong statue and the squad pays for it. Catch it three times.',
+    goal: 'Catch the chameleon 3 times',
+    icon: '🦎',
   },
-  walk: {
-    name: 'THE GREAT ESCAPE',
-    desc: 'The way out. The crust crumbles under every step and the chain drags stragglers into the void. Get EVERY SINGLE BLOB onto the exit ledge. Nobody gets left behind.',
-    goal: 'Everyone reaches the exit ledge',
-    icon: '🕳️',
+  casino: {
+    name: "THE BOSS'S CASINO",
+    based: 'Gamble With Friends',
+    desc: 'The Pit Boss deals blackjack to the whole squad. Vote with your BODY — stand in the HIT or STAND zone before the timer. Win 2 hands before you bust out 3 times and the gate opens.',
+    goal: 'Beat the Boss at blackjack',
+    icon: '🎩',
+  },
+  chained: {
+    name: 'CHAINED TOGETHER',
+    based: 'Chained Together',
+    desc: 'The pit CHAINS THE SQUAD for this climb — and the slop tide is rising. Ledges hold you, slime vines climb you, and one slip drags the whole chain down. Everyone to the top. Together.',
+    goal: 'Everyone above the tide, up top — CHAINED',
+    icon: '⛓️',
+  },
+  peak: {
+    name: 'THE PEAK',
+    based: 'PEAK',
+    desc: 'The final free solo. No chain now — just you, the boys, the falling slop, and the summit. Get every single climber to THE PEAK and the Slop Pit is history.',
+    goal: 'Every climber reaches the summit',
+    icon: '🏔️',
   },
 };

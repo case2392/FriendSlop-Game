@@ -83,19 +83,20 @@ function ruleStrip() {
   const m = S.meta;
   if (!m) return '';
   const info = C.MINIGAME_INFO[m.minigame] || {};
+  const cred = info.based ? ` <span style="opacity:.65">· an homage to ${info.based}</span>` : '';
   if (S.phase === 'play') {
-    return `<b>${info.icon || ''} ${info.name || ''}</b> — ${info.desc || ''}`;
+    if (m.minigame === 'casino') {
+      return `<b>${info.icon} ${info.name}</b> — walk onto a floor zone to vote: <b>HIT 👊</b> left, <b>STAND ✋</b> right. Majority of bodies rules. Ties hit.${cred}`;
+    }
+    return `<b>${info.icon || ''} ${info.name || ''}</b> — ${info.desc || ''}${cred}`;
   }
   if (m.hubMode === 'lobby') {
     return m.players.length < 2
-      ? `Welcome to <b>THE DEN</b>. You need at least 2 blobs — send the code <b>${S.code}</b> to the boys${m.hostId === S.selfId ? ' or hit <b>+ BOT</b>' : ''}.`
-      : `<b>${info.icon || ''} CHAMBER 1: ${info.name || ''}</b> — walk the squad into the glowing gate to descend.`;
+      ? `Welcome to <b>THE DEN</b>. You need at least 2 slop-people — send the code <b>${S.code}</b> to the boys${m.hostId === S.selfId ? ' or hit <b>+ BOT</b>' : ''}.`
+      : `<b>${info.icon || ''} CHAMBER 1: ${info.name || ''}</b>${cred} — walk the squad into the glowing gate to descend.`;
   }
   if (m.hubMode === 'gate') {
-    return `<b>${info.icon || ''} CHAMBER ${m.chamber + 1}: ${info.name || ''}</b>${m.attempts > 0 ? ` (attempt ${m.attempts + 1})` : ''} — walk into the gate when the boys are ready.`;
-  }
-  if (m.hubMode === 'blackjack') {
-    return `<b>🎩 THE PIT BOSS DEALS.</b> Walk onto a floor zone to vote — <b>HIT 👊</b> left, <b>STAND ✋</b> right. Majority of bodies rules. Ties hit.`;
+    return `<b>${info.icon || ''} CHAMBER ${m.chamber + 1}/${m.chambers}: ${info.name || ''}</b>${m.attempts > 0 ? ` (attempt ${m.attempts + 1})` : ''}${cred} — walk into the gate when the boys are ready.`;
   }
   return '';
 }

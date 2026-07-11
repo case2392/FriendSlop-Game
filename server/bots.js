@@ -28,75 +28,102 @@ export function driveBot(bot, game, players, dt) {
 
   const id = game.constructor.id;
 
-  if (id === 'gates') {
-    // Claim the least-crowded plate; shove gremlins that get close.
-    const ex = game.extras();
-    const plates = ex.plates; // [x, y, r, covered]
-    let target = null, bestScore = Infinity;
-    for (const [px, py] of plates) {
-      const crowd = players.filter(p => p.alive && p.id !== bot.id && Math.hypot(p.x - px, p.y - py) < 130).length;
-      const d = Math.hypot(px - bot.x, py - bot.y);
-      const s = crowd * 900 + d;
-      if (s < bestScore) { bestScore = s; target = [px, py]; }
-    }
-    const grem = game.gremlins?.find(g => g.alive && Math.hypot(g.x - bot.x, g.y - bot.y) < 140);
-    if (grem && bot.dashCd === 0) {
-      steerToward(bot, grem.x, grem.y);
-      bot.input.dash = true;
-    } else if (target) {
-      steerToward(bot, target[0] + (Math.random() - 0.5) * 40, target[1] + (Math.random() - 0.5) * 40);
-    }
-  } else if (id === 'gut') {
-    if (game.islands.length) {
-      // The chain punishes solo thinking: commit to the SQUAD's island —
-      // the one closest to the pack's centroid.
-      const alive = players.filter(p => p.alive);
-      const cx2 = alive.reduce((s, p) => s + p.x, 0) / (alive.length || 1);
-      const cy2 = alive.reduce((s, p) => s + p.y, 0) / (alive.length || 1);
+  if (id === 'dig') {
+    if (bot.done) { steerToward(bot, C.ARENA_W / 2, C.ARENA_H / 2); return; }
+    const grid = game.layers[bot.layer];
+    const myTile = game.tileAt(bot.x, bot.y);
+    if (myTile !== -1 && grid && grid[myTile] > 0) {
+      // dig where you stand
+      steerToward(bot, bot.x, bot.y);
+      if (bot.dashCd === 0 && Math.random() < 0.8) bot.input.dash = true;
+    } else if (grid) {
+      // find something intact to break (or a hole was left for us — stand on it)
       let best = null, bd = Infinity;
-      for (const i of game.islands) {
-        const d = Math.hypot(i.x - cx2, i.y - cy2);
-        if (d < bd) { bd = d; best = i; }
+      for (let i = 0; i < grid.length; i++) {
+        if (grid[i] <= 0) continue;
+        const tx = (i % 16) * 100 + 50, ty = Math.floor(i / 16) * 100 + 50;
+        const d = Math.hypot(tx - bot.x, ty - bot.y) + Math.random() * 150;
+        if (d < bd) { bd = d; best = { tx, ty }; }
       }
-      if (best) {
-        const jx = best.x + (Math.random() - 0.5) * best.r * 0.7;
-        const jy = best.y + (Math.random() - 0.5) * best.r * 0.7;
-        steerToward(bot, jx, jy);
-        if (game.state === 'warn' && game.stateT < 1.2 && Math.hypot(best.x - bot.x, best.y - bot.y) > best.r && bot.dashCd === 0) {
-          bot.input.dash = true;
-        }
+      if (best) steerToward(bot, best.tx, best.ty);
+    }
+  } else if (id === 'rv') {
+    // get behind the bumper and push east; dash into it now and then
+    const rv = game.rv;
+    const behindX = rv.x - 130;
+    const laneY = rv.y + Math.sin(bot.id * 2.1) * 60;
+    const d = Math.hypot(behindX - bot.x, laneY - bot.y);
+    steerToward(bot, d < 40 ? rv.x : behindX, d < 40 ? rv.y : laneY);
+    if (d < 60 && bot.dashCd === 0 && Math.random() < 0.5) bot.input.dash = true;
+  } else if (id === 'casino') {
+    const bj = game.bj;
+    if (bj && bj.state === 'voting') {
+      const key = game.handNo * 100 + game.windowNo;
+      if (bot.bjKey !== key) {
+        bot.bjKey = key;
+        bot.bjChoice = null;
+        bot.bjDelay = 0.5 + Math.random() * 1.6;
       }
+      if (bot.bjChoice === null) {
+        bot.bjDelay -= 0.18;
+        if (bot.bjDelay <= 0) bot.bjChoice = botVote(bj.squadTotal());
+        steerToward(bot, C.HUB.TABLE.x + Math.sin(bot.id * 2.7) * 250, 480);
+        return;
+      }
+      const zone = bot.bjChoice === 'hit' ? C.HUB.HIT : C.HUB.STAND;
+      steerToward(bot, zone.x + (Math.random() - 0.5) * zone.r, zone.y + (Math.random() - 0.5) * zone.r);
     } else {
-      steerToward(bot, C.ARENA_W / 2 + (Math.random() - 0.5) * 300, C.ARENA_H / 2 + (Math.random() - 0.5) * 200);
+      steerToward(bot, C.HUB.TABLE.x + Math.sin(bot.id * 2.7) * 260, 500 + Math.cos(bot.id) * 60);
     }
-  } else if (id === 'tater') {
-    if (bot.id === game.taterId) {
-      // I am the problem: sprint to the drain.
-      steerToward(bot, game.hole.x, game.hole.y);
-      if (bot.dashCd === 0 && Math.hypot(game.hole.x - bot.x, game.hole.y - bot.y) > 300) bot.input.dash = true;
-    } else if (game.taterId !== null) {
-      // Shadow the holder loosely — the chain needs slack toward the drain.
-      const holder = players.find(p => p.id === game.taterId);
-      if (holder) {
-        const mx = (holder.x + game.hole.x) / 2, my = (holder.y + game.hole.y) / 2;
-        steerToward(bot, mx + (Math.random() - 0.5) * 120, my + (Math.random() - 0.5) * 120);
+  } else if (id === 'cham') {
+    // loiter near statues; when the twitch happens, the nearest bot pounces
+    if (game.tellT > 0) {
+      const real = game.decoys.find(d => d.id === game.realId);
+      if (real) {
+        steerToward(bot, real.x, real.y);
+        if (Math.hypot(real.x - bot.x, real.y - bot.y) < 170 && bot.dashCd === 0) bot.input.dash = true;
+        return;
       }
+    }
+    // drift between statues, watching
+    if (!bot.watchId || Math.random() < 0.05) {
+      const d = game.decoys[Math.floor(Math.random() * game.decoys.length)];
+      bot.watchId = d?.id;
+    }
+    const w = game.decoys.find(d => d.id === bot.watchId);
+    if (w) steerToward(bot, w.x + 90, w.y + 60);
+  } else if (game.ledges) {
+    // the mountains: ledge -> vine -> up
+    const climbing = game.onClimb(bot);
+    if (climbing) {
+      // push straight up the vine, stay centered
+      let vine = null;
+      for (const c of game.climbs) {
+        if (Math.abs(bot.x - c.x) < c.w / 2 + 20 && bot.y > c.yTop - 14 && bot.y < c.yBot + 14) { vine = c; break; }
+      }
+      bot.input.my = -1;
+      bot.input.mx = vine ? Math.max(-0.4, Math.min(0.4, (vine.x - bot.x) / 40)) : 0;
+      return;
+    }
+    // find a vine that starts at (or below) our footing and leads up
+    const reachable = game.climbs.filter(c => c.yTop < bot.y - 20 && c.yBot >= bot.y - 60);
+    let best = null, bd = Infinity;
+    for (const c of reachable) {
+      let d = Math.abs(c.x - bot.x) + Math.max(0, bot.y - c.yBot) * 2;
+      if (game.constructor.chained) {
+        // chained: single file — favor the route under the highest climber
+        let leader = null;
+        for (const q of players) if (q.alive && (!leader || q.y < leader.y)) leader = q;
+        if (leader && leader.id !== bot.id) d += Math.abs(c.x - leader.x) * 1.5;
+      }
+      if (d < bd) { bd = d; best = c; }
+    }
+    if (best) {
+      steerToward(bot, best.x, Math.min(bot.y, best.yBot - 4));
     } else {
-      steerToward(bot, game.hole.x + (Math.random() - 0.5) * 300, game.hole.y + (Math.random() - 0.5) * 300);
+      // walk toward the middle of our ledge to find a better spot
+      steerToward(bot, C.ARENA_W / 2 + Math.sin(bot.id * 3.7) * 300, bot.y);
     }
-  } else if (id === 'walk') {
-    // March right, preferring intact tiles; hop holes with a dash when stuck.
-    const probe = game.tileAt(bot.x + 70, bot.y);
-    let ty = bot.y;
-    if (probe !== -1 && game.tiles[probe] === 2) {
-      // Hole ahead — look for a safer lane above or below.
-      const up = game.tileAt(bot.x + 70, bot.y - 85);
-      const down = game.tileAt(bot.x + 70, bot.y + 85);
-      if (up !== -1 && game.tiles[up] !== 2) ty = bot.y - 90;
-      else if (down !== -1 && game.tiles[down] !== 2) ty = bot.y + 90;
-      else if (bot.dashCd === 0) bot.input.dash = true; // send it
-    }
-    steerToward(bot, bot.x + 200, ty);
   }
 }
 
@@ -123,23 +150,6 @@ export function driveHubBot(bot, room, dt) {
     }
     steerToward(bot, C.HUB.GATE.x + (Math.random() - 0.5) * (C.HUB.GATE.w - 120),
       C.HUB.GATE.y + (Math.random() - 0.5) * (C.HUB.GATE.h - 100));
-  } else if (mode === 'blackjack' && room.bj) {
-    if (room.bj.state === 'voting') {
-      if (bot.bjChoice === undefined) {
-        bot.bjChoice = null;
-        bot.bjDecideIn = 0.8 + Math.random() * 2.2;
-      }
-      if (bot.bjChoice === null) {
-        bot.bjDecideIn -= 0.2;
-        if (bot.bjDecideIn <= 0) bot.bjChoice = botVote(room.bj.squadTotal());
-        wander(bot);
-        return;
-      }
-      const zone = bot.bjChoice === 'hit' ? C.HUB.HIT : C.HUB.STAND;
-      steerToward(bot, zone.x + (Math.random() - 0.5) * zone.r, zone.y + (Math.random() - 0.5) * zone.r);
-    } else {
-      wander(bot);
-    }
   } else {
     wander(bot);
     if (Math.random() < 0.05) bot.input.dash = true; // celebration zoomies
