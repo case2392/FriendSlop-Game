@@ -100,6 +100,30 @@ function particleMat(color) {
   return particleMats.get(color);
 }
 
+// Soft contact-shadow blob — the cheap trick that glues toys to the diorama.
+let blobShadowTex = null;
+function blobShadow(radius = 42, opacity = 0.34) {
+  if (!blobShadowTex) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 128;
+    const g = cv.getContext('2d');
+    const grad = g.createRadialGradient(64, 64, 6, 64, 64, 62);
+    grad.addColorStop(0, 'rgba(10,6,20,1)');
+    grad.addColorStop(0.7, 'rgba(10,6,20,0.55)');
+    grad.addColorStop(1, 'rgba(10,6,20,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 128, 128);
+    blobShadowTex = canvasTex(cv);
+  }
+  const m = new THREE.Mesh(
+    new THREE.CircleGeometry(radius, 20),
+    new THREE.MeshBasicMaterial({ map: blobShadowTex, transparent: true, opacity, depthWrite: false }),
+  );
+  m.rotation.x = -Math.PI / 2;
+  m.renderOrder = 1;
+  return m;
+}
+
 // ---- humanoid slop-people ------------------------------------------------------
 
 // Real skin tones + hair colors, keyed per player so the squad looks like a
@@ -429,14 +453,15 @@ export function initRender(cv) {
     if (!yawLocked && document.pointerLockElement === canvas) camYaw += e.movementX * 0.0026;
   });
 
-  // sunny illustrated look: strong warm sun + sky-blue fill. The facets are
-  // the art style, and facets only read when light has a direction.
-  scene.add(new THREE.AmbientLight(0xcabdf0, 1.0));
-  scene.add(new THREE.HemisphereLight(0x9ec8ff, 0xd8a878, 1.25));
-  const sun = new THREE.DirectionalLight(0xfff0d8, 2.3);
+  // The concept-art look lives or dies on CONTRAST: a strong warm sun and a
+  // modest cool fill, so lit faces glow and shadowed faces actually go dark.
+  scene.add(new THREE.AmbientLight(0xc8bcf0, 0.5));
+  scene.add(new THREE.HemisphereLight(0x9ec8ff, 0xd8a878, 0.85));
+  const sun = new THREE.DirectionalLight(0xfff0d8, 2.7);
   sun.position.set(500, 1500, 900);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
+  sun.shadow.normalBias = 4; // flat-shaded facets shadow-acne without this
   Object.assign(sun.shadow.camera, { left: -1300, right: 1300, top: 1300, bottom: -1300, near: 100, far: 3500 });
   sun.target.position.set(CX, 0, CZ);
   scene.add(sun, sun.target);
@@ -675,6 +700,50 @@ function noiseTexture(base, blotch, n = 46, size = 512) {
     g.beginPath();
     g.arc(Math.random() * size, Math.random() * size, 12 + Math.random() * 46, 0, Math.PI * 2);
     g.fill();
+  }
+  const tex = canvasTex(cv);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  return tex;
+}
+
+// Concept-art ground: big soft tonal patches, dense speckle, hairline cracks.
+// A flat plane painted like this reads as terrain instead of a void.
+function paintedGround(base, tones, { cracks = 10, speckle = 420, size = 1024 } = {}) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const g = cv.getContext('2d');
+  g.fillStyle = base;
+  g.fillRect(0, 0, size, size);
+  for (let i = 0; i < 70; i++) { // broad patches
+    g.fillStyle = tones[i % tones.length];
+    g.globalAlpha = 0.10 + Math.random() * 0.16;
+    g.beginPath();
+    g.ellipse(Math.random() * size, Math.random() * size,
+      40 + Math.random() * 150, 25 + Math.random() * 90, Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  for (let i = 0; i < speckle; i++) { // pebble speckle
+    g.fillStyle = tones[i % tones.length];
+    g.globalAlpha = 0.25 + Math.random() * 0.3;
+    const s = 2 + Math.random() * 5;
+    g.fillRect(Math.random() * size, Math.random() * size, s, s * 0.7);
+  }
+  g.globalAlpha = 1;
+  g.strokeStyle = 'rgba(20,10,6,0.28)';
+  for (let i = 0; i < cracks; i++) { // wandering hairline cracks
+    g.lineWidth = 1.5 + Math.random() * 2;
+    let x = Math.random() * size, y = Math.random() * size;
+    let a = Math.random() * Math.PI * 2;
+    g.beginPath();
+    g.moveTo(x, y);
+    for (let s = 0; s < 9; s++) {
+      a += (Math.random() - 0.5) * 1.3;
+      x += Math.cos(a) * (18 + Math.random() * 26);
+      y += Math.sin(a) * (18 + Math.random() * 26);
+      g.lineTo(x, y);
+    }
+    g.stroke();
   }
   const tex = canvasTex(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -1089,6 +1158,29 @@ function cactus(group, x, z, s = 1) {
   group.add(cac);
 }
 
+// Faceted sandstone chunks and dry desert brush for floor dressing.
+const ROCK_MATS = [0xc4652f, 0xb3502a, 0xd4784a].map(c => new THREE.MeshStandardMaterial({ color: c, roughness: 1, flatShading: true }));
+function desertRock(group, x, z, s = 1) {
+  const rock = new THREE.Mesh(
+    new THREE.DodecahedronGeometry(26, 0),
+    ROCK_MATS[Math.floor(Math.random() * ROCK_MATS.length)],
+  );
+  rock.scale.set(s * (0.8 + Math.random() * 0.5), s * 0.7, s * (0.8 + Math.random() * 0.5));
+  rock.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
+  rock.position.set(x, 10 * s, z);
+  rock.castShadow = true;
+  group.add(rock);
+}
+const BUSH_MAT = new THREE.MeshStandardMaterial({ color: 0x8a8a3c, roughness: 1, flatShading: true });
+function dryBush(group, x, z, s = 1) {
+  const bush = new THREE.Mesh(new THREE.IcosahedronGeometry(16, 0), BUSH_MAT);
+  bush.scale.set(s * 1.3, s * 0.8, s * 1.2);
+  bush.rotation.y = Math.random() * 3;
+  bush.position.set(x, 9 * s, z);
+  bush.castShadow = true;
+  group.add(bush);
+}
+
 // A weathered roadside billboard on two posts.
 function billboard(group, x, z, text, color) {
   const posts = new THREE.MeshStandardMaterial({ color: 0x6b5a4a, roughness: 1, flatShading: true });
@@ -1347,7 +1439,7 @@ function buildArena(kind) {
     skyDome(group, '#4a8ac8', '#a8d0e8', '#d8e8c8');
     addClouds(group, 6, 750);
     // grassy village ground framing the dig site (a hole needs a rim)
-    const grass = new THREE.MeshStandardMaterial({ color: 0x3f8f2c, roughness: 0.95, map: noiseTexture('#3f8f2c', '#2d6e1f', 60, 256) });
+    const grass = new THREE.MeshStandardMaterial({ color: 0x3f8f2c, roughness: 0.95, map: paintedGround('#3f8f2c', ['#2d6e1f', '#4a9a34', '#26611b', '#57ab3e'], { cracks: 0 }) });
     for (const [w, d, x, z] of [
       [4600, 1500, CX, -760], [4600, 1500, CX, C.ARENA_H + 760],
       [1500, 960, -760, CZ], [1500, 960, C.ARENA_W + 760, CZ],
@@ -1411,8 +1503,19 @@ function buildArena(kind) {
     cactus(group, 120, 90, 1.1); cactus(group, C.ARENA_W - 90, C.ARENA_H - 70, 0.9);
     // the big dumb billboard
     billboard(group, CX - 350, -640, 'R.V. SLOP YET? →', '#c23a2e');
+    // rubble + dry brush so the pit floor reads as desert, not a void
+    for (let i = 0; i < 16; i++) {
+      const a = (i / 16) * Math.PI * 2 + 0.7;
+      desertRock(group,
+        CX + Math.cos(a) * (920 + Math.random() * 260),
+        CZ + Math.sin(a) * (620 + Math.random() * 220),
+        0.5 + Math.random() * 1.4);
+    }
+    for (let i = 0; i < 10; i++) {
+      dryBush(group, 60 + Math.random() * (C.ARENA_W - 120), Math.random() < 0.5 ? 40 + Math.random() * 90 : C.ARENA_H - 40 - Math.random() * 90, 0.7 + Math.random() * 0.8);
+    }
     addDrifters(group, { count: 70, color: 0xffcf90, size: 5, opacity: 0.3, box: [0, 1600, 10, 300, 0, 900], vy: 6 });
-    floorBox(group, 1760, 1020, 0xdca55e, noiseTexture('#dca55e', '#c28f4a'));
+    floorBox(group, 1760, 1020, 0xdca55e, paintedGround('#dca55e', ['#c28f4a', '#e8b878', '#ab7a3c', '#d19a52'], { cracks: 14 }));
     arena.mudDiscs = [];
     // exit garage on the east wall
     const garage = new THREE.Mesh(
@@ -1455,7 +1558,7 @@ function buildArena(kind) {
     skyDome(group, '#12124a', '#2a2a6e', '#141438');
     setMood(0x1c1c52, 2000, 5200);
     addCave(group);
-    floorBox(group, 1760, 1020, 0x3d3468, noiseTexture('#3d3468', '#2a2250'));
+    floorBox(group, 1760, 1020, 0x3d3468, paintedGround('#3d3468', ['#2a2250', '#4a4080', '#332b5c'], { cracks: 8, speckle: 300 }));
     const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTexture(), color: 0xd8e0ff, transparent: true, opacity: 0.95, fog: false }));
     moonSprite.scale.set(260, 260, 1);
     moonSprite.position.set(CX + 900, 1100, CZ - 1600);
@@ -1940,9 +2043,13 @@ function makeBlobView(b) {
   mic.visible = false;
   group.add(mic);
 
+  const shadow = blobShadow(44);
+  shadow.position.y = 1.5;
+  group.add(shadow);
+
   scene.add(group);
   return {
-    group, yaw, char, aura, label, mic,
+    group, yaw, char, aura, label, mic, shadow,
     face: 0, phase: 0, spinY: 0,
     flailT: 0, emote: null,
     sp: { lL: mkSpring(), lR: mkSpring(), aL: mkSpring(), aR: mkSpring(), lean: mkSpring(), tip: mkSpring(), head: mkSpring() },
@@ -2082,6 +2189,7 @@ function updateBlobViews(dt) {
       const pulse = 44 + Math.sin(time * 10) * 5;
       v.mic.scale.set(pulse, pulse, 1);
     }
+    v.shadow.visible = mapMode !== 'mountain'; // no flat ground on a cliff face
 
     v.aura.visible = !!b.dashing;
     if (b.dashing) v.aura.material.opacity = 0.2 + Math.sin(time * 30) * 0.1;
