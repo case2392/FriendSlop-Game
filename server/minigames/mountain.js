@@ -33,6 +33,10 @@ export function makeMountain(cfg) {
       this.nextGlobId = 1;
       this.lives = cfg.lives ? cfg.lives(players.length) : null;
       this.tideY = cfg.tide ? 940 : null;
+      // altitude milestones: a very important sponsor slab falls for each
+      this.milestone = 0;
+      const climbSpan = 900 - SUMMIT_Y;
+      this.mileAlts = [0.3, 0.6, 0.85].map(f => Math.round(climbSpan * f));
       this.buildMountain();
       players.forEach((p, i) => {
         p.alive = true; p.score = 0; p.stun = 0; p.speedMult = 1;
@@ -167,6 +171,10 @@ export function makeMountain(cfg) {
 
         const alt = 900 - p.y;
         if (alt > p.bestAlt) { p.bestAlt = alt; p.score = Math.round(alt); }
+        while (this.milestone < this.mileAlts.length && alt >= this.mileAlts[this.milestone]) {
+          this.milestone++;
+          this.mileLeader = p.id;
+        }
         if (!p.summited && p.y < SUMMIT_Y) {
           p.summited = true;
           p.events.push('escape');
@@ -203,6 +211,9 @@ export function makeMountain(cfg) {
         climbs: this.climbs.map(c => [Math.round(c.x), c.w, Math.round(c.yTop), Math.round(c.yBot)]),
         globs: this.globs.map(g => [g.id, Math.round(g.x), Math.round(g.y)]),
         tide: this.tideY !== null ? Math.round(this.tideY) : null,
+        milestone: this.milestone,
+        mileLeader: this.mileLeader || null,
+        mileAlts: this.mileAlts,
         summitY: SUMMIT_Y,
         lives: this.lives,
         goal: `${this.summitOrder.length}/${this.players.filter(p => p.alive).length} at the summit`,

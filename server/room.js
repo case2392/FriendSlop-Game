@@ -118,7 +118,7 @@ export class Room {
       minigame: this.gameClass ? this.gameClass.id : null,
       players: this.list().map(p => ({
         id: p.id, name: p.name, color: p.color, isBot: p.isBot,
-        connected: p.connected, coins: p.coins,
+        connected: p.connected, coins: p.coins, axe: p.axeTier || 0,
       })),
       lastResults: this.lastResults,
     });
@@ -157,6 +157,7 @@ export class Room {
   // ---- expedition flow -----------------------------------------------------
 
   startExpedition() {
+    for (const p of this.players.values()) p.axeTier = 0;
     this.chamberIdx = 0;
     this.attempts = 0;
     this.totalPlays = 0;

@@ -3,6 +3,11 @@ import { stepMovement, collidePlayers, boundRect } from '../physics.js';
 
 // THE DIG SITE (a Keep Digging homage): dash the floor to crack it, fall
 // through, repeat. The squad wins when EVERYONE reaches the bottom floor.
+// Digging loots progressively rarer pickaxes (gray -> white -> green ->
+// blue -> purple) that dig faster — and you carry yours for the rest of
+// the expedition, where it does absolutely nothing.
+
+const AXE_AT = [3, 7, 12, 18]; // tiles broken -> tier 1..4
 
 export const COLS = 16;
 export const ROWS = 9;
@@ -45,7 +50,15 @@ export default class Dig {
     const grid = this.layers[p.layer];
     if (!grid || grid[ti] <= 0) return;
     grid[ti] = Math.max(0, grid[ti] - amt);
-    if (grid[ti] === 0) { p.score++; p.events.push('crack'); }
+    if (grid[ti] === 0) {
+      p.score++;
+      p.events.push('crack');
+      const tier = AXE_AT.filter(n => p.score >= n).length;
+      if (tier > (p.axeTier || 0)) {
+        p.axeTier = tier;
+        p.events.push('loot' + tier);
+      }
+    }
   }
 
   tick(dt) {
@@ -78,16 +91,18 @@ export default class Dig {
         }
         continue;
       }
-      // dash-digging cracks the tile hard
+      // dash-digging cracks the tile hard; big axes crack harder
+      const tier = p.axeTier || 0;
       if (p.dashTime > 0 && p.digCd === 0) {
-        this.damage(p, ti, 1);
-        p.digCd = 0.45;
+        this.damage(p, ti, tier >= 3 ? 2 : 1);
+        p.digCd = Math.max(0.28, 0.45 - tier * 0.04);
         p.events.push('dig');
       }
-      // loitering digs slowly
+      // loitering digs slowly (faster with a better axe)
       if (ti === p.standTile) {
         p.standT += dt;
-        if (p.standT >= STAND_DIG) { this.damage(p, ti, 1); p.standT = 0; }
+        const need = STAND_DIG * (1 - tier * 0.13);
+        if (p.standT >= need) { this.damage(p, ti, 1); p.standT = 0; }
       } else {
         p.standTile = ti;
         p.standT = 0;
@@ -101,8 +116,11 @@ export default class Dig {
 
     const active = this.players.filter(p => p.alive);
     if (active.length && active.every(p => p.done)) {
-      this.teamWin = true;
-      return this.rankings();
+      // FRIENDSLOP_PHOTO holds the chamber open so screenshots can pose
+      if (!process.env.FRIENDSLOP_PHOTO || this.t >= 60) {
+        this.teamWin = true;
+        return this.rankings();
+      }
     }
     if (this.t >= MAX_TIME) return this.rankings();
     return null;

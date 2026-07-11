@@ -7,6 +7,13 @@ import { sfx } from './sfx.js';
 
 export const blobs = new Map(); // id -> logical state {x,y,tx,ty,alive,...}
 
+// Canvas colors are sRGB — every texture must say so or it renders washed out.
+function canvasTex(cv) {
+  const t = new THREE.CanvasTexture(cv);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+
 const BG = 0x14101f;
 const CX = C.ARENA_W / 2, CZ = C.ARENA_H / 2;
 
@@ -98,6 +105,41 @@ function charMats(color, blocky = false) {
   }
   return charMatCache.get(key);
 }
+const AXE_COLORS = ['#9d9d9d', '#f8f8f8', '#1eff00', '#0070dd', '#a335ee'];
+const AXE_NAMES = ['Worn', 'Common', 'Uncommon', 'Rare', 'Epic'];
+const WOOD_MAT = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.85 });
+function buildAxe(tier) {
+  const g = new THREE.Group();
+  const handle = new THREE.Mesh(new THREE.CylinderGeometry(2.6, 3.4, 42, 7), WOOD_MAT);
+  g.add(handle);
+  const headMat = new THREE.MeshStandardMaterial({
+    color: AXE_COLORS[tier], roughness: 0.35, metalness: 0.6,
+    emissive: tier >= 2 ? AXE_COLORS[tier] : '#000000',
+    emissiveIntensity: tier >= 2 ? 0.4 : 0,
+  });
+  const head = new THREE.Mesh(new THREE.BoxGeometry(20, 9, 6), headMat);
+  head.position.set(6, 18, 0);
+  const spike = new THREE.Mesh(new THREE.ConeGeometry(4.5, 12, 6), headMat);
+  spike.rotation.z = Math.PI / 2 + 0.5;
+  spike.position.set(18, 16, 0);
+  g.add(head, spike);
+  if (tier >= 4) { // epic gets the glow
+    const glow = new THREE.PointLight(0xa335ee, 1600, 160);
+    glow.position.set(6, 18, 0);
+    g.add(glow);
+  }
+  return g;
+}
+function attachAxe(v, tier) {
+  if (v.axeMesh) { v.char.armR.remove(v.axeMesh); v.axeMesh = null; }
+  v.axeShown = tier;
+  if (tier < 0) return;
+  v.axeMesh = buildAxe(tier);
+  v.axeMesh.position.set(6, -26, 2);
+  v.axeMesh.rotation.z = -0.5;
+  v.char.armR.add(v.axeMesh);
+}
+
 const HAT_DARK = new THREE.MeshStandardMaterial({ color: 0x14101f, roughness: 0.6 });
 const HAT_RED = new THREE.MeshStandardMaterial({ color: 0xd8333f, roughness: 0.6 });
 const HAT_GOLD = new THREE.MeshStandardMaterial({ color: 0xffd84d, roughness: 0.4, metalness: 0.4 });
@@ -205,7 +247,7 @@ function makeTextSprite(text, { px = 44, color = '#fff', w = 512, stroke = true 
     g.fillStyle = col;
     g.fillText(t, w / 2, 64);
     if (sprite.material.map) sprite.material.map.dispose();
-    sprite.material.map = new THREE.CanvasTexture(cv);
+    sprite.material.map = canvasTex(cv);
     sprite.material.needsUpdate = true;
   };
   draw(text, color);
@@ -267,7 +309,7 @@ function cardTexture(code) {
     g.textAlign = 'center';
     g.fillText(suit, 88, 190);
   }
-  const tex = new THREE.CanvasTexture(cv);
+  const tex = canvasTex(cv);
   cardTexCache.set(code, tex);
   return tex;
 }
@@ -379,7 +421,7 @@ function carpetTexture() {
       g.beginPath(); g.arc((x + 64) % 512, (y + 64) % 512, 52, 0.3, 2.4); g.stroke();
     }
   }
-  const tex = new THREE.CanvasTexture(cv);
+  const tex = canvasTex(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(5, 3);
   return tex;
@@ -403,9 +445,106 @@ function wallpaperTexture() {
       g.beginPath(); g.arc(x, y, 7, 0, Math.PI * 2); g.fill();
     }
   }
-  const tex = new THREE.CanvasTexture(cv);
+  const tex = canvasTex(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   tex.repeat.set(8, 3);
+  return tex;
+}
+
+// The whole dig field painted as ONE continuous ground (tiles carve it up
+// via planar UVs, so there is no checkerboard — just terrain that breaks).
+function goldshireField() {
+  const cv = document.createElement('canvas');
+  cv.width = 1024; cv.height = 576;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#3f8f2c';
+  g.fillRect(0, 0, 1024, 576);
+  // painterly grass mottling
+  const tones = ['#357a24', '#2d6e1f', '#4a9a34', '#26611b', '#38852a'];
+  for (let i = 0; i < 1100; i++) {
+    g.fillStyle = tones[i % tones.length];
+    g.globalAlpha = 0.16 + Math.random() * 0.22;
+    g.beginPath();
+    g.ellipse(Math.random() * 1024, Math.random() * 576, 8 + Math.random() * 26, 5 + Math.random() * 14, Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 1;
+  // the winding village road (heads up toward the inn)
+  const road = (jx, w, col, alpha) => {
+    g.strokeStyle = col;
+    g.globalAlpha = alpha;
+    g.lineWidth = w;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(-20 + jx, 400 + jx);
+    g.bezierCurveTo(300 + jx, 330, 420 - jx, 240, 512 + jx, 60);
+    g.stroke();
+    g.beginPath();
+    g.moveTo(512 + jx, 60);
+    g.bezierCurveTo(600, 220 + jx, 820 - jx, 300, 1050, 360 + jx);
+    g.stroke();
+  };
+  road(0, 74, '#8a6b42', 1);
+  road(3, 60, '#a08050', 1);
+  road(-2, 40, '#b09461', 0.9);
+  for (let i = 0; i < 260; i++) { // dirt speckle on the road band
+    g.fillStyle = Math.random() < 0.5 ? '#8a6b42' : '#c0a470';
+    g.globalAlpha = 0.35;
+    const t = Math.random();
+    const rx = t < 0.5 ? (-20 + t * 2 * 532) : (512 + (t - 0.5) * 2 * 538);
+    const ry = t < 0.5 ? 400 - t * 2 * 320 + (Math.random() - 0.5) * 46 : 60 + (t - 0.5) * 2 * 300 + (Math.random() - 0.5) * 46;
+    g.fillRect(rx, ry, 3, 2);
+  }
+  g.globalAlpha = 1;
+  // flowers
+  const petals = ['#ffffff', '#ffe93b', '#ff6ec7', '#ff5252'];
+  for (let i = 0; i < 130; i++) {
+    g.fillStyle = petals[i % petals.length];
+    const fx = Math.random() * 1024, fy = Math.random() * 576;
+    g.fillRect(fx, fy, 3, 3);
+    g.fillStyle = '#ffd84d';
+    g.fillRect(fx + 1, fy + 1, 1, 1);
+  }
+  const tex = canvasTex(cv);
+  return tex;
+}
+
+function dirtField() {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 288;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#8a6a3a';
+  g.fillRect(0, 0, 512, 288);
+  for (let i = 0; i < 500; i++) {
+    g.fillStyle = ['#7a5a30', '#9a7a46', '#6b4f2a', '#a58852'][i % 4];
+    g.globalAlpha = 0.2 + Math.random() * 0.25;
+    g.beginPath();
+    g.ellipse(Math.random() * 512, Math.random() * 288, 4 + Math.random() * 16, 3 + Math.random() * 8, Math.random() * 3, 0, Math.PI * 2);
+    g.fill();
+  }
+  g.globalAlpha = 0.8;
+  for (let i = 0; i < 60; i++) { // pebbles + roots
+    g.fillStyle = '#5a452a';
+    g.fillRect(Math.random() * 512, Math.random() * 288, 4 + Math.random() * 6, 3);
+  }
+  g.globalAlpha = 1;
+  return canvasTex(cv);
+}
+
+function rockField() {
+  const cv = document.createElement('canvas');
+  cv.width = 64; cv.height = 36;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#8a8a92';
+  g.fillRect(0, 0, 64, 36);
+  const tones = ['#6b6b74', '#a3a3ac', '#55555e', '#7a7a84'];
+  for (let i = 0; i < 240; i++) {
+    g.fillStyle = tones[i % 4];
+    g.fillRect(Math.floor(Math.random() * 64), Math.floor(Math.random() * 36), 1 + Math.floor(Math.random() * 2), 1);
+  }
+  const tex = canvasTex(cv);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
   return tex;
 }
 
@@ -421,7 +560,7 @@ function pixelTexture(base, accents, repeat = 6) {
     g.globalAlpha = 0.25 + Math.random() * 0.4;
     g.fillRect(Math.floor(Math.random() * 16), Math.floor(Math.random() * 16), 1 + Math.floor(Math.random() * 2), 1);
   }
-  const tex = new THREE.CanvasTexture(cv);
+  const tex = canvasTex(cv);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
@@ -442,7 +581,7 @@ function noiseTexture(base, blotch, n = 46, size = 512) {
     g.arc(Math.random() * size, Math.random() * size, 12 + Math.random() * 46, 0, Math.PI * 2);
     g.fill();
   }
-  const tex = new THREE.CanvasTexture(cv);
+  const tex = canvasTex(cv);
   tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
   return tex;
 }
@@ -474,7 +613,7 @@ function skyDome(group, top, horizon, low) {
   g.fillRect(0, 0, 4, 512);
   const dome = new THREE.Mesh(
     new THREE.SphereGeometry(3800, 20, 14),
-    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), side: THREE.BackSide, fog: false }),
+    new THREE.MeshBasicMaterial({ map: canvasTex(cv), side: THREE.BackSide, fog: false }),
   );
   dome.position.set(CX, 0, CZ);
   group.add(dome);
@@ -494,7 +633,7 @@ function cloudTexture() {
     g.fillStyle = grad;
     g.fillRect(0, 0, 256, 128);
   }
-  const t = new THREE.CanvasTexture(cv);
+  const t = canvasTex(cv);
   cloudTexCache.push(t);
   return t;
 }
@@ -549,7 +688,7 @@ function flameTexture() {
   grad.addColorStop(1, 'rgba(255,80,20,0)');
   g.fillStyle = grad;
   g.fillRect(0, 0, 64, 64);
-  const t = new THREE.CanvasTexture(cv);
+  const t = canvasTex(cv);
   flameTexCache.push(t);
   return t;
 }
@@ -624,9 +763,9 @@ function tree(group, x, z, s = 1) {
     new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.9 }));
   trunk.position.set(x, 35 * s, z);
   const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: 0.9, flatShading: true });
-  const lo = new THREE.Mesh(new THREE.IcosahedronGeometry(48 * s, 0), leafMat);
+  const lo = new THREE.Mesh(new THREE.IcosahedronGeometry(48 * s, 1), leafMat);
   lo.position.set(x, 95 * s, z);
-  const hi = new THREE.Mesh(new THREE.IcosahedronGeometry(32 * s, 0), leafMat);
+  const hi = new THREE.Mesh(new THREE.IcosahedronGeometry(32 * s, 1), leafMat);
   hi.position.set(x + 10 * s, 135 * s, z - 6 * s);
   lo.castShadow = hi.castShadow = trunk.castShadow = true;
   group.add(trunk, lo, hi);
@@ -979,7 +1118,7 @@ function buildArena(kind) {
     skyDome(group, '#4a8ac8', '#a8d0e8', '#d8e8c8');
     addClouds(group, 6, 750);
     // grassy village ground framing the dig site (a hole needs a rim)
-    const grass = new THREE.MeshStandardMaterial({ color: 0x4f9d3c, roughness: 0.95 });
+    const grass = new THREE.MeshStandardMaterial({ color: 0x3f8f2c, roughness: 0.95, map: noiseTexture('#3f8f2c', '#2d6e1f', 60, 256) });
     for (const [w, d, x, z] of [
       [4600, 1500, CX, -760], [4600, 1500, CX, C.ARENA_H + 760],
       [1500, 960, -760, CZ], [1500, 960, C.ARENA_W + 760, CZ],
@@ -1220,21 +1359,31 @@ function updateDig(dt, ex, S) {
   if (!ex?.layers) return;
   const { cols, rows, tile } = ex;
   if (!arena.digLayers.length) {
-    // era gradient: painterly grass -> coarse dirt -> full 2004 pixel rock
-    const layerMats = [
-      () => new THREE.MeshStandardMaterial({ color: 0x4f9d3c, roughness: 0.9, map: noiseTexture('#4f9d3c', '#3c7a2e', 30, 128) }),
-      () => new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 1, flatShading: true, map: noiseTexture('#8a6a3a', '#6b4f2a', 20, 64) }),
-      () => new THREE.MeshStandardMaterial({ color: 0x8a8a92, roughness: 1, flatShading: true, map: pixelTexture('#8a8a92', ['#6b6b74', '#a3a3ac', '#55555e'], 1) }),
+    // one continuous painted ground per floor — tiles carve it, no checkerboard
+    const plates = [
+      { tex: goldshireField(), tint: 0x9a7a52 },
+      { tex: dirtField(), tint: 0x6b4f2e },
+      { tex: rockField(), tint: 0x666670 },
     ];
     for (let l = 0; l < ex.layers.length; l++) {
+      const p = plates[Math.min(l, plates.length - 1)];
+      const baseMat = new THREE.MeshStandardMaterial({ map: p.tex, roughness: 0.92 });
+      const crackMat = new THREE.MeshStandardMaterial({ map: p.tex, roughness: 1, color: p.tint });
       const meshes = [];
-      const geo = l === 0
-        ? new THREE.BoxGeometry(tile - 6, 26, tile - 6, 2, 1, 2)
-        : new THREE.BoxGeometry(tile - 6, 26, tile - 6);
-      if (l === 0) roughen(geo, 5);
       for (let i = 0; i < cols * rows; i++) {
-        const m = new THREE.Mesh(geo, layerMats[Math.min(l, layerMats.length - 1)]());
-        m.position.set((i % cols) * tile + tile / 2, -13 - l * 130, Math.floor(i / cols) * tile + tile / 2);
+        const tx = (i % cols) * tile, tz = Math.floor(i / cols) * tile;
+        const geo = new THREE.BoxGeometry(tile, 26, tile);
+        // planar-project UVs so the field texture flows across every tile
+        const pos = geo.attributes.position, uv = geo.attributes.uv;
+        for (let vI = 0; vI < uv.count; vI++) {
+          uv.setXY(vI,
+            (tx + tile / 2 + pos.getX(vI)) / (cols * tile),
+            1 - (tz + tile / 2 + pos.getZ(vI)) / (rows * tile));
+        }
+        const m = new THREE.Mesh(geo, baseMat);
+        m.userData.baseMat = baseMat;
+        m.userData.crackMat = crackMat;
+        m.position.set(tx + tile / 2, -13 - l * 130, tz + tile / 2);
         m.receiveShadow = true;
         arena.group.add(m);
         meshes.push(m);
@@ -1262,8 +1411,9 @@ function updateDig(dt, ex, S) {
         continue;
       }
       layer.states[i] = st;
-      if (st === '1') m.material.color.set(0xa88a4a);
+      if (st === '1') m.material = m.userData.crackMat;
       else if (st === '2') { m.userData.falling = true; m.userData.vy = -50; }
+      else m.material = m.userData.baseMat;
       m.visible = !hidden;
     }
   }
@@ -1334,8 +1484,64 @@ function updateCham(dt, ex, S) {
   }
 }
 
+const SLAB_DEFS = [
+  { big: '0FFBRAND', small: 'r.i.p. — no longer a company', fg: '#ffffff', bg: '#101014' },
+  { big: '0TK', small: 'ONE TRUE SLOP', fg: '#14100a', bg: '#d8c9a0' },
+  { big: 'F4ZE', small: '#SLOPPEDUP', fg: '#ff3838', bg: '#0b0b0d' },
+];
+function slabTexture(def) {
+  const cv = document.createElement('canvas');
+  cv.width = 512; cv.height = 256;
+  const g = cv.getContext('2d');
+  g.fillStyle = def.bg;
+  g.fillRect(0, 0, 512, 256);
+  g.strokeStyle = def.fg;
+  g.lineWidth = 10;
+  g.strokeRect(14, 14, 484, 228);
+  g.fillStyle = def.fg;
+  g.textAlign = 'center';
+  g.font = 'bold 96px Trebuchet MS';
+  g.fillText(def.big, 256, 128);
+  g.font = 'bold 30px Trebuchet MS';
+  g.fillText(def.small, 256, 196);
+  return canvasTex(cv);
+}
+function dropSlab(idx, leaderId) {
+  const def = SLAB_DEFS[idx % SLAB_DEFS.length];
+  const lead = views.get(leaderId) || [...views.values()][0];
+  if (!lead) return;
+  const mat = new THREE.MeshStandardMaterial({ map: slabTexture(def), roughness: 0.6 });
+  const slab = new THREE.Mesh(new THREE.BoxGeometry(300, 150, 34), mat);
+  const lp = lead.group.position;
+  const groundY = lp.y;
+  slab.position.set(Math.max(220, Math.min(1380, lp.x + 150)), lp.y + 950, lp.z - 30);
+  slab.rotation.y = -0.25;
+  slab.castShadow = true;
+  arena.group.add(slab);
+  let vy = 0, landed = false;
+  arena.fx.push(dt2 => {
+    if (landed) return;
+    vy -= 2400 * dt2;
+    slab.position.y += vy * dt2;
+    slab.rotation.x = Math.sin(time * 3) * 0.05;
+    if (slab.position.y <= groundY + 75) {
+      slab.position.y = groundY + 75;
+      landed = true;
+      slab.rotation.z = 0.06;
+      shakeAmt = Math.max(shakeAmt, 26);
+      sfx.boom();
+      burst3(slab.position.clone().setY(groundY + 20), '#c9b9a0', 30, { speed: 420, up: 260, life: 0.9, size: 1.4 });
+      addFloater(slab.position.clone().setY(groundY), 'A VERY IMPORTANT SPONSOR', '#ffd84d', 36);
+    }
+  });
+}
+
 function updateMountain(dt, ex) {
   if (!ex?.ledges) return;
+  if ((ex.milestone || 0) > (arena.mileShown || 0)) {
+    for (let m = (arena.mileShown || 0); m < ex.milestone; m++) dropSlab(m, ex.mileLeader);
+    arena.mileShown = ex.milestone;
+  }
   if (!arena.ledgeMeshes.length) {
     const chained = arena.kind === 'chained';
     const rockMat = new THREE.MeshStandardMaterial({
@@ -1521,9 +1727,13 @@ function updateBlobViews(dt) {
       v.yaw.remove(v.char.root);
       v.char = buildCharacter(b.color, { hatIndex: b.id % 5, blocky: wantBlocky });
       v.yaw.add(v.char.root);
+      v.axeMesh = null;
+      v.axeShown = -2;
       burst3(toWorld(b.rx, b.rz, liftFor(id) + 40), '#e8dfc8', 16, { speed: 200, up: 180, life: 0.6 });
       if (id === selfIdCache) sfx.tater();
     }
+    const wantAxe = (arena?.kind === 'dig' || (b.axe || 0) > 0) ? (b.axe || 0) : -1;
+    if (v.axeShown !== wantAxe) attachAxe(v, wantAxe);
 
     const k = 1 - Math.pow(0.00002, dt);
     const jump = Math.hypot(b.tx - b.x, b.ty - b.y);
@@ -1783,7 +1993,7 @@ export function applySnapshot(snap, meta, selfId) {
     }
     b.tx = x; b.ty = y;
     b.score = score; b.dashCd = dashCd; b.dashing = !!dashing;
-    if (info) { b.money = info.coins; b.name = info.name; }
+    if (info) { b.money = info.coins; b.name = info.name; b.axe = info.axe || 0; }
 
     if (b.wasAlive && !alive) {
       spawnCorpse(b);
@@ -1804,6 +2014,13 @@ export function applySnapshot(snap, meta, selfId) {
       else if (ev === 'catch') { burst3(w(), '#ffd84d', 26, { speed: 380, up: 460, life: 0.9 }); sfx.coin(); addFloater(w(), 'GOT IT!', '#ffd84d', 46); }
       else if (ev === 'smash') { burst3(w(), '#8a8298', 20, { speed: 300, life: 0.7 }); sfx.splat(); addFloater(w(), '-1 ❤️', '#ff5252', 40); flail(0.8); }
       else if (ev === 'escape') { burst3(w(), '#7CFC00', 24, { speed: 300, up: 500, life: 1 }); sfx.go(); addFloater(w(), 'SAFE!', '#7CFC00', 46); }
+      else if (ev.startsWith('loot')) {
+        const t = Number(ev.slice(4)) || 0;
+        addFloater(w(), `[${AXE_NAMES[t]} Slopaxe]`, AXE_COLORS[t], 46);
+        burst3(w(), AXE_COLORS[t], 18, { speed: 260, up: 360, life: 0.8 });
+        sfx.coin();
+        if (id === selfIdCache) sfx.win();
+      }
     }
   }
   for (const id of blobs.keys()) if (!seen.has(id)) blobs.delete(id);
