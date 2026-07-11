@@ -1,0 +1,21 @@
+{
+  "name": "friendslop",
+  "version": "0.1.0",
+  "description": "FRIENDSLOP — a chaotic multiplayer party game for you and the boys. Bet on your friends, betray your friends, become the slop.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js --port 3000",
+    "test": "node test/logic.mjs && node test/smoke-browser.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
