@@ -3,7 +3,7 @@ import { stepMovement, collidePlayers, boundRect, applyChain, spawnInCircle } fr
 
 const FUSE = C.FAST ? 3 : 13;
 const DUNKS_NEED = C.FAST ? 1 : 4;
-const LIVES = 3;
+const livesFor = n => 2 + Math.floor(n / 3);
 const MAX_TIME = C.FAST ? 8 : 100;
 const HOLE_R = C.FAST ? 2000 : 85;
 const NEXT_TATER_DELAY = 2;
@@ -22,7 +22,7 @@ export default class Tater {
     this.rng = rng;
     this.t = 0;
     this.teamWin = false;
-    this.lives = LIVES;
+    this.lives = livesFor(players.length);
     this.dunks = 0;
     this.taterId = null;
     this.fuse = 0;

@@ -2,16 +2,28 @@ import * as C from '../../shared/constants.js';
 import { stepMovement, collidePlayers, boundRect, applyChain, spawnInCircle } from '../physics.js';
 import { makeGremlin, driveGremlin } from '../gremlins.js';
 
-const PLATES = [
-  { x: 380, y: 260 },
-  { x: 1220, y: 260 },
-  { x: 800, y: 700 },
-];
+// Plate layout scales with squad size: the chain (LINK_LEN per hop) must be
+// able to span every pair of covered plates, so small squads get a tight
+// triangle and big squads a wide one. 2-3 blobs get two plates only.
+function makePlates(n) {
+  if (n <= 3) {
+    const d = 120 + n * 50;
+    return [
+      { x: C.ARENA_W / 2 - d / 2, y: 480 },
+      { x: C.ARENA_W / 2 + d / 2, y: 480 },
+    ];
+  }
+  const R = 100 + n * 16;
+  return [-Math.PI / 2, Math.PI / 6, (Math.PI * 5) / 6].map(a => ({
+    x: C.ARENA_W / 2 + Math.cos(a) * R,
+    y: 450 + Math.sin(a) * R,
+  }));
+}
 const PLATE_R = C.FAST ? 2000 : 100;
-const HOLD_NEED = C.FAST ? 0.4 : 10;   // cumulative seconds with all plates covered
+const HOLD_NEED = C.FAST ? 0.4 : 8;    // cumulative seconds with all plates covered
 const MAX_TIME = C.FAST ? 6 : 75;
 const GREMLIN_EVERY = 5;
-const GREMLIN_CAP = C.FAST ? 0 : 3;
+const GREMLIN_CAP = C.FAST ? 0 : 2;
 
 // CO-OP: stretch the chain across all three pressure plates at once to grind
 // the gate open, while gremlins try to shove you off. No lives — a time race.
@@ -21,6 +33,7 @@ export default class Gates {
 
   constructor(players) {
     this.players = players;
+    this.plates = makePlates(players.length);
     this.t = 0;
     this.teamWin = false;
     this.progress = 0;
@@ -63,11 +76,11 @@ export default class Gates {
     });
     applyChain(this.players.filter(p => p.alive), C.LINK_LEN);
 
-    const covered = PLATES.map(pl =>
-      this.players.some(p => p.alive && p.stun <= 0 && Math.hypot(p.x - pl.x, p.y - pl.y) < PLATE_R));
+    const covered = this.plates.map(pl =>
+      this.players.some(p => p.alive && Math.hypot(p.x - pl.x, p.y - pl.y) < PLATE_R));
     for (const p of this.players) {
-      if (!p.alive || p.stun > 0) continue;
-      if (PLATES.some(pl => Math.hypot(p.x - pl.x, p.y - pl.y) < PLATE_R)) p.score += dt; // MVP: plate time
+      if (!p.alive) continue;
+      if (this.plates.some(pl => Math.hypot(p.x - pl.x, p.y - pl.y) < PLATE_R)) p.score += dt; // MVP: plate time
     }
     if (covered.every(Boolean)) this.progress += dt;
 
@@ -84,10 +97,10 @@ export default class Gates {
   }
 
   extras() {
-    const covered = PLATES.map(pl =>
-      this.players.some(p => p.alive && p.stun <= 0 && Math.hypot(p.x - pl.x, p.y - pl.y) < PLATE_R));
+    const covered = this.plates.map(pl =>
+      this.players.some(p => p.alive && Math.hypot(p.x - pl.x, p.y - pl.y) < PLATE_R));
     return {
-      plates: PLATES.map((pl, i) => [pl.x, pl.y, Math.min(PLATE_R, 100), covered[i] ? 1 : 0]),
+      plates: this.plates.map((pl, i) => [Math.round(pl.x), Math.round(pl.y), Math.min(PLATE_R, 100), covered[i] ? 1 : 0]),
       prog: Math.round(this.progress * 10) / 10,
       need: HOLD_NEED,
       gremlins: this.gremlins.filter(g => g.alive).map(g => [g.id, Math.round(g.x), Math.round(g.y), g.dashTime > 0 ? 1 : 0]),

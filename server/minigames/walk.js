@@ -10,7 +10,7 @@ export const EXIT_X = C.FAST ? 40 : OFF_X + COLS * TILE; // safe ledge beyond 14
 const CRACK_AFTER = 0.5;
 const BREAK_AFTER = 1.0;
 const MAX_TIME = C.FAST ? 6 : 90;
-const LIVES = 4;
+const livesFor = n => 2 + Math.floor(n * 0.7);
 const RESPAWN_T = 2.2;
 
 // CO-OP: cross the cavern. Every tile you touch crumbles behind the squad.
@@ -23,7 +23,7 @@ export default class Walk {
     this.players = players;
     this.t = 0;
     this.teamWin = false;
-    this.lives = LIVES;
+    this.lives = livesFor(players.length);
     this.exitOrder = [];
     this.tiles = new Array(COLS * ROWS).fill(0); // 0 solid, 1 cracked, 2 gone
     this.timers = new Array(COLS * ROWS).fill(-1);

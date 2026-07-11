@@ -5,7 +5,7 @@ const CALM = C.FAST ? 0.5 : 4.5;
 const WARN = C.FAST ? 0.5 : 3.2;
 const FLOOD = C.FAST ? 0.5 : 2.2;
 const WAVES_NEED = C.FAST ? 1 : 4;
-const LIVES = 4;
+const livesFor = n => 2 + Math.floor(n * 0.8);
 const MAX_TIME = C.FAST ? 8 : 90;
 // Islands per wave: fewer and smaller as the gut gets angrier.
 const WAVE_ISLANDS = [
@@ -26,7 +26,7 @@ export default class Gut {
     this.rng = rng;
     this.t = 0;
     this.teamWin = false;
-    this.lives = LIVES;
+    this.lives = livesFor(players.length);
     this.wave = 0;             // completed waves
     this.state = 'calm';
     this.stateT = CALM;
@@ -37,7 +37,7 @@ export default class Gut {
 
   pickIslands() {
     const cfg = WAVE_ISLANDS[Math.min(this.wave, WAVE_ISLANDS.length - 1)];
-    const r = C.FAST ? 1200 : cfg.r;
+    const r = C.FAST ? 1200 : cfg.r + this.players.length * 6; // squads need standing room
     const isles = [];
     let guard = 0;
     while (isles.length < cfg.n && guard++ < 200) {

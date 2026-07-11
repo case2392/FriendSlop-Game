@@ -1,67 +1,86 @@
 # FRIENDSLOP — Design Document
 
-> bet on your friends. betray your friends. become the slop.
+> chained to the boys. one way out of the pit. don't bust.
 
 ## The pitch
 
-2–8 friends are sentient blobs of slop. Every round, the game announces a chaotic
-physics minigame — then **everyone publicly bets Slop Coins on who's going to win it**
-before it starts. Winner takes prize money, correct bettors split the pot, and when
-nobody calls it, the pot rolls into a growing jackpot that hangs over the lobby like
-a guillotine. After 5 rounds, the richest blob wins.
+2–8 friends are blobs of slop chained into one squad, escaping a living dungeon.
+It's a **co-op expedition**: four original chambers with shared team lives, a
+walkable 3D hub between them, and one hand of blackjack against the Pit Boss
+gating every advance. True friendslop: one common goal, constant physical
+comedy, and just enough gambling to start arguments.
 
-The betting layer is the social engine: it means every round matters even when you're
-bad at the minigame (gamble well!), it makes alliances ("I'm ALL IN on you, do NOT
-choke") and betrayals ("you bet on HIM?") automatic, and public bets = automatic
-trash talk. The minigames are the slapstick; the wagers are the friendship-ruiner.
+## Design pillars
+
+1. **Embodied everything.** There are no menus mid-game. Start a chamber by
+   walking the squad through the gate. Vote in blackjack by standing on a floor
+   zone. If a mechanic can be a *place*, it's a place.
+2. **The chain is the game.** Every blob is tethered to the next (server-side
+   distance constraint, momentum-sharing). Every chamber is designed around
+   what a chain ruins: spreading out, fleeing, splitting up, leaving someone.
+3. **One common goal.** Nobody wins a chamber alone — team lives are shared,
+   and The Great Escape requires every single blob on the ledge. Money is
+   bragging rights, not victory.
+4. **A little gambling.** Exactly one hand of blackjack between chambers.
+   Win = advance, lose = run it back, push = re-deal. Majority of bodies
+   decides hit/stand; ties hit, because of course they do.
 
 ## The loop
 
 ```
-LOBBY → [ BET (18s) → MINIGAME (~60s) → RESULTS (9s) ] × 5 → PODIUM → LOBBY
+THE DEN (hub) ──walk into gate──▶ CHAMBER ──cleared──▶ PIT BOSS BLACKJACK
+   ▲                                 │ failed              │ win: next gate
+   └──────── run it back ◀───────────┴──── lose ◀──────────┘
 ```
 
-### Economy
-- Everyone starts a match with **100 🪙**.
-- Betting: pick a blob (yourself allowed), stake 10% / 25% / 50% / ALL IN.
-- Minigame placement prizes: **100 / 50 / 25** for 1st / 2nd / 3rd.
-- The pot (all stakes + any jackpot) is split among everyone who bet on the winner,
-  proportional to stake. Nobody called it → the whole pot **rolls into the jackpot**.
-- Broke? You get a **pity slop** top-up to 10 🪙 — you're never out of the game,
-  and an ALL-IN comeback from 10 coins is the best story of the night.
+- Expedition = chambers 1→4 in order. Clearing chamber 4 IS the escape
+  (no hand after it — the finale can't be undone by a card).
+- The pit collapses after 14 total chamber attempts — matches always end.
+- Celebration in the Den: confetti, floating standings, back to the lobby.
 
-### Controls
-WASD / arrows to squish around, **Space/Shift to dash** (1.6s cooldown). Dashing is
-the universal verb: it's the shove in Sumo, the tag in Tater, the robbery in Greed
-Pit, and the panic button everywhere. Keys 1–6 fire emotes.
+## The Den
 
-## Minigames
+A casino-carpeted room (Gamble With Friends energy): wallpaper, neon, ceiling
+panels, the Pit Boss (a blob in a top hat) behind a felt table with real dealt
+3D cards. North: the chamber gate — glowing walk-in zone; when 60%+ of the
+squad is in, a countdown starts (everyone in = fast countdown). South: the
+table with HIT 👊 and STAND ✋ floor zones. Voting is per-decision: each hit
+deals a card and opens a fresh vote window. The zones are close enough that a
+chained squad *can* split across them — and the tug-of-war when they disagree
+is the design.
 
-| | Rules | Win |
-|---|---|---|
-| 🥵 **SLOP SUMO** | Circular platform over lava shrinks for 60s. Outside the ring = splat. | Last blob standing (timeout: closest to center) |
-| 🥔 **HOT TATER** | One blob holds an exploding potato (14s fuse, shrinking each cycle). Touch someone to pass it. Holder moves 18% faster. | Last blob alive |
-| 🪙 **GREED PIT** | Coins rain for 45s (golden = 10). Dash into a friend: they drop 35% of their haul, scattered. | Most coins collected |
-| 🕳️ **THE FLOOR IS SLOP** | Every tile you touch cracks (0.45s) then crumbles (0.9s). Falling = splat. | Last blob alive (timeout: most tiles touched) |
+## Economy
 
-Adding a fifth minigame = one file in `server/minigames/` implementing
-`constructor(players)`, `tick(dt) → rankings | null`, `extras()`, plus a renderer
-branch in `client/js/render.js` and an entry in `shared/constants.js`. The round
-queue picks it up automatically.
+- Chamber cleared (first time): **+100 💰 each**, +15/unused team life each,
+  MVP +50. Re-clear after a lost hand: +25 each.
+- Beat the Boss: +25 each; dealt a natural 21: +75 each.
+- Failed chamber: MVP gets 25 for carrying.
+- Money is the podium ranking at the end. The real result is ESCAPED or NOT.
 
-## Design pillars
+## Chambers
 
-1. **Nobody sits out.** Dead blobs still won/lost their bets; results are 9 seconds
-   away; pity coins mean no one's mathematically eliminated.
-2. **Public information is content.** Bets are visible live during the betting phase
-   on purpose — the UI is a trash-talk generator.
-3. **One verb.** Everything is move + dash. Your grandma can play round 1;
-   round 5 she's slide-canceling into your sumo blindside.
-4. **The house never wins.** All coins flow between friends. The jackpot is the
-   only "bank," and it always pays back out.
+| | Rules | Shared lives | MVP metric |
+|---|---|---|---|
+| 🚪 **THE GATES OF SLOP** | Cover all pressure plates simultaneously for a cumulative 8s. Gremlins shove and stagger you (a staggered blob still holds a plate — only displacement matters). Plate count and spread scale with squad size so the chain can always physically reach. | none (time race, 75s) | plate time |
+| 🌊 **THE BELCHING GUT** | Wave cycle: calm 4.5s → warning 3.2s (islands telegraph) → acid flood 2.2s. Caught outside an island = burn, stun, −1 life. Survive 4 waves; islands shrink and dwindle. Island size scales with squad. | 2 + 0.8/blob | clean waves |
+| 🥔 **GALLSTONE PANIC** | A lit gallstone (13s fuse) spawns on someone; touching a friend passes it; holder is faster. Dunk it in the relocating drain. Explosion: knockback + stun + −1 life. Dunk 4 to clear. | 2 + blob/3 | dunks |
+| 🕳️ **THE GREAT ESCAPE** | Tiles crack 0.5s after touch, crumble 1s later. Fall = −1 life + respawn at start (and you drop out of the chain while you run back). Everyone alive on the exit ledge = escape. | 2 + 0.7/blob | first across, then tiles scouted |
+
+Adding a chamber = one file in `server/minigames/` implementing
+`constructor(players)`, `tick(dt) → rankings|null`, `extras()`, `teamWin`,
+optional `lives` — plus a renderer branch and an entry in `MINIGAME_INFO`.
+
+## Tech notes
+
+- Server-authoritative: 30Hz sim, 20Hz snapshots, movement as camera-relative
+  unit vectors. The chain is 3 iterations of distance constraints with
+  momentum blending — dashing yanks the whole squad.
+- Client is Three.js with zero assets: all geometry procedural, all textures
+  canvas-generated (carpet, wallpaper, cards), all SFX WebAudio-synthesized.
+- Bots are first-class: hub walking, chamber AI per game, blackjack instincts
+  (12% chaos agent), and they vote with their bodies like everyone else.
 
 ## Tone
 
-Self-aware slop. Comic Sans-adjacent fonts, wet sounds, blobs with googly eyes that
-look where they're going, goo stains that persist where your friends died. The game
-knows what it is: the store page should too.
+Self-aware slop with casino-den maximalism. Googly eyes look where you walk.
+The Pit Boss never speaks. The chain never comes off.

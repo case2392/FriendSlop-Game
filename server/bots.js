@@ -6,7 +6,7 @@ const BOT_NAMES = [
 ];
 
 export function botName(taken) {
-  const free = BOT_NAMES.filter(n => !taken.includes(n));
+  const free = BOT_NAMES.filter(n => !taken.includes(n + ' 🤖'));
   const pool = free.length ? free : BOT_NAMES;
   return pool[Math.floor(Math.random() * pool.length)] + ' 🤖';
 }
@@ -48,15 +48,23 @@ export function driveBot(bot, game, players, dt) {
     }
   } else if (id === 'gut') {
     if (game.islands.length) {
-      // Nearest island, with a dash of panic when the wave is imminent.
+      // The chain punishes solo thinking: commit to the SQUAD's island —
+      // the one closest to the pack's centroid.
+      const alive = players.filter(p => p.alive);
+      const cx2 = alive.reduce((s, p) => s + p.x, 0) / (alive.length || 1);
+      const cy2 = alive.reduce((s, p) => s + p.y, 0) / (alive.length || 1);
       let best = null, bd = Infinity;
       for (const i of game.islands) {
-        const d = Math.hypot(i.x - bot.x, i.y - bot.y);
+        const d = Math.hypot(i.x - cx2, i.y - cy2);
         if (d < bd) { bd = d; best = i; }
       }
       if (best) {
-        steerToward(bot, best.x, best.y);
-        if (game.state === 'warn' && game.stateT < 1 && bd > best.r && bot.dashCd === 0) bot.input.dash = true;
+        const jx = best.x + (Math.random() - 0.5) * best.r * 0.7;
+        const jy = best.y + (Math.random() - 0.5) * best.r * 0.7;
+        steerToward(bot, jx, jy);
+        if (game.state === 'warn' && game.stateT < 1.2 && Math.hypot(best.x - bot.x, best.y - bot.y) > best.r && bot.dashCd === 0) {
+          bot.input.dash = true;
+        }
       }
     } else {
       steerToward(bot, C.ARENA_W / 2 + (Math.random() - 0.5) * 300, C.ARENA_H / 2 + (Math.random() - 0.5) * 200);

@@ -165,7 +165,8 @@ export function initRender(cv) {
     if (document.pointerLockElement === canvas) camYaw += e.movementX * 0.0026;
   });
 
-  scene.add(new THREE.AmbientLight(0x9080b8, 1.1));
+  scene.add(new THREE.AmbientLight(0x9080b8, 1.35));
+  scene.add(new THREE.HemisphereLight(0x8878c0, 0x2a1f3a, 0.9));
   const sun = new THREE.DirectionalLight(0xfff2e0, 2.0);
   sun.position.set(500, 1500, 900);
   sun.castShadow = true;
@@ -287,6 +288,15 @@ function noiseTexture(base, blotch, n = 46, size = 512) {
 }
 
 // ---- arena builders ---------------------------------------------------------------------
+
+function addCave(group) {
+  const cave = new THREE.Mesh(
+    new THREE.CylinderGeometry(2600, 2600, 600, 24, 1, true),
+    new THREE.MeshStandardMaterial({ color: 0x171126, roughness: 1, side: THREE.BackSide }),
+  );
+  cave.position.set(CX, 180, CZ);
+  group.add(cave);
+}
 
 function buildArena(kind) {
   if (arena) clearGroup(arena.group);
@@ -490,27 +500,12 @@ function buildArena(kind) {
     arena.standRows = [];
     arena.confettiT = 0;
   } else if (kind === 'gates') {
-    const cave = new THREE.Mesh(
-      new THREE.CylinderGeometry(2600, 2600, 10, 24, 1, true),
-      new THREE.MeshStandardMaterial({ color: 0x0d0918, roughness: 1, side: THREE.BackSide }),
-    );
-    cave.scale.y = 60;
-    cave.position.set(CX, 240, CZ);
-    group.add(cave);
+    addCave(group);
     floorBox(1760, 1020, 0x322a52, noiseTexture('#322a52', '#221b3a'));
     arena.door = gateArch(CX, -60);
-    arena.plates = [];
-    for (let i = 0; i < 3; i++) {
-      const plate = new THREE.Mesh(
-        new THREE.CylinderGeometry(100, 108, 10, 32),
-        new THREE.MeshStandardMaterial({ color: 0x5a2338, emissive: 0xff3860, emissiveIntensity: 0.35, roughness: 0.4 }),
-      );
-      plate.position.y = 5;
-      plate.receiveShadow = true;
-      group.add(plate);
-      arena.plates.push(plate);
-    }
+    arena.plates = []; // created on demand — plate count scales with the squad
   } else if (kind === 'gut') {
+    addCave(group);
     arena.floor = floorBox(1760, 1020, 0x7a3352, noiseTexture('#7a3352', '#5a1f3c'));
     const acid = new THREE.Mesh(
       new THREE.BoxGeometry(1760, 26, 1020),
@@ -524,6 +519,7 @@ function buildArena(kind) {
     arena.acid = acid;
     arena.islands = [];
   } else if (kind === 'tater') {
+    addCave(group);
     floorBox(1660, 960, 0x2e2749, noiseTexture('#2e2749', '#1e1834'));
     const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a3d75, roughness: 0.7 });
     const mkWall = (w, d, x, z) => {
@@ -563,6 +559,7 @@ function buildArena(kind) {
     arena.fuse = makeTextSprite(' ', { px: 52, color: '#ffd84d' });
     group.add(arena.fuse);
   } else if (kind === 'walk') {
+    addCave(group);
     const startLedge = new THREE.Mesh(
       new THREE.BoxGeometry(170, 44, 1020),
       new THREE.MeshStandardMaterial({ color: 0x3a2f5c, roughness: 0.8 }),
@@ -714,6 +711,17 @@ function updateArena(dt, extra, S) {
 
   if (arena.kind === 'gates') {
     if (extra?.plates) {
+      while (arena.plates.length < extra.plates.length) {
+        const plate = new THREE.Mesh(
+          new THREE.CylinderGeometry(100, 108, 10, 32),
+          new THREE.MeshStandardMaterial({ color: 0x5a2338, emissive: 0xff3860, emissiveIntensity: 0.35, roughness: 0.4 }),
+        );
+        plate.position.y = 5;
+        plate.receiveShadow = true;
+        arena.group.add(plate);
+        arena.plates.push(plate);
+      }
+      arena.plates.forEach((plate, i) => { plate.visible = i < extra.plates.length; });
       extra.plates.forEach(([x, y, r, cov], i) => {
         const plate = arena.plates[i];
         if (!plate) return;

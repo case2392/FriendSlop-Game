@@ -28,6 +28,8 @@ Vampire Survivors launched like this.
    trailer, tags: *Multiplayer, Party Game, Casual, Funny, PvP*.
 3. In **Steamworks → App → Installation**, define a launch option per OS pointing at
    the packaged binary (see step 2).
+4. Store screenshots: real captures live in `docs/screenshots/` — the Den, all four
+   chambers, the blackjack table, and the celebration.
 
 ## 2. Package the desktop build
 
@@ -84,5 +86,6 @@ doesn't hook automatically.
 - [ ] Playtest with 8 real humans (the game supports it; the chaos scales)
 - [ ] Store page assets: 6+ screenshots, a 30s trailer of the sumo ring shrinking
 - [ ] Price point: friend-slop games live at $4.99 (or F2P + cosmetic DLC later)
-- [ ] Steam Deck: it's a browser canvas — it runs; verify controls (add gamepad
-      support: map left stick → WASD, A → dash; ~30 lines in `client/js/main.js`)
+- [ ] Steam Deck: it runs (WebGL canvas); add gamepad support — left stick →
+      movement vector, right stick → camera yaw, A → dash (~40 lines in
+      `client/js/main.js`, the input protocol already takes analog vectors)
