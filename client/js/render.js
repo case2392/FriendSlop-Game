@@ -56,20 +56,27 @@ function liftFor(id) {
 // ---- shared geometry / materials --------------------------------------------
 
 const GEO = {
-  // chunky toy proportions (Gamble With Friends / R.V. There Yet energy):
-  // fat egg body, big head, stubby little limbs, all smooth-shaded
-  torso: new THREE.SphereGeometry(23, 26, 20).scale(1, 1.18, 0.96),
-  leg: new THREE.CapsuleGeometry(8.5, 8, 6, 14),
-  arm: new THREE.CapsuleGeometry(7, 9, 6, 14),
-  head: new THREE.SphereGeometry(19.5, 26, 20).scale(1, 0.94, 1),
+  // chunky little HUMANS (R.V. There Yet clay-person energy): big head with a
+  // real face, shirt torso, sleeves ending in hands, pants ending in shoes
+  torso: new THREE.CapsuleGeometry(17, 22, 8, 18),
+  sleeve: new THREE.CapsuleGeometry(6.8, 6, 6, 12),
+  forearm: new THREE.CapsuleGeometry(5.6, 9, 6, 12),
+  hand: new THREE.SphereGeometry(6.2, 12, 10),
+  thigh: new THREE.CapsuleGeometry(7.5, 12, 6, 12),
+  shoe: new THREE.SphereGeometry(8.5, 12, 10).scale(1.35, 0.75, 1.05),
+  head: new THREE.SphereGeometry(16.5, 26, 20),
+  nose: new THREE.SphereGeometry(4.6, 12, 10).scale(1.25, 1, 1),
+  ear: new THREE.SphereGeometry(3.6, 10, 8),
+  brow: new THREE.BoxGeometry(2.4, 2.2, 6.5),
+  hair: new THREE.SphereGeometry(17.3, 22, 12, 0, Math.PI * 2, 0, Math.PI * 0.52),
   // the 2004 de-make set
   torsoB: new THREE.BoxGeometry(26, 46, 36),
   legB: new THREE.BoxGeometry(12, 27, 14),
   armB: new THREE.BoxGeometry(10, 27, 12),
   headB: new THREE.BoxGeometry(26, 24, 28),
   eyeB: new THREE.BoxGeometry(3, 6, 6),
-  eyeH: new THREE.SphereGeometry(6.5, 14, 12).scale(1, 1.25, 1),
-  pupilH: new THREE.SphereGeometry(3.2, 10, 8),
+  eyeH: new THREE.SphereGeometry(5.4, 14, 12).scale(1, 1.2, 1),
+  pupilH: new THREE.SphereGeometry(2.8, 10, 8),
   aura: new THREE.SphereGeometry(C.PLAYER_RADIUS + 12, 16, 12),
   link: new THREE.SphereGeometry(7, 8, 6),
   particle: new THREE.SphereGeometry(5, 6, 5),
@@ -94,17 +101,32 @@ function particleMat(color) {
 
 // ---- humanoid slop-people ------------------------------------------------------
 
+// Real skin tones + hair colors, keyed per player so the squad looks like a
+// crew of little dudes instead of a bag of gumballs.
+const SKINS = ['#f2c9a0', '#e8ab72', '#c98e55', '#9a6b42', '#f6d7b8', '#7a5236'];
+const HAIRS = ['#3a2a1e', '#191922', '#6b4a2e', '#8a8a92', '#b8862e', '#2e1c14'];
+const SHOE_MAT = new THREE.MeshStandardMaterial({ color: 0x2a2233, roughness: 0.6 });
+
 const charMatCache = new Map();
-function charMats(color, blocky = false) {
-  const key = color + (blocky ? '#B' : '');
+function charMats(color, skinIndex = 0, blocky = false) {
+  const key = `${color}#${skinIndex}${blocky ? 'B' : ''}`;
   if (!charMatCache.has(key)) {
     const base = new THREE.Color(color);
-    const opts = blocky ? { flatShading: true, roughness: 1 } : {};
-    charMatCache.set(key, {
-      suit: new THREE.MeshStandardMaterial({ color: base, roughness: 0.5, ...opts }),
-      skin: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#ffffff'), 0.35), roughness: 0.45, ...opts }),
-      limb: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#000000'), 0.25), roughness: 0.55, ...opts }),
-    });
+    if (blocky) {
+      const opts = { flatShading: true, roughness: 1 };
+      charMatCache.set(key, {
+        suit: new THREE.MeshStandardMaterial({ color: base, roughness: 0.5, ...opts }),
+        skin: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#ffffff'), 0.35), roughness: 0.45, ...opts }),
+        limb: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#000000'), 0.25), roughness: 0.55, ...opts }),
+      });
+    } else {
+      charMatCache.set(key, {
+        shirt: new THREE.MeshStandardMaterial({ color: base, roughness: 0.6 }),
+        pants: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#14101f'), 0.45), roughness: 0.65 }),
+        skin: new THREE.MeshStandardMaterial({ color: SKINS[skinIndex % SKINS.length], roughness: 0.55 }),
+        hair: new THREE.MeshStandardMaterial({ color: HAIRS[skinIndex % HAIRS.length], roughness: 0.75 }),
+      });
+    }
   }
   return charMatCache.get(key);
 }
@@ -174,60 +196,117 @@ function makeHat(i) {
   return hat;
 }
 
-// Root sits at ground level; feet reach y≈3. Local +x is forward.
+// Root sits at ground level; feet reach y≈0. Local +x is forward.
 // blocky=true builds the 2004 de-make: box limbs, flat shading, dead eyes.
-function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1, blocky = false } = {}) {
-  const m = charMats(color, blocky);
+function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1, blocky = false, skinIndex = 0 } = {}) {
+  const m = charMats(color, skinIndex, blocky);
   const root = new THREE.Group();
 
+  if (blocky) {
+    const legL = new THREE.Group();
+    const legR = new THREE.Group();
+    for (const [pivot, side] of [[legL, -1], [legR, 1]]) {
+      pivot.position.set(0, 28, side * 9);
+      const leg = new THREE.Mesh(GEO.legB, m.limb);
+      leg.position.y = -14;
+      leg.castShadow = true;
+      pivot.add(leg);
+      root.add(pivot);
+    }
+    const torso = new THREE.Mesh(GEO.torsoB, m.suit);
+    torso.position.y = 51;
+    torso.castShadow = true;
+    root.add(torso);
+    const armL = new THREE.Group();
+    const armR = new THREE.Group();
+    for (const [pivot, side] of [[armL, -1], [armR, 1]]) {
+      pivot.position.set(0, 64, side * 24);
+      const arm = new THREE.Mesh(GEO.armB, m.limb);
+      arm.position.y = -13;
+      arm.castShadow = true;
+      pivot.add(arm);
+      root.add(pivot);
+    }
+    const head = new THREE.Mesh(GEO.headB, m.skin);
+    head.position.y = 89;
+    head.castShadow = true;
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(GEO.eyeB, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
+      eye.position.set(13.5, 2, side * 7);
+      head.add(eye);
+    }
+    const hat = makeHat(hatIndex);
+    hat.position.y = 12;
+    head.add(hat);
+    root.add(head);
+    root.scale.setScalar(scale);
+    return { root, legL, legR, armL, armR, torso, head };
+  }
+
+  // ---- the little human ----
   const legL = new THREE.Group();
   const legR = new THREE.Group();
   for (const [pivot, side] of [[legL, -1], [legR, 1]]) {
-    pivot.position.set(0, blocky ? 28 : 22, side * (blocky ? 9 : 10));
-    const leg = new THREE.Mesh(blocky ? GEO.legB : GEO.leg, m.limb);
-    leg.position.y = blocky ? -14 : -11;
-    leg.castShadow = true;
-    pivot.add(leg);
+    pivot.position.set(0, 30, side * 9.5);
+    const thigh = new THREE.Mesh(GEO.thigh, m.pants);
+    thigh.position.y = -13;
+    thigh.castShadow = true;
+    const shoe = new THREE.Mesh(GEO.shoe, SHOE_MAT);
+    shoe.position.set(3.5, -26, 0);
+    shoe.castShadow = true;
+    pivot.add(thigh, shoe);
     root.add(pivot);
   }
 
-  const torso = new THREE.Mesh(blocky ? GEO.torsoB : GEO.torso, m.suit);
-  torso.position.y = blocky ? 51 : 46;
+  const torso = new THREE.Mesh(GEO.torso, m.shirt);
+  torso.position.y = 50;
+  torso.scale.set(1.14, 1, 1.06); // a respectable belly
   torso.castShadow = true;
   root.add(torso);
 
   const armL = new THREE.Group();
   const armR = new THREE.Group();
   for (const [pivot, side] of [[armL, -1], [armR, 1]]) {
-    pivot.position.set(0, blocky ? 64 : 58, side * (blocky ? 24 : 22));
-    const arm = new THREE.Mesh(blocky ? GEO.armB : GEO.arm, m.limb);
-    arm.position.y = blocky ? -13 : -11;
-    arm.castShadow = true;
-    pivot.add(arm);
+    pivot.position.set(0, 66, side * 20.5);
+    const sleeve = new THREE.Mesh(GEO.sleeve, m.shirt);
+    sleeve.position.y = -5;
+    sleeve.castShadow = true;
+    const forearm = new THREE.Mesh(GEO.forearm, m.skin);
+    forearm.position.y = -15;
+    forearm.castShadow = true;
+    const hand = new THREE.Mesh(GEO.hand, m.skin);
+    hand.position.y = -24;
+    hand.castShadow = true;
+    pivot.add(sleeve, forearm, hand);
     root.add(pivot);
   }
 
-  const head = new THREE.Mesh(blocky ? GEO.headB : GEO.head, m.skin);
-  head.position.y = blocky ? 89 : 88;
+  const head = new THREE.Mesh(GEO.head, m.skin);
+  head.position.y = 90;
   head.castShadow = true;
-  if (blocky) {
-    for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(GEO.eyeB, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
-      eye.position.set(13.5, 2, side * 7);
-      head.add(eye);
-    }
-  } else {
-    for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(GEO.eyeH, MAT.eyeWhite);
-      eye.position.set(15, 2.5, side * 8);
-      const pupil = new THREE.Mesh(GEO.pupilH, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
-      pupil.position.set(4.6, 0.4, 0);
-      eye.add(pupil);
-      head.add(eye);
-    }
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(GEO.eyeH, MAT.eyeWhite);
+    eye.position.set(13.8, 3.5, side * 6.8);
+    const pupil = new THREE.Mesh(GEO.pupilH, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
+    pupil.position.set(4, 0.3, 0);
+    eye.add(pupil);
+    head.add(eye);
+    const brow = new THREE.Mesh(GEO.brow, m.hair);
+    brow.position.set(14.6, 10, side * 6.8);
+    head.add(brow);
+    const ear = new THREE.Mesh(GEO.ear, m.skin);
+    ear.position.set(0, 0.5, side * 16);
+    head.add(ear);
   }
+  const nose = new THREE.Mesh(GEO.nose, m.skin);
+  nose.position.set(16.2, -1.5, 0);
+  head.add(nose);
+  const hair = new THREE.Mesh(GEO.hair, m.hair);
+  hair.position.set(-1.5, 2.5, 0);
+  hair.rotation.z = 0.3; // tip the mop back so the face stays clear
+  head.add(hair);
   const hat = makeHat(hatIndex);
-  hat.position.y = blocky ? 12 : 15;
+  hat.position.y = 14;
   head.add(hat);
   root.add(head);
 
@@ -1008,7 +1087,7 @@ function buildBjTable(group) {
   rim.position.set(C.HUB.TABLE.x, 46, C.HUB.TABLE.y);
   group.add(rim);
 
-  const bossChar = buildCharacter('#241d35', { hatIndex: 1, eyeColor: 0xff3030, scale: 1.45 });
+  const bossChar = buildCharacter('#241d35', { hatIndex: 1, eyeColor: 0xff3030, scale: 1.45, skinIndex: 4 });
   const boss = bossChar.root;
   const bowtie = new THREE.Mesh(new THREE.BoxGeometry(4, 6, 14), HAT_RED);
   bowtie.position.set(21, 62, 0);
@@ -1523,7 +1602,7 @@ function updateCham(dt, ex, S) {
     let st = arena.statues.get(id);
     if (!st) {
       const info = S.meta?.players.find(p => p.id === mimic);
-      const char = buildCharacter(info?.color || '#888888', { hatIndex: mimic % 5 });
+      const char = buildCharacter(info?.color || '#888888', { hatIndex: mimic % 5, skinIndex: mimic % 6 });
       const base = new THREE.Mesh(new THREE.CylinderGeometry(44, 50, 10, 20), MAT.statueBase);
       base.position.set(x, 5, y);
       char.root.position.set(x, 10, y);
@@ -1746,7 +1825,7 @@ function makeBlobView(b) {
   const yaw = new THREE.Group();
   group.add(yaw);
 
-  const char = buildCharacter(b.color, { hatIndex: b.id % 5 });
+  const char = buildCharacter(b.color, { hatIndex: b.id % 5, skinIndex: b.id % 6 });
   yaw.add(char.root);
 
   const aura = new THREE.Mesh(GEO.aura, new THREE.MeshBasicMaterial({
@@ -1782,7 +1861,7 @@ export function emoteBody(id, e) {
 }
 
 function spawnCorpse(b) {
-  const char = buildCharacter(b.color, { hatIndex: b.id % 5 });
+  const char = buildCharacter(b.color, { hatIndex: b.id % 5, skinIndex: b.id % 6 });
   const group = char.root;
   const w = toWorld(b.rx ?? b.x, b.rz ?? b.y, liftFor(b.id) + 10);
   group.position.copy(w);
@@ -1804,7 +1883,7 @@ function updateBlobViews(dt) {
     if (v.blocky !== wantBlocky) {
       v.blocky = wantBlocky;
       v.yaw.remove(v.char.root);
-      v.char = buildCharacter(b.color, { hatIndex: b.id % 5, blocky: wantBlocky });
+      v.char = buildCharacter(b.color, { hatIndex: b.id % 5, blocky: wantBlocky, skinIndex: b.id % 6 });
       v.yaw.add(v.char.root);
       v.axeMesh = null;
       v.axeShown = -2;
