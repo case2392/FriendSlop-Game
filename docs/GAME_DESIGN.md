@@ -4,7 +4,7 @@
 
 ## The pitch
 
-2–8 friends are blobs of slop chained into one squad, escaping a living dungeon.
+2–8 friends are chunky humanoid slop-people in dumb hats, chained into one squad, escaping a living dungeon.
 It's a **co-op expedition**: four original chambers with shared team lives, a
 walkable 3D hub between them, and one hand of blackjack against the Pit Boss
 gating every advance. True friendslop: one common goal, constant physical
@@ -82,5 +82,5 @@ optional `lives` — plus a renderer branch and an entry in `MINIGAME_INFO`.
 
 ## Tone
 
-Self-aware slop with casino-den maximalism. Googly eyes look where you walk.
+Self-aware slop with casino-den maximalism. Little humanoids with swinging arms, per-player hats, and eyes that look where they walk.
 The Pit Boss never speaks. The chain never comes off.

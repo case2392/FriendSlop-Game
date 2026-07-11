@@ -2,9 +2,9 @@
 
 > chained to the boys. one way out of the pit. don't bust.
 
-A 2–8 player **3D co-op party game**. You and the boys are blobs of slop,
-**physically chained together**, trying to escape a living dungeon called the
-Slop Pit. Between chambers you hang out in **The Den** — a walkable casino-carpet
+A 2–8 player **3D co-op party game**. You and the boys are little slop-people
+(chunky humanoids in dumb hats), **physically chained together**, trying to
+escape a living dungeon called the Slop Pit. Between chambers you hang out in **The Den** — a walkable casino-carpet
 hub where everything is embodied: walk the squad into the glowing gate to start
 the next chamber, and settle your fate at the Pit Boss's blackjack table by
 literally **standing on the HIT or STAND floor zone**. Majority of bodies rules.

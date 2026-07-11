@@ -29,6 +29,12 @@ const corpses = [];
 
 const GEO = {
   body: new THREE.SphereGeometry(C.PLAYER_RADIUS, 24, 18),
+  torso: new THREE.CapsuleGeometry(15, 24, 6, 14),
+  leg: new THREE.CapsuleGeometry(7, 13, 4, 10),
+  arm: new THREE.CapsuleGeometry(5.5, 14, 4, 10),
+  head: new THREE.SphereGeometry(16, 20, 16),
+  eyeH: new THREE.SphereGeometry(5, 10, 8),
+  pupilH: new THREE.SphereGeometry(2.6, 8, 6),
   eye: new THREE.SphereGeometry(8, 12, 10),
   pupil: new THREE.SphereGeometry(4, 8, 8),
   aura: new THREE.SphereGeometry(C.PLAYER_RADIUS + 12, 16, 12),
@@ -53,6 +59,102 @@ const particleMats = new Map();
 function particleMat(color) {
   if (!particleMats.has(color)) particleMats.set(color, new THREE.MeshBasicMaterial({ color, transparent: true }));
   return particleMats.get(color);
+}
+
+// ---- humanoid slop-people ------------------------------------------------------
+// Chunky low-poly characters: colored suit, lighter face, stubby limbs, a hat.
+const charMatCache = new Map();
+function charMats(color) {
+  if (!charMatCache.has(color)) {
+    const base = new THREE.Color(color);
+    charMatCache.set(color, {
+      suit: new THREE.MeshStandardMaterial({ color: base, roughness: 0.5 }),
+      skin: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#ffffff'), 0.35), roughness: 0.45 }),
+      limb: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#000000'), 0.25), roughness: 0.55 }),
+    });
+  }
+  return charMatCache.get(color);
+}
+const HAT_DARK = new THREE.MeshStandardMaterial({ color: 0x14101f, roughness: 0.6 });
+const HAT_RED = new THREE.MeshStandardMaterial({ color: 0xd8333f, roughness: 0.6 });
+const HAT_GOLD = new THREE.MeshStandardMaterial({ color: 0xffd84d, roughness: 0.4, metalness: 0.4 });
+
+function makeHat(i) {
+  const hat = new THREE.Group();
+  if (i === 1) { // top hat
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(15, 15, 3, 16), HAT_DARK);
+    const top = new THREE.Mesh(new THREE.CylinderGeometry(10, 10, 18, 16), HAT_DARK);
+    top.position.y = 10;
+    const band = new THREE.Mesh(new THREE.CylinderGeometry(10.5, 10.5, 5, 16), HAT_RED);
+    band.position.y = 4;
+    hat.add(brim, top, band);
+  } else if (i === 2) { // cap
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(13, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2), HAT_RED);
+    const brim = new THREE.Mesh(new THREE.BoxGeometry(12, 2.5, 14), HAT_RED);
+    brim.position.set(12, 1, 0);
+    hat.add(dome, brim);
+  } else if (i === 3) { // fez
+    const fez = new THREE.Mesh(new THREE.CylinderGeometry(7, 10, 13, 14), HAT_RED);
+    fez.position.y = 5;
+    hat.add(fez);
+  } else if (i === 4) { // lil crown
+    const ring = new THREE.Mesh(new THREE.CylinderGeometry(10, 11, 7, 10), HAT_GOLD);
+    ring.position.y = 2;
+    hat.add(ring);
+  }
+  return hat;
+}
+
+// Root sits at ground level; feet reach y≈3. Local +x is forward.
+function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1 } = {}) {
+  const m = charMats(color);
+  const root = new THREE.Group();
+
+  const legL = new THREE.Group();
+  const legR = new THREE.Group();
+  for (const [pivot, side] of [[legL, -1], [legR, 1]]) {
+    pivot.position.set(0, 28, side * 9);
+    const leg = new THREE.Mesh(GEO.leg, m.limb);
+    leg.position.y = -14;
+    leg.castShadow = true;
+    pivot.add(leg);
+    root.add(pivot);
+  }
+
+  const torso = new THREE.Mesh(GEO.torso, m.suit);
+  torso.position.y = 48;
+  torso.castShadow = true;
+  root.add(torso);
+
+  const armL = new THREE.Group();
+  const armR = new THREE.Group();
+  for (const [pivot, side] of [[armL, -1], [armR, 1]]) {
+    pivot.position.set(0, 64, side * 20);
+    const arm = new THREE.Mesh(GEO.arm, m.limb);
+    arm.position.y = -13;
+    arm.castShadow = true;
+    pivot.add(arm);
+    root.add(pivot);
+  }
+
+  const head = new THREE.Mesh(GEO.head, m.skin);
+  head.position.y = 90;
+  head.castShadow = true;
+  for (const side of [-1, 1]) {
+    const eye = new THREE.Mesh(GEO.eyeH, MAT.eyeWhite);
+    eye.position.set(12.5, 2, side * 6.5);
+    const pupil = new THREE.Mesh(GEO.pupilH, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
+    pupil.position.set(3.6, 0.3, 0);
+    eye.add(pupil);
+    head.add(eye);
+  }
+  const hat = makeHat(hatIndex);
+  hat.position.y = 12;
+  head.add(hat);
+  root.add(head);
+
+  root.scale.setScalar(scale);
+  return { root, legL, legR, armL, armR, torso, head };
 }
 
 // ---- text sprites -------------------------------------------------------------
@@ -440,23 +542,16 @@ function buildArena(kind) {
     rim.rotation.x = Math.PI / 2;
     rim.position.set(C.HUB.TABLE.x, 46, C.HUB.TABLE.y);
     group.add(rim);
-    // the boss himself: a dark blob in a top hat
-    const boss = new THREE.Group();
-    const bossBody = new THREE.Mesh(GEO.body, new THREE.MeshStandardMaterial({ color: 0x1c1530, roughness: 0.5 }));
-    bossBody.scale.setScalar(1.55);
-    const hatBrim = new THREE.Mesh(new THREE.CylinderGeometry(30, 30, 5, 20), new THREE.MeshStandardMaterial({ color: 0x0a0714 }));
-    hatBrim.position.y = 30;
-    const hatTop = new THREE.Mesh(new THREE.CylinderGeometry(19, 19, 34, 20), new THREE.MeshStandardMaterial({ color: 0x0a0714 }));
-    hatTop.position.y = 48;
-    const band = new THREE.Mesh(new THREE.CylinderGeometry(19.5, 19.5, 8, 20), new THREE.MeshStandardMaterial({ color: 0xff2050 }));
-    band.position.y = 36;
-    for (const side of [-1, 1]) {
-      const eye = new THREE.Mesh(GEO.pupil, MAT.gremlinEye);
-      eye.position.set(side * 12, 12, 26);
-      boss.add(eye);
-    }
-    boss.add(bossBody, hatBrim, hatTop, band);
-    boss.position.set(C.HUB.TABLE.x, 48, C.HUB.TABLE.y - 205);
+    // the boss himself: a towering slop-man in a top hat
+    const bossChar = buildCharacter('#241d35', { hatIndex: 1, eyeColor: 0xff3030, scale: 1.45 });
+    const boss = bossChar.root;
+    const bowtie = new THREE.Mesh(new THREE.BoxGeometry(4, 6, 14), HAT_RED);
+    bowtie.position.set(13, 74, 0);
+    boss.add(bowtie);
+    // he faces the table (south, toward the players)
+    boss.rotation.y = -Math.PI / 2;
+    boss.position.set(C.HUB.TABLE.x, 0, C.HUB.TABLE.y - 215);
+    arena.bossChar = bossChar;
     const deck = makeCardMesh('BACK');
     deck.rotation.x = -Math.PI / 2;
     deck.position.set(C.HUB.TABLE.x + 60, 48, C.HUB.TABLE.y - 20);
@@ -624,7 +719,11 @@ function updateHub(dt, ex, S) {
   arena.standZone.material.opacity = zonesActive ? 0.3 + Math.cos(time * 8) * 0.1 : 0.08;
   arena.hitLabel.userData.set(zonesActive ? `HIT 👊 ×${bj.hitIds.length}` : 'HIT 👊');
   arena.standLabel.userData.set(zonesActive ? `STAND ✋ ×${bj.standIds.length}` : 'STAND ✋');
-  arena.boss.position.y = 40 + Math.sin(time * 2.2) * 6;
+  arena.boss.rotation.y = -Math.PI / 2 + Math.sin(time * 0.9) * 0.12;
+  if (arena.bossChar) {
+    arena.bossChar.armR.rotation.z = -1.1 + Math.sin(time * 2.2) * 0.15; // dealing hand
+    arena.bossChar.armL.rotation.z = Math.sin(time * 1.7) * 0.1;
+  }
 
   if (bj) {
     const dealerCards = bj.dealer || [bj.dealerUp, 'BACK'];
@@ -785,10 +884,10 @@ function updateArena(dt, extra, S) {
     arena.fuse.visible = show;
     arena.stoneLight.intensity = show ? 30000 + Math.sin(time * 10) * 20000 : 0;
     if (show) {
-      arena.stone.position.set(holder.rx, 84 + Math.sin(time * 5) * 6, holder.rz);
+      arena.stone.position.set(holder.rx, 130 + Math.sin(time * 5) * 6, holder.rz);
       arena.stone.rotation.y += dt * 3;
-      arena.stoneLight.position.set(holder.rx, 120, holder.rz);
-      arena.fuse.position.set(holder.rx, 150, holder.rz);
+      arena.stoneLight.position.set(holder.rx, 160, holder.rz);
+      arena.fuse.position.set(holder.rx, 192, holder.rz);
       const f = extra.fuse ?? 0;
       arena.fuse.userData.set(f.toFixed(1), f < 4 ? '#ff5252' : '#ffd84d');
     }
@@ -875,39 +974,29 @@ function makeBlobView(b) {
   const yaw = new THREE.Group();
   group.add(yaw);
 
-  const body = new THREE.Mesh(GEO.body, bodyMat(b.color));
-  body.castShadow = true;
-  yaw.add(body);
-
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(GEO.eye, MAT.eyeWhite);
-    eye.position.set(17, 11, side * 11);
-    const pupil = new THREE.Mesh(GEO.pupil, MAT.pupil);
-    pupil.position.set(5.5, 0.5, 0);
-    eye.add(pupil);
-    yaw.add(eye);
-  }
+  const char = buildCharacter(b.color, { hatIndex: b.id % 5 });
+  yaw.add(char.root);
 
   const aura = new THREE.Mesh(GEO.aura, new THREE.MeshBasicMaterial({
     color: b.color, transparent: true, opacity: 0.3, depthWrite: false,
   }));
+  aura.position.y = 50;
   aura.visible = false;
   group.add(aura);
 
   const label = makeTextSprite(b.name, { px: 40, color: b.color });
-  label.position.y = 92;
+  label.position.y = 132;
   group.add(label);
 
-  group.position.set(b.x, C.PLAYER_RADIUS, b.y);
+  group.position.set(b.x, 0, b.y);
   scene.add(group);
-  return { group, yaw, body, aura, label, face: 0 };
+  return { group, yaw, char, aura, label, face: 0, phase: 0 };
 }
 
 function spawnCorpse(b) {
-  const group = new THREE.Group();
-  const body = new THREE.Mesh(GEO.body, bodyMat(b.color));
-  group.add(body);
-  group.position.set(b.rx ?? b.x, C.PLAYER_RADIUS, b.rz ?? b.y);
+  const char = buildCharacter(b.color, { hatIndex: b.id % 5 });
+  const group = char.root;
+  group.position.set(b.rx ?? b.x, 10, b.rz ?? b.y);
   scene.add(group);
   corpses.push({ group, vy: -60, t: 0 });
 }
@@ -938,12 +1027,29 @@ function updateBlobViews(dt) {
     }
     v.yaw.rotation.y = -v.face;
 
-    const wob = Math.sin(time * 5 + id * 2.1) * 0.05;
-    const stretch = Math.min(0.3, sp * 0.012);
-    v.yaw.scale.set(1 + stretch + wob, 1 - stretch * 0.6 - wob, 1 + wob * 0.5);
-
-    const hop = Math.min(10, sp * 0.35);
-    v.group.position.set(b.x, C.PLAYER_RADIUS + Math.abs(Math.sin(time * 10 + id)) * hop, b.y);
+    // walk cycle from actual render-space velocity
+    const mvx = b.rx - (v.px ?? b.rx), mvz = b.rz - (v.pz ?? b.rz);
+    const vel = Math.hypot(mvx, mvz) / Math.max(dt, 1e-4);
+    v.px = b.rx; v.pz = b.rz;
+    const st = Math.min(1, vel / 340);
+    v.phase += dt * (3 + vel * 0.055);
+    const sw = Math.sin(v.phase);
+    const ch = v.char;
+    if (b.dashing) {
+      ch.armL.rotation.z = -1.7;
+      ch.armR.rotation.z = -1.7;
+      ch.legL.rotation.z = sw * 1.2;
+      ch.legR.rotation.z = -sw * 1.2;
+      ch.root.rotation.z = -0.5;
+    } else {
+      ch.legL.rotation.z = sw * 0.85 * st;
+      ch.legR.rotation.z = -sw * 0.85 * st;
+      ch.armL.rotation.z = -sw * 0.6 * st;
+      ch.armR.rotation.z = sw * 0.6 * st;
+      ch.root.rotation.z = -0.14 * st + Math.sin(time * 2 + id) * 0.02;
+    }
+    ch.root.position.y = Math.abs(Math.sin(v.phase)) * 4 * st;
+    v.group.position.set(b.x, 0, b.y);
 
     v.label.userData.set(b.money != null ? `${b.name} ${b.money}💰` : b.name, b.color);
 
@@ -993,7 +1099,7 @@ function updateChain(extra) {
         link.visible = true;
         link.position.set(
           a.rx + (b.rx - a.rx) * t,
-          C.PLAYER_RADIUS + 6 - Math.sin(t * Math.PI) * sag + Math.sin(time * 6 + j) * 1.5,
+          44 - Math.sin(t * Math.PI) * sag + Math.sin(time * 6 + j) * 1.5,
           a.rz + (b.rz - a.rz) * t,
         );
       }

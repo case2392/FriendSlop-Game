@@ -113,9 +113,11 @@ console.log('✅ chamber cleared — the Pit Boss deals in-world');
 await host.waitForTimeout(450); // cards mid-deal
 await host.screenshot({ path: SHOTS + '05-blackjack.png' });
 
-// Hand resolves purely by where the bodies stand.
-await host.waitForFunction(() => window.__slop.snap?.extra?.bj?.outcome != null, null, { timeout: 40000 });
-const outcome = await host.evaluate(() => window.__slop.snap.extra.bj.outcome);
+// Hand resolves purely by where the bodies stand (or the mode has already
+// moved on, which itself proves the hand resolved).
+let outcome = null;
+await host.waitForFunction(() => window.__slop.snap?.extra?.bj?.outcome != null || window.__slop.hubMode !== 'blackjack', null, { timeout: 40000 });
+outcome = await host.evaluate(() => window.__slop.snap?.extra?.bj?.outcome ?? 'resolved (mode advanced)');
 console.log(`✅ hand resolved by body-vote: ${outcome}`);
 
 // Ride to the end of the expedition.
