@@ -52,6 +52,12 @@ const GEO = {
   leg: new THREE.CapsuleGeometry(7, 13, 4, 10),
   arm: new THREE.CapsuleGeometry(5.5, 14, 4, 10),
   head: new THREE.SphereGeometry(16, 20, 16),
+  // the 2004 de-make set
+  torsoB: new THREE.BoxGeometry(26, 46, 36),
+  legB: new THREE.BoxGeometry(12, 27, 14),
+  armB: new THREE.BoxGeometry(10, 27, 12),
+  headB: new THREE.BoxGeometry(26, 24, 28),
+  eyeB: new THREE.BoxGeometry(3, 6, 6),
   eyeH: new THREE.SphereGeometry(5, 10, 8),
   pupilH: new THREE.SphereGeometry(2.6, 8, 6),
   aura: new THREE.SphereGeometry(C.PLAYER_RADIUS + 12, 16, 12),
@@ -79,16 +85,18 @@ function particleMat(color) {
 // ---- humanoid slop-people ------------------------------------------------------
 
 const charMatCache = new Map();
-function charMats(color) {
-  if (!charMatCache.has(color)) {
+function charMats(color, blocky = false) {
+  const key = color + (blocky ? '#B' : '');
+  if (!charMatCache.has(key)) {
     const base = new THREE.Color(color);
-    charMatCache.set(color, {
-      suit: new THREE.MeshStandardMaterial({ color: base, roughness: 0.5 }),
-      skin: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#ffffff'), 0.35), roughness: 0.45 }),
-      limb: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#000000'), 0.25), roughness: 0.55 }),
+    const opts = blocky ? { flatShading: true, roughness: 1 } : {};
+    charMatCache.set(key, {
+      suit: new THREE.MeshStandardMaterial({ color: base, roughness: 0.5, ...opts }),
+      skin: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#ffffff'), 0.35), roughness: 0.45, ...opts }),
+      limb: new THREE.MeshStandardMaterial({ color: base.clone().lerp(new THREE.Color('#000000'), 0.25), roughness: 0.55, ...opts }),
     });
   }
-  return charMatCache.get(color);
+  return charMatCache.get(key);
 }
 const HAT_DARK = new THREE.MeshStandardMaterial({ color: 0x14101f, roughness: 0.6 });
 const HAT_RED = new THREE.MeshStandardMaterial({ color: 0xd8333f, roughness: 0.6 });
@@ -121,47 +129,56 @@ function makeHat(i) {
 }
 
 // Root sits at ground level; feet reach y≈3. Local +x is forward.
-function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1 } = {}) {
-  const m = charMats(color);
+// blocky=true builds the 2004 de-make: box limbs, flat shading, dead eyes.
+function buildCharacter(color, { hatIndex = 0, eyeColor = null, scale = 1, blocky = false } = {}) {
+  const m = charMats(color, blocky);
   const root = new THREE.Group();
 
   const legL = new THREE.Group();
   const legR = new THREE.Group();
   for (const [pivot, side] of [[legL, -1], [legR, 1]]) {
     pivot.position.set(0, 28, side * 9);
-    const leg = new THREE.Mesh(GEO.leg, m.limb);
+    const leg = new THREE.Mesh(blocky ? GEO.legB : GEO.leg, m.limb);
     leg.position.y = -14;
     leg.castShadow = true;
     pivot.add(leg);
     root.add(pivot);
   }
 
-  const torso = new THREE.Mesh(GEO.torso, m.suit);
-  torso.position.y = 48;
+  const torso = new THREE.Mesh(blocky ? GEO.torsoB : GEO.torso, m.suit);
+  torso.position.y = blocky ? 51 : 48;
   torso.castShadow = true;
   root.add(torso);
 
   const armL = new THREE.Group();
   const armR = new THREE.Group();
   for (const [pivot, side] of [[armL, -1], [armR, 1]]) {
-    pivot.position.set(0, 64, side * 20);
-    const arm = new THREE.Mesh(GEO.arm, m.limb);
+    pivot.position.set(0, 64, side * (blocky ? 24 : 20));
+    const arm = new THREE.Mesh(blocky ? GEO.armB : GEO.arm, m.limb);
     arm.position.y = -13;
     arm.castShadow = true;
     pivot.add(arm);
     root.add(pivot);
   }
 
-  const head = new THREE.Mesh(GEO.head, m.skin);
-  head.position.y = 90;
+  const head = new THREE.Mesh(blocky ? GEO.headB : GEO.head, m.skin);
+  head.position.y = blocky ? 89 : 90;
   head.castShadow = true;
-  for (const side of [-1, 1]) {
-    const eye = new THREE.Mesh(GEO.eyeH, MAT.eyeWhite);
-    eye.position.set(12.5, 2, side * 6.5);
-    const pupil = new THREE.Mesh(GEO.pupilH, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
-    pupil.position.set(3.6, 0.3, 0);
-    eye.add(pupil);
-    head.add(eye);
+  if (blocky) {
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(GEO.eyeB, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
+      eye.position.set(13.5, 2, side * 7);
+      head.add(eye);
+    }
+  } else {
+    for (const side of [-1, 1]) {
+      const eye = new THREE.Mesh(GEO.eyeH, MAT.eyeWhite);
+      eye.position.set(12.5, 2, side * 6.5);
+      const pupil = new THREE.Mesh(GEO.pupilH, eyeColor ? new THREE.MeshBasicMaterial({ color: eyeColor }) : MAT.pupil);
+      pupil.position.set(3.6, 0.3, 0);
+      eye.add(pupil);
+      head.add(eye);
+    }
   }
   const hat = makeHat(hatIndex);
   hat.position.y = 12;
@@ -270,6 +287,8 @@ export function initRender(cv) {
   canvas = cv;
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
   renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 1.5));
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.25;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
@@ -390,6 +409,26 @@ function wallpaperTexture() {
   return tex;
 }
 
+// 16x16 nearest-filter texture — instant 2004
+function pixelTexture(base, accents, repeat = 6) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 16;
+  const g = cv.getContext('2d');
+  g.fillStyle = base;
+  g.fillRect(0, 0, 16, 16);
+  for (let i = 0; i < 46; i++) {
+    g.fillStyle = accents[i % accents.length];
+    g.globalAlpha = 0.25 + Math.random() * 0.4;
+    g.fillRect(Math.floor(Math.random() * 16), Math.floor(Math.random() * 16), 1 + Math.floor(Math.random() * 2), 1);
+  }
+  const tex = new THREE.CanvasTexture(cv);
+  tex.magFilter = THREE.NearestFilter;
+  tex.minFilter = THREE.NearestFilter;
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat, repeat);
+  return tex;
+}
+
 function noiseTexture(base, blotch, n = 46, size = 512) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = size;
@@ -409,6 +448,276 @@ function noiseTexture(base, blotch, n = 46, size = 512) {
 }
 
 // ---- arena builders ---------------------------------------------------------------------
+
+// jitter vertices so primitives read as hand-carved rock, not math
+function roughen(geo, amp) {
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    pos.setXYZ(i,
+      pos.getX(i) + (Math.random() - 0.5) * amp,
+      pos.getY(i) + (Math.random() - 0.5) * amp,
+      pos.getZ(i) + (Math.random() - 0.5) * amp);
+  }
+  geo.computeVertexNormals();
+  return geo;
+}
+
+function skyDome(group, top, horizon, low) {
+  const cv = document.createElement('canvas');
+  cv.width = 4; cv.height = 512;
+  const g = cv.getContext('2d');
+  const grad = g.createLinearGradient(0, 0, 0, 512);
+  grad.addColorStop(0, top);
+  grad.addColorStop(0.55, horizon);
+  grad.addColorStop(1, low);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 4, 512);
+  const dome = new THREE.Mesh(
+    new THREE.SphereGeometry(3800, 20, 14),
+    new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(cv), side: THREE.BackSide, fog: false }),
+  );
+  dome.position.set(CX, 0, CZ);
+  group.add(dome);
+  return dome;
+}
+
+const cloudTexCache = [];
+function cloudTexture() {
+  if (cloudTexCache.length) return cloudTexCache[0];
+  const cv = document.createElement('canvas');
+  cv.width = 256; cv.height = 128;
+  const g = cv.getContext('2d');
+  for (let i = 0; i < 9; i++) {
+    const grad = g.createRadialGradient(40 + i * 22, 64 + Math.sin(i) * 14, 4, 40 + i * 22, 64 + Math.sin(i) * 14, 42);
+    grad.addColorStop(0, 'rgba(255,255,255,0.6)');
+    grad.addColorStop(1, 'rgba(255,255,255,0)');
+    g.fillStyle = grad;
+    g.fillRect(0, 0, 256, 128);
+  }
+  const t = new THREE.CanvasTexture(cv);
+  cloudTexCache.push(t);
+  return t;
+}
+
+function addClouds(group, n, yBase, tint = 0xffffff, opacity = 0.55) {
+  for (let i = 0; i < n; i++) {
+    const c = new THREE.Sprite(new THREE.SpriteMaterial({ map: cloudTexture(), color: tint, transparent: true, opacity: opacity * (0.6 + Math.random() * 0.4), fog: false, depthWrite: false }));
+    const sc = 500 + Math.random() * 700;
+    c.scale.set(sc, sc * 0.42, 1);
+    c.position.set(Math.random() * 5000 - 1700, yBase + Math.random() * 380, CZ - 1300 - Math.random() * 1400);
+    group.add(c);
+    const speed = 12 + Math.random() * 18;
+    arena.fx.push(dt => {
+      c.position.x += speed * dt;
+      if (c.position.x > 3600) c.position.x = -2200;
+    });
+  }
+}
+
+function addDrifters(group, { count = 90, color = 0xfff2d0, size = 5, opacity = 0.4, box = [0, 1600, 20, 420, 0, 900], vy = 9 }) {
+  const geo = new THREE.BufferGeometry();
+  const pts = new Float32Array(count * 3);
+  for (let i = 0; i < count; i++) {
+    pts[i * 3] = box[0] + Math.random() * (box[1] - box[0]);
+    pts[i * 3 + 1] = box[2] + Math.random() * (box[3] - box[2]);
+    pts[i * 3 + 2] = box[4] + Math.random() * (box[5] - box[4]);
+  }
+  geo.setAttribute('position', new THREE.BufferAttribute(pts, 3));
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({ color, size, transparent: true, opacity, depthWrite: false }));
+  group.add(points);
+  arena.fx.push(dt => {
+    const a = geo.attributes.position.array;
+    for (let i = 0; i < count; i++) {
+      a[i * 3 + 1] += vy * dt;
+      a[i * 3] += Math.sin(time * 0.7 + i) * 6 * dt;
+      if (a[i * 3 + 1] > box[3]) a[i * 3 + 1] = box[2];
+      if (a[i * 3 + 1] < box[2]) a[i * 3 + 1] = box[3];
+    }
+    geo.attributes.position.needsUpdate = true;
+  });
+}
+
+const flameTexCache = [];
+function flameTexture() {
+  if (flameTexCache.length) return flameTexCache[0];
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = 64;
+  const g = cv.getContext('2d');
+  const grad = g.createRadialGradient(32, 40, 2, 32, 34, 30);
+  grad.addColorStop(0, 'rgba(255,240,180,0.95)');
+  grad.addColorStop(0.4, 'rgba(255,150,50,0.8)');
+  grad.addColorStop(1, 'rgba(255,80,20,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, 64, 64);
+  const t = new THREE.CanvasTexture(cv);
+  flameTexCache.push(t);
+  return t;
+}
+
+function torch(group, x, y, z) {
+  const stick = new THREE.Mesh(new THREE.CylinderGeometry(4, 5, 56, 7), new THREE.MeshStandardMaterial({ color: 0x4a3220, roughness: 0.9 }));
+  stick.position.set(x, y + 24, z);
+  stick.rotation.z = 0.16;
+  const flame = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTexture(), transparent: true, depthWrite: false }));
+  flame.position.set(x + 8, y + 62, z);
+  flame.scale.set(46, 46, 1);
+  const light = new THREE.PointLight(0xff9040, 9000, 620);
+  light.position.set(x + 8, y + 66, z + 20);
+  group.add(stick, flame, light);
+  const seed = Math.random() * 10;
+  arena.fx.push(() => {
+    const f = 0.85 + Math.sin(time * 11 + seed) * 0.12 + Math.sin(time * 23 + seed * 2) * 0.06;
+    light.intensity = 9000 * f;
+    flame.scale.set(46 * f, 46 * (2 - f), 1);
+  });
+}
+
+function setMood(bg, fogNear = 2400, fogFar = 4600) {
+  scene.background.set(bg);
+  scene.fog.color.set(bg);
+  scene.fog.near = fogNear;
+  scene.fog.far = fogFar;
+}
+
+// ---- Slopshire set dressing (a certain vanilla village) --------------------------
+
+function timberHouse(group, x, z, ry, sx = 1) {
+  const house = new THREE.Group();
+  const plaster = new THREE.MeshStandardMaterial({ color: 0xe8dfc8, roughness: 0.9 });
+  const timber = new THREE.MeshStandardMaterial({ color: 0x4a3220, roughness: 0.8 });
+  const roofMat = new THREE.MeshStandardMaterial({ color: 0x8a4a2e, roughness: 0.85 });
+  const W = 300 * sx, D = 210 * sx, H = 130 * sx;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), plaster);
+  body.position.y = H / 2;
+  body.castShadow = true;
+  house.add(body);
+  for (const [px, pz] of [[-W / 2, -D / 2], [W / 2, -D / 2], [-W / 2, D / 2], [W / 2, D / 2]]) {
+    const post = new THREE.Mesh(new THREE.BoxGeometry(14, H, 14), timber);
+    post.position.set(px, H / 2, pz);
+    house.add(post);
+  }
+  for (const by of [H * 0.33, H * 0.66]) {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(W + 4, 9, D + 4), timber);
+    band.position.y = by;
+    house.add(band);
+  }
+  // gabled roof: two leaning slabs
+  const slabLen = Math.hypot(W / 2 + 24, 80 * sx);
+  for (const side of [-1, 1]) {
+    const slab = new THREE.Mesh(new THREE.BoxGeometry(slabLen, 10, D + 60), roofMat);
+    slab.position.set(side * (W / 4 + 6), H + 40 * sx, 0);
+    slab.rotation.z = side * -Math.atan2(80 * sx, W / 2 + 24);
+    slab.castShadow = true;
+    house.add(slab);
+  }
+  const chimney = new THREE.Mesh(new THREE.BoxGeometry(26, 70, 26), new THREE.MeshStandardMaterial({ color: 0x777083 }));
+  chimney.position.set(W / 4, H + 60 * sx, D / 4);
+  house.add(chimney);
+  house.position.set(x, 0, z);
+  house.rotation.y = ry;
+  group.add(house);
+  return house;
+}
+
+function tree(group, x, z, s = 1) {
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(9 * s, 13 * s, 70 * s, 8),
+    new THREE.MeshStandardMaterial({ color: 0x5a3a22, roughness: 0.9 }));
+  trunk.position.set(x, 35 * s, z);
+  const leafMat = new THREE.MeshStandardMaterial({ color: 0x3f7d2c, roughness: 0.9, flatShading: true });
+  const lo = new THREE.Mesh(new THREE.IcosahedronGeometry(48 * s, 0), leafMat);
+  lo.position.set(x, 95 * s, z);
+  const hi = new THREE.Mesh(new THREE.IcosahedronGeometry(32 * s, 0), leafMat);
+  hi.position.set(x + 10 * s, 135 * s, z - 6 * s);
+  lo.castShadow = hi.castShadow = trunk.castShadow = true;
+  group.add(trunk, lo, hi);
+}
+
+function lamppost(group, x, z) {
+  const pole = new THREE.Mesh(new THREE.CylinderGeometry(4, 5, 110, 8), HAT_DARK);
+  pole.position.set(x, 55, z);
+  const lamp = new THREE.Mesh(new THREE.SphereGeometry(11, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffd84d, emissive: 0xffb020, emissiveIntensity: 1.2 }));
+  lamp.position.set(x, 116, z);
+  const light = new THREE.PointLight(0xffc860, 6000, 420);
+  light.position.set(x, 120, z);
+  group.add(pole, lamp, light);
+}
+
+// ---- Grand Slopchange set dressing (a certain grand marketplace) ------------------
+
+function buildSlopchange(group, baseY) {
+  const stone = new THREE.MeshStandardMaterial({ color: 0xcbb98a, roughness: 1, flatShading: true, map: pixelTexture('#cbb98a', ['#b3a276', '#dbc99a', '#9a8a64'], 2) });
+  const darkStone = new THREE.MeshStandardMaterial({ color: 0x9a8a64, roughness: 1, flatShading: true, map: pixelTexture('#9a8a64', ['#8a7a54', '#ab9b74'], 2) });
+  // circular plaza inlay
+  const plaza = new THREE.Mesh(new THREE.CylinderGeometry(340, 340, 6, 40), darkStone);
+  plaza.position.set(CX, baseY + 4, CZ);
+  group.add(plaza);
+  // the fountain
+  const tiers = [[110, 26], [70, 34], [34, 46]];
+  let ty = baseY + 6;
+  for (const [r, h] of tiers) {
+    const tier = new THREE.Mesh(new THREE.CylinderGeometry(r, r + 8, h, 24), stone);
+    tier.position.set(CX, ty + h / 2, CZ);
+    tier.castShadow = true;
+    group.add(tier);
+    ty += h;
+  }
+  const water = new THREE.Mesh(new THREE.CylinderGeometry(96, 96, 6, 24),
+    new THREE.MeshStandardMaterial({ color: 0x4db8e8, emissive: 0x1a6a9a, emissiveIntensity: 0.5, roughness: 0.15 }));
+  water.position.set(CX, baseY + 30, CZ);
+  group.add(water);
+  // banker booths around the circle
+  for (let i = 0; i < 4; i++) {
+    const a = (i / 4) * Math.PI * 2 + Math.PI / 4;
+    const bx = CX + Math.cos(a) * 430, bz = CZ + Math.sin(a) * 300;
+    const desk = new THREE.Mesh(new THREE.BoxGeometry(150, 55, 55), new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 0.8 }));
+    desk.position.set(bx, baseY + 28, bz);
+    desk.rotation.y = -a + Math.PI / 2;
+    desk.castShadow = true;
+    group.add(desk);
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(170, 8, 90), HAT_GOLD);
+    awning.position.set(bx, baseY + 120, bz);
+    awning.rotation.y = -a + Math.PI / 2;
+    awning.rotation.x = 0.18;
+    group.add(awning);
+    for (const side of [-70, 70]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(3.5, 3.5, 110, 8), HAT_DARK);
+      pole.position.set(bx + Math.cos(-a + Math.PI / 2) * side, baseY + 58, bz + Math.sin(-a + Math.PI / 2) * side);
+      group.add(pole);
+    }
+    // coin piles by the desks
+    for (let c = 0; c < 5; c++) {
+      const coin = new THREE.Mesh(new THREE.SphereGeometry(9 + Math.random() * 7, 8, 6),
+        new THREE.MeshStandardMaterial({ color: 0xffd84d, metalness: 0.5, roughness: 0.35 }));
+      coin.position.set(bx + (Math.random() - 0.5) * 120, baseY + 10, bz + 50 + Math.random() * 30);
+      group.add(coin);
+    }
+  }
+  // merchants yelling eternal nonsense
+  const cries = [
+    ['selling lobbies 150gp', '#ffd84d'],
+    ['buying gf 10k', '#ff6ec7'],
+    ['DOUBLING MONEY (trust)', '#7cfc00'],
+  ];
+  cries.forEach(([txt, col], i) => {
+    const a = (i / 3) * Math.PI * 2 + 0.6;
+    const mx = CX + Math.cos(a) * 210, mz = CZ + Math.sin(a) * 160;
+    const merch = buildCharacter(['#9a8a64', '#6b7a8a', '#8a6b7a'][i], { hatIndex: (i + 2) % 5, blocky: true });
+    merch.root.position.set(mx, baseY + 3, mz);
+    merch.root.rotation.y = -a - Math.PI / 2;
+    merch.armL.rotation.z = -2.2;
+    group.add(merch.root);
+    const cry = makeTextSprite(txt, { px: 34, color: col });
+    cry.position.set(mx, baseY + 150, mz);
+    group.add(cry);
+  });
+  const sign = makeTextSprite('🪙 THE GRAND SLOPCHANGE 🪙', { px: 48, color: '#FFD84D', w: 1024 });
+  sign.position.set(CX, baseY + 300, CZ - 120);
+  group.add(sign);
+  const glow = new THREE.PointLight(0xffd8a0, 30000, 1200);
+  glow.position.set(CX, baseY + 260, CZ);
+  group.add(glow);
+}
 
 function addCave(group) {
   const cave = new THREE.Mesh(
@@ -601,11 +910,13 @@ function buildArena(kind) {
   if (arena) clearGroup(arena.group);
   const group = new THREE.Group();
   scene.add(group);
-  arena = { kind, group };
+  arena = { kind, group, fx: [] };
   mapMode = (kind === 'chained' || kind === 'peak') ? 'mountain' : 'flat';
+  if (kind !== 'dig') setMood(BG);
 
   if (kind === 'hub') {
     buildDenRoom(group);
+    addDrifters(group, { count: 60, color: 0xffd890, size: 4, opacity: 0.28, box: [100, 1500, 60, 440, 60, 840], vy: 7 });
     // THE GATE (north)
     const gmat = new THREE.MeshStandardMaterial({ color: 0x4a3d75, roughness: 0.7 });
     for (const px of [C.HUB.GATE.x - 330, C.HUB.GATE.x + 330]) {
@@ -658,27 +969,66 @@ function buildArena(kind) {
     arena.confettiT = 0;
   } else if (kind === 'casino') {
     buildDenRoom(group);
+    addDrifters(group, { count: 60, color: 0xffd890, size: 4, opacity: 0.28, box: [100, 1500, 60, 440, 60, 840], vy: 7 });
     arena.bj = buildBjTable(group);
     const marquee = makeTextSprite("🎩 THE BOSS'S CASINO 🎩", { px: 52, color: '#FFD84D', w: 1024 });
     marquee.position.set(CX, 470, 60);
     group.add(marquee);
   } else if (kind === 'dig') {
-    addCave(group);
-    // a shaft: dark walls all the way down
-    const wallMat = new THREE.MeshStandardMaterial({ color: 0x241b38, roughness: 1 });
-    for (const [w, d, x, z, ry] of [[1700, 1, CX, -8, 0], [1700, 1, CX, C.ARENA_H + 8, Math.PI], [1, 940, -8, CZ, Math.PI / 2], [1, 940, C.ARENA_W + 8, CZ, -Math.PI / 2]]) {
-      const wall = new THREE.Mesh(new THREE.PlaneGeometry(w === 1 ? 940 : 1700, 1000), wallMat);
-      wall.position.set(x, 60, z);
+    setMood(0xa8d0e8, 3000, 6800); // daylight up in Slopshire
+    skyDome(group, '#4a8ac8', '#a8d0e8', '#d8e8c8');
+    addClouds(group, 6, 750);
+    // grassy village ground framing the dig site (a hole needs a rim)
+    const grass = new THREE.MeshStandardMaterial({ color: 0x4f9d3c, roughness: 0.95 });
+    for (const [w, d, x, z] of [
+      [4600, 1500, CX, -760], [4600, 1500, CX, C.ARENA_H + 760],
+      [1500, 960, -760, CZ], [1500, 960, C.ARENA_W + 760, CZ],
+    ]) {
+      const strip = new THREE.Mesh(new THREE.BoxGeometry(w, 40, d), grass);
+      strip.position.set(x, -21, z);
+      strip.receiveShadow = true;
+      group.add(strip);
+    }
+    // SLOPSHIRE: the inn, cottages, trees, lamps
+    const inn = timberHouse(group, CX, -420, 0, 1.4);
+    const innSign = makeTextSprite("🦁 THE LION'S SLOP INN", { px: 44, color: '#FFD84D', w: 1024 });
+    innSign.position.set(CX, 330, -300);
+    group.add(innSign);
+    const shire = makeTextSprite('⚔️ SLOPSHIRE ⚔️', { px: 40, color: '#e8dfc8', w: 1024 });
+    shire.position.set(CX, 470, -430);
+    group.add(shire);
+    timberHouse(group, -360, 300, 0.9, 0.9);
+    timberHouse(group, C.ARENA_W + 380, 620, -0.8, 0.85);
+    tree(group, -280, 750, 1.2); tree(group, -420, 60, 1);
+    tree(group, C.ARENA_W + 300, 130, 1.1); tree(group, C.ARENA_W + 460, 380, 0.9);
+    tree(group, 220, -350, 1); tree(group, 1420, -390, 1.15);
+    tree(group, 380, C.ARENA_H + 320, 1.05); tree(group, 1240, C.ARENA_H + 380, 0.95);
+    lamppost(group, -60, -60); lamppost(group, C.ARENA_W + 60, -60);
+    lamppost(group, -60, C.ARENA_H + 60); lamppost(group, C.ARENA_W + 60, C.ARENA_H + 60);
+    // the shaft walls, earthier now
+    const wallMat = new THREE.MeshStandardMaterial({ color: 0x4a3626, roughness: 1 });
+    for (const [w, x, z, ry] of [[1700, CX, -8, 0], [1700, CX, C.ARENA_H + 8, Math.PI], [940, -8, CZ, Math.PI / 2], [940, C.ARENA_W + 8, CZ, -Math.PI / 2]]) {
+      const wall = new THREE.Mesh(new THREE.PlaneGeometry(w, 1000), wallMat);
+      wall.position.set(x, -440, z);
       wall.rotation.y = ry;
       group.add(wall);
     }
-    // the promised land glows at the bottom of the shaft
-    const freedom = floorBox(group, 1700, 1000, 0x1f5a2e, null, -420, 30);
-    freedom.material.emissive = new THREE.Color(0x2fbb2f);
-    freedom.material.emissiveIntensity = 0.35;
+    // and all the way down: THE GRAND SLOPCHANGE
+    const gePlate = floorBox(group, 1700, 1000, 0xffffff, pixelTexture('#cbb98a', ['#b3a276', '#dbc99a'], 10), -420, 30);
+    gePlate.material.flatShading = true;
+    buildSlopchange(group, -405);
     arena.digLayers = []; // built on demand from extras
   } else if (kind === 'rv') {
-    addCave(group);
+    skyDome(group, '#3a2248', '#c9743a', '#7a4a2a');
+    setMood(0xb06a3a, 2200, 5200);
+    addClouds(group, 5, 640, 0xffc9a0, 0.4);
+    const canyon = new THREE.Mesh(
+      roughen(new THREE.CylinderGeometry(2500, 2400, 1500, 22, 5, true), 110),
+      new THREE.MeshStandardMaterial({ color: 0x6b3a22, roughness: 1, flatShading: true, side: THREE.BackSide }),
+    );
+    canyon.position.set(CX, 500, CZ);
+    group.add(canyon);
+    addDrifters(group, { count: 70, color: 0xd8a070, size: 5, opacity: 0.3, box: [0, 1600, 10, 300, 0, 900], vy: 6 });
     floorBox(group, 1760, 1020, 0x5a4a33, noiseTexture('#5a4a33', '#463a26'));
     arena.mudDiscs = [];
     // exit garage on the east wall
@@ -719,27 +1069,64 @@ function buildArena(kind) {
     group.add(rv);
     arena.rv = rv;
   } else if (kind === 'cham') {
+    skyDome(group, '#0d0d2e', '#1c1c46', '#0d0d1e');
+    setMood(0x16163a, 2000, 5200);
     addCave(group);
     floorBox(group, 1760, 1020, 0x322a52, noiseTexture('#322a52', '#221b3a'));
-    const moon = new THREE.PointLight(0xa090ff, 20000, 1400);
-    moon.position.set(CX, 500, CZ);
+    const moonSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: flameTexture(), color: 0xd8e0ff, transparent: true, opacity: 0.95, fog: false }));
+    moonSprite.scale.set(260, 260, 1);
+    moonSprite.position.set(CX + 900, 1100, CZ - 1600);
+    group.add(moonSprite);
+    const moon = new THREE.PointLight(0xa0b0ff, 26000, 1600);
+    moon.position.set(CX, 520, CZ);
     group.add(moon);
+    addDrifters(group, { count: 50, color: 0x9dff2e, size: 4, opacity: 0.5, box: [100, 1500, 20, 200, 100, 800], vy: 4 });
     arena.statues = new Map();
-  } else { // chained | peak
-    // the cliff face
+  } else { // chained | peak — same wall, two different worlds
     const base = toWorld(CX, 900), top = toWorld(CX, 0);
     const mid = base.clone().add(top).multiplyScalar(0.5);
     const len = base.distanceTo(top) + 260;
-    const cliff = new THREE.Mesh(
-      new THREE.PlaneGeometry(2100, len),
-      new THREE.MeshStandardMaterial({ color: 0x3a3050, roughness: 1, map: noiseTexture('#3a3050', '#251d3a', 70) }),
-    );
-    cliff.position.set(mid.x, mid.y, mid.z - 30);
+    const cliffGeo = roughen(new THREE.PlaneGeometry(2300, len, 42, 22), 34);
+    let cliffMat;
+    if (kind === 'chained') {
+      setMood(0x0c1410, 1500, 3400);
+      cliffMat = new THREE.MeshStandardMaterial({ color: 0x24343a, roughness: 1, flatShading: true });
+      // cave all around
+      const cave = new THREE.Mesh(
+        roughen(new THREE.CylinderGeometry(2400, 2400, 3200, 26, 6, true), 90),
+        new THREE.MeshStandardMaterial({ color: 0x101d18, roughness: 1, flatShading: true, side: THREE.BackSide }),
+      );
+      cave.position.set(CX, 800, CZ);
+      group.add(cave);
+      // green murk drifting up from the tide
+      addDrifters(group, { count: 80, color: 0x9dff2e, size: 6, opacity: 0.35, box: [-200, 1800, 0, 800, 100, 800], vy: 26 });
+    } else {
+      // dawn on the mountain
+      skyDome(group, '#22335e', '#e8956a', '#6a4a5a');
+      setMood(0xc98a6a, 2600, 5600);
+      addClouds(group, 7, 620, 0xffd8c0, 0.5);
+      cliffMat = new THREE.MeshStandardMaterial({ color: 0x6b5a50, roughness: 1, flatShading: true });
+      // distant range
+      for (let i = 0; i < 4; i++) {
+        const mtn = new THREE.Mesh(
+          roughen(new THREE.ConeGeometry(600 + Math.random() * 400, 900 + Math.random() * 500, 7), 60),
+          new THREE.MeshStandardMaterial({ color: 0x3a3450, roughness: 1, flatShading: true }),
+        );
+        mtn.position.set(-1400 + i * 1200 + Math.random() * 300, 260, -1700 - Math.random() * 700);
+        group.add(mtn);
+      }
+      // falling snow
+      addDrifters(group, { count: 130, color: 0xffffff, size: 5, opacity: 0.7, box: [-200, 1800, 0, 950, -200, 900], vy: -34 });
+      const sun = new THREE.PointLight(0xffb070, 60000, 4000);
+      sun.position.set(2200, 900, -800);
+      group.add(sun);
+    }
+    const cliff = new THREE.Mesh(cliffGeo, cliffMat);
+    cliff.position.set(mid.x, mid.y, mid.z - 44);
     cliff.rotation.x = -Math.atan2(base.z - top.z, top.y - base.y);
     cliff.receiveShadow = true;
     group.add(cliff);
-    // valley floor way below
-    floorBox(group, 4000, 3000, 0x151026, null, -40, 40);
+    floorBox(group, 4000, 3000, kind === 'chained' ? 0x0d1a12 : 0x2a2438, null, -40, 40);
     arena.ledgeMeshes = [];
     arena.vineMeshes = [];
     arena.globViews = new Map();
@@ -754,6 +1141,11 @@ function buildArena(kind) {
       tide.position.set(CX, -80, 760);
       group.add(tide);
       arena.tideMesh = tide;
+      const tideLight = new THREE.PointLight(0x8ae82e, 40000, 2200);
+      tideLight.position.set(CX, -60, 720);
+      group.add(tideLight);
+      arena.tideLight = tideLight;
+      arena.fx.push(() => { tideLight.intensity = 40000 * (0.85 + Math.sin(time * 6) * 0.15); });
     }
     const flag = makeTextSprite('🏁 THE TOP 🏁', { px: 52, color: '#7CFC00' });
     const fp = toWorld(CX, 40, 130);
@@ -828,12 +1220,20 @@ function updateDig(dt, ex, S) {
   if (!ex?.layers) return;
   const { cols, rows, tile } = ex;
   if (!arena.digLayers.length) {
-    const palette = [0x3f9d4c, 0x8a6a3a, 0x666078];
+    // era gradient: painterly grass -> coarse dirt -> full 2004 pixel rock
+    const layerMats = [
+      () => new THREE.MeshStandardMaterial({ color: 0x4f9d3c, roughness: 0.9, map: noiseTexture('#4f9d3c', '#3c7a2e', 30, 128) }),
+      () => new THREE.MeshStandardMaterial({ color: 0x8a6a3a, roughness: 1, flatShading: true, map: noiseTexture('#8a6a3a', '#6b4f2a', 20, 64) }),
+      () => new THREE.MeshStandardMaterial({ color: 0x8a8a92, roughness: 1, flatShading: true, map: pixelTexture('#8a8a92', ['#6b6b74', '#a3a3ac', '#55555e'], 1) }),
+    ];
     for (let l = 0; l < ex.layers.length; l++) {
       const meshes = [];
-      const geo = new THREE.BoxGeometry(tile - 6, 26, tile - 6);
+      const geo = l === 0
+        ? new THREE.BoxGeometry(tile - 6, 26, tile - 6, 2, 1, 2)
+        : new THREE.BoxGeometry(tile - 6, 26, tile - 6);
+      if (l === 0) roughen(geo, 5);
       for (let i = 0; i < cols * rows; i++) {
-        const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color: palette[l % palette.length], roughness: 0.85 }));
+        const m = new THREE.Mesh(geo, layerMats[Math.min(l, layerMats.length - 1)]());
         m.position.set((i % cols) * tile + tile / 2, -13 - l * 130, Math.floor(i / cols) * tile + tile / 2);
         m.receiveShadow = true;
         arena.group.add(m);
@@ -937,22 +1337,35 @@ function updateCham(dt, ex, S) {
 function updateMountain(dt, ex) {
   if (!ex?.ledges) return;
   if (!arena.ledgeMeshes.length) {
-    const rockMat = new THREE.MeshStandardMaterial({ color: 0x5a5078, roughness: 0.8 });
-    for (const [x, y, w] of ex.ledges) {
+    const chained = arena.kind === 'chained';
+    const rockMat = new THREE.MeshStandardMaterial({
+      color: chained ? 0x35494a : 0x7a6a5c, roughness: 1, flatShading: true,
+    });
+    const snowMat = new THREE.MeshStandardMaterial({ color: 0xeef2f8, roughness: 0.85 });
+    ex.ledges.forEach(([x, y, w], i) => {
       const p = toWorld(x, y);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, 20, 90), rockMat);
+      const m = new THREE.Mesh(roughen(new THREE.BoxGeometry(w, 22, 96, Math.max(2, Math.round(w / 90)), 1, 2), 9), rockMat);
       m.position.set(p.x, p.y - 6, p.z);
       m.receiveShadow = true;
       m.castShadow = true;
       arena.group.add(m);
       arena.ledgeMeshes.push(m);
-    }
-    const vineMat = new THREE.MeshStandardMaterial({ color: 0x3f9d4c, emissive: 0x2fbb2f, emissiveIntensity: 0.35, roughness: 0.6 });
+      if (!chained) {
+        const cap = new THREE.Mesh(new THREE.BoxGeometry(w - 8, 7, 86), snowMat);
+        cap.position.set(p.x, p.y + 6, p.z);
+        arena.group.add(cap);
+      } else if (i % 2 === 1) {
+        torch(arena.group, p.x - w / 2 + 26, p.y, p.z + 30);
+      }
+    });
+    const vineMat = chained
+      ? new THREE.MeshStandardMaterial({ color: 0x3f9d4c, emissive: 0x3fdb3f, emissiveIntensity: 0.55, roughness: 0.6 })
+      : new THREE.MeshStandardMaterial({ color: 0x7da05c, emissive: 0x2f5b1f, emissiveIntensity: 0.15, roughness: 0.8, flatShading: true });
     for (const [x, w, yTop, yBot] of ex.climbs) {
       const a = toWorld(x, yTop), b = toWorld(x, yBot);
       const mid = a.clone().add(b).multiplyScalar(0.5);
       const len = a.distanceTo(b);
-      const m = new THREE.Mesh(new THREE.BoxGeometry(w, len, 12), vineMat);
+      const m = new THREE.Mesh(roughen(new THREE.BoxGeometry(w, len, 12, 2, Math.max(2, Math.round(len / 70)), 1), 6), vineMat);
       m.position.set(mid.x, mid.y, mid.z + 8);
       m.rotation.x = -Math.atan2(b.z - a.z, a.y - b.y);
       arena.group.add(m);
@@ -982,11 +1395,16 @@ function updateMountain(dt, ex) {
     arena.tideMesh.position.y += (p.y - arena.tideMesh.position.y) * Math.min(1, dt * 5);
     arena.tideMesh.position.z = p.z + 60;
     arena.tideMesh.material.emissiveIntensity = 0.7 + Math.sin(time * 9) * 0.25;
+    if (arena.tideLight) {
+      arena.tideLight.position.y = arena.tideMesh.position.y + 60;
+      arena.tideLight.position.z = arena.tideMesh.position.z - 100;
+    }
   }
 }
 
 function updateArena(dt, extra, S) {
   if (!arena) return;
+  for (const fn of arena.fx) fn(dt);
   if (arena.kind === 'hub') updateHub(dt, extra, S);
   else if (arena.kind === 'casino') {
     updateBjTable(dt, arena.bj, extra?.bj || null);
@@ -1095,6 +1513,17 @@ function updateBlobViews(dt) {
       continue;
     }
     if (!v) { v = makeBlobView(b); views.set(id, v); }
+
+    // THE DE-MAKE: digging deep enough turns you into your 2004 self
+    const wantBlocky = arena?.kind === 'dig' && (curExtra?.pl?.[id] ?? 0) >= 2;
+    if (v.blocky !== wantBlocky) {
+      v.blocky = wantBlocky;
+      v.yaw.remove(v.char.root);
+      v.char = buildCharacter(b.color, { hatIndex: b.id % 5, blocky: wantBlocky });
+      v.yaw.add(v.char.root);
+      burst3(toWorld(b.rx, b.rz, liftFor(id) + 40), '#e8dfc8', 16, { speed: 200, up: 180, life: 0.6 });
+      if (id === selfIdCache) sfx.tater();
+    }
 
     const k = 1 - Math.pow(0.00002, dt);
     const jump = Math.hypot(b.tx - b.x, b.ty - b.y);
@@ -1335,7 +1764,9 @@ function updateEffects(dt) {
 
 // ---- snapshots ----------------------------------------------------------------------------
 
+let selfIdCache = null;
 export function applySnapshot(snap, meta, selfId) {
+  selfIdCache = selfId;
   curExtra = snap.extra || curExtra;
   const seen = new Set();
   for (const [id, x, y, alive, score, dashCd, dashing, events] of snap.players) {

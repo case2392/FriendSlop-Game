@@ -72,9 +72,9 @@ export const EMOTES = ['😂', '😭', '💀', '🤬', '👑', '🤡'];
 export const MINIGAME_INFO = {
   dig: {
     name: 'THE DIG SITE',
-    based: 'Keep Digging',
-    desc: 'Keep digging. DASH the ground to crack it, drop through the hole, repeat — three floors down. The squad escapes when EVERYONE reaches the bottom of the pit.',
-    goal: 'Everyone digs down 3 floors',
+    based: 'Keep Digging (via a certain village & a certain marketplace)',
+    desc: 'Start on the green grass of SLOPSHIRE. DASH the ground to crack it, drop through, repeat — three floors down — until you splash into THE GRAND SLOPCHANGE. Everyone to the bottom. Mind the merchants.',
+    goal: 'Everyone digs down to the Slopchange',
     icon: '⛏️',
   },
   rv: {

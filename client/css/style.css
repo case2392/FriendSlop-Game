@@ -279,3 +279,9 @@ input:focus { border-color: var(--pink); }
   height: 96px; background: #171226bb; font-size: 13px;
 }
 .game-chat input { background: #171226bb; }
+
+/* ---------- filmic vignette ---------- */
+#vignette {
+  position: absolute; inset: 0; pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(8, 5, 18, 0.38) 100%);
+}

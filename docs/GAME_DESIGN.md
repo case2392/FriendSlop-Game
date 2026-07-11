@@ -57,7 +57,7 @@ is the design.
 
 | | Homage | Rules | Shared lives |
 |---|---|---|---|
-| ⛏️ **THE DIG SITE** | Keep Digging | Dash tiles (2 hits) or loiter to dig; fall through holes; EVERYONE to the bottom of 3 floors in 110s. | time only |
+| ⛏️ **THE DIG SITE** | Keep Digging | Dash tiles (2 hits) or loiter to dig; fall through holes; EVERYONE to the bottom of 3 floors in 110s. Starts in SLOPSHIRE (painterly village, smooth characters); each floor down de-makes the art era until the bottom is THE GRAND SLOPCHANGE — pixel textures, flat shading, and your character rebuilt as a blocky 2004 box-person. | time only |
 | 🚐 **ARE WE SLOP YET?** | R.V. There Yet? | Push a 7×-mass RV to the far exit in 110s. Mud kills its momentum; gremlins push back; dashes shove hard. MVP: shoulder time. | time only |
 | 🦎 **THE CHAMELEON** | Mecha Chameleon | ~2n statues mimic the squad; the real one twitches every ~4s. Dash it ×3. Wrong smash: −1 life + stun. | 2 + n/2 |
 | 🎩 **THE BOSS'S CASINO** | Gamble With Friends | Squad blackjack: bodies in HIT/STAND zones vote each decision (window 14s, all-in resolves early). Win 2 hands; 3 losses busts the squad. | 3 losses |
@@ -73,8 +73,12 @@ optional `lives` — plus a renderer branch and an entry in `MINIGAME_INFO`.
 - Server-authoritative: 30Hz sim, 20Hz snapshots, movement as camera-relative
   unit vectors. The chain is 3 iterations of distance constraints with
   momentum blending — dashing yanks the whole squad.
-- Client is Three.js with zero assets: all geometry procedural, all textures
-  canvas-generated (carpet, wallpaper, cards), all SFX WebAudio-synthesized.
+- Client is Three.js with zero assets: all geometry procedural (vertex-
+  roughened, flat-shaded rock for a deliberate stylized look), all textures
+  canvas-generated (carpet, wallpaper, cards, 16px pixel-era tiles), ACES
+  filmic tone mapping, per-chamber sky domes and palettes (day, dusk,
+  moonlight, cavern, alpine dawn), ambient particles (dust, snow, embers,
+  fireflies), and WebAudio-synthesized SFX.
 - Bots are first-class: hub walking, chamber AI per game, blackjack instincts
   (12% chaos agent), and they vote with their bodies like everyone else.
 
