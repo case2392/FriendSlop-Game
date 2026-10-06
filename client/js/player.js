@@ -84,6 +84,7 @@ export class Me {
 
   ko(why) {
     if (this.mode === 'ko') return;
+    (this.koLog ||= []).push({ why, pos: { ...this.pos }, vel: { ...this.vel }, par: this.par, mode: this.mode, t: performance.now() });
     if (this.mode === 'seat') this.seat = null;
     this.mode = 'ko';
     this.koT = P.KO_TIME;
@@ -159,10 +160,28 @@ export class Me {
       this.reparent(lw, rv, exclude);
       return;
     }
+    this.lurch(dt, rv);
     if (this.mode === 'climb') this.climbStep(dt, inp, lw, rv, exclude);
     else this.walk(dt, inp, lw, rv, exclude, false);
     this.reparent(lw, rv, exclude);
     if (this.mode !== 'climb') this.regen(dt);
+  }
+
+  // Standing in the RV when it brakes hard (or hits a boulder) throws you around.
+  // rv.acc comes from the server snapshots' own timestamps, so a frame hitch
+  // on your machine can't fake a crash.
+  lurch(dt, rv) {
+    if (!rv?.acc || dt <= 0) return;
+    const a = Math.hypot(rv.acc.x, rv.acc.z);
+    this.lurchCd = Math.max(0, (this.lurchCd || 0) - dt);
+    if (this.par && this.mode === 'walk' && a > 6 && a < 400 && this.lurchCd <= 0) {
+      this.vel.x -= rv.acc.x * 0.28; this.vel.z -= rv.acc.z * 0.28;
+      this.vel.y += Math.min(3, a * 0.08);
+      this.lurchCd = 0.5;
+      this.events.push({ k: 'lurch', a });
+      if (a > 45) { this.lastCrash = { a, acc: { ...rv.acc }, rvp: { ...rv.p }, lp: this.lp && { ...this.lp } }; this.ko('crash'); }
+      else if (a > 20) { this.spend(30); this.events.push({ k: 'stumble' }); }
+    }
   }
 
   regen(dt) {
@@ -235,7 +254,7 @@ export class Me {
       if (!this.grounded && vy0 < -2) {
         const s = -vy0;
         this.events.push({ k: 'land', s });
-        if (s > P.KO_LAND_SPEED && this.mode !== 'ko') this.ko('fall');
+        if (s > P.KO_LAND_SPEED && this.mode !== 'ko') { this.lastFall = { s, airT: this.airT }; this.ko('fall'); }
         else if (s > P.STUMBLE_LAND_SPEED) { this.events.push({ k: 'stumble' }); this.spend(25); this.vel.x *= 0.3; this.vel.z *= 0.3; }
       }
       this.vel.y = Math.max(this.vel.y, -1);

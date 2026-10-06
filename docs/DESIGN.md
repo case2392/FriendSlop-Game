@@ -303,22 +303,30 @@ starts.
 
 ## 8. Economy
 
-The quotas are built so that **you can't scavenge your way out of the last
-two days**. The game puts you at the roulette table at exactly the moment
-the run matters most.
+The quotas are tuned so **you can't scavenge your way out of the last two
+days**. The game puts you at the roulette table at exactly the moment the run
+matters most. The face values below are **measured from the generator**
+(average over 20 seeds), not guessed:
 
-| Day | Payment due | Loot on the leg (face value) | Realistic haul (time + breakage) |
-|---|---|---|---|
-| 1 | $1,500 | ~$4,000 | $2,000–3,000 |
-| 2 | $3,000 | ~$5,500 | $2,500–4,000 |
-| 3 | $5,500 | ~$7,000 | $3,500–5,000 |
-| 4 | $9,000 | ~$8,500 | $4,000–6,000 |
-| 5 | $15,000 balloon | ~$10,000 | $5,000–7,000 |
+| Day | Payment due | Stops | Loot on the leg (face value) | Due as a share of face value |
+|---|---|---|---|---|
+| 1 | $1,500 | 5 | ~$8,400 | 18% (a learning day: surplus to gamble) |
+| 2 | $3,000 | 6 | ~$13,500 | 22% |
+| 3 | $5,500 | 7 | ~$16,800 | 33% |
+| 4 | $9,000 | 8 | ~$22,600 | 40% |
+| 5 | $15,000 balloon | 8 | ~$24,300 | 62% (you will be gambling) |
 
-- Every casino game has a house edge (blackjack ~1–2% played sensibly, the
-  coin flip 3%). The casino is variance you choose, never free money.
-- Medical bill: $250 + $50 × day per KO. Hitting a pedestrian with the RV:
-  $500.
+The realistic haul is roughly 40–60% of face value: the clock, stops on mesa
+tops you have to climb to, loot that breaks on the way down, and loot that
+slides around in the RV. Day 5 is beyond that unless you banked surplus or got
+lucky. The numbers need real playtests with real friends before anyone trusts
+them (confidence: moderate).
+
+- Every casino game has a house edge (blackjack about 1–2% played sensibly,
+  the coin flip 3%). The casino is variance you choose, never free money.
+- Medical bill: $250 + $50 × day per KO, unless a friend picks you up.
+  Getting run over by your own RV: $500. RV on its back for 7 seconds: an
+  $800 tow.
 - Missing a payment: the Repo Man takes everything in the bank toward it,
   plus a part.
 
@@ -354,6 +362,12 @@ Things the systems will produce without being scripted:
 - The winch yanking the RV off the side of the grade.
 - Carrying your KO'd friend back to the RV like a sack of potatoes.
 - The navigator holding the map upside down, figuratively and literally.
+- The driver gets up to grab a snack and the RV keeps rolling. Nobody is
+  driving. (A driverless RV coasts; the parking brake only catches near a
+  stop.)
+- Riding in the back when the driver brake-checks, or rams the boulder:
+  everyone standing gets thrown forward. Hard enough and it's a KO and a
+  bill.
 
 ## 11. What we cut, and why
 
@@ -408,6 +422,34 @@ Things the systems will produce without being scripted:
 | **M2: content** | Route forks, more biomes (red canyon, pine mountains, the Strip), the ledge road, the washout gap, rockfall, about 30 loot items, slots, physical roulette chips, store items, more RV parts, a fuel can loop, flat tires |
 | **M3: feel** | Real ragdolls, a procedural radio with stations in the RV, better animation, weather (dust storms kill visibility, so there's more talking), night driving with headlights |
 | **M4: ship** | Steam build, Steam networking, achievements, daily trip seed leaderboard ("lowest medical bills"), a $5–8 price point |
+
+### What M1 actually contains (as built, October 2026)
+
+All of this is implemented and covered by `test/logic.mjs` (31 server checks
+over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
+
+- Seeded 5-day runs. Each leg has a camp, a road through canyon walls, mesas,
+  4–8 stops, 2–5 obstacles (grade, mud, boulder, ranger gate), billboards and
+  a cow skull as map landmarks, and a town.
+- The RV on raycast wheels with a walkable interior, seats, a door, bunks,
+  a dash odometer and clock, and a front winch with a payout spool, anchors
+  and a reel. Riders stay glued to it on every client, and it can run you
+  over.
+- First-person bodies: walk, sprint, jump, crouch, stamina climbing with
+  lunges and mantling, carrying weight shrinks your stamina bar, falls cause
+  KOs, friends revive you.
+- Loot: 15 item types with mass, value, fragility and carry class.
+  Spring-force grabbing, so co-carrying emerges. Throwing. Impact damage. The
+  pawn counter with appraisal.
+- Casino: body-vote blackjack and double-or-nothing. Store: walkie-talkies,
+  energy drinks, bungee tie-downs.
+- The Repo Man, strikes, parts removal, night receipts, sleeping, and both
+  endings.
+- Proximity voice with occlusion, KO muffling, and the walkie radio path.
+
+Not yet built (M2+): route forks, the ledge road, the washout gap and planks,
+rockfall, slots, physical roulette chips, odds-shifting items, more RV parts,
+fuel, weather, night driving beyond headlights, the radio, real ragdolls.
 
 ## 14. Risks
 

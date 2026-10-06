@@ -300,7 +300,7 @@ function skull(d) {
 
 function towTruck(t) {
   const g = new THREE.Group();
-  const body = flat('#1d1d24'), chrome = flat('#c8ccd2', { metalness: 0.7, roughness: 0.3 });
+  const body = flat('#4a5160'), chrome = flat('#c8ccd2', { metalness: 0.7, roughness: 0.3 });
   const cab = new THREE.Mesh(new THREE.BoxGeometry(2.4, 1.9, 2.2), body); cab.position.set(0, 1.55, 2.0);
   const bed = new THREE.Mesh(new THREE.BoxGeometry(2.4, 0.5, 4.2), body); bed.position.set(0, 0.95, -1.2);
   const glass = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.7, 0.05), flat('#2d3b4f', { metalness: 0.4, roughness: 0.2 })); glass.position.set(0, 2.0, 3.12);
@@ -311,7 +311,7 @@ function towTruck(t) {
     const w = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.55, 0.4, 10), flat('#151515'));
     w.rotation.z = Math.PI / 2; w.position.set(x, 0.55, z); g.add(w);
   }
-  const lbl = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.6), new THREE.MeshBasicMaterial({ map: canvasTex(textCanvas(['REPO'], { w: 256, h: 80, bg: '#1d1d24', fg: '#f2c14e' })) }));
+  const lbl = new THREE.Mesh(new THREE.PlaneGeometry(2.0, 0.6), new THREE.MeshBasicMaterial({ map: canvasTex(textCanvas(['REPO'], { w: 256, h: 80, bg: '#4a5160', fg: '#f2c14e' })) }));
   lbl.position.set(1.21, 1.6, 2.0); lbl.rotation.y = Math.PI / 2;
   g.add(lbl);
   const beacon = new THREE.Mesh(new THREE.BoxGeometry(0.8, 0.15, 0.25), new THREE.MeshBasicMaterial({ color: 0xffa500 }));
@@ -424,8 +424,8 @@ export function buildWorld(W) {
   npc({ ...T.pawnKeeper, ry: T.pawnKeeper.ry }, '#c0392b', { hatIndex: 2, skinIndex: 3 }, 'HONEST ED');
   npc({ ...T.clerk, ry: T.clerk.ry }, '#2e86ab', { hatIndex: 0, skinIndex: 4 }, 'CLERK');
   npc({ ...T.bj.dealer, ry: T.bj.ry + Math.PI }, '#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }, 'THE DEALER');
-  const repoSpot = { x: T.repo.x + 2.2, y: T.repo.y, z: T.repo.z - 0.5, ry: -Math.PI / 2 };
-  const repo = npc(repoSpot, '#1d1d24', { hatIndex: 0, skinIndex: 1, scale: 1.25 }, 'THE REPO MAN');
+  const repoSpot = { x: T.repo.x - 2.4, y: T.repo.y, z: T.repo.z + 0.6, ry: -Math.PI / 2 };   // street side, facing you
+  const repo = npc(repoSpot, '#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }, 'THE REPO MAN');
   // sunglasses
   const shades = new THREE.Mesh(new THREE.BoxGeometry(4, 5, 30), flat('#0a0a0a'));
   shades.position.set(16.5, 4, 0);
@@ -434,7 +434,7 @@ export function buildWorld(W) {
 
   // pawn counter appraisal + casino furniture
   const pawnLabel = labelSprite('', '#7CFC00', 44);
-  pawnLabel.position.set(T.pawn.x, T.pawn.y + 1.0, T.pawn.z);
+  pawnLabel.position.set(T.pawn.x, T.pawn.y + 1.95, T.pawn.z);
   pawnLabel.scale.set(2.6, 0.5, 1);
   group.add(pawnLabel);
 

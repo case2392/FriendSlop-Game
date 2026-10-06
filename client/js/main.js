@@ -213,7 +213,10 @@ function computeTarget() {
     return null;
   }
   if (hit.kind === 'rv') {
-    const u = hit.use;
+    let u = hit.use;
+    // the whole lower front of the RV is "the winch" if you're standing outside in front of it
+    const lh = toLocal(S.rv.p, S.rv.q, hit.point);
+    if (!u && !me.par && lh.z > 3.8 && lh.y < 1.1) u = 'winch';
     if (u === 'seat0') return { kind: 'rvuse', use: 'seat0', label: '[E] DRIVE' };
     if (u === 'seat1') return { kind: 'rvuse', use: 'seat1', label: '[E] ride shotgun' };
     if (u === 'door') return { kind: 'rvuse', use: 'door', label: '[E] open the door' };
@@ -443,7 +446,7 @@ function onEvent(e) {
     case 'buzz': sfx.buzz(); break;
     case 'slip': if (e.by === S.selfId) { me.holding = null; toast('It slipped out of your hands.', '#ffb4a2', 2); } break;
     case 'throw': break;
-    case 'bet': (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
+    case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
     case 'flip': sfx.coin(); break;
     case 'repo': sfx.repo(); shake(0.4); break;
     case 'thud': sfx.thunk(1); break;
@@ -530,6 +533,7 @@ function positional(at, fn) {
 // ---- voice ui (dock + settings panel) ---------------------------------------------------------
 
 const VV = voice.V;
+window.__nmdVoice = VV;
 function renderVoiceUI() {
   $('voiceJoinBtn').classList.toggle('hidden', VV.on);
   $('voiceJoinBtn').disabled = VV.connecting;
@@ -581,6 +585,7 @@ function frame(now) {
 S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.y, dz = z - e.z; me.yaw = Math.atan2(dx, dz); me.pitch = -Math.atan2(dy, Math.hypot(dx, dz)); };
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
 S.target = () => target;
+S.send = m => net.send(m);
 requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
@@ -638,6 +643,7 @@ requestAnimationFrame(frame);
     else if (e.k === 'lunge') sfx.lunge();
     else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
     else if (e.k === 'mantle') sfx.grab();
+    else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
     else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
     else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
   }

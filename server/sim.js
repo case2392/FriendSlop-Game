@@ -27,6 +27,7 @@ const GROUPS = {
   rv: grp(G_RV, G_WORLD | G_RV | G_PROP),
   prop: grp(G_PROP, 0xffff),
   hook: grp(G_HOOK, G_WORLD | G_PROP),
+  flimsy: grp(G_WORLD, G_PROP | G_HOOK),     // cacti: they stop people, not a 3-ton RV
 };
 
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
@@ -104,9 +105,11 @@ export class Sim {
         .setTranslation(s.x, s.y, s.z).setRotation(yawQ(s.ry)).setFriction(0.8)
         .setCollisionGroups(GROUPS.world), this.statics);
     }
+    this.flimsy = new Set();
     for (const c of W.cyls) {
-      this.world.createCollider(RAPIER.ColliderDesc.cylinder(c.hh, c.r)
-        .setTranslation(c.x, c.y, c.z).setCollisionGroups(GROUPS.world), this.statics);
+      const col = this.world.createCollider(RAPIER.ColliderDesc.cylinder(c.hh, c.r)
+        .setTranslation(c.x, c.y, c.z).setCollisionGroups(c.mat === 'cactus' ? GROUPS.flimsy : GROUPS.world), this.statics);
+      if (c.mat === 'cactus') this.flimsy.add(col.handle);
     }
     for (const g of W.gates) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(g.hx, g.hy, g.hz)
@@ -604,7 +607,7 @@ export class Sim {
 
     this.stepWinch(dt, players);
 
-    v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle);
+    v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle));
     this.world.step(this.eq);
 
     // impacts: knock value off the loot

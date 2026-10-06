@@ -189,9 +189,13 @@ export class RVView {
     const blk = box(0.12, 0.16, 0.12, '#333', 0, 0.14, 0);
     this.hook.add(hk, blk);
     scene.add(this.hook);
-    this.cablePts = Array.from({ length: 16 }, () => new THREE.Vector3());
-    this.cableGeo = new THREE.BufferGeometry().setFromPoints(this.cablePts);
-    this.cable = new THREE.Line(this.cableGeo, new THREE.LineBasicMaterial({ color: 0x222222 }));
+    // the cable: a chain of thin cylinders (a 1px line disappears at distance)
+    this.cablePts = Array.from({ length: 17 }, () => new THREE.Vector3());
+    this.cable = new THREE.Group();
+    const segGeo = new THREE.CylinderGeometry(0.06, 0.06, 1, 6).translate(0, 0.5, 0).rotateX(Math.PI / 2);
+    const segMat = flat('#ff8c1a', { emissive: new THREE.Color('#5a2a00') });   // a bright tow strap reads at 40 m
+    this.cableSegs = [];
+    for (let i = 0; i < 16; i++) { const m = new THREE.Mesh(segGeo, segMat); m.castShadow = true; this.cable.add(m); this.cableSegs.push(m); }
     this.cable.frustumCulled = false;
     scene.add(this.cable);
   }
@@ -246,7 +250,12 @@ export class RVView {
         this.cablePts[i].lerpVectors(wp, this.hook.position, t);
         this.cablePts[i].y -= Math.sin(t * Math.PI) * sag;
       }
-      this.cableGeo.setFromPoints(this.cablePts);
+      for (let i = 0; i < this.cableSegs.length; i++) {
+        const a = this.cablePts[i], b = this.cablePts[i + 1], m = this.cableSegs[i];
+        m.position.copy(a);
+        m.scale.set(1, 1, Math.max(0.001, a.distanceTo(b)));
+        m.lookAt(b);
+      }
       this.cable.visible = true;
     }
     this.hook.visible = true;

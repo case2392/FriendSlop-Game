@@ -238,8 +238,8 @@ export class Hands {
     const palm = new THREE.Mesh(new THREE.SphereGeometry(0.062, 9, 7).scale(1, 0.75, 1.25), glove);
     const thumb = new THREE.Mesh(new THREE.SphereGeometry(0.032, 7, 5).scale(1, 1, 1.6), glove);
     thumb.position.set(-side * 0.065, 0.015, -0.02);
-    const c = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.055, 0.06, 9), cuff);
-    c.rotation.x = Math.PI / 2; c.position.z = 0.085;
+    const c = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.012, 5, 12), cuff);
+    c.position.z = 0.07;
     h.add(palm, thumb, c);
     h.userData.side = side;
     return h;

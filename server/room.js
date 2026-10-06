@@ -413,7 +413,8 @@ export class Room {
     this.sim.release(p.id);
     this.sim.dropHook(p.id);
     this.stats.kos++;
-    this.toast(`💫 ${p.name} ${m.why === 'fall' ? 'ate dirt' : m.why === 'rv' ? 'got run over' : 'is down'}. Hold E on them to pick them up.`, '#ffb4a2', 4);
+    const how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)' }[m.why] || 'is down';
+    this.toast(`💫 ${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
   }
 
   onWake(p) {

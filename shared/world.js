@@ -544,7 +544,7 @@ export function generateLeg(seed, day) {
   }
   // the Repo Man's tow truck parks out front
   town.repo = { x: 7.5, z: T + 24, y: townY, ry: Math.PI };
-  use('pay', 7.5 + 1.6, townY + 1.2, T + 24, 'Pay the Repo Man', null, 0.6);
+  use('pay', 7.5 - 2.4, townY + 1.2, T + 24.6, 'Pay the Repo Man', null, 0.6);
   // RV lot + campfire
   town.lot = { x: 0, z: T + 138, yaw: 0 };
   town.fire = { x: -9, z: T + 150 };

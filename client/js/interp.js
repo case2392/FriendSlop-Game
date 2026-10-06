@@ -85,7 +85,12 @@ export class Interp {
     if (!b) return null;
     const [a, c, k] = b;
     const wheels = a.wheels.map((w, i) => (i % 2 === 1 ? c.wheels[i] : lerp(w, c.wheels[i], k)));
+    // acceleration over this snapshot segment, from server timestamps — frame-rate independent
+    const span = (c.tm - a.tm) / 1000;
+    const acc = a === c || span <= 0 || span > 0.5 ? { x: 0, y: 0, z: 0 }
+      : { x: (c.v.x - a.v.x) / span, y: (c.v.y - a.v.y) / span, z: (c.v.z - a.v.z) / span };
     return {
+      acc,
       p: { x: lerp(a.p.x, c.p.x, k), y: lerp(a.p.y, c.p.y, k), z: lerp(a.p.z, c.p.z, k) },
       q: nlerpQ(a.q, c.q, k),
       v: { x: lerp(a.v.x, c.v.x, k), y: lerp(a.v.y, c.v.y, k), z: lerp(a.v.z, c.v.z, k) },
