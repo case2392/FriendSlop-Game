@@ -3,6 +3,7 @@
 import './terrain.js';
 import './nature.js';
 import './architecture.js';
+import './roadside.js';
 import './vehicle.js';
 import './characters.js';
 import './props.js';

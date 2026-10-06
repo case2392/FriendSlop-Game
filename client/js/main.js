@@ -6,7 +6,7 @@ import { RV_DIM, RV_SEATS, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.j
 import * as net from './net.js';
 import * as voice from './voice.js';
 import { initAudio, sfx, setLoops } from './sfx.js';
-import { THREE, initGfx, scene, camera, render, setTimeOfDay, updateSun, labelSprite, flat } from './gfx.js';
+import { THREE, initGfx, scene, camera, renderer, render, setTimeOfDay, updateSun, setBiome, labelSprite, flat } from './gfx.js';
 import { initPhys, LocalWorld, G } from './phys.js';
 import { Me } from './player.js';
 import { Interp } from './interp.js';
@@ -319,6 +319,7 @@ async function buildDay(m) {
   S.door = !!m.door;
   S.gatesOpen = new Set();
   S.lw = new LocalWorld(W, S.parts);
+  setBiome(W.biome);
   S.wv = buildWorld(W);
   scene.add(S.wv.group);
   S.mapCv = mapCanvas(W);
@@ -586,6 +587,7 @@ S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
 S.target = () => target;
 S.send = m => net.send(m);
+S.renderer = () => renderer;   // tools read draw-call counts
 requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;

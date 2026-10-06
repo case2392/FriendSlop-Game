@@ -1,10 +1,14 @@
-// Structures: buildings, stops' furniture, signs, the ranger gates, the town
-// (pawn shop, store, casino furniture, the Repo Man and his truck), NPCs.
+// Town and buildings: every W.buildings entry (gas station, pawn shop, store,
+// casino; their statics carry s.bld), all W.signs, street lamps, the town's
+// furniture and interactables (pawn counter, store shelf, casino tables and
+// machines), the NPCs, the Repo Man and his truck.
+// Roadside stuff (POI furniture, gates, anchors, camp) is in roadside3d.js.
 // Owned by the architecture art pass.
-// API: buildStructures(W) -> { group, near, gates, npcs, pawnLabel, bjLabel, flipLabel,
+// API: buildStructures(W) -> { group, near, npcs, pawnLabel, bjLabel, flipLabel,
 //      cardGroup, coin, hitPad, standPad, update(dt, t, camPos) } and PREVIEW.
 import { THREE, canvasTex, flat, textCanvas, labelSprite, roughen, shadowy } from './gfx.js';
 import { buildCharacter } from './people.js';
+import { isRoadside } from './roadside3d.js';
 
 const MAT_COLORS = {
   floor: '#cfc6b8', roof: '#7a4b3a', wood: '#8a5a30', metal: '#c9ccd1', pump: '#d64545', felt: '#1f7a4d',
@@ -14,7 +18,7 @@ const MAT_COLORS = {
 
 function buildStatics(W, group) {
   for (const s of W.statics) {
-    if (s.mat === 'invisible') continue;
+    if (s.mat === 'invisible' || isRoadside(s)) continue;
     const color = s.col || MAT_COLORS[s.mat] || '#cccccc';
     const opts = s.mat === 'machine' ? { emissive: new THREE.Color(color).multiplyScalar(0.25) } : s.mat === 'casino' ? { emissive: new THREE.Color('#2a0d2e') } : {};
     const m = new THREE.Mesh(new THREE.BoxGeometry(s.hx * 2, s.hy * 2, s.hz * 2), flat(color, opts));
@@ -29,18 +33,6 @@ function buildStatics(W, group) {
       trim.rotation.y = s.ry;
       group.add(trim);
     }
-  }
-  for (const c of W.cyls) {
-    if (c.mat !== 'post') continue;
-    const m = new THREE.Mesh(new THREE.CylinderGeometry(c.r, c.r * 1.1, c.hh * 2, 7), flat('#6b4a2e'));
-    m.position.set(c.x, c.y, c.z);
-    shadowy(m);
-    group.add(m);
-    // anchor ring on top
-    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.16, 0.04, 6, 12), flat('#f2c14e', { metalness: 0.6 }));
-    ring.position.set(c.x, c.y + c.hh - 0.15, c.z);
-    ring.rotation.x = Math.PI / 2;
-    group.add(ring);
   }
 }
 
@@ -126,62 +118,18 @@ function button(u, color, text) {
 export function buildStructures(W) {
   const group = new THREE.Group();
   const near = [];
-  const gates = new Map();
   const npcs = [];
   buildStatics(W, group);
   buildSigns(W, group, near);
 
   for (const d of W.decor) {
-    if (d.k === 'canopy') {
-      const c = new THREE.Mesh(new THREE.BoxGeometry(8, 0.3, 4), flat('#f4f1ea'));
-      c.position.set(d.x, d.y, d.z); c.rotation.y = d.ry; shadowy(c); group.add(c);
-      const stripe = new THREE.Mesh(new THREE.BoxGeometry(8.05, 0.12, 4.05), flat('#d64545'));
-      stripe.position.set(d.x, d.y - 0.1, d.z); stripe.rotation.y = d.ry; group.add(stripe);
-    } else if (d.k === 'umbrella') {
-      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.2, 5), flat('#ddd'));
-      pole.position.set(d.x, d.y + 1.1, d.z);
-      const top = new THREE.Mesh(new THREE.ConeGeometry(1.4, 0.5, 8), flat('#e84a5f'));
-      top.position.set(d.x, d.y + 2.3, d.z);
-      group.add(shadowy(pole), shadowy(top));
-    } else if (d.k === 'plane') {
-      const nose = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.4, 8), flat('#f1f1f1'));
-      const s = Math.sin(d.ry), c = Math.cos(d.ry);
-      nose.position.set(d.x + s * 3.9, d.y + 0.7, d.z + c * 3.9);
-      nose.rotation.set(Math.PI / 2, 0, 0); nose.rotation.order = 'YXZ'; nose.rotation.y = d.ry;
-      const fin = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.3, 1.0), flat('#d83a3a'));
-      fin.position.set(d.x - s * 2.9, d.y + 1.8, d.z - c * 2.9); fin.rotation.y = d.ry;
-      group.add(shadowy(nose), shadowy(fin));
-    } else if (d.k === 'lamp') {
+    if (d.k === 'lamp') {
       const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.09, 5, 6), flat('#3c3c44'));
       pole.position.set(d.x, d.y + 2.5, d.z);
       const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.18, 0.3), new THREE.MeshBasicMaterial({ color: 0xfff1c1 }));
       head.position.set(d.x, d.y + 5.0, d.z);
       group.add(shadowy(pole), head);
-    } else if (d.k === 'wheels') {
-      // semi trailer wheels poking out
     }
-  }
-
-  for (const g of W.gates) {
-    const gg = new THREE.Group();
-    const bars = new THREE.Group();
-    const steel = flat('#c9c3b5', { metalness: 0.5, roughness: 0.5 });
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(g.hx * 2, 0.16, 0.16), steel);
-    rail.position.y = g.hy - 0.1;
-    const rail2 = rail.clone(); rail2.position.y = -g.hy + 0.25;
-    bars.add(rail, rail2);
-    for (let x = -g.hx + 0.4; x < g.hx; x += 0.55) {
-      const b = new THREE.Mesh(new THREE.BoxGeometry(0.07, g.hy * 2, 0.07), steel);
-      b.position.x = x;
-      bars.add(b);
-    }
-    const stripe = new THREE.Mesh(new THREE.BoxGeometry(g.hx * 2, 0.5, 0.2), new THREE.MeshStandardMaterial({ map: canvasTex(stripes()), roughness: 0.6 }));
-    stripe.position.y = 0.2;
-    bars.add(stripe);
-    gg.add(bars);
-    gg.position.set(g.x, g.y, g.z);
-    group.add(shadowy(gg));
-    gates.set(g.id, { bars, open: 0, target: 0, hx: g.hx });
   }
 
   const T = W.town;
@@ -258,12 +206,7 @@ export function buildStructures(W) {
 
   // interactable bits
   for (const u of W.uses) {
-    if (u.kind === 'keypad') {
-      const k = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.44, 0.08), new THREE.MeshStandardMaterial({ map: canvasTex(keypadCanvas()), roughness: 0.6 }));
-      k.position.set(u.x, u.y, u.z);
-      k.rotation.y = Math.PI;
-      group.add(k);
-    } else if (u.kind === 'pawnBell') {
+    if (u.kind === 'pawnBell') {
       const b = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), flat('#f2c14e', { metalness: 0.8, roughness: 0.25 }));
       b.position.set(u.x, u.y - 0.08, u.z);
       group.add(b);
@@ -296,35 +239,12 @@ export function buildStructures(W) {
   }
 
   return {
-    group, near, gates, npcs,
+    group, near, npcs,
     update(dt, t, camPos) {
       for (const n of near) n.mesh.visible = Math.hypot(camPos.x - n.x, camPos.y - n.y, camPos.z - n.z) < n.r;
-      for (const g of gates.values()) {
-        g.open += (g.target - g.open) * Math.min(1, dt * 1.5);
-        g.bars.position.x = g.open * g.hx * 1.9;
-      }
     },
     pawnLabel, bjLabel, flipLabel, cardGroup, coin, hitPad, standPad,
   };
-}
-
-function stripes() {
-  const cv = document.createElement('canvas');
-  cv.width = 256; cv.height = 32;
-  const g = cv.getContext('2d');
-  for (let i = 0; i < 16; i++) { g.fillStyle = i % 2 ? '#d62828' : '#ffffff'; g.fillRect(i * 16, 0, 16, 32); }
-  return cv;
-}
-
-function keypadCanvas() {
-  const cv = document.createElement('canvas');
-  cv.width = 128; cv.height = 160;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#2b2b2b'; g.fillRect(0, 0, 128, 160);
-  g.fillStyle = '#7CFC00'; g.fillRect(12, 10, 104, 26);
-  g.fillStyle = '#ddd';
-  for (let r = 0; r < 4; r++) for (let c = 0; c < 3; c++) { g.fillRect(14 + c * 36, 46 + r * 28, 28, 22); }
-  return cv;
 }
 
 function carpetCanvas() {

@@ -7,8 +7,11 @@ import { has } from './paint/index.js';
 const q = new URLSearchParams(location.search);
 const errEl = document.getElementById('err');
 try {
-  const mods = await Promise.all(['./nature3d.js', './town3d.js', './people.js', './rv3d.js', './props3d.js'].map(m => import(m)));
-  const REG = Object.assign({}, ...mods.map(m => m.PREVIEW || {}));
+  // one module at a time, so a half-edited module elsewhere doesn't block your preview
+  const files = ['./nature3d.js', './roadside3d.js', './town3d.js', './people.js', './rv3d.js', './props3d.js'];
+  const settled = await Promise.allSettled(files.map(m => import(m)));
+  settled.forEach((r, i) => { if (r.status === 'rejected') console.warn(`preview: ${files[i]} failed to load: ${r.reason}`); });
+  const REG = Object.assign({}, ...settled.filter(r => r.status === 'fulfilled').map(r => r.value.PREVIEW || {}));
   const names = (q.get('assets') || Object.keys(REG).slice(0, 6).join(',')).split(',').filter(Boolean);
   const biome = q.get('biome') || 'meadow';
   const hour = Number(q.get('hour') || 10);
