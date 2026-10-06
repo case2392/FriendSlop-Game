@@ -1,0 +1,579 @@
+// The road. Every day is a fresh leg generated from (seed, day): the server
+// and every client run this same code and get the same world, down to the
+// last float — no meshes ever cross the network.
+//
+//   z < 0            the morning camp (the RV, a campfire, the crew)
+//   0 .. LEN         the road: canyon walls, mesas, obstacles, stops with loot
+//   LEN .. LEN+TOWN  the town: pawn shop, casino, store, the Repo Man, RV lot
+
+import { mulberry32, fbm, noise2, smoothstep, clamp, lerp } from './rng.js';
+import { LOOT, POI_LOOT } from './loot.js';
+
+export const CELL = 2.5;
+export const HALF_W = 150;
+export const CAMP_LEN = 90;
+export const TOWN_LEN = 175;
+const GRADE_DEG = 35;
+
+const OBSTACLE_PLAN = [
+  ['gate', 'grade'],
+  ['mud', 'boulder', 'grade'],
+  ['gate', 'mud', 'boulder', 'grade'],
+  ['boulder', 'gate', 'mud', 'grade'],
+  ['mud', 'gate', 'boulder', 'grade', 'grade'],
+];
+
+const POI_WEIGHTS = [['gas', 3], ['semi', 3], ['yard', 3], ['crash', 2], ['junk', 2], ['dino', 1]];
+
+const BILLBOARDS = [
+  ['LOST WAGES', '— 900 MILES —', '#e8473f'],
+  ['DESPERATE?', 'EZ LOANS NO QUESTIONS', '#2d7dd2'],
+  ['LUCKY SLOP', 'LOOSEST SLOTS IN THE DESERT', '#b8336a'],
+  ['GAS $8.99', 'JESUS SAVES · WE DON\'T', '#f4a259'],
+  ['SLOPMASTER RVs', 'NO MONEY DOWN!!!', '#3fae52'],
+  ['THE REPO MAN', 'KNOWS WHERE YOU PARK', '#333333'],
+  ['WORLD\'S LARGEST', 'GARDEN GNOME — EXIT 4', '#9b5de5'],
+];
+
+function pickWeighted(rng, table) {
+  const total = table.reduce((s, [, w]) => s + w, 0);
+  let r = rng() * total;
+  for (const [k, w] of table) { if ((r -= w) < 0) return k; }
+  return table[0][0];
+}
+
+export function generateLeg(seed, day) {
+  const rng = mulberry32((seed ^ Math.imul(day, 0x9E3779B1)) >>> 0);
+  const S = (seed + day * 7919) % 1000003;
+  const LEN = 820 + day * 80;
+  const Z0 = -CAMP_LEN, Z1 = LEN + TOWN_LEN;
+  const TOWN_Z = LEN;
+
+  // ---- the road's line --------------------------------------------------------
+  const ax1 = 16 + rng() * 14, l1 = 70 + rng() * 40, p1 = rng() * 6.28;
+  const ax2 = 5 + rng() * 6, l2 = 26 + rng() * 14, p2 = rng() * 6.28;
+  const taper = z => smoothstep(0, 70, z) * (1 - smoothstep(LEN - 70, LEN, z));
+  const roadXraw = z => ax1 * Math.sin(z / l1 + p1) + ax2 * Math.sin(z / l2 + p2);
+
+  // ---- obstacles along the way -------------------------------------------------
+  const plan = OBSTACLE_PLAN[Math.min(day, OBSTACLE_PLAN.length) - 1];
+  const obstacles = [];
+  const span = LEN - 330;
+  plan.forEach((type, i) => {
+    const z = Math.round(165 + span * (i + 0.5) / plan.length + (rng() - 0.5) * 40);
+    obstacles.push({ type, z, id: i });
+  });
+
+  // straighten the road through obstacles (and the town gate) so they're fair
+  const calm = z => {
+    let c = 1;
+    for (const o of obstacles) c = Math.min(c, smoothstep(18, 55, Math.abs(z - (o.z + (o.type === 'grade' ? 10 : 0)))));
+    return c;
+  };
+  // integrate a calmed road so it doesn't kink: sample roadX on a 1 m grid
+  const nRoad = Z1 - Z0 + 1;
+  const RX = new Float64Array(nRoad), RY = new Float64Array(nRoad);
+  for (let i = 0; i < nRoad; i++) {
+    const z = Z0 + i;
+    RX[i] = roadXraw(z) * taper(z);
+  }
+  // smooth through calm zones: blend toward a moving average
+  {
+    const tmp = RX.slice();
+    for (let i = 0; i < nRoad; i++) {
+      const z = Z0 + i;
+      const c = calm(z);
+      if (c >= 1) continue;
+      let s = 0, n = 0;
+      for (let k = -45; k <= 45; k++) { const j = clamp(i + k, 0, nRoad - 1); s += tmp[j]; n++; }
+      RX[i] = lerp(s / n, tmp[i], c);
+    }
+  }
+
+  // height profile: gentle hills, then the grades as hard steps
+  const tanG = Math.tan(GRADE_DEG * Math.PI / 180);
+  for (const o of obstacles) {
+    if (o.type !== 'grade') continue;
+    o.h = 8.5 + day * 0.9 + rng() * 1.5;
+    o.z0 = o.z;
+    o.z1 = o.z + o.h / tanG + 0.5;
+  }
+  {
+    let y = 0;
+    for (let i = 0; i < nRoad; i++) {
+      const z = Z0 + i;
+      let slope = 0.045 * fbm(z / 110, 3.3, S + 5, 2) * taper(z) * calm(z);
+      // the grade, with a rounded toe and crest so an RV can get over the lip (breakover angle)
+      for (const o of obstacles) if (o.type === 'grade' && z >= o.z0 - 4 && z < o.z1 + 6) slope = Math.max(slope, tanG * smoothstep(o.z0 - 4, o.z0 + 2, z) * (1 - smoothstep(o.z1 - 3, o.z1 + 6, z)));
+      y += slope;
+      RY[i] = y;
+    }
+  }
+  const sampleArr = (A, z) => {
+    const f = clamp(z - Z0, 0, nRoad - 1.0001);
+    const i = Math.floor(f);
+    return A[i] + (A[i + 1] - A[i]) * (f - i);
+  };
+  const roadX = z => sampleArr(RX, z);
+  const roadY = z => sampleArr(RY, z);
+  const townY = roadY(TOWN_Z);
+
+  // ---- canyon walls -------------------------------------------------------------
+  const narrows = obstacles.filter(o => o.type === 'boulder' || o.type === 'gate');
+  const flatZone = z => Math.max(1 - smoothstep(-25, 15, z), smoothstep(LEN - 15, LEN + 25, z));
+  function wallDist(side, z) {
+    let wd = 36 + 16 * fbm(z / 140, side * 7.7, S + 3, 2);
+    for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 6.2, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
+    return lerp(wd, 85, flatZone(z));
+  }
+  function wallH(side, z) {
+    let wh = 15 + 8 * fbm(z / 90, side * 3.1 + 40, S + 9, 2);
+    for (const o of narrows) if (o.type === 'gate') wh = lerp(wh, 9.5, 1 - smoothstep(20, 45, Math.abs(z - o.z)));
+    return wh;
+  }
+
+  // ---- mesas (and their crash sites) --------------------------------------------
+  const mesas = [];
+
+  // ---- points of interest ------------------------------------------------------
+  const pois = [];
+  const nPoi = Math.min(8, 4 + day);
+  let guard = 0;
+  while (pois.length < nPoi && guard++ < 400) {
+    const z = 60 + rng() * (LEN - 110);
+    if (obstacles.some(o => Math.abs(z - o.z) < 48)) continue;
+    if (pois.some(p => Math.abs(z - p.z) < 55)) continue;
+    const type = pickWeighted(rng, POI_WEIGHTS);
+    const side = rng() < 0.5 ? -1 : 1;
+    const wd = Math.min(wallDist(side > 0 ? 1 : 0, z), 40);
+    const off = type === 'crash' ? Math.min(wd - 8, 20 + rng() * 4) : Math.min(wd - 9, 14 + rng() * 6);
+    if (off < 11) continue;
+    const p = { type, z, side, off, id: pois.length, x: 0 };
+    if (type === 'crash') {
+      p.mesa = { r: 6.5 + rng() * 1.5, h: 7 + rng() * 3.5 + day * 0.4 };
+      mesas.push(p);
+    }
+    pois.push(p);
+  }
+
+  // ---- the height function -------------------------------------------------------
+  function H(x, z) {
+    const rx = roadX(z), ry = roadY(z);
+    const d = x - rx, ad = Math.abs(d);
+    const flat = flatZone(z);
+    let h = ry;
+    // road crown + shallow ditches
+    h -= 0.22 * smoothstep(4.6, 6.4, ad) * (1 - smoothstep(8, 12, ad)) * (1 - flat);
+    // valley floor bumps
+    h += fbm(x / 34, z / 34, S + 11, 3) * 1.7 * smoothstep(7, 22, ad) * (1 - flat);
+    // canyon walls
+    const side = d >= 0 ? 1 : 0;
+    const wd = wallDist(side, z);
+    const jag = fbm(x / 9, z / 9, S + 21, 2) * 2.4;
+    const t = smoothstep(wd, wd + 5.5, ad + jag);
+    h += t * (wallH(side, z) + fbm(x / 22, z / 22, S + 31, 2) * 3.2);
+    // beyond the rim: rolling plateau, then the world's edge rises
+    h += smoothstep(wd + 8, wd + 60, ad) * 6 * (fbm(x / 60, z / 60, S + 41, 2) + 0.6);
+    h += smoothstep(HALF_W - 22, HALF_W - 2, Math.abs(x)) * 30;
+    // flat pads under the stops
+    for (const p of pois) {
+      if (p.type === 'crash') continue;
+      const dp = Math.hypot(x - p.x, z - p.z);
+      if (dp < 15) h = lerp(h, p.padY, smoothstep(15, 9.5, dp));
+    }
+    // mesas
+    for (const p of mesas) {
+      const mx = p.x, mz = p.z;
+      const dm = Math.hypot(x - mx, z - mz) + noise2(x / 3, z / 3, S + 51) * 0.9;
+      const ff = smoothstep(p.mesa.r + 3.2, p.mesa.r, dm);
+      if (ff > 0) {
+        const top = p.mesa.base + p.mesa.h + fbm(x / 6, z / 6, S + 61, 2) * 0.35;
+        h = Math.max(h, lerp(h, top, ff));
+      }
+    }
+    return h;
+  }
+  // POI pads are flattened so buildings sit on the ground; mesa centers need roadX
+  for (const p of pois) { p.x = roadX(p.z) + p.side * p.off; p.padY = roadY(p.z) + 0.05; }
+  for (const p of mesas) {
+    p.mesa.base = roadY(p.z) - 0.2;
+  }
+
+  // ---- the heightfield ------------------------------------------------------------
+  const X0 = -HALF_W;
+  const nx = Math.round((2 * HALF_W) / CELL);
+  const nz = Math.ceil((Z1 - Z0) / CELL);
+  const heights = new Float32Array((nx + 1) * (nz + 1));
+  for (let ix = 0; ix <= nx; ix++) {
+    const x = X0 + ix * CELL;
+    for (let iz = 0; iz <= nz; iz++) {
+      heights[ix * (nz + 1) + iz] = H(x, Z0 + iz * CELL);
+    }
+  }
+
+  // Height exactly as the physics engine sees it (Rapier splits each cell
+  // along the (+x,-z)/(-x,+z) diagonal).
+  function heightAt(x, z) {
+    const fx = clamp((x - X0) / CELL, 0, nx - 1e-6), fz = clamp((z - Z0) / CELL, 0, nz - 1e-6);
+    const ix = Math.floor(fx), iz = Math.floor(fz);
+    const u = fx - ix, v = fz - iz;
+    const h00 = heights[ix * (nz + 1) + iz], h10 = heights[(ix + 1) * (nz + 1) + iz];
+    const h01 = heights[ix * (nz + 1) + iz + 1], h11 = heights[(ix + 1) * (nz + 1) + iz + 1];
+    if (u + v <= 1) return h00 + u * (h10 - h00) + v * (h01 - h00);
+    return h11 + (1 - u) * (h01 - h11) + (1 - v) * (h10 - h11);
+  }
+
+  // ---- static stuff: buildings, posts, gates, signs ---------------------------------
+  const statics = [];       // boxes with colliders: {x,y,z,hx,hy,hz,ry,mat,col}
+  const cyls = [];          // cylinders with colliders: {x,y,z,r,hh,mat}
+  const decor = [];         // visual-only bits the renderer knows how to draw
+  const signs = [];         // text panels: {x,y,z,ry,w,h,lines,bg,fg,flat,near}
+  const uses = [];          // interactables: {id,kind,x,y,z,r,label,arg}
+  const anchors = [];       // winch anchor points: {x,y,z,id}
+  const mud = [];
+  const gates = [];
+  const props = [];
+  let propId = 1;
+
+  const box = (x, y, z, hx, hy, hz, ry = 0, mat = 'wall', col = null) => {
+    statics.push({ x, y, z, hx, hy, hz, ry, mat, col });
+  };
+  const use = (kind, x, y, z, label, arg = null, r = 0.35) => {
+    uses.push({ id: uses.length, kind, x, y, z, r, label, arg });
+  };
+  // local frame helper: origin (ox, oy, oz), yaw ry (local +z -> (sin ry, cos ry))
+  const frame = (ox, oy, oz, ry) => {
+    const s = Math.sin(ry), c = Math.cos(ry);
+    return (lx, ly, lz) => ({ x: ox + lx * c + lz * s, y: oy + ly, z: oz - lx * s + lz * c });
+  };
+  const lbox = (F, ry, lx, ly, lz, hx, hy, hz, mat, col) => {
+    const p = F(lx, ly, lz);
+    box(p.x, p.y, p.z, hx, hy, hz, ry, mat, col);
+  };
+  // a walk-in building: front wall (local +z) has a door gap. Returns its frame.
+  function building(ox, oz, ry, w, dep, h, mat, col, oy = null) {
+    const y0 = oy ?? heightAt(ox, oz);
+    const F = frame(ox, y0, oz, ry);
+    const t = 0.15, door = 1.6;
+    lbox(F, ry, 0, -0.5, 0, w / 2, 0.6, dep / 2, 'floor', null);          // slab
+    lbox(F, ry, 0, h / 2, -dep / 2, w / 2, h / 2, t, mat, col);           // back
+    lbox(F, ry, -w / 2, h / 2, 0, t, h / 2, dep / 2, mat, col);           // sides
+    lbox(F, ry, w / 2, h / 2, 0, t, h / 2, dep / 2, mat, col);
+    const segW = (w - door) / 2;
+    lbox(F, ry, -(door / 2 + segW / 2), h / 2, dep / 2, segW / 2, h / 2, t, mat, col);
+    lbox(F, ry, (door / 2 + segW / 2), h / 2, dep / 2, segW / 2, h / 2, t, mat, col);
+    lbox(F, ry, 0, h - 0.4, dep / 2, door / 2, 0.4, t, mat, col);       // over the door
+    lbox(F, ry, 0, h + 0.1, 0, w / 2 + 0.3, 0.1, dep / 2 + 0.3, 'roof', null);
+    return { F, y0 };
+  }
+  const placeLoot = (type, x, y, z, ry = 0, mult = 1) => {
+    const L = LOOT[type];
+    const dayMult = 1 + 0.22 * (day - 1);
+    const value = L.value ? Math.round(L.value * dayMult * mult * (0.85 + rng() * 0.4) / 5) * 5 : 0;
+    const half = L.shape[0] === 'box' ? L.shape[2] : L.shape[0] === 'cyl' ? L.shape[1] : L.shape[1];
+    props.push({ id: propId++, type, x, y: y + half + 0.06, z, ry, value });
+  };
+
+  // ---- obstacles' furniture ------------------------------------------------------
+  for (const o of obstacles) {
+    const rx = roadX(o.z);
+    if (o.type === 'grade') {
+      const zt = o.z1 + 9;
+      const xt = roadX(zt);
+      for (const s of [-1, 1]) {
+        const ax = xt + s * 3.4, az = zt, ay = heightAt(ax, az);
+        cyls.push({ x: ax, y: ay + 0.7, z: az, r: 0.17, hh: 0.7, mat: 'post' });
+        anchors.push({ id: anchors.length, x: ax, y: ay + 1.25, z: az });
+      }
+      const sx = roadX(o.z - 14) - 5.4, sz = o.z - 14;
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 3.0, h: 1.4,
+        lines: ['ROAD WASHED OUT', 'WINCH IT ↑'], bg: '#f2c14e', fg: '#1d1d1d', post: true });
+    } else if (o.type === 'mud') {
+      o.z0 = o.z; o.z1 = o.z + 42;
+      mud.push({ z0: o.z0, z1: o.z1, hw: 70 });
+      const az = o.z1 + 20, ax = roadX(az) + 5.2, ay = heightAt(ax, az);
+      cyls.push({ x: ax, y: ay + 1.6, z: az, r: 0.3, hh: 1.6, mat: 'deadtree' });
+      anchors.push({ id: anchors.length, x: ax, y: ay + 1.1, z: az });
+      const sx = roadX(o.z - 12) + 5.2, sz = o.z - 12;
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.6, h: 1.2,
+        lines: ['SOFT SHOULDER', 'AND ROAD', 'AND EVERYTHING'], bg: '#f2c14e', fg: '#1d1d1d', post: true });
+    } else if (o.type === 'boulder') {
+      const y = roadY(o.z);
+      props.push({ id: propId++, type: 'boulder', x: rx + (rng() - 0.5) * 0.8, y: y + LOOT.boulder.shape[2] + 0.05, z: o.z, ry: (rng() - 0.5) * 0.3, value: 0 });
+      // a dead tree past the boulder, for winching it out of the way
+      const az = o.z + 26, ax = roadX(o.z + 26) + (rng() < 0.5 ? -1 : 1) * 5.0, ay = heightAt(ax, az);
+      cyls.push({ x: ax, y: ay + 1.6, z: az, r: 0.3, hh: 1.6, mat: 'deadtree' });
+      anchors.push({ id: anchors.length, x: ax, y: ay + 1.1, z: az });
+    } else if (o.type === 'gate') {
+      const y = roadY(o.z);
+      o.code = String(1000 + Math.floor(rng() * 9000));
+      o.gate = gates.length;
+      gates.push({ id: gates.length, x: rx, y: y + 1.6, z: o.z, hx: 11, hy: 1.6, hz: 0.18, code: o.code });
+      const kx = rx - 5.0, kz = o.z - 2.2, ky = heightAt(kx, kz);
+      box(kx, ky + 0.6, kz, 0.12, 0.6, 0.12, 0, 'post');
+      use('keypad', kx, ky + 1.3, kz - 0.14, 'Enter gate code', gates.length - 1, 0.32);
+      signs.push({ x: rx + 5.4, y: heightAt(rx + 5.4, o.z - 6) + 2.2, z: o.z - 6, ry: 0, w: 3.2, h: 1.4,
+        lines: ['RANGER STATION 7', 'CODE POSTED ON THE RIM ↗'], bg: '#3a6b35', fg: '#f6efd6', post: true });
+      // the code is painted on the rock up top — readable only from up there
+      const side = rng() < 0.5 ? -1 : 1;
+      const cz = o.z - 14 - rng() * 10;
+      const cx = roadX(cz) + side * (wallDist(side > 0 ? 1 : 0, cz) + 9.5);
+      const cy = heightAt(cx, cz);
+      o.codeAt = { x: cx, y: cy, z: cz };
+      signs.push({ x: cx, y: cy + 0.06, z: cz, ry: side > 0 ? Math.PI / 2 : -Math.PI / 2, w: 3.4, h: 2.0,
+        lines: [o.code], bg: 'rgba(0,0,0,0)', fg: '#ffffff', flat: true, near: 10, painted: true });
+    }
+  }
+
+  // ---- points of interest: the buildings and the loot ---------------------------------
+  for (const p of pois) {
+    const px = p.x;
+    const ry = p.side > 0 ? -Math.PI / 2 : Math.PI / 2;   // front faces the road
+    if (p.type === 'gas') {
+      const { F, y0 } = building(px, p.z, ry, 8, 6, 3.2, 'stucco', '#e9d8b4');
+      p.y = y0;
+      const pump = F(-1.5, 0.75, 6.2); box(pump.x, pump.y, pump.z, 0.35, 0.75, 0.25, ry, 'pump', '#d64545');
+      const pump2 = F(1.5, 0.75, 6.2); box(pump2.x, pump2.y, pump2.z, 0.35, 0.75, 0.25, ry, 'pump', '#d64545');
+      const canopy = F(0, 4.2, 6.2); decor.push({ k: 'canopy', x: canopy.x, y: canopy.y, z: canopy.z, ry });
+      const cnt = F(1.8, 0.5, -1.8); box(cnt.x, cnt.y, cnt.z, 1.6, 0.5, 0.5, ry, 'wood');
+      const sg = F(0, 4.2, 3.2); signs.push({ x: sg.x, y: sg.y, z: sg.z, ry, w: 4.2, h: 0.9, lines: ['GAS · FOOD · REGRET'], bg: '#d64545', fg: '#fff' });
+      const spots = [[1.6, 1.0, -1.8], [-2.5, 0, -1.6], [-2.6, 0, 1.2], [2.8, 0, 1.4], [-0.6, 0, -2.0], [0.4, 0, 5.0], [-3.2, 0, 4.4]];
+      for (let i = 0; i < 5 + Math.floor(rng() * 2); i++) {
+        const [lx, ly, lz] = spots[i];
+        const type = i === 0 ? 'register' : POI_LOOT.gas[Math.floor(rng() * POI_LOOT.gas.length)];
+        const w = F(lx, ly, lz);
+        placeLoot(type, w.x, ly > 0 ? y0 + ly : heightAt(w.x, w.z), w.z, ry + rng());
+      }
+    } else if (p.type === 'semi') {
+      const y0 = heightAt(px, p.z); p.y = y0;
+      const F = frame(px, y0, p.z, ry + 0.35);
+      const r2 = ry + 0.35;
+      // trailer: floor, two sides, roof, front; open rear
+      lbox(F, r2, 0, 0.75, 0, 1.3, 0.12, 6, 'metal', '#c9ccd1');
+      lbox(F, r2, -1.3, 2.2, 0, 0.06, 1.35, 6, 'metal', '#e9ecef');
+      lbox(F, r2, 1.3, 2.2, 0, 0.06, 1.35, 6, 'metal', '#e9ecef');
+      lbox(F, r2, 0, 3.55, 0, 1.36, 0.06, 6, 'metal', '#dfe3e8');
+      lbox(F, r2, 0, 2.2, 6, 1.3, 1.35, 0.06, 'metal', '#e9ecef');
+      lbox(F, r2, 0, 1.6, 7.6, 1.2, 1.6, 1.2, 'metal', '#2f6db5');   // the cab, nose in the dirt
+      const ramp = F(0, 0.35, -6.9); box(ramp.x, ramp.y, ramp.z, 1.1, 0.06, 1.3, r2, 'wood');
+      decor.push({ k: 'wheels', x: px, y: y0, z: p.z, ry: r2 });
+      for (let i = 0; i < 5; i++) {
+        const lz = -4.5 + i * 2.0, w = F((rng() - 0.5) * 1.4, 0.87, lz);
+        placeLoot(POI_LOOT.semi[Math.floor(rng() * POI_LOOT.semi.length)], w.x, y0 + 0.87, w.z, r2 + rng());
+      }
+      for (let i = 0; i < 2; i++) {
+        const w = F((rng() - 0.5) * 6, 0, -9 - rng() * 3);
+        placeLoot(POI_LOOT.semi[Math.floor(rng() * POI_LOOT.semi.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
+      }
+    } else if (p.type === 'yard') {
+      const y0 = heightAt(px, p.z); p.y = y0;
+      const F = frame(px, y0, p.z, ry);
+      for (const lx of [-2.2, 2.2]) {
+        const t = F(lx, 0.72, 0); box(t.x, t.y, t.z, 1.1, 0.04, 0.55, ry, 'wood', '#b07a45');
+        const l = F(lx, 0.35, 0); box(l.x, l.y, l.z, 0.9, 0.35, 0.05, ry, 'wood', '#8a5a30');
+        for (let i = 0; i < 2; i++) {
+          const w = F(lx - 0.5 + i * 1.0, 0, 0);
+          placeLoot(POI_LOOT.yard[Math.floor(rng() * POI_LOOT.yard.length)], w.x, y0 + 0.76, w.z, ry + rng() * 0.6);
+        }
+      }
+      for (let i = 0; i < 3; i++) {
+        const w = F(-3 + rng() * 6, 0, 1.6 + rng() * 1.5);
+        placeLoot(POI_LOOT.yard[Math.floor(rng() * POI_LOOT.yard.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
+      }
+      const s = F(0, 1.4, 3.6);
+      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.2, h: 0.9, lines: ['YARD SALE', 'EVERYTHING MUST GO'], bg: '#ffffff', fg: '#d0342c', post: true });
+      decor.push({ k: 'umbrella', x: F(4.5, 0, -1).x, y: y0, z: F(4.5, 0, -1).z, ry });
+    } else if (p.type === 'crash') {
+      const y0 = p.mesa.base + p.mesa.h; p.y = y0;
+      const F = frame(px, y0, p.z, ry + 0.8);
+      decor.push({ k: 'plane', x: px, y: y0, z: p.z, ry: ry + 0.8 });
+      lbox(F, ry + 0.8, 0, 0.7, 0, 0.7, 0.7, 3.2, 'metal', '#f1f1f1');
+      lbox(F, ry + 0.8, 0, 0.7, 0.4, 4.2, 0.08, 0.8, 'metal', '#d83a3a');
+      for (let i = 0; i < 3; i++) {
+        const w = F(-2 + i * 2, 0, -3.5 - rng());
+        placeLoot(POI_LOOT.crash[Math.floor(rng() * POI_LOOT.crash.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6, 1.15);
+      }
+    } else if (p.type === 'junk') {
+      const y0 = heightAt(px, p.z); p.y = y0;
+      const F = frame(px, y0, p.z, ry);
+      for (let i = 0; i < 6; i++) {
+        const w = F(-3 + rng() * 6, 0, -3 + rng() * 3);
+        box(w.x, y0 + 0.4 + rng() * 0.4, w.z, 0.5 + rng() * 0.6, 0.4 + rng() * 0.4, 0.5 + rng() * 0.6, rng() * 3, 'junk', ['#7a6e64', '#8c3b2e', '#4f5d75', '#6b705c'][i % 4]);
+      }
+      for (let i = 0; i < 4; i++) {
+        const w = F(-3.5 + rng() * 7, 0, 1.0 + rng() * 2.5);
+        placeLoot(POI_LOOT.junk[Math.floor(rng() * POI_LOOT.junk.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
+      }
+    } else if (p.type === 'dino') {
+      const y0 = heightAt(px, p.z); p.y = y0;
+      const F = frame(px, y0, p.z, ry);
+      lbox(F, ry, 0, 2.2, -1.5, 1.6, 2.2, 3.0, 'dino', '#5aa469');      // body
+      lbox(F, ry, 0, 3.6, -5.6, 0.5, 0.5, 2.2, 'dino', '#5aa469');      // tail
+      for (const lx of [-1.1, 1.1]) for (const lz of [-3.4, 0.4]) lbox(F, ry, lx, 0.9, lz, 0.4, 0.9, 0.4, 'dino', '#4b8a58');
+      lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469');     // headless neck. the head is loot.
+      const h = F(1.5, 0, 3.4);
+      placeLoot('dino', h.x, heightAt(h.x, h.z), h.z, ry + 0.4);
+      for (let i = 0; i < 2; i++) {
+        const w = F(-3 + rng() * 6, 0, 3 + rng() * 2);
+        placeLoot(POI_LOOT.dino[1 + Math.floor(rng() * 2)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
+      }
+      const s = F(3.6, 1.6, 4.0);
+      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.8, h: 1.1, lines: ['DINO WORLD', 'HEAD MISSING — REWARD'], bg: '#5aa469', fg: '#fff', post: true });
+    }
+  }
+
+  // ---- billboards & landmarks (they're on the map, so you can navigate by them) --------
+  const landmarks = [];
+  for (let i = 0; i < 3 + Math.floor(day / 2); i++) {
+    const z = 40 + rng() * (LEN - 80);
+    if (obstacles.some(o => Math.abs(z - o.z) < 25) || pois.some(p => Math.abs(z - p.z) < 25)) continue;
+    const side = rng() < 0.5 ? -1 : 1;
+    const x = roadX(z) + side * (9.5 + rng() * 3);
+    const b = BILLBOARDS[Math.floor(rng() * BILLBOARDS.length)];
+    const y = heightAt(x, z);
+    signs.push({ x, y: y + 4.2, z, ry: side > 0 ? -0.35 : 0.35, w: 6.4, h: 2.6, lines: [b[0], b[1]], bg: b[2], fg: '#fff', billboard: true });
+    landmarks.push({ kind: 'billboard', x, z, label: b[0] });
+  }
+  {
+    const z = 120 + rng() * (LEN - 240), side = rng() < 0.5 ? -1 : 1;
+    const x = roadX(z) + side * 12;
+    if (!obstacles.some(o => Math.abs(z - o.z) < 30) && !pois.some(p => Math.abs(z - p.z) < 30)) {
+      decor.push({ k: 'skull', x, y: heightAt(x, z), z, ry: rng() * 6 });
+      landmarks.push({ kind: 'skull', x, z, label: 'cow skull' });
+    }
+  }
+
+  // ---- desert decor: cacti and rocks (cacti have colliders) ---------------------------
+  const nDecor = Math.floor(LEN / 7);
+  for (let i = 0; i < nDecor; i++) {
+    const z = 10 + rng() * (LEN - 20);
+    const side = rng() < 0.5 ? -1 : 1;
+    const wd = wallDist(side > 0 ? 1 : 0, z);
+    const off = 8 + rng() * Math.max(1, wd - 10);
+    const x = roadX(z) + side * off;
+    if (pois.some(p => Math.hypot(p.x - x, p.z - z) < 13)) continue;
+    if (obstacles.some(o => Math.abs(o.z - z) < 20)) continue;
+    const y = heightAt(x, z);
+    if (rng() < 0.55) {
+      const hh = 0.9 + rng() * 0.9;
+      cyls.push({ x, y: y + hh, z, r: 0.24, hh, mat: 'cactus' });
+      decor.push({ k: 'cactus', x, y, z, h: hh * 2, ry: rng() * 6 });
+    } else {
+      decor.push({ k: 'rock', x, y, z, s: 0.5 + rng() * 1.3, ry: rng() * 6 });
+    }
+  }
+
+  // ---- the camp -------------------------------------------------------------------
+  const camp = {
+    rv: { x: 0, z: -42, yaw: 0 },
+    fire: { x: -7.5, z: -50 },
+    spawns: [],
+    exitZ: -6,
+  };
+  for (let i = 0; i < 6; i++) {
+    const a = i / 6 * Math.PI * 2;
+    camp.spawns.push({ x: camp.fire.x + Math.cos(a) * 3.2, z: camp.fire.z + Math.sin(a) * 3.2 });
+  }
+  decor.push({ k: 'fire', x: camp.fire.x, y: heightAt(camp.fire.x, camp.fire.z), z: camp.fire.z });
+  for (let i = 0; i < 4; i++) {
+    const a = i / 4 * Math.PI * 2 + 0.4;
+    const lx = camp.fire.x + Math.cos(a) * 2.2, lz = camp.fire.z + Math.sin(a) * 2.2;
+    box(lx, heightAt(lx, lz) + 0.2, lz, 0.6, 0.2, 0.18, -a, 'log', '#6b4a2e');
+  }
+  signs.push({ x: 7, y: heightAt(7, -8) + 2.3, z: -8, ry: 0, w: 3.6, h: 1.4,
+    lines: [`DAY ${day}`, `TOWN ${Math.round(LEN)} m →`], bg: '#2f4858', fg: '#fff', post: true });
+
+  // ---- the town ---------------------------------------------------------------------
+  const T = TOWN_Z;
+  const town = { z: T, y: townY };
+  signs.push({ x: 7.5, y: townY + 3, z: T + 6, ry: 0, w: 4.6, h: 1.8,
+    lines: [['PAYDIRT', 'BUSTED FLATS', 'LAST CHANCE', 'SNAKE EYES', 'LOST WAGES'][day - 1], 'POP. 41 · EST. 1971'], bg: '#3a6b35', fg: '#fff', post: true });
+
+  // pawn shop (left of the street, door facing the street)
+  {
+    const { F, y0 } = building(-17, T + 42, Math.PI / 2, 12, 9, 3.6, 'stucco', '#c97b63', townY);
+    const counter = F(0, 0.5, -1.8);
+    box(counter.x, y0 + 0.5, counter.z, 3.2, 0.5, 0.55, Math.PI / 2, 'wood', '#7b4b2a');
+    town.pawn = { x: counter.x, y: y0 + 1.0, z: counter.z, hx: 0.6, hz: 3.2 };   // in world axes
+    const bell = F(-2.6, 1.08, -1.6);
+    use('pawnBell', bell.x, y0 + 1.08, bell.z, 'Ring to sell what\'s on the counter', null, 0.28);
+    const sg = F(0, 4.4, 4.6);
+    signs.push({ x: sg.x, y: y0 + 4.4, z: sg.z, ry: Math.PI / 2, w: 5, h: 1.3, lines: ['HONEST ED\'S PAWN', 'WE BUY ANYTHING'], bg: '#f4d35e', fg: '#2b2d42' });
+    town.pawnKeeper = F(0, 0, -3.4); town.pawnKeeper.y = y0; town.pawnKeeper.ry = Math.PI / 2;
+  }
+  // general store
+  {
+    const { F, y0 } = building(-17, T + 78, Math.PI / 2, 10, 8, 3.4, 'stucco', '#7fb7be', townY);
+    const counter = F(0, 0.5, -1.6);
+    box(counter.x, y0 + 0.5, counter.z, 2.6, 0.5, 0.5, Math.PI / 2, 'wood', '#a0743c');
+    const w = F(-1.4, 1.1, -1.5); use('buy', w.x, y0 + 1.1, w.z, 'Walkie-talkie', 'walkie', 0.3);
+    const d = F(0.2, 1.1, -1.5); use('buy', d.x, y0 + 1.1, d.z, 'Energy drink', 'drink', 0.3);
+    const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords', 'bungee', 0.3);
+    town.store = { walkie: w, drink: d, bungee: r };
+    const sg = F(0, 4.2, 4.1);
+    signs.push({ x: sg.x, y: y0 + 4.2, z: sg.z, ry: Math.PI / 2, w: 4.4, h: 1.2, lines: ['GENERAL STORE', 'OPEN 24/7 (NOT 7)'], bg: '#ffffff', fg: '#1b4965' });
+    town.clerk = F(0, 0, -3.0); town.clerk.y = y0; town.clerk.ry = Math.PI / 2;
+  }
+  // the casino
+  {
+    const ry = -Math.PI / 2;
+    const { F, y0 } = building(21, T + 58, ry, 22, 18, 5.2, 'casino', '#6a2c70', townY);
+    // blackjack table
+    const tbl = F(-5, 0.45, -3);
+    box(tbl.x, y0 + 0.45, tbl.z, 1.8, 0.45, 1.0, ry, 'felt', '#1f7a4d');
+    const dealer = F(-5, 0, -4.6); dealer.y = y0;
+    const hit = F(-7.2, 0.02, 0.6), stand = F(-2.8, 0.02, 0.6);
+    town.bj = { table: { ...tbl, y: y0 + 0.92 }, dealer, ry, hit: { x: hit.x, z: hit.z, r: 1.35 }, stand: { x: stand.x, z: stand.z, r: 1.35 } };
+    const btn = (lx, label, arg) => { const b = F(lx, 1.0, -2.0); use('bj', b.x, y0 + 1.0, b.z, label, arg, 0.26); };
+    btn(-6.6, 'Bet +$100', '+100'); btn(-5.9, 'Bet +$500', '+500'); btn(-5.2, 'ALL IN', 'all'); btn(-4.5, 'Clear bet', 'clear'); btn(-3.5, 'DEAL', 'deal');
+    // double-or-nothing machine
+    const m = F(5.5, 1.1, -6.5);
+    box(m.x, y0 + 1.1, m.z, 1.0, 1.1, 0.6, ry, 'machine', '#d4af37');
+    town.flip = { x: m.x, y: y0, z: m.z, ry };
+    const fb = (lx, label, arg) => { const b = F(lx, 1.15, -5.8); use('flip', b.x, y0 + 1.15, b.z, label, arg, 0.24); };
+    fb(4.9, 'Stake +$100', '+100'); fb(5.5, 'Stake +$500', '+500'); fb(6.1, 'ALL IN', 'all');
+    const lever = F(6.9, 1.4, -6.3); use('flip', lever.x, y0 + 1.4, lever.z, 'PULL — double or nothing', 'pull', 0.3);
+    // decor slot banks
+    for (let i = 0; i < 5; i++) {
+      const s = F(-9 + i * 1.3, 1.0, -8.3);
+      box(s.x, y0 + 1.0, s.z, 0.45, 1.0, 0.4, ry, 'machine', ['#e63946', '#f1c40f', '#2a9d8f', '#e76f51', '#8338ec'][i]);
+    }
+    const sg = F(0, 6.4, 9.2);
+    signs.push({ x: sg.x, y: y0 + 6.4, z: sg.z, ry, w: 9, h: 2.4, lines: ['LUCKY SLOP', 'CASINO · NO CLOCKS'], bg: '#ff2e88', fg: '#fff9c4', neon: true });
+    town.casino = { x: 21, z: T + 58, y: y0 };
+  }
+  // the Repo Man's tow truck parks out front
+  town.repo = { x: 7.5, z: T + 24, y: townY, ry: Math.PI };
+  use('pay', 7.5 + 1.6, townY + 1.2, T + 24, 'Pay the Repo Man', null, 0.6);
+  // RV lot + campfire
+  town.lot = { x: 0, z: T + 138, yaw: 0 };
+  town.fire = { x: -9, z: T + 150 };
+  decor.push({ k: 'fire', x: town.fire.x, y: townY, z: town.fire.z });
+  for (let i = 0; i < 3; i++) {
+    const x = 14 + i * 0.3, z = T + 125 + i * 14;
+    box(x, townY + 1.5, z, 1.25, 1.5, 4, 0.05 * i, 'rvjunk', ['#e0d6c8', '#cbd5c0', '#d8c3a5'][i]);
+  }
+  for (let i = 0; i < 6; i++) decor.push({ k: 'lamp', x: (i % 2 ? 6 : -6), y: townY, z: T + 15 + i * 22 });
+
+  // world edges
+  const zMid = (Z0 + Z1) / 2, zHalf = (Z1 - Z0) / 2;
+  box(-HALF_W + 1, 80, zMid, 1, 120, zHalf, 0, 'invisible');
+  box(HALF_W - 1, 80, zMid, 1, 120, zHalf, 0, 'invisible');
+  box(0, 80, Z0 + 1, HALF_W, 120, 1, 0, 'invisible');
+  box(0, 80, Z1 - 1, HALF_W, 120, 1, 0, 'invisible');
+
+  return {
+    seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights,
+    roadX, roadY, heightAt, townY,
+    obstacles, pois, mesas, statics, cyls, decor, signs, uses, anchors, mud, gates, props,
+    landmarks, camp, town, quota: null,
+  };
+}
+
+// Is a world point inside a mud patch?
+export function inMud(W, x, z) {
+  for (const m of W.mud) {
+    if (z >= m.z0 && z <= m.z1 && Math.abs(x - W.roadX(z)) < m.hw) return true;
+  }
+  return false;
+}

@@ -1,230 +1,353 @@
-// End-to-end expedition test with EMBODIED interactions: ws clients literally
-// steer their blobs into the gate zone and blackjack vote zones.
+// Integration test: the whole run over real WebSockets with two fake players.
+// Physics is real (Rapier on the server); the clock runs fast (FRIENDSLOP_FAST).
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
+import { generateLeg } from '../shared/world.js';
+import { QUOTAS, medBill } from '../shared/constants.js';
 import { Blackjack, handTotal } from '../server/blackjack.js';
-import * as C from '../shared/constants.js';
 
-const PORT = 3199;
-const url = `ws://localhost:${PORT}`;
+const PORT = 4100 + Math.floor(Math.random() * 500);
+const SEED = 4242;
+let failed = false;
+const ok = m => console.log('✅', m);
+const fail = m => { console.error('❌', m); failed = true; };
+const check = (c, m) => (c ? ok(m) : fail(m));
+const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-function fail(msg) {
-  console.error('❌ FAIL:', msg);
-  process.exit(1);
-}
-
-// ---- blackjack unit checks --------------------------------------------------
+// --- blackjack engine sanity (pure logic) ---
 {
-  if (handTotal(['A♠', 'K♦']) !== 21) fail('natural should total 21');
-  if (handTotal(['A♠', 'A♦', '9♥']) !== 21) fail('double ace should soft-total 21');
-  if (handTotal(['A♠', 'A♦', 'A♥', 'K♣', 'Q♣']) !== 23) fail('aces should collapse to 1');
-
-  const outcomes = { win: 0, lose: 0, push: 0, natural: 0 };
+  let bad = 0;
+  const tally = { win: 0, lose: 0, push: 0, natural: 0 };
   for (let i = 0; i < 3000; i++) {
-    const bj = new Blackjack();
-    let guard = 0;
-    while (bj.state === 'voting' && guard++ < 20) {
-      bj.act(bj.squadTotal() <= 15 ? 'hit' : 'stand');
-    }
-    if (bj.state !== 'done' || !bj.outcome) fail('hand never resolved');
-    if (bj.squadTotal() > 30) fail('impossible squad total');
-    if (bj.squadTotal() <= 21 && bj.outcome !== 'natural' && bj.dealerTotal() < 17) {
-      fail('dealer quit under 17');
-    }
-    outcomes[bj.outcome]++;
+    const h = new Blackjack();
+    while (h.state === 'voting') h.act(h.squadTotal() < 17 ? 'hit' : 'stand');
+    tally[h.outcome]++;
+    if (h.outcome === 'win' && handTotal(h.dealer) <= 21 && handTotal(h.squad) <= handTotal(h.dealer)) bad++;
   }
-  for (const k of ['win', 'lose', 'push', 'natural']) {
-    if (!outcomes[k]) fail(`outcome ${k} never occurred in 3000 hands`);
-  }
-  const winRate = (outcomes.win + outcomes.natural) / 3000;
-  if (winRate < 0.30 || winRate > 0.60) fail(`suspicious win rate ${winRate}`);
-  console.log('✅ blackjack engine: 3000 hands valid,', JSON.stringify(outcomes));
+  check(bad === 0 && tally.lose > tally.win, `blackjack engine: 3000 hands consistent ${JSON.stringify(tally)}`);
 }
 
-// ---- live server ------------------------------------------------------------
-
+const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
-process.on('uncaughtException', e => { console.error('❌ FAIL:', e.message); process.exit(1); });
+await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server did not start')), 8000); });
 
-const server = spawn(process.execPath, ['server/index.js'], {
-  env: { ...process.env, PORT: String(PORT), FRIENDSLOP_FAST: '1' },
-  stdio: ['ignore', 'pipe', 'inherit'],
-});
-await new Promise((res, rej) => {
-  server.stdout.on('data', d => { if (String(d).includes('sloppin')) res(); });
-  server.on('exit', () => rej(new Error('server died')));
-  setTimeout(() => rej(new Error('server never started')), 5000);
-}).catch(e => fail(e.message));
-
-class Client {
-  constructor(name) {
-    this.name = name;
-    this.meta = null;
-    this.welcome = null;
-    this.snap = null;
-    this.states = 0;
-    this.podium = null;
-    this.errors = [];
-    this.modesSeen = new Set();
-    this.bjOutcomes = [];
-    this.maxChamber = 0;
-    this.keys = {};
-    this.rtc = [];
-  }
+class Player {
+  constructor(name) { this.name = name; this.q = []; this.waiters = []; this.snap = null; this.events = []; this.meta = null; this.pos = { x: 0, y: 0, z: 0 }; this.yaw = 0; this.pitch = 0; this.par = 0; }
   connect() {
-    return new Promise((res, rej) => {
-      this.ws = new WebSocket(url);
+    return new Promise(res => {
+      this.ws = new WebSocket(`ws://localhost:${PORT}`);
       this.ws.on('open', res);
-      this.ws.on('error', rej);
-      this.ws.on('message', raw => {
-        const m = JSON.parse(raw);
-        if (m.t === 'welcome') this.welcome = m;
-        else if (m.t === 'meta') {
-          this.meta = m;
-          this.modesSeen.add(m.phase === 'play' ? 'play' : m.hubMode);
-          this.maxChamber = Math.max(this.maxChamber, m.chamber ?? 0);
-        } else if (m.t === 'state') {
-          this.snap = m;
-          this.states++;
-          const o = m.extra?.bj?.outcome;
-          if (o && this.bjOutcomes.at(-1) !== o) this.bjOutcomes.push(o);
-        } else if (m.t === 'podium') this.podium = m;
-        else if (m.t === 'rtc') this.rtc.push(m);
-        else if (m.t === 'error') this.errors.push(m.msg);
+      this.ws.on('message', d => {
+        const m = JSON.parse(d);
+        if (m.t === 's') this.snap = m;
+        if (m.t === 'meta') this.meta = m;
+        if (m.t === 'ev') this.events.push(...m.list);
+        if (m.t === 'welcome') this.id = m.id;
+        if (m.t === 'tp') { this.pos = { x: m.x, y: m.y, z: m.z }; this.par = 0; }
+        let consumed = false;
+        for (const w of [...this.waiters]) if (!consumed && w.pred(m)) { this.waiters.splice(this.waiters.indexOf(w), 1); w.res(m); consumed = true; }
+        if (!consumed) this.q.push(m);
+        if (this.q.length > 400) this.q.shift();
       });
     });
   }
   send(m) { this.ws.send(JSON.stringify(m)); }
-  pos() {
-    const me = this.snap?.players.find(p => p[0] === this.welcome?.id);
-    return me ? { x: me[1], y: me[2] } : null;
+  wait(pred, ms = 8000, label = '') {
+    const hit = this.q.find(pred);
+    if (hit) { this.q.splice(this.q.indexOf(hit), 1); return Promise.resolve(hit); }
+    return new Promise((res, rej) => {
+      const w = { pred, res };
+      this.waiters.push(w);
+      setTimeout(() => { const i = this.waiters.indexOf(w); if (i >= 0) { this.waiters.splice(i, 1); rej(new Error(`${this.name} timed out waiting for ${label}`)); } }, ms);
+    });
   }
-  steerToward(tx, ty) {
-    const p = this.pos();
-    if (!p) return;
-    const dx = tx - p.x, dy = ty - p.y;
-    const d = Math.hypot(dx, dy);
-    const move = d < 20 ? { mx: 0, my: 0 } : { mx: dx / d, my: dy / d };
-    const sig = JSON.stringify(move);
-    if (sig !== this._lastKeys) { this._lastKeys = sig; this.send({ t: 'input', ...move }); }
+  drain() { this.q.length = 0; this.events.length = 0; }
+  pose(extra = {}) {
+    Object.assign(this, extra);
+    this.send({ t: 'p', par: this.par, x: this.pos.x, y: this.pos.y, z: this.pos.z, yaw: this.yaw, pitch: this.pitch, m: 0, f: 0, v: [0, 0, 0] });
   }
-  async until(pred, what, ms = 60000) {
-    const t0 = Date.now();
-    while (!pred(this)) {
-      if (Date.now() - t0 > ms) {
-        fail(`timeout waiting for: ${what} (phase=${this.meta?.phase}, mode=${this.meta?.hubMode}, chamber=${this.meta?.chamber})`);
-      }
-      await new Promise(r => setTimeout(r, 40));
-    }
-  }
+  at(x, y, z, yaw = this.yaw, pitch = 0, par = 0) { this.pos = { x, y, z }; this.yaw = yaw; this.pitch = pitch; this.par = par; this.pose(); }
+  g() { return this.snap?.g; }
+  rv() { const r = this.snap.rv; return { x: r[0], y: r[1], z: r[2] }; }
+  prop(id) { const a = this.snap?.pr.find(p => p[0] === id); return a ? { x: a[1], y: a[2], z: a[3] } : null; }
+  async until(fn, ms = 8000, label = '') { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (this.snap && fn(this.snap.g, this.snap)) return true; await sleep(40); } throw new Error(`${this.name}: timed out: ${label} — g=${JSON.stringify({ ...this.snap?.g, bj: undefined, flip: undefined })} rv=${JSON.stringify(this.snap?.rv.slice(0, 3))}`); }
+  async hold(ms, fn) { const t0 = Date.now(); while (Date.now() - t0 < ms) { fn?.(); this.pose(); await sleep(33); } }
 }
 
-const host = new Client('Hosty');
-const p2 = new Client('SloppyJoe');
-const p3 = new Client('Beans');
-await Promise.all([host.connect(), p2.connect(), p3.connect()]);
+try {
+  const A = new Player('Hosty'), B = new Player('Beans');
+  await A.connect();
+  A.send({ t: 'create', name: A.name, seed: SEED });
+  const wA = await A.wait(m => m.t === 'welcome', 8000, 'welcome');
+  const world = await A.wait(m => m.t === 'world', 8000, 'world');
+  const props = await A.wait(m => m.t === 'props', 8000, 'props');
+  check(world.seed === SEED && world.day === 1 && props.list.length > 10, `host got world (seed ${world.seed}, day 1) and ${props.list.length} props`);
+  await B.connect();
+  B.send({ t: 'join', name: B.name, room: wA.code });
+  await B.wait(m => m.t === 'welcome', 8000, 'B welcome');
+  await B.wait(m => m.t === 'tp', 8000, 'B tp');
+  B.send({ t: 'join', name: 'x', room: 'ZZZZ' });   // already joined: ignored
+  const bad = new Player('Nobody'); await bad.connect(); bad.send({ t: 'join', name: 'n', room: 'QQQQ' });
+  const err = await bad.wait(m => m.t === 'error', 4000, 'error');
+  check(/No RV/.test(err.msg), 'bad room code rejected');
+  bad.ws.close();
+  A.pose(); B.pose();
+  await A.until((g, s) => s.pl.length === 2, 4000, 'two players in snapshot');
+  ok('two players in the room, poses flowing');
 
-host.send({ t: 'create', name: host.name });
-await host.until(c => c.welcome, 'welcome');
-const code = host.welcome.code;
-if (!/^[A-Z2-9]{4}$/.test(code)) fail(`bad room code: ${code}`);
+  let W = generateLeg(SEED, 1);
+  // ---- drive ----------------------------------------------------------------------------
+  A.at(0.2, 0.05, 1.6, 0, 0.3, 1);
+  A.send({ t: 'use', kind: 'seat0' });
+  await A.wait(m => m.t === 'seat' && m.seat === 0, 4000, 'seat');
+  const z0 = A.rv().z;
+  await A.hold(3000, () => A.send({ t: 'drv', th: 1, st: 0, hb: 0 }));
+  const z1 = A.rv().z;
+  check(z1 - z0 > 6, `driver: RV drove ${(z1 - z0).toFixed(1)} m in 3 s`);
+  A.send({ t: 'drv', th: 0, st: 0, hb: 1 });
+  A.send({ t: 'use', kind: 'unseat' });
+  await A.wait(m => m.t === 'seat' && m.seat === null, 4000, 'unseat');
+  ok('got out of the driver seat');
+  A.send({ t: 'dbg', op: 'tpRV', x: W.roadX(3), z: 3, yaw: 0 });
+  await A.until(g => g.ph === 'road', 6000, 'phase road (rolled out of camp)');
+  ok(`left camp — the clock is running (${A.g().clk.toFixed(2)})`);
 
-p3.send({ t: 'join', name: 'x', room: 'ZZZZ' });
-await p3.until(c => c.errors.length > 0, 'join error for bad code');
-console.log('✅ bad room code rejected');
-p3.errors = [];
+  // ---- grab, carry, throw ------------------------------------------------------------------
+  const gz = 60, gx = W.roadX(gz), gy = W.heightAt(gx, gz);
+  A.at(gx, gy + 0.05, gz - 1.6, 0, 0.35, 0);
+  A.send({ t: 'dbg', op: 'spawn', type: 'vase', x: gx, y: gy + 1.0, z: gz, value: 500 });
+  const sp = await A.wait(m => m.t === 'dbg' && m.op === 'spawned', 4000, 'spawn');
+  await sleep(800);
+  const vp = A.prop(sp.id) || { x: gx, y: gy + 0.4, z: gz };
+  A.send({ t: 'grab', kind: 'prop', id: sp.id, pt: [vp.x, vp.y, vp.z], d: 1.4 });
+  const gr = await A.wait(m => m.t === 'grabbed', 4000, 'grabbed');
+  check(gr.ok, 'grabbed the vase');
+  await A.hold(1500, () => { A.pos.z += 0.08; });
+  const held = A.prop(sp.id);
+  check(held && held.z > gz + 1.5, `carried it (vase z ${held?.z.toFixed(2)}, player z ${A.pos.z.toFixed(2)})`);
+  A.send({ t: 'rel', thr: 1, dir: [0, 0.3, 1] });
+  await sleep(600);
+  const thrown = A.prop(sp.id);
+  const broke = A.events.find(e => (e.k === 'break' || e.k === 'dmg') && e.id === sp.id);
+  check((thrown && thrown.z > held.z + 1.5) || broke, `threw it (${thrown ? `z ${thrown.z.toFixed(2)}` : 'gone'}${broke ? `, ${broke.k} -$${broke.lost}` : ''})`);
 
-p2.send({ t: 'join', name: p2.name, room: code });
-p3.send({ t: 'join', name: p3.name, room: code });
-await p2.until(c => c.welcome, 'p2 welcome');
-await p3.until(c => c.welcome, 'p3 welcome');
+  // ---- gate keypad -------------------------------------------------------------------------
+  const gate = W.obstacles.find(o => o.type === 'gate');
+  const kp = W.uses.find(u => u.kind === 'keypad');
+  A.at(kp.x, kp.y - 1.5, kp.z - 1.2, 0, 0, 0);
+  await sleep(150);
+  A.events.length = 0;
+  A.send({ t: 'use', id: kp.id, code: gate.code === '1111' ? '2222' : '1111' });
+  await A.until(() => A.events.some(e => e.k === 'buzz'), 3000, 'buzz');
+  ok('wrong gate code buzzes');
+  A.send({ t: 'use', id: kp.id, code: gate.code });
+  await A.until(g => g.gates.includes(gate.gate), 3000, 'gate open');
+  ok(`right code (${gate.code}) opens the ranger gate`);
 
-host.send({ t: 'addbot' });
-await host.until(c => c.meta?.players.length === 4, '4 blobs in the Den');
-console.log('✅ the Den: 3 humans + 1 bot walking around');
-
-await host.until(c => c.states > 5, 'hub snapshots flowing');
-if (host.meta.phase !== 'hub' || host.meta.hubMode !== 'lobby') fail('should idle in hub lobby');
-console.log('✅ hub snapshots flowing (the Den is live)');
-
-// Voice chat plumbing: presence flags ride the meta, WebRTC signaling relays
-// point-to-point (and never leaks to a third player).
-host.send({ t: 'voice', on: true });
-p2.send({ t: 'voice', on: true });
-await p3.until(c => c.meta?.players.filter(p => p.voice).length === 2, 'voice flags in meta');
-host.send({ t: 'rtc', to: p2.welcome.id, data: { sdp: { type: 'offer', sdp: 'test-offer' } } });
-await p2.until(c => c.rtc.length === 1, 'rtc offer relayed');
-if (p2.rtc[0].from !== host.welcome.id) fail(`rtc "from" should be host id, got ${p2.rtc[0].from}`);
-if (p2.rtc[0].data?.sdp?.sdp !== 'test-offer') fail('rtc payload mangled in relay');
-if (p3.rtc.length) fail('rtc message leaked to a player it was not addressed to');
-host.send({ t: 'voice', on: false });
-p2.send({ t: 'voice', on: false });
-await p3.until(c => c.meta?.players.every(p => !p.voice), 'voice flags cleared');
-console.log('✅ voice presence + point-to-point rtc signaling relay');
-
-// The squad drives itself for the whole expedition with body language only.
-const driver = setInterval(() => {
-  for (const c of [host, p2, p3]) {
-    const m = c.meta;
-    if (!m) continue;
-    if (m.phase === 'play') {
-      if (m.minigame === 'casino') {
-        c.steerToward(C.HUB.STAND.x, C.HUB.STAND.y); // vote with the body
-      } else if (Math.random() < 0.6) {
-        const a = Math.random() * Math.PI * 2;
-        c.send({ t: 'input', mx: Math.cos(a), my: Math.sin(a), dash: Math.random() < 0.2 });
-        c._lastKeys = null;
-      }
-    } else if (m.hubMode === 'lobby' || m.hubMode === 'gate') {
-      c.steerToward(C.HUB.GATE.x, C.HUB.GATE.y);
-    }
+  // ---- the winch up the grade --------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'clock', h: 8 });   // the test clock runs 30x fast; keep it daytime
+  const grade = W.obstacles.find(o => o.type === 'grade');
+  const rz = grade.z0 - 7, rx = W.roadX(rz);
+  A.send({ t: 'dbg', op: 'tpRV', x: rx, z: rz, yaw: 0 });
+  await sleep(1200);
+  const rvp = A.rv();
+  A.at(rvp.x, W.heightAt(rvp.x, rvp.z + 5.4) + 0.05, rvp.z + 5.4, Math.PI, 0.5, 0);
+  await sleep(200);
+  A.send({ t: 'use', kind: 'winch' });
+  await A.wait(m => m.t === 'hooked' && m.on, 4000, 'hook taken');
+  ok('took the winch hook off the bumper');
+  const anc = W.anchors[0];
+  const from = { ...A.pos };
+  for (let i = 0; i <= 60; i++) {
+    const f = i / 60;
+    const x = from.x + (anc.x - 0.8 - from.x) * f, z = from.z + (anc.z - 0.8 - from.z) * f;
+    A.at(x, W.heightAt(x, z) + 0.05, z, 0, 0, 0);
+    await sleep(50);
   }
-}, 100);
+  await sleep(400);
+  A.send({ t: 'use', kind: 'hook' });
+  await A.wait(m => m.t === 'hooked' && !m.on, 4000, 'anchored');
+  await A.until((g, s) => s.hk[0] === 2, 3000, 'hook anchored in snapshot');
+  ok(`hooked the anchor post at the top of the grade (cable ${A.snap.hk[4].toFixed(1)} m)`);
+  B.at(0.6, 0.05, 2.85, 0, 0, 1);
+  B.send({ t: 'use', kind: 'seat0' });
+  await B.wait(m => m.t === 'seat' && m.seat === 0, 4000, 'B seat');
+  B.send({ t: 'use', kind: 'reel' });
+  await A.until((g, s) => s.hk[5] === 1, 3000, 'reeling');
+  // the driver feathers the throttle while the winch does the work
+  const tGrade = Date.now();
+  while (!(A.snap.rv[2] > grade.z1 + 1.5) && Date.now() - tGrade < 30000) { B.send({ t: 'drv', th: 0.5, st: 0, hb: 0 }); B.pose(); A.pose(); await sleep(50); }
+  B.send({ t: 'drv', th: 0, st: 0, hb: 1 });
+  if (!(A.snap.rv[2] > grade.z1 + 1.5)) throw new Error(`winch stalled at rv=${JSON.stringify(A.snap.rv.slice(0, 3))}`);
+  ok(`winched the RV up the ${grade.h.toFixed(1)} m grade`);
+  B.send({ t: 'use', kind: 'reel' });
+  A.send({ t: 'use', kind: 'hook' });   // unhook
+  B.send({ t: 'use', kind: 'unseat' });
+  await B.wait(m => m.t === 'seat' && m.seat === null, 4000, 'B unseat');
 
-// Walking into the gate must start chamber 1.
-await host.until(c => c.meta?.phase === 'play', 'gate walk-in starts chamber 1', 30000);
-if (host.meta.minigame !== 'dig') fail(`expedition should start at THE DIG SITE, got ${host.meta.minigame}`);
-console.log('✅ walked into the gate — chamber 1 begins (THE DIG SITE)');
+  // ---- town: pawn shop -----------------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'clock', h: 8 });
+  A.send({ t: 'dbg', op: 'tpRV', x: 0, z: W.LEN + 4, yaw: 0 });
+  await A.until(g => g.town === 1, 4000, 'in town');
+  ok('rolled into town');
+  const T = W.town;
+  A.send({ t: 'dbg', op: 'spawn', type: 'tv', x: T.pawn.x, y: T.pawn.y + 0.5, z: T.pawn.z, value: 300 });
+  await A.wait(m => m.t === 'dbg' && m.op === 'spawned', 4000, 'tv');
+  await A.until(g => g.pawn > 0, 4000, 'appraisal');
+  const bell = W.uses.find(u => u.kind === 'pawnBell');
+  A.at(bell.x - 1.6, T.y + 0.05, bell.z, Math.PI / 2, 0, 0);
+  await sleep(100);
+  const bank0 = A.g().bank, offer = A.g().pawn;
+  A.send({ t: 'use', id: bell.id });
+  await A.until(() => A.events.some(e => e.k === 'sold'), 3000, 'sold');
+  await A.until(g => g.bank === bank0 + offer, 3000, 'bank up');
+  ok(`pawned the TV: +$${offer} (bank $${A.g().bank})`);
 
-await host.until(c => c.meta?.phase === 'hub' && c.meta.chamber === 1, 'clear -> straight to chamber 2', 60000);
-const r1 = host.meta.lastResults;
-if (!r1?.teamWin) fail('dig should be trivially clearable in FAST mode');
-const mvpPay = (r1.payouts[r1.mvpId] || []).reduce((s, x) => s + x.amt, 0);
-if (mvpPay < 150) fail(`mvp should earn clear pay + bonus, got ${mvpPay}`);
-console.log(`✅ chamber cleared (mvp=${r1.mvpId}, +${mvpPay}) — advanced with NO toll booth`);
+  // ---- casino: blackjack ------------------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'clock', h: 9 });
+  const bjU = arg => W.uses.find(u => u.kind === 'bj' && u.arg === arg);
+  A.send({ t: 'dbg', op: 'bank', v: 1000 });
+  const b500 = bjU('+500');
+  A.at(b500.x - 1.2, T.y + 0.05, b500.z, Math.PI / 2, 0, 0);
+  await sleep(100);
+  A.send({ t: 'use', id: b500.id });
+  await A.until(g => g.bj.bet === 500, 3000, 'bet 500');
+  A.send({ t: 'use', id: bjU('deal').id });
+  await A.until(g => g.bj.st !== 'bet', 3000, 'dealt');
+  const st = T.bj.stand;
+  A.at(st.x, T.y + 0.05, st.z, 0, 0, 0);
+  B.at(st.x + 0.3, T.y + 0.05, st.z, 0, 0, 0);
+  await A.until(g => g.bj.st === 'result', 12000, 'hand resolved');
+  const out = A.g().bj.out, bankAfter = A.g().bank;
+  const expect = { win: 1500, natural: 1750, push: 1000, lose: 500 }[out];
+  check(bankAfter === expect, `blackjack by body-vote: ${out} — bank $1000 → $${bankAfter}`);
 
-// Ride until the casino chamber deals cards in-world.
-await host.until(c => c.meta?.phase === 'play' && c.meta.minigame === 'casino' && c.snap?.extra?.bj?.squad?.length >= 2,
-  "the Boss's Casino deals", 120000);
-console.log(`✅ THE BOSS'S CASINO: ${host.snap.extra.bj.squad.join(' ')} (${host.snap.extra.bj.squadTotal}) vs ${host.snap.extra.bj.dealerUp}`);
+  // ---- casino: double or nothing ---------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'bank', v: 1000 });
+  const fU = arg => W.uses.find(u => u.kind === 'flip' && u.arg === arg);
+  A.at(fU('+100').x - 1.2, T.y + 0.05, fU('+100').z, Math.PI / 2, 0, 0);
+  await sleep(100);
+  A.send({ t: 'use', id: fU('+100').id });
+  await A.until(g => g.flip.stake === 100, 3000, 'stake');
+  A.events.length = 0;
+  A.send({ t: 'use', id: fU('pull').id });
+  await A.until(() => A.events.some(e => e.k === 'bet'), 6000, 'flip result');
+  await sleep(100);
+  check([900, 1100].includes(A.g().bank), `double or nothing: bank $1000 → $${A.g().bank}`);
 
-await host.until(c => c.bjOutcomes.length > 0, 'hand resolves via body votes', 40000);
-console.log(`✅ hand resolved by standing in a zone: ${host.bjOutcomes[0]}`);
+  // ---- store -------------------------------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'bank', v: 1000 });
+  const wk = W.uses.find(u => u.kind === 'buy' && u.arg === 'walkie');
+  A.at(wk.x + 1.2, T.y + 0.05, wk.z, -Math.PI / 2, 0, 0);
+  await sleep(100);
+  A.send({ t: 'use', id: wk.id });
+  await A.until(g => g.bank === 850, 3000, 'bought walkie');
+  await sleep(150);
+  check(A.meta.players.find(p => p.id === A.id)?.walkie === true, 'bought a walkie-talkie ($150)');
 
-// Ride it out: bodies do everything until the podium.
-await host.until(c => c.podium, 'podium', 240000);
-clearInterval(driver);
+  // ---- pay the Repo Man, night, sleep → day 2 ---------------------------------------------------------
+  A.send({ t: 'dbg', op: 'bank', v: QUOTAS[0] + 250 });
+  const pay = W.uses.find(u => u.kind === 'pay');
+  A.at(pay.x + 1, T.y + 0.05, pay.z, 0, 0, 0);
+  await sleep(100);
+  A.send({ t: 'use', id: pay.id });
+  const rc = await A.wait(m => m.t === 'receipt', 4000, 'receipt');
+  await A.until(g => g.ph === 'night' && g.bank === 250 && g.paid === 1, 3000, 'paid → night');
+  check(rc.paid, `paid the Repo Man $${QUOTAS[0]} → night (bank $${A.g().bank}, receipt: sold $${rc.sold}, bills $${rc.bills})`);
+  A.at(0, 0.62, -3.3, 0, 0, 1); B.at(0.4, 0.62, -3.4, 0, 0, 1);
+  await sleep(200);
+  A.send({ t: 'use', kind: 'bunk' }); B.send({ t: 'use', kind: 'bunk' });
+  const w2 = await A.wait(m => m.t === 'world' && m.day === 2, 8000, 'day 2');
+  check(w2.day === 2, 'everyone in a bunk → DAY 2');
+  await A.until(g => g.day === 2 && g.ph === 'camp', 4000, 'day 2 camp');
+  W = generateLeg(SEED, 2);
 
-const pod = host.podium;
-console.log(`✅ podium: escaped=${pod.escaped}, cleared=${pod.cleared}/${pod.chambers}, standings=${pod.standings.map(s => `${s.name}:${s.coins}`).join(' | ')}`);
-if (pod.standings.length !== 4) fail('podium missing blobs');
-if (pod.standings.every(s => s.coins === 0)) fail('nobody earned anything all match');
-const sorted = pod.standings.every((s, i, a) => i === 0 || a[i - 1].coins >= s.coins);
-if (!sorted) fail('podium not sorted by coins');
+  // ---- KO bill ------------------------------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'clock', h: 8 });
+  A.send({ t: 'dbg', op: 'bank', v: 1000 });
+  await sleep(150);
+  A.send({ t: 'ko', why: 'fall' });
+  await sleep(150);
+  A.send({ t: 'wake' });
+  await A.until(g => g.bank === 1000 - medBill(2), 3000, 'billed');
+  ok(`woke up alone after a KO: ambulance -$${medBill(2)}`);
+  // revive path: B picks A up — no bill
+  A.send({ t: 'ko', why: 'fall' });
+  B.at(A.pos.x + 1, A.pos.y, A.pos.z, 0, 0, A.par);
+  await sleep(150);
+  B.send({ t: 'use', kind: 'revive', id: A.id });
+  await A.wait(m => m.t === 'revived', 3000, 'revived');
+  check(A.g().bank === 1000 - medBill(2), 'friend picked them up: no bill');
 
-for (const c of [host, p2, p3]) {
-  for (const mode of ['lobby', 'play', 'gate', 'celebrate']) {
-    if (!c.modesSeen.has(mode)) fail(`${c.name} never saw ${mode}`);
-  }
+  // ---- getting run over ------------------------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'clock', h: 8 });
+  let sz = 120;
+  for (let z = 100; z < 400; z += 5) if (Math.abs(W.roadX(z + 30) - W.roadX(z)) < 1.5 && !W.obstacles.some(o => Math.abs(o.z - z) < 60)) { sz = z; break; }
+  A.send({ t: 'dbg', op: 'tpRV', x: W.roadX(sz), z: sz, yaw: Math.atan2(W.roadX(sz + 20) - W.roadX(sz), 20) });
+  await sleep(1200);
+  A.at(0.6, 0.05, 2.85, 0, 0, 1);
+  A.send({ t: 'use', kind: 'seat0' });
+  await A.wait(m => m.t === 'seat' && m.seat === 0, 4000, 'seat for knock');
+  const bz = sz + 22, bx = W.roadX(bz);
+  B.at(bx, W.heightAt(bx, bz) + 0.05, bz, Math.PI, 0, 0);
+  B.drain();
+  let knocked = null;
+  B.wait(m => m.t === 'knock', 12000, 'knock').then(m => { knocked = m; }).catch(() => {});
+  await A.hold(9000, () => { if (!knocked) { A.send({ t: 'drv', th: 1, st: 0, hb: 0 }); B.pose(); } });
+  check(!!knocked, `ran over Beans at speed (knock v=[${knocked?.v.map(n => n.toFixed(1))}], KO=${knocked?.ko})`);
+  A.send({ t: 'drv', th: 0, st: 0, hb: 1 });
+  A.send({ t: 'use', kind: 'unseat' });
+  await sleep(300);
+
+  // ---- missed payment → the Repo Man takes the doors -------------------------------------------------------
+  await A.until(g => g.ph === 'road', 4000, 'road (day 2: the knock test rolled us out of camp)');
+  A.send({ t: 'dbg', op: 'bank', v: 100 });
+  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
+  const parts = await A.wait(m => m.t === 'parts', 6000, 'parts');
+  await A.until(g => g.str === 1 && g.ph === 'night', 3000, 'strike 1');
+  check(parts.parts.doors === false, 'missed midnight → strike 1, the Repo Man took the DOORS');
+
+  // ---- strike 3 = repo'd → over → fresh run -----------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'day', d: 3 });
+  await A.wait(m => m.t === 'world' && m.day === 3, 6000, 'day 3');
+  await A.until(g => g.day === 3, 3000, 'day 3 state');
+  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
+  A.send({ t: 'dbg', op: 'bank', v: 0 });
+  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
+  const p2 = await A.wait(m => m.t === 'parts' && m.parts.roof === false, 6000, 'parts 2');
+  await A.until(g => g.str === 2, 3000, 'strike 2');
+  check(p2.parts.roof === false && p2.parts.doors === false, 'missed again → strike 2, the ROOF is gone (doors still gone)');
+  A.send({ t: 'dbg', op: 'day', d: 4 });
+  await A.wait(m => m.t === 'world' && m.day === 4, 6000, 'day 4');
+  await A.until(g => g.day === 4, 3000, 'day 4 state');
+  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
+  A.send({ t: 'dbg', op: 'bank', v: 0 });
+  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
+  const over = await A.wait(m => m.t === 'over', 6000, 'over');
+  check(over.won === false, "third strike → REPO'D (game over)");
+  const fresh = await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run');
+  check(fresh.day === 1 && fresh.parts.doors && fresh.parts.roof, 'a fresh run starts: new RV, doors and roof back');
+
+  // ---- win: pay the balloon on day 5 -------------------------------------------------------------------------
+  A.send({ t: 'dbg', op: 'day', d: 5 });
+  await A.wait(m => m.t === 'world' && m.day === 5, 6000, 'day 5');
+  W = generateLeg(fresh.seed, 5);
+  A.send({ t: 'dbg', op: 'tpRV', x: 0, z: W.LEN + 4, yaw: 0 });
+  A.send({ t: 'dbg', op: 'bank', v: QUOTAS[4] + 1 });
+  const pay5 = W.uses.find(u => u.kind === 'pay');
+  A.at(pay5.x + 1, W.townY + 0.05, pay5.z, 0, 0, 0);
+  await sleep(300);
+  A.send({ t: 'use', id: pay5.id });
+  const win = await A.wait(m => m.t === 'over', 6000, 'win');
+  check(win.won === true, `paid the $${QUOTAS[4]} balloon on day 5 → YOU OWN THE RV`);
+
+  // ---- disconnect -----------------------------------------------------------------------------------------------
+  B.ws.close();
+  await A.wait(m => m.t === 'meta' && m.players.length === 1, 4000, 'B left');
+  ok('disconnect handled');
+  A.ws.close();
+} catch (e) {
+  fail(e.message);
 }
-
-await host.until(c => c.meta?.hubMode === 'lobby', 'back to the Den lobby', 30000);
-console.log('✅ back to the Den after the expedition');
-
-p3.ws.close();
-await host.until(c => c.meta?.players.length === 3, 'p3 removed from lobby');
-console.log('✅ disconnect handled');
-
-console.log('\n🎉 ALL LOGIC TESTS PASSED');
-server.kill();
-process.exit(0);
+console.log(failed ? '\n💥 LOGIC TESTS FAILED' : '\n🎉 ALL LOGIC TESTS PASSED');
+process.exit(failed ? 1 : 0);

@@ -1,115 +1,114 @@
-// Shared between server (Node ESM) and client (browser ESM).
+// Tunables shared by the server (Node ESM) and the client (browser ESM).
+// Units: meters, seconds, kilograms. Y is up. The road runs toward +Z.
 
-export const ARENA_W = 1600;
-export const ARENA_H = 900;
-
-export const PLAYER_RADIUS = 28;
-export const ACCEL = 2400;
-export const MAX_SPEED = 380;
-export const FRICTION = 0.90;          // per-frame damping at 60fps equivalent
-export const DASH_SPEED = 980;
-export const DASH_CD = 1.6;            // seconds
-export const DASH_TIME = 0.18;         // seconds of "heavy" knockback state
-export const WALL_BOUNCE = 0.65;
-
-// The chain. For four chambers you're free — then the pit chains the squad
-// together for the final climb. One slip drags everyone.
-export const LINK_LEN = 140;
-
-export const TICK_RATE = 30;           // server simulation Hz
-export const SNAPSHOT_RATE = 20;       // server -> client state Hz
-
-export const MAX_PLAYERS = 8;
-export const START_COINS = 0;
-
-// ---- money (score, bragging rights, and blackjack table stakes energy) ----
-export const CLEAR_PAY = 100;          // each blob, first time a chamber is cleared
-export const RECLEAR_PAY = 25;         // each blob, clearing a chamber again after a lost hand
-export const MVP_BONUS = 50;
-export const LIFE_BONUS = 15;          // per unused team life on a clear
-
-// ---- match structure ----
-export const CHAMBER_COUNT = 6;
-
-// Phase durations (seconds). FRIENDSLOP_FAST=1 shrinks these for tests.
 export const FAST = typeof process !== 'undefined' && process.env && process.env.FRIENDSLOP_FAST === '1';
-export const COUNTDOWN_TIME = FAST ? 1 : 3;
-export const BJ_VOTE_TIME = FAST ? 1.5 : 14;    // seconds per hit/stand body-vote
-export const BJ_RESULT_TIME = FAST ? 1.5 : 6;   // gloating window after the hand
-export const MAX_TOTAL_PLAYS = FAST ? 7 : 20;   // pit collapses eventually — match always ends
-export const CELEBRATE_TIME = FAST ? 3 : 18;
-export const BANNER_TIME = FAST ? 1.5 : 6;
+export const TEST = typeof process !== 'undefined' && process.env && process.env.FRIENDSLOP_TEST === '1';
 
-// ---- THE DEN (walkable hub) ----
-// Everything you do between chambers, you do with your body:
-// walk through the gate to enter the next chamber, stand in a zone to vote.
-export const HUB = {
-  SPAWN: { x: 800, y: 430 },
-  GATE: { x: 800, y: 150, w: 500, h: 230 },      // walk-in zone under the gate arch
-  TABLE: { x: 800, y: 660 },                     // the Pit Boss's table
-  HIT: { x: 620, y: 700, r: 115 },
-  STAND: { x: 980, y: 700, r: 115 },
+export const SIM_HZ = 60;               // server physics
+export const SNAP_HZ = 20;              // server -> client snapshots
+export const POSE_HZ = 30;              // client -> server own-body pose
+export const INTERP_MS = 110;           // how far behind the server clients render the world
+
+export const MAX_PLAYERS = 6;
+
+// ---- the run ----------------------------------------------------------------
+export const DAYS = 5;
+export const QUOTAS = [1500, 3000, 5500, 9000, 15000];   // due at midnight, per day
+export const STRIKES_TO_LOSE = 3;                        // 3rd missed payment: the RV is gone
+export const HOUR_SEC = FAST ? 5 : 45;                   // real seconds per game hour
+export const DAY_START = 6;                              // 06:00
+export const MIDNIGHT = 24;
+export const REPO_ARRIVES = 18;                          // the tow truck shows up in town at 18:00
+export const medBill = day => 250 + 50 * day;            // KO'd and nobody picked you up
+export const RV_HIT_BILL = 500;                          // got run over by your own RV
+export const NIGHT_MIN_SEC = FAST ? 1 : 6;               // the receipt stays up at least this long
+
+// what the Repo Man takes, in order, when you miss a payment
+export const REPO_PARTS = ['doors', 'roof', 'rv'];
+
+// ---- your body ----------------------------------------------------------------
+export const PLAYER = {
+  RADIUS: 0.34,
+  HALF_H: 0.56,             // capsule half-height (cylinder part); total ≈ 1.8 m
+  EYE: 1.62,                // eye height above the feet
+  WALK: 4.4,
+  SPRINT: 7.2,
+  CROUCH: 2.2,
+  ACCEL_GROUND: 38,
+  ACCEL_AIR: 8,
+  JUMP: 6.6,
+  GRAVITY: 20,
+  MAX_SLOPE_DEG: 38,        // steeper than this you can't walk — you climb or you slide
+  STEP: 0.46,
+  REACH: 3.0,               // grab / use distance
+  KO_LAND_SPEED: 15.5,      // land faster than this and you're out
+  STUMBLE_LAND_SPEED: 11,
+  KO_TIME: 20,              // seconds until you wake up on your own (and pay for it)
+  REVIVE_HOLD: 2.2,
 };
-export const GATE_CD_ALL = FAST ? 0.5 : 3;       // countdown when EVERYONE is in
-export const GATE_CD_MAJORITY = FAST ? 1 : 9;    // countdown when most are in
 
-export const SLOP_COLORS = [
-  '#7CFC00', // slime green
-  '#FF6EC7', // gum pink
-  '#00E5FF', // toxic cyan
-  '#FFA033', // cheese orange
-  '#B26EFF', // grape purple
-  '#FFE93B', // mustard yellow
-  '#FF5252', // ketchup red
-  '#5C7CFF', // blueberry
-];
+export const STAMINA = {
+  MAX: 100,
+  SPRINT: 11,               // per second
+  CLIMB_MOVE: 9.5,
+  CLIMB_HANG: 3.5,
+  LUNGE: 24,
+  JUMP: 6,
+  REGEN: 30,
+  REGEN_DELAY: 0.7,
+  WEIGHT_PER_KG: 0.45,      // max stamina lost per kg you're holding (PEAK's backpack rule)
+  WEIGHT_CAP: 55,
+};
 
+export const CLIMB = {
+  SPEED: 1.85,
+  LUNGE: 4.6,
+  MIN_STEEP_DEG: 38,        // surfaces at least this steep can be clung to
+  REACH: 0.95,
+};
+
+// ---- grabbing ---------------------------------------------------------------
+export const GRAB = {
+  KP: 140,                  // spring toward the hand
+  KD: 22,
+  FMAX: 950,                // newtons one person can pull with (lifts ~95 kg alone)
+  RV_FMAX: 1300,            // tugging the RV by its bumper
+  HOLD_MIN: 1.0,
+  HOLD_MAX: 2.6,
+  HOLD_DEFAULT: 1.6,
+  THROW: 9,                 // m/s for light things; heavy things get less
+  THROW_IMPULSE_CAP: 260,
+};
+
+export const PUSH_FORCE_RV = 2600;      // per shoving player, newtons
+export const PUSH_FORCE_PROP = 520;
+
+// ---- the RV -------------------------------------------------------------------
+export const RV = {
+  MASS: 3000,
+  ENGINE: 2900,             // newtons per driven wheel at full throttle
+  REVERSE: 1700,
+  BRAKE: 95,
+  TOP_SPEED: 17,            // m/s
+  STEER_MAX: 0.56,
+  FRICTION_SLIP: 2.2,
+  MUD_SLIP: 0.16,
+  MUD_DRAG: 11000,
+};
+
+export const WINCH = {
+  MAX_LEN: 42,
+  REEL_SPEED: 1.6,          // m/s
+  FORCE: 52000,             // max newtons on the cable
+  STIFF: 42000,             // newtons per meter of stretch
+  DAMP: 9000,
+  ANCHOR_REACH: 1.6,
+};
+
+export const COLORS = ['#7CFC00', '#FF6EC7', '#00E5FF', '#FFA033', '#B26EFF', '#FFE93B'];
 export const EMOTES = ['😂', '😭', '💀', '🤬', '👑', '🤡'];
 
-// The five chambers of the Slop Pit, in expedition order.
-// Every level is an homage to a friendslop classic (plus the Pit Boss's
-// blackjack table between levels — that one's for Gamble With Friends).
-export const MINIGAME_INFO = {
-  dig: {
-    name: 'THE DIG SITE',
-    based: 'Keep Digging (via a certain village & a certain marketplace)',
-    desc: 'Start on the green grass of SLOPSHIRE. DASH the ground to crack it, drop through, repeat — three floors down — until you splash into THE GRAND SLOPCHANGE. Everyone to the bottom. Mind the merchants.',
-    goal: 'Everyone digs down to the Slopchange',
-    icon: '⛏️',
-  },
-  rv: {
-    name: 'ARE WE SLOP YET?',
-    based: 'R.V. There Yet?',
-    desc: 'The old RV is the only way through and it does not drive. PUSH IT. Mud bogs it down, gremlins shove it backwards, and the exit is all the way across the pit. All shoulders on the bumper.',
-    goal: 'Push the RV to the exit',
-    icon: '🚐',
-  },
-  cham: {
-    name: 'THE CHAMELEON',
-    based: 'Mecha Chameleon',
-    desc: 'One of those statues is ALIVE and wearing your friend\'s face. Watch for the twitch, then DASH it. Smash a wrong statue and the squad pays for it. Catch it three times.',
-    goal: 'Catch the chameleon 3 times',
-    icon: '🦎',
-  },
-  casino: {
-    name: "THE BOSS'S CASINO",
-    based: 'Gamble With Friends',
-    desc: 'The Pit Boss deals blackjack to the whole squad. Vote with your BODY — stand in the HIT or STAND zone before the timer. Win 2 hands before you bust out 3 times and the gate opens.',
-    goal: 'Beat the Boss at blackjack',
-    icon: '🎩',
-  },
-  chained: {
-    name: 'CHAINED TOGETHER',
-    based: 'Chained Together',
-    desc: 'The pit CHAINS THE SQUAD for this climb — and the slop tide is rising. Ledges hold you, slime vines climb you, and one slip drags the whole chain down. Everyone to the top. Together.',
-    goal: 'Everyone above the tide, up top — CHAINED',
-    icon: '⛓️',
-  },
-  peak: {
-    name: 'THE PEAK',
-    based: 'PEAK',
-    desc: 'The final free solo. No chain now — just you, the boys, the falling slop, and the summit. Get every single climber to THE PEAK and the Slop Pit is history.',
-    goal: 'Every climber reaches the summit',
-    icon: '🏔️',
-  },
-};
+// pose modes, sent as a small int
+export const MODE = { WALK: 0, CLIMB: 1, SEAT: 2, KO: 3, AIR: 4 };
+// pose flags (bitmask)
+export const FLAG = { SPRINT: 1, CROUCH: 2, HOLDING: 4, WALKIE_TX: 8, MAP: 16 };
