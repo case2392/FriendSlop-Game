@@ -23,6 +23,38 @@ const OBSTACLE_PLAN = [
   ['mud', 'gate', 'boulder', 'grade', 'grade'],
 ];
 
+// One biome per day: the trip runs from green meadows (think Elwynn) through
+// golden farmland (Westfall), red canyons (the Badlands) into the desert
+// (Tanaris) where Lost Wages sits. Biomes change the terrain's shape, the
+// decor, and the art; obstacles and their narrows stay steep everywhere.
+export const BIOME_BY_DAY = ['meadow', 'fields', 'badlands', 'badlands', 'desert'];
+export const BIOMES = {
+  meadow: {
+    name: 'The Westmeadow Road', town: 'timber',
+    wallSoft: 12, wallH: [10, 6], wallDist: [42, 14], bumps: 2.2,
+    decor: [['oak', 30], ['bush', 22], ['rock', 12], ['flowers', 22], ['stump', 5], ['fence', 4], ['pine', 5]],
+    density: 1 / 4.5,
+  },
+  fields: {
+    name: 'Goldenfield Pike', town: 'timber',
+    wallSoft: 16, wallH: [7, 5], wallDist: [46, 14], bumps: 1.6,
+    decor: [['oak', 10], ['haybale', 14], ['bush', 16], ['rock', 8], ['wheat', 30], ['scarecrow', 3], ['fence', 10], ['flowers', 9]],
+    density: 1 / 4.5,
+  },
+  badlands: {
+    name: 'The Redrock Badlands', town: 'adobe',
+    wallSoft: 5.5, wallH: [15, 8], wallDist: [36, 16], bumps: 1.7,
+    decor: [['cactus', 34], ['deadtree', 10], ['rock', 40], ['bones', 6], ['bush', 10]],
+    density: 1 / 7,
+  },
+  desert: {
+    name: 'The Lost Wages Flats', town: 'adobe',
+    wallSoft: 10, wallH: [9, 6], wallDist: [44, 14], bumps: 2.6,
+    decor: [['cactus', 30], ['palm', 8], ['rock', 26], ['bones', 12], ['bush', 10]],
+    density: 1 / 8,
+  },
+};
+
 const POI_WEIGHTS = [['gas', 3], ['semi', 3], ['yard', 3], ['crash', 2], ['junk', 2], ['dino', 1]];
 
 const BILLBOARDS = [
@@ -46,6 +78,8 @@ export function generateLeg(seed, day) {
   const rng = mulberry32((seed ^ Math.imul(day, 0x9E3779B1)) >>> 0);
   const S = (seed + day * 7919) % 1000003;
   const LEN = 820 + day * 80;
+  const biome = BIOME_BY_DAY[Math.min(day, BIOME_BY_DAY.length) - 1];
+  const B = BIOMES[biome];
   const Z0 = -CAMP_LEN, Z1 = LEN + TOWN_LEN;
   const TOWN_Z = LEN;
 
@@ -121,13 +155,15 @@ export function generateLeg(seed, day) {
   // ---- canyon walls -------------------------------------------------------------
   const narrows = obstacles.filter(o => o.type === 'boulder' || o.type === 'gate');
   const flatZone = z => Math.max(1 - smoothstep(-25, 15, z), smoothstep(LEN - 15, LEN + 25, z));
+  const narrowK = z => { let k = 0; for (const o of narrows) k = Math.max(k, 1 - smoothstep(14, 42, Math.abs(z - o.z))); return k; };
+  const wallSoft = z => lerp(B.wallSoft, 5.5, narrowK(z));
   function wallDist(side, z) {
-    let wd = 36 + 16 * fbm(z / 140, side * 7.7, S + 3, 2);
+    let wd = B.wallDist[0] + B.wallDist[1] * fbm(z / 140, side * 7.7, S + 3, 2);
     for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 6.2, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
     return lerp(wd, 85, flatZone(z));
   }
   function wallH(side, z) {
-    let wh = 15 + 8 * fbm(z / 90, side * 3.1 + 40, S + 9, 2);
+    let wh = lerp(B.wallH[0] + B.wallH[1] * fbm(z / 90, side * 3.1 + 40, S + 9, 2), 15 + 6 * fbm(z / 90, side * 3.1 + 40, S + 9, 2), narrowK(z));
     for (const o of narrows) if (o.type === 'gate') wh = lerp(wh, 9.5, 1 - smoothstep(20, 45, Math.abs(z - o.z)));
     return wh;
   }
@@ -165,12 +201,12 @@ export function generateLeg(seed, day) {
     // road crown + shallow ditches
     h -= 0.22 * smoothstep(4.6, 6.4, ad) * (1 - smoothstep(8, 12, ad)) * (1 - flat);
     // valley floor bumps
-    h += fbm(x / 34, z / 34, S + 11, 3) * 1.7 * smoothstep(7, 22, ad) * (1 - flat);
+    h += fbm(x / 34, z / 34, S + 11, 3) * B.bumps * smoothstep(7, 22, ad) * (1 - flat);
     // canyon walls
     const side = d >= 0 ? 1 : 0;
     const wd = wallDist(side, z);
     const jag = fbm(x / 9, z / 9, S + 21, 2) * 2.4;
-    const t = smoothstep(wd, wd + 5.5, ad + jag);
+    const t = smoothstep(wd, wd + wallSoft(z), ad + jag);
     h += t * (wallH(side, z) + fbm(x / 22, z / 22, S + 31, 2) * 3.2);
     // beyond the rim: rolling plateau, then the world's edge rises
     h += smoothstep(wd + 8, wd + 60, ad) * 6 * (fbm(x / 60, z / 60, S + 41, 2) + 0.6);
@@ -235,8 +271,10 @@ export function generateLeg(seed, day) {
   const props = [];
   let propId = 1;
 
-  const box = (x, y, z, hx, hy, hz, ry = 0, mat = 'wall', col = null) => {
-    statics.push({ x, y, z, hx, hy, hz, ry, mat, col });
+  const buildings = [];      // whole buildings, for the renderer: {id,kind,x,y,z,ry,w,dep,h,door}
+  let tagNow = null;        // statics created while this is set belong to a building / stop
+  const box = (x, y, z, hx, hy, hz, ry = 0, mat = 'wall', col = null, part = null) => {
+    statics.push({ x, y, z, hx, hy, hz, ry, mat, col, part, ...(tagNow || {}) });
   };
   const use = (kind, x, y, z, label, arg = null, r = 0.35) => {
     uses.push({ id: uses.length, kind, x, y, z, r, label, arg });
@@ -246,15 +284,19 @@ export function generateLeg(seed, day) {
     const s = Math.sin(ry), c = Math.cos(ry);
     return (lx, ly, lz) => ({ x: ox + lx * c + lz * s, y: oy + ly, z: oz - lx * s + lz * c });
   };
-  const lbox = (F, ry, lx, ly, lz, hx, hy, hz, mat, col) => {
+  const lbox = (F, ry, lx, ly, lz, hx, hy, hz, mat, col, part = null) => {
     const p = F(lx, ly, lz);
-    box(p.x, p.y, p.z, hx, hy, hz, ry, mat, col);
+    box(p.x, p.y, p.z, hx, hy, hz, ry, mat, col, part);
   };
   // a walk-in building: front wall (local +z) has a door gap. Returns its frame.
-  function building(ox, oz, ry, w, dep, h, mat, col, oy = null) {
+  function building(ox, oz, ry, w, dep, h, mat, col, oy = null, kind = 'house') {
     const y0 = oy ?? heightAt(ox, oz);
     const F = frame(ox, y0, oz, ry);
     const t = 0.15, door = 1.6;
+    const id = buildings.length;
+    buildings.push({ id, kind, x: ox, y: y0, z: oz, ry, w, dep, h, door, style: B.town });
+    const prevTag = tagNow;
+    tagNow = { bld: id };
     lbox(F, ry, 0, -0.5, 0, w / 2, 0.6, dep / 2, 'floor', null);          // slab
     lbox(F, ry, 0, h / 2, -dep / 2, w / 2, h / 2, t, mat, col);           // back
     lbox(F, ry, -w / 2, h / 2, 0, t, h / 2, dep / 2, mat, col);           // sides
@@ -264,7 +306,8 @@ export function generateLeg(seed, day) {
     lbox(F, ry, (door / 2 + segW / 2), h / 2, dep / 2, segW / 2, h / 2, t, mat, col);
     lbox(F, ry, 0, h - 0.4, dep / 2, door / 2, 0.4, t, mat, col);       // over the door
     lbox(F, ry, 0, h + 0.1, 0, w / 2 + 0.3, 0.1, dep / 2 + 0.3, 'roof', null);
-    return { F, y0 };
+    tagNow = prevTag;
+    return { F, y0, id };
   }
   const placeLoot = (type, x, y, z, ry = 0, mult = 1) => {
     const L = LOOT[type];
@@ -310,7 +353,7 @@ export function generateLeg(seed, day) {
       o.gate = gates.length;
       gates.push({ id: gates.length, x: rx, y: y + 1.6, z: o.z, hx: 11, hy: 1.6, hz: 0.18, code: o.code });
       const kx = rx - 5.0, kz = o.z - 2.2, ky = heightAt(kx, kz);
-      box(kx, ky + 0.6, kz, 0.12, 0.6, 0.12, 0, 'post');
+      box(kx, ky + 0.6, kz, 0.12, 0.6, 0.12, 0, 'post', null, 'keypad_post');
       use('keypad', kx, ky + 1.3, kz - 0.14, 'Enter gate code', gates.length - 1, 0.32);
       signs.push({ x: rx + 5.4, y: heightAt(rx + 5.4, o.z - 6) + 2.2, z: o.z - 6, ry: 0, w: 3.2, h: 1.4,
         lines: ['RANGER STATION 7', 'CODE POSTED ON THE RIM ↗'], bg: '#3a6b35', fg: '#f6efd6', post: true });
@@ -329,13 +372,15 @@ export function generateLeg(seed, day) {
   for (const p of pois) {
     const px = p.x;
     const ry = p.side > 0 ? -Math.PI / 2 : Math.PI / 2;   // front faces the road
+    p.ry = ry;
+    tagNow = { poi: p.id, poiType: p.type };
     if (p.type === 'gas') {
-      const { F, y0 } = building(px, p.z, ry, 8, 6, 3.2, 'stucco', '#e9d8b4');
+      const { F, y0 } = building(px, p.z, ry, 8, 6, 3.2, 'stucco', '#e9d8b4', null, 'gas');
       p.y = y0;
-      const pump = F(-1.5, 0.75, 6.2); box(pump.x, pump.y, pump.z, 0.35, 0.75, 0.25, ry, 'pump', '#d64545');
-      const pump2 = F(1.5, 0.75, 6.2); box(pump2.x, pump2.y, pump2.z, 0.35, 0.75, 0.25, ry, 'pump', '#d64545');
+      const pump = F(-1.5, 0.75, 6.2); box(pump.x, pump.y, pump.z, 0.35, 0.75, 0.25, ry, 'pump', '#d64545', 'pump');
+      const pump2 = F(1.5, 0.75, 6.2); box(pump2.x, pump2.y, pump2.z, 0.35, 0.75, 0.25, ry, 'pump', '#d64545', 'pump');
       const canopy = F(0, 4.2, 6.2); decor.push({ k: 'canopy', x: canopy.x, y: canopy.y, z: canopy.z, ry });
-      const cnt = F(1.8, 0.5, -1.8); box(cnt.x, cnt.y, cnt.z, 1.6, 0.5, 0.5, ry, 'wood');
+      const cnt = F(1.8, 0.5, -1.8); box(cnt.x, cnt.y, cnt.z, 1.6, 0.5, 0.5, ry, 'wood', null, 'counter');
       const sg = F(0, 4.2, 3.2); signs.push({ x: sg.x, y: sg.y, z: sg.z, ry, w: 4.2, h: 0.9, lines: ['GAS · FOOD · REGRET'], bg: '#d64545', fg: '#fff' });
       const spots = [[1.6, 1.0, -1.8], [-2.5, 0, -1.6], [-2.6, 0, 1.2], [2.8, 0, 1.4], [-0.6, 0, -2.0], [0.4, 0, 5.0], [-3.2, 0, 4.4]];
       for (let i = 0; i < 5 + Math.floor(rng() * 2); i++) {
@@ -349,13 +394,14 @@ export function generateLeg(seed, day) {
       const F = frame(px, y0, p.z, ry + 0.35);
       const r2 = ry + 0.35;
       // trailer: floor, two sides, roof, front; open rear
-      lbox(F, r2, 0, 0.75, 0, 1.3, 0.12, 6, 'metal', '#c9ccd1');
-      lbox(F, r2, -1.3, 2.2, 0, 0.06, 1.35, 6, 'metal', '#e9ecef');
-      lbox(F, r2, 1.3, 2.2, 0, 0.06, 1.35, 6, 'metal', '#e9ecef');
-      lbox(F, r2, 0, 3.55, 0, 1.36, 0.06, 6, 'metal', '#dfe3e8');
-      lbox(F, r2, 0, 2.2, 6, 1.3, 1.35, 0.06, 'metal', '#e9ecef');
-      lbox(F, r2, 0, 1.6, 7.6, 1.2, 1.6, 1.2, 'metal', '#2f6db5');   // the cab, nose in the dirt
-      const ramp = F(0, 0.35, -6.9); box(ramp.x, ramp.y, ramp.z, 1.1, 0.06, 1.3, r2, 'wood');
+      p.trailer = { x: px, y: y0, z: p.z, ry: r2 };
+      lbox(F, r2, 0, 0.75, 0, 1.3, 0.12, 6, 'metal', '#c9ccd1', 'trailer_floor');
+      lbox(F, r2, -1.3, 2.2, 0, 0.06, 1.35, 6, 'metal', '#e9ecef', 'trailer_side');
+      lbox(F, r2, 1.3, 2.2, 0, 0.06, 1.35, 6, 'metal', '#e9ecef', 'trailer_side');
+      lbox(F, r2, 0, 3.55, 0, 1.36, 0.06, 6, 'metal', '#dfe3e8', 'trailer_roof');
+      lbox(F, r2, 0, 2.2, 6, 1.3, 1.35, 0.06, 'metal', '#e9ecef', 'trailer_front');
+      lbox(F, r2, 0, 1.6, 7.6, 1.2, 1.6, 1.2, 'metal', '#2f6db5', 'cab');   // the cab, nose in the dirt
+      const ramp = F(0, 0.35, -6.9); box(ramp.x, ramp.y, ramp.z, 1.1, 0.06, 1.3, r2, 'wood', null, 'ramp');
       decor.push({ k: 'wheels', x: px, y: y0, z: p.z, ry: r2 });
       for (let i = 0; i < 5; i++) {
         const lz = -4.5 + i * 2.0, w = F((rng() - 0.5) * 1.4, 0.87, lz);
@@ -369,8 +415,8 @@ export function generateLeg(seed, day) {
       const y0 = heightAt(px, p.z); p.y = y0;
       const F = frame(px, y0, p.z, ry);
       for (const lx of [-2.2, 2.2]) {
-        const t = F(lx, 0.72, 0); box(t.x, t.y, t.z, 1.1, 0.04, 0.55, ry, 'wood', '#b07a45');
-        const l = F(lx, 0.35, 0); box(l.x, l.y, l.z, 0.9, 0.35, 0.05, ry, 'wood', '#8a5a30');
+        const t = F(lx, 0.72, 0); box(t.x, t.y, t.z, 1.1, 0.04, 0.55, ry, 'wood', '#b07a45', 'table');
+        const l = F(lx, 0.35, 0); box(l.x, l.y, l.z, 0.9, 0.35, 0.05, ry, 'wood', '#8a5a30', 'table_legs');
         for (let i = 0; i < 2; i++) {
           const w = F(lx - 0.5 + i * 1.0, 0, 0);
           placeLoot(POI_LOOT.yard[Math.floor(rng() * POI_LOOT.yard.length)], w.x, y0 + 0.76, w.z, ry + rng() * 0.6);
@@ -387,8 +433,8 @@ export function generateLeg(seed, day) {
       const y0 = p.mesa.base + p.mesa.h; p.y = y0;
       const F = frame(px, y0, p.z, ry + 0.8);
       decor.push({ k: 'plane', x: px, y: y0, z: p.z, ry: ry + 0.8 });
-      lbox(F, ry + 0.8, 0, 0.7, 0, 0.7, 0.7, 3.2, 'metal', '#f1f1f1');
-      lbox(F, ry + 0.8, 0, 0.7, 0.4, 4.2, 0.08, 0.8, 'metal', '#d83a3a');
+      lbox(F, ry + 0.8, 0, 0.7, 0, 0.7, 0.7, 3.2, 'metal', '#f1f1f1', 'fuselage');
+      lbox(F, ry + 0.8, 0, 0.7, 0.4, 4.2, 0.08, 0.8, 'metal', '#d83a3a', 'wing');
       for (let i = 0; i < 3; i++) {
         const w = F(-2 + i * 2, 0, -3.5 - rng());
         placeLoot(POI_LOOT.crash[Math.floor(rng() * POI_LOOT.crash.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6, 1.15);
@@ -398,7 +444,7 @@ export function generateLeg(seed, day) {
       const F = frame(px, y0, p.z, ry);
       for (let i = 0; i < 6; i++) {
         const w = F(-3 + rng() * 6, 0, -3 + rng() * 3);
-        box(w.x, y0 + 0.4 + rng() * 0.4, w.z, 0.5 + rng() * 0.6, 0.4 + rng() * 0.4, 0.5 + rng() * 0.6, rng() * 3, 'junk', ['#7a6e64', '#8c3b2e', '#4f5d75', '#6b705c'][i % 4]);
+        box(w.x, y0 + 0.4 + rng() * 0.4, w.z, 0.5 + rng() * 0.6, 0.4 + rng() * 0.4, 0.5 + rng() * 0.6, rng() * 3, 'junk', ['#7a6e64', '#8c3b2e', '#4f5d75', '#6b705c'][i % 4], ['crate', 'barrel', 'scrap', 'crate', 'scrap', 'barrel'][i]);
       }
       for (let i = 0; i < 4; i++) {
         const w = F(-3.5 + rng() * 7, 0, 1.0 + rng() * 2.5);
@@ -407,10 +453,11 @@ export function generateLeg(seed, day) {
     } else if (p.type === 'dino') {
       const y0 = heightAt(px, p.z); p.y = y0;
       const F = frame(px, y0, p.z, ry);
-      lbox(F, ry, 0, 2.2, -1.5, 1.6, 2.2, 3.0, 'dino', '#5aa469');      // body
-      lbox(F, ry, 0, 3.6, -5.6, 0.5, 0.5, 2.2, 'dino', '#5aa469');      // tail
-      for (const lx of [-1.1, 1.1]) for (const lz of [-3.4, 0.4]) lbox(F, ry, lx, 0.9, lz, 0.4, 0.9, 0.4, 'dino', '#4b8a58');
-      lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469');     // headless neck. the head is loot.
+      p.dino = { x: px, y: y0, z: p.z, ry };
+      lbox(F, ry, 0, 2.2, -1.5, 1.6, 2.2, 3.0, 'dino', '#5aa469', 'dino_body');
+      lbox(F, ry, 0, 3.6, -5.6, 0.5, 0.5, 2.2, 'dino', '#5aa469', 'dino_tail');
+      for (const lx of [-1.1, 1.1]) for (const lz of [-3.4, 0.4]) lbox(F, ry, lx, 0.9, lz, 0.4, 0.9, 0.4, 'dino', '#4b8a58', 'dino_leg');
+      lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469', 'dino_neck');     // headless neck. the head is loot.
       const h = F(1.5, 0, 3.4);
       placeLoot('dino', h.x, heightAt(h.x, h.z), h.z, ry + 0.4);
       for (let i = 0; i < 2; i++) {
@@ -421,6 +468,8 @@ export function generateLeg(seed, day) {
       signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.8, h: 1.1, lines: ['DINO WORLD', 'HEAD MISSING — REWARD'], bg: '#5aa469', fg: '#fff', post: true });
     }
   }
+
+  tagNow = null;
 
   // ---- billboards & landmarks (they're on the map, so you can navigate by them) --------
   const landmarks = [];
@@ -443,25 +492,51 @@ export function generateLeg(seed, day) {
     }
   }
 
-  // ---- desert decor: cacti and rocks (cacti have colliders) ---------------------------
-  const nDecor = Math.floor(LEN / 7);
+  // ---- biome decor: trees, bushes, rocks, flowers, cacti... ----------------------------
+  // Trees and haybales get colliders (an oak WILL stop the RV); cacti are flimsy
+  // (people bump them, the RV mows them down); everything else is visual.
+  const nDecor = Math.floor(LEN * B.density);
+  const decorTotal = B.decor.reduce((a, [, w]) => a + w, 0);
+  const pickDecor = () => { let r = rng() * decorTotal; for (const [k, w] of B.decor) if ((r -= w) < 0) return k; return B.decor[0][0]; };
   for (let i = 0; i < nDecor; i++) {
-    const z = 10 + rng() * (LEN - 20);
+    const z = Z0 + 10 + rng() * (Z1 - Z0 - 20);
+    const inCamp = z < 0, inTown = z > LEN - 5;
     const side = rng() < 0.5 ? -1 : 1;
     const wd = wallDist(side > 0 ? 1 : 0, z);
-    const off = 8 + rng() * Math.max(1, wd - 10);
+    const k = pickDecor();
+    // trees and rocks also go up on the hills and the rims; small stuff stays on the valley floor
+    const tall = k === 'oak' || k === 'pine' || k === 'palm' || k === 'rock' || k === 'deadtree';
+    const reach = tall && rng() < 0.45 ? wd + 6 + rng() * 40 : Math.max(1, wd - 10);
+    const off = 8.5 + rng() * reach;
     const x = roadX(z) + side * off;
-    if (pois.some(p => Math.hypot(p.x - x, p.z - z) < 13)) continue;
-    if (obstacles.some(o => Math.abs(o.z - z) < 20)) continue;
+    if (Math.abs(x) > HALF_W - 25) continue;
+    if (pois.some(p => Math.hypot(p.x - x, p.z - z) < 14)) continue;
+    if (obstacles.some(o => Math.abs(o.z - z) < 22 && off < 16)) continue;
+    if ((inCamp || inTown) && (Math.abs(x) < 26 || (inTown && x > 8 && x < 34))) continue;   // keep the camp, street and lots clear
     const y = heightAt(x, z);
-    if (rng() < 0.55) {
+    const ry = rng() * 6.283;
+    const s = 0.75 + rng() * 0.6;
+    if (k === 'oak' || k === 'pine' || k === 'palm') {
+      const hh = k === 'palm' ? 2.6 : 1.8;
+      cyls.push({ x, y: y + hh, z, r: (k === 'oak' ? 0.42 : 0.3) * s, hh, mat: 'tree' });
+      decor.push({ k, x, y, z, s, ry });
+    } else if (k === 'cactus') {
       const hh = 0.9 + rng() * 0.9;
       cyls.push({ x, y: y + hh, z, r: 0.24, hh, mat: 'cactus' });
-      decor.push({ k: 'cactus', x, y, z, h: hh * 2, ry: rng() * 6 });
+      decor.push({ k, x, y, z, h: hh * 2, s, ry });
+    } else if (k === 'haybale') {
+      cyls.push({ x, y: y + 0.6, z, r: 0.75, hh: 0.6, mat: 'haybale' });
+      decor.push({ k, x, y, z, s: 1, ry });
+    } else if (k === 'deadtree') {
+      cyls.push({ x, y: y + 1.6, z, r: 0.25, hh: 1.6, mat: 'deadtree_decor' });
+      decor.push({ k, x, y, z, s, ry });
+    } else if (k === 'fence') {
+      decor.push({ k, x, y, z, s, ry: Math.atan2(W_roadDx(z), 1) + (rng() - 0.5) * 0.2, len: 4 + Math.floor(rng() * 4) });
     } else {
-      decor.push({ k: 'rock', x, y, z, s: 0.5 + rng() * 1.3, ry: rng() * 6 });
+      decor.push({ k, x, y, z, s: k === 'rock' ? 0.5 + rng() * 1.4 : s, ry });
     }
   }
+  function W_roadDx(z) { return roadX(z + 0.5) - roadX(z - 0.5); }
 
   // ---- the camp -------------------------------------------------------------------
   const camp = {
@@ -478,7 +553,7 @@ export function generateLeg(seed, day) {
   for (let i = 0; i < 4; i++) {
     const a = i / 4 * Math.PI * 2 + 0.4;
     const lx = camp.fire.x + Math.cos(a) * 2.2, lz = camp.fire.z + Math.sin(a) * 2.2;
-    box(lx, heightAt(lx, lz) + 0.2, lz, 0.6, 0.2, 0.18, -a, 'log', '#6b4a2e');
+    box(lx, heightAt(lx, lz) + 0.2, lz, 0.6, 0.2, 0.18, -a, 'log', '#6b4a2e', 'log_seat');
   }
   signs.push({ x: 7, y: heightAt(7, -8) + 2.3, z: -8, ry: 0, w: 3.6, h: 1.4,
     lines: [`DAY ${day}`, `TOWN ${Math.round(LEN)} m →`], bg: '#2f4858', fg: '#fff', post: true });
@@ -491,9 +566,11 @@ export function generateLeg(seed, day) {
 
   // pawn shop (left of the street, door facing the street)
   {
-    const { F, y0 } = building(-17, T + 42, Math.PI / 2, 12, 9, 3.6, 'stucco', '#c97b63', townY);
+    const { F, y0 } = building(-17, T + 42, Math.PI / 2, 12, 9, 3.6, 'stucco', '#c97b63', townY, 'pawn');
     const counter = F(0, 0.5, -1.8);
-    box(counter.x, y0 + 0.5, counter.z, 3.2, 0.5, 0.55, Math.PI / 2, 'wood', '#7b4b2a');
+    tagNow = { town: 'pawn' };
+    box(counter.x, y0 + 0.5, counter.z, 3.2, 0.5, 0.55, Math.PI / 2, 'wood', '#7b4b2a', 'counter');
+    tagNow = null;
     town.pawn = { x: counter.x, y: y0 + 1.0, z: counter.z, hx: 0.6, hz: 3.2 };   // in world axes
     const bell = F(-2.6, 1.08, -1.6);
     use('pawnBell', bell.x, y0 + 1.08, bell.z, 'Ring to sell what\'s on the counter', null, 0.28);
@@ -503,9 +580,11 @@ export function generateLeg(seed, day) {
   }
   // general store
   {
-    const { F, y0 } = building(-17, T + 78, Math.PI / 2, 10, 8, 3.4, 'stucco', '#7fb7be', townY);
+    const { F, y0 } = building(-17, T + 78, Math.PI / 2, 10, 8, 3.4, 'stucco', '#7fb7be', townY, 'store');
     const counter = F(0, 0.5, -1.6);
-    box(counter.x, y0 + 0.5, counter.z, 2.6, 0.5, 0.5, Math.PI / 2, 'wood', '#a0743c');
+    tagNow = { town: 'store' };
+    box(counter.x, y0 + 0.5, counter.z, 2.6, 0.5, 0.5, Math.PI / 2, 'wood', '#a0743c', 'counter');
+    tagNow = null;
     const w = F(-1.4, 1.1, -1.5); use('buy', w.x, y0 + 1.1, w.z, 'Walkie-talkie', 'walkie', 0.3);
     const d = F(0.2, 1.1, -1.5); use('buy', d.x, y0 + 1.1, d.z, 'Energy drink', 'drink', 0.3);
     const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords', 'bungee', 0.3);
@@ -517,10 +596,11 @@ export function generateLeg(seed, day) {
   // the casino
   {
     const ry = -Math.PI / 2;
-    const { F, y0 } = building(21, T + 58, ry, 22, 18, 5.2, 'casino', '#6a2c70', townY);
+    const { F, y0 } = building(21, T + 58, ry, 22, 18, 5.2, 'casino', '#6a2c70', townY, 'casino');
+    tagNow = { town: 'casino' };
     // blackjack table
     const tbl = F(-5, 0.45, -3);
-    box(tbl.x, y0 + 0.45, tbl.z, 1.8, 0.45, 1.0, ry, 'felt', '#1f7a4d');
+    box(tbl.x, y0 + 0.45, tbl.z, 1.8, 0.45, 1.0, ry, 'felt', '#1f7a4d', 'bj_table');
     const dealer = F(-5, 0, -4.6); dealer.y = y0;
     const hit = F(-7.2, 0.02, 0.6), stand = F(-2.8, 0.02, 0.6);
     town.bj = { table: { ...tbl, y: y0 + 0.92 }, dealer, ry, hit: { x: hit.x, z: hit.z, r: 1.35 }, stand: { x: stand.x, z: stand.z, r: 1.35 } };
@@ -528,7 +608,7 @@ export function generateLeg(seed, day) {
     btn(-6.6, 'Bet +$100', '+100'); btn(-5.9, 'Bet +$500', '+500'); btn(-5.2, 'ALL IN', 'all'); btn(-4.5, 'Clear bet', 'clear'); btn(-3.5, 'DEAL', 'deal');
     // double-or-nothing machine
     const m = F(5.5, 1.1, -6.5);
-    box(m.x, y0 + 1.1, m.z, 1.0, 1.1, 0.6, ry, 'machine', '#d4af37');
+    box(m.x, y0 + 1.1, m.z, 1.0, 1.1, 0.6, ry, 'machine', '#d4af37', 'flip_machine');
     town.flip = { x: m.x, y: y0, z: m.z, ry };
     const fb = (lx, label, arg) => { const b = F(lx, 1.15, -5.8); use('flip', b.x, y0 + 1.15, b.z, label, arg, 0.24); };
     fb(4.9, 'Stake +$100', '+100'); fb(5.5, 'Stake +$500', '+500'); fb(6.1, 'ALL IN', 'all');
@@ -536,8 +616,9 @@ export function generateLeg(seed, day) {
     // decor slot banks
     for (let i = 0; i < 5; i++) {
       const s = F(-9 + i * 1.3, 1.0, -8.3);
-      box(s.x, y0 + 1.0, s.z, 0.45, 1.0, 0.4, ry, 'machine', ['#e63946', '#f1c40f', '#2a9d8f', '#e76f51', '#8338ec'][i]);
+      box(s.x, y0 + 1.0, s.z, 0.45, 1.0, 0.4, ry, 'machine', ['#e63946', '#f1c40f', '#2a9d8f', '#e76f51', '#8338ec'][i], 'slot_bank');
     }
+    tagNow = null;
     const sg = F(0, 6.4, 9.2);
     signs.push({ x: sg.x, y: y0 + 6.4, z: sg.z, ry, w: 9, h: 2.4, lines: ['LUCKY SLOP', 'CASINO · NO CLOCKS'], bg: '#ff2e88', fg: '#fff9c4', neon: true });
     town.casino = { x: 21, z: T + 58, y: y0 };
@@ -551,7 +632,7 @@ export function generateLeg(seed, day) {
   decor.push({ k: 'fire', x: town.fire.x, y: townY, z: town.fire.z });
   for (let i = 0; i < 3; i++) {
     const x = 14 + i * 0.3, z = T + 125 + i * 14;
-    box(x, townY + 1.5, z, 1.25, 1.5, 4, 0.05 * i, 'rvjunk', ['#e0d6c8', '#cbd5c0', '#d8c3a5'][i]);
+    box(x, townY + 1.5, z, 1.25, 1.5, 4, 0.05 * i, 'rvjunk', ['#e0d6c8', '#cbd5c0', '#d8c3a5'][i], 'parked_rv');
   }
   for (let i = 0; i < 6; i++) decor.push({ k: 'lamp', x: (i % 2 ? 6 : -6), y: townY, z: T + 15 + i * 22 });
 
@@ -566,7 +647,7 @@ export function generateLeg(seed, day) {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights,
     roadX, roadY, heightAt, townY,
     obstacles, pois, mesas, statics, cyls, decor, signs, uses, anchors, mud, gates, props,
-    landmarks, camp, town, quota: null,
+    landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
   };
 }
 

@@ -291,3 +291,12 @@ export class Hands {
     }
   }
 }
+
+// ---- preview (tools/preview.mjs) ----
+export const PREVIEW = {
+  player: () => buildCharacter('#7CFC00', { hatIndex: 5, skinIndex: 1 }).root,
+  player2: () => buildCharacter('#FF6EC7', { hatIndex: 2, skinIndex: 3 }).root,
+  player3: () => buildCharacter('#00E5FF', { hatIndex: 0, skinIndex: 5 }).root,
+  dealer: () => buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }).root,
+  repoman: () => buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }).root,
+};

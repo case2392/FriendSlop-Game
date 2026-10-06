@@ -1,0 +1,25 @@
+// Screenshot the texture gallery:  node tools/gallery.mjs [family|all] [out.png] [tile px] [names,comma,list]
+import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+import { chromium } from 'playwright-core';
+const [fam = 'all', out = `test/screenshots/gallery-${process.argv[2] || 'all'}.png`, tile = '256', names = ''] = process.argv.slice(2);
+fs.mkdirSync(path.dirname(out), { recursive: true });
+const PORT = 6100 + Math.floor(Math.random() * 800);
+const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'inherit'] });
+process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
+await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('no server')), 10000); });
+const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
+const errors = [];
+page.on('pageerror', e => errors.push(e.message));
+page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
+await page.goto(`http://localhost:${PORT}/gallery.html?family=${fam}&tile=${tile}${names ? `&names=${names}` : ''}`);
+await page.waitForFunction(() => window.__galleryDone, null, { timeout: 120000 });
+const err = await page.textContent('#err');
+await page.screenshot({ path: out, fullPage: true });
+console.log(`gallery → ${out}`);
+if (err) console.log('PAGE ERROR:', err);
+if (errors.length) console.log('console errors:\n' + errors.join('\n'));
+await browser.close();
+process.exit(0);

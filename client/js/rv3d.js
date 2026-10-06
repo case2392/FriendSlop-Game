@@ -275,3 +275,13 @@ function planks() {
   }
   return cv;
 }
+
+// ---- preview (tools/preview.mjs) ----
+export const PREVIEW = {
+  rv: () => {
+    const v = new RVView(new THREE.Scene());
+    v.update(0, { p: { x: 0, y: 1.3, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 }, v: { x: 0, y: 0, z: 0 }, steer: 0.2, wheels: [] }, false, false, null, 120, '9:41 AM');
+    v.g.position.set(0, 1.3, 0);
+    return v.g;
+  },
+};

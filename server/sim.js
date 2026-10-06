@@ -30,6 +30,9 @@ const GROUPS = {
   flimsy: grp(G_WORLD, G_PROP | G_HOOK),     // cacti: they stop people, not a 3-ton RV
 };
 
+// stuff people bump into but a 3-ton RV flattens
+const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor']);
+
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
 const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const sub = (a, b) => v3(a.x - b.x, a.y - b.y, a.z - b.z);
@@ -108,8 +111,8 @@ export class Sim {
     this.flimsy = new Set();
     for (const c of W.cyls) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cylinder(c.hh, c.r)
-        .setTranslation(c.x, c.y, c.z).setCollisionGroups(c.mat === 'cactus' ? GROUPS.flimsy : GROUPS.world), this.statics);
-      if (c.mat === 'cactus') this.flimsy.add(col.handle);
+        .setTranslation(c.x, c.y, c.z).setCollisionGroups(FLIMSY.has(c.mat) ? GROUPS.flimsy : GROUPS.world), this.statics);
+      if (FLIMSY.has(c.mat)) this.flimsy.add(col.handle);
     }
     for (const g of W.gates) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(g.hx, g.hy, g.hz)

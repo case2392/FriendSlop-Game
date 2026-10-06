@@ -208,3 +208,6 @@ export function buildProp(type, W) {
   }
   return shadowy(g);
 }
+
+// ---- preview (tools/preview.mjs) ----
+export const PREVIEW = Object.fromEntries(Object.keys(LOOT).filter(k => k !== 'map').map(k => [k, () => buildProp(k, null)]));
