@@ -128,9 +128,9 @@ if (want('climbing')) { // 5. climbing the canyon wall
 }
 
 }
-if (want('_gate')) { // 6. the ranger gate, and the code painted up on the rim
+if (want('rim-code')) { // 6. the ranger gate, and the code painted up on the rim
 {
-  const gate = W.obstacles.find(o => o.type === '_gate');
+  const gate = W.obstacles.find(o => o.type === 'gate');
   if (gate) {
     const gz = gate.z - 13, gx = await roadX(gz);
     await ev(dave, ([x, y, z, gx2, gz2]) => { const S = window.__nmd; S.me.teleport(x, y + 0.05, z, 0); S.aimAt(gx2, y + 1.6, gz2); }, [gx - 1.5, await hAt(gx - 1.5, gz), gz, await roadX(gate.z), gate.z]);
@@ -172,7 +172,7 @@ if (want('winch')) { // 7. the winch: RV at the foot of the grade, hook up top, 
 }
 
 }
-if (want('_town')) {
+if (want('town')) {
 // 8. town at sunset, casino, pawn, the Repo Man
 await send({ t: 'dbg', op: 'tpRV', x: 0, z: W.LEN + 6, yaw: 0 });
 await send({ t: 'dbg', op: 'phase', ph: 'road' });
@@ -208,12 +208,25 @@ await wait(steve, 900);
 await send({ t: 'use', id: pay.id });
 await steve.waitForFunction(() => window.__nmd.g?.ph === 'night', null, { timeout: 8000 });
 await wait(steve, 1500);
-await ev(dave, T => { const S = window.__nmd; document.getElementById('_receipt').classList.add('hidden'); S.me.teleport(T.fire.x - 4.5, T.y + 0.05, T.fire.z - 5.5, 0); S.aimAt(T.fire.x + 4, T.y + 1.0, T.fire.z + 3); }, T);
+await ev(dave, T => { const S = window.__nmd; document.getElementById('receipt').classList.add('hidden'); S.me.teleport(T.fire.x - 4.5, T.y + 0.05, T.fire.z - 5.5, 0); S.aimAt(T.fire.x + 4, T.y + 1.0, T.fire.z + 3); }, T);
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(T.fire.x + 1.6, T.y + 0.05, T.fire.z - 1.2, -0.8); }, T);
 await shot(dave, 'night');
-await ev(steve, () => document.getElementById('_receipt').classList.remove('hidden'));
+await ev(steve, () => document.getElementById('receipt').classList.remove('hidden'));
 await shot(steve, '_receipt');
 
+}
+if (want('biomes')) { // 10. one road view per biome: days 2 (fields), 3 (badlands), 5 (desert)
+  for (const [day, name] of [[2, 'fields'], [3, 'badlands'], [5, 'desert']]) {
+    await send({ t: 'dbg', op: 'day', d: day });
+    for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, day, { timeout: 60000 });
+    await send({ t: 'dbg', op: 'clock', h: 10.5 });
+    await wait(dave, 1500);
+    const z = 95, x = (await roadX(z)) - 1.4;
+    const tz = z + 55, tx = await roadX(tz);
+    await ev(steve, ([x, z]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, Math.PI); }, [x + 2.6, z + 8]);
+    await ev(dave, ([x, z, tx, ty, tz]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, 0); S.aimAt(tx, ty, tz); }, [x, z, tx, (await hAt(tx, tz)) + 1.8, tz]);
+    await shot(dave, `biome-${name}`, { hud: false });
+  }
 }
 console.log('dave KOs', JSON.stringify(await dave.evaluate(() => ({ log: window.__nmd.me.koLog, fall: window.__nmd.me.lastFall, crash: window.__nmd.me.lastCrash }))));
 console.log('steve KOs', JSON.stringify(await steve.evaluate(() => ({ log: window.__nmd.me.koLog, fall: window.__nmd.me.lastFall }))));
