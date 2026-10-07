@@ -18,19 +18,21 @@
 //
 // HEAD FRAME (for accessories added to `head`, e.g. the Repo Man's shades in
 // town3d.js): +x = where the face points, +y = up, +z = the character's right.
-// The head bone has a uniform local scale of 1 head unit: HU = 0.00829 m (× the
-// character's scale). In head units the eyes sit at about (13, 3.5, ±4.5), the
+// The head bone has a uniform local scale of 1 head unit: HU = 0.025 × HS / 3.5 =
+// 0.00886 m (× the character's scale). Everything on the head scales with HS, so in
+// head units the landmarks never move: the eyes sit at about (13, 3.5, ±4.5), the
 // nose bridge front at x ≈ 16, the skull half-width at the eyes is ≈ 13, the crown
-// at y ≈ 22, the chin at y ≈ -12. So the old sunglasses transform, position
-// (16.5, 4, 0) with BoxGeometry(4, 5, 30), still sits right across the eyes. (The
-// Repo Man now wears modeled brass aviators of his own at the same spot.)
+// at y ≈ 22, the chin at y ≈ -12. The old sunglasses transform, position
+// (16.5, 4, 0) with BoxGeometry(4, 5, 30), still sits right across the eyes. The
+// Repo Man wears modeled brass aviators of his own there, so a box added to his head
+// is kept attached but hidden (see buildCharacter).
 import { THREE, painted, tex, labelSprite, canvasTex } from './gfx.js';
 import * as C from '/shared/constants.js';
 import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
-import { AW, AH, REG, HEAD_RINGS, TORSO, TORSO_UP, hairlineDy, lerpTable, armV, skirtV, resolveSpec, charAtlas, charGlow, handsAtlas, FP, labelColor } from './paint/characters.js';
+import { AW, AH, REG, HEAD_RINGS, TORSO, TORSO_UP, hairlineDy, lerpTable, armV, skirtV, dressV, DRESS_Y0, DRESS_Y1, resolveSpec, charAtlas, charGlow, handsAtlas, FP, labelColor } from './paint/characters.js';
 
 const TAU = Math.PI * 2;
-const HS = 1.16;             // head size factor over HEAD_RINGS
+const HS = 1.24;             // head size factor over HEAD_RINGS (WoW humans carry a big head)
 const HU = 0.025 * HS / 3.5; // head-local unit (see the header): the eye line sits at y = 3.5
 const clamp01 = x => Math.max(0, Math.min(1, x));
 const sstep = (a, b, x) => { const t = clamp01((x - a) / (b - a)); return t * t * (3 - 2 * t); };
@@ -46,7 +48,7 @@ const J = { hips: 0.95, spine: 1.06, chest: 1.25, neck: 1.475, head: 1.62, hipY:
 // limb joints depend on the build (s = -1 left, +1 right)
 function frameOf(S) {
   const fem = !!S.look.female, bulk = S.bulk || 1, wide = 1 + (bulk - 1) * 0.9;
-  const sh = (fem ? 0.228 : 0.252) * wide, shY = fem ? 1.415 : 1.425;
+  const sh = (fem ? 0.226 : 0.262) * wide, shY = fem ? 1.415 : 1.425;
   return {
     fem, bulk,
     shoulder: s => [0, shY, sh * s],
@@ -304,10 +306,10 @@ function headParts(S) {
     }));
   }
   if (L.facial === 'beard' || L.facial === 'goatee') {
-    const big = L.facial === 'beard';
-    const c = toHead([(big ? 0.07 : 0.095) * HS, (big ? -0.078 : -0.09) * HS, 0]);
+    const big = L.facial === 'beard', bs = big ? (L.beard || 1) : 1;
+    const c = toHead([(big ? 0.07 : 0.095) * HS, (big ? -0.078 - 0.02 * (bs - 1) : -0.09) * HS, 0]);
     const ks = big ? [0, 0.75, 1, 0.95, 0.7, 0] : [0, 0.9, 1, 0.75, 0.4, 0];
-    parts.push(lathe(ks.map((k, i) => ({ y: (0.5 - i / 5) * (big ? 0.08 : 0.052), w: (big ? 0.076 : 0.023) * k, d: (big ? 0.044 : 0.017) * k, db: (big ? 0.03 : 0.01) * k, v: 1 - i / 5 })), {
+    parts.push(lathe(ks.map((k, i) => ({ y: (0.5 - i / 5) * (big ? 0.08 * bs : 0.052), w: (big ? 0.076 * (1 + (bs - 1) * 0.4) : 0.023) * k, d: (big ? 0.044 * bs : 0.017) * k, db: (big ? 0.03 : 0.01) * k, v: 1 - i / 5 })), {
       seg: 12, reg: REG.beard, bones: B.head, xf: p => [c[0] + p[0] + Math.max(0, -p[1]) * 0.35, c[1] + p[1], c[2] + p[2]],
     }));
   }
@@ -507,6 +509,7 @@ function bodyParts(S, F) {
   }
   if (S.belt) P.push(...beltParts(S));
   if (S.skirt) P.push(...skirtParts(S));
+  if (S.dress) P.push(...dressParts(S));
   if (S.apron) P.push(...apronParts(S));
   if (S.pack) P.push(...packParts(S));
   if (S.chain) P.push(...chainParts(S));
@@ -567,7 +570,9 @@ function skirtParts(S) {
       return [x, y, z];
     }, 10, 5, 0.01, {
       reg: REG.skirt, uv: (u, v) => [(pn.q + 0.02 + u * 0.96) / 4, skirtV(yOf(v))],
-      bones: p => { const t = sstep(0.97, 0.86, p[1]); return [[B.hips, 1 - t], [pn.bone, t]]; },
+      // the side panels follow their thigh three-quarters of the way, so a seated
+      // person's skirt drapes over the thighs instead of jutting out flat
+      bones: p => { const t = sstep(0.97, 0.86, p[1]) * (pn.q % 2 ? 0.75 : 1); return [[B.hips, 1 - t], [pn.bone, t]]; },
       inside: (u, v) => [0, yOf(v), 0],
     }));
   }
@@ -589,10 +594,32 @@ function skirtParts(S) {
   return P;
 }
 
+// A long gathered skirt from the waist to the ankles (the clerk). The front half rides
+// flapF and the back half flapB, so a stride pushes the cloth instead of cutting it.
+const DRESS_TOP = DRESS_Y1, DRESS_HEM = DRESS_Y0;
+function dressParts(S) {
+  const prof = [[DRESS_TOP, 0.012, 0], [0.97, 0.018, 0], [0.9, 0.03, 0.01], [0.79, 0.04, 0.035], [0.6, 0.05, 0.09], [0.4, 0.055, 0.14], [0.22, 0.058, 0.18], [DRESS_HEM, 0.06, 0.2]];
+  const rings = prof.map(([y, off, fl]) => {
+    const R = torsoRing(Math.max(0.79, y), S);
+    return { y, w: R.w + off + fl * 0.75, d: R.d + off + fl, db: R.db + off + fl, n: 2.1, v: dressV(y) };
+  });
+  return [lathe(rings, {
+    seg: 26, reg: REG.skirt, uv: (u, v) => [u, dressV(rings[Math.round(v * (rings.length - 1))].y)],
+    deform: (p, th, r) => {   // soft gathers round the hem
+      const t = clamp01((DRESS_TOP - r.y) / (DRESS_TOP - DRESS_HEM)), k = 1 + 0.035 * t * Math.sin(th * 9 + 0.6);
+      return [p[0] * k, p[1], p[2] * k];
+    },
+    bones: p => {
+      const t = sstep(0.98, 0.82, p[1]), f = clamp01(0.5 + p[0] / 0.2);
+      return [[B.hips, 1 - t], [B.flapF, t * f], [B.flapB, t * (1 - f)]];
+    },
+  })];
+}
+
 // Ed's leather shop apron: hangs from the chest to the knees
 function apronParts(S) {
   return slab((u, v) => {
-    const y = 0.48 + 0.82 * v, th = (u - 0.5) * 1.75;
+    const y = 0.48 + 0.82 * v, th = (u - 0.5) * (1.75 - 0.95 * sstep(1.0, 1.22, y));   // a narrow bib over the chest
     const yy = Math.max(0.79, y);
     const r = torsoRing(yy, S), [x, z] = ringXZ(th, r.w, r.d, r.db, r.n);
     const flare = y < 0.79 ? (0.79 - y) * 0.2 : 0;
@@ -627,9 +654,9 @@ function chainParts(S) {
 }
 
 const ARM_UP = [   // dy below the shoulder joint, half-width across (z), front, back
-  [0.075, 0.0, 0.0, 0.0],
-  [0.062, 0.05, 0.056, 0.054],
-  [0.038, 0.082, 0.086, 0.084],
+  [0.064, 0.0, 0.0, 0.0],
+  [0.054, 0.05, 0.056, 0.054],
+  [0.034, 0.08, 0.085, 0.083],
   [-0.005, 0.092, 0.092, 0.088],
   [-0.07, 0.085, 0.083, 0.079],
   [-0.145, 0.079, 0.081, 0.073],
@@ -661,11 +688,16 @@ const HAND = [   // hanging hand: thin across z (palm faces the leg), wide front
 function armParts(S, F, s) {
   const [ua, fa, ha] = ARM(s), sh = F.shoulder(s);
   const bare = S.hands === 'bare';
-  const hk = bare ? 0.9 : S.hands === 'workglove' ? 1.14 : 1.06;
+  const hk = bare ? 1.0 : S.hands === 'workglove' ? 1.3 : 1.16;     // big WoW hands
   const ak = (S.armBulk || 1) * (S.bulk || 1) * (F.fem ? 0.86 : 1);
   const rolled = S.arms === 'rolled';
   const tab = [
-    ...ARM_UP.map(([dy, w, d, db]) => { const roll = rolled ? 0.014 * gauss(dy + 0.255, 0.014) : 0; return [dy, w * ak + roll, d * ak + roll, db * ak + roll]; }),
+    ...ARM_UP.map(([dy, w, d, db]) => {
+      let roll = rolled ? 0.014 * gauss(dy + 0.255, 0.014) : 0;
+      if (S.arms === 'blouse') roll += 0.024 * gauss(dy + 0.12, 0.09) * sstep(0.07, 0.0, dy) - 0.008 * gauss(dy + 0.285, 0.02);   // puffed, gathered at the elbow
+      if (S.arms === 'shirt') roll += 0.008 * gauss(dy + 0.09, 0.03) - 0.005 * gauss(dy + 0.12, 0.012);                            // the puff over a sleeve garter
+      return [dy, w * ak + roll, d * ak + roll, db * ak + roll];
+    }),
     ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => [dy, w * (bare ? ak : 1), d * (bare ? ak : 1), db * (bare ? ak : 1)]),
     ...HAND.map(([dy, w, d, db]) => [dy, w * hk * (F.fem ? 0.9 : 1), d * hk * (F.fem ? 0.9 : 1), db * hk * (F.fem ? 0.9 : 1)]),
   ];
@@ -734,7 +766,7 @@ const FOOT = [ // x, half-width, up, down, center y, squareness, v
 function legParts(S, F, s) {
   const [th, sn, ft] = LEG(s), hip = F.hip(s), knee = F.knee(s), ank = F.ankle(s);
   const tall = S.boots === 'tall', shoe = S.boots === 'shoe';
-  const lk = (F.fem ? 0.9 : 1) * (S.bulk ? 1 + (S.bulk - 1) * 0.6 : 1);
+  const lk = (F.fem ? 0.9 : 1.04) * (S.bulk ? 1 + (S.bulk - 1) * 0.8 : 1);
   const axis = y => {
     const a = y > knee[1] ? [knee, hip] : [ank, knee], t = (y - a[0][1]) / (a[1][1] - a[0][1]);
     return [a[0][0] + (a[1][0] - a[0][0]) * t, a[0][2] + (a[1][2] - a[0][2]) * t];
@@ -748,7 +780,7 @@ function legParts(S, F, s) {
     const t = sstep(0.13, 0.07, y); return [[sn, 1 - t], [ft, t]];
   };
   const P = [lathe(tab.map(([y, w, d, db]) => { const [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v: y }; }), { seg: 14, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s] })];
-  const k = shoe ? [0.86, 0.8, 0.92] : S.outfit === 'repo' ? [1.06, 1.05, 1.04] : F.fem ? [0.9, 0.92, 0.9] : [1, 1, 1];
+  const k = shoe ? [0.86, 0.8, 0.92] : S.outfit === 'repo' ? [1.2, 1.16, 1.14] : F.fem ? [0.9, 0.92, 0.9] : [1.06, 1.06, 1.05];
   const nv = FOOT.length - 1;
   P.push(surf((u, v) => {
     const i = Math.round(v * nv), [x, w, up, dn, cy, n] = FOOT[i];
@@ -855,6 +887,12 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
   inner.add(root);
   const byName = Object.fromEntries(Object.keys(B).map((k, i) => [k, bones[i]]));
   const ch = { root: inner, body, legL: byName.legL, legR: byName.legR, armL: byName.armL, armR: byName.armR, torso: byName.spine, head: byName.head, bones: byName, mesh, spec, frame: F, driven: false, seed: (hatIndex * 7 + skinIndex * 3 + (spec.outfit.length)) };
+  if (spec.shades) {
+    // The Repo Man wears modeled aviators (shadesParts). town3d.js still parents its old
+    // placeholder box shades to his head: it stays attached (the API is unchanged) but hidden.
+    const add = byName.head.add.bind(byName.head);
+    byName.head.add = (...objs) => { for (const o of objs) if (o.isMesh && o.geometry?.type === 'BoxGeometry') o.visible = false; return add(...objs); };
+  }
   applyPose(ch, idlePose(ch, 0));
   // NPCs (nobody drives them) idle on their own: breathing, weight shifts, a look around.
   mesh.onBeforeRender = () => { if (!ch.driven) { const t = performance.now() / 1000; if (t - (ch.idleT || 0) > 1 / 40) { ch.idleT = t; applyPose(ch, idlePose(ch, t)); } } };
@@ -864,10 +902,10 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 // ---- posing --------------------------------------------------------------------------------
 
 const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR'];
-function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.13; P.eL = P.eR = 0.22; P.inL = P.inR = 0.05; return P; }
+function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.16; P.eL = P.eR = 0.3; P.inL = P.inR = 0.08; P.wristL = P.wristR = 0.1; return P; }
 // NPC stances: the Repo Man stands hands-on-hips, the Dealer deals, Ed leans on his counter
 const STANCE = {
-  repo: { abL: 0.62, abR: 0.62, aL: -0.42, aR: -0.42, eL: 1.25, eR: 1.25, inL: 0.95, inR: 0.95, wristL: 0.3, wristR: 0.3, spread: 0.1, bend: 0.04, head: -0.08 },
+  repo: { abL: 0.76, abR: 0.76, aL: -0.24, aR: -0.24, eL: 0.36, eR: 0.36, inL: 1.6, inR: 1.6, wristL: 0.35, wristR: 0.35, spread: 0.13, bend: 0.05, head: -0.1 },
   dealer: { aL: 0.42, aR: 0.48, eL: 0.8, eR: 0.75, inL: 0.25, inR: 0.3, bend: -0.06, head: 0.18 },
   ed: { aL: 0.35, aR: 0.35, eL: 1.05, eR: 1.05, inL: 0.75, inR: 0.75, abL: 0.18, abR: 0.18, bend: -0.04 },
   clerk: { aL: 0.1, aR: 0.12, eL: 0.5, eR: 0.45, inL: 0.5, inR: 0.45, abL: 0.08, abR: 0.08 },
@@ -1062,31 +1100,33 @@ export class PlayerView {
 }
 
 // ---- first-person hands ----------------------------------------------------------------------
-// Chunky stitched leather gauntlets with flared, riveted cuffs (trimmed in your color),
-// a strap across the back of the hand, the sleeve in your color, built pointing down -z
-// from the wrist (the mesh origin), back of the hand up, thumb on the inner side.
+// Big WoW-style leather gauntlets: a flared, riveted cuff banded in your color, a laced
+// bracer, your sleeve; a padded glove with stitched seams, riveted knuckle studs and thick
+// two-jointed fingers in a relaxed curl. Built pointing down -z from the wrist (the mesh
+// origin), back of the hand up, thumb on the inner side (-x for the right hand).
 
 const FPA = [256, 256];
 function fpHandGeometry(side) {
   const P = [];
-  const k = 1.18;      // WoW-chunky
+  const k = 1.2;      // WoW-chunky
   const xf = (p) => [p[2] * k, p[0] * k, p[1] * k];        // lathe local (front, along, side) -> (x side, y up, z along)
   const seg = (rings, reg, n = 14) => lathe(rings, { seg: n, reg, atlas: FPA, xf });
-  // the gauntlet cuff (flared, rolled rim), then the sleeve: lathes along +z (toward the camera)
-  P.push(seg([[0.0, 0.044, 0.033, 0], [0.03, 0.05, 0.038, 0.2], [0.098, 0.066, 0.054, 0.75], [0.118, 0.076, 0.064, 0.92], [0.13, 0.074, 0.062, 1], [0.134, 0.058, 0.05, 1]].map(([y, w, d, v]) => ({ y, w, d, db: d * 1.05, v })), FP.cuff, 16));
-  P.push(seg([[0.13, 0.058, 0.05, 0], [0.24, 0.06, 0.052, 1]].map(([y, w, d, v]) => ({ y, w, d, v })), FP.bracer));
-  P.push(seg([[0.236, 0.064, 0.056, 0], [0.26, 0.068, 0.06, 0.12], [0.6, 0.074, 0.066, 1]].map(([y, w, d, v]) => ({ y, w, d, v })), FP.sleeve));
-  // the hand: a flattened block down -z, back of the hand up
-  P.push(seg([[0.016, 0.043, 0.031, 0], [-0.028, 0.051, 0.035, 0.35], [-0.078, 0.055, 0.032, 0.82], [-0.095, 0.051, 0.027, 0.94], [-0.103, 0.0, 0.0, 1]].map(([y, w, d, v]) => ({ y, w, d, db: d * 0.9, n: 2.8, v })), FP.palm, 16));
-  // fingers, gently curled
-  const fx = [-0.036, -0.012, 0.012, 0.035], len = [0.9, 1.0, 0.96, 0.8];
+  // the gauntlet cuff (flared, with a rolled rim), the laced bracer, then the sleeve: lathes along +z (toward the camera)
+  P.push(seg([[0.0, 0.046, 0.034, 0], [0.025, 0.05, 0.037, 0.18], [0.07, 0.062, 0.05, 0.5], [0.108, 0.078, 0.064, 0.82], [0.122, 0.083, 0.069, 0.93], [0.134, 0.08, 0.066, 1], [0.138, 0.06, 0.05, 1]].map(([y, w, d, v]) => ({ y, w, d, db: d * 1.05, v })), FP.cuff, 18));
+  P.push(seg([[0.13, 0.058, 0.05, 0], [0.185, 0.062, 0.054, 0.5], [0.24, 0.061, 0.053, 1]].map(([y, w, d, v]) => ({ y, w, d, v })), FP.bracer));
+  P.push(seg([[0.236, 0.065, 0.057, 0], [0.26, 0.07, 0.062, 0.12], [0.6, 0.076, 0.068, 1]].map(([y, w, d, v]) => ({ y, w, d, v })), FP.sleeve));
+  // the hand: a broad padded block down -z, back of the hand up, swelling at the knuckles
+  const HR = [[0.016, 0.044, 0.031, 0], [-0.02, 0.053, 0.036, 0.3], [-0.058, 0.057, 0.036, 0.6], [-0.078, 0.06, 0.041, 0.78], [-0.09, 0.059, 0.039, 0.88], [-0.1, 0.054, 0.03, 0.96], [-0.106, 0.0, 0.0, 1]];
+  P.push(seg(HR.map(([y, w, d, v]) => ({ y, w, d, db: d * 0.85, n: 2.8, v })), FP.palm, 18));
+  // fingers: thick, two-jointed, relaxed curl; knuckle bulges at the joints
+  const fx = [-0.038, -0.0128, 0.0128, 0.037], len = [0.84, 1.0, 0.95, 0.76];
   fx.forEach((x, i) => {
-    const L = len[i];
-    const path = bez([x, 0.006, -0.086], [x, 0.004, -0.086 - 0.05 * L], [x * 1.05, -0.02, -0.086 - 0.08 * L], [x * 1.05, -0.046 * L, -0.086 - 0.074 * L]);
-    P.push(tube(v => path(v).map(c => c * k), v => (0.0152 - 0.002 * v) * k * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.35), 8, 7, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
+    const L = len[i], y0 = 0.006 - Math.abs(x) * 0.15;
+    const path = bez([x, y0, -0.088], [x, y0 + 0.002, -0.088 - 0.055 * L], [x * 1.04, y0 - 0.022 * L, -0.088 - 0.085 * L], [x * 1.04, y0 - 0.05 * L, -0.088 - 0.082 * L]);
+    P.push(tube(v => path(v).map(c => c * k), v => (0.0168 - 0.0025 * v) * k * (1 + 0.1 * gauss(v - 0.5, 0.08) + 0.06 * gauss(v - 0.05, 0.06)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 8, 9, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
   });
-  const tp = bez([-0.038, -0.006, -0.01], [-0.068, -0.004, -0.04], [-0.072, -0.01, -0.076], [-0.06, -0.017, -0.098]);
-  P.push(tube(v => tp(v).map(c => c * k), v => (0.0195 - 0.004 * v) * k * Math.pow(Math.sin(Math.min(1, 0.15 + v * 0.85) * Math.PI), 0.4), 8, 7, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
+  const tp = bez([-0.042, -0.01, -0.012], [-0.066, -0.01, -0.04], [-0.07, -0.016, -0.07], [-0.056, -0.024, -0.092]);
+  P.push(tube(v => tp(v).map(c => c * k), v => (0.0185 - 0.004 * v) * k * (1 + 0.08 * gauss(v - 0.5, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.15 + v * 0.85) * Math.PI), 0.35), 8, 8, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
   const geo = mergeGeometries(P.map(g => { for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(a)) g.deleteAttribute(a); return g; }), false);
   if (side < 0) {   // mirror for the left hand
     geo.scale(-1, 1, 1);
@@ -1130,7 +1170,7 @@ export class Hands {
       // a leather map case behind the paper (reuses the glove atlas: no new texture)
       const bg = new THREE.PlaneGeometry(0.5, 0.38);
       const U = bg.attributes.uv, r = FP.bracer;
-      for (let i = 0; i < U.count; i++) U.setXY(i, (r.x + 2 + U.getX(i) * (r.w - 4)) / 256, 1 - (r.y + 2 + (1 - U.getY(i)) * (r.h - 4)) / 256);
+      for (let i = 0; i < U.count; i++) U.setXY(i, (r.x + 2 + U.getX(i) * (r.w - 4)) / FPA[0], 1 - (r.y + 2 + (1 - U.getY(i)) * (r.h - 4)) / FPA[1]);
       this.board = new THREE.Mesh(bg, this.L.material);
       this.board.position.set(0, 0, -0.004);
       this.map.add(this.board);
@@ -1166,14 +1206,15 @@ export class Hands {
       pose(this.L, -0.19, -0.3, -0.34, 0.75, -0.25, 1.0);
       pose(this.R, 0.19, -0.3, -0.34, 0.75, 0.25, -1.0);
     } else if (me.holding?.type === 'map') {
-      pose(this.L, -0.205, -0.33 + bobL * 0.5, -0.36, 1.05, -0.2, 0.55);
-      pose(this.R, 0.205, -0.33 + bobR * 0.5, -0.36, 1.05, 0.2, -0.55);
+      // gripping the map's lower corners from the sides, fingers round the edges
+      pose(this.L, -0.22, -0.3 + bobL * 0.5, -0.38, 1.2, 0.3, 0.9);
+      pose(this.R, 0.22, -0.3 + bobR * 0.5, -0.38, 1.2, -0.3, -0.9);
     } else if (me.holding) {
       pose(this.L, -0.2, -0.3 + bobL * 0.6, -0.4, 0.55, -0.85, 0.9);
       pose(this.R, 0.2, -0.3 + bobR * 0.6, -0.4, 0.55, 0.85, -0.9);
     } else {
-      pose(this.L, -0.255 + swayL, -0.35 + bobL, -0.34, 0.66, -0.34, 0.32);
-      pose(this.R, 0.255 + swayR, -0.35 + bobR, -0.34, 0.66, 0.34, -0.32);
+      pose(this.L, -0.25 + swayL, -0.33 + bobL, -0.36, 0.42, -0.3, 0.42);
+      pose(this.R, 0.25 + swayR, -0.33 + bobR, -0.36, 0.42, 0.3, -0.42);
     }
   }
 }
@@ -1216,5 +1257,7 @@ export const PREVIEW = {
   jumping: () => viewIn(2, { mode: M_.AIR }),
   laughing: () => viewIn(1, {}, { emote: '😂' }),
   crowned: () => viewIn(3, {}, { emote: '👑' }),
+  viewtest: () => { const q = new URLSearchParams(location.search); const L = (q.get('vf') || '40').split(','), n = Number(L[(PREVIEW._vt = (PREVIEW._vt ?? -1) + 1) % L.length]); return viewIn(Number(q.get('vid') || 0), { yaw: Number(q.get('vyaw') || 0), mode: Number(q.get('vmode') || 0), flags: Number(q.get('vflags') || 0) }, { speed: Number(q.get('vspeed') || 0), frames: n, emote: q.get('vemote') || null }); },
+  posetest: () => { const q = new URLSearchParams(location.search); const P = JSON.parse(q.get('pose') || '{}'); const o = JSON.parse(q.get('popts') || '{"hatIndex":0,"skinIndex":1,"scale":1.25}'); return posed(q.get('pcol') || '#6b5640', o, { ...(STANCE[q.get('stance')] || {}), ...P }); },
   fphands: () => { const g = new THREE.Group(); const m = painted(handsAtlas('#00E5FF')); const L = new THREE.Mesh(fpHandGeometry(-1), m), R = new THREE.Mesh(fpHandGeometry(1), m); L.position.set(-0.16, 0, 0); R.position.set(0.16, 0, 0); for (const h of [L, R]) { h.rotation.x = 0.5; g.add(h); } g.rotation.y = Math.PI; g.scale.setScalar(3); return g; },
 };

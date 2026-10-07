@@ -17,8 +17,27 @@
 // skin tones and faces), char_<outfit> sample atlases, fp_hands. Live atlases are
 // registered on demand by charAtlas(spec) / handsAtlas(color).
 import {
-  register, has, blob, ellipse, stroke, mix, shade, shadowOf, lightOf, hex, toHex, range, pick, makeCanvas, rgba,
+  register, has, blob, ellipse, stroke as rawStroke, mix, shade, shadowOf, lightOf, hex, toHex, range, pick, makeCanvas, rgba,
 } from './core.js';
+
+// core's stroke() fills each segment separately, so a translucent stroke beads where the
+// segments overlap. Translucent strokes here are drawn opaque on a scratch canvas and then
+// laid down once at the wanted alpha.
+let SCRATCH = null;
+function stroke(g, pts, w0, w1, color, alpha = 1) {
+  if (alpha >= 0.97) return rawStroke(g, pts, w0, w1, color, alpha);
+  const pad = Math.max(w0, w1) / 2 + 2;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) { x0 = Math.min(x0, x); y0 = Math.min(y0, y); x1 = Math.max(x1, x); y1 = Math.max(y1, y); }
+  x0 = Math.floor(x0 - pad); y0 = Math.floor(y0 - pad);
+  const W = Math.ceil(x1 + pad) - x0, H = Math.ceil(y1 + pad) - y0;
+  if (!(W > 0 && H > 0)) return;
+  if (!SCRATCH || SCRATCH.width < W || SCRATCH.height < H) SCRATCH = makeCanvas(Math.max(W, SCRATCH?.width || 0), Math.max(H, SCRATCH?.height || 0));
+  const sg = SCRATCH.getContext('2d');
+  sg.setTransform(1, 0, 0, 1, 0, 0); sg.clearRect(0, 0, W, H); sg.translate(-x0, -y0);
+  rawStroke(sg, pts, w0, w1, color, 1);
+  g.save(); g.globalAlpha *= alpha; g.drawImage(SCRATCH, 0, 0, W, H, x0, y0, W, H); g.restore();
+}
 
 export const AW = 512, AH = 768;
 export const REG = {
@@ -89,8 +108,8 @@ export const TORSO = [
   [1.16,  0.224, 0.166, 0.142, 2.6, 0.53],
   [1.26,  0.246, 0.180, 0.152, 2.7, 0.67],
   [1.35,  0.248, 0.170, 0.156, 2.7, 0.79],
-  [1.41,  0.214, 0.138, 0.140, 2.5, 0.87],
-  [1.45,  0.150, 0.105, 0.110, 2.2, 0.93],
+  [1.41,  0.232, 0.140, 0.142, 2.6, 0.87],
+  [1.45,  0.168, 0.106, 0.112, 2.3, 0.93],
   [1.48,  0.088, 0.078, 0.078, 2.0, 0.975],
   [1.495, 0.0,   0.0,   0.0,   2.0, 1.0],
 ];
@@ -103,6 +122,9 @@ export const ARM_LM = { elbow: -0.285, sleeve: -0.305, cuffTop: -0.415, cuffRim:
 // Legs: v = height above the sole. The skirt: v from 0.56 m (0) to 1.02 m (1).
 export const SKIRT_Y0 = 0.56, SKIRT_Y1 = 1.02;
 export const skirtV = y => (y - SKIRT_Y0) / (SKIRT_Y1 - SKIRT_Y0);
+// The clerk's long skirt (S.dress) uses the whole skirt region: u around, v from the hem (0) to the waist (1).
+export const DRESS_Y0 = 0.1, DRESS_Y1 = 1.03;
+export const dressV = y => (y - DRESS_Y0) / (DRESS_Y1 - DRESS_Y0);
 
 // ---- who is who ---------------------------------------------------------------------
 
@@ -118,10 +140,10 @@ const LOOKS = [
 export const HATS = ['brim', 'bandana', 'cap', 'hood', 'straw', 'helm'];
 const OUTFITS = {
   player: { torso: 'tabard', arms: 'sleeve', hands: 'glove', legs: 'trousers', boots: 'tall', pauldrons: 'both', belt: true, skirt: true, collar: true, pack: true },
-  ed:     { torso: 'shirt', arms: 'rolled', hands: 'bare', legs: 'wool', boots: 'short', pauldrons: 'none', belt: false, apron: true, hat: 'none', belly: 0.035, armBulk: 1.05 },
-  clerk:  { torso: 'waistcoat', arms: 'shirt', hands: 'bare', legs: 'wool', boots: 'shoe', pauldrons: 'none', belt: true, hat: 'none', armBulk: 0.82, collar: true },
+  ed:     { torso: 'shirt', arms: 'rolled', hands: 'bare', legs: 'wool', boots: 'short', pauldrons: 'none', belt: false, apron: true, hat: 'none', bulk: 1.08, belly: 0.045, armBulk: 1.08, look: { hair: 'bald', hairColor: '#8a7c6c', facial: 'beard', beard: 1.3, female: false } },
+  clerk:  { torso: 'bodice', arms: 'blouse', hands: 'bare', legs: 'wool', boots: 'shoe', pauldrons: 'none', belt: false, dress: true, hat: 'none', armBulk: 0.84, collar: false, look: { hair: 'bun', hairColor: '#8e3a1c', female: true, facial: 'none' } },
   dealer: { torso: 'vest', arms: 'shirt', hands: 'bare', legs: 'black', boots: 'shoe', pauldrons: 'none', belt: true, hat: 'visor', armBulk: 0.84, collar: true, look: { hair: 'slick', hairColor: '#17121a', facial: 'pencil', female: false, stern: true } },
-  repo:   { torso: 'overalls', arms: 'flannel', hands: 'workglove', legs: 'overalls', boots: 'tall', pauldrons: 'none', belt: false, hat: 'beanie', bulk: 1.12, belly: 0.03, chain: true, shades: true, look: { hair: 'buzz', hairColor: '#1d1716', facial: 'stubble', female: false, stern: true } },
+  repo:   { torso: 'overalls', arms: 'flannel', hands: 'workglove', legs: 'overalls', boots: 'tall', pauldrons: 'none', belt: false, hat: 'beanie', bulk: 1.22, belly: 0.05, armBulk: 1.12, chain: true, shades: true, look: { hair: 'buzz', hairColor: '#1d1716', facial: 'stubble', female: false, stern: true } },
 };
 
 function hsl(c) {
@@ -161,6 +183,7 @@ export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, sc
   let c = muted(color);
   if (outfit === 'dealer') c = '#2c2832';
   if (outfit === 'repo') c = '#5a4a36';
+  if (outfit === 'ed') { const q = hsl(c); c = fromHsl(q.h, Math.min(q.s, 0.42), 0.27); }
   const hat = O.hat || HATS[((hatIndex % 6) + 6) % 6];
   // players: steel pauldrons under a helm or cap, leather otherwise
   const paulMetal = outfit === 'player' && (hat === 'helm' || hat === 'cap' || hat === 'bandana');
@@ -171,10 +194,12 @@ export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, sc
 
 // ---- painting helpers ---------------------------------------------------------------
 
-const LEATHER = '#6c4a2f', LEATHER_D = '#432b1c', SUEDE = '#8a6340', TRIM = '#d6b46c', LINEN = '#e2d2ad', BRASS = '#b58c3c', IRON = '#7d8088';
-const TROUSER = '#4e3d30';
+// (the game's sun is warm and bright: browns paint darker and cooler than they read on screen)
+const LEATHER = '#5a3c26', LEATHER_D = '#3a2518', SUEDE = '#7a5636', TRIM = '#d6b46c', LINEN = '#ddcfb0', BRASS = '#b58c3c', IRON = '#7d8088';
+const TROUSER = '#43362e';
 const INK = '#24192a';    // the darkest thing we ever paint (soft violet-brown, not black)
 
+const sstepJS = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
 function clip(g, r, fn) { g.save(); g.beginPath(); g.rect(r.x, r.y, r.w, r.h); g.clip(); fn(); g.restore(); }
 function clipRect(g, x, y, w, h, fn) { g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); fn(); g.restore(); }
 const RX = (r, u) => r.x + u * r.w;
@@ -220,6 +245,19 @@ function fold(g, pts, w, base, a = 0.32) {
   stroke(g, pts, w, w * 0.25, shadowOf(base, 0.5), a);
   stroke(g, pts.map(([x, y]) => [x - w * 0.45, y - w * 0.4]), w * 0.55, w * 0.15, lightOf(base, 0.5), a * 0.85);
 }
+// A soft painted fold: a feathered crease (cool shadow) that swells in the middle and
+// tapers at both ends, with a lit ridge beside it on the light (upper-left) side.
+function sfold(g, pts, w, base, a = 0.5, { ridge = 0.8, dark = 0.55 } = {}) {
+  const P = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [ax, ay] = pts[i], [bx, by] = pts[i + 1], L = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.ceil(L / Math.max(1.2, w * 0.35)));
+    for (let k = 0; k < n; k++) P.push([ax + (bx - ax) * k / n, ay + (by - ay) * k / n, Math.atan2(by - ay, bx - ax)]);
+  }
+  P.push([...pts[pts.length - 1], P.length ? P[P.length - 1][2] : 0]);
+  const sh = mix(shadowOf(base, dark), '#3a2c4e', 0.18), li = lightOf(base, 0.55);
+  P.forEach(([x, y, r], i) => { const t = i / Math.max(1, P.length - 1), k = Math.pow(Math.sin(Math.PI * Math.min(0.97, Math.max(0.03, t))), 0.7); blob(g, x, y, w * k * 0.62 + 0.4, w * k * 0.34 + 0.4, r, sh, a * 0.42, 0.25); });
+  if (ridge > 0) P.forEach(([x, y, r], i) => { const t = i / Math.max(1, P.length - 1), k = Math.pow(Math.sin(Math.PI * Math.min(0.97, Math.max(0.03, t))), 1.2); blob(g, x - w * 0.55 * Math.abs(Math.sin(r)) - w * 0.2, y - w * 0.55 * Math.abs(Math.cos(r)) - w * 0.15, w * k * 0.42 + 0.3, w * k * 0.2 + 0.3, r, li, a * 0.34 * ridge, 0.3); });
+}
 function curve(x0, y0, x1, y1, bend, n = 5) {
   const pts = [];
   const dx = x1 - x0, dy = y1 - y0, l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
@@ -237,8 +275,11 @@ function cloth(g, r, x, y, w, h, base, rnd, { folds = 5, foldLen = [0.25, 0.5], 
     wblob(g, wrap ? r : null, bx, by, bw, bh, rnd() * 3, pick(rnd, hues), 0.24, 0.12);
   }
   for (let i = 0; i < folds; i++) {
-    const x0 = x + rnd() * w, y0 = y + rnd() * h, L = range(rnd, foldLen[0], foldLen[1]) * h, a = foldAngle + (rnd() - 0.5) * 0.6;
-    fold(g, curve(x0, y0, x0 + Math.sin(a) * L, y0 + Math.cos(a) * L, (rnd() - 0.5) * L * 0.25), range(rnd, foldW[0], foldW[1]), base, 0.42);
+    const x0 = x + rnd() * w, y0 = y + rnd() * h, L = range(rnd, foldLen[0], foldLen[1]) * h, a = foldAngle + (rnd() - 0.5) * 0.5;
+    const pts = curve(x0, y0, x0 + Math.sin(a) * L, y0 + Math.cos(a) * L, (rnd() - 0.5) * L * 0.18, 6);
+    const fw = range(rnd, foldW[0], foldW[1]) * 1.5;
+    sfold(g, pts, fw, base, 0.75);
+    if (wrap && r) { if (x0 < x + fw * 2) sfold(g, pts.map(([a, b]) => [a + w, b]), fw, base, 0.75); if (x0 > x + w - fw * 2) sfold(g, pts.map(([a, b]) => [a - w, b]), fw, base, 0.75); }
   }
 }
 // Leather: gradient, darker mottling, worn lighter patches, creases and scuffs.
@@ -255,31 +296,35 @@ function leather(g, r, x, y, w, h, base, rnd, { creases = 6, scuffs = 8, light =
     stroke(g, [[x0, y0], [x0 + Math.cos(a) * L, y0 + Math.sin(a) * L]], range(rnd, 0.8, 1.6), 0.4, lightOf(base, 0.6), 0.3);
   }
 }
-// Hair the WoW way: big tapered locks, each with a dark shadow side and a lit
-// ridge, a warm sheen band, dark partings between. Never thin per-hair strands.
+// Hair the WoW way: a few big tapered clumps with dark partings between them, each
+// clump darker at the root and on its shadow side, a broad warm sheen band across the
+// middle broken into a few soft streaks, darker tips. Never thin per-hair strands.
 function locks(g, r, x, y, w, h, base, rnd, { count = 14, len = [0.55, 0.95], width = [9, 16], flow = 0, sheen = 0.3, wrap = false, topPad = 0.12 } = {}) {
-  gradV(g, x, y, w, h, [[0, lightOf(base, 0.12)], [0.5, base], [1, shadowOf(base, 0.45)]]);
-  const dark = shadowOf(base, 0.6), deep = mix(shadowOf(base, 0.75), INK, 0.3);
-  const mids = [base, mix(base, lightOf(base, 0.2), 0.5), shade(base, 0.9)];
-  const hi = mix(lightOf(base, 0.8), '#ffe6b4', 0.35);
-  const lockList = [];
-  for (let pass = 0; pass < 2; pass++) {
-    for (let i = 0; i < count; i++) {
-      const x0 = x + (i + rnd() * 0.8 + pass * 0.5) / count * w, y0 = y - h * topPad + rnd() * h * 0.2;
-      const L = range(rnd, len[0], len[1]) * h, W = range(rnd, width[0], width[1]) * (pass ? 0.75 : 1);
-      const bend = (rnd() - 0.5) * W * 0.8;
-      lockList.push({ pts: curve(x0, y0, x0 + flow * L * 0.35 + (rnd() - 0.5) * W * 0.4, y0 + L, bend, 7), W, c: pick(rnd, mids) });
-    }
+  gradV(g, x, y, w, h, [[0, shadowOf(base, 0.25)], [0.35, base], [1, shadowOf(base, 0.4)]]);
+  const deep = mix(shadowOf(base, 0.7), INK, 0.25), dark = shadowOf(base, 0.5);
+  const mids = [base, mix(base, lightOf(base, 0.25), 0.5), shade(base, 0.92), mix(base, '#7a4a30', 0.12)];
+  const hi = mix(lightOf(base, 0.75), '#ffe6b4', 0.3);
+  const list = [];
+  const n = Math.max(3, Math.round(count * 0.75));
+  for (let pass = 0; pass < 2; pass++) for (let i = 0; i < n; i++) {
+    const x0 = x + (i + 0.2 + rnd() * 0.6 + pass * 0.5) / n * w, y0 = y - h * topPad + rnd() * h * 0.12 + pass * h * 0.06;
+    const L = range(rnd, len[0], len[1]) * h * (pass ? 0.85 : 1.1), W = Math.max(range(rnd, width[0], width[1]) * 1.3, w / n * range(rnd, 0.9, 1.25)) * (pass ? 0.8 : 1);
+    list.push({ pts: curve(x0, y0, x0 + flow * L * 0.35 + (rnd() - 0.5) * W * 0.3, y0 + L, (rnd() - 0.5) * W * 0.5, 8), W, c: pick(rnd, mids), s: range(rnd, -0.08, 0.08) });
   }
-  const each = (fn) => { for (const lk of lockList) { fn(lk.pts, lk); if (wrap && r) { if (lk.pts[0][0] < x + lk.W * 1.5) fn(lk.pts.map(([a, b]) => [a + w, b]), lk); if (lk.pts[0][0] > x + w - lk.W * 1.5) fn(lk.pts.map(([a, b]) => [a - w, b]), lk); } } };
-  each((P, lk) => stroke(g, P.map(([a, b]) => [a + lk.W * 0.22, b + 1.5]), lk.W * 1.1, lk.W * 0.2, deep, 0.6));      // parting shadow
-  each((P, lk) => stroke(g, P, lk.W, lk.W * 0.12, lk.c, 0.96));                                                       // the lock
-  each((P, lk) => stroke(g, P.slice(1).map(([a, b]) => [a + lk.W * 0.28, b]), lk.W * 0.32, lk.W * 0.05, dark, 0.5)); // shadow side
-  each((P, lk) => {                                                                                                     // lit ridge, strongest in the sheen band
-    const k0 = Math.max(0, Math.floor((sheen - 0.12) * 7)), seg = P.slice(k0, k0 + 3);
-    if (seg.length > 1) stroke(g, seg.map(([a, b]) => [a - lk.W * 0.18, b]), lk.W * 0.3, lk.W * 0.06, hi, 0.75);
-    stroke(g, P.slice(0, 5).map(([a, b]) => [a - lk.W * 0.2, b]), lk.W * 0.16, lk.W * 0.04, lightOf(base, 0.4), 0.45);
+  const each = fn => { for (const lk of list) { fn(lk.pts, lk); if (wrap && r) { if (lk.pts[0][0] < x + lk.W * 1.5) fn(lk.pts.map(([a, b]) => [a + w, b]), lk); if (lk.pts[0][0] > x + w - lk.W * 1.5) fn(lk.pts.map(([a, b]) => [a - w, b]), lk); } } };
+  // (opaque strokes in pre-mixed colors: translucent ones bead where their segments overlap)
+  each((P, lk) => stroke(g, P.map(([a, b]) => [a + lk.W * 0.48, b + 2]), lk.W * 0.42, lk.W * 0.1, mix(deep, base, 0.4), 1));   // the parting beside each clump
+  each((P, lk) => stroke(g, P, lk.W, lk.W * 0.2, lk.c, 1));                                                                    // the clump
+  each((P, lk) => stroke(g, P.map(([a, b]) => [a - lk.W * 0.16, b]), lk.W * 0.45, lk.W * 0.1, mix(lk.c, lightOf(lk.c, 0.25), 0.45), 1));   // its lit side
+  each((P, lk) => stroke(g, P.map(([a, b]) => [a + lk.W * 0.3, b]), lk.W * 0.36, lk.W * 0.08, mix(lk.c, dark, 0.55), 1));       // its shadow side
+  each((P, lk) => stroke(g, P.slice(0, 3), lk.W * 0.9, lk.W * 0.8, mix(lk.c, shadowOf(lk.c, 0.3), 0.45), 1));                 // darker at the root
+  each((P, lk) => {                                                                                                    // the sheen: soft, elongated, broken
+    const t0 = Math.max(0.12, Math.min(0.8, sheen + lk.s * 2.5)), k = Math.min(P.length - 2, Math.floor(t0 * 8));
+    const [ax, ay] = P[k], [bx, by] = P[k + 1], rot = Math.atan2(by - ay, bx - ax);
+    blob(g, (ax + bx) / 2 - lk.W * 0.1, (ay + by) / 2, lk.W * 0.9, lk.W * 0.2, rot, hi, 0.4, 0.2);
+    blob(g, (ax + bx) / 2 - lk.W * 0.14, (ay + by) / 2 + lk.W * 0.3, lk.W * 0.55, lk.W * 0.09, rot, mix(hi, '#fff6dc', 0.4), 0.5, 0.3);
   });
+  each((P, lk) => stroke(g, P.slice(-3), lk.W * 0.35, lk.W * 0.1, mix(lk.c, shadowOf(lk.c, 0.35), 0.45), 1));          // darker tips
 }
 function plaid(g, x, y, w, h, base, rnd) {
   gradV(g, x, y, w, h, [[0, lightOf(base, 0.2)], [0.5, base], [1, shadowOf(base, 0.3)]]);
@@ -358,42 +403,45 @@ function toneOf(c) {
   };
 }
 
-// An eye: a narrow almond under a heavy lid. Mostly iris, very little white, the
-// top third of the eyeball in the lid's shadow, one warm catchlight.
+// An eye, WoW-style: a narrow almond set deep under a heavy brow. A big cool socket
+// shadow (it is what reads at a distance), mostly iris, a thick dark upper lid that
+// runs past the outer corner, the top of the eyeball in the lid's shadow, one catchlight.
 function paintEye(g, cx, cy, S, side, glow) {
   const T = toneOf(S.tone), L = S.look, fem = L.female;
-  const ew = fem ? 10 : 9.5, eh = fem ? 4.2 : 3.4;
-  const inner = [cx - side * ew, cy + eh * 0.35], outer = [cx + side * ew, cy - eh * (fem ? 0.3 : 0.0)];
-  // the socket: a soft cool shadow wrapping the eye, deepest at the inner corner
-  blob(g, cx - side * 1.5, cy - eh * 0.9, ew * 1.75, eh * 3.0, 0, mix(T.deep, '#3a2c52', 0.3), fem ? 0.3 : 0.48, 0.12);
-  blob(g, cx - side * ew * 0.9, cy - eh * 0.2, ew * 0.45, eh * 1.8, 0, T.deep, 0.42, 0.2);
+  const ew = fem ? 11 : 10.5, eh = fem ? 4.6 : 3.9;
+  const inner = [cx - side * ew, cy + eh * 0.3], outer = [cx + side * ew, cy - eh * (fem ? 0.35 : 0.05)];
+  // the socket: a soft cool shadow wrapping the eye, deepest under the brow and at the inner corner
+  blob(g, cx - side * 1.5, cy - eh * 1.1, ew * 1.9, eh * 3.2, 0, mix(T.deep, '#3a2c52', 0.35), fem ? 0.36 : 0.62, 0.14);
+  blob(g, cx - side * ew * 0.85, cy - eh * 0.4, ew * 0.55, eh * 2.0, 0, T.deep, 0.5, 0.2);
+  blob(g, cx + side * ew * 0.5, cy - eh * 1.4, ew * 0.9, eh * 1.2, 0, mix(T.deep, '#2a1c30', 0.3), fem ? 0.2 : 0.38, 0.2);
   const almond = () => {
     g.beginPath(); g.moveTo(...inner);
     g.quadraticCurveTo(cx - side * ew * 0.1, cy - eh * 1.95, ...outer);
-    g.quadraticCurveTo(cx + side * ew * 0.25, cy + eh * 1.45, ...inner);
+    g.quadraticCurveTo(cx + side * ew * 0.25, cy + eh * 1.4, ...inner);
     g.closePath();
   };
   g.save();
-  almond(); g.fillStyle = glow ? mix('#d0b8a0', glow, 0.35) : mix('#cdb9a0', T.base, 0.3); g.fill();
+  almond(); g.fillStyle = glow ? mix('#d0b8a0', glow, 0.4) : mix('#c4b098', T.base, 0.35); g.fill();
   g.clip();
-  const ir = eh * 1.5, ix = cx + side * 0.4, iy = cy - eh * 0.1;
-  ellipse(g, ix, iy, ir, ir, 0, glow ? shadowOf(glow, 0.35) : shadowOf(L.eyes, 0.5));
-  ellipse(g, ix, iy + ir * 0.15, ir * 0.74, ir * 0.7, 0, glow || L.eyes);
-  blob(g, ix, iy + ir * 0.45, ir * 0.6, ir * 0.35, 0, glow ? '#ffb08a' : lightOf(L.eyes, 0.45), 0.55, 0.2);
-  ellipse(g, ix, iy, ir * 0.36, ir * 0.36, 0, glow ? '#4a0808' : '#191216');
-  gradV(g, cx - ew, cy - eh * 2.1, ew * 2, eh * 2.6, [[0, rgba(T.deep, 1)], [0.55, rgba(T.deep, 0.75)], [1, rgba(T.deep, 0)]]);
-  ellipse(g, ix - ir * 0.35, iy - ir * 0.1, ir * 0.2, ir * 0.18, 0, '#fff6e0', 0.95);
+  const ir = eh * 1.55, ix = cx + side * 0.6, iy = cy - eh * 0.05;
+  ellipse(g, ix, iy, ir, ir, 0, glow ? shadowOf(glow, 0.4) : shadowOf(L.eyes, 0.6));
+  ellipse(g, ix, iy + ir * 0.15, ir * 0.76, ir * 0.72, 0, glow || L.eyes);
+  blob(g, ix, iy + ir * 0.5, ir * 0.62, ir * 0.36, 0, glow ? '#ffb08a' : lightOf(L.eyes, 0.5), 0.6, 0.2);
+  ellipse(g, ix, iy, ir * 0.38, ir * 0.38, 0, glow ? '#4a0808' : '#1a1218');
+  gradV(g, cx - ew, cy - eh * 2.1, ew * 2, eh * 2.7, [[0, rgba(T.deep, 1)], [0.6, rgba(mix(T.deep, '#2a1830', 0.3), 0.8)], [1, rgba(T.deep, 0)]]);
+  ellipse(g, ix - ir * 0.35, iy - ir * 0.05, ir * 0.22, ir * 0.2, 0, '#fff6e0', 0.95);
   g.restore();
-  // the upper lid: a thick dark line, heavier toward the outer corner; the lid crease above it
-  const up = [inner, [cx - side * ew * 0.35, cy - eh * 1.2], [cx + side * ew * 0.3, cy - eh * 1.35], outer];
-  if (fem) up.push([outer[0] + side * ew * 0.3, outer[1] - eh * 0.5]);
-  stroke(g, up, 1.6, fem ? 3.4 : 3, '#2a1814', 0.95);
-  stroke(g, up.map(([x, y]) => [x, y - 1.4]), 1.2, 1.8, mix(T.deep, '#2a1814', 0.4), 0.45);
-  stroke(g, curve(inner[0] + side * ew * 0.2, cy - eh * 2.3, outer[0] - side * ew * 0.05, cy - eh * 2.1, -side * eh * 0.6, 4), 1.4, 1, T.deep, 0.55);
-  blob(g, cx + side * ew * 0.1, cy - eh * 3.0, ew * 0.9, eh * 0.7, 0, T.light, fem ? 0.35 : 0.2, 0.2);   // lit lid fold under the brow
-  // lower lid: a soft warm line and a lit cheek under it
-  stroke(g, [[inner[0] + side * ew * 0.25, inner[1] + eh * 0.25], [cx + side * ew * 0.2, cy + eh * 1.2], [outer[0], outer[1] + eh * 0.6]], 1.2, 0.8, mix(T.deep, T.blush, 0.3), 0.6);
-  blob(g, cx, cy + eh * 2.6, ew * 0.95, eh * 0.9, 0, T.light, 0.32, 0.2);
+  // the upper lid: a thick dark line, heaviest toward the outer corner; the crease above it
+  const up = [inner, [cx - side * ew * 0.35, cy - eh * 1.2], [cx + side * ew * 0.3, cy - eh * 1.35], outer, [outer[0] + side * ew * 0.18, outer[1] + eh * (fem ? -0.5 : 0.35)]];
+  stroke(g, up, 1.8, fem ? 3.8 : 3.4, '#24140f', 0.97);
+  stroke(g, up.map(([x, y]) => [x, y - 1.5]), 1.3, 2.2, mix(T.deep, '#24140f', 0.45), 0.5);
+  if (fem) for (let k = 0; k < 3; k++) { const t = 0.55 + k * 0.17, x = inner[0] + (outer[0] - inner[0]) * t, y = cy - eh * (1.3 - k * 0.15); stroke(g, [[x, y], [x + side * 2.2, y - 2.6]], 1.2, 0.4, '#24140f', 0.8); }
+  stroke(g, curve(inner[0] + side * ew * 0.15, cy - eh * 2.4, outer[0] - side * ew * 0.05, cy - eh * 2.15, -side * eh * 0.6, 4), 1.5, 1, mix(T.deep, '#2a1c30', 0.3), 0.6);
+  blob(g, cx + side * ew * 0.1, cy - eh * 3.1, ew * 0.95, eh * 0.65, 0, T.light, fem ? 0.4 : 0.22, 0.2);   // lit lid fold under the brow
+  // lower lid: a soft warm line, a bag of shadow, a lit cheek under it
+  stroke(g, [[inner[0] + side * ew * 0.2, inner[1] + eh * 0.3], [cx + side * ew * 0.2, cy + eh * 1.25], [outer[0], outer[1] + eh * 0.7]], 1.3, 0.9, mix(T.deep, T.blush, 0.25), 0.7);
+  if (!fem) blob(g, cx + side * 1, cy + eh * 2.0, ew * 0.8, eh * 0.6, 0, T.shadow, 0.3, 0.2);
+  blob(g, cx, cy + eh * 2.9, ew * 0.95, eh * 0.9, 0, T.light, 0.35, 0.2);
 }
 
 function paintHead(g, r, S, rnd) {
@@ -438,8 +486,10 @@ function paintHead(g, r, S, rnd) {
     blob(g, X(0), my - ph * 0.012, mw * 1.05, ph * 0.016, 0, mix(T.lip, T.shadow, 0.35), 0.6, 0.4);
     blob(g, X(0), my + ph * 0.015, mw * 0.85, ph * 0.016, 0, fem ? mix(T.lip, '#b8504e', 0.35) : T.lip, fem ? 0.8 : 0.5, 0.4);
     blob(g, X(-0.004), my + ph * 0.012, mw * 0.4, ph * 0.007, 0, T.hi, 0.5, 0.3);
-    const corner = L.stern ? 1.8 : 0.8;
-    stroke(g, [[X(0) - mw, my + corner], [X(0) - mw * 0.4, my - 0.3], [X(0), my + 0.3], [X(0) + mw * 0.4, my - 0.3], [X(0) + mw, my + corner]], 2.1, 1.6, '#3b2220', 0.85);
+    // (canvas y runs down: a positive corner is a frown, a negative one a smile)
+    const corner = L.stern ? 1.8 : fem ? -1.6 : -1.0;
+    stroke(g, [[X(0) - mw, my + corner], [X(0) - mw * 0.4, my - 0.2], [X(0), my + 0.3], [X(0) + mw * 0.4, my - 0.2], [X(0) + mw, my + corner]], 2.3, 1.6, '#3b2220', 0.9);
+    if (!L.stern) for (const s2 of [-1, 1]) blob(g, X(0) + s2 * mw * 1.12, my + corner - 0.5, 2.6, 2.2, 0, T.deep, 0.4, 0.3);   // the corners tuck in
     blob(g, X(0), my + ph * 0.036, mw * 0.75, ph * 0.013, 0, T.deep, 0.45, 0.3);
     blob(g, X(0), Y(vChin + 0.045), pw * 0.026, ph * 0.03, 0, T.hi, 0.5, 0.25);       // chin
     if (!fem && S.skin === 0) stroke(g, [[X(0), Y(vChin + 0.06)], [X(0), Y(vChin + 0.025)]], 1.5, 1, T.shadow, 0.5);   // a cleft chin
@@ -450,9 +500,9 @@ function paintHead(g, r, S, rnd) {
       const cx = X(s * EYE_U), by = Y(vBrow + 0.005);
       const innerY = by + (L.stern ? ph * 0.022 : ph * 0.008);
       const pts = [[cx - s * pw * 0.028, innerY], [cx - s * pw * 0.005, by - ph * (fem ? 0.022 : 0.012)], [cx + s * pw * 0.024, by + ph * 0.01]];
-      if (fem) { stroke(g, pts, 2.6, 1, browC, 0.9); continue; }
-      stroke(g, pts.map(([x, y]) => [x + 0.6, y + 1.4]), 6.5, 2.5, mix(T.deep, INK, 0.3), 0.4);
-      stroke(g, pts, 6.5, 2.4, browC, 0.95);
+      if (fem) { stroke(g, pts.map(([x, y]) => [x, y + 1]), 3.6, 1.2, mix(T.deep, INK, 0.2), 0.35); stroke(g, pts, 3.4, 1.2, browC, 0.95); continue; }
+      stroke(g, pts.map(([x, y]) => [x + 0.6, y + 2]), 8.5, 3, mix(T.deep, INK, 0.3), 0.5);
+      stroke(g, pts, 8, 3, browC, 0.97);
       for (let k = 0; k < 7; k++) { const t = k / 6, px = pts[0][0] + (pts[2][0] - pts[0][0]) * t, py = pts[0][1] + (pts[1][1] - pts[0][1]) * Math.sin(t * Math.PI) * 0.8 + (pts[2][1] - pts[0][1]) * t; stroke(g, [[px - s * 1, py + 2], [px + s * 2.5, py - 1.5]], 1.2, 0.5, lightOf(browC, 0.35), 0.5); }
     }
     facialHair(g, X, Y, pw, ph, S, T, rnd, vMouth, vChin, vNoseB);
@@ -481,7 +531,7 @@ function facialBase(g, X, Y, pw, ph, S, T, rnd, vMouth, vChin, vNoseB) {
   const amt = f === 'stubble' ? 0.42 : f === 'goatee' ? 0.24 : 0.32;
   blob(g, X(0), Y(vChin + 0.04), pw * 0.2, ph * 0.22, 0, sc, amt, 0.4);
   blob(g, X(0), Y(vMouth + 0.05), pw * 0.05, ph * 0.04, 0, sc, amt * 0.8, 0.3);
-  for (let i = 0; i < 60; i++) blob(g, X((rnd() - 0.5) * 0.4), Y(vChin - 0.04 + rnd() * 0.36), range(rnd, 4, 9), range(rnd, 3, 5), rnd() * 3, sc, amt * 0.3, 0.1);
+  for (let i = 0; i < 12; i++) blob(g, X((rnd() - 0.5) * 0.36), Y(vChin + rnd() * 0.3), range(rnd, 10, 20), range(rnd, 6, 10), rnd() * 3, sc, amt * 0.22, 0.1);
   g.restore();
 }
 function facialHair(g, X, Y, pw, ph, S, T, rnd, vMouth, vChin, vNoseB) {
@@ -530,16 +580,17 @@ function paintHairCap(g, r, S, rnd) {
     g.lineTo(X(1), Y(1.2)); g.closePath();
   };
   if (L.hair === 'bald') {
-    // a horseshoe of short gray hair round the back, a shiny scalp on top
+    // a close-cropped horseshoe of hair round the back and sides, a shiny scalp on top
     g.save(); capPath(-0.005); g.clip();
-    gradV(g, r.x, Y(0.75), r.w, r.h * 0.4, [[0, rgba(hc, 0)], [1, rgba(hc, 0.0)]]);
-    for (let i = 0; i < 70; i++) {
-      const u = rnd(), th = Math.PI - 2 * Math.PI * u;
-      if (Math.abs(th) < 1.5) continue;
-      const v0 = headV(hairlineDy(th)), v = v0 + rnd() * 0.2;
-      const x = X(u), y = Y(v);
-      stroke(g, [[x, y - 5], [x + range(rnd, -2, 2), y + 4]], range(rnd, 4, 7), 1.5, pick(rnd, [hc, shadowOf(hc, 0.3), lightOf(hc, 0.2)]), 0.55);
+    g.beginPath();
+    for (let k = 0; k <= 64; k++) {
+      const u = k / 64, th = Math.PI - 2 * Math.PI * u, a = Math.abs(th);
+      const top = hairlineDy(th) + (a > 1.25 ? 0.05 * sstepJS(1.25, 1.9, a) + 0.004 * Math.sin(k * 1.7) : -0.05);
+      k ? g.lineTo(X(u), Y(headV(top))) : g.moveTo(X(u), Y(headV(top)));
     }
+    g.lineTo(X(1), Y(-0.2)); g.lineTo(X(0), Y(-0.2)); g.closePath(); g.clip();
+    gradV(g, r.x, Y(0.75), r.w, r.h * 0.5, [[0, mix(hc, S.tone, 0.55)], [0.4, mix(hc, S.tone, 0.25)], [1, shadowOf(hc, 0.2)]]);
+    for (let i = 0; i < 110; i++) { const x = X(rnd()), y = Y(0.3 + rnd() * 0.45); stroke(g, [[x, y], [x + range(rnd, -1, 1), y + 2.5]], 1.4, 0.5, pick(rnd, [shadowOf(hc, 0.35), lightOf(hc, 0.3)]), 0.35); }
     g.restore();
     blob(g, X(0.46), Y(0.92), r.w * 0.08, r.h * 0.07, 0, '#fff2d6', 0.45, 0.15);
     blob(g, X(0.42), Y(0.86), r.w * 0.03, r.h * 0.03, 0, '#fffaf0', 0.4, 0.3);
@@ -577,34 +628,33 @@ function paintTorso(g, r, S, rnd) {
       // below the belt: trousers (under the skirt; seen when it parts)
       clipRect(g, r.x, TV(0.95), r.w, r.y + r.h - TV(0.95), () => cloth(g, r, r.x, TV(0.95), r.w, r.y + r.h - TV(0.95), TROUSER, rnd, { folds: 6, wrap: true }));
       for (const u of [0.25, 0.75]) stitches(g, [[U(u), TV(1.04)], [U(u), TV(1.42)]], INK, 0.5);
-      // the linen undershirt in the V, laced
-      g.save(); polyPath(g, [[U(0.43), TV(1.5)], [U(0.5), TV(1.31)], [U(0.57), TV(1.5)]]); g.clip();
-      cloth(g, r, U(0.42), TV(1.5), r.w * 0.16, TV(1.3) - TV(1.5), LINEN, rnd, { folds: 2 });
-      blob(g, U(0.5), TV(1.46), r.w * 0.06, 10, 0, INK, 0.45, 0.2);
-      for (let k = 0; k < 3; k++) { const y = TV(1.44 - k * 0.04); stroke(g, [[U(0.478), y - 3], [U(0.522), y + 3]], 1.5, 1.5, '#5a3a24', 0.9); stroke(g, [[U(0.522), y - 3], [U(0.478), y + 3]], 1.5, 1.5, '#5a3a24', 0.9); }
-      g.restore();
-      // tabard panels, front and back, over the shoulders down to the belt
-      const panel = (cu, vneck) => {
-        const p = [[U(cu - 0.16), TV(0.94)], [U(cu + 0.16), TV(0.94)], [U(cu + 0.14), TV(1.36)], [U(cu + 0.12), TV(1.5)]];
-        if (vneck) p.push([U(cu + 0.07), TV(1.5)], [U(cu), TV(1.31)], [U(cu - 0.07), TV(1.5)]);
-        p.push([U(cu - 0.12), TV(1.5)], [U(cu - 0.14), TV(1.36)]);
-        return p;
-      };
-      for (const [cu, vneck] of [[0.5, true], [0, false], [1, false]]) {
-        const p = panel(cu, vneck);
+      // tabard panels front and back: straight sides, a round neck, gold trim, the crew's
+      // wagon-wheel sigil; leather jerkin showing at the sides
+      const panel = (cu, front) => [[U(cu - 0.165), TV(0.94)], [U(cu + 0.165), TV(0.94)], [U(cu + 0.15), TV(1.38)], [U(cu + 0.13), TV(1.52)],
+        ...(front ? [[U(cu + 0.06), TV(1.52)], [U(cu + 0.035), TV(1.455)], [U(cu), TV(1.44)], [U(cu - 0.035), TV(1.455)], [U(cu - 0.06), TV(1.52)]] : []),
+        [U(cu - 0.13), TV(1.52)], [U(cu - 0.15), TV(1.38)]];
+      for (const [cu, front] of [[0.5, true], [0, false], [1, false]]) {
+        const p = panel(cu, front);
         g.save(); polyPath(g, p);
-        g.save(); g.translate(2, 2.5); g.fillStyle = rgba(INK, 0.5); g.fill(); g.restore();
+        g.save(); g.translate(2, 2.5); g.fillStyle = rgba(INK, 0.55); g.fill(); g.restore();
         g.clip();
-        cloth(g, r, U(cu - 0.17), TV(1.5), r.w * 0.34, TV(0.93) - TV(1.5), c, rnd, { folds: 5, foldAngle: 0, light: 0.34, blotch: 10, foldW: [4, 7] });
-        // the chest: lit; the belly under the pecs: a soft shade
-        blob(g, U(cu - 0.03), TV(1.27), r.w * 0.09, 18, 0, lightOf(c, 0.5), 0.3, 0.1);
-        blob(g, U(cu), TV(1.1), r.w * 0.12, 14, 0, shadowOf(c, 0.4), 0.3, 0.1);
+        cloth(g, r, U(cu - 0.17), TV(1.52), r.w * 0.34, TV(0.93) - TV(1.52), c, rnd, { folds: 0, light: 0.42, blotch: 10 });
+        // the chest swells into the light; the cloth bunches into folds above the belt and hangs from the shoulders
+        blob(g, U(cu - 0.04), TV(1.3), r.w * 0.1, 22, 0, lightOf(c, 0.6), 0.34, 0.1);
+        blob(g, U(cu + 0.05), TV(1.12), r.w * 0.12, 18, 0, shadowOf(c, 0.5), 0.3, 0.1);
+        for (const s2 of [-1, 1]) {
+          sfold(g, curve(U(cu + s2 * 0.12), TV(1.42), U(cu + s2 * 0.05), TV(1.1), s2 * 4, 5), 7, c, 0.75);
+          sfold(g, curve(U(cu + s2 * 0.15), TV(1.0), U(cu + s2 * 0.07), TV(1.07), 2, 3), 6, c, 0.8);
+        }
+        for (let k = 0; k < 4; k++) sfold(g, [[U(cu - 0.1 + k * 0.065), TV(0.95)], [U(cu - 0.1 + k * 0.065 + 0.01), TV(1.02)]], 5, c, 0.7);
         g.restore();
-        trimPath(g, [p[0], p[p.length - 1], p[p.length - 2]], 3.4);
-        trimPath(g, [p[1], p[2], p[3]], 3.4);
-        if (vneck) trimPath(g, p.slice(4, 7), 2.8);
-        wheelEmblem(g, U(cu), TV(1.2), r.w * 0.05);
+        trimPath(g, [p[0], p[p.length - 1], p[p.length - 2]], 3.6);
+        trimPath(g, [p[1], p[2], p[3]], 3.6);
+        if (front) trimPath(g, p.slice(3, 10), 3); else trimPath(g, [p[3], p[4]], 3);
+        wheelEmblem(g, U(cu), TV(1.22), r.w * (front ? 0.055 : 0.05));
       }
+      // the jerkin's stitched side panels
+      for (const u of [0.25, 0.75]) { stitches(g, [[U(u - 0.05), TV(0.96)], [U(u - 0.04), TV(1.4)]], '#d2b483', 0.45); stitches(g, [[U(u + 0.05), TV(0.96)], [U(u + 0.04), TV(1.4)]], '#d2b483', 0.45); }
       // the shoulder tops sit in the pauldrons' shadow
       for (const u of [0.25, 0.75]) blob(g, U(u), TV(1.43), r.w * 0.1, 22, 0, INK, 0.4, 0.15);
     } else if (S.torso === 'shirt') {
@@ -616,6 +666,29 @@ function paintTorso(g, r, S, rnd) {
       g.save(); g.fillStyle = '#5a3c26'; g.fillRect(r.x, TV(1.03), r.w, TV(0.995) - TV(1.03)); g.restore();
       for (const s of [-1, 1]) for (const cu of [0, 1]) stroke(g, [[U(cu + s * 0.06), TV(1.0)], [U(cu + s * 0.04), TV(1.5)]], 5, 5, '#3d2a1c', 0.95);
       bandGrad(g, r, torsoV(0.94), torsoV(0.99), rgba(INK, 0), rgba(INK, 0.3));
+    } else if (S.torso === 'bodice') {
+      // a cream linen blouse with a gathered neckline, a laced bodice in her color over it
+      cloth(g, r, r.x, r.y, r.w, r.h, LINEN, rnd, { folds: 7, wrap: true, foldW: [3, 5], light: 0.28 });
+      for (let k = 0; k < 18; k++) { const u = (k + 0.5) / 18; sfold(g, [[U(u), TV(1.49)], [U(u + 0.004), TV(1.4)]], 3.2, LINEN, 0.7); }
+      stroke(g, [[r.x, TV(1.465)], [r.x + r.w, TV(1.465)]], 1.6, 1.6, '#8a5a3a', 0.8);   // the drawstring
+      const bod = shade(c, 0.92);
+      const P = [[U(-0.01), TV(1.35)], [U(0.18), TV(1.36)], [U(0.36), TV(1.33)], [U(0.44), TV(1.28)], [U(0.5), TV(1.25)], [U(0.56), TV(1.28)], [U(0.64), TV(1.33)], [U(0.82), TV(1.36)], [U(1.01), TV(1.35)],
+        [U(1.01), TV(0.96)], [U(0.56), TV(0.96)], [U(0.5), TV(0.92)], [U(0.44), TV(0.96)], [U(-0.01), TV(0.96)]];
+      g.save(); polyPath(g, P);
+      g.save(); g.translate(1.5, 2.5); g.fillStyle = rgba(INK, 0.5); g.fill(); g.restore();
+      g.clip();
+      cloth(g, r, r.x, r.y, r.w, r.h, bod, rnd, { folds: 3, light: 0.38, foldW: [2, 4], wrap: true });
+      for (let k = 0; k < 12; k++) { const x = U(k / 12 + 0.04); sfold(g, [[x, TV(1.34)], [x, TV(0.97)]], 4, bod, 0.55, { ridge: 1.2 }); }   // boning
+      blob(g, U(0.47), TV(1.2), r.w * 0.07, 16, 0, lightOf(bod, 0.5), 0.35, 0.15);
+      g.restore();
+      trimPath(g, P.slice(0, 9), 2.6);
+      // the front lacing
+      for (let k = 0; k < 5; k++) {
+        const y0 = TV(1.0 + k * 0.05), y1 = TV(1.05 + k * 0.05);
+        stroke(g, [[U(0.478), y0], [U(0.522), y1]], 1.6, 1.6, '#efe2c0', 0.95); stroke(g, [[U(0.522), y0], [U(0.478), y1]], 1.6, 1.6, '#efe2c0', 0.95);
+        for (const s2 of [-1, 1]) rivet(g, U(0.5 + s2 * 0.024), y0, 1.4, '#d8c070');
+      }
+      stroke(g, [[U(0.5), TV(1.0)], [U(0.5), TV(1.25)]], 2, 2, shadowOf(bod, 0.5), 0.6);
     } else if (S.torso === 'waistcoat' || S.torso === 'vest') {
       const vest = S.torso === 'vest' ? '#2c2832' : c;
       cloth(g, r, r.x, r.y, r.w, r.h, LINEN, rnd, { folds: 8, wrap: true });
@@ -671,12 +744,18 @@ function paintArm(g, r, S, rnd) {
   const c = S.color, U = u => RX(r, u), V = v => RY(r, v), AV = dy => V(armV(dy)), av = armV;
   const skin = toneOf(S.tone), LM = ARM_LM;
   clip(g, r, () => {
-    const sleeveC = S.arms === 'sleeve' || S.arms === 'rolled' ? c : S.arms === 'flannel' ? '#7d3428' : LINEN;
+    const sleeveC = S.arms === 'sleeve' || S.arms === 'rolled' ? c : S.arms === 'flannel' ? '#7d3428' : S.arms === 'blouse' ? LINEN : '#e6dccb';
     if (S.arms === 'flannel') plaid(g, r.x, r.y, r.w, r.h, sleeveC, rnd);
-    else cloth(g, r, r.x, r.y, r.w, r.h, sleeveC, rnd, { folds: 6, foldAngle: Math.PI / 2, foldLen: [0.05, 0.1], wrap: true });
+    else cloth(g, r, r.x, r.y, r.w, r.h, sleeveC, rnd, { folds: 0, light: 0.4, wrap: true });
+    // the outer/front of the arm faces the light, the inner side (u .75) turns away
+    gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(INK, 0.12)], [0.3, rgba('#fff1c4', 0.16)], [0.5, rgba('#fff1c4', 0.06)], [0.75, rgba(INK, 0.32)], [1, rgba(INK, 0.12)]]);
+    if (S.arms !== 'flannel') for (let i = 0; i < 5; i++) {   // drape folds hanging from the shoulder
+      const u = (i + 0.2 + rnd() * 0.5) / 5;
+      sfold(g, curve(U(u), AV(0.0), U(u + range(rnd, -0.05, 0.05)), AV(range(rnd, -0.16, -0.24)), range(rnd, -3, 3), 4), range(rnd, 5, 8), sleeveC, 0.7);
+    }
     // a lit shoulder cap, folds at the elbow
     bandGrad(g, r, av(-0.02), av(0.06), rgba('#fff1c4', 0), rgba('#fff1c4', 0.25));
-    for (let i = 0; i < 4; i++) fold(g, curve(U(0.55 + rnd() * 0.4), AV(LM.elbow + 0.02 - rnd() * 0.03), U(0.05 + rnd() * 0.4), AV(LM.elbow + 0.01 - rnd() * 0.03), 3), 2.6, sleeveC, 0.4);
+    for (let i = 0; i < 5; i++) sfold(g, curve(U(0.5 + rnd() * 0.45), AV(LM.elbow + 0.03 - rnd() * 0.04), U(0.05 + rnd() * 0.4), AV(LM.elbow + 0.02 - rnd() * 0.04), 3, 4), 5, sleeveC, 0.75);
     if (S.arms === 'sleeve') {
       trimH(g, r.x, r.x + r.w, AV(LM.elbow + 0.005), r.h * 0.035);
       // a laced leather bracer from the elbow to the glove
@@ -687,7 +766,21 @@ function paintArm(g, r, S, rnd) {
       hstitch(g, r, av(LM.sleeve - 0.008), '#c9a878', 0.5);
       bandGrad(g, r, av(LM.sleeve - 0.02), av(LM.sleeve), rgba(INK, 0), rgba(INK, 0.45));
     }
-    if (S.arms === 'shirt') { band(g, r, av(-0.12), av(-0.1), S.outfit === 'dealer' ? '#9a2a2a' : '#2d2a3a', 1); hstitch(g, r, av(-0.11), '#f0d8a0', 0.35); }
+    if (S.arms === 'shirt') {
+      // a sleeve garter above the elbow, a crisp pressed crease down the outside
+      for (let i = 0; i < 4; i++) sfold(g, curve(U(0.1 + i * 0.22), AV(-0.06), U(0.14 + i * 0.22), AV(-0.2), 3, 4), 5, sleeveC, 0.7);
+      band(g, r, av(-0.135), av(-0.105), S.outfit === 'dealer' ? '#9a2a2a' : '#2d2a3a', 1);
+      bandGrad(g, r, av(-0.135), av(-0.105), rgba('#fff0d0', 0.3), rgba(INK, 0.35));
+      rivet(g, U(0.25), AV(-0.12), 2, '#d8c070');
+      for (let i = 0; i < 6; i++) sfold(g, [[U(rnd()), AV(-0.14)], [U(rnd()), AV(-0.1)]], 4, sleeveC, 0.6);   // the puff above the garter
+    }
+    if (S.arms === 'blouse') {
+      // puffed linen sleeve gathered at the elbow with a ribbon in her color
+      for (let i = 0; i < 9; i++) { const u = (i + 0.3) / 9; sfold(g, [[U(u), AV(0.04)], [U(u + 0.01), AV(-0.13)], [U(u - 0.01), AV(LM.elbow + 0.02)]], 5, sleeveC, 0.7); }
+      band(g, r, av(LM.elbow - 0.012), av(LM.elbow + 0.012), c, 1);
+      bandGrad(g, r, av(LM.elbow - 0.012), av(LM.elbow + 0.012), rgba('#fff0d0', 0.35), rgba(INK, 0.35));
+      for (let i = 0; i < 6; i++) sfold(g, [[U(i / 6 + 0.05), AV(LM.elbow - 0.03)], [U(i / 6 + 0.07), AV(LM.wrist + 0.06)]], 3.5, sleeveC, 0.5);
+    }
     if (S.arms === 'rolled') {
       // the sleeve rolled up above the elbow; a hairy bare forearm below
       const top = LM.elbow + 0.03;
@@ -738,7 +831,13 @@ function paintArm(g, r, S, rnd) {
     }
     // the armpit side (inner, u .75) in shade; the top of the arm under the pauldron
     blob(g, U(0.75), AV(-0.06), r.w * 0.14, 30, 0, INK, 0.3, 0.1);
-    bandGrad(g, r, av(0.0), 1.0, rgba(INK, 0), rgba(INK, S.pauldrons !== 'none' ? 0.5 : 0.15));
+    if (S.pauldrons !== 'none') bandGrad(g, r, av(0.0), 1.0, rgba(INK, 0), rgba(INK, 0.5));
+    else {
+      // no pauldron: the sleeve cap is lit from above, with the armhole seam just below it
+      bandGrad(g, r, av(0.0), 1.0, rgba('#fff1c4', 0), rgba('#fff1c4', 0.3));
+      hstitch(g, r, av(-0.012), shadowOf(sleeveC, 0.5), 0.5);
+      bandGrad(g, r, av(-0.04), av(-0.012), rgba(INK, 0), rgba(INK, 0.22));
+    }
   });
 }
 
@@ -805,6 +904,7 @@ function paintFoot(g, r, S, rnd) {
 // The jerkin skirt: four panels (front, right, back, left), each a quarter of the region.
 function paintSkirt(g, r, S, rnd) {
   const V = v => RY(r, v);
+  if (S.dress) return paintDress(g, r, S, rnd);
   clip(g, r, () => {
     const base = mix(LEATHER, '#5a3c26', 0.4);
     for (let q = 0; q < 4; q++) {
@@ -825,6 +925,35 @@ function paintSkirt(g, r, S, rnd) {
     }
     bandGrad(g, r, 0.82, 1.0, rgba(INK, 0), rgba(INK, 0.55));     // under the belt
     bandGrad(g, r, 0.0, 0.25, rgba(INK, 0.3), rgba(INK, 0));
+  });
+}
+
+// The clerk's long skirt: deep dyed wool gathered at the waist, a cream apron at the
+// front (u .5), a trimmed hem. u runs round the skirt, v from the hem (0) to the waist (1).
+function paintDress(g, r, S, rnd) {
+  const U = u => RX(r, u), V = v => RY(r, v);
+  const sk = mix(shade(S.color, 0.72), '#3a2636', 0.25);
+  clip(g, r, () => {
+    cloth(g, r, r.x, r.y, r.w, r.h, sk, rnd, { folds: 0, light: 0.3, blotch: 14, wrap: true });
+    // gathers: soft vertical folds that widen toward the hem
+    for (let i = 0; i < 22; i++) {
+      const u = (i + rnd() * 0.6) / 22, x0 = U(u), x1 = x0 + range(rnd, -4, 4);
+      sfold(g, [[x0, V(0.98)], [(x0 + x1) / 2, V(0.5)], [x1, V(0.04)]], range(rnd, 5, 8), sk, 0.8, { ridge: 1.1 });
+    }
+    // the apron
+    g.save(); polyPath(g, [[U(0.4), V(0.98)], [U(0.6), V(0.98)], [U(0.63), V(0.22)], [U(0.6), V(0.18)], [U(0.4), V(0.18)], [U(0.37), V(0.22)]]);
+    g.save(); g.translate(1.5, 2); g.fillStyle = rgba(INK, 0.45); g.fill(); g.restore();
+    g.clip();
+    cloth(g, r, U(0.36), r.y, r.w * 0.28, r.h, LINEN, rnd, { folds: 0, light: 0.3, blotch: 6 });
+    for (let i = 0; i < 6; i++) { const x = U(0.41 + i * 0.035); sfold(g, [[x, V(0.95)], [x + range(rnd, -2, 2), V(0.2)]], 4, LINEN, 0.6); }
+    g.restore();
+    stitches(g, [[U(0.405), V(0.22)], [U(0.595), V(0.22)]], '#8a6a4a', 0.6);
+    // the hem band, and the waistband in the bodice color
+    band(g, r, 0.0, 0.08, shadowOf(sk, 0.3), 1);
+    trimH(g, r.x, r.x + r.w, V(0.11), 3.2);
+    band(g, r, 0.93, 1.0, shade(S.color, 0.9), 1);
+    bandGrad(g, r, 0.86, 0.93, rgba(INK, 0), rgba(INK, 0.45));
+    bandGrad(g, r, 0.0, 0.1, rgba(INK, 0.35), rgba(INK, 0));
   });
 }
 
@@ -858,28 +987,44 @@ function paintCollar(g, r, S, rnd) {
   });
 }
 
+// Pauldrons: a big domed shell (v .32-1, the rim at the bottom) and a hanging lame
+// (v 0-.28). Leather plates boiled hard with a riveted iron rim, or steel plates for
+// helm/cap/bandana wearers. The player's color is only a narrow cloth edge peeking out under the lame.
 function paintPauldron(g, r, S, rnd) {
   const U = u => RX(r, u), V = v => RY(r, v);
   const metal = S.paulMetal;
-  const base = metal ? '#8a8c94' : '#7c5434';
+  const base = metal ? '#8e929c' : '#7a5232';
+  const rimC = metal ? '#b8a070' : '#6e7078';
   clip(g, r, () => {
+    const dome = { x: r.x, y: V(1), w: r.w, h: V(0.32) - V(1) };
     if (metal) {
-      gradV(g, r.x, r.y, r.w, r.h, [[0, '#e4e6ee'], [0.25, '#a8acb6'], [0.6, base], [1, '#4a4a56']]);
-      for (let i = 0; i < 10; i++) wblob(g, r, r.x + rnd() * r.w, r.y + rnd() * r.h, range(rnd, 6, 18), range(rnd, 4, 10), rnd() * 3, pick(rnd, ['#6a6070', '#c0c4cc', '#5a5c66']), 0.28, 0.2);
-      for (let i = 0; i < 16; i++) { const x = U(rnd()), y = V(0.3 + rnd() * 0.7); stroke(g, [[x, y], [x + range(rnd, -6, 6), y + range(rnd, -2, 2)]], 0.8, 0.3, '#f4f6fc', 0.45); }
-      for (let k = 0; k < 4; k++) { const u = (k + 0.5) / 4; stroke(g, [[U(u), V(0.5)], [U(u), V(1)]], 4, 2, '#5a5c66', 0.45); stroke(g, [[U(u) - 2, V(0.5)], [U(u) - 2, V(1)]], 1.4, 1, '#ffffff', 0.4); }
-    } else leather(g, r, r.x, r.y, r.w, r.h, base, rnd, { creases: 6, scuffs: 14, light: 0.4, wrap: true });
-    bandGrad(g, r, 0.72, 1.0, rgba('#fff0c8', 0.0), rgba('#fff0c8', 0.35));
-    // the rim: a band in the player's color with gold piping
-    band(g, r, 0.32, 0.42, S.color, 1);
-    bandGrad(g, r, 0.32, 0.42, rgba('#fff0c8', 0.3), rgba(INK, 0.3));
-    band(g, r, 0.415, 0.435, TRIM, 1); band(g, r, 0.31, 0.325, TRIM, 1);
-    for (let k = 0; k < 9; k++) rivet(g, U((k + 0.5) / 9), V(0.52), 2.6, metal ? '#d8d0b8' : BRASS);
-    // the lower lame
-    bandGrad(g, r, 0.0, 0.28, rgba(INK, 0.35), rgba(INK, 0.05));
-    band(g, r, 0.02, 0.07, S.color, 0.9);
-    for (let k = 0; k < 7; k++) rivet(g, U((k + 0.3) / 7), V(0.16), 2, BRASS);
-    band(g, r, 0.285, 0.31, INK, 0.5);
+      gradV(g, dome.x, dome.y, dome.w, dome.h, [[0, '#eef0f4'], [0.3, '#b4b8c2'], [0.7, base], [1, '#4c4e5a']]);
+      for (let i = 0; i < 12; i++) wblob(g, r, r.x + rnd() * r.w, dome.y + rnd() * dome.h, range(rnd, 6, 18), range(rnd, 3, 8), rnd() * 3, pick(rnd, ['#6a6272', '#c4c8d0', '#5a5c66', '#8a7a6a']), 0.26, 0.2);
+      for (let i = 0; i < 14; i++) { const x = U(rnd()), y = V(0.45 + rnd() * 0.5); stroke(g, [[x, y], [x + range(rnd, -6, 6), y + range(rnd, -1.5, 1.5)]], 0.8, 0.3, '#f6f8fc', 0.4); }
+    } else {
+      leather(g, r, dome.x, dome.y, dome.w, dome.h, base, rnd, { creases: 5, scuffs: 14, light: 0.5, wrap: true });
+    }
+    // overlapping plates: each plate's lower edge is lit, the next one up casts a shadow on it
+    for (const v of [0.56, 0.78]) {
+      bandGrad(g, r, v - 0.07, v, rgba(INK, 0), rgba(INK, 0.5));
+      band(g, r, v, v + 0.025, lightOf(base, 0.7), 0.6);
+      for (let k = 0; k < 10; k++) rivet(g, U((k + (v > 0.6 ? 0.5 : 0)) / 10 + 0.025), V(v + 0.05), 1.7, metal ? '#d8d2c0' : '#b8bcc4');
+    }
+    // a seam down the middle of each plate
+    for (let k = 0; k < 4; k++) { const u = (k + 0.5) / 4; sfold(g, [[U(u), V(0.97)], [U(u), V(0.4)]], 4, base, 0.55, { ridge: 1.3 }); }
+    bandGrad(g, r, 0.78, 1.0, rgba('#fff0c8', 0.0), rgba('#fff0c8', 0.4));    // the cap of the dome catches the sun
+    // the rolled rim: iron (or brass on steel), riveted
+    gradV(g, r.x, V(0.43), r.w, V(0.32) - V(0.43), [[0, lightOf(rimC, 0.8)], [0.4, rimC], [1, shadowOf(rimC, 0.6)]]);
+    for (let k = 0; k < 9; k++) rivet(g, U((k + 0.5) / 9), V(0.375), 2.4, metal ? '#e0c890' : '#c8ccd4');
+    bandGrad(g, r, 0.43, 0.48, rgba(INK, 0.45), rgba(INK, 0));
+    // the lame: darker leather with a narrow strip of the player's cloth showing under it
+    const lame = { x: r.x, y: V(0.3), w: r.w, h: V(0) - V(0.3) };
+    leather(g, r, lame.x, lame.y, lame.w, lame.h, shadowOf(metal ? '#6a5040' : base, 0.15), rnd, { creases: 3, scuffs: 6, light: 0.45, wrap: true });
+    band(g, r, 0.0, 0.06, S.color, 1);
+    bandGrad(g, r, 0.0, 0.06, rgba(INK, 0.35), rgba('#fff0c8', 0.15));
+    hstitch(g, r, 0.13, '#d8bc8a', 0.55);
+    for (let k = 0; k < 7; k++) rivet(g, U((k + 0.3) / 7), V(0.2), 2, metal ? '#c8ccd4' : BRASS);
+    bandGrad(g, r, 0.22, 0.3, rgba(INK, 0), rgba(INK, 0.55));
   });
 }
 
@@ -1042,10 +1187,18 @@ function paintAcc(g, r, S, rnd) {
       for (let i = 0; i < 20; i++) { const x = U(rnd()); stroke(g, [[x, V(0.02)], [x + range(rnd, -3, 3), V(-0.05)]], 1.2, 0.5, '#7a5a2a', 0.6); }
       bandGrad(g, r, 0, 0.12, rgba(INK, 0.35), rgba(INK, 0));
     } else if (h === 'bandana' || h === 'hood' || h === 'cap') {
-      const cc = h === 'bandana' ? mix(c, '#7a2a24', 0.35) : h === 'hood' ? shadowOf(c, 0.15) : c;
+      const cc = h === 'bandana' ? mix(c, '#7a2a24', 0.35) : h === 'hood' ? mix('#3a302c', c, 0.18) : c;
       cloth(g, r, r.x, r.y, r.w, r.h, cc, rnd, { folds: h === 'hood' ? 10 : 8, light: 0.35, wrap: true });
       if (h === 'bandana') for (let i = 0; i < 40; i++) { const x = r.x + rnd() * r.w, y = r.y + rnd() * r.h; ellipse(g, x, y, 2, 2, 0, '#efe3c8', 0.7); ellipse(g, x + 3, y, 0.9, 0.9, 0, '#efe3c8', 0.6); }
-      if (h === 'hood') { trimH(g, r.x, r.x + r.w, V(0.06), r.h * 0.05); trimH(g, r.x, r.x + r.w, V(0.56), r.h * 0.04); bandGrad(g, r, 0.52, 0.62, rgba(INK, 0.45), rgba(INK, 0)); }
+      if (h === 'hood') {
+        // dark wool with a band of your color round the face opening and the mantle's hem
+        for (let i = 0; i < 9; i++) { const u = (i + rnd() * 0.5) / 9; sfold(g, curve(U(u), V(0.98), U(u + range(rnd, -0.03, 0.03)), V(0.56), range(rnd, -4, 4), 4), 9, cc, 0.8); }
+        band(g, r, 0.36, 0.45, c, 1); bandGrad(g, r, 0.36, 0.45, rgba('#fff0c8', 0.3), rgba(INK, 0.3));    // the mantle's hem
+        trimH(g, r.x, r.x + r.w, V(0.35), r.h * 0.035);
+        for (const [u0, u1] of [[0, 0.06], [0.94, 1]]) gradH(g, U(u0), V(1), U(u1) - U(u0), V(0.52) - V(1), [[0, rgba(INK, u0 ? 0 : 0.45)], [1, rgba(INK, u0 ? 0.45 : 0)]]);   // the shadowed face opening
+        stitches(g, [[r.x, V(0.15)], [r.x + r.w, V(0.15)]], '#c8a878', 0.4);
+        bandGrad(g, r, 0.52, 0.62, rgba(INK, 0.45), rgba(INK, 0));
+      }
       if (h === 'cap') {
         for (let k = 0; k < 6; k++) stitches(g, [[U(k / 6), V(0.52)], [U(k / 6 + 0.02), V(1)]], shadowOf(c, 0.5), 0.6);
         clipRect(g, brim.x, brim.y, brim.w, brim.h, () => {
@@ -1140,7 +1293,7 @@ export function charGlow(spec) {
   return name;
 }
 
-// ---- first-person hands (256×256): sleeve, gauntlet cuff, glove back, palm, fingers, thumb ----
+// ---- first-person hands (256×256): sleeve, gauntlet cuff, bracer, glove, fingers, thumb ----
 export const FP = {
   sleeve: { x: 0, y: 0, w: 124, h: 124 },
   cuff: { x: 128, y: 0, w: 128, h: 60 },
@@ -1155,47 +1308,62 @@ function paintHands(g, s, rnd, cv, color) {
   const GL = '#7a5232';
   clip(g, FP.sleeve, () => {
     const r = FP.sleeve;
-    cloth(g, r, r.x, r.y, r.w, r.h, c, rnd, { folds: 8, foldAngle: Math.PI / 2, foldLen: [0.15, 0.4], wrap: true });
+    cloth(g, r, r.x, r.y, r.w, r.h, c, rnd, { folds: 0, light: 0.4, wrap: true });
+    for (let i = 0; i < 7; i++) { const x = r.x + (i + rnd() * 0.6) / 7 * r.w; sfold(g, curve(x, RY(r, 0.12), x + range(rnd, -8, 8), RY(r, 0.95), range(rnd, -4, 4), 4), range(rnd, 7, 11), c, 0.8); }
+    for (let i = 0; i < 4; i++) { const y = RY(r, 0.2 + rnd() * 0.2); sfold(g, curve(r.x + rnd() * r.w * 0.5, y, r.x + r.w * (0.5 + rnd() * 0.5), y + range(rnd, -5, 5), 3, 4), 6, c, 0.7); }   // bunched over the bracer
     trimH(g, r.x, r.x + r.w, RY(r, 0.1), r.h * 0.07);
-    bandGrad(g, r, 0, 0.1, rgba(INK, 0.5), rgba(INK, 0));
+    bandGrad(g, r, 0, 0.1, rgba(INK, 0.55), rgba(INK, 0));
   });
   clip(g, FP.bracer, () => {
     const r = FP.bracer;
-    leather(g, r, r.x, r.y, r.w, r.h, LEATHER_D, rnd, { creases: 6, scuffs: 12, wrap: true, light: 0.4 });
-    for (let k = 0; k < 4; k++) { const x = RX(r, 0.2 + k * 0.2); stroke(g, [[x - 4, RY(r, 0.3)], [x + 4, RY(r, 0.7)]], 2, 2, '#c9a878', 0.85); stroke(g, [[x + 4, RY(r, 0.3)], [x - 4, RY(r, 0.7)]], 2, 2, '#c9a878', 0.85); }
+    leather(g, r, r.x, r.y, r.w, r.h, LEATHER_D, rnd, { creases: 6, scuffs: 12, wrap: true, light: 0.45 });
+    // a laced split down the inside, a lit strap with a buckle round the middle
+    for (let k = 0; k < 4; k++) { const y = RY(r, 0.25 + k * 0.17); stroke(g, [[RX(r, 0.72), y - 4], [RX(r, 0.8), y + 4]], 2, 2, '#c9a878', 0.9); stroke(g, [[RX(r, 0.8), y - 4], [RX(r, 0.72), y + 4]], 2, 2, '#c9a878', 0.9); }
+    band(g, r, 0.42, 0.6, '#4a3020', 1); bandGrad(g, r, 0.42, 0.6, rgba('#fff0c8', 0.25), rgba(INK, 0.35));
+    hstitch(g, r, 0.47, '#d8bc8a', 0.5); hstitch(g, r, 0.56, '#d8bc8a', 0.5);
+    buckle(g, RX(r, 0.5), RY(r, 0.51), 9, 11);
     hstitch(g, r, 0.1, '#c9a878', 0.55); hstitch(g, r, 0.9, '#c9a878', 0.55);
+    bandGrad(g, r, 0.85, 1, rgba(INK, 0), rgba(INK, 0.45));
   });
   clip(g, FP.cuff, () => {
     const r = FP.cuff;
-    leather(g, r, r.x, r.y, r.w, r.h, SUEDE, rnd, { creases: 6, scuffs: 12, wrap: true, light: 0.45 });
-    trimH(g, r.x, r.x + r.w, RY(r, 0.97), r.h * 0.16, c, shadowOf(c, 0.5));
-    hstitch(g, r, 0.74, '#e8d0a0', 0.6);
-    for (let k = 0; k < 6; k++) rivet(g, RX(r, (k + 0.5) / 6), RY(r, 0.45), 3);
-    bandGrad(g, r, 0, 0.2, rgba(INK, 0.5), rgba(INK, 0));
+    leather(g, r, r.x, r.y, r.w, r.h, SUEDE, rnd, { creases: 6, scuffs: 12, wrap: true, light: 0.5 });
+    // your color: a wide dyed band under the rolled rim, piped in gold
+    band(g, r, 0.66, 0.9, c, 1);
+    bandGrad(g, r, 0.66, 0.9, rgba('#fff0c8', 0.35), rgba(INK, 0.35));
+    trimH(g, r.x, r.x + r.w, RY(r, 0.91), r.h * 0.07);
+    trimH(g, r.x, r.x + r.w, RY(r, 0.66), r.h * 0.06);
+    gradV(g, r.x, RY(r, 1.0), r.w, RY(r, 0.93) - RY(r, 1.0), [[0, '#d8b888'], [1, '#6a4a2a']]);   // the rolled rim
+    for (let k = 0; k < 7; k++) rivet(g, RX(r, (k + 0.5) / 7), RY(r, 0.4), 3);
+    for (let k = 0; k < 7; k++) sfold(g, [[RX(r, (k + 0.1) / 7), RY(r, 0.6)], [RX(r, (k + 0.15) / 7), RY(r, 0.08)]], 6, SUEDE, 0.55);
+    bandGrad(g, r, 0, 0.22, rgba(INK, 0.55), rgba(INK, 0));
   });
   clip(g, FP.palm, () => {
     const r = FP.palm;
-    leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 10, scuffs: 16, light: 0.4, wrap: true });
-    // the back of the hand (u ~ .5): a stitched, riveted leather plate; knuckle highlights at the far end
-    g.save(); g.beginPath(); g.roundRect(RX(r, 0.31), RY(r, 0.82), r.w * 0.38, r.h * 0.62, 8); g.clip();
-    leather(g, r, RX(r, 0.31), RY(r, 0.82), r.w * 0.38, r.h * 0.62, shadowOf(GL, 0.12), rnd, { creases: 4, scuffs: 8, light: 0.45 });
-    g.restore();
-    stitches(g, [[RX(r, 0.32), RY(r, 0.81)], [RX(r, 0.32), RY(r, 0.21)], [RX(r, 0.68), RY(r, 0.21)], [RX(r, 0.68), RY(r, 0.81)], [RX(r, 0.32), RY(r, 0.81)]], '#e2c898', 0.65);
-    for (const [u, v] of [[0.38, 0.74], [0.62, 0.74], [0.38, 0.28], [0.62, 0.28]]) rivet(g, RX(r, u), RY(r, v), 3);
-    band(g, r, 0.38, 0.46, c, 0.85);   // a strap across the back in the player's color
-    hstitch(g, r, 0.42, '#f0dca8', 0.5);
-    for (const u of [0.38, 0.46, 0.54, 0.62]) blob(g, RX(r, u), RY(r, 0.92), 7, 4.5, 0, lightOf(GL, 0.55), 0.6, 0.25);
-    blob(g, RX(r, 0.0), RY(r, 0.5), r.w * 0.2, r.h * 0.4, 0, INK, 0.4, 0.1);   // the palm side in shade
-    blob(g, RX(r, 1.0), RY(r, 0.5), r.w * 0.2, r.h * 0.4, 0, INK, 0.4, 0.1);
-    bandGrad(g, r, 0, 0.1, rgba(INK, 0.4), rgba(INK, 0));
+    leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 8, scuffs: 16, light: 0.45, wrap: true });
+    // the back of the hand (u ~ .5): stitched seams running to each knuckle, a dyed strap with a brass stud
+    for (const u of [0.4, 0.47, 0.53, 0.6]) { stitches(g, [[RX(r, 0.5 + (u - 0.5) * 0.5), RY(r, 0.15)], [RX(r, u), RY(r, 0.8)]], '#e2c898', 0.55); sfold(g, [[RX(r, 0.5 + (u - 0.5) * 0.5) + 3, RY(r, 0.2)], [RX(r, u) + 3, RY(r, 0.78)]], 5, GL, 0.5); }
+    band(g, r, 0.46, 0.58, c, 0.95); bandGrad(g, r, 0.46, 0.58, rgba('#fff0c8', 0.3), rgba(INK, 0.35));
+    hstitch(g, r, 0.48, '#f0dca8', 0.5); hstitch(g, r, 0.56, '#f0dca8', 0.5);
+    rivet(g, RX(r, 0.5), RY(r, 0.52), 4);
+    // a padded knuckle ridge with four iron studs
+    band(g, r, 0.76, 0.9, shadowOf(GL, 0.15), 0.9);
+    bandGrad(g, r, 0.84, 0.92, rgba('#fff0c8', 0.0), rgba('#fff0c8', 0.35));
+    bandGrad(g, r, 0.7, 0.76, rgba(INK, 0), rgba(INK, 0.45));
+    for (const u of [0.38, 0.46, 0.54, 0.62]) rivet(g, RX(r, u), RY(r, 0.83), 3.6, '#b8bcc6');
+    blob(g, RX(r, 0.45), RY(r, 0.55), r.w * 0.12, r.h * 0.2, 0, lightOf(GL, 0.5), 0.35, 0.15);
+    // the palm (u 0 / 1): a darker padded patch in shade
+    for (const u of [0.0, 1.0]) { blob(g, RX(r, u), RY(r, 0.5), r.w * 0.22, r.h * 0.4, 0, INK, 0.45, 0.1); stitches(g, [[RX(r, u) - 20, RY(r, 0.25)], [RX(r, u) + 20, RY(r, 0.25)]], '#c8a878', 0.4); }
+    bandGrad(g, r, 0, 0.1, rgba(INK, 0.45), rgba(INK, 0));
   });
   for (const k of ['finger', 'thumb']) clip(g, FP[k], () => {
     const r = FP[k];
-    leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 8, scuffs: 10, light: 0.4, wrap: true });
-    for (const v of [0.38, 0.68]) { const y = RY(r, v); fold(g, curve(RX(r, 0.3), y, RX(r, 0.7), y, 2, 3), 2.4, GL, 0.65); }
-    blob(g, RX(r, 0.5), RY(r, 0.55), r.w * 0.14, r.h * 0.45, 0, lightOf(GL, 0.4), 0.35, 0.2);
-    gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(INK, 0.4)], [0.3, rgba(INK, 0)], [0.7, rgba(INK, 0)], [1, rgba(INK, 0.4)]]);
-    bandGrad(g, r, 0.9, 1, rgba(INK, 0), rgba(INK, 0.4));
+    leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 6, scuffs: 10, light: 0.45, wrap: true });
+    for (const v of [0.48, 0.74]) { const y = RY(r, v); for (let q = 0; q < 2; q++) sfold(g, curve(RX(r, 0.25), y + q * 3, RX(r, 0.75), y + q * 3, 2, 3), 4, GL, 0.75); }
+    blob(g, RX(r, 0.5), RY(r, 0.5), r.w * 0.16, r.h * 0.45, 0, lightOf(GL, 0.45), 0.4, 0.2);
+    for (const v of [0.5, 0.78]) blob(g, RX(r, 0.5), RY(r, v), r.w * 0.08, r.h * 0.06, 0, lightOf(GL, 0.7), 0.5, 0.25);   // knuckle shine
+    gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(INK, 0.45)], [0.3, rgba(INK, 0)], [0.7, rgba(INK, 0)], [1, rgba(INK, 0.45)]]);
+    bandGrad(g, r, 0.9, 1, rgba(INK, 0), rgba(INK, 0.35));
   });
   for (const r of Object.values(FP)) soften(cv, r, 0.6);
   g.save(); g.globalCompositeOperation = 'soft-light'; g.globalAlpha = 0.12; g.fillStyle = '#ffd9a0'; g.fillRect(0, 0, 256, 256); g.restore();
