@@ -23,11 +23,13 @@ const OBSTACLE_PLAN = [
   ['mud', 'gate', 'boulder', 'grade', 'grade'],
 ];
 
-// One biome per day: the trip runs from green meadows (think Elwynn) through
-// golden farmland (Westfall), red canyons (the Badlands) into the desert
-// (Tanaris) where Lost Wages sits. Biomes change the terrain's shape, the
-// decor, and the art; obstacles and their narrows stay steep everywhere.
-export const BIOME_BY_DAY = ['meadow', 'fields', 'badlands', 'badlands', 'desert'];
+// One biome per day, all five different, each with its own town style. The trip
+// runs like a cross-country drive through WoW Classic zones: green meadows
+// (Elwynn), golden farmland (Westfall), a snowy mountain pass (Dun Morogh), red
+// canyons (the Badlands), and the desert (Tanaris) where Lost Wages sits.
+// Biomes change the terrain's shape, the decor, the towns and the art;
+// obstacles and their narrows stay steep everywhere.
+export const BIOME_BY_DAY = ['meadow', 'fields', 'snow', 'badlands', 'desert'];
 export const BIOMES = {
   meadow: {
     name: 'The Westmeadow Road', town: 'timber',
@@ -36,13 +38,19 @@ export const BIOMES = {
     density: 1 / 4.5,
   },
   fields: {
-    name: 'Goldenfield Pike', town: 'timber',
+    name: 'Goldenfield Pike', town: 'farm',
     wallSoft: 16, wallH: [7, 5], wallDist: [46, 14], bumps: 1.6,
     decor: [['oak', 10], ['haybale', 14], ['bush', 16], ['rock', 8], ['wheat', 30], ['scarecrow', 3], ['fence', 10], ['flowers', 9]],
     density: 1 / 4.5,
   },
+  snow: {
+    name: 'Frostpeak Pass', town: 'alpine',
+    wallSoft: 7, wallH: [16, 9], wallDist: [38, 14], bumps: 2.4,
+    decor: [['pine', 44], ['rock', 22], ['bush', 10], ['stump', 8], ['deadtree', 4], ['fence', 5]],
+    density: 1 / 5,
+  },
   badlands: {
-    name: 'The Redrock Badlands', town: 'adobe',
+    name: 'The Redrock Badlands', town: 'frontier',
     wallSoft: 5.5, wallH: [15, 8], wallDist: [36, 16], bumps: 1.7,
     decor: [['cactus', 34], ['deadtree', 10], ['rock', 40], ['bones', 6], ['bush', 10]],
     density: 1 / 7,

@@ -8,16 +8,16 @@ procedural or AI-generated "low poly indie" art.
 Reference frames from the clip the user supplied (Elwynn Forest / Goldshire)
 are in `docs/reference/frames/`, so look at them. The zones we borrow from:
 
-| Day | Biome | WoW zone it should feel like |
-|---|---|---|
-| 1 | `meadow` | Elwynn Forest: lush green, huge gnarled oaks, gray rock outcrops, dirt roads, timber-and-plaster houses with red shingle roofs |
-| 2 | `fields` | Westfall: golden grass and wheat, haybales, scarecrows, fences, windmills, dusty roads |
-| 3–4 | `badlands` | The Badlands / Thousand Needles: red-orange canyon rock with horizontal strata, dead trees, dusty ochre ground |
-| 5 | `desert` | Tanaris / Gadgetzan: pale sand, dunes, palms, sun-bleached bones, adobe and goblin-tech buildings |
+| Day | Biome | WoW zone it should feel like | Town style |
+|---|---|---|---|
+| 1 | `meadow` | Elwynn Forest: lush green, huge gnarled oaks, gray rock outcrops, dirt roads | `timber`: Goldshire. Timber-framed cream plaster, dark beams, steep red shingle roofs, chimneys, stone bases |
+| 2 | `fields` | Westfall: golden grass and wheat, haybales, scarecrows, rail fences, dusty roads | `farm`: Westfall farmsteads. Weathered plank barns, thatch or gambrel roofs, a windmill, wagon wheels, hay |
+| 3 | `snow` | Dun Morogh: snowfields, snow-laden pines, blue-gray granite with snow on every ledge, icy blue shadows, frozen streams | `alpine`: Kharanos. Squat dwarven stone halls, massive timber, steep roofs heavy with snow, iron braziers, warm windows |
+| 4 | `badlands` | The Badlands / Thousand Needles: red-orange canyon rock with horizontal strata, dead trees, ochre dust | `frontier`: Kargath / a canyon outpost. Rough log and plank, palisade stakes, hides and canvas, rope, ramshackle roofs |
+| 5 | `desert` | Tanaris / Gadgetzan: pale sand, dunes, palms, sun-bleached bones | `adobe`: Gadgetzan. Tan adobe walls, dark wood beams poking out, flat roofs, canvas awnings, goblin brass and rivets |
 
-Town style: `timber` (meadow and fields) is Goldshire. `adobe` (badlands and
-desert) is Gadgetzan or the Crossroads: tan plaster, dark wood beams, flat or
-low roofs, canvas awnings, brass and rivets.
+All five days must look clearly different: ground, sky, fog, rocks, plants
+and towns. Nobody should ever confuse one day's screenshot for another's.
 
 ## Banned: what makes the current build look like AI slop
 
@@ -71,6 +71,7 @@ low roofs, canvas awnings, brass and rivets.
 |---|---|---|---|---|---|
 | meadow | `#4f7d2a` `#6f9c34` `#9cb447` (lit tips) | `#7c5b3a` `#9a7650` | `#77746e` `#97918a` mossy `#6d7a4a` | `#5d9fd8` → `#cfe6e2` | `#a8c8c4` |
 | fields | `#a99a45` `#c9ac52` `#e2c56a` wheat | `#94704a` `#b18c5c` | `#8a8170` | `#7fb6e6` → `#efe2b8` | `#dccfa4` |
+| snow | snow `#e8eef4` `#cfdbe6` (blue shadow) `#f7f4ec` (sunlit) | slush/gravel `#8a8478` `#a39d90` | granite `#6f7682` `#8e96a3` | `#5f9edc` → `#e4eef4` | `#d6e2ec` |
 | badlands | dust `#b98457` `#cf9a62` | `#a77650` | strata `#8e3e22` `#b4552f` `#cf7a45` `#e3a066` | `#6aa2d8` → `#f0c9a0` | `#d9a982` |
 | desert | sand `#d9b87f` `#e8cc96` `#c79c62` | `#bf9a68` | `#b7895e` `#d4ab7c` | `#78b6e8` → `#f6e3b8` | `#efd8aa` |
 
