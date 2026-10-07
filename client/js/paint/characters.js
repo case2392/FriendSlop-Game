@@ -1413,7 +1413,8 @@ function paintAcc(g, r, S, rnd) {
       // hanging folds, a stitched darker edge, a pocket with a pencil, old stains
       const ap = '#7e5a3a';
       leather(g, r, r.x, r.y, r.w, r.h, ap, rnd, { creases: 10, scuffs: 16, light: 0.32 });
-      for (let i = 0; i < 7; i++) { const u = (i + 0.3 + rnd() * 0.4) / 7; sfold(g, curve(U(u), V(0.66), U(u + range(rnd, -0.03, 0.03)), V(0.02), range(rnd, -3, 3), 5), range(rnd, 6, 9), ap, 0.85); }
+      for (let i = 0; i < 4; i++) { const u = (i + 0.3 + rnd() * 0.4) / 4; sfold(g, curve(U(u), V(0.6 - rnd() * 0.15), U(u + range(rnd, -0.04, 0.04)), V(0.02), range(rnd, -5, 5), 5), range(rnd, 9, 13), ap, 0.7); }
+      for (let i = 0; i < 5; i++) { const y = V(0.58 + rnd() * 0.08); sfold(g, curve(U(0.1 + rnd() * 0.3), y, U(0.6 + rnd() * 0.3), y + range(rnd, -3, 3), 3, 5), 5, ap, 0.6); }   // creased where the belly folds it
       blob(g, U(0.5), V(0.5), r.w * 0.3, r.h * 0.12, 0, lightOf(ap, 0.4), 0.3, 0.1);                    // the belly pushes it into the light
       for (let i = 0; i < 6; i++) blob(g, U(0.15 + rnd() * 0.7), V(0.1 + rnd() * 0.6), range(rnd, 5, 12), range(rnd, 3, 7), rnd() * 3, '#3e2e22', 0.32, 0.3);   // stains
       const pk = [U(0.36), V(0.44), r.w * 0.28, V(0.3) - V(0.44)];
