@@ -366,16 +366,15 @@ function plasterHole(g, s, rnd, x, y, r, { brick = ['#9a5a3e', '#a8684a', '#8a4e
       }
       g.save(); g.translate(5, 5); g.lineWidth = 12; g.strokeStyle = rgba(INK, 0.45); g.filter = 'blur(3px)'; polyPath(g, pts); g.stroke(); g.restore();
     });
-    g.save(); g.translate(-1.5, -1.5); g.lineWidth = 3; g.strokeStyle = rgba(shadowOf(plaster, 0.45), 0.7); polyPath(g, pts); g.stroke(); g.restore();
-    g.save(); g.translate(1.5, 1.5); g.lineWidth = 3; g.strokeStyle = rgba(lightOf(plaster, 0.6), 0.8); polyPath(g, pts); g.stroke(); g.restore();
+    g.save(); g.translate(-1.2, -1.2); g.lineWidth = 3; g.strokeStyle = rgba(shadowOf(plaster, 0.4), 0.55); g.filter = 'blur(0.8px)'; polyPath(g, pts); g.stroke(); g.restore();
+    g.save(); g.translate(1.2, 1.4); g.lineWidth = 2.5; g.strokeStyle = rgba(lightOf(plaster, 0.3), 0.45); g.filter = 'blur(0.8px)'; polyPath(g, pts); g.stroke(); g.restore();
   });
 }
 
 // ---- wall textures ----------------------------------------------------------------------------------
 
-register('plaster_cream', {
-  family: F, size: 512, note: 'Goldshire plaster: cream, trowelled, a few cracks and holes showing brick',
-  paint(g, s, rnd, h, cv) {
+function plasterPaint(g, s, rnd, cv, holes) {
+  {
     fill(g, s, s, '#dccdaa');
     mottle(g, s, rnd, { colors: ['#ecdfbe', '#c8b48c', '#d8c49c', '#e8d8b4', '#bdae92', '#c4b496'], count: 60, rmin: 40, rmax: 150, alpha: 0.5, hard: 0.08 });
     mottle(g, s, rnd, { colors: ['#a89c88', '#b0a488', '#9a9484'], count: 10, rmin: 50, rmax: 120, alpha: 0.16, hard: 0.05 });
@@ -387,14 +386,18 @@ register('plaster_cream', {
       wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.1));
     }
     mottle(g, s, rnd, { colors: ['#b8a682', '#a8987a', '#f2e8d0'], count: 260, rmin: 1.5, rmax: 4, alpha: 0.22, hard: 0.6 });
-    plasterHole(g, s, rnd, s * 0.28, s * 0.3, 46, { plaster: '#ddcfae' });
-    plasterHole(g, s, rnd, s * 0.74, s * 0.78, 30, { plaster: '#ddcfae', brick: ['#8e8a80', '#9e988a', '#7e7a72'], mortar: '#5a5048' });
+    if (holes) {
+      plasterHole(g, s, rnd, s * 0.28, s * 0.3, 46, { plaster: '#ddcfae' });
+      plasterHole(g, s, rnd, s * 0.74, s * 0.78, 30, { plaster: '#ddcfae', brick: ['#8e8a80', '#9e988a', '#7e7a72'], mortar: '#5a5048' });
+    }
     cracks(g, s, rnd, { color: '#7a6a58', count: 6, len: [18, 60], width: [0.7, 1.3], alpha: 0.4 });
     streaks(g, s, rnd, { colors: ['#a89878', '#b0a080'], count: 18, len: [40, 140], width: [3, 9], angle: Math.PI, wobble: 0.05, alpha: 0.07 });
     glaze(g, s, s, '#fff0d0', 0.12, 'soft-light');
     blurTile(cv, 0.5);
-  },
-});
+  }
+}
+register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: cream, trowelled, a few cracks and holes showing brick', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, true); } });
+register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: the same cream, no holes (they would repeat every tile)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
 
 register('stone_found', {
   family: F, size: 512, note: 'fieldstone foundation: lumpy coursed stones, warm gray, a little moss',
@@ -435,9 +438,8 @@ register('planks_barnred', {
   },
 });
 
-register('granite_block', {
-  family: F, size: 512, note: 'Kharanos ashlar: big blue-gray granite blocks, chisel marks, frost in the joints, snow on the ledges',
-  paint(g, s, rnd, h, cv) {
+function granitePaint(g, s, rnd, cv, snow) {
+  {
     const rects = rowLayout(s, rnd, { rows: 4, minW: 120, maxW: 250, rowJitter: 0.25 });
     paintRects(g, s, rects, rnd, {
       colors: ['#7c8494', '#8e96a3', '#6f7682', '#868c98', '#7a7f8c'], gap: 7, gapColor: '#363444', radius: 10, bevel: 9, light: 0.5, varAmt: 0.08,
@@ -447,7 +449,7 @@ register('granite_block', {
         for (let i = 0; i < 6; i++) ellipse(gg, X + r() * w, Y + r() * hh, range(r, 1, 2.4), range(r, 1, 2), 0, rgba('#e8e4f0', 0.5));
       },
     });
-    for (const r of rects) {
+    if (snow) for (const r of rects) {
       const x = r.x + 4, w = r.w - 8, y = r.y + 3.5;
       const seed = Math.floor(rnd() * 1e9);
       wrapRect(s, x, y - 2, w, 12, (dx, dy) => {
@@ -463,8 +465,10 @@ register('granite_block', {
     mottle(g, s, rnd, { colors: ['#9aa8a0', '#8a9a8a'], count: 14, rmin: 8, rmax: 22, alpha: 0.12, hard: 0.3 });
     glaze(g, s, s, '#dce8ff', 0.12, 'soft-light');
     blurTile(cv, 0.5);
-  },
-});
+  }
+}
+register('granite_block', { family: F, size: 512, note: 'Kharanos ashlar: big blue-gray granite blocks, chisel marks, snow on the ledges', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, true); } });
+register('granite_inner', { family: F, size: 512, note: 'indoor ashlar: no snow', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, false); } });
 
 register('log_wall', {
   family: F, size: 512, note: 'frontier log wall: peeled horizontal logs, round-shaded, mud chinking',
@@ -479,7 +483,7 @@ register('log_wall', {
       const yT = x => y0 + 6 + top(x), yB = x => y0 + H - 5 + bot(x);
       // shadow cast onto the chinking below the log
       g.save(); g.globalAlpha = 0.45; g.fillStyle = INK; g.filter = 'blur(3px)';
-      g.beginPath(); g.moveTo(0, yB(0)); for (let x = 0; x <= s; x += 16) g.lineTo(x, yB(x) + 5); g.lineTo(s, yB(s) - 6); g.lineTo(0, yB(0) - 6); g.closePath(); g.fill(); g.restore();
+      g.beginPath(); g.moveTo(-32, yB(-32)); for (let x = -32; x <= s + 32; x += 16) g.lineTo(x, yB(x) + 5); g.lineTo(s + 32, yB(s + 32) - 6); g.lineTo(-32, yB(-32) - 6); g.closePath(); g.fill(); g.restore();
       const body = () => { g.beginPath(); g.moveTo(0, yT(0)); for (let x = 0; x <= s; x += 16) g.lineTo(x, yT(x)); for (let x = s; x >= 0; x -= 16) g.lineTo(x, yB(x)); g.closePath(); };
       clipped(g, body, () => {
         g.fillStyle = grad(g, 0, y0, 0, y0 + H, [[0, lightOf(c, 0.55)], [0.25, lightOf(c, 0.2)], [0.55, c], [0.85, shadowOf(c, 0.45)], [1, shadowOf(c, 0.65)]]);
@@ -496,9 +500,10 @@ register('log_wall', {
         // a long check (crack) along the log
         const cy = y0 + range(rnd, 0.35, 0.6) * H, cx = rnd() * s, L = range(rnd, 80, 200);
         wrap(s, cx, cy, L, (X, Y) => { line(g, [[X, Y + 1.2], [X + L, Y + 2.2]], 2.2, lightOf(c, 0.5), 0.35); line(g, [[X, Y], [X + L * 0.5, Y + 1.5], [X + L, Y + 1]], 1.6, INK, 0.6); });
-        for (let k = 0; k < (rnd() < 0.5 ? 1 : 0); k++) {
-          const x = rnd() * s, y = y0 + H * range(rnd, 0.35, 0.65), r = range(rnd, 7, 11);
-          wrap(s, x, y, r * 2, (X, Y) => { ellipse(g, X, Y, r * 1.4, r, 0, shadowOf(c, 0.5)); ellipse(g, X, Y, r * 0.8, r * 0.55, 0, '#b08a5c'); blob(g, X - r * 0.3, Y - r * 0.2, r * 0.5, r * 0.3, 0, '#e0c090', 0.6, 0.4); });
+        // weathered gray patches where the bark came off unevenly
+        for (let k = 0; k < 3; k++) {
+          const x = rnd() * s, y = y0 + H * range(rnd, 0.3, 0.6), L = range(rnd, 30, 90);
+          wrap(s, x, y, L, (X, Y) => blob(g, X, Y, L, H * 0.18, 0, '#a09484', 0.18, 0.2));
         }
       });
     }
@@ -516,9 +521,8 @@ register('planks_rough', {
   },
 });
 
-register('adobe', {
-  family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud plaster, soft blotches, cracks, exposed mud bricks',
-  paint(g, s, rnd, h, cv) {
+function adobePaint(g, s, rnd, cv, holes) {
+  {
     fill(g, s, s, '#d0a676');
     mottle(g, s, rnd, { colors: ['#e0bc8e', '#bc8e60', '#d8b080', '#c4966a', '#e6c89c', '#b48a64'], count: 56, rmin: 40, rmax: 150, alpha: 0.5, hard: 0.08 });
     blurTile(cv, 4);
@@ -529,14 +533,18 @@ register('adobe', {
       wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.09));
     }
     mottle(g, s, rnd, { colors: ['#a87c52', '#f0d8b0', '#b8885c'], count: 320, rmin: 1.5, rmax: 4, alpha: 0.24, hard: 0.6 });
-    plasterHole(g, s, rnd, s * 0.3, s * 0.68, 48, { plaster: '#d0a676', brick: ['#a87650', '#b88458', '#9a6a46'], mortar: '#7a5838' });
-    plasterHole(g, s, rnd, s * 0.8, s * 0.22, 30, { plaster: '#d0a676', brick: ['#a87650', '#b88458', '#9a6a46'], mortar: '#7a5838' });
+    if (holes) {
+      plasterHole(g, s, rnd, s * 0.3, s * 0.68, 48, { plaster: '#d0a676', brick: ['#a87650', '#b88458', '#9a6a46'], mortar: '#7a5838' });
+      plasterHole(g, s, rnd, s * 0.8, s * 0.22, 30, { plaster: '#d0a676', brick: ['#a87650', '#b88458', '#9a6a46'], mortar: '#7a5838' });
+    }
     cracks(g, s, rnd, { color: '#6a4628', count: 9, len: [20, 70], width: [0.8, 1.6], alpha: 0.45 });
     streaks(g, s, rnd, { colors: ['#a07850', '#8a6644'], count: 22, len: [50, 160], width: [3, 10], angle: Math.PI, wobble: 0.05, alpha: 0.08 });
     glaze(g, s, s, '#ffe0b0', 0.14, 'soft-light');
     blurTile(cv, 0.6);
-  },
-});
+  }
+}
+register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud plaster, soft blotches, cracks, exposed mud bricks', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, true); } });
+register('adobe_inner', { family: F, size: 512, note: 'indoor adobe: no exposed bricks', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, false); } });
 
 // ---- roofs ----------------------------------------------------------------------------------
 
@@ -593,36 +601,39 @@ register('snow_roof', {
 });
 
 register('hide_patch', {
-  family: F, size: 512, note: 'frontier roofing: stretched hides and canvas sewn in patches, wrinkles and stitches',
+  family: F, size: 512, note: 'frontier roofing: stretched hides sewn edge to edge, pale where they stretch thin, stitched seams, lacing holes',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#8a6644');
-    mottle(g, s, rnd, { colors: ['#9a7652', '#7a5838', '#a8865e'], count: 40, rmin: 30, rmax: 100, alpha: 0.4, hard: 0.1 });
-    const rects = rowLayout(s, rnd, { rows: 3, minW: 140, maxW: 260, rowJitter: 0.3 });
+    fill(g, s, s, '#5a3e28');
+    const rects = rowLayout(s, rnd, { rows: 3, minW: 150, maxW: 280, rowJitter: 0.35 });
     for (const r of rects) {
       const seed = Math.floor(rnd() * 1e9);
-      const c = pick(rnd, ['#8a6440', '#9c7450', '#7a5636', '#b09068', '#6e4a30', '#a4845a', '#c2a87e']);
-      const cx = r.x + r.w / 2, cy = r.y + r.h / 2;
-      wrap(s, cx, cy, Math.max(r.w, r.h) * 0.7, (X, Y) => {
-        const rr = rngFrom(seed), pts = [];
-        const hw = r.w * 0.56, hh = r.h * 0.58;
-        for (let k = 0; k < 9; k++) { const th = k / 9 * TAU; pts.push([X + Math.cos(th) * hw * range(rr, 0.85, 1.1), Y + Math.sin(th) * hh * range(rr, 0.8, 1.1)]); }
-        g.save(); g.globalAlpha = 0.35; g.fillStyle = INK; g.filter = 'blur(3px)'; g.translate(3, 4); polyPath(g, pts); g.fill(); g.restore();
+      const c = pick(rnd, ['#9a7450', '#a8845c', '#8a6442', '#b8966c', '#94704c', '#c4a47a']);
+      wrapRect(s, r.x - 10, r.y - 10, r.w + 20, r.h + 20, (dx, dy) => {
+        const rr = rngFrom(seed);
+        const x0 = r.x + dx + 3, y0 = r.y + dy + 3, x1 = r.x + dx + r.w - 3, y1 = r.y + dy + r.h - 3, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+        const j = () => (rr() - 0.5) * 10;
+        // an irregular stretched hide: corners pulled out, edges sagging in between
+        const pts = [[x0 + j(), y0 + j()], [cx + j(), y0 + 6 + rr() * 6], [x1 + j(), y0 + j()], [x1 - 6 - rr() * 6, cy + j()], [x1 + j(), y1 + j()], [cx + j(), y1 - 6 - rr() * 6], [x0 + j(), y1 + j()], [x0 + 6 + rr() * 6, cy + j()]];
         clipped(g, () => polyPath(g, pts), () => {
-          g.fillStyle = grad(g, X - hw, Y - hh, X + hw, Y + hh, [[0, lightOf(c, 0.3)], [0.5, c], [1, shadowOf(c, 0.35)]]);
-          g.fillRect(X - hw * 1.2, Y - hh * 1.2, hw * 2.4, hh * 2.4);
-          for (let i = 0; i < 7; i++) {
-            const x = X + (rr() - 0.5) * hw * 1.6, y = Y + (rr() - 0.5) * hh * 1.6, L = range(rr, 20, 60), a = range(rr, -0.5, 0.5);
-            line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], range(rr, 3, 7), shadowOf(c, 0.4), 0.25);
-            line(g, [[x - 2, y - 3], [x + Math.cos(a) * L - 2, y + Math.sin(a) * L - 3]], range(rr, 2, 4), lightOf(c, 0.4), 0.25);
+          const rg = g.createRadialGradient(cx - r.w * 0.1, cy - r.h * 0.15, 4, cx, cy, Math.max(r.w, r.h) * 0.62);
+          rg.addColorStop(0, lightOf(c, 0.35)); rg.addColorStop(0.55, c); rg.addColorStop(1, shadowOf(c, 0.45));
+          g.fillStyle = rg; g.fillRect(x0 - 12, y0 - 12, r.w + 24, r.h + 24);
+          // stretch lines from the corners toward the middle
+          for (const [px, py] of [pts[0], pts[2], pts[4], pts[6]]) for (let k = 0; k < 3; k++) {
+            const tx = cx + (rr() - 0.5) * r.w * 0.4, ty = cy + (rr() - 0.5) * r.h * 0.4;
+            line(g, [[px, py], [px + (tx - px) * 0.55, py + (ty - py) * 0.55]], range(rr, 2, 4), shadowOf(c, 0.35), 0.28);
+            line(g, [[px + 2, py + 2], [px + (tx - px) * 0.5 + 2, py + (ty - py) * 0.5 + 2]], range(rr, 1, 2), lightOf(c, 0.35), 0.22);
           }
-          for (let i = 0; i < 10; i++) blob(g, X + (rr() - 0.5) * hw * 1.6, Y + (rr() - 0.5) * hh * 1.6, range(rr, 3, 10), range(rr, 2, 7), rr() * 3, rr() < 0.5 ? '#5a3c26' : '#c8a880', 0.2, 0.3);
+          for (let i = 0; i < 12; i++) blob(g, x0 + rr() * r.w, y0 + rr() * r.h, range(rr, 4, 14), range(rr, 3, 9), rr() * 3, rr() < 0.5 ? '#5a3c26' : '#d8bc94', 0.18, 0.3);
+          // a scar or a burn mark now and then
+          if (rr() < 0.4) line(g, [[cx - 20, cy + 5], [cx + 18, cy - 4]], 3, '#4a3020', 0.4);
         });
-        // stitches just inside the edge
-        g.save(); g.translate(X, Y); g.scale(0.9, 0.88); g.translate(-X, -Y);
-        g.setLineDash([5, 5]); g.lineWidth = 2; g.strokeStyle = rgba('#e8d8b0', 0.7); polyPath(g, pts); g.stroke();
-        g.lineDashOffset = 1.5; g.strokeStyle = rgba(INK, 0.45); g.translate(1, 1.2); polyPath(g, pts); g.stroke();
+        // lacing holes at the corners, a stitched seam just inside the edge, dark edge
+        g.save(); g.translate(cx, cy); g.scale(0.92, 0.9); g.translate(-cx, -cy);
+        g.setLineDash([6, 5]); g.lineWidth = 2.2; g.strokeStyle = rgba('#ead8b0', 0.7); polyPath(g, pts); g.stroke();
         g.restore();
-        g.lineWidth = 2; g.strokeStyle = rgba(shadowOf(c, 0.6), 0.6); polyPath(g, pts); g.stroke();
+        g.lineWidth = 2.5; g.strokeStyle = rgba(shadowOf(c, 0.65), 0.75); polyPath(g, pts); g.stroke();
+        for (const [px, py] of [pts[0], pts[2], pts[4], pts[6]]) { ellipse(g, px + (cx - px) * 0.08, py + (cy - py) * 0.08, 3, 3, 0, '#2a1a14'); line(g, [[px + (cx - px) * 0.08, py + (cy - py) * 0.08], [px - (cx - px) * 0.05, py - (cy - py) * 0.05]], 2, '#c8b088', 0.8); }
       });
     }
     glaze(g, s, s, '#ffd8a8', 0.12, 'soft-light');
@@ -646,6 +657,16 @@ register('wood_light', {
   paint(g, s, rnd, h, cv) {
     grainTile(g, s, rnd, { base: '#8e5e36', dark: ['#5e3c24', '#6a4428', '#4e3222'], lite: ['#b07a48', '#c08a54'], lines: 44, splits: 3, knots: 2 });
     glaze(g, s, s, '#ffe0b0', 0.12, 'soft-light');
+    blurTile(cv, 0.4);
+  },
+});
+
+register('wood_white', {
+  family: F, size: 256, note: 'whitewashed barn trim: chalky cream paint, worn to gray wood along the grain',
+  paint(g, s, rnd, h, cv) {
+    grainTile(g, s, rnd, { base: '#d6cab2', dark: ['#9a8c78', '#8a7c6a', '#b0a28c'], lite: ['#f2ead8', '#ece2cc'], lines: 30, splits: 3, knots: 1, alpha: 0.35 });
+    mottle(g, s, rnd, { colors: ['#a09484', '#f4ecdc'], count: 26, rmin: 6, rmax: 22, alpha: 0.25, hard: 0.3, stretch: 2.5, rot: Math.PI / 2 });
+    glaze(g, s, s, '#fff0d0', 0.1, 'soft-light');
     blurTile(cv, 0.4);
   },
 });
@@ -1241,7 +1262,7 @@ function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#
     const font = () => `bold ${size}px ${SIGN_FONT}`;
     g.font = font();
     g.letterSpacing = `${Math.round(size * track)}px`;
-    while (g.measureText(ln).width > w && size > 8) { size -= 1; g.font = font(); g.letterSpacing = `${Math.round(size * track)}px`; }
+    while (g.measureText(ln).width > w * 0.93 && size > 8) { size -= 1; g.font = font(); g.letterSpacing = `${Math.round(size * track)}px`; }
     const cy = yy + lh / 2 + size * 0.04, cx = x + w / 2, o = Math.max(1.5, size * 0.05);
     if (carved) {
       g.fillStyle = rgba(lit, 0.5); g.fillText(ln, cx + o * 0.6, cy + o * 0.8);

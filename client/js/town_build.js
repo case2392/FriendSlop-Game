@@ -20,7 +20,7 @@ export const STYLES = {
   timber: {
     wall: 'plaster_cream', wallTile: 3.2, base: 'stone_found', baseTile: 2.2, baseH: 0.62, beam: 'timber_dark',
     roof: 'shingles_red', roofTile: 2.6, layout: 'gable', pitch: 46, maxRise: 5, eave: 0.65, gableOH: 0.5, thick: 0.22, barge: true,
-    floor: 'floor_planks', inner: 'plaster_cream', wainscot: true, halfTimber: true, gableFill: 'plaster_cream',
+    floor: 'floor_planks', inner: 'plaster_inner', wainscot: true, halfTimber: true, gableFill: 'plaster_cream',
     chimney: 'stone_found', win: 'flower', winW: 0.95, winH: 1.3, winY: 1.05, lamp: 'lantern', ridge: 'shingle',
   },
   farm: {
@@ -28,12 +28,12 @@ export const STYLES = {
     roof: 'thatch', roofTile: 2.4, layout: 'gable', pitch: 50, maxRise: 5.2, eave: 0.6, gableOH: 0.55, thick: 0.42, barge: false,
     floor: 'floor_planks', inner: 'planks_weathered', gableFill: 'planks_weathered', cornerBoards: true,
     chimney: 'stone_found', win: 'shutter', shutter: 'planks_barnred', winW: 0.9, winH: 1.2, winY: 1.05, lamp: 'post', ridge: 'thatch',
-    barn: { kinds: ['casino', 'gas'], wall: 'planks_barnred', roof: 'shingles_wood', layout: 'gambrel', thick: 0.2, barge: true, gableFill: 'planks_barnred', ridge: 'shingle', chimney: null, trim: 'wood_light' },
+    barn: { kinds: ['casino', 'gas'], wall: 'planks_barnred', roof: 'shingles_wood', layout: 'gambrel', thick: 0.2, barge: true, gableFill: 'planks_barnred', ridge: 'shingle', chimney: null, trim: 'wood_white', cornerMat: 'wood_white', cornerTint: '#ffffff' },
   },
   alpine: {
     wall: 'granite_block', wallTile: 3.4, base: 'granite_block', baseTile: 2.4, baseH: 0.75, baseTint: '#b8bcc8', beam: 'timber_dark',
     roof: 'slate_roof', roofTile: 2.6, layout: 'gable', pitch: 52, maxRise: 5.8, eave: 0.75, gableOH: 0.6, thick: 0.26, barge: true,
-    floor: 'flagstone', inner: 'granite_block', gableFill: 'planks_weathered', gableTint: '#8a7464', snow: true, quoins: true,
+    floor: 'flagstone', inner: 'granite_inner', gableFill: 'planks_weathered', gableTint: '#8a7464', snow: true, quoins: true,
     chimney: 'granite_block', win: 'stone', winW: 0.8, winH: 1.0, winY: 1.25, lamp: 'brazier', ridge: 'snow', topBeams: true,
   },
   frontier: {
@@ -45,7 +45,7 @@ export const STYLES = {
   },
   adobe: {
     wall: 'adobe', wallTile: 3.2, base: null, beam: 'timber_dark', trim: 'brass', layout: 'flat',
-    floor: 'flagstone', inner: 'adobe', wainscot: false, vigas: true, buttress: true, awning: 'canvas_stripe',
+    floor: 'flagstone', inner: 'adobe_inner', wainscot: false, vigas: true, buttress: true, awning: 'canvas_stripe',
     win: 'port', winW: 0.85, winH: 0.85, winY: 1.45, lamp: 'goblin', pipes: true,
   },
 };
@@ -204,10 +204,10 @@ function doorway(c) {
   if (S.trim === 'brass') K.box(mat('brass'), 2 * dw + 0.7, 0.08, 0.54, 0, dh + 0.3, D / 2, { grain: 'x', tile: 1 });
   // door leaves, swung open flat against the facade
   const dm = mat('door_plank');
-  const leaves = b.kind === 'casino' ? [[-1, Math.min(1.2, dw + 0.3)], [1, Math.min(1.2, dw + 0.3)]] : [[1, Math.min(1.35, c.ix - dw - 0.5)]];
-  c.leafW = b.kind === 'casino' ? 0 : leaves[0][1];
-  c.leafWL = b.kind === 'casino' ? leaves[0][1] : 0;
-  if (b.kind === 'casino') c.leafW = leaves[1][1];
+  const barn = S.layout === 'gambrel';
+  const leaves = barn ? [] : b.kind === 'casino' ? [[-1, Math.min(1.2, dw + 0.3)], [1, Math.min(1.2, dw + 0.3)]] : [[1, Math.min(1.35, c.ix - dw - 0.5)]];
+  c.leafW = barn ? Math.min(2.0, c.ix - dw - 0.4) + 0.1 : b.kind === 'casino' ? leaves[1][1] : leaves[0][1];
+  c.leafWL = barn ? c.leafW : b.kind === 'casino' ? leaves[0][1] : 0;
   const lh = Math.min(dh - 0.06, 2.6 + (dh - 2.6) * 0.5);
   for (const [s, lw] of leaves) {
     if (lw < 0.5) continue;
@@ -230,7 +230,7 @@ function planWindows(c) {
     const L = 2 * oz - 1.8;
     wins.push({ side, t: -L / 2 + L * (k + 0.5) / n + jit() });
   }
-  const nb = W > 16 ? 3 : W > 8.5 ? 2 : 1;
+  const nb = b.kind === 'pawn' || b.kind === 'store' ? 0 : W > 16 ? 3 : W > 8.5 ? 2 : 1;   // shops have shelves on the back wall
   for (let k = 0; k < nb; k++) { const L = 2 * ox - 2.2; wins.push({ side: 'back', t: -L / 2 + L * (k + 0.5) / nb + jit() }); }
   c.wins = wins;
 }
@@ -245,8 +245,8 @@ function windowAt(c, t, side) {
     const r = ww / 2;
     K.add(wmat, new THREE.CircleGeometry(r, 20), { uv: 'keep', at: matrix(t, cy, 0.02), shade: false });
     K.add(mat('brass'), new THREE.TorusGeometry(r + 0.04, 0.07, 6, 20), { uv: 'keep', uvScale: [3, 1], at: matrix(t, cy, 0.05) });
-    K.add(wmat, new THREE.CircleGeometry(r, 20), { uv: 'keep', at: matrix(t, cy, -0.32, Math.PI), shade: false });
-    K.add(mat('brass'), new THREE.TorusGeometry(r + 0.04, 0.06, 6, 20), { uv: 'keep', uvScale: [3, 1], at: matrix(t, cy, -0.34) });
+    K.add(wmat, new THREE.CircleGeometry(r, 20), { uv: 'keep', at: matrix(t, cy, -0.336, Math.PI), shade: false });
+    K.add(mat('brass'), new THREE.TorusGeometry(r + 0.04, 0.06, 6, 20), { uv: 'keep', uvScale: [3, 1], at: matrix(t, cy, -0.35) });
     if (S.awning && side !== 'back') awning(c, t, cy + r + 0.3, ww + 0.6, 0.75);
     return;
   }
@@ -275,9 +275,10 @@ function windowAt(c, t, side) {
   }
   if (S.awning && side === 'front') awning(c, t, cy + wh / 2 + 0.35, ww + 0.6, 0.7);
   // inside: the same window and a sill
-  K.quad(wmat, ww, wh, t, cy, -0.312, { ry: Math.PI, shade: false });
-  K.box(bm, ww + 0.25, 0.06, 0.16, t, y0 - 0.03, -0.37, { grain: 'x', cast: false, tint });
-  for (const s of [-1, 1]) K.box(bm, 0.1, wh + 0.1, 0.06, t + s * (ww / 2 + 0.05), cy, -0.33, { cast: false, tint });
+  K.quad(wmat, ww, wh, t, cy, -0.336, { ry: Math.PI, shade: false });
+  K.box(bm, ww + 0.25, 0.06, 0.16, t, y0 - 0.03, -0.38, { grain: 'x', cast: false, tint });
+  for (const s of [-1, 1]) K.box(bm, 0.1, wh + 0.1, 0.06, t + s * (ww / 2 + 0.05), cy, -0.35, { cast: false, tint });
+  K.box(bm, ww + 0.3, 0.1, 0.06, t, cy + wh / 2 + 0.05, -0.35, { grain: 'x', cast: false, tint });
 }
 
 // a slanted canvas awning on two struts, in a wall frame (x along the wall, z out)
@@ -317,11 +318,12 @@ function framing(c) {
     }
   }
   if (S.cornerBoards || S.cornerPosts) {
-    const cm = mat(S.cornerPosts ? S.beam : 'wood_light');
+    const cm = mat(S.cornerPosts ? S.beam : S.cornerMat || 'wood_light');
     const t = S.cornerPosts ? 0.32 : 0.22;
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) K.box(cm, t, H - by + 0.02, t, sx * (ox - t / 2 + 0.05), by + (H - by) / 2, sz * (oz - t / 2 + 0.05), { tile: 1.2, seg: [1, 3, 1], tint: S.cornerPosts ? null : '#a08a70' });
-    if (S.cornerBoards) for (const sz of [-1, 1]) K.box(cm, 2 * ox + 0.1, 0.18, 0.08, 0, H - 0.25, sz * (oz + 0.03), { grain: 'x', tile: 1.2, seg: [3, 1, 1], tint: '#a08a70' });
-    if (S.cornerBoards) for (const sx of [-1, 1]) K.box(cm, 0.08, 0.18, 2 * oz + 0.1, sx * (ox + 0.03), H - 0.25, 0, { grain: 'z', tile: 1.2, seg: [1, 1, 3], tint: '#a08a70' });
+    const ct = S.cornerTint || '#a08a70';
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) K.box(cm, t, H - by + 0.02, t, sx * (ox - t / 2 + 0.05), by + (H - by) / 2, sz * (oz - t / 2 + 0.05), { tile: 1.2, seg: [1, 3, 1], tint: S.cornerPosts ? null : ct });
+    if (S.cornerBoards) for (const sz of [-1, 1]) K.box(cm, 2 * ox + 0.1, 0.18, 0.08, 0, H - 0.25, sz * (oz + 0.03), { grain: 'x', tile: 1.2, seg: [3, 1, 1], tint: ct });
+    if (S.cornerBoards) for (const sx of [-1, 1]) K.box(cm, 0.08, 0.18, 2 * oz + 0.1, sx * (ox + 0.03), H - 0.25, 0, { grain: 'z', tile: 1.2, seg: [1, 1, 3], tint: ct });
   }
   if (S.logEnds) {
     // crossed log ends at the corners (one course every 3/7 of a 3 m tile)
@@ -402,7 +404,7 @@ function profileOf(c, hs, kind, pitch, eave) {
 }
 
 // roof slabs along the profile, extruded in the current frame from z = w0 to w1
-function roofSlabs(c, P, w0, w1, { roofMat, thick, barge = true, eaveBeams = true, hs = 0 }) {
+function roofSlabs(c, P, w0, w1, { roofMat, thick, barge = true, eaveBeams = true, hs = 0, ridge = true, ridgeFrom = null }) {
   const { K, S, H } = c;
   const rm = mat(roofMat), bm = mat(S.trim && S.trim !== 'brass' ? S.trim : S.beam), th = thick;
   const n = P.pts.length, len = w1 - w0;
@@ -423,8 +425,8 @@ function roofSlabs(c, P, w0, w1, { roofMat, thick, barge = true, eaveBeams = tru
     };
     K.add(rm, new THREE.BoxGeometry(Lt, th, len, 3, 1, Math.max(2, Math.ceil(len / 1.4))), { at: matrix(cx, cy, (w0 + w1) / 2, 0, 0, ang), tile: S.roofTile, grain: 'x', flipV: !up, warp });
     if (barge) {
-      for (const [wz, s] of [[w1, 1], [w0, -1]]) {
-        K.add(bm, new THREE.BoxGeometry(Lt + 0.06, th + 0.2, 0.08, 2, 1, 1), { at: matrix(cx - nx * 0.06, cy - ny * 0.06, wz + s * 0.03, 0, 0, ang), tile: 1.2, grain: 'x' });
+      for (const [wz, s] of (ridgeFrom !== null ? [[w1, 1]] : [[w1, 1], [w0, -1]])) {
+        K.add(bm, new THREE.BoxGeometry(Lt + 0.06, th + 0.24, 0.1, 2, 1, 1), { at: matrix(cx - nx * 0.08, cy - ny * 0.08, wz + s * 0.04, 0, 0, ang), tile: 1.2, grain: 'x', tint: S.trimTint });
       }
     }
     if (c.S.snow) {
@@ -439,7 +441,9 @@ function roofSlabs(c, P, w0, w1, { roofMat, thick, barge = true, eaveBeams = tru
   }
   // ridge cap
   const rk = S.ridge;
-  if (rk === 'thatch') K.cyl(rm, [0, P.apex + th * 0.75, w0 - 0.1], [0, P.apex + th * 0.75, w1 + 0.1], 0.32, 0.32, { sides: 10, uvScale: [2, len / 1.5] });
+  if (ridgeFrom !== null) w0 = ridgeFrom;
+  if (!ridge) { /* the ridge is capped by the second half */ }
+  else if (rk === 'thatch') K.cyl(rm, [0, P.apex + th * 0.75, w0 - 0.1], [0, P.apex + th * 0.75, w1 + 0.1], 0.32, 0.32, { sides: 10, uvScale: [2, len / 1.5] });
   else if (rk === 'snow') K.cyl(mat('snow_roof'), [0, P.apex + th + 0.12, w0 - 0.05], [0, P.apex + th + 0.12, w1 + 0.05], 0.24, 0.24, { sides: 10, uvScale: [1, len / 2] });
   else K.add(bm, new THREE.BoxGeometry(0.3, 0.3, len + 0.12, 1, 1, 2), { at: matrix(0, P.apex + th * 1.05, (w0 + w1) / 2, 0, 0, Math.PI / 4), grain: 'z', tile: 1.2 });
   // rafter tails under the eaves
@@ -509,7 +513,9 @@ function pitchedRoof(c) {
   K.pop();
   const j = eave + 0.12;
   const Pc = profileOf(c, hsNeed, kind, pitch, Math.min(eave, 0.45));
-  roofSlabs(c, Pc, 0, oz + j + gOH, { roofMat: S.roof, thick: S.thick, barge: S.barge, hs: 0, eaveBeams: false });
+  const Pc0 = profileOf(c, hsNeed, kind, pitch, 0.02);
+  roofSlabs(c, Pc0, 0, oz + 0.2, { roofMat: S.roof, thick: S.thick, barge: false, hs: 0, eaveBeams: false, ridge: false });
+  roofSlabs(c, Pc, oz + 0.2, oz + j + gOH, { roofMat: S.roof, thick: S.thick, barge: S.barge, hs: 0, eaveBeams: false, ridgeFrom: 0 });
   gableFill(c, Pc, oz + j, 1);
   // the jetty: the gable sits out over the pent roof on a beam and two braces
   const bm = mat(S.beam);
@@ -537,26 +543,39 @@ function chimney(c, x, z, surf, apex) {
 // farm barns: big sliding doors, a hay loft door with a hoist beam
 function barnFront(c, P) {
   const { K, S, oz, dw, dh, H } = c;
-  const dm = mat('planks_barnred'), tm = mat('wood_light');
+  const dm = mat('planks_barnred'), tm = mat('wood_white');
   const lw = Math.min(2.0, c.ix - dw - 0.4), lh = Math.min(dh, 3.6);
   for (const s of [-1, 1]) {
     const x = s * (dw + 0.25 + lw / 2);
     K.box(dm, lw, lh, 0.08, x, lh / 2 + 0.05, oz + 0.06, { tile: 2.4, seg: [1, 1, 1] });
-    const tr = '#e0d4bc';
+    const tr = '#ffffff';
     K.box(tm, lw, 0.14, 0.05, x, 0.12, oz + 0.12, { grain: 'x', tint: tr }); K.box(tm, lw, 0.14, 0.05, x, lh - 0.02, oz + 0.12, { grain: 'x', tint: tr });
     K.box(tm, 0.14, lh, 0.05, x - lw / 2 + 0.07, lh / 2 + 0.05, oz + 0.12, { tint: tr }); K.box(tm, 0.14, lh, 0.05, x + lw / 2 - 0.07, lh / 2 + 0.05, oz + 0.12, { tint: tr });
     K.beam(tm, [x - lw / 2 + 0.1, 0.2, oz + 0.12], [x + lw / 2 - 0.1, lh - 0.1, oz + 0.12], 0.13, 0.05, { tint: tr });
     K.beam(tm, [x + lw / 2 - 0.1, 0.2, oz + 0.12], [x - lw / 2 + 0.1, lh - 0.1, oz + 0.12], 0.13, 0.05, { tint: tr });
   }
   K.box(mat('iron_wrought'), 2 * (dw + lw + 0.4), 0.08, 0.08, 0, lh + 0.12, oz + 0.1, { grain: 'x', tile: 1 });
-  // loft door and hoist up in the gable (above the sign)
-  const top = (c.sign ? c.sign.top : H + 1.2) + 0.35;
-  if (P.apex - top > 1.6) {
-    const hh = Math.min(1.5, P.apex - top - 0.6);
-    K.box(dm, 1.3, hh, 0.1, 0, top + hh / 2, oz + 0.06, { tile: 2.4 });
-    K.beam(tm, [-0.6, top + 0.1, oz + 0.12], [0.6, top + hh - 0.1, oz + 0.12], 0.12, 0.05, { tint: '#e0d4bc' });
-    K.box(mat(S.beam), 0.24, 0.24, 1.6, 0, top + hh + 0.35, oz + 0.6, { grain: 'z' });
-    K.box(mat('iron_wrought'), 0.03, 1.4, 0.03, 0, top + hh - 0.4, oz + 1.25, { tile: 0.5 });
+  // cream trim along the gambrel edges and the eave line
+  const tr = '#ffffff';
+  const U = P.under;
+  for (let i = 0; i < U.length - 1; i++) K.beam(tm, [U[i][0], U[i][1], oz + 0.07], [U[i + 1][0], U[i + 1][1], oz + 0.07], 0.2, 0.06, { tint: tr, ext: 0.2 });
+  K.box(tm, 2 * c.ox + 0.1, 0.2, 0.06, 0, H + 0.02, oz + 0.07, { grain: 'x', tint: tr, seg: [3, 1, 1] });
+  // loft door with a hoist beam and a round vent up in the gable (above the sign)
+  const top = (c.sign ? c.sign.top : H + 1.2) + 0.4;
+  if (P.apex - top > 1.8) {
+    const hh = Math.min(2.2, P.apex - top - 1.4), lw2 = Math.min(2.2, hh * 1.1);
+    K.box(dm, lw2, hh, 0.1, 0, top + hh / 2, oz + 0.06, { tile: 2.4, seg: [1, 1, 1] });
+    for (const [a, bb] of [[[-lw2 / 2, top], [lw2 / 2, top + hh]], [[lw2 / 2, top], [-lw2 / 2, top + hh]]]) K.beam(tm, [a[0], a[1], oz + 0.12], [bb[0], bb[1], oz + 0.12], 0.14, 0.05, { tint: tr });
+    for (const [x0, y0, x1, y1] of [[-lw2 / 2, top, lw2 / 2, top], [-lw2 / 2, top + hh, lw2 / 2, top + hh], [-lw2 / 2, top, -lw2 / 2, top + hh], [lw2 / 2, top, lw2 / 2, top + hh]]) K.beam(tm, [x0, y0, oz + 0.13], [x1, y1, oz + 0.13], 0.16, 0.05, { tint: tr, ext: 0.16 });
+    K.box(mat(S.beam), 0.28, 0.28, 1.8, 0, top + hh + 0.35, oz + 0.7, { grain: 'z' });
+    K.box(mat('iron_wrought'), 0.03, 1.5, 0.03, 0, top + hh - 0.45, oz + 1.45, { tile: 0.5 });
+    K.add(mat('wood_light'), new THREE.CylinderGeometry(0.16, 0.16, 0.1, 10), { uv: 'keep', at: matrix(0, top + hh + 0.18, oz + 1.45, 0, 0, Math.PI / 2) });
+    const vy = top + hh + 1.1;
+    if (P.apex - vy > 0.9) {
+      K.add(mat('planks_weathered'), new THREE.CircleGeometry(0.55, 16), { uv: 'keep', at: matrix(0, vy, oz + 0.08), tint: '#5a4a40' });
+      K.add(tm, new THREE.TorusGeometry(0.58, 0.07, 6, 18), { uv: 'keep', uvScale: [4, 1], at: matrix(0, vy, oz + 0.1), tint: tr });
+      for (let k = 0; k < 4; k++) K.box(tm, 1.1, 0.07, 0.04, 0, vy, oz + 0.1, { rz: k * Math.PI / 4, tint: tr });
+    }
   }
 }
 
@@ -606,6 +625,46 @@ function shedRoof(c) {
   c.signZ = oz + 0.1;
   c.apex = top;
   c.frontTop = top;
+  // log pillars dividing the front into bays, and a crown of sharpened stakes along the top
+  const lw = mat('wood_light');
+  const nb = Math.max(2, Math.round(2 * ox / 4.2));
+  for (let k = 1; k < nb; k++) {
+    const x = -ox + 2 * ox * k / nb;
+    if (Math.abs(x) < c.dw + 0.6 || (sign && Math.abs(x) < sign.w / 2 + 0.35)) continue;
+    const yt = Math.abs(x) < cw ? top : top - step;
+    K.cyl(lw, [x, 0, oz + 0.1], [x + (R() - 0.5) * 0.05, yt + 0.1, oz + 0.1], 0.16, 0.14, { sides: 8, tint: '#b08a64' });
+  }
+  for (let x = -cw + 0.15; x <= cw - 0.1; x += 0.42) {
+    const h = 0.45 + R() * 0.35;
+    K.cyl(lw, [x, top - 0.3, oz - 0.1], [x + (R() - 0.5) * 0.06, top + h, oz - 0.1], 0.1, 0.09, { sides: 6, tint: '#a8865e' });
+    K.add(lw, new THREE.ConeGeometry(0.09, 0.3, 6), { uv: 'keep', at: matrix(x, top + h + 0.15, oz - 0.1), tint: '#c8a478' });
+  }
+  K.box(mat(S.beam), 2 * cw, 0.12, 0.12, 0, top + 0.25, oz + 0.0, { grain: 'x', tile: 1.2 });
+  // crossed sharpened stakes over the false front's shoulders
+  for (const s of [-1, 1]) for (const tilt of [-0.45, 0.45]) {
+    const x = s * (cw + 0.25), y0 = top - step - 0.4;
+    K.cyl(mat('wood_light'), [x - Math.sin(tilt) * 0.3, y0, oz + 0.12], [x + Math.sin(tilt) * 1.3, y0 + Math.cos(tilt) * 1.6, oz + 0.2], 0.07, 0.05, { sides: 6, tint: '#a8865e' });
+  }
+  // a hide awning over the door, hung on struts and rope
+  onWall(c, 'front', () => {
+    const w = Math.min(2 * c.ox - 1.2, 2 * c.dw + 3.2), y = c.dh + 0.55, depth = 1.7, drop = 0.6;
+    const L = Math.hypot(depth, drop), ang = Math.atan2(drop, depth);
+    K.push(0, y, 0.05, 0, ang);
+    K.quad(mat('hide_patch', { side: THREE.DoubleSide }), w, L, 0, 0, L / 2, { rx: -Math.PI / 2, uv: 'keep', uvScale: [w / 2.5, L / 2.5], sx: 4, sy: 2,
+      warp: v => { v.z -= 0.12 * Math.sin(Math.PI * (v.x / w + 0.5)) * Math.sin(Math.PI * (v.y / L + 0.5)); } });
+    K.pop();
+    const wl = mat('wood_light');
+    K.cyl(wl, [-w / 2 - 0.1, y - drop - 0.02, depth + 0.05], [w / 2 + 0.1, y - drop - 0.02, depth + 0.05], 0.07, 0.07, { sides: 7, tint: '#a8865e' });
+    for (const s of [-1, 1]) {
+      K.beam(wl, [s * (w / 2 - 0.1), y - 1.2, 0.03], [s * (w / 2 - 0.1), y - drop - 0.05, depth], 0.09, 0.09, { tint: '#a8865e' });
+      K.cyl(mat('hide_patch'), [s * (w / 2 - 0.1), y + 0.9, 0.03], [s * (w / 2 - 0.1), y - drop, depth + 0.05], 0.015, 0.015, { sides: 4, tint: '#d8c098' });
+    }
+    // a horned skull over the door
+    const sy = c.dh + 0.35;
+    K.add(mat('wood_light'), new THREE.SphereGeometry(0.2, 10, 8), { uv: 'keep', at: matrix(0, sy, 0.16, 0, 0, 0, new THREE.Vector3(1, 0.85, 1.3)), tint: '#f0e4cc' });
+    K.add(mat('wood_light'), new THREE.BoxGeometry(0.2, 0.14, 0.2), { uv: 'keep', at: matrix(0, sy - 0.15, 0.3), tint: '#e8dcc4' });
+    for (const s of [-1, 1]) K.add(mat('wood_light'), new THREE.ConeGeometry(0.06, 0.55, 7), { uv: 'keep', at: matrix(s * 0.32, sy + 0.12, 0.14, 0, 0, s * -1.2), tint: '#e8dcc4' });
+  });
 }
 
 // adobe: a flat roof behind parapets, a stepped front parapet carrying the sign, vigas, a dome
@@ -669,6 +728,16 @@ export function lantern(c, p, s = 0.5, hanging = false, K = c.K) {
   const wp = new THREE.Vector3(x, y, z).applyMatrix4(K.m).applyMatrix4(K.root);
   if (c && c.glows) c.glows.push({ p: wp, s: s * 3.2 });
   return wp;
+}
+
+// a few tongues of flame (emissive) over a fire bowl
+export function flames(K, x, y, z, r) {
+  const fm = mat('lantern_glass', { emissive: '#ff9a40', emissiveIntensity: 1.2 });
+  const offs = [[0, 0, 1], [0.45, 0.2, 0.7], [-0.4, 0.3, 0.75], [0.1, -0.45, 0.65], [-0.2, -0.2, 0.55]];
+  offs.forEach(([dx, dz, k], i) => {
+    const h = r * 2.2 * k;
+    K.add(fm, new THREE.ConeGeometry(r * 0.38 * (0.7 + k * 0.4), h, 6), { uv: 'keep', at: matrix(x + dx * r, y + h / 2, z + dz * r, i, (dx) * 0.25, -(dz) * 0.25), shade: false, cast: false, tint: i ? '#ffd8a0' : '#fff0c8' });
+  });
 }
 
 // a barrel at (x, z) in the building frame, standing on y = 0
@@ -752,6 +821,7 @@ function extras(c) {
         for (let k = 0; k < 3; k++) { const a = k / 3 * Math.PI * 2; K.beam(im, [x + Math.cos(a) * 0.32, 0, z + Math.sin(a) * 0.32], [x + Math.cos(a) * 0.12, 0.85, z + Math.sin(a) * 0.12], 0.05, 0.05); }
         K.add(im, new THREE.CylinderGeometry(0.42, 0.22, 0.32, 10, 1, true), { uv: 'keep', uvScale: [4, 1], at: matrix(x, 1.0, z), receive: true });
         K.add(mat('embers', { emissive: '#ff8030', emissiveIntensity: 1.0 }), new THREE.SphereGeometry(0.36, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), { uv: 'keep', at: matrix(x, 1.03, z, 0, 0, 0, new THREE.Vector3(1, 0.35, 1)), shade: false, cast: false });
+        flames(K, x, 1.05, z, 0.32);
         c.glows.push({ p: c.world(...new THREE.Vector3(x, 1.4, z).applyMatrix4(K.m).toArray()), s: 2.6, fire: true });
       }
     });

@@ -13,7 +13,7 @@ import { isRoadside } from './roadside3d.js';
 import { canvasFor } from './paint/index.js';
 import { signCanvas, muteColor } from './paint/architecture.js';
 import { Batch, Kit, mat, matrix, sstep } from './town_kit.js';
-import { buildBuilding, styleFor, STYLES, winMat, glassMat, lantern, barrel, crate } from './town_build.js';
+import { buildBuilding, styleFor, STYLES, winMat, glassMat, lantern, barrel, crate, flames } from './town_build.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -30,13 +30,13 @@ function glowPoints(list) {
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('size', new THREE.BufferAttribute(size, 1));
-  geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  geo.setAttribute('gcol', new THREE.BufferAttribute(col, 3));
   const m = new THREE.ShaderMaterial({
     uniforms: { map: { value: tex('glow_soft') }, uScale: { value: 500 }, uOpacity: { value: 0.3 } },
-    vertexShader: `attribute float size; attribute vec3 color; uniform float uScale; varying vec3 vC; varying float vA;
+    vertexShader: `attribute float size; attribute vec3 gcol; uniform float uScale; varying vec3 vC; varying float vA;
       void main() { vec4 mv = modelViewMatrix * vec4(position, 1.0); float d = -mv.z;
         gl_PointSize = clamp(size * uScale / max(d, 0.5), 1.0, 512.0); gl_Position = projectionMatrix * mv;
-        vC = color; vA = clamp(1.0 - (d - 90.0) / 140.0, 0.0, 1.0); }`,
+        vC = gcol; vA = clamp(1.0 - (d - 90.0) / 140.0, 0.0, 1.0); }`,
     fragmentShader: `uniform sampler2D map; uniform float uOpacity; varying vec3 vC; varying float vA;
       void main() { vec4 t = texture2D(map, gl_PointCoord); gl_FragColor = vec4(vC * t.rgb, t.a * uOpacity * vA); }`,
     transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
@@ -138,6 +138,15 @@ function buildSigns(W, batch, group, near, ctx) {
   if (!atlas) return;
   const faceMat = new THREE.MeshLambertMaterial({ map: atlas.tex, vertexColors: true });
   const wood = mat('timber_dark'), iron = mat('iron_wrought'), light = mat('wood_light');
+  // price boards stand on the counter behind the goods, leaning back, facing the customer
+  for (const t of ctx.tags) {
+    const K = new Kit(batch, matrix(t.u.x, t.u.y - 0.1, t.u.z, ctx.tagRy || 0), () => 1);
+    K.push(0, 0.2, -0.2, 0, -0.22);
+    K.box(wood, t.w + 0.06, t.h + 0.06, 0.03, 0, 0, -0.016, { grain: 'x', seg: [1, 1, 1] });
+    K.add(faceMat, remapUV(new THREE.PlaneGeometry(t.w, t.h), atlas.rect(t.fi)), { uv: 'keep', at: matrix(0, 0, 0.001), shade: false, cast: false });
+    K.box(wood, 0.04, 0.24, 0.03, 0, -0.17, -0.03, { seg: [1, 1, 1] });
+    K.pop();
+  }
   const shadeSign = () => 1;
   for (const it of items) {
     const { s, att, style } = it;
@@ -171,17 +180,23 @@ function buildSigns(W, batch, group, near, ctx) {
       } else {
         K.box(wood, s.w + 0.22, s.h + 0.22, 0.1, 0, 0, -0.03, { tile: 1.2, grain: 'x', seg: [1, 1, 1] });
         face(K, 0.025);
-        // iron straps holding it to the wall
-        for (const sx of [-0.35, 0.35]) {
-          K.box(iron, 0.07, s.h + 0.34, 0.03, sx * s.w, 0, 0.035, { tile: 0.5 });
-          K.box(iron, 0.07, 0.07, 0.24, sx * s.w, s.h / 2 + 0.14, -0.1, { tile: 0.5 });
+        // iron corner brackets holding it off the wall (never across the lettering)
+        for (const sx of [-1, 1]) {
+          const x = sx * (s.w / 2 + 0.06);
+          K.box(iron, 0.06, s.h + 0.3, 0.05, x, 0, 0.04, { tile: 0.5 });
+          for (const sy of [-1, 1]) {
+            K.box(iron, 0.24, 0.05, 0.04, x - sx * 0.1, sy * (s.h / 2 + 0.1), 0.045, { tile: 0.5 });
+            K.add(iron, new THREE.SphereGeometry(0.035, 6, 4), { uv: 'keep', at: matrix(x - sx * 0.18, sy * (s.h / 2 + 0.1), 0.07) });
+          }
+          K.box(iron, 0.06, 0.06, 0.3, x, s.h / 2 + 0.12, -0.12, { tile: 0.5 });
         }
       }
       K.pop();
       continue;
     }
     // free-standing: roadside boards and billboards on posts, painted both sides
-    const K = new Kit(batch, matrix(s.x, s.y, s.z, s.ry), shadeSign);
+    const lean = ((Math.sin(s.x * 12.9 + s.z * 78.2) * 43758.5) % 1) * 0.035;
+    const K = new Kit(batch, matrix(s.x, s.y, s.z, s.ry, 0, lean), shadeSign);
     const hw = s.w / 2, hh = s.h / 2;
     const ground = lx => { const c = Math.cos(s.ry), sn = Math.sin(s.ry); return W.heightAt(s.x + c * lx, s.z - sn * lx) - s.y; };
     if (style === 'billboard') {
@@ -216,7 +231,8 @@ function buildSigns(W, batch, group, near, ctx) {
 
 function lampPost(batch, d, style, glows) {
   const ry = d.x > 0 ? Math.PI : 0;     // the arm reaches toward the street
-  const K = new Kit(batch, matrix(d.x, d.y, d.z, ry), (x, y) => 0.7 + 0.3 * sstep(0, 1.5, y));
+  const lean = ((Math.sin(d.x * 12.9 + d.z * 78.2) * 43758.5) % 1) * 0.04;
+  const K = new Kit(batch, matrix(d.x, d.y, d.z, ry, lean * 0.5, lean), (x, y) => 0.7 + 0.3 * sstep(0, 1.5, y));
   const c = { glows };
   const iron = mat('iron_wrought');
   if (style === 'timber') {
@@ -243,6 +259,7 @@ function lampPost(batch, d, style, glows) {
     K.add(iron, new THREE.CylinderGeometry(0.5, 0.26, 0.36, 10, 1, true), { uv: 'keep', uvScale: [4, 1], at: matrix(0, 1.78, 0) });
     K.add(iron, new THREE.CircleGeometry(0.26, 10), { uv: 'keep', at: matrix(0, 1.6, 0, 0, -Math.PI / 2) });
     K.add(mat('embers', { emissive: '#ff8030', emissiveIntensity: 1 }), new THREE.SphereGeometry(0.44, 10, 5, 0, Math.PI * 2, 0, Math.PI / 2), { uv: 'keep', at: matrix(0, 1.83, 0, 0, 0, 0, new THREE.Vector3(1, 0.4, 1)), shade: false, cast: false });
+    flames(K, 0, 1.86, 0, 0.36);
     glows.push({ p: V3(0, 2.3, 0).applyMatrix4(K.root), s: 3.6, fire: true });
   } else if (style === 'frontier') {
     const wood = mat('wood_light');
@@ -308,7 +325,7 @@ function furniture(s, batch, ctx) {
   }
   if (s.part === 'flip_machine') {
     const red = mat('metal_red'), br = mat('brass');
-    K.box(red, 2 * hx - 0.1, top - 0.2, 2 * hz - 0.1, 0, 0.1 + (top - 0.2) / 2, 0, { uv: 'keep' });
+    K.box(red, 2 * hx - 0.1, top - 0.2, 2 * hz - 0.1, 0, 0.1 + (top - 0.2) / 2, 0, { tile: 1.3 });
     K.box(br, 2 * hx + 0.04, 0.16, 2 * hz + 0.04, 0, 0.08, 0, { tile: 1 });
     K.box(br, 2 * hx + 0.16, 0.14, 2 * hz + 0.16, 0, top - 0.07, 0, { tile: 1 });
     K.add(mat('flip_face'), new THREE.PlaneGeometry(2 * hx - 0.2, top - 0.5), { uv: 'keep', at: matrix(0, top / 2, hz - 0.03), shade: false });
@@ -332,10 +349,10 @@ function furniture(s, batch, ctx) {
     const tint = ctx.slotTint(s);
     const red = mat('metal_red'), br = mat('brass');
     K.box(br, 2 * hx + 0.06, 0.14, 2 * hz + 0.06, 0, 0.07, 0, { tile: 1 });
-    K.box(red, 2 * hx - 0.04, top - 0.14, 2 * hz - 0.06, 0, 0.14 + (top - 0.14) / 2, 0, { uv: 'keep', tint });
+    K.box(red, 2 * hx - 0.04, top - 0.14, 2 * hz - 0.06, 0, 0.14 + (top - 0.14) / 2, 0, { tile: 1.3, tint });
     K.add(mat('slot_face'), new THREE.PlaneGeometry(2 * hx - 0.08, top * 0.86), { uv: 'keep', at: matrix(0, 0.14 + top * 0.43, hz - 0.02), shade: false, tint: [1, 1, 1] });
     const arch = new THREE.CylinderGeometry(hx, hx, 2 * hz - 0.06, 14, 1, false, -Math.PI / 2, Math.PI);
-    K.add(red, arch, { uv: 'keep', uvScale: [1, 1], at: matrix(0, top, 0, 0, Math.PI / 2, 0), tint });
+    K.add(red, arch, { uv: 'keep', uvScale: [1, 1], at: matrix(0, top, 0, 0, -Math.PI / 2, 0), tint });
     K.add(glassMat(), new THREE.SphereGeometry(0.11, 10, 8), { uv: 'keep', at: matrix(0, top + hx + 0.06, 0), shade: false, cast: false, tint });
     ctx.glows.push({ p: V3(0, top + hx + 0.08, 0).applyMatrix4(K.root), s: 0.9, col: '#ffd890' });
     // the lever
@@ -353,7 +370,8 @@ function furniture(s, batch, ctx) {
 function wheel(K, x, z, r, w) {
   const iron = mat('iron_wrought'), wood = mat('wood_light'), br = mat('brass');
   K.push(x, r, z, 0, 0, Math.PI / 2);
-  K.add(iron, new THREE.TorusGeometry(r - 0.08, 0.1, 8, 20), { uv: 'keep', uvScale: [6, 1], at: matrix(0, 0, 0, 0, Math.PI / 2, 0, new THREE.Vector3(1, 1, w / 0.2)) });
+  K.add(iron, new THREE.TorusGeometry(r - 0.1, 0.13, 8, 22), { uv: 'keep', uvScale: [6, 1], at: matrix(0, 0, 0, 0, Math.PI / 2, 0, new THREE.Vector3(1, 1, w / 0.26)) });
+  for (let k = 0; k < 14; k++) { const a = k / 14 * Math.PI * 2; K.box(iron, 0.1, w + 0.06, 0.07, Math.cos(a) * (r + 0.01), 0, Math.sin(a) * (r + 0.01), { ry: Math.PI / 2 - a, tile: 0.5 }); }
   K.add(wood, new THREE.TorusGeometry(r - 0.2, 0.045, 6, 18), { uv: 'keep', uvScale: [6, 1], at: matrix(0, 0, 0, 0, Math.PI / 2), tint: '#a07050' });
   for (let k = 0; k < 10; k++) { const a = k / 10 * Math.PI * 2; K.beam(wood, [0, 0, 0], [Math.cos(a) * (r - 0.18), 0, Math.sin(a) * (r - 0.18)], 0.06, 0.05, { tint: '#a07050' }); }
   K.cyl(br, [0, -w / 2 - 0.06, 0], [0, w / 2 + 0.06, 0], 0.15, 0.15, { sides: 10 });
@@ -371,16 +389,16 @@ function towWagon(K, glows) {
   // fenders
   for (const sx of [-1, 1]) {
     const f = new THREE.CylinderGeometry(0.92, 0.92, 0.42, 14, 1, true, Math.PI * 0.05, Math.PI * 0.9);
-    K.add(red, f, { uv: 'keep', uvScale: [2, 1], at: matrix(sx * 1.12, 0.78, -2.1, Math.PI / 2, 0, Math.PI / 2), receive: true });
+    K.add(red, f, { uv: 'keep', uvScale: [2, 1], at: matrix(sx * 1.12, 0.78, -2.1, 0, 0, Math.PI / 2), receive: true });
     const f2 = new THREE.CylinderGeometry(0.74, 0.74, 0.36, 12, 1, true, Math.PI * 0.05, Math.PI * 0.9);
-    K.add(red, f2, { uv: 'keep', uvScale: [2, 1], at: matrix(sx * 1.1, 0.6, 2.15, Math.PI / 2, 0, Math.PI / 2), receive: true });
+    K.add(red, f2, { uv: 'keep', uvScale: [2, 1], at: matrix(sx * 1.1, 0.6, 2.15, 0, 0, Math.PI / 2), receive: true });
   }
   // cab: riveted lower body, open sides, a red plate roof on iron posts
-  K.box(green, 2.0, 0.85, 2.0, 0, 1.38, 2.0, { uv: 'keep' });
-  K.add(green, new THREE.BoxGeometry(1.8, 0.6, 0.7), { uv: 'keep', at: matrix(0, 1.5, 3.25), warp: v => { if (v.y > 0) v.z -= 0.25; } });
+  K.box(green, 2.0, 0.85, 2.0, 0, 1.38, 2.0, { tile: 1.3 });
+  K.add(green, new THREE.BoxGeometry(1.8, 0.6, 0.7), { tile: 1.3, at: matrix(0, 1.5, 3.25), warp: v => { if (v.y > 0) v.z -= 0.25; } });
   K.box(br, 2.06, 0.08, 2.06, 0, 1.84, 2.0, { tile: 1 });
   for (const sx of [-1, 1]) for (const sz of [1.1, 2.9]) K.cyl(iron, [sx * 0.92, 1.8, sz], [sx * 0.9, 2.85, sz - 0.05], 0.045, 0.04, { sides: 6 });
-  K.box(red, 2.3, 0.1, 2.3, 0, 2.9, 1.95, { uv: 'keep', warp: v => { v.y += (1.15 - Math.abs(v.x)) * 0.12; } });
+  K.box(red, 2.3, 0.1, 2.3, 0, 2.9, 1.95, { tile: 1.3, seg: [4, 1, 1], warp: v => { v.y += (1.15 - Math.abs(v.x)) * 0.14; } });
   K.box(br, 1.8, 0.06, 0.06, 0, 2.2, 2.92, { tile: 1 });
   K.box(br, 0.06, 0.62, 0.06, -0.9, 2.5, 2.92, { tile: 1 }); K.box(br, 0.06, 0.62, 0.06, 0.9, 2.5, 2.92, { tile: 1 });
   K.box(wl, 1.5, 0.18, 0.6, 0, 1.9, 1.5, { tint: '#7a4a34' });
@@ -397,8 +415,10 @@ function towWagon(K, glows) {
     glows.push({ p: V3(sx * 0.72, 1.55, 3.6).applyMatrix4(K.m).applyMatrix4(K.root), s: 1.4 });
   }
   K.box(iron, 2.4, 0.18, 0.2, 0, 0.82, 3.6, { grain: 'x', tile: 1 });
-  K.add(iron, new THREE.BoxGeometry(1.8, 0.5, 0.6, 4, 1, 1), { uv: 'keep', at: matrix(0, 0.5, 3.85), warp: v => { if (v.y < 0) v.z += 0.3; v.x *= v.z > 0 ? 0.85 : 1; } });
-  for (let k = 0; k < 5; k++) K.add(iron, new THREE.ConeGeometry(0.05, 0.3, 5), { uv: 'keep', at: matrix(-0.7 + k * 0.35, 0.42, 4.25, 0, Math.PI / 2 + 0.3) });
+  // a goblin cow-catcher: slanted iron bars
+  for (let k = 0; k < 7; k++) { const x = -0.9 + k * 0.3; K.beam(iron, [x, 0.78, 3.66], [x * 0.55, 0.16, 4.25], 0.06, 0.06); }
+  K.beam(iron, [-0.55, 0.18, 4.24], [0.55, 0.18, 4.24], 0.07, 0.07);
+  K.beam(iron, [-0.8, 0.5, 3.95], [0.8, 0.5, 3.95], 0.05, 0.05);
   // REPO plates on the cab doors
   for (const sx of [-1, 1]) K.add(mat('repo_plate'), new THREE.PlaneGeometry(1.5, 0.75), { uv: 'keep', at: matrix(sx * 1.012, 1.38, 2.0, sx * Math.PI / 2), shade: false });
   // the boiler and its stack
@@ -419,7 +439,7 @@ function towWagon(K, glows) {
   for (const sx of [-1, 1]) K.beam(iron, [sx * 0.75, 1.1, -0.9], [sx * 0.12, 2.6, -1.5], 0.12, 0.12);
   K.cyl(iron, [-0.55, 1.45, -1.25], [0.55, 1.45, -1.25], 0.22, 0.22, { sides: 12 });
   for (const sx of [-0.4, 0, 0.4]) K.add(iron, new THREE.TorusGeometry(0.24, 0.035, 4, 12), { uv: 'keep', at: matrix(sx, 1.45, -1.25, Math.PI / 2) });
-  for (const sx of [-1, 1]) K.beam(mat('metal_green'), [sx * 0.16, 2.55, -1.3], [sx * 0.12, 3.55, -4.0], 0.16, 0.2);
+  for (const sx of [-1, 1]) K.beam(mat('metal_green'), [sx * 0.16, 2.55, -1.3], [sx * 0.12, 3.55, -4.0], 0.16, 0.2, { tile: 1.3 });
   for (let k = 0; k < 5; k++) { const t = k / 4, y = 2.55 + t, z = -1.3 - t * 2.7; K.box(iron, 0.36, 0.06, 0.06, 0, y + 0.02, z, { tile: 0.5 }); }
   K.add(br, new THREE.CylinderGeometry(0.22, 0.22, 0.12, 12), { uv: 'keep', at: matrix(0, 3.55, -4.05, 0, 0, Math.PI / 2) });
   K.cyl(iron, [0, 3.35, -4.12], [0.02, 1.95, -4.12], 0.025, 0.025, { sides: 4 });
@@ -432,7 +452,7 @@ function towWagon(K, glows) {
 function towTruck(t, batch = null, glows = []) {
   const own = !batch;
   const B = batch || new Batch();
-  const K = new Kit(B, matrix(t.x, t.y, t.z, t.ry), (x, y) => 0.72 + 0.28 * sstep(0, 1.5, y));
+  const K = new Kit(B, matrix(t.x, t.y, t.z, t.ry, 0, 0, 1.28), (x, y) => 0.72 + 0.28 * sstep(0, 1.5, y));
   towWagon(K, glows);
   if (own) { const g = new THREE.Group(); B.build(g); return g; }
   return null;
@@ -460,14 +480,14 @@ function interiorKit(batch, b) {
   return new Kit(batch, matrix(b.x, b.y, b.z, b.ry), (x, y, z, nx, ny) => { const k = 0.72 + 0.2 * sstep(0, 2.5, y) - (ny < -0.5 ? 0.1 : 0); return [k, k * 0.95, k * 0.88]; });
 }
 
-function shelves(K, x0, x1, z, h, goods, ry = 0) {
-  const w = x1 - x0, cx = (x0 + x1) / 2;
-  K.push(cx, 0, z, ry);
+// a shelf unit w wide against a wall at (cx, cz), facing ry (0 = +z)
+function shelves(K, cx, cz, w, h, goods, ry = 0) {
+  K.push(cx, 0, cz, ry);
   const wd = mat('timber_dark');
   K.add(mat(goods), new THREE.PlaneGeometry(w, h), { uv: 'keep', uvScale: [w / (2 * h), 1], at: matrix(0, 0.15 + h / 2, 0.02), shade: (x, y) => 0.95 });
-  for (const sx of [-1, 1]) K.box(wd, 0.12, h + 0.25, 0.42, sx * (w / 2 + 0.04), (h + 0.25) / 2, 0.2, { tile: 1.2 });
-  K.box(wd, w + 0.3, 0.14, 0.46, 0, h + 0.3, 0.22, { grain: 'x' });
-  K.box(wd, w + 0.2, 0.15, 0.42, 0, 0.075, 0.2, { grain: 'x' });
+  for (const sx of [-1, 1]) K.box(wd, 0.12, h + 0.25, 0.3, sx * (w / 2 + 0.04), (h + 0.25) / 2, 0.15, { tile: 1.2 });
+  K.box(wd, w + 0.3, 0.14, 0.34, 0, h + 0.3, 0.17, { grain: 'x' });
+  K.box(wd, w + 0.2, 0.15, 0.3, 0, 0.075, 0.15, { grain: 'x' });
   K.pop();
 }
 
@@ -493,15 +513,13 @@ function dressInteriors(W, batch, ctx) {
     const K = interiorKit(batch, b);
     const ix = b.w / 2 - 0.15, iz = b.dep / 2 - 0.15, H = b.h;
     if (b.kind === 'pawn') {
-      shelves(K, -ix + 0.4, ix - 0.4, -iz + 0.02, 2.2, 'shelf_goods');
-      shelves(K, -iz + 1.0, -1.0, ix - 0.02, 1.9, 'shelf_goods', -Math.PI / 2);
+      shelves(K, 0, -iz + 0.02, 2 * ix - 0.8, 2.2, 'shelf_goods');
       rug(K, 3.4, 2.2, 0, 1.5);
       crate(K, -ix + 0.6, iz - 0.7, 0.7, 0.3); crate(K, -ix + 0.65, iz - 0.75, 0.5, 0.8, 0.7);
       barrel(K, ix - 0.6, iz - 1.6, 0.32, 0.9);
       lantern(ctx, [-ix * 0.5, H - 0.4, 0.4], 0.5, true, K); lantern(ctx, [ix * 0.5, H - 0.4, 0.4], 0.5, true, K);
     } else if (b.kind === 'store') {
-      shelves(K, -ix + 0.4, ix - 0.4, -iz + 0.02, 2.2, 'store_goods');
-      shelves(K, -iz + 0.6, iz - 1.2, -ix + 0.02, 1.9, 'store_goods', Math.PI / 2);
+      shelves(K, 0, -iz + 0.02, 2 * ix - 0.8, 2.2, 'store_goods');
       rug(K, 3.0, 2.0, 0, 1.3);
       barrel(K, ix - 0.6, iz - 0.7, 0.32, 0.9); barrel(K, ix - 1.3, iz - 0.6, 0.28, 0.8); crate(K, ix - 0.7, iz - 1.6, 0.66, 0.2);
       lantern(ctx, [0, H - 0.4, 1.2], 0.5, true, K);
@@ -557,7 +575,7 @@ export function buildStructures(W) {
   const tags = [];
   const store = W.buildings.find(b => b.kind === 'store');
   for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90' }[u.arg] || ''], w: 0.46, h: 0.26 });
-  buildSigns(W, batch, group, near, { attached, bInfo, glows, tags, style: S });
+  buildSigns(W, batch, group, near, { attached, bInfo, glows, tags, style: S, tagRy: store ? store.ry : 0 });
 
   for (const d of W.decor) if (d.k === 'lamp') lampPost(batch, d, style, glows);
 
@@ -587,9 +605,9 @@ export function buildStructures(W) {
   towTruck(T.repo, batch, glows);
 
   // pawn counter appraisal + casino furniture
-  const pawnLabel = labelSprite('', '#7CFC00', 44);
+  const pawnLabel = labelSprite('', '#7CFC00', 32);
   pawnLabel.position.set(T.pawn.x, T.pawn.y + 1.95, T.pawn.z);
-  pawnLabel.scale.set(2.6, 0.5, 1);
+  pawnLabel.scale.set(3.0, 0.56, 1);
   group.add(pawnLabel);
 
   const bj = T.bj;
@@ -602,7 +620,7 @@ export function buildStructures(W) {
     mesh.receiveShadow = true;
     const holder = new THREE.Group();
     holder.position.set(z.x, T.y + 0.13, z.z);
-    holder.rotation.y = bj.ry;
+    holder.rotation.y = bj.ry + Math.PI;
     holder.add(mesh);
     group.add(holder);
     return mesh;
@@ -611,13 +629,13 @@ export function buildStructures(W) {
   const standPad = pad(bj.stand, 'pad_stand', '#a8c8ff');
   const cardGroup = new THREE.Group();
   group.add(cardGroup);
-  const bjLabel = labelSprite('', '#fff', 36);
+  const bjLabel = labelSprite('', '#fff', 32);
   bjLabel.position.set(bj.table.x, bj.table.y + 1.25, bj.table.z);
   bjLabel.scale.set(3.4, 0.64, 1);
   group.add(bjLabel);
-  const flipLabel = labelSprite('', '#ffd166', 38);
+  const flipLabel = labelSprite('', '#ffd166', 30);
   flipLabel.position.set(T.flip.x, T.flip.y + 3.55, T.flip.z);
-  flipLabel.scale.set(3.0, 0.56, 1);
+  flipLabel.scale.set(3.4, 0.64, 1);
   group.add(flipLabel);
   // the coin, spinning in a glass dome on top of the machine
   const coinFace = new THREE.MeshLambertMaterial({ map: tex('coin_face'), emissive: new THREE.Color('#3a2a00'), emissiveMap: tex('coin_face'), emissiveIntensity: 0.6 });
@@ -658,7 +676,7 @@ export function buildStructures(W) {
         K.box(mat('brass'), 0.2, 0.3, 0.2, 0, -0.2, 0, { tile: 1 });
         K.cyl(mat('iron_wrought'), [0, 0, 0], [0, 0.8, 0.1], 0.035, 0.03, { sides: 6 });
         K.add(mat('wood_light'), new THREE.SphereGeometry(0.12, 10, 8), { uv: 'keep', at: matrix(0, 0.85, 0.11), tint: '#c03a2a' });
-      } else group.add(button(u, u.arg === 'all' ? '#c0402e' : '#d8a840', u.label.replace('Stake ', ''), batch, glows));
+      } else { const s = button(u, u.arg === 'all' ? '#c0402e' : '#d8a840', u.label.replace('Stake ', ''), batch, glows); if (s) group.add(s); }
     } else if (u.kind === 'buy') {
       const ry = store ? store.ry : 0;
       const K = new Kit(batch, matrix(u.x, u.y - 0.1, u.z, ry), () => 1);
@@ -679,10 +697,6 @@ export function buildStructures(W) {
         for (const s of [-1, 1]) K.add(mat('brass'), new THREE.TorusGeometry(0.03, 0.01, 4, 8, Math.PI * 1.4), { uv: 'keep', at: matrix(s * 0.12, 0.08, 0.05) });
       }
     }
-  }
-  // the price boards stand behind the goods, facing the customer
-  if (tags.length) {
-    // (built inside buildSigns via the atlas; placed here)
   }
 
   // all the merged statics, the glow cloud
@@ -757,7 +771,7 @@ function previewFurniture() {
 }
 
 export const PREVIEW = {
-  towtruck: () => towTruck({ x: 0, y: 0, z: 0, ry: 0.6 }),
+  towtruck: () => towTruck({ x: 0, y: 0, z: 0, ry: 1.25 }),
   town_timber: () => previewTown('timber', ['pawn', 'store']),
   town_farm: () => previewTown('farm', ['pawn', 'gas']),
   town_alpine: () => previewTown('alpine', ['pawn', 'store']),

@@ -224,7 +224,7 @@ const COVER = {
   moss: { tex: 'cover_moss', lo: 0.42, hi: 0.72, noise: 1.3, scale: 0.4 },
   mossBark: { tex: 'cover_moss', lo: 0.62, hi: 0.9, noise: 1.2, scale: 0.7 },
   lichen: { tex: 'cover_lichen', lo: 0.5, hi: 0.8, noise: 1.3, scale: 0.45 },
-  snow: { tex: 'cover_snow', lo: 0.22, hi: 0.5, noise: 1.0, scale: 0.35 },
+  snow: { tex: 'cover_snow', lo: 0.48, hi: 0.72, noise: 0.9, scale: 0.35, gate: [0.18, 0.38] },
   snowRock: { tex: 'cover_snow', lo: 0.42, hi: 0.62, noise: 1.1, scale: 0.35, gate: [0.25, 0.45] },
   snowLeaf: { tex: 'cover_snow', lo: 0.35, hi: 0.62, noise: 1.3, scale: 0.6 },
   frost: { tex: 'cover_snow', lo: 0.45, hi: 0.8, noise: 1.5, scale: 0.7, gate: [0.42, 0.62] },
@@ -384,14 +384,14 @@ const BIO = {
     rock: 'rock_gray', rockCover: 'moss', rockTints: ['#ffffff', '#f0eee6', '#e6e8de', '#f4efe4'],
     oakTints: ['#ffffff', '#eef6dc', '#e2ecc8', '#fff4dc', '#f2f6e0', '#dfe9c8'], leafDensity: 1,
     pineTints: ['#ffffff', '#f2f8ea', '#e8f0de', '#f8f4e4'],
-    bush: 'leaves', bushCells: [3], bushFill: 2, bushTints: ['#ffffff', '#eef4dc', '#e2ecd0'],
+    bush: 'leaves', bushCells: [3], bushFill: 2, bushTints: ['#ffffff', '#f4f8e4', '#fffbe8'],
     deadTint: '#c4bcb4', barkCover: 'mossBark',
   },
   fields: {
     rock: 'rock_warm', rockCover: 'lichen', rockTints: ['#ffffff', '#f6eee0', '#ece4d4'],
     oakTints: ['#ffe490', '#f4d680', '#ffeaa0', '#ead078', '#f8e8a8'], leafDensity: 0.8, crownWarm: [1.18, 1.08, 0.7],
     pineTints: ['#f4f0d0', '#ece8c8'],
-    bush: 'leaves', bushCells: [3], bushFill: 2, bushTints: ['#f4e6a8', '#ecdc9a', '#fff0bc', '#e4e0a8'],
+    bush: 'leaves', bushCells: [3], bushFill: 2, bushTints: ['#fff0b0', '#f8e8a4', '#fff6c8', '#f0eab0'],
     deadTint: '#d0c4b0',
   },
   snow: {
@@ -399,7 +399,7 @@ const BIO = {
     oakTints: ['#d8e4d8'], leafDensity: 0.7,
     pineTints: ['#e2ecea', '#d6e4e2', '#eaf2ee', '#dce8e0'],
     bush: 'scrub', bushCells: [3], bushFill: 2, bushTints: ['#c8d8d8', '#bcd0d0', '#d4e0dc'],
-    deadTint: '#9a908c', snow: true,
+    deadTint: '#c4bab4', snow: true,
   },
   badlands: {
     rock: 'rock_red', rockCover: 'dust', rockTints: ['#ffffff', '#f6ece4', '#ecdcd0'],
@@ -547,7 +547,7 @@ function oak(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 11)), s = d.s || 1, B = ctx.bio;
   ctx.at(d, d.ry || 0);
   const bark = ctx.b('bark_oak'), leaves = ctx.b('leaves');
-  const r0 = 0.47 * s, H = range(rnd, 2.9, 3.6) * s;
+  const r0 = 0.44 * s, H = range(rnd, 2.9, 3.6) * s;
   const lx = range(rnd, -0.4, 0.4) * s, lz = range(rnd, -0.4, 0.4) * s;
   const nR = 5 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
   const rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.3, 0.3));
@@ -555,8 +555,8 @@ function oak(ctx, d) {
   for (let i = 0; i <= NT; i++) {
     const t = i / NT, y = -0.5 + t * (H + 0.5), wob = Math.sin(t * 3.2 + a0) * 0.12 * s * t;
     tp.push(new V3(lx * t * t + wob, y, lz * t * t - wob * 0.6));
-    const fl = Math.pow(clamp01(1 - (y + 0.2) / (1.5 * s)), 2);
-    tr.push(r0 * (1.02 - 0.1 * t) * (1 + 0.5 * fl));
+    const fl = Math.pow(clamp01(1 - (y + 0.2) / (1.15 * s)), 2);     // the flare stays below the bumper
+    tr.push(r0 * (1.04 - 0.1 * t) * (1 + 0.6 * fl));
   }
   const lobes = (dir, t, i) => {
     const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / (1.4 * s)), 1.5), ph = Math.atan2(dir.z, dir.x);
@@ -716,12 +716,13 @@ function bush(ctx, d) {
   const b = ctx.b(B.bush);
   const tint = lin(pick(rnd, B.bushTints));
   const n = 2 + Math.floor(rnd() * 2.5);
-  const dry = B.bush === 'scrub' && !B.snow, ao = p => (dry ? 0.7 : 0.5) + (dry ? 0.3 : 0.5) * smooth(0, 1.4 * s, p.y);
+  const dry = B.bush === 'scrub' && !B.snow, ao = p => (dry ? 0.7 : 0.6) + (dry ? 0.3 : 0.4) * smooth(0, 1.4 * s, p.y);
+  const warm = B.snow ? null : p => { const t = smooth(0.5 * s, 1.5 * s, p.y); return [1 + 0.12 * t, 1 + 0.1 * t, 1 - 0.15 * t]; };
   for (let k = 0; k < n; k++) {
     const a = rnd() * TAU, dd = k === 0 ? 0 : range(rnd, 0.35, 0.65) * s, R = (k === 0 ? range(rnd, 0.75, 0.95) : range(rnd, 0.5, 0.75)) * s;
     const C = new V3(Math.cos(a) * dd, R * 0.62, Math.sin(a) * dd);
     C.y += ctx.gh(C.x, C.z);
-    clump(b, C, R, rnd, { cards: Math.round(7 + 7 * (R / s) ** 2), size: range(rnd, 1.0, 1.25) * s, cells: B.bushCells, fill: B.bushFill, tint, ao, squash: 0.78, inner: dry ? 0.55 : B.snow ? 0.55 : 0.7, wind: 0.6, massK: dry ? 0.75 : B.snow ? 0.38 : 0.55 });
+    clump(b, C, R, rnd, { cards: Math.round(7 + 7 * (R / s) ** 2), size: range(rnd, 1.0, 1.25) * s, cells: B.bushCells, fill: B.bushFill, tint, ao, warm, squash: 0.78, inner: dry ? 0.55 : B.snow ? 0.55 : 0.7, wind: 0.6, massK: dry ? 0.75 : B.snow ? 0.38 : 0.55 });
   }
 }
 
@@ -738,16 +739,16 @@ function deadTree(ctx, s, rnd, { r0 = 0.27, ring = null } = {}) {
   }
   const nR = 3 + (rnd() < 0.5 ? 1 : 0), rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.4, 0.4));
   tube(b, tp, tr, {
-    sides: 8, uRep: 1.5, vLen: 1.6, color: col(0.5), cap: true,
-    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / 1.0), 1.5), ph = Math.atan2(dir.z, dir.x); let m = 0; for (const ra of rootA) m = Math.max(m, clamp01(1 - angDiff(ph, ra) / 0.6)); return (1 + f * 0.9 * m * m) * (1 + 0.06 * Math.sin(ph * 5 + i)); },
+    sides: 10, uRep: 1.5, vLen: 1.6, color: col(0.5), cap: true,
+    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / 1.0), 1.5), ph = Math.atan2(dir.z, dir.x); let m = 0; for (const ra of rootA) m = Math.max(m, clamp01(1 - angDiff(ph, ra) / 0.8)); return (1 + f * 0.6 * m * m) * (1 + 0.06 * Math.sin(ph * 5 + i)); },
   });
   roots(ctx, b, rootA, r0, 1, rnd, { len: [0.6, 0.9], rad: 0.16, up: 0.45, sides: 6 });
   // gnarled limbs reaching up, with twigs
-  const nL = 4 + Math.floor(rnd() * 2.5);
+  const nL = 5 + Math.floor(rnd() * 2.5);
   for (let k = 0; k < nL; k++) {
-    const t = range(rnd, 0.4, 0.92), i = Math.min(NT - 1, Math.floor(t * NT)), f = t * NT - i;
-    const P0 = tp[i].clone().lerp(tp[i + 1], f), rB = (tr[i] + (tr[i + 1] - tr[i]) * f) * 0.7;
-    const a = a0 + k * TAU / nL + range(rnd, -0.4, 0.4), L = range(rnd, 1.4, 2.4) * s;
+    const t = range(rnd, 0.32, 0.9), i = Math.min(NT - 1, Math.floor(t * NT)), f = t * NT - i;
+    const P0 = tp[i].clone().lerp(tp[i + 1], f), rB = Math.max(0.07, (tr[i] + (tr[i + 1] - tr[i]) * f) * 0.8);
+    const a = a0 + k * TAU / nL + range(rnd, -0.4, 0.4), L = range(rnd, 1.7, 2.9) * s;
     const pts = [P0];
     let dir = new V3(Math.cos(a), range(rnd, 0.5, 1.0), Math.sin(a)).normalize();
     for (let j = 1; j <= 4; j++) {
@@ -755,8 +756,8 @@ function deadTree(ctx, s, rnd, { r0 = 0.27, ring = null } = {}) {
       pts.push(pts[j - 1].clone().addScaledVector(dir, L / 4));
     }
     tube(b, pts, [rB, rB * 0.75, rB * 0.52, rB * 0.3, 0.02], { sides: 6, uRep: 1, vLen: 1.6, color: col(0.75) });
-    for (let tw = 0; tw < 2; tw++) {
-      const q = pts[2 + tw], td = new V3(range(rnd, -1, 1), range(rnd, 0.3, 1), range(rnd, -1, 1)).normalize(), tl = range(rnd, 0.4, 0.8) * s;
+    for (let tw = 0; tw < 3; tw++) {
+      const q = pts[1 + tw], td = new V3(range(rnd, -1, 1), range(rnd, 0.3, 1), range(rnd, -1, 1)).normalize(), tl = range(rnd, 0.5, 1.0) * s;
       tube(b, [q, q.clone().addScaledVector(td, tl * 0.5).add(new V3(0, 0.05, 0)), q.clone().addScaledVector(td, tl)], [rB * 0.25, rB * 0.15, 0.008], { sides: 5, uRep: 1, vLen: 1.6, color: col(0.8) });
     }
   }
@@ -892,7 +893,7 @@ function haybale(ctx, d) {
       tube(hay, loop, loop.map(() => 0.016), { sides: 4, uRep: 1, vLen: 0.3, color: lin('#5a4630') });
     }
   } else {             // a domed haystack
-    const g0 = ctx.gh(0, 0), ys = [-0.25, 0.15, 0.6, 1.0, 1.35, 1.6, 1.74, 1.78], rs = [0.86, 0.86, 0.8, 0.66, 0.47, 0.26, 0.09, 0.02];
+    const g0 = ctx.gh(0, 0), ys = [-0.25, 0.15, 0.6, 1.0, 1.35, 1.6, 1.74, 1.78], rs = [0.8, 0.8, 0.76, 0.64, 0.46, 0.26, 0.09, 0.02];
     const sA = rnd() * 9;
     tube(hay, ys.map(y => new V3(0, g0 + y, 0)), rs, { sides: 14, uRep: 3, vLen: 0.7, color: ao, lobes: (dir, t, i, j) => 1 + 0.07 * Math.sin(j * 1.9 + sA) * Math.sin(i * 1.3 + sA) });
     if (rnd() < 0.35) {
@@ -984,11 +985,11 @@ function cactus(ctx, d) {
     return;
   }
   // saguaro: 8 ribs (16 sides, the lobes alternate), a domed top and up-turned arms
-  const R = range(rnd, 0.25, 0.3);
-  const ribs = n => (dir, t, i, j) => 1 + 0.09 * Math.cos(j * Math.PI) * (n ? 1 : 1);
+  const R = range(rnd, 0.23, 0.26);
+  const ribs = (dir, t, i, j) => 1 + 0.09 * Math.cos(j * Math.PI);    // even sides are crests, odd are grooves
   const ys = [-0.3, 0.3, h * 0.5, h - R * 1.1, h - R * 0.55, h - R * 0.18, h + 0.02];
   const rs = [R * 0.92, R, R * 1.04, R * 0.98, R * 0.85, R * 0.55, R * 0.12];
-  tube(cb, ys.map(y => new V3(0, g0 + y, 0)), rs, { sides: 16, uRep: 2, vLen: 1.6, lobes: ribs(8), color: col });
+  tube(cb, ys.map(y => new V3(0, g0 + y, 0)), rs, { sides: 16, uRep: 2, vLen: 1.6, lobes: ribs, color: col });
   const nA = h > 2.5 ? 1 + (rnd() < 0.6 ? 1 : 0) : (rnd() < 0.6 ? 1 : 0);
   let phi = rnd() * TAU;
   for (let k = 0; k < nA; k++) {
@@ -996,7 +997,7 @@ function cactus(ctx, d) {
     const c = Math.cos(phi), sn = Math.sin(phi), ya = g0 + h * range(rnd, 0.32, 0.55), ra = R * 0.66, L = range(rnd, 0.5, 1.1);
     const at = (o, y) => new V3(c * o, y, sn * o);
     const pts = [at(R * 0.2, ya - 0.05), at(R + 0.1, ya - 0.04), at(R + 0.3, ya + 0.04), at(R + 0.38, ya + 0.24), at(R + 0.4, ya + 0.24 + L * 0.5), at(R + 0.4, ya + 0.24 + L - ra * 0.5), at(R + 0.4, ya + 0.24 + L - ra * 0.1), at(R + 0.4, ya + 0.24 + L + 0.02)];
-    tube(cb, pts, [ra, ra, ra * 1.02, ra, ra, ra * 0.85, ra * 0.5, ra * 0.1], { sides: 12, uRep: 1.5, vLen: 1.6, lobes: (dir, t, i, j) => 1 + 0.09 * Math.cos(j * Math.PI), color: col });
+    tube(cb, pts, [ra, ra, ra * 1.02, ra, ra, ra * 0.85, ra * 0.5, ra * 0.1], { sides: 12, uRep: 1.5, vLen: 1.6, lobes: ribs, color: col });
   }
   if (ctx.biome === 'desert' && rnd() < 0.5) {
     const bone = ctx.b('bone'), fc = lin(pick(rnd, ['#f8f0f8', '#f8d870', '#f0a0c0']));
@@ -1009,7 +1010,7 @@ function cactus(ctx, d) {
 function skullAt(ctx, C, k, rnd) {
   const b = ctx.b('bone');
   const dark = lin('#2a2018'), horn = lin('#a08a64');
-  const zs = [-0.55, -0.42, -0.15, 0.3, 0.75, 1.15, 1.45, 1.66, 1.76], rs = [0.3, 0.6, 0.68, 0.6, 0.5, 0.42, 0.36, 0.28, 0.1];
+  const zs = [-0.5, -0.38, -0.1, 0.3, 0.68, 0.98, 1.22, 1.4, 1.48], rs = [0.32, 0.64, 0.72, 0.64, 0.54, 0.47, 0.41, 0.31, 0.12];
   tube(b, zs.map((z, i) => new V3(C.x, C.y + (z < 0.3 ? 0.1 : 0.1 - (z - 0.3) * 0.14) * k, C.z + z * k)), rs.map(r => r * k), {
     sides: 12, uRep: 1, vLen: 1.2 * k, cap: true,
     lobes: (dir, t) => 1 + 0.22 * Math.abs(dir.x) * (1 - t) - 0.22 * Math.abs(dir.y) + (dir.y > 0.3 && t < 0.4 ? 0.06 : 0),
@@ -1017,12 +1018,12 @@ function skullAt(ctx, C, k, rnd) {
   });
   const pit = (x, y, z, r, ry = 0.8) => sphereish(b, 1, u => new V3(C.x + (x + u.x * r) * k, C.y + (y + u.y * r * ry) * k, C.z + (z + u.z * r) * k), { color: dark });
   for (const sd of [-1, 1]) {
-    pit(sd * 0.5, 0.2, 0.32, 0.2, 0.8);
-    pit(sd * 0.1, 0.0, 1.72, 0.07, 0.8);
+    pit(sd * 0.52, 0.2, 0.3, 0.23, 0.8);
+    pit(sd * 0.11, 0.0, 1.44, 0.08, 0.8);
     const pts = [[0.45, 0.32, -0.3], [0.95, 0.42, -0.36], [1.45, 0.62, -0.25], [1.75, 0.98, 0.0], [1.78, 1.32, 0.3], [1.66, 1.55, 0.5]]
       .map(([x, y, z]) => new V3(C.x + sd * x * k, C.y + y * k, C.z + z * k));
     tube(b, pts, [0.22, 0.18, 0.13, 0.09, 0.05, 0.012].map(r => r * k), { sides: 8, uRep: 1, vLen: 0.8 * k, color: (p, n, t) => [1 - (1 - horn[0]) * t, 1 - (1 - horn[1]) * t, 1 - (1 - horn[2]) * t] });
-    for (let j = 0; j < 5; j++) sphereish(b, 0, u => new V3(C.x + (sd * 0.2 + u.x * 0.05) * k, C.y + (-0.2 + u.y * 0.06) * k, C.z + (0.7 + j * 0.19 + u.z * 0.06) * k), { color: [0.9, 0.86, 0.78] });
+    for (let j = 0; j < 5; j++) sphereish(b, 0, u => new V3(C.x + (sd * 0.22 + u.x * 0.05) * k, C.y + (-0.22 + u.y * 0.06) * k, C.z + (0.62 + j * 0.16 + u.z * 0.06) * k), { color: [0.9, 0.86, 0.78] });
   }
 }
 
@@ -1066,7 +1067,7 @@ function bones(ctx, d) {
 function deadTreeDecor(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 23));
   ctx.at(d, d.ry || 0);
-  deadTree(ctx, d.s || 1, rnd, { r0: 0.3 });
+  deadTree(ctx, d.s || 1, rnd, { r0: 0.25 });
 }
 
 // ---- campfire ---------------------------------------------------------------------------------------
@@ -1077,9 +1078,9 @@ function campfire(ctx, d, fires) {
   const rk = ctx.b('rock'), lg = ctx.b('bark_dead');
   for (let i = 0; i < 9; i++) {
     const a = i / 9 * TAU + range(rnd, -0.12, 0.12), r = range(rnd, 0.6, 0.7), x = Math.cos(a) * r, z = Math.sin(a) * r;
-    boulder(rk, new V3(x, ctx.gh(x, z) + 0.04, z), range(rnd, 0.17, 0.24), rnd, { sq: 0.75, cuts: 2, tint: [0.85, 0.85, 0.85] });
+    boulder(rk, new V3(x, ctx.gh(x, z) + 0.04, z), range(rnd, 0.17, 0.24), rnd, { sq: 0.75, cuts: 2, tint: [0.26, 0.25, 0.24] });   // sooty, and too warm for snow
   }
-  const charred = (p, n, t) => { const k = 0.25 + 0.75 * clamp01(1 - t * 1.4); return [k, k * 0.95, k * 0.9]; };
+  const charred = (p, n, t) => { const k = 0.16 + 0.34 * clamp01(1 - t * 1.4); return [k, k * 0.95, k * 0.9]; };
   for (let i = 0; i < 4; i++) {
     const a = i / 4 * TAU + 0.4 + range(rnd, -0.2, 0.2), r = 0.55;
     const p0 = new V3(Math.cos(a) * r, ctx.gh(Math.cos(a) * r, Math.sin(a) * r) + 0.06, Math.sin(a) * r), p1 = new V3(Math.cos(a) * 0.06, 0.5, Math.sin(a) * 0.06);
