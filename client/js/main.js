@@ -443,7 +443,7 @@ function onEvent(e) {
     case 'horn': sfx.horn(); break;
     case 'door': S.door = e.open; sfx.door(); break;
     case 'hook': sfx.hook(); if (e.what === 'yanked' && e.by === S.selfId) { me.hasHook = false; toast('The cable ran out — the hook got yanked out of your hands.', '#ffb4a2'); } break;
-    case 'reel': toast(e.on ? '🪝 Winch reeling in…' : 'Winch stopped.', '#f2c14e', 2); break;
+    case 'reel': toast(e.on ? 'Winch reeling in…' : 'Winch stopped.', '#f2c14e', 2); break;
     case 'creak': sfx.creak(); break;
     case 'gate': sfx.gate(); break;
     case 'buzz': sfx.buzz(); break;
@@ -541,12 +541,12 @@ window.__nmdVoice = VV;
 function renderVoiceUI() {
   $('voiceJoinBtn').classList.toggle('hidden', VV.on);
   $('voiceJoinBtn').disabled = VV.connecting;
-  $('voiceJoinBtn').textContent = VV.connecting ? '🎙 …' : '🎙 JOIN VOICE';
+  $('voiceJoinBtn').textContent = VV.connecting ? 'JOINING…' : 'JOIN VOICE';   // the mic icon is painted by CSS
   $('voiceLive').classList.toggle('hidden', !VV.on);
   $('voiceErr').classList.toggle('hidden', !VV.err);
   $('voiceErr').textContent = VV.err || '';
   if (VV.on) {
-    $('voiceMuteBtn').textContent = VV.muted ? '🔇' : '🎙';
+    $('voiceMuteBtn').textContent = '';   // CSS paints the mic / muted-mic icon from the .off class
     $('voiceMuteBtn').classList.toggle('off', VV.muted);
     $('voiceTxHint').textContent = VV.muted ? 'muted (M)' : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : 'hold V to talk') : 'proximity mic';
   }
@@ -558,7 +558,7 @@ function renderVoiceUI() {
     const nm = document.createElement('span'); nm.className = 'vp-name'; nm.style.color = p?.color || '#fff'; nm.textContent = p?.name || `player ${id}`;
     const vol = document.createElement('input'); vol.type = 'range'; vol.min = 0; vol.max = 1.5; vol.step = 0.05; vol.value = peer.vol;
     vol.oninput = () => voice.setPeerVol(id, Number(vol.value));
-    const mute = document.createElement('button'); mute.className = 'voice-btn' + (peer.muted ? ' off' : ''); mute.textContent = peer.muted ? '🔇' : '🔊';
+    const mute = document.createElement('button'); mute.className = 'voice-btn' + (peer.muted ? ' off' : ''); mute.textContent = '';   // CSS paints the speaker / muted icon from the .off class
     mute.onclick = () => voice.togglePeerMute(id);
     row.append(nm, vol, mute); rows.appendChild(row);
   }
@@ -838,14 +838,14 @@ function updateCasino(dt) {
 function hud(rv) {
   const g = S.g;
   if (g) {
-    $('hDay').textContent = `DAY ${g.day}/${C.DAYS}`;
-    $('hClock').textContent = g.ph === 'night' ? '🌙 NIGHT' : g.ph === 'camp' ? `☀️ ${fmtClock(g.clk)} · leave camp to start the clock` : fmtClock(g.clk);
+    $('hDay').textContent = `DAY ${Math.min(g.day, C.DAYS)}/${C.DAYS}`;
+    $('hClock').textContent = g.ph === 'night' ? 'NIGHT' : g.ph === 'camp' ? `${fmtClock(g.clk)} · leave camp to start the clock` : fmtClock(g.clk);
     $('hClock').classList.toggle('late', g.ph === 'road' && g.clk >= 21);
     $('hBank').textContent = `BANK ${fmt$(g.bank)}`;
     $('hBank').classList.toggle('neg', g.bank < 0);
     $('hDue').textContent = g.paid ? `PAID ✓` : `DUE ${fmt$(g.due)} @ MIDNIGHT`;
     $('hDue').classList.toggle('ok', !!g.paid || g.bank >= g.due);
-    $('hStrikes').textContent = `🚛 STRIKES ${g.str}/${C.STRIKES_TO_LOSE - 1}`;
+    $('hStrikes').textContent = `STRIKES ${g.str}/${C.STRIKES_TO_LOSE - 1}`;
     $('hStrikes').classList.toggle('red', g.str > 0);
     $('hStrikes').title = 'Missed payments. Two strikes take parts of the RV. The third takes the RV.';
   }
@@ -857,8 +857,8 @@ function hud(rv) {
   let held = '';
   if (me.holding) {
     const p = S.props.get(me.holding.id);
-    held = p ? (p.type === 'map' ? '🗺️ ROAD MAP — [F] raise/lower · [Q] drop' : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`) : '';
-  } else if (me.hasHook) held = '🪝 WINCH HOOK clipped to your belt';
+    held = p ? (p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop' : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`) : '';
+  } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
   $('heldLabel').classList.toggle('hidden', !held);
   $('koOverlay').classList.toggle('hidden', me.mode !== 'ko');

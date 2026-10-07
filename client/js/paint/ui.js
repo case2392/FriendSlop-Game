@@ -10,9 +10,9 @@
 //   tiling:    ui_parchment ui_stone ui_wood ui_leather ui_bar
 //   9-slice:   ui_frame_gold (192, slice 64)  ui_frame_silver (96, slice 32)
 //              ui_btn_red / ui_btn_stone (128x40, slice 14)  ui_editbox (64, slice 16)
-//   sprites:   ui_filigree (512x64)  ui_endcap (160x128)  ui_seal (96)  ui_menu_bg (1280x720)
+//   sprites:   ui_filigree (512x64)  ui_endcap (160x128)  ui_seal (96)  ui_ring (128)  ui_menu_bg (1280x720)
 //   icons 64:  ui_ico_<crown coin hourglass scroll hook key sun mic micoff speaker
-//              speakeroff walkie gear close ping skull>
+//              speakeroff walkie gear close ping skull bolt>
 import {
   register, mottle, streaks, blob, ellipse, stroke, cracks, glaze, blurTile, fill, vgrad, rgba, mix, shade,
   lightOf, shadowOf, wrap, range, pick, rowLayout, paintRects, makeCanvas, jitter, blade,
