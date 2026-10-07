@@ -3,7 +3,7 @@
 //
 //   node tools/scene.mjs camp,road,town [outdir] [day 1-5] [hour] [seed]
 //
-// Views: camp road vista wall poi(=every stop on the leg) gate grade winch town pawn casino
+// Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) boulder gate grade winch town pawn casino
 //        pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin crew hands loot night   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3-4 badlands, 5 desert.
@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 
-const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
+const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'crash', 'boulder', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
 const [viewArg = 'camp,road,town', OUT = 'test/screenshots/scene', dayArg = '1', hourArg = '10', seed = '777'] = process.argv.slice(2);
 const views = viewArg === 'all' ? ALL : viewArg.split(',').filter(Boolean);
 const DAY = Math.max(1, Math.min(5, +dayArg | 0)), HOUR = +hourArg;
@@ -119,6 +119,18 @@ for (const v of views) {
         await camAt(x, z, p.x, (await hy(p.x, p.z)) + (p.type === 'crash' ? 4 : 1.6), p.z);
         await shot(dave, `poi${i}-${p.type}`);
       }
+    } else if (v === 'crash') {
+      const p = W.pois.find(p => p.type === 'crash');
+      if (!p) { console.log('  (no crash site on this day)'); continue; }
+      // stand on the mesa top, a few metres from the wreck
+      await camAt(p.x - p.side * 5.5, p.z - 4.5, p.x, (await hy(p.x, p.z)) + 0.9, p.z);
+      await shot(dave, v);
+    } else if (v === 'boulder') {
+      const b = W.obstacles.find(o => o.type === 'boulder');
+      if (!b) { console.log('  (no boulder on this day)'); continue; }
+      const z = b.z - 11, x = (await rx(z)) - 1.5;
+      await camAt(x, z, await rx(b.z), (await hy(await rx(b.z), b.z)) + 1.4, b.z);
+      await shot(dave, v);
     } else if (v === 'gate') {
       const g = W.obstacles.find(o => o.type === 'gate');
       if (!g) { console.log('  (no gate on this day)'); continue; }
