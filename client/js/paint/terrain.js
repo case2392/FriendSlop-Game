@@ -173,12 +173,15 @@ function paintRoad(g, s, rnd, P) {
 }
 
 // ---- natural rock faces ---------------------------------------------------------------------------
-// A cliff is painted from a relief: a height field (how far the rock sticks out toward the viewer)
-// built from big tilted planes (a domain-warped Voronoi of slabs), broken ledges (a sawtooth per slab:
-// a lit lip on top, a face that recedes into shadow below it), broad bulges and fine chisel marks.
-// It is lit from the upper left, darkened in its cavities, and then painted over: moss and grass on
-// the lips, rain stains running down from them, cracks and lichen. Strata biomes colour the same
-// relief by height in bands (the y axis is world height, so the bands stay level in the world).
+// A cliff is painted in two parts. The rock is a mosaic of planes of very different sizes (a
+// power diagram, so a few big planes and many small chips), each painted as one tone from its own
+// normal, with cracks along only some of their borders. Under that sits a relief (how far the rock
+// sticks out toward the viewer): partial shelves, each a lit top over a soft shaded underside,
+// broad bulges, fine chisel marks, and for strata biomes level bands that bulge or recede. The
+// relief is lit from the upper left and darkened in its cavities, then painted over: moss, dry
+// grass or snow on whatever faces up (snow pillows and icicles in the pass), rain or snow streaks
+// running down from the lips, chisel strokes and lichen. The y axis is world height, so shelves
+// and strata stay level in the world.
 
 // A tileable 1D table: f((a·x + b·y) mod s) tiles for integer a, b.
 function ptable(rnd, s, terms, falloff, k0 = 1) {
@@ -692,24 +695,12 @@ register('ground2_badlands', {
 
 // ---- ground: desert (Tanaris) ---------------------------------------------------------------
 
-function sandRipples(g, s, rnd, light, dark, n = 34, alpha = 0.3) {
-  for (let i = 0; i < n; i++) {
-    const y0 = (i + rnd() * 0.6) / n * s;
-    const wob = periodic(rnd, 4, 1.1, 1), ph = rnd();
-    const pts = []; for (let x = -16; x <= s + 16; x += 8) pts.push([x, y0 + wob(x / s + ph) * 14]);
-    for (const dy of [-s, 0, s]) {
-      stroke(g, pts.map(([x, y]) => [x, y + dy + 2.5]), 3.4, 3.4, dark, alpha * 0.9);
-      stroke(g, pts.map(([x, y]) => [x, y + dy]), 2.4, 2.4, light, alpha);
-    }
-  }
-}
-
 register('ground_desert', {
   family: 'terrain', size: 512, note: 'Tanaris: wind-rippled sand',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#dcb985');
     mottle(g, s, rnd, { colors: ['#e8cc96', '#d2ad74', '#c79c62', '#efd6a4', '#d8b47e'], count: 50, rmin: 50, rmax: 160, alpha: 0.42, hard: 0.08 });
-    snowRipples(g, s, rnd, { n: 46, len: [90, 280], amp: [3, 9], lit: '#f6e6c0', lee: '#b08a5a', alpha: 0.42, wid: [2.5, 5] });
+    windRipples(g, s, rnd, { n: 46, len: [90, 280], amp: [3, 9], lit: '#f6e6c0', lee: '#b08a5a', alpha: 0.42, wid: [2.5, 5] });
     mottle(g, s, rnd, { colors: ['#e8cc96', '#dcb985'], count: 60, rmin: 20, rmax: 60, alpha: 0.3, hard: 0.2 });
     mottle(g, s, rnd, { colors: ['#c49a68', '#f0dcb0'], count: 160, rmin: 3, rmax: 9, alpha: 0.2, hard: 0.4 });
     stones(g, s, rnd, { colors: ['#c4a47c', '#a88a68', '#e0caa0', '#9a7e64'], count: 50, rmin: 1.3, rmax: 3, ground: '#dcb985', sink: 0.4 });
@@ -723,7 +714,7 @@ register('ground2_desert', {
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#cba26c');
     mottle(g, s, rnd, { colors: ['#b88e5c', '#d4ac78', '#c79c62', '#ad8452', '#ddb886'], count: 50, rmin: 40, rmax: 140, alpha: 0.42, hard: 0.1 });
-    snowRipples(g, s, rnd, { n: 20, len: [70, 200], amp: [3, 8], lit: '#eed8aa', lee: '#a47e56', alpha: 0.28, wid: [2, 4] });
+    windRipples(g, s, rnd, { n: 20, len: [70, 200], amp: [3, 8], lit: '#eed8aa', lee: '#a47e56', alpha: 0.28, wid: [2, 4] });
     mottle(g, s, rnd, { colors: ['#d8b480', '#c09464'], count: 60, rmin: 20, rmax: 70, alpha: 0.3, hard: 0.2 });
     dryCracks(g, s, rnd, { n: 40, len: [20, 50], w: [0.9, 1.6], color: '#9a7048', lip: '#f6e2b8', alpha: 0.3 });
     stones(g, s, rnd, { colors: ['#d8c09a', '#b89a74', '#e8d4ae', '#9c8268', '#a07a5a'], count: 220, rmin: 1.3, rmax: 3.2, ground: '#cba26c', sink: 0.35 });
@@ -738,15 +729,11 @@ register('ground2_desert', {
 // Snow is painted, not white: a cool blue-gray base, big warm sunlit fields, soft blue shadows in
 // the hollows, drifts lit on the upper left, broken wind ripples, a few things poking through.
 
-// Broken wind ripples: wavy crests of different lengths, each a lit crest over a blue lee shadow.
-// Paint fn into a transparent layer at full strength, then lay the layer down at alpha once
+// Broken wind ripples (snow and sand): wavy crests of different lengths, each a lit crest over
+// a cool lee shadow.
+// Lee and crest strokes go into two layers at full strength and are laid down once at alpha
 // (alpha strokes overlapping at their joints would otherwise bead up).
-function layer(g, s, alpha, fn) {
-  const L = makeCanvas(s), lg = L.getContext('2d');
-  fn(lg);
-  g.save(); g.globalAlpha = alpha; g.drawImage(L, 0, 0); g.restore();
-}
-function snowRipples(g0, s, rnd, { n, len, amp, lit, lee, alpha, wid = [4, 9] }) {
+function windRipples(g0, s, rnd, { n, len, amp, lit, lee, alpha, wid = [4, 9] }) {
   const lees = makeCanvas(s), lits = makeCanvas(s), gl = lees.getContext('2d'), gt = lits.getContext('2d');
   for (let i = 0; i < n; i++) {
     const x0 = rnd() * s, y0 = rnd() * s, L = range(rnd, len[0], len[1]), ph = rnd() * TAU, A = range(rnd, amp[0], amp[1]), tilt = range(rnd, -0.12, 0.12);
@@ -809,7 +796,7 @@ register('ground_snow', {
     mottle(g, s, rnd, { colors: ['#f4f0e4', '#cad6e6', '#bccbe0', '#eceff0', '#d6dfeb', '#f8f2e2'], count: 46, rmin: 60, rmax: 170, alpha: 0.55, hard: 0.08 });
     mottle(g, s, rnd, { colors: ['#b0c2da', '#bfcde2'], count: 14, rmin: 30, rmax: 90, alpha: 0.4, hard: 0.2, stretch: 2, rot: 0.25 });
     drifts(g, s, rnd, 34, [20, 60], '#fcf8ee', '#9fb3d0', 1.1);
-    snowRipples(g, s, rnd, { n: 26, len: [90, 240], amp: [5, 16], lit: '#fbf8f0', lee: '#a8bad4', alpha: 0.4, wid: [5, 10] });
+    windRipples(g, s, rnd, { n: 26, len: [90, 240], amp: [5, 16], lit: '#fbf8f0', lee: '#a8bad4', alpha: 0.4, wid: [5, 10] });
     mottle(g, s, rnd, { colors: ['#c4d0e0', '#f6f4ee'], count: 140, rmin: 4, rmax: 14, alpha: 0.18, hard: 0.35, stretch: 1.6, rot: 0.3 });
     blurTile(cv, 1.2);
     // things poking through: dry grass tips, a few capped stones, twigs
@@ -849,7 +836,7 @@ register('ground2_snow', {
     stones(g, s, rnd, { colors: ['#6f7682', '#7e8694', '#8a8e96', '#5e6472'], count: 90, rmin: 1.4, rmax: 3.5, ground: '#7d7464', sink: 0.2, where: (x, y) => Math.min(1, near(x, y) * 2) });
     // snow lips around the bare patches and drifts between them
     drifts(g, s, rnd, 34, [10, 30], '#fbf8f0', '#a8bad2', 0.9);
-    snowRipples(g, s, rnd, { n: 14, len: [70, 180], amp: [4, 12], lit: '#fbf8f0', lee: '#a8bad4', alpha: 0.3, wid: [4, 8] });
+    windRipples(g, s, rnd, { n: 14, len: [70, 180], amp: [4, 12], lit: '#fbf8f0', lee: '#a8bad4', alpha: 0.3, wid: [4, 8] });
     cappedStones(g, s, rnd, 10, ['#6f7682', '#7e8694'], [3, 6]);
     glints(g, s, rnd, 30);
     glaze(g, s, s, '#eaf0ff', 0.08, 'soft-light');
@@ -963,7 +950,7 @@ register('road_desert', {
           const side = rnd() < 0.5, x = side ? range(rnd, 0, 110) : range(rnd, s - 110, s), y = rnd() * s, r = range(rnd, 20, 50);
           wrap(s, x, y, r * 1.6, (X, Y) => blob(g, X, Y, r * 1.6, r * 0.7, range(rnd, -0.3, 0.3), '#e4c896', 0.35, 0.3));
         }
-        snowRipples(g, s, rnd, { n: 16, len: [60, 160], amp: [3, 8], lit: '#f0dcb0', lee: '#a8845a', alpha: 0.22, wid: [2, 4] });
+        windRipples(g, s, rnd, { n: 16, len: [60, 160], amp: [3, 8], lit: '#f0dcb0', lee: '#a8845a', alpha: 0.22, wid: [2, 4] });
       } });
   },
 });
@@ -1402,9 +1389,7 @@ register('sky_clouds', {
       }));
     }
     // soften a touch: painted, not cut out
-    const cv2 = makeCanvas(w, h), g2 = cv2.getContext('2d');
-    g2.filter = 'blur(1.2px)'; g2.drawImage(g.canvas, 0, 0);
-    g.clearRect(0, 0, w, h); g.drawImage(cv2, 0, 0);
+    blurWrapX(g, w, h, 1.2);
     // fade out toward the very bottom so clouds sink into the horizon haze
     g.save(); g.globalCompositeOperation = 'destination-out';
     const gr = g.createLinearGradient(0, h - 50, 0, h); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
@@ -1526,10 +1511,16 @@ for (const b of Object.keys(MTN)) {
       });
       g.putImageData(img, 0, 0);
       // soften: a painted look, not a rendered one
-      const cv2 = makeCanvas(w, h), g2 = cv2.getContext('2d');
-      g2.filter = 'blur(0.8px)'; g2.drawImage(g.canvas, 0, 0);
-      g.clearRect(0, 0, w, h); g.drawImage(cv2, 0, 0);
+      blurWrapX(g, w, h, 0.8);
     },
   });
+}
+// Blur a band that wraps around the sky horizontally (no seam at u = 0 / 1).
+function blurWrapX(g, w, h, px) {
+  const big = makeCanvas(w * 3, h), bg = big.getContext('2d');
+  for (let i = 0; i < 3; i++) bg.drawImage(g.canvas, i * w, 0);
+  const out = makeCanvas(w * 3, h), og = out.getContext('2d');
+  og.filter = `blur(${px}px)`; og.drawImage(big, 0, 0);
+  g.clearRect(0, 0, w, h); g.drawImage(out, w, 0, w, h, 0, 0, w, h);
 }
 function mixRGB(a, b, t) { return { r: a.r + (b.r - a.r) * t, g: a.g + (b.g - a.g) * t, b: a.b + (b.b - a.b) * t }; }

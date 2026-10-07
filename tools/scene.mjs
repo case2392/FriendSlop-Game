@@ -27,9 +27,10 @@ const errors = [];
 async function open(name) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await ctx.newPage();
+  page.setDefaultTimeout(180000);   // several agents may be rendering on swiftshader at once
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/404|favicon/.test(m.text())) errors.push(`[${name}] ${m.text()}`); });
-  await page.goto(`http://localhost:${PORT}`);
+  await page.goto(`http://localhost:${PORT}`, { timeout: 180000 });
   await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
   await page.fill('#nameInput', name);
   return page;

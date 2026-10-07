@@ -10,6 +10,13 @@
 // chunky painted hair, stitched leather, gold trim). Geometry is smooth lathes,
 // tubes and thick slabs, all built here; the detail lives in the texture.
 //
+// The town folk: Honest Ed (burly, bald, a grizzled beard, rolled sleeves and a
+// leather shop apron), the clerk (a barmaid's laced bodice, puffed blouse sleeves,
+// a long gathered skirt with an apron), the Dealer (pressed shirt with sleeve
+// garters, pinstriped vest, green visor, slick hair, red-lit eyes) and the Repo Man
+// (scale 1.25 and bulked up besides: plaid flannel, overalls, work gloves, a beanie,
+// brass aviators and a tow chain worn like a bandolier, standing hands on hips).
+//
 // Frames: root at the feet; the model faces local +x inside, and root.rotation.y
 // = -PI/2 turns it to face +z (unchanged from the old egg people). Bones rotate
 // about local z to swing forward (legs, arms, head nod), as before. Two extra
@@ -1257,7 +1264,5 @@ export const PREVIEW = {
   jumping: () => viewIn(2, { mode: M_.AIR }),
   laughing: () => viewIn(1, {}, { emote: '😂' }),
   crowned: () => viewIn(3, {}, { emote: '👑' }),
-  viewtest: () => { const q = new URLSearchParams(location.search); const L = (q.get('vf') || '40').split(','), n = Number(L[(PREVIEW._vt = (PREVIEW._vt ?? -1) + 1) % L.length]); return viewIn(Number(q.get('vid') || 0), { yaw: Number(q.get('vyaw') || 0), mode: Number(q.get('vmode') || 0), flags: Number(q.get('vflags') || 0) }, { speed: Number(q.get('vspeed') || 0), frames: n, emote: q.get('vemote') || null }); },
-  posetest: () => { const q = new URLSearchParams(location.search); const P = JSON.parse(q.get('pose') || '{}'); const o = JSON.parse(q.get('popts') || '{"hatIndex":0,"skinIndex":1,"scale":1.25}'); return posed(q.get('pcol') || '#6b5640', o, { ...(STANCE[q.get('stance')] || {}), ...P }); },
   fphands: () => { const g = new THREE.Group(); const m = painted(handsAtlas('#00E5FF')); const L = new THREE.Mesh(fpHandGeometry(-1), m), R = new THREE.Mesh(fpHandGeometry(1), m); L.position.set(-0.16, 0, 0); R.position.set(0.16, 0, 0); for (const h of [L, R]) { h.rotation.x = 0.5; g.add(h); } g.rotation.y = Math.PI; g.scale.setScalar(3); return g; },
 };

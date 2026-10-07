@@ -142,7 +142,7 @@ export function buildStructures(W) {
     group.add(ch.root);
     if (label) {
       const s = labelSprite(label, '#ffe9a8', 30);
-      s.position.set(spot.x, spot.y + 2.25, spot.z);
+      s.position.set(spot.x, spot.y + 2.25 * (opts.scale || 1) + 0.1, spot.z);
       s.scale.set(1.9, 0.36, 1);
       group.add(s);
     }
@@ -153,11 +153,7 @@ export function buildStructures(W) {
   npc({ ...T.clerk, ry: T.clerk.ry }, '#2e86ab', { hatIndex: 0, skinIndex: 4 }, 'CLERK');
   npc({ ...T.bj.dealer, ry: T.bj.ry + Math.PI }, '#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }, 'THE DEALER');
   const repoSpot = { x: T.repo.x - 2.4, y: T.repo.y, z: T.repo.z + 0.6, ry: -Math.PI / 2 };   // street side, facing you
-  const repo = npc(repoSpot, '#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }, 'THE REPO MAN');
-  // sunglasses
-  const shades = new THREE.Mesh(new THREE.BoxGeometry(4, 5, 30), flat('#0a0a0a'));
-  shades.position.set(16.5, 4, 0);
-  repo.head.add(shades);
+  npc(repoSpot, '#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }, 'THE REPO MAN');   // people.js gives him brass aviators
   group.add(towTruck(T.repo));
 
   // pawn counter appraisal + casino furniture

@@ -47,7 +47,7 @@ const CFG = {
       cards: [[0.75, 0.5, 0.5], [0.8, 0.55, 0.2], [0.75, 0.5, 0.15], [0.7, 0.5, 0.15]] },
   },
   desert: {
-    hw: 3.1, scale: [7, 7, 6, 16], mud: 6, roadLen: 10, cliff: [0.16, 0.28], cliffN: [0.14, 0.06], g2: [0.62, 0.3],
+    hw: 3.1, scale: [7, 7, 6, 16], mud: 6, roadLen: 10, cliff: [0.21, 0.33], cliffN: [0.14, 0.06], g2: [0.62, 0.3],
     ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.92], tintB: [0.95, 0.97, 1.02], macro: 0.18,
     clutter: { cell: 2.1, radius: 22, density: 0.12, flowers: 0,
       cards: [[0.7, 0.45, 0.55], [0.75, 0.5, 0.2], [0.7, 0.45, 0.15], [0.6, 0.45, 0.1]] },
@@ -102,7 +102,7 @@ function splatMaterial(biome, cfg) {
   m.defines = {};
   if (cheap) m.defines.TERRAIN_CHEAP = 1;
   if (cfg.sparkle) m.defines.TERRAIN_SPARKLE = 1;
-  m.customProgramCacheKey = () => 'terrain-splat-v6' + (cheap ? 'c' : '') + (cfg.sparkle ? 's' : '');
+  m.customProgramCacheKey = () => 'terrain-splat-v7' + (cheap ? 'c' : '') + (cfg.sparkle ? 's' : '');
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
@@ -175,16 +175,26 @@ function splatMaterial(biome, cfg) {
             float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
             vec3 cc = vec3(0.0); float aw = 0.0;
+            // far walls use the rock at 2.5x its size: fewer, bigger masses instead of a fine repeat
+            float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp));
             if (an.x > 0.03) {
               vec2 p = vec2(wp.z, wp.y) / uScale.w + cw;
-              vec3 c1 = texture2D(tCliff, p).rgb;
-              c1 = mix(c1, texture2D(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21)).rgb, xb);
+              vec3 c1 = vec3(0.0);
+              if (farK < 0.999) {
+                c1 = texture2D(tCliff, p).rgb;
+                c1 = mix(c1, texture2D(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21)).rgb, xb);
+              }
+              if (farK > 0.001) c1 = mix(c1, texture2D(tCliff, p * 0.4 + vec2(0.13, 0.57)).rgb, farK);
               cc += an.x * c1; aw += an.x;
             }
             if (an.y > 0.03) {
               vec2 p = vec2(-wp.x, wp.y) / uScale.w + vec2(0.5, 0.0) + cw;
-              vec3 c2 = texture2D(tCliff, p).rgb;
-              c2 = mix(c2, texture2D(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47)).rgb, xb);
+              vec3 c2 = vec3(0.0);
+              if (farK < 0.999) {
+                c2 = texture2D(tCliff, p).rgb;
+                c2 = mix(c2, texture2D(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47)).rgb, xb);
+              }
+              if (farK > 0.001) c2 = mix(c2, texture2D(tCliff, p * 0.4 + vec2(0.71, 0.29)).rgb, farK);
               cc += an.y * c2; aw += an.y;
             }
             cc /= aw;
