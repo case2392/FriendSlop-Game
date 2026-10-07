@@ -382,7 +382,7 @@ function beardSurface(S, { thMax, top, bot, off0 = 0.003, off1 = 0.016, taper = 
     if (dy >= CH) return toHead(facePt(th, dy * HS, off, fem));
     const p0 = facePt(th, CH * HS, off, fem), t = (CH - dy) / 0.05;
     return toHead([p0[0] + 0.016 * t - 0.006 * t * t, dy * HS, p0[2] * (1 - taper * Math.min(1, t))]);
-  }, nu, 6, 0.008, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(u, v); return [headU(th), headV(dy)]; }, bones: B.head, inside: () => toHead(HC), noInner: true });
+  }, nu, 6, 0.008, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(u, v); return [headU(th), headV(dy)]; }, bones: B.head, inside: () => toHead(HC) });
 }
 // A mustache: a thick tapered roll under the nose sweeping out past the mouth corners
 // and drooping (or curling up at the ends: a handlebar). Textured from the face, where
@@ -743,7 +743,7 @@ function apronParts(S) {
 
 // The road map held up in front of the chest (third person). It rides the `map` bone, which
 // sits at zero scale (collapsed out of sight inside the chest) unless the map is out.
-const MAP_AT = [0.4, 1.17, 0];
+const MAP_AT = [0.38, 1.22, 0];
 function mapParts() {
   return slab((u, v) => {
     const x = (u - 0.5) * 0.3, y = (v - 0.5) * 0.22, curl = 0.012 * (x / 0.15) ** 2;
@@ -961,7 +961,7 @@ function pauldron(S, F, s, size) {
     const th = thOf(u), f = (1 - v) * fmax;
     const lip = 1 + 0.075 * gauss(v, 0.07);
     return pt(th, f, R * lip * (1 + 0.05 * Math.cos(th)));
-  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, noInner: true }));
+  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, uvInner: innerIn(REG.paul, 0.02, 0.26) }));
   const out = [0, -0.25, s]; const ol = Math.hypot(...out);
   const thOut = Math.atan2((out[0] * E2[0] + out[1] * E2[1] + out[2] * E2[2]) / ol, (out[0] * E1[0] + out[1] * E1[1] + out[2] * E1[2]) / ol);
   P.push(...slab((u, v) => {
@@ -1020,7 +1020,7 @@ function makeSkeleton(F) {
   for (const f of [by.flapF, by.flapB]) { by.hips.add(f); f.position.set(0, J.hipY - J.hips, 0); }
   by.flapF.add(by.flapF2); by.flapF2.position.set(0.17, FLAP2_Y - J.hipY, 0);
   by.head.add(by.hat);
-  by.chest.add(by.map); by.map.position.set(MAP_AT[0], MAP_AT[1] - J.chest, MAP_AT[2]); by.map.scale.setScalar(1e-4);
+  by.chest.add(by.map); by.map.position.set(MAP_AT[0], MAP_AT[1] - J.chest, MAP_AT[2]);    // (bound at scale 1; applyPose collapses it)
   return bones;
 }
 
