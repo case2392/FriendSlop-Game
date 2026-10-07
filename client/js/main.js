@@ -12,7 +12,7 @@ import { Me } from './player.js';
 import { Interp } from './interp.js';
 import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
-import { buildProp, mapCanvas } from './props3d.js';
+import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText } from './labels.js';
 
@@ -184,7 +184,7 @@ function computeTarget() {
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
     const a = nearestAnchor();
-    return { kind: 'hookhold', label: a ? (a.prop ? '[E] hook the winch onto it' : '[E] hook the winch here ⚓') : 'carrying the winch hook — find a post / dead tree · [Q] drop it' };
+    return { kind: 'hookhold', label: a ? (a.prop ? '[E] hook the winch onto it' : '[E] hook the winch here') : 'carrying the winch hook — find a post / dead tree · [Q] drop it' };
   }
   const eye = me.eye(S.rv), look = me.look();
   const hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
@@ -328,6 +328,7 @@ async function buildDay(m) {
   S.wv = buildWorld(W);
   scene.add(S.wv.group);
   S.mapCv = mapCanvas(W);
+  prewarmProps(W);   // paint the loot atlas and build prop meshes while idle, so the first loot doesn't stall a frame
   rvView.setParts(S.parts);
   S.interp.reset();
   S.dayLabel = m.day;

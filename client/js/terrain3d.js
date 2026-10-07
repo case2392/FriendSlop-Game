@@ -28,34 +28,34 @@ const MUD_TILE = 10;         // the mud texture spans 10 m across the road, like
 // clutter: cell size (m), slots per cell, patch noise scale (m), how sparse (density), cards [w, h, weight].
 const CFG = {
   meadow: {
-    hw: 3.0, scale: [7, 9, 6, 11], cliff: [0.27, 0.36], cliffN: [0.1, 0.05], g2: [0.56, 0.5],
+    hw: 3.0, scale: [7, 9, 6, 15], cliff: [0.34, 0.5], cliffN: [0.14, 0.04], g2: [0.56, 0.5], collar: [0.2, 0.11, 0.045], ledge: [0.95, 0.97, 0.9],
     ao: [0.5, 0.52, 0.7], tintA: [1.12, 1.04, 0.78], tintB: [0.82, 0.95, 1.0], macro: 0.4, macro2: 0.16,
-    clutter: { cell: 2.2, slots: 4, radius: 23, patch: 9, density: 1.0, spread: 0.8, flowers: 0.16,
-      cards: [[0.85, 0.6, 0.55], [0.75, 0.85, 0.25], [0.65, 0.55, 0.1], [0.65, 0.55, 0.1]] },
+    clutter: { cell: 2.2, slots: 4, radius: 23, patch: 9, density: 1.0, spread: 0.8, flowers: 0.16, flowerCards: [2, 3, 7],
+      cards: [[0.85, 0.6, 0.34], [0.7, 0.45, 0.22], [0.65, 0.55, 0.08], [0.65, 0.55, 0.08], [0.75, 0.85, 0.08], [0.65, 0.42, 0.1], [0.8, 0.6, 0.2], [0.6, 0.38, 0.06]] },
   },
   fields: {
-    hw: 3.0, scale: [7, 9, 6, 11], cliff: [0.27, 0.36], cliffN: [0.1, 0.05], g2: [0.6, 0.45],
+    hw: 3.0, scale: [7, 9, 6, 15], cliff: [0.34, 0.5], cliffN: [0.14, 0.04], g2: [0.6, 0.45], collar: [0.3, 0.2, 0.09], ledge: [0.95, 0.95, 0.9],
     ao: [0.55, 0.52, 0.66], tintA: [1.08, 1.0, 0.84], tintB: [0.9, 0.98, 1.0], macro: 0.36,
-    clutter: { cell: 2.2, slots: 4, radius: 23, patch: 10, density: 0.95, spread: 0.85, flowers: 0.06, wheat: 0.3,
-      cards: [[0.85, 0.62, 0.6], [0.95, 1.0, 0.12], [0.8, 0.58, 0.28], [0.65, 0.55, 0.06]] },
+    clutter: { cell: 2.2, slots: 4, radius: 23, patch: 10, density: 0.95, spread: 0.85, flowers: 0.06, flowerCards: [4], wheat: 0.3, wheatCards: [[1, 0.95], [2, 0.72]],
+      cards: [[0.85, 0.62, 0.36], [0.95, 0.95, 0.04], [0.85, 0.72, 0.04], [0.8, 0.58, 0.22], [0.65, 0.55, 0.05], [0.85, 0.72, 0.16], [0.8, 0.7, 0.08], [0.7, 0.32, 0.08]] },
   },
   snow: {
-    hw: 3.0, scale: [8, 9, 6, 11], cliff: [0.22, 0.32], cliffN: [0.12, 0.06], g2: [0.67, 0.42],
+    hw: 3.0, scale: [8, 9, 6, 14], cliff: [0.26, 0.44], cliffN: [0.14, 0.04], g2: [0.67, 0.42], collar: [0.36, 0.38, 0.42], ledge: [1.0, 1.0, 1.0],
     ao: [0.6, 0.67, 0.86], tintA: [1.03, 1.01, 0.96], tintB: [0.9, 0.95, 1.06], macro: 0.2, macro2: 0.1, mudTex: 'slush', sparkle: true,
     clutter: { cell: 3.0, slots: 3, radius: 22, patch: 10, density: 0.5, spread: 1.0, flowers: 0,
-      cards: [[0.8, 0.55, 0.55], [0.8, 0.6, 0.22], [0.7, 0.42, 0.05], [0.95, 0.75, 0.4]] },
+      cards: [[0.8, 0.55, 0.38], [0.8, 0.6, 0.16], [0.7, 0.42, 0.04], [0.95, 0.75, 0.26], [1.1, 0.5, 0.14], [0.6, 0.38, 0.2], [0.85, 0.65, 0.08], [0.9, 0.4, 0.12]] },
   },
   badlands: {
-    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.22], cliffN: [0.1, 0.06], g2: [0.6, 0.35], strata: true, mudTex: 'mud_badlands',
+    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands',
     ao: [0.52, 0.42, 0.55], tintA: [1.07, 1.0, 0.9], tintB: [0.92, 0.95, 1.03], macro: 0.32,
     clutter: { cell: 3.2, slots: 3, radius: 22, patch: 12, density: 0.42, spread: 1.0, flowers: 0,
-      cards: [[0.75, 0.5, 0.5], [0.8, 0.55, 0.2], [0.75, 0.5, 0.15], [0.7, 0.5, 0.15]] },
+      cards: [[0.75, 0.5, 0.3], [0.8, 0.55, 0.12], [0.75, 0.5, 0.12], [0.7, 0.5, 0.12], [0.75, 0.5, 0.16], [0.85, 0.6, 0.06], [0.7, 0.45, 0.06], [0.5, 0.3, 0.14]] },
   },
   desert: {
-    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.38, 0.52], cliffN: [0.14, 0.06], g2: [0.62, 0.3], strata: true, dunes: true, mudTex: 'mud_desert',
+    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.36, 0.52], cliffN: [0.14, 0.05], g2: [0.62, 0.3], collar: [0.5, 0.36, 0.2], ledge: [1, 1, 1], strata: true, dunes: true, mudTex: 'mud_desert',
     ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.9], tintB: [0.94, 0.97, 1.03], macro: 0.3,
     clutter: { cell: 4.0, slots: 2, radius: 22, patch: 12, density: 0.3, spread: 1.0, flowers: 0,
-      cards: [[0.7, 0.45, 0.55], [0.75, 0.5, 0.2], [0.7, 0.45, 0.15], [0.6, 0.45, 0.1]] },
+      cards: [[0.7, 0.45, 0.34], [0.75, 0.5, 0.12], [0.7, 0.45, 0.12], [0.6, 0.45, 0.08], [0.8, 0.75, 0.12], [0.7, 0.45, 0.06], [0.6, 0.4, 0.06], [0.5, 0.3, 0.14]] },
   },
 };
 
@@ -102,7 +102,7 @@ function splatMaterial(biome, cfg) {
     uSpark: { value: 0 }, uFire: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uRoadSpan: { value: 2 * (cfg.hw + SHOULDER) },
     uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(MUD_TILE, 10, cfg.macro, cfg.macro2 ?? 0.12) },
     uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uCliffN: { value: new THREE.Vector2(...cfg.cliffN) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
-    uAO: { value: new THREE.Vector3(...cfg.ao) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
+    uAO: { value: new THREE.Vector3(...cfg.ao) }, uCollar: { value: new THREE.Vector3(...cfg.collar) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   m.userData.U = U;
@@ -110,23 +110,23 @@ function splatMaterial(biome, cfg) {
   if (cfg.sparkle) m.defines.TERRAIN_SPARKLE = 1;
   if (cfg.strata) m.defines.TERRAIN_STRATA = 1;
   if (cfg.dunes) m.defines.TERRAIN_DUNES = 1;
-  const key = 'terrain-splat-v8' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '');
+  const key = 'terrain-splat-v9' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-        attribute vec4 aRoad; attribute vec4 aSplat; attribute float aCv;
-        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv;`)
+        attribute vec4 aRoad; attribute vec4 aSplat; attribute float aCv; attribute vec2 aSlope;
+        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv; varying vec2 vSlope;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vRoad = aRoad; vSplat = aSplat; vCv = aCv;
+        vRoad = aRoad; vSplat = aSplat; vCv = aCv; vSlope = aSlope;
         vTPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vTNrm = normalize(mat3(modelMatrix) * objectNormal);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro;
-        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB; uniform float uSpark, uRoadSpan;
-        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv;
+        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge; uniform float uSpark, uRoadSpan;
+        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv; varying vec2 vSlope;
         float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
         float tHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
         `)
@@ -141,18 +141,33 @@ function splatMaterial(biome, cfg) {
           // large-scale noise comes per vertex (vRoad.zw, vSplat.w); one fetch gives the medium/fine noise
           vec4 mB = texture2D(tMacro, xr / 61.0 + vec2(0.31, 0.77));   // r: ~7-20 m, g: ~3-9 m, b: ~1-3 m
           float nE = mB.b;
-          // ground: two scales of the main ground, picked patch by patch so neither tile shows; on
-          // steep slopes (where a top-down projection stretches) a blurrier mip, so nothing streaks
-          float sBias = smoothstep(0.12, 0.45, 1.0 - nr.y) * 2.5 + smoothstep(80.0, 260.0, distance(cameraPosition, wp)) * 1.5;
-          vec3 g1 = texture2D(tG1, xz / uScale.x, sBias).rgb;
-          vec3 g1b = texture2D(tG1, xr / (uScale.x * 2.3) + 0.37, sBias).rgb;
+          // ground: two scales of the main ground, picked patch by patch so neither tile shows. Flat
+          // ground is projected from above; on slopes (by a smoothed slope, so the grid never shows)
+          // from the side, x- or z-facing, the switch dithered by noise. Every fetch is given the
+          // derivatives of its own projection, so a switch never drops to a tiny mip along the seam.
+          float distK = smoothstep(80.0, 260.0, distance(cameraPosition, wp));
+          float gB = exp2(distK * 1.5);
+          float sideW = smoothstep(0.17, 0.32, vSlope.y + (nE - 0.5) * 0.12 + (mB.r - 0.5) * 0.06);
+          vec2 sxz = vec2(wp.z, wp.y), szx = vec2(-wp.x, wp.y);
+          vec2 an0 = pow(abs(nr.xz) + 0.001, vec2(6.0));
+          bool useX = an0.x / (an0.x + an0.y) + (nE - 0.5) * 0.6 > 0.5;
+          vec2 sp = useX ? sxz : szx;
+          vec2 dsx = useX ? dFdx(sxz) : dFdx(szx), dsy = useX ? dFdy(sxz) : dFdy(szx);
+          bool side = sideW + (nE - 0.5) * 0.5 + (mB.g - 0.5) * 0.25 > 0.5;
+          vec2 gp = side ? sp : xz, gpr = side ? vec2(sp.x * 0.8 - sp.y * 0.6, sp.x * 0.6 + sp.y * 0.8) : xr;
+          vec2 gdx = side ? dsx : dFdx(xz), gdy = side ? dsy : dFdy(xz);
+          vec2 gdxr = ROT * gdx, gdyr = ROT * gdy;
+          if (side) { gdxr = vec2(dsx.x * 0.8 - dsx.y * 0.6, dsx.x * 0.6 + dsx.y * 0.8); gdyr = vec2(dsy.x * 0.8 - dsy.y * 0.6, dsy.x * 0.6 + dsy.y * 0.8); }
+          float sBias = side ? 1.0 : exp2(smoothstep(0.12, 0.45, 1.0 - nr.y) * 2.0);
+          vec3 g1 = textureGrad(tG1, gp / uScale.x, gdx / uScale.x * gB * sBias, gdy / uScale.x * gB * sBias).rgb;
+          vec3 g1b = textureGrad(tG1, gpr / (uScale.x * 2.3) + 0.37, gdxr / (uScale.x * 2.3) * gB * sBias, gdyr / (uScale.x * 2.3) * gB * sBias).rgb;
           g1 = mix(g1, g1b, smoothstep(0.36, 0.64, mB.g + (nE - 0.5) * 0.4) * 0.85);
           vec3 col = g1;
           float gW = 1.0;              // how much of the plain ground is left (for the snow sparkle)
           // the second ground in big blobs of noise
           float n2 = vSplat.w + (mB.r - 0.5) * 0.28 + (nE - 0.5) * 0.1;
           if (n2 > uG2.x - 0.1 - 0.3 * uG2.y) {
-            vec3 g2 = texture2D(tG2, xr / uScale.y, sBias).rgb;
+            vec3 g2 = textureGrad(tG2, gpr / uScale.y, gdxr / uScale.y * gB * sBias, gdyr / uScale.y * gB * sBias).rgb;
             float w2 = smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y);
             col = mix(g1, g2, w2);
           }
@@ -169,9 +184,13 @@ function splatMaterial(biome, cfg) {
               col = mix(col, vec3(0.022, 0.019, 0.017), (1.0 - smoothstep(0.85, 1.75, fd)) * 0.8);                                // soot
             }
           }
-          // the road, in road space; the ground laps over its ragged edge
+          // the road, in road space; the ground laps over its ragged edge. A second sample of the road
+          // (mirrored, a 23 m period) takes over in big patches, so the 10 m tile never repeats.
           if (vRoad.y < 2.6) {
-            vec3 rc = texture2D(tRoad, vec2(clamp(vRoad.x, 0.004, 0.996), wp.z / uMisc.y)).rgb;
+            vec2 ru = vec2(clamp(vRoad.x, 0.004, 0.996), wp.z / uMisc.y);
+            vec3 rc = texture2D(tRoad, ru).rgb;
+            float r2k = smoothstep(0.4, 0.6, mB.r * 0.75 + vRoad.w * 0.5 - 0.12);
+            if (r2k > 0.01) rc = mix(rc, texture2D(tRoad, vec2(1.0 - ru.x, wp.z / 23.0 + 0.37)).rgb, r2k);
             float edge = vRoad.y + (nE - 0.5) * 1.5 + (mB.g - 0.5) * 1.0;
             float rw = 1.0 - smoothstep(-0.35, 0.35, edge + clamp(tLum(col) - tLum(rc), -0.3, 0.3) * 1.6);
             col = mix(col, rc, rw);
@@ -184,11 +203,11 @@ function splatMaterial(biome, cfg) {
             col = mix(col, md, w * smoothstep(0.005, 0.1, vSplat.x));
             gW *= 1.0 - w;
           }
-          // cliffs by slope; patchy outcrops by noise
+          // rock, by the SMOOTHED slope (averaged per vertex over 5 x 5 cells, so the heightfield's
+          // triangles never show) plus a 30 m noise; the edge dithered by 1-3 m noise into a ragged band
           float slope = 1.0 - nr.y;
-          float sn = (mB.r - 0.5) * uCliffN.x + (mB.g - 0.5) * uCliffN.y + (vSplat.w - 0.5) * uCliffN.x;
-          float cB = slope + sn;
-          if (cB > uCliff.x - 0.1) {
+          float cB = vSlope.x + (vSplat.w - 0.5) * uCliffN.x + (mB.r - 0.5) * uCliffN.y + (nE - 0.5) * 0.12;
+          if (cB > uCliff.x - 0.01) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
             float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
             float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp));   // far walls: the rock at 2.5x, bigger masses
@@ -210,18 +229,25 @@ function splatMaterial(biome, cfg) {
               if (farK > 0.001) c2 = mix(c2, texture2D(tCliff, p * 0.4 + vec2(0.71, 0.29)).rgb, farK);
               cc += (1.0 - sx) * c2;
             }
-            // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces
             #ifdef TERRAIN_STRATA
+              // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces
               float topK = 1.0 - smoothstep(0.3, 0.5, slope);
               if (topK > 0.01) cc = mix(cc, texture2D(tG2, xz / (uScale.y * 0.8) + 0.41).rgb * vec3(0.92, 0.9, 0.9), topK);
+            #else
+              // ledges and shelves inside the rock hold what the ground holds (grass, golden grass,
+              // snow), so the foot and the lip of a wall turn into soft drifts, never a row of teeth
+              float ledge = smoothstep(0.26, 0.12, vSlope.y + (nE - 0.5) * 0.16 + (mB.g - 0.5) * 0.1 + (vSplat.w - 0.5) * 0.08);
+              cc = mix(cc, col * uLedge, ledge);
             #endif
-            // height blend: the lit, protruding parts of the rock break through the ground first
             float wk = smoothstep(uCliff.x, uCliff.y, cB);
-            wk = smoothstep(0.38, 0.62, wk + (min(tLum(cc), 0.7) - 0.42) * 0.9 * (1.0 - wk) + (nE - 0.5) * 0.15);
-            wk *= smoothstep(uCliff.x - 0.1, uCliff.x - 0.03, cB);      // zero at the branch boundary
+            // the lit, protruding parts of the rock break through first (a soft height blend)
+            wk = smoothstep(0.3, 0.7, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.1);
             #ifdef TERRAIN_DUNES
               wk *= 1.0 - smoothstep(-0.05, 0.35, vCv);                // dune crests stay sand
             #endif
+            // a thin collar of scree and dirt where the rock comes out of the ground
+            float collar = clamp(wk * (1.0 - wk) * 4.0, 0.0, 1.0) * smoothstep(0.15, 0.55, nE + mB.g * 0.4);
+            col = mix(col, uCollar * (0.65 + tLum(cc) * 1.1), collar * 0.5);
             col = mix(col, cc, wk);
             gW *= 1.0 - wk;
           }
@@ -272,7 +298,27 @@ function vertexData(W, cfg, clearings) {
   const { nx, nz, cell, X0, Z0, heights } = W;
   const NZ1 = nz + 1, NV = (nx + 1) * NZ1;
   const Hc = (ix, iz) => heights[(ix < 0 ? 0 : ix > nx ? nx : ix) * NZ1 + (iz < 0 ? 0 : iz > nz ? nz : iz)];
-  const nrm = new Float32Array(NV * 3), road = new Float32Array(NV * 4), spl = new Float32Array(NV * 4), cvA = new Float32Array(NV);
+  const nrm = new Float32Array(NV * 3), road = new Float32Array(NV * 4), spl = new Float32Array(NV * 4), cvA = new Float32Array(NV), slp = new Float32Array(NV * 2);
+  // the slope, smoothed: |grad h| per vertex, then tent-averaged over 5 x 5 (rock) and 3 x 3 (ground projection)
+  const G = new Float32Array(NV);
+  for (let ix = 0; ix <= nx; ix++) for (let iz = 0; iz <= nz; iz++) {
+    const dx = (Hc(ix + 1, iz) - Hc(ix - 1, iz)) / ((Math.min(ix + 1, nx) - Math.max(ix - 1, 0)) * cell);
+    const dz = (Hc(ix, iz + 1) - Hc(ix, iz - 1)) / ((Math.min(iz + 1, nz) - Math.max(iz - 1, 0)) * cell);
+    G[ix * NZ1 + iz] = Math.hypot(dx, dz);
+  }
+  const toS = g => 1 - 1 / Math.sqrt(1 + g * g);
+  for (let ix = 0; ix <= nx; ix++) for (let iz = 0; iz <= nz; iz++) {
+    let a5 = 0, n5 = 0, a3 = 0, n3 = 0;
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+      const x = ix + i, z = iz + j;
+      if (x < 0 || z < 0 || x > nx || z > nz) continue;
+      const g = G[x * NZ1 + z], w = (3 - Math.abs(i)) * (3 - Math.abs(j));
+      a5 += g * w; n5 += w;
+      if (Math.abs(i) < 2 && Math.abs(j) < 2) { const w3 = (2 - Math.abs(i)) * (2 - Math.abs(j)); a3 += g * w3; n3 += w3; }
+    }
+    const v = ix * NZ1 + iz;
+    slp[v * 2] = toS(a5 / n5); slp[v * 2 + 1] = toS(a3 / n3);
+  }
   const AO_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const AO_STEPS = [1, 2, 4, 7, 12];
   for (let ix = 0; ix <= nx; ix++) {
@@ -321,7 +367,7 @@ function vertexData(W, cfg, clearings) {
       spl[v * 4] = mud; spl[v * 4 + 1] = clr; spl[v * 4 + 2] = ao; spl[v * 4 + 3] = n2;
     }
   }
-  return { nrm, road, spl, cvA };
+  return { nrm, road, spl, cvA, slp };
 }
 
 function buildChunks(W, data, mat, group) {
@@ -331,13 +377,13 @@ function buildChunks(W, data, mat, group) {
     for (let cz = 0; cz < nz; cz += CHUNK) {
       const ex = Math.min(nx, cx + CHUNK), ez = Math.min(nz, cz + CHUNK);
       const vx = ex - cx + 1, vz = ez - cz + 1, n = vx * vz;
-      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), rd = new Float32Array(n * 4), sp = new Float32Array(n * 4), cv = new Float32Array(n);
+      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), rd = new Float32Array(n * 4), sp = new Float32Array(n * 4), cv = new Float32Array(n), sl = new Float32Array(n * 2);
       for (let i = 0; i < vx; i++) for (let j = 0; j < vz; j++) {
         const lv = i * vz + j, ix = cx + i, iz = cz + j, gv = ix * NZ1 + iz;
         pos[lv * 3] = X0 + ix * cell; pos[lv * 3 + 1] = heights[gv]; pos[lv * 3 + 2] = Z0 + iz * cell;
         for (let k = 0; k < 3; k++) nor[lv * 3 + k] = data.nrm[gv * 3 + k];
         for (let k = 0; k < 4; k++) { sp[lv * 4 + k] = data.spl[gv * 4 + k]; rd[lv * 4 + k] = data.road[gv * 4 + k]; }
-        cv[lv] = data.cvA[gv];
+        cv[lv] = data.cvA[gv]; sl[lv * 2] = data.slp[gv * 2]; sl[lv * 2 + 1] = data.slp[gv * 2 + 1];
       }
       const idx = [];
       for (let i = 0; i < vx - 1; i++) for (let j = 0; j < vz - 1; j++) {
@@ -350,6 +396,7 @@ function buildChunks(W, data, mat, group) {
       geo.setAttribute('aRoad', new THREE.BufferAttribute(rd, 4));
       geo.setAttribute('aSplat', new THREE.BufferAttribute(sp, 4));
       geo.setAttribute('aCv', new THREE.BufferAttribute(cv, 1));
+      geo.setAttribute('aSlope', new THREE.BufferAttribute(sl, 2));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mat);
@@ -394,7 +441,7 @@ function buildApron(W, cfg, data, mat, group) {
     return base + rise;
   };
   const NX = xs.length, NZ = zs.length;
-  const pos = [], nor = [], rd = [], sp = [], cvs = [], idx = [];
+  const pos = [], nor = [], rd = [], sp = [], cvs = [], sls = [], idx = [];
   const vid = new Int32Array(NX * NZ).fill(-1);
   const inside = (x, z) => x > X0 && x < X1 && z > Z0 && z < Zend;
   const vert = (i, j) => {
@@ -409,6 +456,7 @@ function buildApron(W, cfg, data, mat, group) {
     rd.push(d / (2 * (hwz + SHOULDER)) + 0.5, Math.abs(d) - hwz + sstep(50, 150, pastOf(z)) * 12, nt, nv);   // the track peters out up the saddle
     sp.push(0, 0, 1, n2);
     cvs.push(0);
+    const sg = 1 - 1 / l; sls.push(sg, sg);
     return vid[k];
   };
   for (let i = 0; i < NX - 1; i++) for (let j = 0; j < NZ - 1; j++) {
@@ -430,7 +478,7 @@ function buildApron(W, cfg, data, mat, group) {
       pos.push(x, yy, z); nor.push(data.nrm[gv * 3], data.nrm[gv * 3 + 1], data.nrm[gv * 3 + 2]);
       for (let k = 0; k < 4; k++) rd.push(data.road[gv * 4 + k]);
       sp.push(0, data.spl[gv * 4 + 1], data.spl[gv * 4 + 2], data.spl[gv * 4 + 3]);
-      cvs.push(data.cvA[gv]);
+      cvs.push(data.cvA[gv]); sls.push(data.slp[gv * 2], data.slp[gv * 2 + 1]);
     }
     if (prev >= 0) idx.push(prev, prev + 1, t, t, prev + 1, t + 1, t, prev + 1, prev, t + 1, prev + 1, t);
     prev = t;
@@ -441,6 +489,7 @@ function buildApron(W, cfg, data, mat, group) {
   geo.setAttribute('aRoad', new THREE.Float32BufferAttribute(rd, 4));
   geo.setAttribute('aSplat', new THREE.Float32BufferAttribute(sp, 4));
   geo.setAttribute('aCv', new THREE.Float32BufferAttribute(cvs, 1));
+  geo.setAttribute('aSlope', new THREE.Float32BufferAttribute(sls, 2));
   geo.setIndex(idx);
   geo.computeBoundingSphere();
   const m = new THREE.Mesh(geo, mat);
@@ -459,10 +508,10 @@ function clutterTex(biome) {
   const w = cv.width, h = cv.height;
   const src = cv.getContext('2d').getImageData(0, 0, w, h).data;
   const out = new Uint8Array(w * h * 4);
-  const avg = [];
-  for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 2; cx++) {
+  const avg = [], CX = Math.round(w / 256), CY = Math.round(h / 256);
+  for (let cy = 0; cy < CY; cy++) for (let cx = 0; cx < CX; cx++) {
     let r = 0, g = 0, b = 0, n = 0;
-    for (let y = cy * h / 2; y < (cy + 1) * h / 2; y++) for (let x = cx * w / 2; x < (cx + 1) * w / 2; x++) {
+    for (let y = cy * h / CY; y < (cy + 1) * h / CY; y++) for (let x = cx * w / CX; x < (cx + 1) * w / CX; x++) {
       const k = (y * w + x) * 4;
       if (src[k + 3] > 200) { r += src[k]; g += src[k + 1]; b += src[k + 2]; n++; }
     }
@@ -471,7 +520,7 @@ function clutterTex(biome) {
   for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const k = (y * w + x) * 4, o = ((h - 1 - y) * w + x) * 4;     // flip rows: canvas top → v = 1
     const a = src[k + 3];
-    if (a < 24) { const c = avg[(y < h / 2 ? 0 : 2) + (x < w / 2 ? 0 : 1)]; out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; }
+    if (a < 24) { const c = avg[Math.floor(y / (h / CY)) * CX + Math.floor(x / (w / CX))]; out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; }
     else { out[o] = src[k]; out[o + 1] = src[k + 1]; out[o + 2] = src[k + 2]; }
     out[o + 3] = a;
   }
@@ -513,7 +562,7 @@ function clutterMaterial(biome) {
   const m = new THREE.MeshLambertMaterial({ map: clutterTex(biome), alphaTest: 0.45, side: THREE.FrontSide });
   m.alphaToCoverage = true;
   m.userData.U = U;
-  m.customProgramCacheKey = () => 'terrain-clutter-v1';
+  m.customProgramCacheKey = () => 'terrain-clutter-v2';
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = U.uTime;
     sh.vertexShader = sh.vertexShader
@@ -530,7 +579,7 @@ function clutterMaterial(biome) {
           transformed.z += sw * 0.035 * hy;
         }`)
       .replace('#include <uv_vertex>', `#include <uv_vertex>
-        vMapUv = vMapUv * 0.5 + aCard.xy;`);
+        vMapUv = vMapUv * vec2(0.25, 0.5) + aCard.xy;`);
   };
   clutterMatCache.set(biome, m);
   return m;
@@ -579,6 +628,8 @@ class Clutter {
   constructor(W, cfg, biome) {
     this.W = W; this.cfg = cfg; this.C = cfg.clutter;
     this.blocked = exclusion(W);
+    // bare dirt clearings (camp, doorsteps, yards) stay bare; the wheat under a wheat patch is wanted
+    this.clear = clearingsOf(W).filter(c => !c.wheat);
     this.cell = this.C.cell; this.K = this.C.slots;
     this.N = Math.ceil(2 * this.C.radius / this.cell) + 1;
     this.half = Math.floor(this.N / 2);
@@ -609,10 +660,16 @@ class Clutter {
     this.q.setFromAxisAngle(this.up, ry);
     this.m4.compose(this.v.set(x, y, z), this.q, this.sv.set(w, h, w));
     this.mesh.setMatrixAt(i, this.m4);
-    this.aCard[i * 3] = (card % 2) * 0.5; this.aCard[i * 3 + 1] = card < 2 ? 0.5 : 0; this.aCard[i * 3 + 2] = fade;
+    this.aCard[i * 3] = (card % 4) * 0.25; this.aCard[i * 3 + 1] = card < 4 ? 0.5 : 0; this.aCard[i * 3 + 2] = fade;
   }
   hide(i) { this.m4.makeScale(0, 0, 0); this.mesh.setMatrixAt(i, this.m4); }
-  okAt(x, z, roadPad) {
+  // how bare the ground is here (the dirt of a clearing): 0..1
+  clearAt(x, z) {
+    let c = 0;
+    for (const q of this.clear) { const d = Math.hypot(x - q.x, z - q.z); if (d < q.r1 + 1) c = Math.max(c, (1 - sstep(q.r0 + 1, q.r1 + 1, d)) * q.k); }
+    return c;
+  }
+  okAt(x, z, roadPad, r = null) {
     const W = this.W;
     if (x < W.X0 + 2 || x > W.X0 + W.nx * W.cell - 2 || z < W.Z0 + 2 || z > W.Z1 - 2) return false;
     if (Math.abs(x - W.roadX(z)) < roadHW(W, this.cfg, z) + roadPad) return false;
@@ -620,11 +677,15 @@ class Clutter {
     const e = 0.7, gx = W.heightAt(x + e, z) - W.heightAt(x - e, z), gz = W.heightAt(x, z + e) - W.heightAt(x, z - e);
     if (Math.hypot(gx, gz) / (2 * e) > 0.8) return false;        // no tufts on cliff faces
     for (const m of W.mud) if (z > m.z0 - 2 && z < m.z1 + 2 && Math.abs(x - W.roadX(z)) < 22) return false;
+    if (r) {                     // nothing on the dirt of a clearing; thinned to 30% in a ring round it
+      const c = this.clearAt(x, z);
+      if (c > 0.25 || (c > 0.04 && r() > 0.3)) return false;
+    }
     return true;
   }
   pickCard(r, flowerish) {
     const cards = this.C.cards;
-    if (flowerish && this.C.flowers > 0 && r < 0.55) return r < 0.3 ? 2 : 3;
+    if (flowerish && this.C.flowers > 0 && r < 0.55) { const F = this.C.flowerCards; return F[Math.floor(r / 0.55 * F.length) % F.length]; }
     let t = r * this.wsum;
     for (let k = 0; k < cards.length; k++) { if ((t -= cards[k][2]) < 0) return k; }
     return 0;
@@ -643,12 +704,13 @@ class Clutter {
         const x = d.x + Math.cos(a) * rr, z = d.z + Math.sin(a) * rr * (wheat ? 0.8 : 1);
         if (!this.okAt(x, z, 0.8)) continue;
         let card, w, h;
+        const WC = this.C.wheatCards, FC = this.C.flowerCards;
         if (wheat) {
-          card = W.biome === 'fields' ? 1 : 0; w = 0.95 + r() * 0.45; h = 0.95 + r() * 0.35;
-          if (r() < 0.12) { card = 0; h *= 0.6; }
+          if (WC) { const [c, hh] = WC[r() < 0.55 ? 0 : 1]; card = c; w = 0.95 + r() * 0.4; h = hh * (0.9 + r() * 0.25); }
+          else { card = 0; w = 0.95 + r() * 0.45; h = 0.7 + r() * 0.3; }
+          if (r() < 0.12) { card = 0; w = 0.85; h = 0.55; }
         } else {
-          card = r() < 0.7 ? (r() < 0.55 ? 2 : 3) : 0;
-          if (W.biome === 'fields' && card !== 0) card = r() < 0.7 ? 3 : 2;
+          card = r() < 0.7 && FC ? FC[Math.floor(r() * FC.length)] : 0;
           w = 0.6 + r() * 0.25; h = 0.5 + r() * 0.25;
         }
         out.push({ x, y: W.heightAt(x, z) - 0.04, z, ry: r() * 6.283, w, h, card, fade: wheat ? 170 : 110 });
@@ -664,15 +726,16 @@ class Clutter {
     let n = q < -0.06 ? 0 : q < 0.05 ? 1 : q < 0.13 ? 2 : q < 0.21 ? 3 : 4;
     n = Math.max(0, Math.min(K, Math.round(n * C.density * (K / 4) + (r() - 0.5) * 0.8)));
     const flowerish = noise2(cx / 7.5, cz / 7.5, W.seed + 31) > 0.42;
-    const wheaty = C.wheat && noise2(cx / 11, cz / 11, W.seed + 53) > 1 - C.wheat * 2;
-    const main = wheaty ? 1 : this.pickCard(r(), flowerish);
+    // wild wheat only in drifts well off the road and out of the clearings
+    const wheaty = C.wheat && noise2(cx / 11, cz / 11, W.seed + 53) > 1 - C.wheat * 2 && Math.abs(cx - W.roadX(cz)) > roadHW(W, this.cfg, cz) + 8 && this.clearAt(cx, cz) < 0.02;
+    const main = wheaty ? (r() < 0.55 ? C.wheatCards[0][0] : C.wheatCards[1][0]) : this.pickCard(r(), flowerish);
     const px = (ci + 0.25 + r() * 0.5) * this.cell, pz = (cj + 0.25 + r() * 0.5) * this.cell;
     for (let k = 0; k < K; k++) {
       const i = this.base + s * K + k;
       if (k >= n) { this.hide(i); continue; }
       const a = r() * 6.283, rr = Math.sqrt(r()) * C.spread;
       const x = px + Math.cos(a) * rr, z = pz + Math.sin(a) * rr;
-      if (!this.okAt(x, z, 0.35 + r() * 1.1)) { this.hide(i); continue; }
+      if (!this.okAt(x, z, 0.35 + r() * 1.1, r)) { this.hide(i); continue; }
       const card = r() < 0.75 ? main : this.pickCard(r(), flowerish);
       const [cw, chh] = C.cards[card];
       const sc = 0.7 + r() * 0.7;
@@ -720,7 +783,7 @@ function clearingsOf(W) {
     const r = Math.max(b.w, b.dep) * 0.5;
     out.push({ x: b.x + Math.sin(b.ry) * (b.dep * 0.5 + 1.5), z: b.z + Math.cos(b.ry) * (b.dep * 0.5 + 1.5), r0: 1.5, r1: Math.min(6, r * 0.6), k: 0.8 });   // the trodden doorstep
   }
-  for (const d of W.decor) if (d.k === 'wheat') out.push({ x: d.x, z: d.z, r0: 1.0, r1: 2.6 * (d.s || 1) + 0.8, k: 0.75 });  // tilled under the wheat
+  for (const d of W.decor) if (d.k === 'wheat') out.push({ x: d.x, z: d.z, r0: 1.0, r1: 2.6 * (d.s || 1) + 0.8, k: 0.75, wheat: true });  // tilled under the wheat
   return out;
 }
 

@@ -1,23 +1,32 @@
 // People: every human in the game. Other players (PlayerView), the town NPCs
 // (buildCharacter, used by town3d.js) and your own first-person hands (Hands).
 //
-// Style: WoW Classic humans with a dash of OSRS chunk: big shoulders under domed
-// pauldrons, a barrel chest, a leather jerkin skirt with a tabard in the player's
-// color hanging front and back, big gauntleted gloves with real thumbs, knee boots with
-// turned-down cuffs, a bedroll high on the back. Each person is ONE SkinnedMesh (one
-// draw call + one in the shadow pass) on a 22-bone skeleton, textured with ONE
-// hand-painted 512×768 atlas from paint/characters.js. The face is modeled (a big nose,
-// a heavy brow ridge over deep sockets, cheekbones, a square jaw) and painted with
-// its light baked in; beards and mustaches are modeled sheets and rolls that take their
-// texture from the painted face. Geometry is smooth lathes, tubes and thick slabs, all
-// built here; the detail lives in the texture.
+// Style: WoW Classic humans with a dash of OSRS chunk: big shoulders, a barrel chest, a leather
+// jerkin skirt with a tabard in the player's color hanging front and back, big gloves with real
+// thumbs and grooved fingers, knee boots with turned-down cuffs and a welted sole, a bedroll on
+// the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 23-bone
+// skeleton, textured with ONE hand-painted 512×768 atlas from paint/characters.js. The face is
+// modeled (a broad blunt nose, a heavy brow ridge over deep sockets, cheekbones, a square chin
+// with a flat front; a woman's is narrower and rounder, with a short nose, a small round chin and
+// a slimmer neck) and painted in a few lit and shaded planes; beards and mustaches are modeled
+// sheets and rolls that take their texture from the painted face. Geometry is smooth lathes,
+// tubes and thick slabs, all built here; the detail lives in the texture.
 //
-// The town folk: Honest Ed (burly, bald, a forked grizzled beard, rolled sleeves and a
-// leather shop apron), the clerk (a barmaid's laced bodice, puffed blouse sleeves,
-// a long gathered skirt with an apron, a high bun), the Dealer (pressed shirt with sleeve
-// garters, pinstriped vest, green celluloid visor, slick hair, red-lit eyes) and the
-// Repo Man (scale 1.25 and a brute besides: a barrel chest, trapezius and forearms,
-// plaid flannel, an overall bib, work gloves, a beanie, brass aviators and a tow chain
+// The crew: six kits (paint/characters.js KITS, picked by player id like the hat and the face):
+// a boiled-leather dome, layered leather lames or a riveted iron dome on the shoulders, or none
+// under the hood's capelet or a fur-collared leather mantle; one embroidered sigil on the tabard
+// (wheel, coin, crossed wrenches, horseshoe, boot, lion); pouches, a flask, a map case or nothing
+// on the belt; laced or plain bracers and jerkin front. The dye stays on the tabard, the cuff
+// bands and the name label, so the crew stays tellable apart at a distance.
+//
+// The town folk: Honest Ed (burly, bald, a forked grizzled beard, a red shirt with its sleeves
+// rolled to a fat cuff, bare hairy forearms, a one-piece leather shop apron with neck straps),
+// the clerk (a barmaid's laced bodice, puffed blouse sleeves, a long gathered skirt with an
+// apron, a high bun), the Dealer (pressed shirt with sleeve garters, pinstriped vest and trousers,
+// a brass watch chain, green celluloid visor, slick hair, red-lit eyes, a fanned hand of cards in
+// his left hand and his right on the table) and the Repo Man (scale 1.25 and a brute besides: a
+// barrel chest, trapezius and forearms, a head a size up, plaid flannel, a canvas overall bib with
+// a pocket, work gloves, a beanie with a pompom, brass aviators and a tow chain of real iron links
 // worn like a bandolier, standing hands on hips).
 //
 // Frames: root at the feet; the model faces local +x inside, and root.rotation.y
@@ -25,22 +34,24 @@
 // about local z to swing forward (legs, arms, head nod), as before. Extra bones:
 // flapF / flapB carry the front and back of the skirt and tabard (they follow the
 // forward-most / back-most thigh, so the cloth never cuts the legs), flapF2 lets the
-// front flap's hem hang over the knees when sitting, and `hat` (a child of the head)
-// carries a brimmed hat, which tips over the face when its wearer is knocked out.
+// front flap's hem hang over the knees when sitting, `hat` (a child of the head) carries a
+// brimmed hat, which tips over the face when its wearer is knocked out, and `map` (a child of
+// the chest, at zero scale unless the map is raised) carries the third-person road map.
 //
 // HEAD FRAME (for accessories added to `head`): +x = where the face points, +y = up,
 // +z = the character's right. The head bone has a uniform local scale of 1 head unit:
 // HU = 0.025 × HS / 3.5 = 0.00886 m (× the character's scale). Everything on the head
 // scales with HS, so in head units the landmarks never move: the eyes sit at about
 // (11.5, 3.5, ±4), deep under the brow ridge; the nose bridge front at x ≈ 14 at eye
-// height and the nose tip at about (18.5, -1.5, 0); the skull half-width at the eyes is
+// height and the nose tip at about (18.4, -1.8, 0); the skull half-width at the eyes is
 // ≈ 12.7, the crown at y ≈ 22, the chin at y ≈ -12. An accessory at (16.5, 4, 0) (the
-// old placeholder shades) still sits just in front of the eyes. The Repo Man wears
-// modeled brass aviators of his own.
+// old placeholder shades) still sits just in front of the eyes. Exception: the Repo Man's head
+// geometry is built 1.12× bigger about the head bone (the bone's scale is still HU), so his
+// landmarks are 1.12× these; he wears modeled brass aviators of his own.
 import { THREE, painted, tex, labelSprite, canvasTex } from './gfx.js';
 import * as C from '/shared/constants.js';
 import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
-import { AW, AH, REG, HEAD_RINGS, HEAD_SCALE, headTh, headU, headV, hairWave, BEARD_TOP, GOATEE_TOP, TORSO, TORSO_UP, hairlineDy, lerpTable, armV, skirtV, dressV, DRESS_Y0, DRESS_Y1, resolveSpec, charAtlas, charGlow, handsAtlas, FP, labelColor } from './paint/characters.js';
+import { AW, AH, REG, HEAD_RINGS, HEAD_SCALE, headTh, headU, headV, hairWave, BEARD_TOP, GOATEE_TOP, MUSTACHES, mustacheAt, TORSO, TORSO_UP, hairlineDy, lerpTable, armV, ARM_LM, skirtV, dressV, DRESS_Y0, DRESS_Y1, APRON_Y0, APRON_Y1, resolveSpec, charAtlas, charGlow, handsAtlas, FP, labelColor } from './paint/characters.js';
 
 const TAU = Math.PI * 2;
 const HS = HEAD_SCALE;        // head size factor over HEAD_RINGS (WoW humans carry a big head)
@@ -58,8 +69,9 @@ const LEG = s => s < 0 ? [B.legL, B.shinL, B.footL] : [B.legR, B.shinR, B.footR]
 const J = { hips: 0.95, spine: 1.06, chest: 1.25, neck: 1.475, head: 1.62, hipY: 0.92, upper: 0.3, fore: 0.275, thigh: 0.42, shin: 0.4 };
 // limb joints depend on the build (s = -1 left, +1 right)
 function frameOf(S) {
-  const fem = !!S.look.female, bulk = S.bulk || 1, wide = 1 + (bulk - 1) * 0.9;
-  const sh = (fem ? 0.226 : 0.262) * wide * (S.shoulderK || 1), shY = fem ? 1.415 : 1.425;
+  const fem = !!S.look.female, bulk = S.bulk || 1, wide = 1 + (bulk - 1) * 0.9, bare = S.pauldrons === 'none';
+  // (no pauldrons: the arm hangs a little in and down, so the shoulder is a dome on the trapezius' slope)
+  const sh = (fem ? 0.226 : 0.262) * wide * (S.shoulderK || 1) * (bare ? 0.93 : 1), shY = (fem ? 1.415 : 1.425) - (bare ? 0.012 : 0);
   return {
     fem, bulk,
     shoulder: s => [0, shY, sh * s],
@@ -241,8 +253,11 @@ function skull(th, dy) {
   return [(cx + x) * HS, dy, z * HS];
 }
 const HC = [-0.006 * HS, 0.025 * HS, 0];     // head center for radial offsets
+let femHead = false;   // true while a woman's head is built: shellPt / facePt follow her narrower jaw and neck
+const femY = dyU => femHead ? Math.max(0, -0.05 - dyU) * 0.08 * HS : 0;
 function shellPt(th, dy, off) {
   const p = skull(th, dy);
+  if (femHead) { p[0] *= femNeck(dy / HS); p[1] += femY(dy / HS); p[2] *= femJaw(dy / HS); }
   const dx = p[0] - HC[0], dyy = p[1] - HC[1], dz = p[2] - HC[2];
   const l = Math.hypot(dx, dyy, dz) || 1;
   return [p[0] + dx / l * off, p[1] + dyy / l * off, p[2] + dz / l * off];
@@ -261,46 +276,62 @@ function headWeights(p) {
 // head meters): a big nose, a heavy brow ridge over deep sockets, cheekbones, a
 // muzzle, a square chin and jaw corners, temples pulled back so the face is a wedge.
 function faceRelief(th, dy, fem) {
-  const a = Math.abs(th), m = fem ? 0.6 : 1;
+  const a = Math.abs(th);
   let fx = 0, rr = 0;
-  fx += (fem ? 0.021 : 0.029) * gauss(dy + 0.013, 0.01) * gauss(th, 0.14 + 0.05 * sstep(0.01, -0.02, dy));    // nose tip
-  fx += (fem ? 0.009 : 0.013) * sstep(0.032, 0.004, dy) * sstep(-0.028, -0.012, dy) * gauss(th, 0.11);         // bridge
-  fx += 0.01 * m * gauss(dy + 0.019, 0.007) * gauss(a - 0.15, 0.07);                                            // nostril wings
-  fx += 0.008 * gauss(dy + 0.045, 0.014) * gauss(th, 0.42);                                                      // the mouth's muzzle
-  fx += (fem ? 0.006 : 0.011) * gauss(dy + 0.079, 0.011) * gauss(th, 0.32);                                     // chin
-  rr += (fem ? 0.007 : 0.016) * gauss(dy - 0.046, 0.011) * gauss(th, 0.78);                                     // brow ridge
-  rr -= (fem ? 0.01 : 0.014) * gauss(dy - 0.024, 0.012) * gauss(a - 0.3, 0.17);                                 // eye sockets
-  rr += (fem ? 0.009 : 0.012) * gauss(dy + 0.003, 0.015) * gauss(a - 0.64, 0.26);                               // cheekbones
-  rr -= 0.006 * m * gauss(dy + 0.04, 0.014) * gauss(a - 0.72, 0.25);                                             // hollows under them
-  rr -= 0.009 * gauss(dy - 0.045, 0.028) * gauss(a - 1.08, 0.3);                                                 // temples
-  rr += (fem ? 0 : 0.007) * gauss(dy + 0.074, 0.014) * gauss(a - 0.95, 0.28);                                    // square jaw corners
+  fx += (fem ? 0.011 : 0.017) * gauss(dy + 0.013, 0.011) * gauss(th, (fem ? 0.13 : 0.17) + 0.05 * sstep(0.01, -0.02, dy));   // nose tip: broad and blunt
+  fx += (fem ? 0.006 : 0.011) * sstep(0.032, 0.004, dy) * sstep(-0.028, -0.012, dy) * gauss(th, fem ? 0.1 : 0.12);       // bridge
+  fx += (fem ? 0.005 : 0.012) * gauss(dy + 0.019, 0.007) * gauss(a - (fem ? 0.13 : 0.17), 0.08);                           // nostril wings
+  fx += 0.008 * gauss(dy + 0.045, 0.014) * gauss(th, 0.42);                                                                  // the mouth's muzzle
+  if (fem) fx += 0.012 * gauss(dy + 0.081, 0.01) * gauss(th, 0.24);                                                         // a small round chin
+  else fx += 0.021 * gauss(dy + 0.081, 0.012) * Math.exp(-Math.pow(th / 0.24, 4));                                          // a square chin with a flat front
+  rr += (fem ? 0.0035 : 0.016) * gauss(dy - 0.046, 0.011) * gauss(th, 0.78);                                                // brow ridge
+  rr -= (fem ? 0.009 : 0.014) * gauss(dy - 0.024, 0.012) * gauss(a - 0.3, 0.17);                                            // eye sockets
+  rr += (fem ? 0.0075 : 0.012) * gauss(dy + (fem ? -0.002 : 0.003), 0.015) * gauss(a - 0.64, 0.26);                        // cheekbones
+  rr -= (fem ? 0.0036 : 0.006) * gauss(dy + 0.04, 0.014) * gauss(a - 0.72, 0.25);                                          // hollows under them
+  rr -= 0.009 * gauss(dy - 0.045, 0.028) * gauss(a - 1.08, 0.3);                                                            // temples
+  rr += (fem ? 0 : 0.012) * gauss(dy + 0.076, 0.014) * gauss(a - 0.95, 0.28);                                               // square jaw corners
   return [fx * Math.max(0, Math.cos(th)), rr];
 }
+// a woman's head: a narrower, rounder jaw, a slimmer neck (z scale and x scale at height dy, unscaled)
+const femJaw = dy => 0.93 * (1 - 0.17 * sstep(-0.005, -0.075, dy)) * (1 - 0.06 * sstep(-0.1, -0.12, dy));
+const femNeck = dy => 1 - 0.2 * sstep(-0.098, -0.118, dy);
 // a point on the face surface (head-local meters), pushed `off` further out
 function facePt(th, dyM, off, fem) {
-  const p = skull(th, dyM), [fx, rr] = faceRelief(th, dyM / HS, fem);
-  const c = Math.cos(th), s = Math.sin(th);
-  return [p[0] + (fx + rr * c) * HS + c * off, p[1], p[2] + rr * s * HS + s * off];
+  const p = skull(th, dyM), [fx, rr] = faceRelief(th, dyM / HS, fem), dy = dyM / HS;
+  const c = Math.cos(th), s = Math.sin(th), xk = fem ? femNeck(dy) : 1, zk = fem ? femJaw(dy) : 1;
+  return [(p[0] + (fx + rr * c) * HS) * xk + c * off, p[1] + (fem ? Math.max(0, -0.05 - dy) * 0.08 * HS : 0), (p[2] + rr * s * HS) * zk + s * off];
 }
 const HEAD_DY = [-0.15, -0.125, -0.106, -0.096, -0.088, -0.079, -0.07, -0.061, -0.052, -0.044, -0.036, -0.028, -0.02, -0.012, -0.004, 0.004, 0.013, 0.021, 0.029, 0.037, 0.045, 0.054, 0.066, 0.08, 0.098, 0.116, 0.134, 0.147, 0.156];
 
 function headParts(S) {
+  femHead = !!S.look.female;
+  try { return headPartsOf(S); } finally { femHead = false; }
+}
+function headPartsOf(S) {
   const parts = [];
   const fem = S.look.female;
-  const rings = HEAD_DY.map(dy => ({ y: dy * HS, w: lerpTable(HEAD_RINGS, dy, 1) * HS, d: lerpTable(HEAD_RINGS, dy, 2) * HS, db: lerpTable(HEAD_RINGS, dy, 3) * HS, n: lerpTable(HEAD_RINGS, dy, 4), cx: lerpTable(HEAD_RINGS, dy, 5) * HS, v: lerpTable(HEAD_RINGS, dy, 6) }));
+  const rings = HEAD_DY.map(dy => ({ y: dy * HS, w: lerpTable(HEAD_RINGS, dy, 1) * HS, d: lerpTable(HEAD_RINGS, dy, 2) * HS, db: lerpTable(HEAD_RINGS, dy, 3) * HS, n: fem && dy < -0.04 ? 2 + (lerpTable(HEAD_RINGS, dy, 4) - 2) * 0.3 : lerpTable(HEAD_RINGS, dy, 4), cx: lerpTable(HEAD_RINGS, dy, 5) * HS, v: lerpTable(HEAD_RINGS, dy, 6) }));
   parts.push(lathe(rings, {
     seg: 28, thOf: headTh, reg: REG.head, bones: headWeights, xf: toHead,
     deform(p, th, r) {
       const dy = r.y / HS, [fx, rr] = faceRelief(th, dy, fem);
       const c = Math.cos(th), s = Math.sin(th);
-      const jaw = fem ? 1 - 0.12 * gauss(dy + 0.07, 0.03) : 1;     // a woman's jaw and chin are narrower
-      return [p[0] + (fx + rr * c) * HS, p[1], (p[2] + rr * s * HS) * jaw];
+      const zk = fem ? femJaw(dy) : 1, xk = fem ? femNeck(dy) : 1;
+      return [(p[0] + (fx + rr * c) * HS) * xk, p[1] + (fem ? Math.max(0, -0.05 - dy) * 0.08 * HS : 0), (p[2] + rr * s * HS) * zk];
     },
   }));
-  // ears
+  // ears: a cupped bowl inside a raised rim, the back edge flaring away from the head
   for (const s of [-1, 1]) {
-    const er = [[-0.028, 0], [-0.024, 0.6], [-0.01, 1], [0.012, 1], [0.024, 0.75], [0.03, 0]].map(([dy, k], i, a) => ({ y: dy * HS, w: 0.01 * k * HS, d: 0.02 * k * HS, db: 0.013 * k * HS, cx: (-0.006 - dy * 0.15) * HS, v: i / (a.length - 1) }));
-    parts.push(lathe(er, { seg: 8, reg: REG.ear, bones: B.head, xf: p => toHead([p[0], p[1] + 0.008 * HS, p[2] + s * 0.094 * HS]) }));
+    const er = [[-0.03, 0], [-0.027, 0.55], [-0.017, 0.9], [-0.002, 1], [0.013, 1], [0.024, 0.82], [0.031, 0]].map(([dy, k], i, a) => ({ y: dy * HS * (fem ? 0.86 : 1), w: 0.0088 * k * HS, d: 0.019 * k * HS * (fem ? 0.86 : 1), db: 0.014 * k * HS * (fem ? 0.86 : 1), cx: (-0.006 - dy * 0.2) * HS, v: i / (a.length - 1) }));
+    parts.push(lathe(er, {
+      seg: 10, reg: REG.ear, bones: B.head,
+      deform: (p, th, r, u, v) => {
+        let z = p[2];
+        if (z * s > 0) z *= 1 - 0.62 * gauss(th - s * Math.PI / 2, 0.8) * Math.pow(Math.sin(v * Math.PI), 1.5);
+        return [p[0], p[1], z + s * Math.max(0, -(p[0] - (r.cx || 0))) * 0.45];
+      },
+      xf: p => toHead([p[0], p[1] + 0.008 * HS, p[2] + s * (fem ? 0.09 : 0.094) * HS]),
+    }));
   }
   // hair shell
   const L = S.look, coveredByHat = ['hood', 'helm', 'beanie', 'bandana'].includes(S.hat);
@@ -342,11 +373,12 @@ function headParts(S) {
     }));
   }
   if (S.look.female && ['bun', 'braid', 'long'].includes(L.hair) && !coveredByHat) {
-    // two loose locks slipping out at the temples, framing the face
+    // two loose locks slipping out at the temples: flat wavy ribbons lying along the cheeks
     for (const s of [-1, 1]) {
-      const a0 = toHead(shellPt(s * 1.08, 0.065 * HS, 0.012)), a3 = toHead(shellPt(s * 1.2, -0.045 * HS, 0.016));
-      const path = bez(a0, [a0[0] + 0.01, a0[1] - 0.04, a0[2] + s * 0.012], [a3[0] + 0.012, a3[1] + 0.04, a3[2] + s * 0.01], a3);
-      parts.push(tube(path, v => 0.012 * (1 - 0.55 * v) * Math.pow(Math.sin(Math.min(1, 0.08 + v * 0.92) * Math.PI), 0.3), 6, 7, { reg: REG.hair, uv: (u, v) => [0.3 + u * 0.15, 0.85 - v * 0.7], ref: [1, 0, 0], bones: B.head }));
+      parts.push(...slab((u, v) => {
+        const th = s * (1.02 + 0.1 * v + (u - 0.5) * (0.16 - 0.08 * v) + 0.03 * Math.sin(v * 5)), dy = (0.07 - 0.12 * v) * HS;
+        return toHead(shellPt(th, dy, 0.005 + 0.004 * Math.sin(v * Math.PI)));
+      }, 2, 6, 0.006, { reg: REG.hair, uv: (u, v) => [0.28 + u * 0.12, 0.92 - v * 0.8], bones: B.head, inside: () => toHead(HC), noInner: true }));
     }
   }
   if (L.facial === 'beard') {
@@ -358,13 +390,13 @@ function headParts(S) {
       bot: a => a < 0.7 ? -0.09 - len * (1 - Math.pow(a / 0.7, 1.5)) * (1 - fork * gauss(a, 0.07)) : lerpTable([[0.7, -0.09], [1.0, -0.094], [1.2, -0.08], [1.42, -0.01]], a),
       off1: 0.014 + 0.006 * bs, taper: 0.45,
     }));
-    parts.push(mustacheTube(S, { w: 0.36, droop: 0.026, r: 0.011 * (0.8 + 0.2 * bs) }));
+    parts.push(mustacheTube(S, MUSTACHES.beard, 0.0125 * (0.8 + 0.2 * bs)));
   }
   if (L.facial === 'goatee') {
     // a small tapered tuft hugging the chin
-    parts.push(...beardSurface(S, { thMax: 0.34, top: GOATEE_TOP, bot: a => -0.088 - 0.024 * (1 - (a / 0.34) ** 2), off1: 0.008, taper: 0.5, nu: 8 }));
+    parts.push(...beardSurface(S, { thMax: 0.42, top: GOATEE_TOP, bot: a => -0.09 - 0.017 * (1 - (a / 0.42) ** 2), off1: 0.009, taper: 0.3, nu: 10 }));
   }
-  if (L.facial === 'mustache') parts.push(mustacheTube(S, { w: 0.42, droop: 0.012, r: 0.0105, curl: true }));
+  if (L.facial === 'mustache') parts.push(mustacheTube(S, MUSTACHES.mustache, 0.0145));
   if (S.shades) parts.push(...shadesParts());
   parts.push(...hatParts(S));
   return parts;
@@ -387,16 +419,10 @@ function beardSurface(S, { thMax, top, bot, off0 = 0.003, off1 = 0.016, taper = 
 // A mustache: a thick tapered roll under the nose sweeping out past the mouth corners
 // and drooping (or curling up at the ends: a handlebar). Textured from the face, where
 // paintHead paints the mustache.
-function mustacheTube(S, { w = 0.38, droop = 0.02, r = 0.011, curl = false }) {
+function mustacheTube(S, line, r) {
   const fem = S.look.female;
-  const at = v => {
-    const a = (v - 0.5) * 2, q = Math.abs(a), th = -a * w;
-    let dy = -0.029 - droop * Math.pow(q, 1.6);
-    if (curl) dy += 0.016 * Math.max(0, (q - 0.75) / 0.25) ** 2;
-    return [th, dy];
-  };
-  const path = v => { const [th, dy] = at(v); return toHead(facePt(th, dy * HS, 0.007 * HS + r * 0.4, fem)); };
-  return tube(path, v => r * (1.05 - 0.55 * Math.abs(v - 0.5) * 2) * Math.pow(Math.sin(Math.min(1, 0.04 + v * 0.92) * Math.PI), 0.35), 8, 12, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(v); return [headU(th), headV(dy + 0.002 * Math.cos(u * TAU))]; }, ref: [1, 0, 0], bones: B.head });
+  const path = v => { const [th, dy] = mustacheAt(v, line); return toHead(facePt(th, dy * HS, 0.007 * HS + r * 0.4, fem)); };
+  return tube(path, v => r * (1.1 - 0.75 * Math.pow(Math.abs(v - 0.5) * 2, 0.8)) * Math.pow(Math.sin(Math.min(1, 0.04 + v * 0.92) * Math.PI), 0.35), 8, 12, { reg: REG.head, uv: (u, v) => { const [th, dy] = mustacheAt(v, line); return [headU(th), headV(dy + 0.002 * Math.cos(u * TAU))]; }, ref: [1, 0, 0], bones: B.head });
 }
 
 // The Repo Man's aviators: two dark lenses in brass frames, a bridge, temples to the ears.
@@ -432,25 +458,32 @@ function hatParts(S) {
   const h = S.hat, P = [];
   const head = { bones: B.hat };      // brimmed hats ride their own bone: knocked out, the hat tips over the face
   if (h === 'brim' || h === 'straw') {
-    // a wide-brimmed leather hat with a pinched crown and a brim that curls up at the
-    // sides, or a farmer's straw hat with a round crown and a ragged drooping brim
+    // a soft traveller's hat of leather: a tapered crown with a teardrop crease down the top and
+    // two pinches at the front, the brim curling up at the sides and dipping front and back; or
+    // a farmer's straw hat: a low round dome and a ragged, drooping brim
     const straw = h === 'straw';
-    const base = 0.08 * HS, top = (straw ? 0.21 : 0.225) * HS;
-    const prof = straw ? [[1, 0], [0.98, 0.3], [0.9, 0.65], [0.78, 0.9], [0.5, 1.0], [0, 1.03]] : [[1, 0], [0.99, 0.3], [0.95, 0.7], [0.88, 0.95], [0.55, 1.0], [0.25, 0.9], [0, 0.88]];
+    const base = 0.08 * HS, top = (straw ? 0.1775 : 0.19) * HS;
+    const prof = straw ? [[1, 0], [0.97, 0.3], [0.88, 0.6], [0.7, 0.82], [0.4, 0.95], [0, 1]] : [[1, 0], [0.97, 0.2], [0.94, 0.35], [0.84, 0.62], [0.72, 0.82], [0.5, 0.95], [0, 1]];
     const rx = 0.13 * HS, rz = 0.122 * HS;
-    P.push(lathe(prof.map(([k, t], i) => ({ y: base + (top - base) * t, w: rz * k, d: rx * k * (!straw && t > 0.8 ? 0.82 : 1), db: rx * k, n: 2.1, cx: -0.008, v: i / (prof.length - 1) })), {
-      seg: 18, reg: ACC, uv: (u, v) => crownUV(u, v), ...head, xf: toHead,
-      deform: (p, th) => straw ? p : [p[0], p[1] - (p[1] > top * 0.9 ? 0.014 * Math.max(0, Math.cos(th)) : 0), p[2] * (1 - (p[1] > top * 0.85 ? 0.06 * Math.max(0, Math.cos(th)) : 0))],
+    P.push(lathe(prof.map(([k, t], i) => ({ y: base + (top - base) * t, w: rz * k, d: rx * k, db: rx * k, n: 2.1, cx: -0.008, v: i / (prof.length - 1) })), {
+      seg: straw ? 18 : 20, reg: ACC, uv: (u, v) => crownUV(u, v), ...head, xf: toHead,
+      deform: (p, th) => {
+        if (straw) return p;
+        const t = (p[1] - base) / (top - base), c = Math.cos(th);
+        const crease = 0.02 * HS * gauss(p[2] / (rz * 0.55), 1) * sstep(0.5, 1.0, t) * (1 - 0.3 * Math.max(0, c));
+        const pinch = 1 - (0.012 * HS / rx) * Math.max(gauss(th - 0.61, 0.32), gauss(th + 0.61, 0.32)) * sstep(0.4, 0.9, t);
+        return [(p[0] + 0.008) * pinch - 0.008, p[1] - crease, p[2] * pinch];
+      },
     }));
-    const r0 = 0.1 * HS, r1 = (straw ? 0.24 : 0.235) * HS;
+    const r0 = 0.1 * HS, r1 = (straw ? 0.24 : 0.235) * HS, nb = straw ? 40 : 24;
     P.push(...slab((u, v) => {
       const th = thOf(u), t = v;
       let r = r0 + (r1 - r0) * t;
-      if (straw) r += (Math.sin(u * 61) * 0.5 + Math.sin(u * 23) * 0.5) * 0.008 * t;
+      if (straw) r += (Math.sin(u * 61) * 0.5 + Math.sin(u * 23) * 0.5) * 0.009 * t + (Math.sin(u * 157) > 0.6 ? 0.014 : 0) * t * t;   // ragged, a few strands poking out
       const side = Math.sin(th) ** 2, front = Math.cos(th);
-      const y = base + 0.004 - (straw ? 0.03 * t * t : 0) + (straw ? 0 : 0.05 * side * t ** 1.7 - 0.016 * Math.max(0, front) * t);
+      const y = base + 0.004 - (straw ? 0.045 * t * t * (1 + 0.15 * Math.sin(u * 37)) : 0) + (straw ? 0 : 0.08 * side * t ** 1.7 - 0.025 * Math.abs(front) * t * (1 - side));
       return toHead([Math.cos(th) * r * 1.05 - 0.008, y, Math.sin(th) * r]);
-    }, 24, 3, 0.012, { reg: ACC, uv: brimUV, ...head, closed: true, inside: () => toHead([0, base + 0.05, 0]) }));
+    }, nb, 3, 0.012, { reg: ACC, uv: brimUV, ...head, closed: true, inside: () => toHead([0, base + 0.05, 0]) }));
   } else if (h === 'bandana' || h === 'beanie' || h === 'helm' || h === 'hood' || h === 'cap') {
     const off = { bandana: 0.012, beanie: 0.02, helm: 0.024, hood: 0.03, cap: 0.022 }[h];
     const low = th => {
@@ -489,18 +522,7 @@ function hatParts(S) {
       // the rolled lip round the face opening
       const edge = t => { const q = t < 0.5 ? t * 2 : (1 - t) * 2; const p = cowl(t < 0.5 ? 0 : 1, Math.min(0.995, q)); return p; };
       P.push(tube(edge, () => 0.0125, 8, 20, { reg: ACC, uv: (u, v) => [v, 0.43 + u * 0.06], ref: [1, 0, 0], bones: p => headWeights(p) }));
-      // a draped capelet over the shoulders and back, open down the front from a clasp at the
-      // throat: it follows the torso, folds radiate from the neck, the hem is scalloped a
-      // hand's width below the shoulder line
-      P.push(...slab((u, v) => {
-        const open = 0.2 + 0.42 * (1 - v) ** 1.5, th = open + (TAU - 2 * open) * u, a = Math.abs(Math.atan2(Math.sin(th), Math.cos(th)));
-        const yTop = 1.478, hem = 1.33 + 0.016 * Math.cos(th * 7 + 0.4) - 0.022 * gauss(a - Math.PI / 2, 0.55) + 0.03 * gauss(a, 0.5);
-        const y = hem + (yTop - hem) * v, R = torsoRing(Math.min(1.45, y), S);
-        const off = 0.018 + 0.008 * Math.sin(th * 12) * (1 - v) + 0.012 * (1 - v);
-        const [x, z] = ringXZ(th, R.w + off, R.d + off, R.db + off, R.n);
-        const fr = Math.max(0, Math.cos(th)), hug = 1 - 0.28 * sstep(0.4, 1, v) * fr;
-        return [x * hug, y, z * (1 - 0.1 * sstep(0.4, 1, v) * fr)];
-      }, 30, 4, 0.01, { reg: REG.apron, uv: (u, v) => [u, v], bones: p => p[1] > 1.46 ? [[B.chest, 0.6], [B.neck, 0.4]] : [[B.chest, 1]], inside: (u, v) => [0, 1.4, 0], uvInner: innerIn(REG.apron, 0.0, 0.15) }));
+      P.push(...capeletParts(S));
     } else {
       P.push(surf(shellFn, 22, 6, { reg: ACC, uv: crownUV, bones: B.head, closed: true, inside: () => toHead(HC) }));
     }
@@ -519,8 +541,11 @@ function hatParts(S) {
       }, 12, 2, 0.008, { reg: ACC, uv: brimUV, bones: B.head, inside: () => toHead([0, 0.1, 0]) }));
       P.push(lathe([0, 1, 0.7, 0].map((k, i) => ({ y: CROWN + off + i * 0.004, w: 0.012 * k, d: 0.012 * k, v: 1 })), { seg: 8, reg: ACC, uv: () => [0.5, 0.98], bones: B.head, xf: toHead }));
     }
-    if (h === 'beanie') {   // the pompom-less fold at the top
-      P.push(lathe([0, 0.8, 1, 0.6, 0].map((k, i) => ({ y: CROWN + off + 0.004 + i * 0.006, w: 0.022 * k, d: 0.02 * k, v: 0.95 })), { seg: 8, reg: ACC, uv: () => [0.5, 0.95], bones: B.head, xf: toHead }));
+    if (h === 'beanie') {   // a squat pompom of yarn clumps
+      P.push(lathe([0, 0.62, 0.92, 1, 0.86, 0.5, 0].map((k, i) => ({ y: CROWN + off - 0.004 + i * 0.0075, w: 0.034 * k, d: 0.032 * k, v: 0.2 + i * 0.12 })), {
+        seg: 12, reg: ACC, uv: (u, v) => [u, 0.62 + v * 0.3], bones: B.head, xf: toHead,
+        deform: (p, th, r, u, v) => { const k = 1 + 0.2 * Math.sin(th * 4 + 0.5) * Math.sin(v * Math.PI) + 0.12 * Math.sin(th * 7 + v * 9); return [p[0] * k, p[1] + 0.003 * Math.sin(th * 5) * Math.sin(v * Math.PI), p[2] * k]; },
+      }));
     }
     if (h === 'bandana') {
       const k = toHead(shellPt(Math.PI, 0.0, off + 0.012));
@@ -550,6 +575,33 @@ function hatParts(S) {
   return P;
 }
 
+// A draped capelet over the shoulders and back, open down the front: it follows the torso, folds
+// radiate from the neck, the hem is scalloped a hand's width below the shoulder line. The hood's
+// is wool; a mantle (kit 'mantle') is leather, a little longer, under a fur collar.
+function capeletParts(S) {
+  const mantle = !!S.mantle;
+  return slab((u, v) => {
+    const open = (mantle ? 0.3 : 0.2) + (mantle ? 0.32 : 0.42) * (1 - v) ** 1.5, th = open + (TAU - 2 * open) * u, a = Math.abs(Math.atan2(Math.sin(th), Math.cos(th)));
+    const yTop = 1.478, hem = (mantle ? 1.3 : 1.33) + 0.016 * Math.cos(th * 7 + 0.4) - 0.022 * gauss(a - Math.PI / 2, 0.55) + 0.03 * gauss(a, 0.5) - (mantle ? 0.03 * gauss(a - Math.PI, 0.9) : 0);
+    const y = hem + (yTop - hem) * v, R = torsoRing(Math.min(1.45, y), S);
+    const off = 0.018 + 0.008 * Math.sin(th * 12) * (1 - v) + 0.012 * (1 - v) + (mantle ? 0.006 : 0);
+    const [x, z] = ringXZ(th, R.w + off, R.d + off, R.db + off, R.n);
+    const fr = Math.max(0, Math.cos(th)), hug = 1 - 0.28 * sstep(0.4, 1, v) * fr;
+    return [x * hug, y, z * (1 - 0.1 * sstep(0.4, 1, v) * fr)];
+  }, 30, 4, 0.01, { reg: REG.apron, uv: (u, v) => [u, v], bones: p => p[1] > 1.46 ? [[B.chest, 0.6], [B.neck, 0.4]] : [[B.chest, 1]], inside: () => [0, 1.4, 0], uvInner: innerIn(REG.apron, 0.0, 0.15) });
+}
+// The mantle's fur collar: a thick, clumpy roll of fur round the base of the neck, open at the throat.
+function furCollarParts(S) {
+  const path = v => {
+    const th = 0.55 + (TAU - 1.1) * v, y = 1.462 - 0.012 * Math.max(0, Math.cos(th));
+    const R = torsoRing(1.45, S), [x, z] = ringXZ(th, R.w + 0.03, R.d + 0.034, R.db + 0.03, R.n);
+    return [x * 0.96, y, z];
+  };
+  return [tube(path, (v, th) => 0.037 * (1 + 0.2 * Math.max(0, Math.sin(v * 61 + th * 2)) * Math.max(0, Math.sin(th * 4 + v * 17)) + 0.14 * Math.sin(v * 29) * Math.cos(th * 2)) * Math.pow(Math.sin(Math.min(1, 0.03 + v * 0.94) * Math.PI), 0.25), 10, 32, {
+    reg: REG.horn, uv: (u, v) => [u, (v * 3) % 1], ref: [0, 1, 0], bones: p => [[B.chest, 0.7], [B.neck, 0.3]],
+  })];
+}
+
 // ---- body ----------------------------------------------------------------------------------
 
 // per-height width scales for the build: women narrower in the chest and waist,
@@ -565,11 +617,14 @@ function torsoScale(y, S) {
     kdb *= 1 + 0.06 * chest;
   }
   if (S.shoulderK) kw *= 1 + (S.shoulderK - 1) * 0.7 * sstep(1.12, 1.36, y);
-  if (S.look.female) {
-    const chest = gauss(y - 1.3, 0.13), waist = gauss(y - 1.06, 0.09), hip = gauss(y - 0.86, 0.09);
-    kw *= 1 - 0.13 * chest - 0.15 * waist - 0.02 * hip;
-    kd *= 1 - 0.1 * waist - 0.05 * chest;
-    kdb *= 1 - 0.08 * chest + 0.04 * hip;
+  // a barrel chest: deeper front and back between the ribs and the collarbones; the waist stays, so the V reads
+  const rib = sstep(1.12, 1.2, y) * sstep(1.45, 1.38, y), fem = S.look.female;
+  kd *= 1 + (fem ? 0.1 : 0.2) * rib; kdb *= 1 + (fem ? 0.08 : 0.15) * rib;
+  if (fem) {
+    const chest = gauss(y - 1.3, 0.13), waist = gauss(y - 1.06, 0.09), hip = gauss(y - 0.86, 0.09), neck = sstep(1.43, 1.48, y);
+    kw *= (1 - 0.13 * chest - 0.15 * waist - 0.02 * hip) * (1 - 0.2 * neck);
+    kd *= (1 - 0.1 * waist - 0.05 * chest) * (1 - 0.15 * neck);
+    kdb *= (1 - 0.08 * chest + 0.04 * hip) * (1 - 0.15 * neck);
   }
   return [kw, kd, kdb];
 }
@@ -577,6 +632,8 @@ function torsoRing(y, S) {
   const [kw, kd, kdb] = torsoScale(y, S);
   const r = { y, w: lerpTable(TORSO_UP, y, 1) * kw, d: lerpTable(TORSO_UP, y, 2) * kd, db: lerpTable(TORSO_UP, y, 3) * kdb, n: lerpTable(TORSO_UP, y, 4) };
   r.d += (S.belly || 0) * gauss(y - 1.06, 0.12);
+  r.d += 0.012 * gauss(y - 1.33, 0.05);                        // pectorals
+  r.db += 0.01 * gauss(y - 1.32, 0.06);                        // shoulder blades
   if (S.look.female) r.d += 0.022 * gauss(y - 1.27, 0.06);   // bust
   return r;
 }
@@ -607,7 +664,8 @@ function bodyParts(S, F) {
   if (S.collar) {
     // a folded neckline: a low soft roll of cloth round the base of the neck
     const prof = [[1.452, 0.0], [1.462, 0.7], [1.474, 1.0], [1.486, 0.75], [1.492, 0.3], [1.49, 0.0]];
-    P.push(lathe(prof.map(([y, k], i) => ({ y, w: 0.086 + 0.016 * k, d: 0.082 + 0.014 * k, db: 0.084 + 0.016 * k, n: 2.1, cx: -0.004, v: 1 - i / (prof.length - 1) })), {
+    const nk = S.look.female ? 0.86 : 1;
+    P.push(lathe(prof.map(([y, k], i) => ({ y, w: (0.086 + 0.016 * k) * nk, d: (0.082 + 0.014 * k) * nk, db: (0.084 + 0.016 * k) * nk, n: 2.1, cx: -0.004, v: 1 - i / (prof.length - 1) })), {
       seg: 18, reg: REG.collar, bones: p => { const t = sstep(1.46, 1.51, p[1]); return [[B.chest, 1 - t * 0.5], [B.neck, t * 0.5]]; },
     }));
   }
@@ -616,7 +674,9 @@ function bodyParts(S, F) {
   if (S.dress) P.push(...dressParts(S));
   if (S.apron) P.push(...apronParts(S));
   if (S.pack) P.push(...packParts(S));
+  if (S.mantle) P.push(...capeletParts(S), ...furCollarParts(S));
   if (S.outfit === 'player') P.push(...mapParts());
+  if (S.outfit === 'dealer') P.push(...cardParts(S, F));
   if (S.chain) P.push(...chainParts(S));
   if (S.bib) P.push(...bibParts(S));
   for (const s of [-1, 1]) { P.push(...armParts(S, F, s)); P.push(...legParts(S, F, s)); }
@@ -639,8 +699,28 @@ function beltParts(S) {
   P.push(lathe(ks.map((k, i) => ({ y: ys[i] * bh, w: bw * k, d: 0.011 * k, db: 0.004 * k, n: 4, v: i / 5 })),
     { seg: 10, reg: REG.metal, uv: (u, v) => [u, 0.55 + v * 0.42], bones: B.hips, xf: p => [fr.d + off + 0.006 + p[0], 0.99 + p[1], p[2]] }));
   if (player) {
-    // a pouch on the right hip and a smaller one round the back on the left
-    for (const [th, sc] of [[1.05, 1], [-2.3, 0.75]]) {
+    // the kit's belt gear: pouches (a big one on the right hip, a small one round the back on the
+    // left), or a leather-wrapped flask in a loop, or a map case hanging at the back, or nothing
+    const pouches = { pouch: [[1.05, 1], [-2.3, 0.75]], flask: [[1.05, 1]], mapcase: [[-1.1, 0.85]], none: [] }[S.beltX || 'pouch'];
+    const hipW = th => () => [[B.hips, 0.6], [Math.sin(th) > 0 ? B.legR : B.legL, 0.4]];
+    const onHip = (th, y, lift = 0) => { const pr = torsoRing(0.95, S), [px, pz] = ringXZ(th, pr.w + off + lift, pr.d + off + lift, pr.db + off + lift, pr.n); return [px, y, pz]; };
+    if (S.beltX === 'flask') {
+      // a flat flask in a leather loop on the left hip, a brass cap
+      const th = -1.15, [px, py, pz] = onHip(th, 0.875, 0.02), c = Math.cos(th), sn = Math.sin(th);
+      const xf = p => [px + p[0] * c - p[2] * sn, py + p[1], pz + p[0] * sn + p[2] * c];
+      P.push(lathe([0, 0.75, 0.97, 1, 0.96, 0.8, 0.42, 0.36, 0.36].map((k, i) => ({ y: -0.075 + i * 0.019, w: 0.05 * k, d: 0.026 * k, db: 0.026 * k, n: 2.2, v: i / 8 })), { seg: 12, reg: REG.belt, uv: (u, v) => [u, 0.04 + v * 0.42], bones: hipW(th), xf }));
+      P.push(lathe([1, 1.1, 1.1, 0.9, 0].map((k, i) => ({ y: 0.077 + i * 0.008, w: 0.019 * k, d: 0.019 * k, v: i / 4 })), { seg: 8, reg: REG.metal, uv: (u, v) => [u, 0.55 + v * 0.4], bones: hipW(th), xf }));
+      P.push(lathe([0, 1, 1, 0].map((k, i) => ({ y: 0.012 + i * 0.012, w: 0.054 * k + 0.0001, d: 0.03 * k + 0.0001, n: 2.2, v: i / 3 })), { seg: 12, reg: REG.belt, uv: (u, v) => [u, 0.6 + v * 0.3], bones: hipW(th), xf }));   // the loop
+    }
+    if (S.beltX === 'mapcase') {
+      // a leather map case slung at the back, tilted, brass end caps
+      const th = 2.35, [px, py, pz] = onHip(th, 0.84, 0.045), c = Math.cos(th), sn = Math.sin(th), tilt = 0.6;
+      const xf = p => { const y = p[1] * Math.cos(tilt) - p[0] * Math.sin(tilt), x0 = p[0] * Math.cos(tilt) + p[1] * Math.sin(tilt); return [px + x0 * c - p[2] * sn, py + y, pz + x0 * sn + p[2] * c]; };
+      const caseR = 0.034, half = 0.17;
+      P.push(lathe([[-half, 0], [-half, 0.92], [-half + 0.006, 1], [half - 0.006, 1], [half, 0.92], [half, 0]].map(([y, k], i) => ({ y, w: caseR * k, d: caseR * k, v: i / 5 })), { seg: 10, reg: REG.belt, uv: (u, v) => [u, 0.04 + v * 0.42], bones: hipW(th), xf }));
+      for (const e of [-1, 1]) P.push(lathe([1.08, 1.12, 1.12, 1.08].map((k, i) => ({ y: e * (half - 0.03 + i * 0.012), w: caseR * k, d: caseR * k, v: i / 3 })), { seg: 10, reg: REG.metal, uv: (u, v) => [u, 0.55 + v * 0.4], bones: hipW(th), xf }));
+    }
+    for (const [th, sc] of pouches) {
       const pr = torsoRing(0.95, S), [px, pz] = ringXZ(th, pr.w + off, pr.d + off, pr.db + off, pr.n);
       const c = Math.cos(th), s = Math.sin(th);
       P.push(lathe([0, 0.85, 1, 1, 0.92, 0].map((k, i) => ({ y: (0.5 - i / 5) * 0.09 * sc, w: 0.052 * k * sc, d: 0.028 * k * sc, db: 0.01 * k * sc, n: 3, v: 1 - i / 5 })), {
@@ -723,22 +803,64 @@ function dressParts(S) {
   })];
 }
 
-// Ed's leather shop apron: a narrow bib over the chest, wrapping round the belly, hanging
-// round the fronts of the thighs to the knees in heavy vertical folds.
+// Ed's leather shop apron: one piece, a bib wrapped round the chest (its edges turn back round the
+// ribs), the skirt round the belly and hanging round the fronts of the thighs to the knees, two big
+// soft folds hanging from the waist ties, and a strap from each top corner over the shoulder.
+const apronHalf = y => 1.1 - 0.5 * sstep(1.0, 1.2, y);              // its half-angle round the body
 function apronParts(S) {
-  const Y0 = 0.5, Y1 = 1.3;
-  return slab((u, v) => {
-    const y = Y0 + (Y1 - Y0) * v;
-    const half = 1.08 - 0.62 * sstep(1.0, 1.2, y), th = (u - 0.5) * 2 * half;
-    const R = torsoRing(Math.max(0.8, y), S), below = Math.max(0, 0.8 - y);
-    const folds = 0.008 * Math.sin(u * Math.PI * 7 + 0.5) * sstep(1.0, 0.6, y);
-    const off = 0.016 + 0.06 * below + folds;
+  const P = [];
+  P.push(...slab((u, v) => {
+    const y = APRON_Y0 + (APRON_Y1 - APRON_Y0) * v;
+    const corner = Math.max(0, Math.abs(u - 0.5) * 2 - 0.8) / 0.2;     // the bib's top corners round off
+    const yy = y - 0.03 * corner * corner * sstep(1.24, 1.31, y);
+    const th = (u - 0.5) * 2 * apronHalf(yy);
+    const R = torsoRing(Math.max(0.8, Math.min(1.44, yy)), S), below = Math.max(0, 0.8 - yy);
+    // two big soft folds from the ties, strongest toward the hem
+    const folds = (0.013 * gauss(u - 0.31, 0.07) + 0.011 * gauss(u - 0.7, 0.06) - 0.004 * gauss(u - 0.5, 0.08)) * sstep(1.0, 0.62, yy);
+    const off = 0.012 + 0.06 * below + folds;
     const [x, z] = ringXZ(th, R.w + off, R.d + off, R.db, R.n);
-    return [x + below * 0.08, y, z];
-  }, 16, 10, 0.008, {
-    reg: ACC, uv: (u, v) => [u, v], inside: (u, v) => [0, Y0 + (Y1 - Y0) * v, 0],
+    return [x + below * 0.08, yy, z];
+  }, 16, 12, 0.008, {
+    reg: ACC, uv: (u, v) => [u, v], inside: (u, v) => [0, APRON_Y0 + (APRON_Y1 - APRON_Y0) * v, 0],
     bones: p => { if (p[1] > 0.955) return torsoWeights(p); const t = sstep(0.95, 0.8, p[1]); return [[B.hips, 1 - t], [B.flapF, t]]; },
+  }));
+  // the neck straps: from the bib's top corners up over the shoulders to the back of the neck
+  for (const s of [-1, 1]) {
+    const ctl = [[0.47, 1.27], [0.62, 1.38], [0.95, 1.455], [1.45, 1.488], [2.2, 1.45], [2.7, 1.4]];
+    const at = v => { const f = v * (ctl.length - 1), i = Math.min(ctl.length - 2, Math.floor(f)), t = f - i; return [ctl[i][0] + (ctl[i + 1][0] - ctl[i][0]) * t, ctl[i][1] + (ctl[i + 1][1] - ctl[i][1]) * t]; };
+    P.push(...slab((u, v) => {
+      const [th0, y] = at(v), R = torsoRing(Math.min(1.47, y), S), rad = Math.max(0.08, (R.w + R.d) / 2);
+      const th = s * (th0 + (u - 0.5) * 0.026 / rad), off = 0.014 + 0.004 * sstep(1.4, 1.47, y);
+      const [x, z] = ringXZ(th, R.w + off, R.d + off, R.db + off, R.n);
+      return [x, y + 0.004 * sstep(1.4, 1.48, y), z];
+    }, 1, 10, 0.005, { reg: ACC, uv: (u, v) => [0.005 + u * 0.03, 0.15 + v * 0.7], inside: (u, v) => [0, at(v)[1] - 0.05, 0], bones: torsoWeights, noInner: true }));
+  }
+  return P;
+}
+
+// The Dealer's fanned hand of cards, held up in his left hand: five cards fanned round the palm,
+// their faces toward him and their backs to the table. They are built in the hand's bind frame so
+// that in his stance (DEALER_STANCE) they stand up out of his fist facing back and up.
+const DEALER_STANCE = { aL: 0.3, eL: 1.55, inL: 0.55, abL: 0.1, wristL: -0.15, aR: 0.72, eR: 0.18, inR: 0.22, abR: 0.22, wristR: -0.45, bend: -0.12, head: 0.16 };
+function cardParts(S, F) {
+  const st = { ...DEALER_STANCE }, s = -1, sh = F.shoulder(s);
+  // the hand bone's posed rotation, composed down the chain (spine, chest, arm, forearm, hand)
+  const E = (x, y, z) => new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(x, y, z));
+  const R = E(0, 0, st.bend * 0.5).multiply(E(0, 0, st.bend * 0.5)).multiply(E(st.abL, 0, st.aL)).multiply(E(-st.inL, 0, st.eL)).multiply(E(0, 0, st.wristL));
+  const Ri = R.clone().transpose(), V3 = THREE.Vector3;
+  const toBind = v => new V3(...v).normalize().applyMatrix4(Ri);
+  const n = toBind([-0.85, 0.45, 0.18]), up0 = toBind([0.4, 1, 0.05]), side = new V3().crossVectors(up0, n).normalize(), up = new V3().crossVectors(n, side).normalize();
+  const k = 1.16, pivot = new V3(sh[0] + 0.012, sh[1] - 0.575 - 0.075 * k, sh[2] + 0.03).addScaledVector(n, 0.012);
+  const W = 0.07, H = 0.1, reg = REG.pack, P = [];
+  [-0.55, -0.28, 0, 0.28, 0.55].forEach((phi, i) => {
+    const c = Math.cos(phi), sn = Math.sin(phi);
+    const ax = side.clone().multiplyScalar(c).addScaledVector(up, sn), ay = up.clone().multiplyScalar(c).addScaledVector(side, -sn);
+    P.push(...slab((u, v) => {
+      const p = pivot.clone().addScaledVector(ax, (u - 0.5) * W).addScaledVector(ay, v * H - 0.018).addScaledVector(n, (i - 2) * 0.0016);
+      return [p.x, p.y, p.z];
+    }, 1, 1, 0.0018, { reg, uv: (u, v) => [0.02 + u * 0.44, 0.06 + v * 0.88], uvInner: (a, b) => { const [tu, tv] = localUV(reg, a, b); return atlasUV(reg, tu + 0.52, tv); }, bones: B.handL, inside: () => { const q = pivot.clone().addScaledVector(n, -0.1); return [q.x, q.y, q.z]; } }));
   });
+  return P;
 }
 
 // The road map held up in front of the chest (third person). It rides the `map` bone, which
@@ -753,7 +875,8 @@ function mapParts() {
 
 // A rolled bedroll strapped high across the shoulder blades, sagging a little in the middle.
 function packParts(S) {
-  const R = torsoRing(1.28, S), cx = -(R.db + 0.058), cy = 1.285;
+  const yc = S.pauldrons === 'none' ? 1.16 : 1.285;   // (under a capelet or a mantle it rides lower, below the hem)
+  const R = torsoRing(yc, S), cx = -(R.db + 0.058), cy = yc;
   const rings = [0, 0.75, 0.97, 1, 1, 1, 0.97, 0.75, 0].map((k, i, a) => {
     const t = i / (a.length - 1);
     const q = k === 0 ? 0 : 0.4 + 0.6 * k; return { y: (t - 0.5) * 0.4 * (k === 0 ? 0.96 : 1), w: 0.06 * q, d: 0.064 * q, v: k < 0.9 ? 0.2 : 0.4 + 0.6 * t };
@@ -766,27 +889,61 @@ function packParts(S) {
   })];
 }
 
-// The Repo Man's overall bib: a stiff canvas panel over the chest with a curved top edge.
+// The Repo Man's overall bib: heavy canvas wrapped to the chest and belly, rounded top corners,
+// a stitched chest pocket standing proud of it with a lit lip.
 function bibParts(S) {
-  return slab((u, v) => {
-    const y = 1.02 + 0.33 * v, a = (u - 0.5) * 2;
-    const top = 1.35 - 0.035 * a * a;                                  // the top edge dips at the corners
-    const yy = Math.min(y, top + (y - 1.35)), th = a * (0.62 - 0.12 * sstep(1.1, 1.3, yy));
-    const R = torsoRing(yy, S), [x, z] = ringXZ(th, R.w + 0.012, R.d + 0.012, R.db, R.n);
-    return [x, yy, z];
-  }, 12, 6, 0.008, { reg: REG.apron, uv: (u, v) => [u, v], bones: torsoWeights, inside: (u, v) => [0, 1.02 + 0.33 * v, 0], noInner: true });
+  const P = [];
+  const at = (a, y, off) => {
+    const th = a * (0.64 - 0.12 * sstep(1.1, 1.3, y)), R = torsoRing(y, S);
+    const [x, z] = ringXZ(th, R.w + off, R.d + off, R.db, R.n);
+    return [x, y, z];
+  };
+  P.push(...slab((u, v) => {
+    const a = (u - 0.5) * 2, corner = Math.max(0, Math.abs(a) - 0.72) / 0.28;
+    const top = 1.36 - 0.03 * a * a - 0.045 * corner * corner;          // the top edge dips, its corners round off
+    return at(a, 1.0 + (top - 1.0) * v, 0.012);
+  }, 14, 8, 0.008, { reg: REG.apron, uv: (u, v) => [u, v], bones: torsoWeights, inside: (u, v) => [0, 1.0 + 0.33 * v, 0], noInner: true }));
+  // the pocket (its texture is the bib's own painted pocket, u .36-.64, v .36-.78)
+  P.push(...slab((u, v) => {
+    const a = (u - 0.5) * 0.56, y = 1.12 + 0.14 * v, p = at(a, y, 0.012 + 0.012 * Math.sin(Math.min(1, v * 1.4) * Math.PI / 2) + 0.004 * Math.sin(u * Math.PI));
+    return p;
+  }, 4, 3, 0.006, { reg: REG.apron, uv: (u, v) => [0.36 + u * 0.28, 0.36 + v * 0.42], bones: torsoWeights, inside: (u, v) => [0, 1.12 + 0.14 * v, 0], noInner: true }));
+  return P;
 }
 
-// The Repo Man's tow chain, worn like a bandolier over his right shoulder.
+// The Repo Man's tow chain, worn like a bandolier over his right shoulder: big iron links, each a
+// flattened torus, alternately lying flat on him and standing up, merged into his one mesh.
 function chainParts(S) {
   const path = v => {
     const th = v * TAU, y = 1.21 + 0.24 * Math.sin(th);
-    const R = torsoRing(Math.min(1.44, y), S), [x, z] = ringXZ(th, R.w + 0.026, R.d + 0.026, R.db + 0.026, R.n);
+    const R = torsoRing(Math.min(1.44, y), S), [x, z] = ringXZ(th, R.w + 0.03, R.d + 0.03, R.db + 0.03, R.n);
     return [x, y, z];
   };
-  return [tube(path, () => 0.024, 8, 40, { reg: REG.gear, uv: (u, v) => [u, ((v * 9) % 1) * 0.58], ref: [0, 1, 0], bones: p => p[1] > 1.3 ? [[B.chest, 1]] : p[1] > 1.1 ? [[B.chest, 0.5], [B.spine, 0.5]] : [[B.spine, 0.4], [B.hips, 0.6]] })];
+  const N = 400, pts = [], len = [0];
+  for (let i = 0; i <= N; i++) pts.push(path(i / N));
+  for (let i = 1; i <= N; i++) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]));
+  const L = len[N], pitch = 0.072, n = Math.round(L / pitch), out = [];
+  const reg = REG.gear, wts = p => p[1] > 1.3 ? [[B.chest, 1]] : p[1] > 1.1 ? [[B.chest, 0.5], [B.spine, 0.5]] : [[B.spine, 0.4], [B.hips, 0.6]];
+  const V3 = THREE.Vector3;
+  for (let k = 0; k < n; k++) {
+    const d = (k + 0.5) * L / n; let i = 1; while (i < N && len[i] < d) i++;
+    const c = new V3(...pts[i]), T = new V3(...pts[Math.min(N, i + 1)]).sub(new V3(...pts[Math.max(0, i - 1)])).normalize();
+    const out0 = new V3(c.x, 0, c.z).normalize(), Bn = new V3().crossVectors(T, out0).normalize(), Nn = new V3().crossVectors(Bn, T).normalize();
+    const g = new THREE.TorusGeometry(0.03, 0.0072, 4, 8);
+    g.scale(1.45, 1, 1);
+    const m = (k % 2 ? new THREE.Matrix4().makeBasis(T, Nn, Bn) : new THREE.Matrix4().makeBasis(T, Bn, Nn.clone().negate())).setPosition(c);   // (right-handed bases: standing up / lying flat)
+    g.applyMatrix4(m);
+    const U = g.attributes.uv, cnt = g.attributes.position.count;
+    for (let q = 0; q < cnt; q++) { const [a, b] = atlasUV(reg, U.getX(q), 0.03 + U.getY(q) * 0.54); U.setXY(q, a, b); }
+    const [si, sw] = weightsOf(wts, [c.x, c.y, c.z]);
+    g.setAttribute('skinIndex', new THREE.Uint16BufferAttribute(Array.from({ length: cnt }, () => si).flat(), 4));
+    g.setAttribute('skinWeight', new THREE.Float32BufferAttribute(Array.from({ length: cnt }, () => sw).flat(), 4));
+    out.push(g);
+  }
+  return out;
 }
 
+const ROLL_DY = ARM_LM.roll;   // where a rolled sleeve sits (a little over halfway down the upper arm)
 const ARM_UP = [   // dy below the shoulder joint, half-width across (z), front, back: a round deltoid, a
   [0.064, 0.0, 0.0, 0.0],     // tapering upper arm, a slim elbow, a forearm swell, a slim wrist
   [0.056, 0.05, 0.056, 0.054],
@@ -800,6 +957,13 @@ const ARM_UP = [   // dy below the shoulder joint, half-width across (z), front,
   [-0.35, 0.064, 0.069, 0.06],
   [-0.4, 0.061, 0.066, 0.057],
   [-0.44, 0.056, 0.059, 0.052],
+];
+// no pauldron: a lower, rounder shoulder cap (it replaces the rows of ARM_UP above dy -0.06)
+const ARM_CAP = [
+  [-0.004, 0.0, 0.0, 0.0],
+  [-0.01, 0.05, 0.054, 0.052],
+  [-0.024, 0.078, 0.082, 0.08],
+  [-0.05, 0.088, 0.087, 0.082],
 ];
 const ARM_GLOVE = [   // a gauntlet: a rolled rim flaring out over the forearm, tapering to the wrist
   [-0.448, 0.057, 0.06, 0.053],
@@ -830,13 +994,14 @@ function armParts(S, F, s) {
   const ak = (S.armBulk || 1) * (S.bulk || 1) * (F.fem ? 0.86 : 1);
   const rolled = S.arms === 'rolled';
   const fk = S.forearm || 1;
+  const UP = S.pauldrons === 'none' ? [...ARM_CAP, ...ARM_UP.filter(r => r[0] < -0.06)] : ARM_UP;
   const tab = [
-    ...ARM_UP.map(([dy0, w, d, db]) => {
-      const dy = dy0 > 0 && S.pauldrons === 'none' ? dy0 * 0.7 : dy0;     // no pauldron: a lower, rounder shoulder cap
-      let roll = rolled ? 0.013 * gauss(dy + 0.268, 0.013) : 0;
+    ...UP.map(([dy, w, d, db]) => {
+      let roll = 0;
       if (S.arms === 'blouse') roll += 0.024 * gauss(dy + 0.12, 0.09) * sstep(0.07, 0.0, dy) - 0.008 * gauss(dy + 0.3, 0.02);    // puffed, gathered at the elbow
       if (S.arms === 'shirt') roll += 0.009 * gauss(dy + 0.09, 0.03) - 0.006 * gauss(dy + 0.125, 0.012);                           // the puff over a sleeve garter
-      const f = dy < -0.31 ? 1 + (fk - 1) * gauss(dy + 0.37, 0.06) : 1;                                                          // a brute's forearms
+      // a brute's (and Ed's) forearms swell toward the elbow; a rolled sleeve tapers in toward the shoulder
+      const f = (dy < -0.31 ? 1 + (fk - 1) * gauss(dy + 0.37, 0.06) : 1) * (rolled ? 0.82 + 0.18 * sstep(-0.02, -0.2, dy) : 1);
       return [dy, w * ak * f + roll, d * ak * f + roll, db * ak * f + roll];
     }),
     ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => [dy, w * (bare ? ak : 1), d * (bare ? ak : 1), db * (bare ? ak : 1)]),
@@ -854,7 +1019,21 @@ function armParts(S, F, s) {
     if (dy > -0.595) { const t = sstep(-0.555, -0.595, dy); return [[fa, 1 - t], [ha, t]]; }
     return [[ha, 1]];
   };
-  const P = [lathe(rings, { seg: 14, reg: REG.arm, bones: wts, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] })];
+  // below the knuckles, three grooves across the back and the palm split the hand into four fingers
+  // (with 12 segments there's a vertex column right on each groove: x = 0, +-d/2)
+  const fingers = (p, th, r) => {
+    if (r.y > ARM_LM.knuckle) return p;
+    const t = sstep(ARM_LM.knuckle, ARM_LM.knuckle - 0.03, r.y), xr = p[0] - (r.cx || 0), xn = xr / ((xr >= 0 ? r.d : r.db) || 1);
+    const gr = gauss(xn + 0.5, 0.14) + gauss(xn, 0.14) + gauss(xn - 0.5, 0.14), cz = r.cz || 0;
+    return [p[0], p[1], cz + (p[2] - cz) * (1 - 0.24 * gr * t)];
+  };
+  const P = [lathe(rings, { seg: 12, reg: REG.arm, bones: wts, deform: fingers, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] })];
+  if (rolled) {
+    // the rolled sleeve: a fat torus of cloth round the upper arm, a little over halfway down
+    const y0 = ROLL_DY, R = lerpTable(tab.map(r => [-r[0], r[1]]), -y0, 1), r0 = 0.018;
+    const ring = Array.from({ length: 7 }, (_, i) => { const ph = Math.PI / 2 - i / 6 * TAU; return { y: y0 + r0 * Math.sin(ph) * 1.1, w: R + r0 * (0.4 + Math.cos(ph)), d: R * 1.04 + r0 * (0.4 + Math.cos(ph)), db: R * 0.98 + r0 * (0.4 + Math.cos(ph)), v: armV(ROLL_DY + 0.012 - 0.024 * i / 6) }; });
+    P.push(lathe(ring, { seg: 10, reg: REG.arm, bones: ua, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] }));
+  }
   // the thumb (front, toward the body)
   const k = hk * (F.fem ? 0.9 : 1);
   // a proper thumb on the palm side of the front edge, angled forward and down, clear of the fingers
@@ -908,16 +1087,16 @@ const LEG_PLAIN = [
   [0.07, 0.05, 0.05, 0.05],
   [0.05, 0.0, 0.0, 0.0],
 ];
-const FOOT = [ // x, half-width, up, down, center y, squareness, v
+const FOOT = [ // x, half-width, up, down, center y, squareness, v  (a squarer, flatter toe than a clown's bulb)
   [-0.095, 0.0, 0.0, 0.0, 0.055, 2, 0.0],
   [-0.086, 0.05, 0.046, 0.05, 0.055, 2.4, 0.05],
   [-0.056, 0.062, 0.066, 0.054, 0.06, 2.6, 0.16],
-  [0.0, 0.066, 0.082, 0.06, 0.066, 2.6, 0.33],
-  [0.06, 0.07, 0.064, 0.053, 0.053, 2.7, 0.52],
-  [0.13, 0.074, 0.052, 0.048, 0.048, 2.8, 0.70],
-  [0.195, 0.07, 0.047, 0.043, 0.045, 2.8, 0.86],
-  [0.234, 0.054, 0.039, 0.036, 0.044, 2.5, 0.95],
-  [0.248, 0.0, 0.0, 0.0, 0.047, 2, 1.0],
+  [0.0, 0.066, 0.08, 0.06, 0.066, 2.6, 0.33],
+  [0.06, 0.068, 0.058, 0.053, 0.053, 2.8, 0.52],
+  [0.13, 0.07, 0.045, 0.048, 0.048, 3.0, 0.70],
+  [0.195, 0.066, 0.04, 0.043, 0.045, 3.0, 0.86],
+  [0.234, 0.052, 0.033, 0.036, 0.044, 2.6, 0.95],
+  [0.248, 0.0, 0.0, 0.0, 0.045, 2, 1.0],
 ];
 function legParts(S, F, s) {
   const [th, sn, ft] = LEG(s), hip = F.hip(s), knee = F.knee(s), ank = F.ankle(s);
@@ -935,15 +1114,15 @@ function legParts(S, F, s) {
     if (y > 0.13) return [[sn, 1]];
     const t = sstep(0.13, 0.07, y); return [[sn, 1 - t], [ft, t]];
   };
-  const P = [lathe(tab.map(([y, w, d, db]) => { const [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v: y }; }), { seg: 14, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s] })];
+  const P = [lathe(tab.map(([y, w, d, db]) => { const [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v: y }; }), { seg: 12, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s] })];
   const k = shoe ? [0.86, 0.8, 0.92] : S.outfit === 'repo' ? [1.2, 1.16, 1.14] : F.fem ? [0.9, 0.92, 0.9] : [1.06, 1.06, 1.05];
   const nv = FOOT.length - 1;
   P.push(surf((u, v) => {
     const i = Math.round(v * nv), [x, w, up, dn, cy, n] = FOOT[i];
     const [a, b] = ringXZ(thOf(u), w * k[0], up * k[1], dn, n);
-    const X = x * k[2];
-    return [X, Math.max(0.002, cy * (shoe ? 0.85 : 1) + a), s * (Math.abs(ank[2]) + b + 0.05 * Math.max(0, X))];
-  }, 14, nv, { reg: REG.foot, uv: (u, v) => [u, FOOT[Math.round(v * nv)][6]], bones: p => p[0] < -0.03 && p[1] > 0.09 ? [[ft, 0.7], [sn, 0.3]] : [[ft, 1]], closed: true, inside: (u, v) => { const r = FOOT[Math.round(v * nv)]; return [r[0] * k[2], r[4], ank[2]]; } }));
+    const X = x * k[2], welt = 1 + 0.09 * sstep(-0.55, -0.85, a / Math.max(1e-4, dn));    // the sole's welt stands out round the bottom
+    return [X * (1 + 0.04 * (welt - 1)), Math.max(0.002, cy * (shoe ? 0.85 : 1) + a), s * (Math.abs(ank[2]) + b * welt + 0.05 * Math.max(0, X))];
+  }, 12, nv, { reg: REG.foot, uv: (u, v) => [u, FOOT[Math.round(v * nv)][6]], bones: p => p[0] < -0.03 && p[1] > 0.09 ? [[ft, 0.7], [sn, 0.3]] : [[ft, 1]], closed: true, inside: (u, v) => { const r = FOOT[Math.round(v * nv)]; return [r[0] * k[2], r[4], ank[2]]; } }));
   return P;
 }
 
@@ -957,13 +1136,29 @@ function pauldron(S, F, s, size) {
   const dir = (th, f) => { const c = Math.cos(th), sn = Math.sin(th), sf = Math.sin(f), cf = Math.cos(f); return [0, 1, 2].map(k => A[k] * cf * 0.74 + (E1[k] * c + E2[k] * sn) * sf); };
   const pt = (th, f, rr) => { const d = dir(th, f); return [Cc[0] + d[0] * rr, Cc[1] + d[1] * rr, Cc[2] + d[2] * rr]; };
   const P = [];
+  const out = [0, -0.25, s]; const ol = Math.hypot(...out);
+  const thOut = Math.atan2((out[0] * E2[0] + out[1] * E2[1] + out[2] * E2[2]) / ol, (out[0] * E1[0] + out[1] * E1[1] + out[2] * E1[2]) / ol);
+  if (S.shoulders === 'lames') {
+    // three overlapping curved plates of boiled leather: a cap, then two lames, each lower one
+    // a little bigger so it tucks under the one above; the lames wrap the outside of the arm
+    const plates = [[0, 0.86, 1.0, null], [0.72, 1.22, 1.06, 2.3], [1.04, 1.56, 1.12, 2.0]];
+    plates.forEach(([f0, f1, k, span]) => {
+      P.push(...slab((u, v) => {
+        const th = span ? thOut + (u - 0.5) * span : thOf(u), f = f1 - (f1 - f0) * v;
+        return pt(th, f, R * k * (1 + 0.05 * Math.cos(th)) * (1 + 0.06 * gauss(v, 0.12)));
+      }, span ? 12 : 18, 3, 0.012, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: !span, inside: () => Cc, noInner: !!span }));
+    });
+    // the cap's underside, closed by a cheap disc (you'd see the sky through the dome from below)
+    P.push(surf((u, v) => pt(thOf(u), 0.82, R * (1 - v)), 8, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: () => [Cc[0] + A[0] * 0.3, Cc[1] + A[1] * 0.3, Cc[2] + A[2] * 0.3] }));
+    return P;
+  }
   P.push(...slab((u, v) => {
     const th = thOf(u), f = (1 - v) * fmax;
     const lip = 1 + 0.075 * gauss(v, 0.07);
     return pt(th, f, R * lip * (1 + 0.05 * Math.cos(th)));
-  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, uvInner: innerIn(REG.paul, 0.02, 0.26) }));
-  const out = [0, -0.25, s]; const ol = Math.hypot(...out);
-  const thOut = Math.atan2((out[0] * E2[0] + out[1] * E2[1] + out[2] * E2[2]) / ol, (out[0] * E1[0] + out[1] * E1[1] + out[2] * E1[2]) / ol);
+  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, noInner: true }));
+  // the dome's underside: a cheap disc across its rim (no inner skin: you'd only ever see it from below)
+  P.push(surf((u, v) => pt(thOf(u), fmax, R * 1.075 * (1 - v)), 9, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: () => [Cc[0] + A[0] * 0.3, Cc[1] + A[1] * 0.3, Cc[2] + A[2] * 0.3] }));
   P.push(...slab((u, v) => {
     const th = thOut + (u - 0.5) * 3.2, f = fmax * (0.9 + 0.34 * (1 - v));
     return pt(th, f, R * 1.1);
@@ -976,9 +1171,12 @@ const FLAP2_Y = 0.53;   // where the front flap folds over the knees (a thigh's 
 
 const geoCache = new Map();
 function charGeometry(S, F) {
-  const key = [S.outfit, S.hat, S.skin, S.look.hair, S.look.facial, S.look.female ? 'f' : 'm'].join('|');
+  const key = [S.outfit, S.hat, S.skin, S.look.hair, S.look.facial, S.look.female ? 'f' : 'm', S.kit ?? '-'].join('|');
   if (!geoCache.has(key)) {
-    const parts = [...bodyParts(S, F), ...headParts(S)].map(g => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k); return g; });
+    const head = headParts(S);
+    // the Repo Man's head is a size up, so it isn't a pinhead on his bulk (scaled about the head bone)
+    if (S.brute) for (const g of head) { g.translate(0, -J.head, 0); g.scale(1.12, 1.12, 1.12); g.translate(0, J.head, 0); }
+    const parts = [...bodyParts(S, F), ...head].map(g => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k); return g; });
     const geo = mergeGeometries(parts, false);
     geo.computeBoundingSphere();
     geoCache.set(key, geo);
@@ -1026,9 +1224,9 @@ function makeSkeleton(F) {
 
 // Root at the feet. Inner model faces local +x; root.rotation.y = -PI/2 turns it to face +z.
 // opts.outfit: 'player' | 'ed' | 'clerk' | 'dealer' | 'repo' (inferred from the old call
-// signatures in town3d.js when absent).
-export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null } = {}) {
-  const spec = resolveSpec(color, { hatIndex, skinIndex, scale, eyeColor, outfit });
+// signatures in town3d.js when absent). opts.variant: a player's kit, 0-5 (defaults to hatIndex).
+export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null, variant = null } = {}) {
+  const spec = resolveSpec(color, { hatIndex, skinIndex, scale, eyeColor, outfit, variant });
   const F = frameOf(spec);
   const bones = makeSkeleton(F);
   const [body] = bones;
@@ -1055,40 +1253,51 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 
 // ---- posing --------------------------------------------------------------------------------
 
-const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'hatOff', 'mapK'];
-function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.16; P.eL = P.eR = 0.3; P.inL = P.inR = 0.08; P.wristL = P.wristR = 0.1; return P; }
+const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'hatOff', 'mapK', 'toe', 'sway'];
+function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.24; P.eL = P.eR = 0.3; P.inL = P.inR = 0.08; P.wristL = P.wristR = 0.2; return P; }
+// The heroic WoW idle, layered on a pose by weight w (0 = none): feet apart and turned out, knees
+// a little soft, chest up, and a slow (~4.5 s) weight shift: the hips sway and roll over one leg
+// while the opposite shoulder dips.
+function heroicIdle(P, t, k, w = 1) {
+  P.spread += 0.038 * w; P.toe += 0.14 * w;
+  P.lL += 0.05 * w; P.lR += 0.05 * w; P.kL -= 0.1 * w; P.kR -= 0.1 * w; P.fL += 0.05 * w; P.fR += 0.05 * w;
+  P.bend += 0.05 * w;
+  const sh = Math.sin(t * 1.4 + k * 1.7);
+  P.roll += 0.035 * sh * w; P.sway += 0.015 * sh * w;
+}
 // NPC stances: the Repo Man stands hands-on-hips, the Dealer deals, Ed leans on his counter
 const STANCE = {
   repo: { abL: 0.76, abR: 0.76, aL: -0.24, aR: -0.24, eL: 0.36, eR: 0.36, inL: 1.6, inR: 1.6, wristL: 0.35, wristR: 0.35, spread: 0.13, bend: 0.05, head: -0.1 },
-  dealer: { aL: 0.42, aR: 0.48, eL: 0.8, eR: 0.75, inL: 0.25, inR: 0.3, bend: -0.015, head: 0.1 },
+  dealer: DEALER_STANCE,
   ed: { aL: 0.35, aR: 0.35, eL: 1.05, eR: 1.05, inL: 0.75, inR: 0.75, abL: 0.18, abR: 0.18, bend: -0.04 },
   clerk: { aL: 0.1, aR: 0.12, eL: 0.5, eR: 0.45, inL: 0.5, inR: 0.45, abL: 0.08, abR: 0.08 },
 };
 function idlePose(ch, t) {
-  const P = { ...restPose(), ...(STANCE[ch.spec.outfit] || {}) }, k = ch.seed;
+  const st = STANCE[ch.spec.outfit] || {}, P = { ...restPose(), ...st }, k = ch.seed;
   const br = Math.sin(t * 1.7 + k);
+  heroicIdle(P, t, k, st.spread ? 0.4 : 1);
+  if (ch.spec.outfit === 'dealer') P.bend -= 0.05;          // (leaning on his table)
   P.bend += -0.015 - br * 0.012;
   P.abL += br * 0.015; P.abR += br * 0.015;
   P.aL += 0.03 * Math.sin(t * 0.6 + k); P.aR += 0.03 * Math.sin(t * 0.7 + k * 2);
   P.headY = 0.35 * Math.sin(t * 0.23 + k) * Math.max(0, Math.sin(t * 0.11 + k * 3));
   P.head += 0.04 * Math.sin(t * 0.4 + k);
-  const shift = Math.sin(t * 0.3 + k * 5);
-  P.roll = shift * 0.025; P.spread = Math.max(P.spread, 0.03);
   return P;
 }
 function applyPose(ch, P) {
   const b = ch.bones;
-  b.legL.rotation.set(P.spread + P.roll, 0, P.lL);
-  b.legR.rotation.set(-P.spread + P.roll, 0, P.lR);
+  // (the hips' sway is cancelled at the feet: the legs lean back over the planted soles)
+  b.legL.rotation.set(P.spread + P.roll + P.sway / 0.82, P.toe, P.lL);
+  b.legR.rotation.set(-P.spread + P.roll + P.sway / 0.82, -P.toe, P.lR);
   b.shinL.rotation.set(0, 0, P.kL); b.shinR.rotation.set(0, 0, P.kR);
   b.footL.rotation.set(-P.roll, 0, P.fL); b.footR.rotation.set(-P.roll, 0, P.fR);
   b.armL.rotation.set(P.abL, 0, P.aL); b.armR.rotation.set(-P.abR, 0, P.aR);
   b.foreL.rotation.set(-P.inL, 0, P.eL); b.foreR.rotation.set(P.inR, 0, P.eR);
   b.handL.rotation.set(0, 0, P.wristL); b.handR.rotation.set(0, 0, P.wristR);
-  b.hips.position.y = J.hips + P.bob;
+  b.hips.position.y = J.hips + P.bob; b.hips.position.z = P.sway;
   b.hips.rotation.set(-P.roll, P.tw * 0.5, 0);
-  b.spine.rotation.set(P.roll * 0.6, P.tw * 0.5, P.bend * 0.5);
-  b.chest.rotation.set(P.roll * 0.4, P.ctw, P.bend * 0.5);
+  b.spine.rotation.set(P.roll * 0.75, P.tw * 0.5, P.bend * 0.5);
+  b.chest.rotation.set(P.roll * 0.6, P.ctw, P.bend * 0.5);     // (net +.35 roll: the shoulders dip against the hips)
   b.neck.rotation.set(0, P.headY * 0.4, P.head * 0.35);
   b.head.rotation.set(0, P.headY * 0.6, P.head * 0.65);
   // a brimmed hat tipped forward over the face (knocked out): pivot forward, settle on the nose
@@ -1169,10 +1378,10 @@ function playerPose(st, m) {
     T.roll += 0.035 * g * Math.sin(ph);
     T.bend = -(sprint ? 0.22 : 0.07) * g; T.lean = (sprint ? 0.09 : 0.03) * g;
     T.abL += 0.06 * g; T.abR += 0.06 * g;
-    // idle on top: breathing + a slow weight shift
+    // idle on top: the heroic stance, breathing, a slow weight shift
+    heroicIdle(T, t, id, 1 - g);
     T.bend += -0.012 - br * 0.012 * (1 - g);
     T.abL += br * 0.015 * (1 - g); T.abR += br * 0.015 * (1 - g);
-    T.roll += 0.025 * Math.sin(t * 0.35 + id * 2) * (1 - g);
     if (st.flags & F.CROUCH) {
       drop = -0.3;
       T.lL += 1.0; T.lR += 1.0; T.kL = kneeFor(T.lL, drop) + T.kL * 0.3; T.kR = kneeFor(T.lR, drop) + T.kR * 0.3;
@@ -1204,7 +1413,7 @@ function playerPose(st, m) {
 // Paint a player's atlas and build their mesh ahead of time (e.g. when the lobby lists them),
 // so a player joining mid-game doesn't stall a frame while their look is painted.
 export function prewarmPlayer(p) {
-  const S = resolveSpec(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6 });
+  const S = resolveSpec(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6 });
   charMaterial(S); charGeometry(S, frameOf(S));
 }
 
@@ -1214,7 +1423,7 @@ export class PlayerView {
   constructor(scene, p) {
     this.id = p.id;
     this.group = new THREE.Group();
-    this.ch = buildCharacter(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6 });
+    this.ch = buildCharacter(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6 });
     this.ch.driven = true;
     this.ch.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
     this.tilt = new THREE.Group();
@@ -1315,16 +1524,17 @@ function fpHandGeometry(side) {
   // the hand: a broad padded block down -z, back of the hand up, swelling at the knuckles
   const HR = [[0.016, 0.044, 0.031, 0], [-0.02, 0.053, 0.036, 0.3], [-0.058, 0.057, 0.036, 0.6], [-0.078, 0.06, 0.041, 0.78], [-0.09, 0.059, 0.039, 0.88], [-0.1, 0.054, 0.03, 0.96], [-0.106, 0.0, 0.0, 1]];
   P.push(seg(HR.map(([y, w, d, v]) => ({ y, w, d, db: d * 0.85, n: 2.8, v })), FP.palm, 18));
-  // fingers: thick, two-jointed, each curled a little differently (the index straightest, the
-  // little finger tucked in), fanned slightly apart so they read as fingers, not a paddle
-  const fx = [-0.041, -0.014, 0.0135, 0.04], len = [0.86, 1.0, 0.95, 0.76], curl = [0.8, 0.95, 1.1, 1.3], fan = [-0.05, -0.015, 0.02, 0.06];
+  // fingers: thick and jointed, curled into a loose fist (the index least, the little finger most),
+  // each a little different, the tips tucked under the palm
+  const fx = [-0.04, -0.0135, 0.013, 0.039], len = [0.95, 1.0, 0.96, 0.82], curl = [0.72, 0.82, 0.9, 1.0];
   fx.forEach((x, i) => {
-    const L = len[i], c = curl[i], y0 = 0.006 - Math.abs(x) * 0.15, xe = x + fan[i] * 0.09;
-    const path = bez([x, y0, -0.088], [x + fan[i] * 0.04, y0 + 0.002, -0.088 - 0.055 * L], [xe, y0 - 0.022 * L * c, -0.088 - 0.085 * L], [xe, y0 - 0.05 * L * c, -0.088 - 0.082 * L / c]);
-    P.push(tube(v => path(v).map(c => c * k), v => (0.0155 - 0.0022 * v) * k * (1 + 0.1 * gauss(v - 0.5, 0.08) + 0.06 * gauss(v - 0.05, 0.06)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 8, 9, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
+    const L = len[i], c = curl[i], y0 = 0.004 - Math.abs(x) * 0.12, z0 = -0.086 + Math.abs(x) * 0.15;
+    const path = bez([x, y0, z0], [x * 1.02, y0 - 0.006, z0 - 0.05 * L], [x * 1.04, y0 - 0.058 * L * c, z0 - 0.062 * L], [x * 1.04, y0 - 0.07 * L * c, z0 - 0.022 * L / c]);
+    P.push(tube(v => path(v).map(q => q * k), v => (0.0158 - 0.0018 * v) * k * (1 + 0.1 * gauss(v - 0.42, 0.08) + 0.08 * gauss(v - 0.72, 0.07)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 8, 10, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
   });
-  const tp = bez([-0.042, -0.01, -0.012], [-0.066, -0.01, -0.04], [-0.07, -0.016, -0.07], [-0.056, -0.024, -0.092]);
-  P.push(tube(v => tp(v).map(c => c * k), v => (0.0185 - 0.004 * v) * k * (1 + 0.08 * gauss(v - 0.5, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.15 + v * 0.85) * Math.PI), 0.35), 8, 8, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
+  // the thumb, from the heel of the palm across to rest on the index finger's middle joint
+  const tp = bez([-0.044, -0.012, -0.015], [-0.07, -0.016, -0.052], [-0.064, -0.034, -0.1], [-0.047, -0.044, -0.128]);
+  P.push(tube(v => tp(v).map(q => q * k), v => (0.0185 - 0.003 * v) * k * (1 + 0.08 * gauss(v - 0.55, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.15 + v * 0.85) * Math.PI), 0.35), 8, 9, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
   const geo = mergeGeometries(P.map(g => { for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(a)) g.deleteAttribute(a); return g; }), false);
   if (side < 0) {   // mirror for the left hand
     geo.scale(-1, 1, 1);
@@ -1411,16 +1621,17 @@ export class Hands {
       pose(this.R, 0.19, -0.3, -0.34, 0.75, 0.25, -1.0);
     } else if (me.holding?.type === 'map' && this.map?.visible) {
       // gripping the bottom roller near both ends, fingers curled over it
-      pose(this.L, -0.2, -0.31 + bobL * 0.5, -0.4, 1.05, 0.25, 0.75);
-      pose(this.R, 0.2, -0.3 + bobR * 0.5, -0.4, 1.05, -0.25, -0.75);
+      pose(this.L, -0.205, -0.322 + bobL * 0.5, -0.385, 1.2, 0.25, 0.7);
+      pose(this.R, 0.205, -0.316 + bobR * 0.5, -0.385, 1.2, -0.25, -0.7);
     } else if (me.holding) {
       pose(this.L, -0.2, -0.3 + bobL * 0.6, -0.4, 0.55, -0.85, 0.9);
       pose(this.R, 0.2, -0.3 + bobR * 0.6, -0.4, 0.55, 0.85, -0.9);
     } else {
-      // not mirror twins: the left hand rides a little lower and turned, and idles on its own beat
+      // loose fists low in the frame, knuckles forward and the backs of the hands turned up toward
+      // you; not mirror twins: the left rides a little lower and turned, and idles on its own beat
       const idleL = Math.sin(now * 1.3 + 1.7) * 0.004;
-      pose(this.L, -0.25 + swayL, -0.348 + bobL + idleL, -0.36, 0.44, -0.3, 0.47);
-      pose(this.R, 0.25 + swayR, -0.33 + bobR, -0.36, 0.42, 0.3, -0.42);
+      pose(this.L, -0.235 + swayL, -0.37 + bobL + idleL, -0.4, 0.62, -0.3, 0.5);
+      pose(this.R, 0.235 + swayR, -0.36 + bobR, -0.4, 0.6, 0.28, -0.46);
     }
   }
 }

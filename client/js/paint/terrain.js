@@ -287,22 +287,24 @@ function rippleHeight(rnd, s, { per = 18, warp = 22, warp2 = 5, tilt = 1, lee = 
 
 // Snow drifts as a height field: crescent ridges with a long windward slope and a short steep lee,
 // so the lit face meets the blue lee in a crisp crest line.
-function driftHeight(rnd, s, n, { len = [80, 200], wind = [30, 80], lee = [8, 16], amp = [8, 16], ang = [-0.35, 0.35] }) {
+function driftHeight(rnd, s, n, { len = [80, 200], wind = [30, 80], lee = [8, 16], amp = [8, 16], ang = [-0.35, 0.35], curve = 1, endTaper = 30 }) {
   const H = new Float32Array(s * s);
   for (let d = 0; d < n; d++) {
     const cx = rnd() * s, cy = rnd() * s, Lc = range(rnd, len[0], len[1]) / 2, Lw = range(rnd, wind[0], wind[1]), Ll = range(rnd, lee[0], lee[1]);
-    const A = range(rnd, amp[0], amp[1]), th = range(rnd, ang[0], ang[1]), cu = range(rnd, -1, 1) * 0.6 / Lc;
+    const A = range(rnd, amp[0], amp[1]), th = range(rnd, ang[0], ang[1]), cu = range(rnd, -1, 1) * 0.6 * curve / Lc;
     const c = Math.cos(th), sn = Math.sin(th);
     const R = Math.ceil(Math.max(Lc, Lw) + 4);
     for (let oy = -R; oy <= R; oy++) for (let ox = -R; ox <= R; ox++) {
       const v = ox * c + oy * sn, u0 = -ox * sn + oy * c;      // v along the crest, u across (+u = lee side)
       if (Math.abs(v) >= Lc) continue;
       const u = u0 - cu * v * v;
-      if (u < -Lw || u > Ll) continue;
-      const p = u < 0 ? Math.pow(1 + u / Lw, 1.6) : Math.pow(1 - u / Ll, 2);
-      const wv = 1 - (v / Lc) * (v / Lc);
+      // an elliptic footprint (rounded ends, never a thin tail), the height tapering over the last endTaper px
+      const ef = Math.sqrt(Math.max(0, 1 - (v / Lc) * (v / Lc))), lw = Lw * (0.35 + 0.65 * ef), ll = Ll * (0.5 + 0.5 * ef);
+      if (u < -lw || u > ll) continue;
+      const p = u < 0 ? Math.pow(1 + u / lw, 1.6) : Math.pow(1 - u / ll, 2);
+      const wv = sst(Lc, Lc - Math.min(endTaper, Lc * 0.6), Math.abs(v)) * (0.7 + 0.3 * ef);
       const x = ((Math.round(cx) + ox) % s + s) % s, y = ((Math.round(cy) + oy) % s + s) % s;
-      H[y * s + x] += A * p * wv * wv;
+      H[y * s + x] += A * p * wv;
     }
   }
   return H;
@@ -356,16 +358,16 @@ function paintRoad(g, s, rnd, P) {
 }
 
 // Ragged grass creeping in from the road's edges (and a grassy crown strip between the ruts).
-function roadGrass(g, s, rnd, c, mpx, G, { crown = true, edgeN = 150, crownN = 70, fine = true } = {}) {
-  const ragL = periodic(rnd, 6, 0.8, 2), ragR = periodic(rnd, 6, 0.8, 2), ragC = periodic(rnd, 5, 0.8, 3);
+function roadGrass(g, s, rnd, c, mpx, G, { crown = true, edgeN = 150, crownN = 70, fine = true, fineN = 900, crownOn = 1 } = {}) {
+  const ragL = periodic(rnd, 6, 0.8, 2), ragR = periodic(rnd, 6, 0.8, 2), ragC = periodic(rnd, 5, 0.8, 3), onC = periodic(rnd, 4, 0.8, 1);
   const edge = (x, y) => {
     const l = c - (2.85 + ragL(y / s) * 0.5) * mpx, r = c + (2.85 + ragR(y / s) * 0.5) * mpx;
     return x < l ? 1 : x > r ? 1 : x < l + 18 || x > r - 18 ? 0.35 : 0;
   };
-  const strip = (x, y) => { const w = (0.32 + ragC(y / s) * 0.14) * mpx; return Math.abs(x - c) < w ? 1 - Math.abs(x - c) / w * 0.5 : 0; };
+  const strip = (x, y) => { const w = (0.32 + ragC(y / s) * 0.14) * mpx, on = sst(1 - crownOn * 2 - 0.1, 1 - crownOn * 2 + 0.1, onC(y / s)); return Math.abs(x - c) < w ? (1 - Math.abs(x - c) / w * 0.5) * on : 0; };
   grassTufts(g, s, rnd, edgeN, { r: [8, 16], blades: [6, 10], len: [12, 22], wid: [2.6, 4.2], root: G.root, body: G.body, tip: G.tip, shadow: G.shadow, shadowA: 0.35, where: edge, lean: [-0.4, 0.4] });
   if (crown) grassTufts(g, s, rnd, crownN, { r: [6, 12], blades: [5, 9], len: [10, 18], wid: [2.4, 3.8], root: G.root, body: G.body, tip: G.tip, shadow: G.shadow, shadowA: 0.3, where: strip, lean: [-0.4, 0.4] });
-  if (fine) bladePass(g, s, rnd, 900, G.body, [6, 12], [1.4, 2.2], 0.7, [-0.5, 0.5], [-0.2, 0.3], (x, y) => edge(x, y) > 0.3 || (crown && strip(x, y) > 0.5));
+  if (fine) bladePass(g, s, rnd, fineN, G.body, [6, 12], [1.6, 2.6], 0.7, [-0.5, 0.5], [-0.2, 0.3], (x, y) => edge(x, y) > 0.3 || (crown && strip(x, y) > 0.5));
 }
 
 // ---- natural rock faces ---------------------------------------------------------------------------
@@ -831,6 +833,401 @@ function paintRockFace(g, s, rnd, P, cv) {
   soften(cv, 0.75);
 }
 
+// ---- packed dirt, stones and cracks --------------------------------------------------------------
+
+// Cobbled packed dirt: soft Worley cells (borders warped, so no cell is a clean polygon), each lit on
+// its upper left and a little shaded on its lower right, parted by soft grout. Laid over what is
+// already painted at partial strength, so the big blotches show through.
+function cellDirt(g, s, rnd, { cells = 16, warp = 12, grout, groutA = 0.35, groutW = 3.4, lit, litA = 0.4, shade: dk, shadeA = 0.3, where = null, varA = 0.06 }) {
+  const F = worley(s, cells, rnd, 0.95);
+  const WX = fbmLo(rnd, s, 3, 5, 0.6), WY = fbmLo(rnd, s, 3, 5, 0.6), GN = fbmLo(rnd, s, 3, 9, 0.55);
+  const tone = F.seeds.map(() => range(rnd, -1, 1));
+  const G = hex(grout), L = hex(lit), Dk = hex(dk);
+  const img = g.getImageData(0, 0, s, s), D = img.data;
+  const R = s / cells * 0.62;
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const k = y * s + x;
+    const m = where ? where(x, y) : 1;
+    if (m <= 0.01) continue;
+    const u = ((Math.round(x + WX[k] * warp) % s) + s) % s, v = ((Math.round(y + WY[k] * warp) % s) + s) % s, q = v * s + u;
+    const e = F.edge[q], id = F.id[q], o = k * 4;
+    // lit toward the upper left of each cell, shaded toward its lower right, a domed middle
+    const f = -(F.dirx[q] * 0.7 + F.diry[q] * 0.72) * Math.min(1, F.d1[q] / R);
+    const tk = 1 + tone[id] * varA;
+    D[o] *= tk; D[o + 1] *= tk; D[o + 2] *= tk;
+    if (f > 0) { const a = f * litA * m; D[o] += (L.r - D[o]) * a; D[o + 1] += (L.g - D[o + 1]) * a; D[o + 2] += (L.b - D[o + 2]) * a; }
+    else { const a = -f * shadeA * m; D[o] += (Dk.r - D[o]) * a; D[o + 1] += (Dk.g - D[o + 1]) * a; D[o + 2] += (Dk.b - D[o + 2]) * a; }
+    const gt = sst(groutW, 0.3, e) * groutA * m * sst(-0.25, 0.3, GN[k]);     // grout along only some of the borders
+    if (gt > 0) { D[o] += (G.r - D[o]) * gt; D[o + 1] += (G.g - D[o + 1]) * gt; D[o + 2] += (G.b - D[o + 2]) * gt; }
+  }
+  g.putImageData(img, 0, 0);
+}
+
+// One stone seen from above: a flat slab or an angular chip (aspect 0.4-1), lit on its upper-left
+// edge, with only a thin dark contact line along its lower right (no cast-shadow ellipse).
+function stone(g, s, x, y, r, rnd, { color, contact = '#4a3424', contactA = 0.5, sides = 5, asp = [0.4, 1] }) {
+  const rot = rnd() * TAU, sq = range(rnd, asp[0], asp[1]), pts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = (i + range(rnd, -0.25, 0.25)) / sides * TAU, rr = r * range(rnd, 0.75, 1.15);
+    const px = Math.cos(a) * rr, py = Math.sin(a) * rr * sq;
+    pts.push([px * Math.cos(rot) - py * Math.sin(rot), px * Math.sin(rot) + py * Math.cos(rot)]);
+  }
+  const path = (X, Y, ox = 0, oy = 0) => { g.beginPath(); pts.forEach(([u, v], i) => (i ? g.lineTo(X + u + ox, Y + v + oy) : g.moveTo(X + u + ox, Y + v + oy))); g.closePath(); };
+  const lit = lightOf(color, 0.45), dk = shadowOf(color, 0.3);
+  wrap(s, x, y, r * 1.6, (X, Y) => {
+    g.save(); g.globalAlpha = contactA; g.fillStyle = contact; path(X, Y, 1.1, 1.3); g.fill(); g.restore();
+    g.fillStyle = color; path(X, Y); g.fill();
+    g.save(); path(X, Y); g.clip();
+    blob(g, X + r * 0.5, Y + r * 0.55, r * 0.95, r * 0.8, 0, dk, 0.55, 0.35);
+    blob(g, X - r * 0.45, Y - r * 0.5, r * 0.85, r * 0.7, 0, lit, 0.75, 0.35);
+    g.restore();
+  });
+}
+
+// Stones gathered in clusters of 3-8 (one bigger, the rest small), at given spots or where a mask
+// allows, leaving most of the ground empty.
+function stoneClusters(g, s, rnd, n, { colors, r = [1.6, 4.2], k = [3, 8], spread = [5, 14], at = null, where = null, contact = '#4a3424', contactA = 0.5, sides = [4, 6], asp = [0.4, 1], sy = 0.7 }) {
+  const C = at ? at.slice() : [];
+  for (let i = 0; i < n * 8 && C.length < n; i++) { const x = rnd() * s, y = rnd() * s; if (!where || rnd() < where(x, y)) C.push([x, y]); }
+  for (const [cx, cy] of C.slice(0, n)) {
+    const m = Math.round(range(rnd, k[0], k[1])), sp = range(rnd, spread[0], spread[1]), a0 = rnd() * TAU;
+    const list = [];
+    for (let j = 0; j < m; j++) {
+      const t = rnd() * TAU, d = Math.sqrt(rnd()) * sp * (j ? 1 : 0.3);
+      list.push([cx + Math.cos(t + a0) * d, cy + Math.sin(t + a0) * d * sy, (j ? range(rnd, r[0], (r[0] + r[1]) / 2) : range(rnd, (r[0] + r[1]) / 2, r[1]))]);
+    }
+    list.sort((p, q) => p[1] - q[1]);
+    for (const [x, y, rr] of list) stone(g, s, x, y, rr, rnd, { color: jitter(pick(rnd, colors), rnd, 0.06), contact, contactA, sides: Math.round(range(rnd, sides[0], sides[1])), asp });
+  }
+  return C;
+}
+
+// Open crack networks: a few long wandering cracks that branch, 1-2 px wide, with a 1 px lit lip on
+// their upper-left side. Returns points along them (for stones to gather at).
+function crackNet(g, s, rnd, n, { color, lit, alpha = 0.5, litA = 0.45, len = [90, 220], width = [1, 2], branch = 0.4 }) {
+  const along = [];
+  const lines = [];
+  const one = (x, y, a, L, W, depth) => {
+    const pts = [[x, y]], segs = Math.max(4, Math.round(L / 10));
+    let px = x, py = y;
+    for (let i = 0; i < segs; i++) {
+      a += range(rnd, -0.45, 0.45);
+      px += Math.cos(a) * L / segs; py += Math.sin(a) * L / segs; pts.push([px, py]);
+      if (rnd() < 0.15) along.push([px, py]);
+      if (depth < 2 && rnd() < branch / segs * 3) one(px, py, a + (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.6, 1.3), L * range(rnd, 0.25, 0.5), W * 0.7, depth + 1);
+    }
+    lines.push({ pts, W, x, y, L });
+  };
+  for (let i = 0; i < n; i++) one(rnd() * s, rnd() * s, rnd() * TAU, range(rnd, len[0], len[1]), range(rnd, width[0], width[1]), 0);
+  layered(g, s, litA, lg => { for (const l of lines) wrap(s, l.x, l.y, l.L + 4, (X, Y) => stroke(lg, l.pts.map(([u, v]) => [u - l.x + X - 0.9, v - l.y + Y - 0.9]), l.W * 0.8, l.W * 0.3, lit, 1)); });
+  layered(g, s, alpha, lg => { for (const l of lines) wrap(s, l.x, l.y, l.L + 4, (X, Y) => stroke(lg, l.pts.map(([u, v]) => [u - l.x + X, v - l.y + Y]), l.W, l.W * 0.35, color, 1)); });
+  return along;
+}
+
+// Shallow wheel tracks as broken soft bands along y at x0 (each w px wide, no lines), present over
+// part of the length; strength fades in and out along the road.
+function softRuts(g, s, rnd, xs, { w, color, alpha = 0.25, presence = 0.6, wob = 6 }) {
+  const img = g.getImageData(0, 0, s, s), D = img.data, C = hex(color);
+  for (const x0 of xs) {
+    const on = periodic(rnd, 4, 0.8, 1), on2 = periodic(rnd, 3, 0.7, 5), wb = periodic(rnd, 3, 1.1, 1), wd = periodic(rnd, 3, 1, 2);
+    const cut = 1 - presence * 2;      // periodic() spans about -1..1
+    for (let y = 0; y < s; y++) {
+      const pres = sst(cut - 0.15, cut + 0.15, on(y / s) * 0.8 + on2(y / s) * 0.35);
+      if (pres <= 0) continue;
+      const cx = x0 + wb(y / s) * wob, hw = w * (0.5 + 0.12 * wd(y / s));
+      for (let x = Math.max(0, Math.floor(cx - hw)); x <= Math.min(s - 1, Math.ceil(cx + hw)); x++) {
+        const u = (x - cx) / hw, a = Math.cos(u * Math.PI / 2) ** 2 * alpha * pres, o = (y * s + x) * 4;
+        D[o] += (C.r - D[o]) * a; D[o + 1] += (C.g - D[o + 1]) * a; D[o + 2] += (C.b - D[o + 2]) * a;
+      }
+    }
+  }
+  g.putImageData(img, 0, 0);
+}
+
+// The cross profile of a road: darker, softer toward the edges, a slightly paler crown.
+function roadProfile(g, s, edge, crown, base) {
+  const gr = g.createLinearGradient(0, 0, s, 0);
+  gr.addColorStop(0, rgba(edge, 0.6)); gr.addColorStop(0.18, rgba(edge, 0.15)); gr.addColorStop(0.3, rgba(edge, 0));
+  gr.addColorStop(0.7, rgba(edge, 0)); gr.addColorStop(0.82, rgba(edge, 0.15)); gr.addColorStop(1, rgba(edge, 0.6));
+  g.fillStyle = gr; g.fillRect(0, 0, s, s);
+  const cr = g.createLinearGradient(0, 0, s, 0);
+  cr.addColorStop(0.36, rgba(crown, 0)); cr.addColorStop(0.5, rgba(crown, 0.22)); cr.addColorStop(0.64, rgba(crown, 0));
+  g.fillStyle = cr; g.fillRect(0, 0, s, s);
+}
+// Lighter worn patches, long along the road.
+function worn(g, s, rnd, n, xs, color, a, w = [12, 28], l = [40, 120]) {
+  layered(g, s, 1, lg => {
+    for (let i = 0; i < n; i++) {
+      const x = pick(rnd, xs) + range(rnd, -14, 14), y = rnd() * s, rx = range(rnd, w[0], w[1]), ry = range(rnd, l[0], l[1]), al = range(rnd, a[0], a[1]), rot = range(rnd, -0.12, 0.12);
+      wrap(s, x, y, ry * 1.2, (X, Y) => blob(lg, X, Y, rx, ry, rot, color, al, 0.2));
+    }
+  });
+}
+
+// ---- rounded rock masses (granite, sandstone) -------------------------------------------------
+// Granite is painted as big rounded, lumpy masses: 5-8 big ones per tile over a fill of medium
+// ones (sizes vary three to one), each a low dome with its own tilt. The domes are joined by a
+// smooth maximum, so most borders between masses are only a change of value; about a third of the
+// seams get a soft dark crease. Light from the upper left (and above: the canvas top is up in the
+// world): the upper-left of every mass is cream-lit, its underside cool, and it casts a soft
+// shadow on what lies behind it. Outlines are warped on two octaves and lobed, so nothing runs
+// straight. Then moss or snow settles on whatever faces up, rain streaks run down, a few short
+// cracks and lichen.
+
+function rockMasses(s, rnd, P) {
+  const M = [];
+  const add = (x, y, rx, ry, z, kind, rot = range(rnd, -P.rot, P.rot)) => {
+    M.push({ id: M.length, x, y, rx, ry, c: Math.cos(rot), sn: Math.sin(rot), z, kind, tone: range(rnd, -1, 1), hue: hex(pick(rnd, P.colors)),
+      lob: ptable(rnd, 256, 5, 0.8, 2), lobA: range(rnd, 0.12, 0.24), dome: range(rnd, 0.7, 1.25), gx: range(rnd, -1, 1) * P.tilt, gy: range(rnd, -0.6, 1) * P.tilt, r2: rnd(), r3: rnd() });
+  };
+  const [fx, fy] = P.fill, cw = s / fx, ch = s / fy;
+  for (let j = 0; j < fy; j++) for (let i = 0; i < fx; i++) {
+    add((i + 0.5 + range(rnd, -0.4, 0.4) + (j % 2) * 0.37) * cw, (j + 0.5 + range(rnd, -0.3, 0.3)) * ch, cw * range(rnd, 0.55, 0.8), ch * range(rnd, 0.5, 0.75), rnd() * 0.45, 1);
+  }
+  for (let i = 0; i < P.big; i++) {
+    const R = range(rnd, P.bigR[0], P.bigR[1]), asp = range(rnd, P.asp[0], P.asp[1]);
+    add((i + rnd() * 0.8) / P.big * s, rnd() * s, R * Math.sqrt(asp) * P.sx, R / Math.sqrt(asp) * P.sy, 0.45 + rnd() * 0.55, 2);
+  }
+  for (let i = 0; i < (P.ledgeN || 0); i++) add(rnd() * s, (i + 0.2 + rnd() * 0.6) / P.ledgeN * s, range(rnd, P.ledgeL[0], P.ledgeL[1]), range(rnd, 13, 22), 1.0 + rnd() * 0.2, 3, range(rnd, -0.05, 0.05));
+  for (let i = 0; i < (P.small || 0); i++) { const R = range(rnd, 22, 42); add(rnd() * s, rnd() * s, R * P.sx, R * 0.8 * P.sy, -0.3 + rnd() * 0.3, 0); }
+  return M;
+}
+
+function massRock(g, s, rnd, P, cv) {
+  const N = s * s;
+  const M = rockMasses(s, rnd, P);
+  const REACH = 1.35;
+  // bins of 32 px, each holding the (wrapped copies of the) masses that can reach it
+  const BS = 32, NB = s / BS, bins = Array.from({ length: NB * NB }, () => []);
+  for (const m of M) {
+    const R = Math.max(m.rx, m.ry) * (1 + m.lobA) * REACH + 3;
+    for (const ox of [-s, 0, s]) for (const oy of [-s, 0, s]) {
+      const cx = m.x + ox, cy = m.y + oy;
+      if (cx + R < 0 || cx - R > s || cy + R < 0 || cy - R > s) continue;
+      const bx0 = Math.max(0, Math.floor((cx - R) / BS)), bx1 = Math.min(NB - 1, Math.floor((cx + R) / BS));
+      const by0 = Math.max(0, Math.floor((cy - R) / BS)), by1 = Math.min(NB - 1, Math.floor((cy + R) / BS));
+      for (let by = by0; by <= by1; by++) for (let bx = bx0; bx <= bx1; bx++) bins[by * NB + bx].push({ m, cx, cy });
+    }
+  }
+  const WX = fbmLo(rnd, s, 2, 4, 0.5), WY = fbmLo(rnd, s, 2, 4, 0.5), WX2 = fbmLo(rnd, s, 2, 13, 0.5), WY2 = fbmLo(rnd, s, 2, 13, 0.5);
+  const BU = fbmLo(rnd, s, 3, 3, 0.5);
+  const TOP = new Int32Array(N), H = new Float32Array(N), CR = new Float32Array(N), RIM = new Float32Array(N), DYN = new Float32Array(N);
+  const D = P.dome, ZS = P.zs, K = P.smooth, ex = P.exp ?? 2.4;
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const k = y * s + x;
+    let u = x + WX[k] * P.warp + WX2[k] * P.warp * 0.38, v = y + WY[k] * P.warp + WY2[k] * P.warp * 0.38;
+    u = ((u % s) + s) % s; v = ((v % s) + s) % s;
+    const list = bins[Math.min(NB - 1, Math.floor(v / BS)) * NB + Math.min(NB - 1, Math.floor(u / BS))];
+    let h1 = -1e9, h2 = -1e9, i1 = -1, i2 = -1, acc = 0, rim = 0, dyn = 0;
+    // pass 1: the top two heights; pass 2 (folded in): a running log-sum-exp for the smooth union
+    for (const e of list) {
+      const m = e.m, dx = u - e.cx, dy = v - e.cy;
+      const lx = (dx * m.c + dy * m.sn) / m.rx, ly = (-dx * m.sn + dy * m.c) / m.ry;
+      let r = lx * lx + ly * ly;
+      if (r > REACH * REACH * 1.6) continue;
+      r = Math.sqrt(r) / (1 + m.lobA * m.lob[((Math.atan2(ly, lx) / TAU + 0.5) * 255) | 0]);
+      if (r > REACH) continue;
+      const h = m.z * ZS + D * m.dome * (1 - Math.pow(r, ex)) + (m.gx * dx + m.gy * dy);
+      if (h > h1) { acc = acc * Math.exp(K * (h1 - h)) + 1; h2 = h1; i2 = i1; h1 = h; i1 = m.id; const dd = Math.hypot(dx, dy) || 1; rim = dd / Math.max(r, 1e-3) - dd; dyn = dy / dd; }
+      else { acc += Math.exp(K * (h - h1)); if (h > h2) { h2 = h; i2 = m.id; } }
+    }
+    if (i1 < 0) { TOP[k] = -1; H[k] = -D * 1.2 + BU[k] * P.bulge; CR[k] = 1; continue; }
+    TOP[k] = i1; RIM[k] = rim; DYN[k] = dyn;
+    H[k] = h1 + Math.log(acc) / K + BU[k] * P.bulge;
+    if (h1 < 0) CR[k] = Math.max(CR[k], sst(0, -D * 0.8, h1) * 0.7);                       // a gap between masses
+    if (i2 >= 0 && M[i1].kind && M[i2].kind && pairHash(i1, i2) < P.crease) CR[k] = Math.max(CR[k], sst(P.creaseW, 0, h1 - h2));
+  }
+  blurField(CR, s, 1, 2);
+  for (let k = 0; k < N; k++) H[k] -= CR[k] * P.creaseD;
+  const Hs = blurField(Float32Array.from(H), s, P.soft ?? 2, 2);
+  // -- colour: painted blotches under the light
+  fill(g, s, s, P.colors[0]);
+  mottle(g, s, rnd, { colors: P.colors, count: 34, rmin: 60, rmax: 170, alpha: 0.45, hard: 0.1 });
+  mottle(g, s, rnd, { colors: P.blot, count: 70, rmin: 12, rmax: 46, alpha: 0.18, hard: 0.2, stretch: 1.4 });
+  blurWrap(cv, 2);
+  const base = g.getImageData(0, 0, s, s), B = base.data;
+  const Lx = -0.5, Ly = -0.64, Lz = 0.58, Ll = Math.hypot(Lx, Ly, Lz), dif0 = Lz / Ll;
+  const lit = hex(P.light), shd = hex(P.shadow), deep = hex(P.deep || shadowOf(P.shadow, 0.3)), crc = hex(P.creaseC), cast = hex(P.cast || P.shadow);
+  const rs = P.relief, UP = new Float32Array(N), LT = new Float32Array(N);
+  const SH = [[4, 0.7], [9, 0.8], [16, 0.9], [26, 1]];
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const k = y * s + x, o = k * 4;
+    const hx = (Hs[y * s + (x + 1) % s] - Hs[y * s + (x - 1 + s) % s]) * 0.5 * rs;
+    const hy = (Hs[((y + 1) % s) * s + x] - Hs[((y - 1 + s) % s) * s + x]) * 0.5 * rs;
+    const nl = Math.hypot(hx, hy, 1);
+    UP[k] = hy / nl;                                                // > 0: the surface faces up (the canvas top is up)
+    const dif = (-hx * Lx - hy * Ly + Lz) / (nl * Ll);              // n = (-hx, -hy, 1) / nl
+    let r = B[o], gg = B[o + 1], b = B[o + 2];
+    const id = TOP[k];
+    if (id >= 0) {
+      const m = M[id], h = m.hue, tk = 1 + m.tone * P.tone;
+      r = (r * (1 - P.hueMix) + h.r * P.hueMix) * tk; gg = (gg * (1 - P.hueMix) + h.g * P.hueMix) * tk; b = (b * (1 - P.hueMix) + h.b * P.hueMix) * tk;
+    }
+    let t = (dif - dif0) * P.contrast;
+    LT[k] = t;
+    t = t * (1 - P.planes) + P.planes * Math.round(t * 3) / 3;      // painted in broad planes of light
+    // a soft shadow cast by whatever stands up toward the light
+    let occ = 0;
+    for (const [d, f] of SH) {
+      const sx = ((x - Math.round(d * 0.62)) % s + s) % s, sy = ((y - Math.round(d * 0.78)) % s + s) % s;
+      occ = Math.max(occ, Hs[sy * s + sx] - Hs[k] - d * P.shSlope * f);
+    }
+    const sh = sst(0, D * 0.4, occ) * P.castA;
+    if (t > 0) { const a = Math.min(0.85, t) * (1 - sh); r += (lit.r - r) * a; gg += (lit.g - gg) * a; b += (lit.b - b) * a; }
+    else { const a = Math.min(0.85, -t); r += (shd.r - r) * a; gg += (shd.g - gg) * a; b += (shd.b - b) * a; }
+    if (sh > 0) { r += (cast.r - r) * sh; gg += (cast.g - gg) * sh; b += (cast.b - b) * sh; }
+    if (id < 0) { const a = 0.5; r += (deep.r - r) * a; gg += (deep.g - gg) * a; b += (deep.b - b) * a; }
+    const c = CR[k] * P.creaseA;
+    if (c > 0.005) { r += (crc.r - r) * c; gg += (crc.g - gg) * c; b += (crc.b - b) * c; }
+    B[o] = r; B[o + 1] = gg; B[o + 2] = b; B[o + 3] = 255;
+  }
+  g.putImageData(base, 0, 0);
+  // -- painted details on the faces: soft chisel strokes, a few short cracks with a lit lip
+  if (P.chisel) {
+    streaks(g, s, rnd, { colors: [P.light], count: P.chisel, len: [8, 26], width: [2, 4.5], angle: P.chiselA ?? 1.3, wobble: 0.3, alpha: 0.1 });
+    streaks(g, s, rnd, { colors: [P.shadow], count: P.chisel, len: [8, 26], width: [2, 4.5], angle: (P.chiselA ?? 1.3) + 0.15, wobble: 0.3, alpha: 0.09 });
+  }
+  const ptsTop = [], ptsFace = [];
+  for (let i = 0; i < 30000 && (ptsTop.length < 300 || ptsFace.length < 200); i++) {
+    const x = Math.floor(rnd() * s), y = Math.floor(rnd() * s), k = y * s + x;
+    if (TOP[k] < 0) continue;
+    if (UP[k] > 0.45 && UP[((y + 3) % s) * s + x] < 0.3 && ptsTop.length < 300) ptsTop.push([x, y, TOP[k]]);     // the lip where a top turns down into a face
+    else if (Math.abs(UP[k]) < 0.15 && CR[k] < 0.1 && ptsFace.length < 200) ptsFace.push([x, y, TOP[k]]);
+  }
+  for (const [x, y] of ptsFace.slice(0, P.cracks ?? 10)) {
+    const L = range(rnd, 18, 54), a0 = range(rnd, -0.6, 0.6) + (rnd() < 0.5 ? Math.PI / 2 : 0), pts = [];
+    let px = 0, py = 0, a = a0;
+    for (let i = 0; i <= 6; i++) { pts.push([px, py]); a += range(rnd, -0.5, 0.5); px += Math.cos(a) * L / 6; py += Math.sin(a) * L / 6; }
+    wrap(s, x, y, L + 4, (X, Y) => {
+      stroke(g, pts.map(([u, v]) => [X + u + 1.1, Y + v + 1.2]), 2.2, 0.6, P.light, 0.3);
+      stroke(g, pts.map(([u, v]) => [X + u, Y + v]), 2, 0.5, P.creaseC, 0.45);
+    });
+  }
+  // rain streaks running down the faces from the lips
+  for (const [x, y] of ptsTop.slice(0, P.stains ?? 30)) {
+    const L = range(rnd, 26, 100), w = range(rnd, 3, 8), pts = [];
+    let px = 0; for (let i = 0; i <= 5; i++) { pts.push([px, 3 + L * i / 5]); px += range(rnd, -1.5, 1.5); }
+    wrap(s, x, y + L / 2, L, (X, Y) => stroke(g, pts.map(([u, v]) => [X + u, Y - L / 2 + v]), w, w * 0.3, P.stain, P.stainA ?? 0.12));
+  }
+  // -- what settles on whatever faces up: moss pads or dry grass, a powder dusting, and on a few
+  // masses a thick lumpy snow pillow that bulges down past the lip, with a blue shadow line and a
+  // soft stain under it. (UP > 0: the surface faces up; the canvas top is up in the world.)
+  const img = g.getImageData(0, 0, s, s), I = img.data;
+  const PATCH = fbmLo(rnd, s, 3, 5, 0.55), PATCH2 = fbmLo(rnd, s, 2, 14, 0.5);
+  const mixP = (o, c, a) => { I[o] += (c.r - I[o]) * a; I[o + 1] += (c.g - I[o + 1]) * a; I[o + 2] += (c.b - I[o + 2]) * a; };
+  const mixC = (a, b, f) => ({ r: a.r + (b.r - a.r) * f, g: a.g + (b.g - a.g) * f, b: a.b + (b.b - a.b) * f });
+  const cov = P.cover ? { lo: hex(P.cover.shade), mid: hex(P.cover.mid), hi: hex(P.cover.lit), lip: hex(P.cover.lip || P.shadow) } : null;
+  const lumpA = ptable(rnd, s, 8, 0.7, 3), lumpB = ptable(rnd, s, 6, 0.6, 11), drip = ptable(rnd, s, 9, 0.5, 6);
+  const capT = new Float32Array(M.length);
+  const S0 = new Float32Array(N);
+  if (P.caps) {        // thick caps on a few masses only (the ones with the broadest tops)
+    const area = new Float32Array(M.length);
+    for (let k = 0; k < N; k++) if (TOP[k] >= 0 && UP[k] > P.caps.up) area[TOP[k]]++;
+    const order = M.filter(m => m.kind >= 1).sort((a, b) => area[b.id] - area[a.id]);
+    for (const m of order.slice(0, P.caps.n)) capT[m.id] = range(rnd, P.caps.T[0], P.caps.T[1]);
+    const UPb = blurField(Float32Array.from(UP), s, 3, 2);
+    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+      const k = y * s + x, id = TOP[k];
+      if (id >= 0 && capT[id] > 0) S0[k] = sst(P.caps.up - 0.04, P.caps.up + 0.04, UPb[k] + lumpA[x] * 0.07 + PATCH2[k] * 0.04 - CR[k] * 0.8);
+    }
+  }
+  // per column: how far below the last up-facing snow pixel (the pillow overhangs that far), and how
+  // far into the current run of snow from its top (for the lit crest)
+  const BL = new Float32Array(N).fill(999), RUN = new Float32Array(N), TL = new Float32Array(N);
+  if (P.caps) for (let x = 0; x < s; x++) {
+    let d = 999, run = 0, T = 0;
+    for (let yy = 0; yy < 2 * s; yy++) {
+      const y = yy % s, k = y * s + x;
+      if (S0[k] > 0.5) { if (d > 0) { run = 0; } d = 0; T = capT[TOP[k]] || T; } else d += 1;
+      run += 1;
+      if (yy >= s) { BL[k] = d; RUN[k] = run; TL[k] = T * (0.65 + 0.35 * lumpB[(x * 2) % s] + 0.15 * lumpA[x]); }
+    }
+  }
+  const SN1 = hex('#f7f4ec'), SN2 = hex('#e8edf3'), SN3 = hex('#c9d4e4'), SNSH = hex(P.capShadow || '#9fb0c8'), POW = hex(P.powderC || '#e6ecf4');
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const k = y * s + x, id = TOP[k], o = k * 4;
+    if (id < 0) continue;
+    const m = M[id], up = UP[k];
+    if (cov && m.r2 < P.cover.p) {        // moss pads on the tops: lit where they face up most, darker at a ragged lower edge
+      const a = sst(P.cover.up, P.cover.up + 0.28, up + PATCH[k] * 0.32 + PATCH2[k] * 0.22 + (m.r3 - 0.5) * 0.2);
+      if (a > 0.01) {
+        const q = Math.max(0, Math.min(1, (up - P.cover.up) * 2.4 + 0.2));
+        mixP(o, q > 0.5 ? mixC(cov.mid, cov.hi, (q - 0.5) * 2) : mixC(cov.lo, cov.mid, q * 2), a * P.cover.max);
+      }
+    }
+    if (P.powder) {      // a powder dusting on every top, thinning out down the face
+      const a = sst(P.powder.up, P.powder.up + 0.3, up + PATCH[k] * 0.12 + PATCH2[k] * 0.12) * P.powder.a;
+      if (a > 0.01) mixP(o, POW, a);
+    }
+    if (P.caps) {
+      const bl = BL[k], T = TL[k];
+      if (bl < T) {          // the pillow: crisp lit crest at the top of the run, cooler toward its bulging lower edge
+        // snow takes the light of the rock under it (so the pillow has form), rounds off cooler toward its
+        // bulging lower edge; the first rows of a run are the lit crest, laid on softly
+        const q = Math.max(0, Math.min(1, 0.42 + LT[k] * 0.55 + PATCH2[k] * 0.15 - bl / Math.max(4, T) * 0.4));
+        const run = RUN[k];
+        if (run < 3 && bl === 0) mixP(o, SN1, 0.55 + run * 0.15);
+        else mixP(o, q > 0.5 ? mixC(SN2, SN1, (q - 0.5) * 2) : mixC(SN3, SN2, q * 2), 0.96);
+      } else if (bl < T + 4.5 && T > 2) mixP(o, SNSH, 0.75 * (1 - (bl - T) / 4.5));
+      else if (bl < T + 20 && T > 4 && drip[x] > 0.5) mixP(o, SNSH, 0.14 * (1 - (bl - T - 4.5) / 15.5));
+    }
+  }
+  g.putImageData(img, 0, 0);
+  // grass clinging to the lips, or dry grass hanging over them
+  if (P.tuft) for (const [x, y] of ptsTop.slice(40, 40 + (P.tuftN ?? 16))) {
+    const n = 5 + Math.floor(rnd() * 6), B2 = [];
+    for (let i = 0; i < n; i++) B2.push([range(rnd, -8, 8), range(rnd, 6, 13), range(rnd, -0.9, 0.9), range(rnd, 1.8, 3), pick(rnd, P.tuft), range(rnd, -0.5, 0.5)]);
+    wrap(s, x, y, 22, (X, Y) => { blob(g, X + 2, Y + 5, 10, 4, 0, '#1e2418', 0.25, 0.3); for (const [dx, L, a, w, c, bd] of B2) blade2(g, X + dx, Y + 3, L, a, w, c, bd); });
+  }
+  if (P.fringe) for (const [x, y] of ptsTop.slice(80, 80 + (P.fringeN ?? 20))) {
+    const n = 5 + Math.floor(rnd() * 6), B2 = [];
+    for (let i = 0; i < n; i++) B2.push([range(rnd, -9, 9), range(rnd, 7, 15), Math.PI + range(rnd, -0.5, 0.5), range(rnd, 1.8, 3), pick(rnd, P.fringe), range(rnd, -0.3, 0.3)]);
+    wrap(s, x, y, 26, (X, Y) => { blob(g, X + 2, Y + 7, 11, 5, 0, '#2a2024', 0.22, 0.3); for (const [dx, L, a, w, c, bd] of B2) blade2(g, X + dx, Y - 1, L, a, w, c, bd); });
+  }
+  // icicles: a few small groups under the caps
+  if (P.icicles) {
+    let n = 0;
+    const done = [];
+    for (let i = 0; i < 60000 && n < P.icicles; i++) {
+      const x = Math.floor(rnd() * s), y = Math.floor(rnd() * s), k = y * s + x;
+      if (Math.abs(BL[k] - TL[k] - 1) > 0.5 || done.some(([a, b]) => Math.hypot(a - x, b - y) < 50)) continue;
+      n++; done.push([x, y]);
+      const cnt = 2 + Math.floor(rnd() * 3);
+      for (let j = 0; j < cnt; j++) {
+        const xx = x + j * range(rnd, 4, 8), L = range(rnd, 6, 16) * (1 - j * 0.18), w = range(rnd, 2, 3.2);
+        wrap(s, xx, y + L / 2, L, (X, Y) => {
+          const Y0 = Y - L / 2;
+          stroke(g, [[X + 1, Y0 + 1], [X + 1.2, Y0 + L + 1]], w, 0.4, '#3a4660', 0.22);
+          stroke(g, [[X, Y0], [X + 0.2, Y0 + L]], w, 0.4, '#c8dcef', 0.9);
+          stroke(g, [[X - w * 0.25, Y0], [X - w * 0.2, Y0 + L * 0.7]], w * 0.35, 0.3, '#ffffff', 0.75);
+        });
+      }
+    }
+  }
+  if (P.lichen) for (let i = 0; i < 34; i++) {
+    const x = rnd() * s, y = rnd() * s, c = pick(rnd, P.lichen);
+    for (let j = 0; j < 6; j++) { const xx = x + range(rnd, -9, 9), yy = y + range(rnd, -6, 6), r = range(rnd, 1.5, 3.6); wrap(s, xx, yy, r, (X, Y) => blob(g, X, Y, r, r * 0.8, 0, c, 0.4, 0.5)); }
+  }
+  // vertical joints (sandstone): a few dark wandering lines with a lit left lip
+  if (P.joints) for (let i = 0; i < P.joints; i++) {
+    const x0 = rnd() * s, y0 = rnd() * s, L = range(rnd, 50, 160), pts = [];
+    let px = x0; for (let j = 0; j <= 8; j++) { pts.push([px, y0 + L * j / 8]); px += range(rnd, -2.5, 2.5); }
+    wrap(s, x0, y0 + L / 2, L, (X, Y) => {
+      const dx = X - x0, dy = Y - (y0 + L / 2);
+      stroke(g, pts.map(([u, v]) => [u + dx - 2, v + dy]), 2.4, 1, P.light, 0.3);
+      stroke(g, pts.map(([u, v]) => [u + dx, v + dy]), 2.6, 1, P.creaseC, 0.5);
+    });
+  }
+  if (P.undercut) {     // one irregular dark hollow under a ledge
+    const ms = M.filter(m => m.kind === 3);
+    const m = ms.length ? pick(rnd, ms) : pick(rnd, M);
+    const x = m.x + range(rnd, -0.4, 0.4) * m.rx, y = m.y + m.ry * 1.1;
+    wrap(s, x, y, 60, (X, Y) => { for (let j = 0; j < 4; j++) blob(g, X + range(rnd, -26, 26), Y + range(rnd, 0, 10), range(rnd, 14, 30), range(rnd, 6, 12), range(rnd, -0.2, 0.2), P.undercut, 0.2, 0.4); });
+  }
+  glaze(g, s, s, P.glaze || '#ffe2b0', 0.1, 'soft-light');
+  soften(cv, 0.7);
+}
+
 // ---- palettes ------------------------------------------------------------------------------
 
 // grass: tuft palettes (root at the ground, body, lit tips, the cast shadow under a clump)
@@ -873,60 +1270,125 @@ const BIO = {
   },
 };
 
+// ---- grass in clusters ----------------------------------------------------------------------------
+
+// Short grass the way Elwynn's is painted: clusters of 3-6 blades of 6-14 px fanning out of one
+// root (within about 35 degrees of straight up, the whole cluster turned a little at random), each
+// blade from a dark root through its body colour to a lit tip. Painted at full strength into a
+// layer and laid down once at alpha.
+function vTufts(g, s, rnd, n, { root, body, tip, len = [6, 14], wid = [1.8, 2.8], k = [3, 6], fan = 0.6, turn = 0.45, where = null, alpha = 1, bend = 0.25, shadow = null, shadowA = 0.3 }) {
+  const C = [];
+  for (let i = 0; i < n * 4 && C.length < n; i++) { const x = rnd() * s, y = rnd() * s; if (!where || rnd() < where(x, y)) C.push([x, y]); }
+  C.sort((a, b) => a[1] - b[1]);
+  if (shadow) layered(g, s, shadowA, lg => { for (const [x, y] of C) wrap(s, x, y, 12, (X, Y) => blob(lg, X + 3, Y + 1, 6, 3, 0.2, shadow, 1, 0.4)); });
+  layered(g, s, alpha, lg => {
+    for (const [x, y] of C) {
+      const m = Math.round(range(rnd, k[0], k[1])), rot = range(rnd, -turn, turn), b = pick(rnd, body), tp = pick(rnd, tip);
+      const B = [];
+      for (let j = 0; j < m; j++) B.push({ a: rot + range(rnd, -fan, fan), L: range(rnd, len[0], len[1]), w: range(rnd, wid[0], wid[1]), bd: range(rnd, -bend, bend), dx: range(rnd, -1.5, 1.5) });
+      B.sort((p, q) => Math.abs(q.a - rot) - Math.abs(p.a - rot));            // outer blades first
+      wrap(s, x, y, len[1] + 4, (X, Y) => {
+        for (const bl of B) {
+          const ex = X + bl.dx + Math.sin(bl.a) * bl.L, ey = Y - Math.cos(bl.a) * bl.L;
+          const gr = lg.createLinearGradient(X + bl.dx, Y, ex, ey);
+          gr.addColorStop(0, root); gr.addColorStop(0.45, b); gr.addColorStop(1, (bl.a - rot) > 0.25 ? mix(tp, b, 0.4) : tp);
+          blade2(lg, X + bl.dx, Y, bl.L, bl.a, bl.w, gr, bl.bd);
+        }
+      });
+    }
+  });
+}
+
+// A few small daisy clusters (4-6 heads of 3-5 px), never single specks.
+function daisies(g, s, rnd, n, petal = ['#fbf6e8', '#f8f0d8'], eye = '#e8b030') {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * s, y = rnd() * s, m = 4 + Math.floor(rnd() * 3);
+    for (let j = 0; j < m; j++) {
+      const px = x + range(rnd, -9, 9), py = y + range(rnd, -6, 6), r = range(rnd, 1.8, 2.6), c = pick(rnd, petal);
+      wrap(s, px, py, 8, (X, Y) => {
+        blob(g, X + 1.2, Y + 1.4, r * 1.6, r * 1.3, 0, '#1e2a14', 0.35, 0.4);
+        ellipse(g, X, Y, r * 1.3, r * 1.1, 0, c);
+        ellipse(g, X + 0.2, Y + 0.2, r * 0.45, r * 0.4, 0, eye);
+      });
+    }
+  }
+}
+
+// Soft scuffs and boot smears: a dark smear with a lit far edge.
+function scuffs(g, s, rnd, n, base, r = [6, 11]) {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * s, y = rnd() * s, rr = range(rnd, r[0], r[1]), rot = rnd() * TAU;
+    wrap(s, x, y, rr * 2, (X, Y) => { blob(g, X, Y, rr, rr * 0.45, rot, shadowOf(base, 0.35), 0.3, 0.5); blob(g, X + 1.5, Y + 2, rr * 0.8, rr * 0.3, rot, lightOf(base, 0.3), 0.26, 0.5); });
+  }
+}
+
+// One or two shallow dried-puddle hollows: a pale silt fill cracked into small plates, a dark damp rim.
+function driedPuddles(g, s, rnd, n, { silt, crack, rim, r = [34, 60] }) {
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * s, y = rnd() * s, R = range(rnd, r[0], r[1]), rot = rnd() * TAU, sq = range(rnd, 0.55, 0.8);
+    const L = makeCanvas(s), lg = L.getContext('2d');
+    wrap(s, x, y, R * 1.4, (X, Y) => { blob(lg, X, Y, R * 1.12, R * sq * 1.12, rot, rim, 0.5, 0.5); blob(lg, X, Y, R, R * sq, rot, silt, 1, 0.82); });
+    // small plates: short cracks inside the hollow only
+    lg.globalCompositeOperation = 'source-atop';
+    const F = worley(s, 30, rnd, 0.9), img = lg.getImageData(0, 0, s, s), D = img.data, C = hex(crack), Lt = hex(lightOf(silt, 0.3));
+    for (let k = 0; k < s * s; k++) {
+      if (D[k * 4 + 3] < 200) continue;
+      const e = F.edge[k];
+      if (e < 1.2) { const a = 0.65; D[k * 4] += (C.r - D[k * 4]) * a; D[k * 4 + 1] += (C.g - D[k * 4 + 1]) * a; D[k * 4 + 2] += (C.b - D[k * 4 + 2]) * a; }
+      else if (e < 3 && F.dirx[k] + F.diry[k] < 0) { const a = 0.35; D[k * 4] += (Lt.r - D[k * 4]) * a; D[k * 4 + 1] += (Lt.g - D[k * 4 + 1]) * a; D[k * 4 + 2] += (Lt.b - D[k * 4 + 2]) * a; }
+    }
+    lg.putImageData(img, 0, 0);
+    g.drawImage(L, 0, 0);
+  }
+}
+
 // ---- ground: meadow (Elwynn) ----------------------------------------------------------------
 
 register('ground_meadow', {
-  family: 'terrain', size: 512, note: 'anchor: Elwynn grass: tone fields, dry yellow and brown patches, dark hollows, long combed strokes, wide-bladed tufts lit on the upper left',
+  family: 'terrain', size: 512, note: 'anchor: Elwynn grass: tone fields, dry yellow and brown patches, dark hollows, short V-shaped blade clusters with yellow tips, a few lit clumps',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#506e2c');
     mottle(g, s, rnd, { colors: ['#4a6a2a', '#60822f', '#6c8a34', '#52722c', '#768a38', '#5a7a2e'], count: 40, rmin: 60, rmax: 170, alpha: 0.5, hard: 0.1 });
-    // warm dry patches and a few olive-blue dark fields, so the meadow has yellow and brown in it
     const dry = []; for (let i = 0; i < 9; i++) dry.push([rnd() * s, rnd() * s, range(rnd, 60, 110)]);
     for (const [x, y, r] of dry) wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.8, 0.4, '#8e8a3c', 0.45, 0.25));
     for (let i = 0; i < 4; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 30, 60); wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.75, 0.2, '#86683e', 0.4, 0.3)); }
     for (let i = 0; i < 7; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 50, 90); wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.8, 0.6, '#3e5a30', 0.42, 0.25)); }
     blurWrap(cv, 3);
-    const isDry = coreMask(s, dry), M = massField(rnd, s, 7, 1.7);
-    const ang = [0.05, 0.6];
-    toneBy(g, s, M.F, '#2e4c20', '#7e9c40', 0.5, 0.32);
-    // the dark hollows between the clump masses
-    layered(g, s, 0.5, lg => { for (let i = 0; i < 300; i++) { const x = rnd() * s, y = rnd() * s; if (M(x, y) > 0.45) continue; const r = range(rnd, 10, 24); wrap(s, x, y, r * 1.3, (X, Y) => blob(lg, X, Y, r, r * 0.6, 0.5, '#2a441c', 1, 0.45)); } });
-    // long combed strokes: dark under, mid and lit over, the lit ones gathered in the masses
-    combed(g, s, rnd, 280, { cols: ['#2a461a', '#304e1e', '#36501f'], len: [24, 56], wid: [5, 9], ang, alpha: 0.6 });
-    combed(g, s, rnd, 260, { cols: ['#6e923a', '#7a9a3e', '#668c34', '#5a8432'], len: [22, 50], wid: [4, 8], ang, alpha: 0.7, where: (x, y) => 0.3 + M(x, y) * 0.7 });
-    combed(g, s, rnd, 90, { cols: ['#9a9a44', '#a89c4a'], len: [20, 44], wid: [4, 7], ang, alpha: 0.6, where: (x, y) => isDry(x, y) * 2 });
-    combed(g, s, rnd, 140, { cols: ['#b4c45c', '#c2c866', '#a8b84e'], len: [16, 36], wid: [3, 6], ang, alpha: 0.65, where: (x, y) => M(x, y) * M(x, y) });
-    grassTufts(g, s, rnd, 220, { ...GRASS.meadow, r: [9, 20], blades: [6, 11], len: [14, 28], wid: [3, 5], lean: ang, where: (x, y) => (0.2 + M(x, y) * 0.8) * (1 - isDry(x, y) * 0.9) });
-    grassTufts(g, s, rnd, 50, { ...GRASS.meadowDry, r: [9, 18], blades: [6, 10], len: [12, 24], wid: [3, 4.6], lean: ang, where: (x, y) => Math.min(1, isDry(x, y) * 2.5) });
-    bladePass(g, s, rnd, 500, ['#6e9a3a', '#7aa040', '#5e8a30'], [7, 13], [1.4, 2.2], 0.55, ang, [-0.15, 0.35]);
-    bladePass(g, s, rnd, 300, ['#b4c45c', '#c6cc6c', '#a2bc50'], [5, 10], [1.2, 1.8], 0.6, ang, [-0.15, 0.35], (x, y) => rnd() < 0.3 + M(x, y) * 0.7);
-    speckFlowers(g, s, rnd, 12, ['#f4e08a', '#fff6e0', '#e8c2e8']);
+    const isDry = coreMask(s, dry), M = massField(rnd, s, 7, 0.9);
+    toneBy(g, s, M.F, '#34522a', '#7e9c40', 0.4, 0.3);
+    // short blade clusters in three values: dark ones under, mid ones, lit yellow tips in the masses
+    vTufts(g, s, rnd, 520, { root: '#22381a', body: ['#2c4a1c', '#32521f', '#2a441c'], tip: ['#4a6e2a', '#527a2c'], len: [10, 19], wid: [2.4, 3.6], alpha: 0.7, where: (x, y) => 1.1 - M(x, y) * 0.7 });
+    vTufts(g, s, rnd, 600, { root: '#3f5a22', body: ['#5e8a32', '#6a9238', '#58842e', '#66903a'], tip: ['#9cb447', '#a8bc4c', '#8eac42'], len: [9, 17], wid: [2.2, 3.2], alpha: 0.85, where: (x, y) => 0.3 + M(x, y) * 0.7 });
+    vTufts(g, s, rnd, 160, { root: '#4a4a24', body: ['#8a8a3a', '#968e40'], tip: ['#d8cc78', '#e2d488'], len: [7, 13], wid: [2, 2.8], alpha: 0.85, where: (x, y) => Math.min(1, isDry(x, y) * 2.5) });
+    grassTufts(g, s, rnd, 120, { ...GRASS.meadow, r: [9, 18], blades: [6, 10], len: [12, 24], wid: [3, 4.6], lean: [-0.35, 0.35], where: (x, y) => (0.15 + M(x, y) * 0.85) * (1 - isDry(x, y) * 0.9) });
+    vTufts(g, s, rnd, 380, { root: '#4a6a28', body: ['#7aa040', '#86a844'], tip: ['#b8c850', '#d0c860', '#c2c866'], len: [8, 15], wid: [2, 2.8], alpha: 0.85, where: (x, y) => 0.15 + M(x, y) * M(x, y) * 0.85 });
     glaze(g, s, s, '#ffe7a0', 0.1, 'soft-light');
-    soften(cv, 0.45);
+    soften(cv, 0.4);
   },
 });
 
 register('ground2_meadow', {
-  family: 'terrain', size: 512, note: 'Elwynn: red-brown earth worn through the grass, combed dirt, clods, islands of lit tufts thinning into dirt lanes',
+  family: 'terrain', size: 512, note: 'Elwynn: red-brown earth worn through the grass: soft cobbly clods and scuffs, stones in a few clusters, islands of grass thinning into the dirt',
   paint(g, s, rnd, h, cv) {
-    const P = BIO.meadow.dirt;
     fill(g, s, s, '#7a5438');
-    mottle(g, s, rnd, { colors: ['#8a5e3c', '#6a4630', '#946844', '#70503a', '#865a38'], count: 46, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
+    mottle(g, s, rnd, { colors: ['#8a5e3c', '#6a4630', '#946844', '#70503a', '#865a38', '#9a6440'], count: 46, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
     blurWrap(cv, 2);
-    combed(g, s, rnd, 160, { cols: ['#9c6c46', '#a8784e'], len: [24, 60], wid: [4, 8], ang: [0.05, 0.6], alpha: 0.4 });
-    combed(g, s, rnd, 120, { cols: ['#5a3c28', '#62422c'], len: [20, 50], wid: [3, 6], ang: [0.05, 0.6], alpha: 0.45 });
-    lumps(g, s, rnd, 200, { r: [3, 8], colors: ['#8a603e', '#966a46', '#7a5438', '#a07450'], shadow: P.gap, shadowA: 0.5, sq: 0.75, litA: 0.65, shadeA: 0.55 });
-    lumps(g, s, rnd, 90, { r: [1.3, 2.6], colors: P.peb, shadow: P.gap, shadowA: 0.55, sides: 6 });
-    // islands of grass around a handful of cores
-    const cores = []; for (let i = 0; i < 13; i++) cores.push([rnd() * s, rnd() * s, range(rnd, 50, 100)]);
-    const dens = coreMask(s, cores);
-    for (const [cx, cy, r] of cores) { const rot = rnd() * 3; wrap(s, cx, cy, r * 1.2, (X, Y) => blob(g, X, Y, r * 0.85, r * 0.7, rot, '#3e5222', 0.6, 0.35)); }
-    combed(g, s, rnd, 140, { cols: ['#5a3a26', '#4e3222'], len: [20, 50], wid: [5, 9], ang: [0.05, 0.6], alpha: 0.5, where: (x, y) => 1 - dens(x, y) * 2 });
-    combed(g, s, rnd, 160, { cols: ['#2a461a', '#304e1e'], len: [18, 40], wid: [4, 7], ang: [0.05, 0.6], alpha: 0.6, where: (x, y) => dens(x, y) * 2 });
-    grassTufts(g, s, rnd, 200, { ...GRASS.meadow, r: [8, 18], blades: [5, 11], len: [12, 24], wid: [3, 4.6], lean: [0.05, 0.6], where: (x, y) => Math.min(1, dens(x, y) * 2.2) });
-    grassTufts(g, s, rnd, 50, { ...GRASS.meadowDry, r: [7, 14], blades: [5, 9], len: [10, 20], wid: [2.6, 4], lean: [0.05, 0.6], where: (x, y) => dens(x, y) > 0.02 && dens(x, y) < 0.35 ? 1 : 0.05 });
-    combed(g, s, rnd, 80, { cols: ['#b4c45c', '#c2c866'], len: [14, 30], wid: [3, 5], ang: [0.05, 0.6], alpha: 0.6, where: (x, y) => dens(x, y) * 2 });
-    bladePass(g, s, rnd, 160, ['#7a9a3a', '#a2b04a', '#6a8a30'], [5, 10], [1.4, 2], 0.6, [-0.3, 0.8]);
+    cellDirt(g, s, rnd, { cells: 13, warp: 14, grout: '#54382a', groutA: 0.3, lit: '#a87a52', litA: 0.38, shade: '#5e4030', shadeA: 0.26 });
+    scuffs(g, s, rnd, 30, '#7a5438');
+    const cracksAt = crackNet(g, s, rnd, 3, { color: '#4a3022', lit: '#b08458', alpha: 0.3, litA: 0.3, len: [60, 150], width: [1, 1.6] });
+    stoneClusters(g, s, rnd, 8, { colors: ['#a89478', '#94826a', '#b4a488', '#7a6a5c'], at: cracksAt.filter(() => rnd() < 0.4) });
+    // islands of grass around a handful of cores, thinning into the dirt
+    const cores = [];
+    for (let i = 0; i < 9; i++) {            // each island a ragged chain of lobes
+      let x = rnd() * s, y = rnd() * s; const a = rnd() * TAU, n = 2 + Math.floor(rnd() * 4);
+      for (let k = 0; k < n; k++) { cores.push([x, y, range(rnd, 26, 62)]); x += Math.cos(a + range(rnd, -0.8, 0.8)) * range(rnd, 30, 60); y += Math.sin(a + range(rnd, -0.8, 0.8)) * range(rnd, 30, 60); }
+    }
+    const DN = fbmLo(rnd, s, 3, 8, 0.6), dens0 = coreMask(s, cores), dens = (x, y) => Math.max(0, dens0(x, y) + DN[(((Math.floor(y) % s) + s) % s) * s + (((Math.floor(x) % s) + s) % s)] * 0.35 - 0.05);
+    for (const [cx, cy, r] of cores) { const rot = rnd() * 3; wrap(s, cx, cy, r * 1.2, (X, Y) => blob(g, X, Y, r * 0.8, r * 0.65, rot, '#3e5222', 0.45, 0.3)); }
+    vTufts(g, s, rnd, 380, { root: '#22381a', body: ['#2c4a1c', '#32521f'], tip: ['#4a6e2a'], len: [8, 15], wid: [2.2, 3.2], alpha: 0.8, where: (x, y) => Math.min(1, dens(x, y) * 2.4) });
+    vTufts(g, s, rnd, 380, { root: '#3f5a22', body: ['#5e8a32', '#6a9238', '#58842e'], tip: ['#9cb447', '#b8c850', '#c8d060'], len: [7, 13], wid: [2, 3], alpha: 0.9, where: (x, y) => Math.min(1, dens(x, y) * 2) });
+    grassTufts(g, s, rnd, 110, { ...GRASS.meadow, r: [8, 16], blades: [5, 10], len: [12, 22], wid: [3, 4.4], lean: [-0.35, 0.35], where: (x, y) => Math.min(1, dens(x, y) * 2.2) });
+    vTufts(g, s, rnd, 150, { root: '#4a4a24', body: ['#8a8a3a', '#7e823a'], tip: ['#d8cc78', '#c8c868'], len: [6, 12], wid: [1.8, 2.6], alpha: 0.85, where: (x, y) => (dens(x, y) > 0.0 && dens(x, y) < 0.3 ? 1 : 0.12) });
     glaze(g, s, s, '#ffe0a0', 0.08, 'soft-light');
     soften(cv, 0.45);
   },
@@ -935,7 +1397,7 @@ register('ground2_meadow', {
 // ---- ground: fields (Westfall) --------------------------------------------------------------
 
 register('ground_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: golden dry grass, long wind-combed straw strokes and clumps over dark gaps',
+  family: 'terrain', size: 512, note: 'Westfall: golden dry grass, short straw clusters with pale tips over dark gaps, golden clumps',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#b4944a');
     mottle(g, s, rnd, { colors: ['#c4a24e', '#a88a40', '#d2b05a', '#9e8642', '#b89848', '#c8a456'], count: 44, rmin: 60, rmax: 160, alpha: 0.45, hard: 0.1 });
@@ -943,37 +1405,33 @@ register('ground_fields', {
     for (const [x, y, r] of green) wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.8, 0.3, '#8a8a40', 0.35, 0.3));
     for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 40, 80); wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.7, 0.4, '#8a6e3a', 0.35, 0.3)); }
     blurWrap(cv, 3);
-    const isGreen = coreMask(s, green), M = massField(rnd, s, 7, 1.8);
-    const ang = [0.25, 0.85];
-    toneBy(g, s, M.F, '#6a5426', '#e0c070', 0.5, 0.35);
-    layered(g, s, 0.5, lg => { for (let i = 0; i < 300; i++) { const x = rnd() * s, y = rnd() * s; if (M(x, y) > 0.45) continue; const r = range(rnd, 10, 24); wrap(s, x, y, r * 1.3, (X, Y) => blob(lg, X, Y, r, r * 0.55, 0.6, '#5a4a22', 1, 0.45)); } });
-    combed(g, s, rnd, 300, { cols: ['#6a5a28', '#5e5024', '#705e2c'], len: [26, 62], wid: [4, 8], ang, alpha: 0.6 });
-    combed(g, s, rnd, 260, { cols: ['#c8a24a', '#bc9a44', '#d0ac52'], len: [24, 58], wid: [4, 7], ang, alpha: 0.75, where: (x, y) => 0.2 + M(x, y) * 0.8 });
-    combed(g, s, rnd, 160, { cols: ['#f0d890', '#ecd486', '#f6e2a4'], len: [18, 44], wid: [3, 5], ang, alpha: 0.7, where: (x, y) => M(x, y) * M(x, y) });
-    grassTufts(g, s, rnd, 230, { ...GRASS.fields, r: [10, 22], blades: [7, 12], len: [16, 32], wid: [2.6, 4.4], lean: ang, where: (x, y) => (0.25 + M(x, y) * 0.75) * (1 - isGreen(x, y)) });
-    grassTufts(g, s, rnd, 30, { ...GRASS.fieldsGreen, r: [9, 18], blades: [6, 10], len: [12, 24], wid: [2.6, 4], lean: ang, where: (x, y) => Math.min(1, isGreen(x, y) * 3) });
-    bladePass(g, s, rnd, 500, ['#f0d890', '#e2c56a', '#f6e2a4'], [7, 14], [1.3, 2], 0.6, ang, [-0.1, 0.3], (x, y) => rnd() < 0.3 + M(x, y) * 0.7);
-    speckFlowers(g, s, rnd, 8, ['#e8b8c8', '#f6e8b0', '#d8483a'], [1.6, 2.4]);
+    const isGreen = coreMask(s, green), M = massField(rnd, s, 7, 0.9);
+    toneBy(g, s, M.F, '#7a6230', '#e0c070', 0.4, 0.32);
+    vTufts(g, s, rnd, 420, { root: '#4a3e1c', body: ['#6a5a28', '#5e5024', '#705e2c'], tip: ['#9a8442'], len: [10, 19], wid: [2.2, 3.2], alpha: 0.7, fan: 0.5, where: (x, y) => 1.1 - M(x, y) * 0.7 });
+    vTufts(g, s, rnd, 560, { root: '#8a7a3a', body: ['#c8a24a', '#bc9a44', '#d0ac52'], tip: ['#f0d888', '#ecd486'], len: [9, 17], wid: [2, 3], alpha: 0.85, fan: 0.5, where: (x, y) => (0.25 + M(x, y) * 0.75) * (1 - isGreen(x, y)) });
+    grassTufts(g, s, rnd, 150, { ...GRASS.fields, r: [10, 20], blades: [7, 12], len: [14, 28], wid: [2.6, 4.2], lean: [-0.3, 0.3], where: (x, y) => (0.2 + M(x, y) * 0.8) * (1 - isGreen(x, y)) });
+    vTufts(g, s, rnd, 90, { root: '#4a4c22', body: ['#8a8e3c', '#969440'], tip: ['#d8d07a'], len: [7, 13], wid: [2, 2.8], alpha: 0.85, where: (x, y) => Math.min(1, isGreen(x, y) * 3) });
+    vTufts(g, s, rnd, 300, { root: '#a08a44', body: ['#e2c56a', '#d8bc60'], tip: ['#f6e4a4', '#f0d888'], len: [6, 12], wid: [1.6, 2.4], alpha: 0.85, fan: 0.5, where: (x, y) => M(x, y) * M(x, y) });
     glaze(g, s, s, '#ffe6a0', 0.12, 'soft-light');
-    soften(cv, 0.45);
+    soften(cv, 0.4);
   },
 });
 
 register('ground2_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: grazed dusty pasture, short olive-gold tufts over pale dust and clods',
+  family: 'terrain', size: 512, note: 'Westfall: grazed dusty pasture, short olive-gold tufts over pale dust, soft clods, loose straw',
   paint(g, s, rnd, h, cv) {
-    const P = BIO.fields.dirt;
     fill(g, s, s, '#a8895a');
     mottle(g, s, rnd, { colors: ['#b4966a', '#9c7e52', '#c0a274', '#94784e', '#a88a5c'], count: 44, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
     blurWrap(cv, 2);
-    lumps(g, s, rnd, 160, { r: [3, 7], colors: P.clod, shadow: P.gap, shadowA: 0.45, sq: 0.75, litA: 0.65, shadeA: 0.55 });
-    lumps(g, s, rnd, 80, { r: [1.3, 2.6], colors: P.peb, shadow: P.gap, shadowA: 0.5, sides: 6 });
+    cellDirt(g, s, rnd, { cells: 11, warp: 16, grout: '#7a5e3c', groutA: 0.12, lit: '#d0b488', litA: 0.3, shade: '#86683e', shadeA: 0.18 });
+    scuffs(g, s, rnd, 24, '#a8895a');
+    stoneClusters(g, s, rnd, 7, { colors: ['#c4ae88', '#ac9672', '#d4c09c', '#8c7a62'], contact: '#5a4430' });
     const cores = []; for (let i = 0; i < 16; i++) cores.push([rnd() * s, rnd() * s, range(rnd, 40, 90)]);
     const dens = coreMask(s, cores);
-    bladePass(g, s, rnd, 700, ['#5e5426', '#6a5e2a'], [8, 16], [2, 3], 0.55, [0.1, 0.8], [-0.1, 0.3], (x, y) => rnd() < dens(x, y) * 1.8);
-    grassTufts(g, s, rnd, 200, { ...GRASS.fieldsGreen, r: [8, 16], blades: [6, 10], len: [10, 20], wid: [2.6, 4], where: (x, y) => Math.min(1, dens(x, y) * 2.2) });
-    grassTufts(g, s, rnd, 90, { ...GRASS.fields, r: [8, 16], blades: [6, 10], len: [12, 22], wid: [2.4, 3.8], where: (x, y) => Math.min(1, dens(x, y) * 3) });
-    bladePass(g, s, rnd, 260, ['#e2c56a', '#c9a64e', '#f0dc98'], [6, 14], [1.1, 1.7], 0.6, [-1.6, 1.6], [-0.1, 0.1]);   // loose straw
+    vTufts(g, s, rnd, 320, { root: '#4a4220', body: ['#5e5426', '#6a5e2a'], tip: ['#8a7e3a'], len: [8, 15], wid: [2, 3], alpha: 0.75, where: (x, y) => Math.min(1, dens(x, y) * 2) });
+    vTufts(g, s, rnd, 320, { root: '#4a4c22', body: ['#8a8e3c', '#969440', '#7e8a38'], tip: ['#d8d07a', '#e0d488'], len: [7, 13], wid: [1.8, 2.8], alpha: 0.85, where: (x, y) => Math.min(1, dens(x, y) * 2.2) });
+    grassTufts(g, s, rnd, 70, { ...GRASS.fields, r: [8, 16], blades: [6, 10], len: [12, 22], wid: [2.4, 3.8], where: (x, y) => Math.min(1, dens(x, y) * 3) });
+    bladePass(g, s, rnd, 220, ['#e2c56a', '#c9a64e', '#f0dc98'], [6, 14], [1.2, 1.8], 0.6, [-1.6, 1.6], [-0.1, 0.1]);   // loose straw
     glaze(g, s, s, '#ffe6a0', 0.1, 'soft-light');
     soften(cv, 0.45);
   },
@@ -981,85 +1439,57 @@ register('ground2_fields', {
 
 // ---- ground: badlands -----------------------------------------------------------------------
 
-// Hardpan: whole cells of a Worley field become plates of baked clay where mask() allows, each lit
-// on its upper-left rim, shaded on the lower right, split from its neighbours by a dark crack.
-function hardpan(g, s, rnd, { cells = 9, plate, lit, shade: dk, crack, mask, alpha = 1, jit = 0.06, crackW = 1.6 }) {
-  const F = worley(s, cells, rnd, 0.85);
-  const on = F.seeds.map(sd => mask(sd.x, sd.y) > rnd() * 0.6 + 0.2);
-  const pc = F.seeds.map(() => hex(jitter(plate, rnd, jit)));
-  const L = hex(lit), Dk = hex(dk), Cr = hex(crack);
-  const img = g.getImageData(0, 0, s, s), D = img.data;
-  const maxR = s / cells * 0.7;
-  for (let k = 0; k < s * s; k++) {
-    const id = F.id[k];
-    if (!on[id]) continue;
-    const e = F.edge[k], c = pc[id];
-    let r = c.r, gg = c.g, b = c.b;
-    const dm = 1 + 0.06 * (1 - Math.min(1, F.d1[k] / maxR));
-    r *= dm; gg *= dm; b *= dm;
-    const bv = Math.max(0, 1 - e / 5);
-    const facing = F.dirx[k] * 0.707 + F.diry[k] * 0.707;             // + toward the lower right
-    if (bv > 0) {
-      const t = bv * Math.abs(facing), C = facing > 0 ? Dk : L;
-      r += (C.r - r) * t * 0.75; gg += (C.g - gg) * t * 0.75; b += (C.b - b) * t * 0.75;
-    }
-    const ct = Math.max(0, Math.min(1, (crackW - e) / 1.2)) * 0.85;
-    r += (Cr.r - r) * ct; gg += (Cr.g - gg) * ct; b += (Cr.b - b) * ct;
-    const o = k * 4;
-    D[o] += (r - D[o]) * alpha; D[o + 1] += (gg - D[o + 1]) * alpha; D[o + 2] += (b - D[o + 2]) * alpha;
-  }
-  g.putImageData(img, 0, 0);
-}
-
 // A gravel wash: a wandering band of small red stones, as if washed down from the walls.
-function gravelWash(g, s, rnd, n, { colors, ground, gap, width = [14, 30], count = 140 }) {
+function gravelWash(g, s, rnd, n, { colors, ground, contact, width = [14, 30], count = 26 }) {
   for (let i = 0; i < n; i++) {
     const x0 = rnd() * s, y0 = rnd() * s, a0 = range(rnd, -0.6, 0.6) + Math.PI / 2, L = range(rnd, 160, 360), W = range(rnd, width[0], width[1]);
     const wob = periodic(rnd, 3, 1, 1);
     const at = t => [x0 + Math.cos(a0) * (t - 0.5) * L + Math.sin(a0) * wob(t) * 30, y0 + Math.sin(a0) * (t - 0.5) * L - Math.cos(a0) * wob(t) * 30];
     for (let k = 0; k < 12; k++) { const [x, y] = at(k / 11); wrap(s, x, y, W * 1.6, (X, Y) => blob(g, X, Y, W * 1.2, W * 0.8, a0, ground, 0.22, 0.3)); }
-    for (let k = 0; k < count; k++) {
-      const t = rnd(), [x, y] = at(t), off = (rnd() - 0.5) * W * 2 * (1 - Math.abs(t - 0.5));
-      lump(g, s, x + Math.sin(a0) * off, y - Math.cos(a0) * off, range(rnd, 1.4, 3.6), rnd, { color: jitter(pick(rnd, colors), rnd, 0.06), shadow: gap, shadowA: 0.5, sides: 5, jag: 0.35 });
-    }
+    const spots = [];
+    for (let k = 0; k < count; k++) { const t = rnd(), [x, y] = at(t), off = (rnd() - 0.5) * W * 1.6 * (1 - Math.abs(t - 0.5)); spots.push([x + Math.sin(a0) * off, y - Math.cos(a0) * off]); }
+    stoneClusters(g, s, rnd, spots.length, { colors, at: spots, r: [1.4, 3.4], k: [3, 7], spread: [5, 11], sides: [4, 5], contact });
   }
 }
 
 register('ground_badlands', {
-  family: 'terrain', size: 512, note: 'Badlands: pale ochre dust, scattered plates of cracked hardpan, red gravel washes, a few dry tufts',
+  family: 'terrain', size: 512, note: 'Badlands: pale ochre dust in soft tonal patches, open networks of wandering cracks, one or two dried-puddle hollows, red gravel washes',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#c89a6a');
     mottle(g, s, rnd, { colors: ['#d2a676', '#bc8c5e', '#d8b080', '#b48458', '#c49464'], count: 44, rmin: 50, rmax: 150, alpha: 0.45, hard: 0.1 });
-    mottle(g, s, rnd, { colors: ['#a86e48', '#9e6644'], count: 12, rmin: 30, rmax: 70, alpha: 0.35, hard: 0.3, stretch: 1.6 });
-    streaks(g, s, rnd, { colors: ['#e2b884', '#b88456', '#d4a070'], count: 70, len: [40, 120], width: [4, 10], angle: 1.25, wobble: 0.12, alpha: 0.14 });
+    mottle(g, s, rnd, { colors: ['#b98457', '#cf9a62'], count: 30, rmin: 60, rmax: 150, alpha: 0.35, hard: 0.12 });
+    mottle(g, s, rnd, { colors: ['#a86e48', '#9e6644'], count: 10, rmin: 30, rmax: 70, alpha: 0.3, hard: 0.25, stretch: 1.6 });
+    blurWrap(cv, 6);
+    streaks(g, s, rnd, { colors: ['#e2b884', '#b88456', '#d4a070'], count: 50, len: [30, 90], width: [5, 12], angle: 1.25, wobble: 0.15, alpha: 0.1 });
     blurWrap(cv, 2);
     const M = massField(rnd, s, 10, 2);
     toneBy(g, s, M.F, '#b07a50', '#dcb486', 0.3, 0.3);
-    hardpan(g, s, rnd, { cells: 11, plate: '#d0a476', lit: '#e4bc8e', shade: '#a2643e', crack: '#94583a', mask: (x, y) => M(x, y) * 1.1, alpha: 0.55, jit: 0.14, crackW: 0.9 });
-    gravelWash(g, s, rnd, 4, { colors: ['#a8583a', '#8e4a30', '#b86a44', '#9a6450'], ground: '#a86a44', gap: '#5a2a1a' });
-    lumps(g, s, rnd, 40, { r: [3.5, 8], colors: ['#b8704a', '#9a5a3c', '#c88a5e', '#8a5a44'], shadow: '#5a2a1a', shadowA: 0.55, sides: 6, jag: 0.32, where: (x, y) => 1 - M(x, y) * 0.8 });
-    lumps(g, s, rnd, 140, { r: [1.2, 2.4], colors: ['#a86a48', '#c08a64', '#8a5a44'], shadow: '#5a2a1a', shadowA: 0.5, sides: 5 });
-    grassTufts(g, s, rnd, 10, { ...GRASS.badlands, r: [7, 12], blades: [5, 9], len: [10, 18], wid: [2, 3.2], lean: [-0.6, 0.6], where: (x, y) => 1 - M(x, y) });
+    driedPuddles(g, s, rnd, 1, { silt: '#dcb48a', crack: '#a06a44', rim: '#a87048', r: [36, 54] });
+    const along = crackNet(g, s, rnd, 5, { color: '#8a5a3a', lit: '#e8c096', alpha: 0.6, litA: 0.6, len: [120, 260], width: [1.4, 2.4] });
+    gravelWash(g, s, rnd, 3, { colors: ['#a8583a', '#8e4a30', '#b86a44', '#9a6450'], ground: '#a86a44', contact: '#5a2a1a' });
+    stoneClusters(g, s, rnd, 10, { colors: ['#b8704a', '#9a5a3c', '#c88a5e', '#8a5a44'], at: along.filter(() => rnd() < 0.3), r: [1.6, 4], sides: [4, 5], contact: '#5a2a1a' });
+    grassTufts(g, s, rnd, 8, { ...GRASS.badlands, r: [7, 12], blades: [5, 9], len: [10, 18], wid: [2, 3.2], lean: [-0.6, 0.6], where: (x, y) => 1 - M(x, y) });
     glaze(g, s, s, '#ffd29a', 0.08, 'soft-light');
-    soften(cv, 0.55);
+    soften(cv, 0.5);
   },
 });
 
 register('ground2_badlands', {
-  family: 'terrain', size: 512, note: 'Badlands: red scree and gravel washed down from the walls, in drifts and dusty gaps',
+  family: 'terrain', size: 512, note: 'Badlands: angular red scree washed down from the walls, in drifts and dusty gaps',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#ae7a54');
     mottle(g, s, rnd, { colors: ['#a46e4a', '#bc8a60', '#a8724c', '#986444', '#c49268'], count: 44, rmin: 40, rmax: 130, alpha: 0.42, hard: 0.1 });
     blurWrap(cv, 2);
     const M = massField(rnd, s, 8, 1.4);
     toneBy(g, s, M.F, '#cc9c6c', '#904e32', 0.3, 0.35);
-    layered(g, s, 0.45, lg => { for (let i = 0; i < 260; i++) { const x = rnd() * s, y = rnd() * s; if (M(x, y) < 0.5) continue; const r = range(rnd, 12, 26); wrap(s, x, y, r * 1.3, (X, Y) => blob(lg, X, Y, r, r * 0.7, 0.3, '#8a4a30', 1, 0.45)); } });
-    layered(g, s, 0.4, lg => { for (let i = 0; i < 200; i++) { const x = rnd() * s, y = rnd() * s; if (M(x, y) > 0.4) continue; const r = range(rnd, 12, 26); wrap(s, x, y, r * 1.3, (X, Y) => blob(lg, X, Y, r, r * 0.7, 0.3, '#d4a676', 1, 0.45)); } });
-    lumps(g, s, rnd, 600, { r: [1.6, 4.4], colors: ['#a85e3c', '#8e4e34', '#c4825a', '#9a7262', '#b8907a'], shadow: '#4a2216', shadowA: 0.55, sides: 5, jag: 0.4, litA: 0.5, shadeA: 0.5, where: (x, y) => 0.2 + M(x, y) * 0.8 });
-    lumps(g, s, rnd, 80, { r: [5, 11], colors: ['#a86444', '#8e5238', '#c4865e', '#9a8070'], shadow: '#4a2216', shadowA: 0.55, sides: 6, jag: 0.3, where: (x, y) => 0.1 + M(x, y) * 0.9 });
-    lumps(g, s, rnd, 8, { r: [12, 18], colors: ['#a86444', '#b8805c'], shadow: '#4a2216', shadowA: 0.5, sides: 7, jag: 0.25 });
+    layered(g, s, 0.4, lg => { for (let i = 0; i < 220; i++) { const x = rnd() * s, y = rnd() * s; if (M(x, y) < 0.5) continue; const r = range(rnd, 12, 26); wrap(s, x, y, r * 1.3, (X, Y) => blob(lg, X, Y, r, r * 0.7, 0.3, '#8a4a30', 1, 0.45)); } });
+    cellDirt(g, s, rnd, { cells: 16, warp: 16, grout: '#6e3a24', groutA: 0.07, lit: '#c8885c', litA: 0.22, shade: '#7e4630', shadeA: 0.16 });
+    const scree = ['#8e3e22', '#b4552f', '#a24a2a', '#c4683e', '#9a6450'];
+    stoneClusters(g, s, rnd, 46, { colors: scree, r: [2, 5.4], k: [4, 9], spread: [7, 18], sides: [4, 5], asp: [0.4, 0.9], contact: '#4a2216', where: (x, y) => 0.1 + M(x, y) * 0.9 });
+    stoneClusters(g, s, rnd, 30, { colors: scree, r: [1, 2], k: [3, 7], spread: [5, 12], sides: [4, 5], contact: '#4a2216', contactA: 0.4, where: (x, y) => 0.2 + M(x, y) * 0.8 });
+    stoneClusters(g, s, rnd, 4, { colors: ['#a86444', '#b8805c'], r: [7, 12], k: [1, 3], spread: [10, 20], sides: [5, 6], contact: '#4a2216' });
     glaze(g, s, s, '#ffcf98', 0.08, 'soft-light');
-    soften(cv, 0.55);
+    soften(cv, 0.5);
   },
 });
 
@@ -1075,25 +1505,23 @@ register('ground_desert', {
     const H = rippleHeight(rnd, s, { per: 10, warp: 34, warp2: 7, tilt: 1, lee: 0.3, fade: [-0.25, 0.35], floor: 0.06 });
     shadeHeight(g, s, H, { k: 0.45, lit: '#f6e6c0', dark: '#b48a5e', litA: 0.6, darkA: 0.68 });
     mottle(g, s, rnd, { colors: ['#e8cc96', '#d8b47e'], count: 30, rmin: 30, rmax: 70, alpha: 0.18, hard: 0.2 });
-    lumps(g, s, rnd, 40, { r: [1.4, 3], colors: ['#c4a47c', '#a88a68', '#e0caa0', '#9a7e64'], shadow: '#8a6440', shadowA: 0.5, sides: 6 });
-    lumps(g, s, rnd, 5, { r: [4, 7], colors: ['#b89670', '#a0805e'], shadow: '#8a6440', shadowA: 0.5 });
+    stoneClusters(g, s, rnd, 4, { colors: ['#c4a47c', '#a88a68', '#e0caa0', '#9a7e64'], r: [1.4, 3.2], contact: '#8a6440', contactA: 0.4 });
     glaze(g, s, s, '#ffe8b8', 0.1, 'soft-light');
     soften(cv, 0.55);
   },
 });
 
 register('ground2_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: coarse wind-packed sand with a thin crust, grit and pebbles',
+  family: 'terrain', size: 512, note: 'Tanaris: coarse wind-packed sand, a thin crust broken by open cracks, a dried silt hollow, grit in a few clusters',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#caa06a');
     mottle(g, s, rnd, { colors: ['#b88e5c', '#d4ac78', '#c79c62', '#ad8452', '#ddb886'], count: 44, rmin: 40, rmax: 140, alpha: 0.42, hard: 0.1 });
     blurWrap(cv, 2);
     const H = rippleHeight(rnd, s, { per: 11, warp: 30, warp2: 6, tilt: -1, lee: 0.3, fade: [-0.2, 0.5], floor: 0.05 });
     shadeHeight(g, s, H, { k: 0.5, lit: '#eed6a6', dark: '#a87e54', litA: 0.45, darkA: 0.55 });
-    const cores = []; for (let i = 0; i < 5; i++) cores.push([rnd() * s, rnd() * s, range(rnd, 60, 110)]);
-    hardpan(g, s, rnd, { cells: 11, plate: '#d8b482', lit: '#f2dcb0', shade: '#9a7048', crack: '#8a6440', mask: coreMask(s, cores), alpha: 0.8 });
-    lumps(g, s, rnd, 230, { r: [1.3, 3.2], colors: ['#d8c09a', '#b89a74', '#e8d4ae', '#9c8268', '#a07a5a'], shadow: '#7a5636', shadowA: 0.5, sides: 6 });
-    lumps(g, s, rnd, 20, { r: [4, 8], colors: ['#c4a47c', '#9c8268'], shadow: '#7a5636', shadowA: 0.5 });
+    driedPuddles(g, s, rnd, 1, { silt: '#e2c494', crack: '#a8845a', rim: '#b08a5e', r: [30, 48] });
+    const along = crackNet(g, s, rnd, 4, { color: '#9a7048', lit: '#f6e2b8', alpha: 0.45, litA: 0.5, len: [100, 220], width: [1, 1.8] });
+    stoneClusters(g, s, rnd, 10, { colors: ['#d8c09a', '#b89a74', '#e8d4ae', '#9c8268', '#a07a5a'], at: along.filter(() => rnd() < 0.3), r: [1.3, 3], contact: '#7a5636', contactA: 0.45 });
     grassTufts(g, s, rnd, 6, { ...GRASS.desert, r: [6, 10], blades: [5, 8], len: [8, 14], wid: [2, 3], lean: [-0.6, 0.6] });
     glaze(g, s, s, '#ffe8b8', 0.08, 'soft-light');
     soften(cv, 0.55);
@@ -1101,8 +1529,9 @@ register('ground2_desert', {
 });
 
 // ---- ground: snow (Dun Morogh) ----------------------------------------------------------------
-// Snow is painted, not white: a cool blue-gray base, big drifts lit on the upper left with a crisp
-// crest and a blue lee, broken wind ripples, a few things poking through with cool shadow rings.
+// Snow is painted, not white: large faint warm and cool value fields, a few broad drifts lit on the
+// upper left with a short crisp crest and a soft blue lee, faint ripples, a few things poking
+// through with cool shadow rings.
 
 // Painted glints: a few tiny bright crosses (the shader adds live sparkle on top).
 function glints(g, s, rnd, n) {
@@ -1120,7 +1549,7 @@ function cappedStones(g, s, rnd, n, cols, r) {
   for (let i = 0; i < n; i++) {
     const x = rnd() * s, y = rnd() * s, R = range(rnd, r[0], r[1]), c = pick(rnd, cols);
     wrap(s, x, y, R * 2.6, (X, Y) => blob(g, X + R * 0.2, Y + R * 0.2, R * 2, R * 1.5, 0, '#b8c6d6', 0.6, 0.45));
-    lump(g, s, x, y, R, rnd, { color: c, shadow: '#7a8cae', shadowA: 0.45, sq: 0.7 });
+    stone(g, s, x, y, R, rnd, { color: c, contact: '#5a6886', contactA: 0.5, sides: 6, asp: [0.6, 0.9] });
     wrap(s, x, y, R * 2, (X, Y) => {
       blob(g, X - R * 0.15, Y - R * 0.4, R * 0.95, R * 0.45, 0, '#f2f4f6', 0.95, 0.65);   // the cap
       blob(g, X - R * 0.35, Y - R * 0.55, R * 0.45, R * 0.22, 0, '#ffffff', 0.8, 0.5);
@@ -1140,21 +1569,20 @@ function snowGrass(g, s, rnd, n, where = null) {
 }
 
 register('ground_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: wind-packed snow, big drifts with crisp crests and blue lees, ripples, grass tips poking through',
+  family: 'terrain', size: 512, note: 'Dun Morogh: wind-packed snow in big faint warm and cool fields, a few broad drifts with short crisp crests and soft blue lees, faint ripples, grass tips poking through',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#dfe6ee');
-    mottle(g, s, rnd, { colors: ['#f4f0e4', '#cad6e6', '#c4d2e2', '#eceff0', '#d6dfeb', '#f6f2e6'], count: 40, rmin: 60, rmax: 170, alpha: 0.5, hard: 0.08 });
-    blurWrap(cv, 3);
-    for (let i = 0; i < 8; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 50, 100); wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.6, 0.2, '#b8c8dc', 0.5, 0.25)); }
-    const H = driftHeight(rnd, s, 20, { len: [120, 280], wind: [50, 100], lee: [10, 20], amp: [14, 24], ang: [-0.3, 0.3] });
-    const R = rippleHeight(rnd, s, { per: 16, warp: 30, warp2: 6, tilt: 1, lee: 0.3, fade: [-0.15, 0.45], floor: 0 });
-    for (let i = 0; i < H.length; i++) H[i] += R[i] * 0.35;
-    shadeHeight(g, s, H, { k: 1.0, lit: '#fbf8ef', dark: '#9cb2d0', litA: 0.85, darkA: 0.9 });
-    mottle(g, s, rnd, { colors: ['#c4d0e0', '#f6f4ee'], count: 60, rmin: 6, rmax: 16, alpha: 0.14, hard: 0.35, stretch: 1.6, rot: 0.3 });
-    snowGrass(g, s, rnd, 16);
-    cappedStones(g, s, rnd, 10, ['#6f7682', '#7e8694', '#5e6472'], [2.5, 5.5]);
-    glints(g, s, rnd, 50);
-    glaze(g, s, s, '#e8f0ff', 0.08, 'soft-light');
+    fill(g, s, s, '#e6ecf2');
+    mottle(g, s, rnd, { colors: ['#f7f4ec', '#e8eef4', '#dde6f0', '#f4f2ea', '#e2e9f2'], count: 26, rmin: 110, rmax: 230, alpha: 0.55, hard: 0.06 });
+    mottle(g, s, rnd, { colors: ['#f7f4ec', '#d6e0ec'], count: 30, rmin: 40, rmax: 100, alpha: 0.3, hard: 0.08 });
+    blurWrap(cv, 4);
+    const H = driftHeight(rnd, s, 7, { len: [120, 220], wind: [60, 110], lee: [16, 28], amp: [16, 26], ang: [-0.3, 0.3], curve: 0.9, endTaper: 40 });
+    const R = rippleHeight(rnd, s, { per: 16, warp: 30, warp2: 6, tilt: 1, lee: 0.3, fade: [-0.1, 0.5], floor: 0 });
+    for (let i = 0; i < H.length; i++) H[i] += R[i] * 0.12;
+    shadeHeight(g, s, H, { k: 0.9, lit: '#fbfaf6', dark: '#b8c8dc', litA: 0.6, darkA: 0.42 });
+    snowGrass(g, s, rnd, 14);
+    cappedStones(g, s, rnd, 7, ['#6f7682', '#7e8694', '#5e6472'], [2.5, 5.5]);
+    glints(g, s, rnd, 40);
+    glaze(g, s, s, '#e8f0ff', 0.06, 'soft-light');
     soften(cv, 0.45);
   },
 });
@@ -1162,52 +1590,60 @@ register('ground_snow', {
 register('ground2_snow', {
   family: 'terrain', size: 512, note: 'Dun Morogh: thin windswept snow, frozen tundra grass and stones in scoured lanes',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#d8e0ea');
-    mottle(g, s, rnd, { colors: ['#eeece4', '#cdd8e6', '#e2e8ee', '#c4d0e0'], count: 40, rmin: 50, rmax: 150, alpha: 0.45, hard: 0.08 });
+    fill(g, s, s, '#dce4ec');
+    mottle(g, s, rnd, { colors: ['#eeece4', '#cdd8e6', '#e2e8ee', '#d4dee8'], count: 40, rmin: 50, rmax: 150, alpha: 0.45, hard: 0.08 });
     blurWrap(cv, 3);
-    const Hd = driftHeight(rnd, s, 10, { len: [80, 180], wind: [30, 60], lee: [8, 14], amp: [6, 12] });
-    shadeHeight(g, s, Hd, { k: 0.8, lit: '#fbf8ef', dark: '#a8bcd6', litA: 0.7, darkA: 0.75 });
-    // bare lanes the wind scoured: each a chain of lobes along the wind, crisp-edged, in a cool rim
+    const Hd = driftHeight(rnd, s, 6, { len: [90, 180], wind: [40, 70], lee: [12, 22], amp: [8, 14], curve: 0.9, endTaper: 34 });
+    shadeHeight(g, s, Hd, { k: 0.8, lit: '#fbf8ef', dark: '#b4c4d8', litA: 0.55, darkA: 0.42 });
+    // bare lanes the wind scoured: each a chain of lobes along the wind, in a cool rim
     const cores = [];
-    for (let i = 0; i < 8; i++) {
+    for (let i = 0; i < 7; i++) {
       const x = rnd() * s, y = rnd() * s, n = 3 + Math.floor(rnd() * 4), dir = range(rnd, -0.25, 0.25);
-      for (let k = 0; k < n; k++) cores.push([x + k * range(rnd, 20, 40), y + k * range(rnd, 20, 40) * dir + range(rnd, -10, 10), range(rnd, 14, 30)]);
+      for (let k = 0; k < n; k++) cores.push([x + k * range(rnd, 20, 40), y + k * range(rnd, 20, 40) * dir + range(rnd, -10, 10), range(rnd, 14, 28)]);
     }
     const near = coreMask(s, cores, 0.7, 1.4);
     for (const [cx, cy, r] of cores) wrap(s, cx, cy, r * 1.8, (X, Y) => {
-      blob(g, X - r * 0.12, Y - r * 0.18, r * 1.55, r * 0.85, 0, '#9fb0c8', 0.55, 0.55);   // the cool rim (upper-left wall in shade)
-      blob(g, X + r * 0.1, Y + r * 0.12, r * 1.45, r * 0.75, 0, '#f6f4ee', 0.6, 0.6);      // the lit far wall
+      blob(g, X - r * 0.12, Y - r * 0.18, r * 1.55, r * 0.85, 0, '#a8b8cc', 0.45, 0.55);
+      blob(g, X + r * 0.1, Y + r * 0.12, r * 1.45, r * 0.75, 0, '#f6f4ee', 0.55, 0.6);
     });
-    for (const [cx, cy, r] of cores) wrap(s, cx, cy, r * 1.6, (X, Y) => { blob(g, X, Y, r * 1.2, r * 0.58, 0, '#a89c80', 0.8, 0.55); blob(g, X - r * 0.2, Y - r * 0.1, r * 0.8, r * 0.36, 0, '#bcb498', 0.5, 0.5); });
-    grassTufts(g, s, rnd, 300, { ...GRASS.snow, shadow: '#6a6250', shadowA: 0.25, r: [5, 11], blades: [5, 9], len: [8, 16], wid: [2, 3.2], where: (x, y) => Math.min(1, near(x, y) * 3), lean: [-0.5, 0.5] });
-    lumps(g, s, rnd, 90, { r: [1.4, 3.5], colors: ['#6f7682', '#7e8694', '#8a8e96', '#5e6472'], shadow: '#3a3e4a', shadowA: 0.5, where: (x, y) => Math.min(1, near(x, y) * 3) });
-    snowGrass(g, s, rnd, 10);
-    cappedStones(g, s, rnd, 8, ['#6f7682', '#7e8694'], [3, 6]);
-    glints(g, s, rnd, 30);
+    for (const [cx, cy, r] of cores) wrap(s, cx, cy, r * 1.6, (X, Y) => { blob(g, X, Y, r * 1.2, r * 0.58, 0, '#c4bea8', 0.32, 0.5); blob(g, X - r * 0.2, Y - r * 0.1, r * 0.8, r * 0.36, 0, '#d4cebc', 0.28, 0.5); });
+    vTufts(g, s, rnd, 150, { root: '#5a5040', body: ['#a8946a', '#b4a274', '#9a8a60'], tip: ['#e6d8aa', '#f0e4bc'], len: [9, 16], wid: [2, 2.8], where: (x, y) => Math.min(1, near(x, y) * 3) });
+    stoneClusters(g, s, rnd, 8, { colors: ['#6f7682', '#7e8694', '#8a8e96', '#5e6472'], where: (x, y) => Math.min(1, near(x, y) * 3), contact: '#3a3e4a', contactA: 0.45 });
+    snowGrass(g, s, rnd, 8);
+    cappedStones(g, s, rnd, 6, ['#6f7682', '#7e8694'], [3, 6]);
+    glints(g, s, rnd, 26);
     glaze(g, s, s, '#eaf0ff', 0.08, 'soft-light');
     soften(cv, 0.55);
   },
 });
 
 register('dirt_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: trampled snow churned with frozen mud and straw (camps, doorsteps)',
+  family: 'terrain', size: 512, note: 'Dun Morogh: trampled snow churned with frozen mud and straw (camps, doorsteps): soft trodden patches, a few boot-print trails',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#b8bec6');
-    mottle(g, s, rnd, { colors: ['#c8ced6', '#a4a8ae', '#d6dce2', '#9a958c', '#b0b2b2'], count: 50, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
-    mottle(g, s, rnd, { colors: ['#7e7468', '#8a8070', '#6e665c'], count: 30, rmin: 12, rmax: 40, alpha: 0.4, hard: 0.3, stretch: 1.4 });
-    blurWrap(cv, 2);
-    // lumps of trampled snow and frozen mud
-    lumps(g, s, rnd, 70, { r: [6, 13], colors: ['#dfe4ea', '#e8ecf0', '#ccd2da'], lit: '#fbfaf6', shade: '#a2b0c6', shadow: '#6c7a96', shadowA: 0.35, sq: 0.65, litA: 0.6, shadeA: 0.5 });
-    lumps(g, s, rnd, 40, { r: [3, 7], colors: ['#7e7468', '#8a8070', '#6e665c'], shadow: '#3a3634', shadowA: 0.4, sq: 0.7, litA: 0.5, shadeA: 0.5 });
-    // trodden prints: small dimples, blue-shadowed on the upper left wall, lit on the lower right
-    for (let i = 0; i < 120; i++) {
-      const x = rnd() * s, y = rnd() * s, r = range(rnd, 4, 8), rot = rnd() * TAU;
-      wrap(s, x, y, r * 2, (X, Y) => {
-        blob(g, X, Y, r, r * 0.6, rot, '#8494ae', 0.4, 0.45);
-        blob(g, X + r * 0.3, Y + r * 0.3, r * 0.7, r * 0.4, rot, '#eef0f2', 0.4, 0.45);
-      });
+    fill(g, s, s, '#bcc2ca');
+    mottle(g, s, rnd, { colors: ['#c8ced6', '#a8acb2', '#d6dce2', '#9e9890', '#b4b6b6'], count: 50, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
+    mottle(g, s, rnd, { colors: ['#7e7468', '#8a8070', '#6e665c'], count: 26, rmin: 16, rmax: 50, alpha: 0.32, hard: 0.2, stretch: 1.4 });
+    blurWrap(cv, 3);
+    cellDirt(g, s, rnd, { cells: 8, warp: 20, grout: '#8a8e98', groutA: 0.06, lit: '#eef1f4', litA: 0.28, shade: '#9aa4b4', shadeA: 0.2 });
+    // trodden patches: soft cool hollows with a lit far rim
+    for (let i = 0; i < 34; i++) {
+      const x = rnd() * s, y = rnd() * s, r = range(rnd, 14, 34), rot = rnd() * TAU;
+      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X, Y, r, r * 0.6, rot, '#98a6bc', 0.32, 0.4); blob(g, X + r * 0.25, Y + r * 0.3, r * 0.7, r * 0.35, rot, '#f2f4f6', 0.3, 0.45); });
     }
-    lumps(g, s, rnd, 50, { r: [1.3, 2.6], colors: ['#7e8694', '#8a8e96', '#6a6460', '#9a948a'], shadow: '#3a3e4a', shadowA: 0.4, sides: 6 });
+    // a few trails of boot prints: pairs, left and right, walking somewhere
+    for (let t = 0; t < 4; t++) {
+      let x = rnd() * s, y = rnd() * s; const a = rnd() * TAU, n = 6 + Math.floor(rnd() * 5);
+      for (let i = 0; i < n; i++) {
+        const side = i % 2 ? 1 : -1, px = x + Math.cos(a + Math.PI / 2) * side * 5, py = y + Math.sin(a + Math.PI / 2) * side * 5;
+        wrap(s, px, py, 14, (X, Y) => {
+          blob(g, X, Y, 7.5, 3.4, a, '#76849e', 0.55, 0.6);
+          blob(g, X + 1.2, Y + 1.4, 5, 2, a, '#eef0f2', 0.35, 0.5);
+          blob(g, X + Math.cos(a) * 7, Y + Math.sin(a) * 7, 3.2, 2.6, a, '#7e8ca6', 0.38, 0.55);
+        });
+        x += Math.cos(a) * 18; y += Math.sin(a) * 18;
+      }
+    }
+    stoneClusters(g, s, rnd, 6, { colors: ['#7e8694', '#8a8e96', '#6a6460', '#9a948a'], contact: '#3a3e4a', contactA: 0.4 });
     bladePass(g, s, rnd, 110, ['#c8b07a', '#b09860', '#d8c48e'], [5, 11], [1.2, 1.8], 0.7, [-1.6, 1.6], [-0.15, 0.15]);
     glaze(g, s, s, '#eef2ff', 0.08, 'soft-light');
     soften(cv, 0.45);
@@ -1218,24 +1654,19 @@ register('dirt_snow', {
 
 for (const b of ['meadow', 'fields', 'badlands', 'desert']) {
   register(`dirt_${b}`, {
-    family: 'terrain', size: 512, note: `${b}: bare packed dirt for clearings: clods, scuffs and pebbles with their shadows`,
+    family: 'terrain', size: 512, note: `${b}: bare packed dirt for clearings: soft cobbly clods, scuffs, stones in a few clusters, trodden straw`,
     paint(g, s, rnd, h, cv) {
       const P = BIO[b].dirt;
       fill(g, s, s, P.base);
       mottle(g, s, rnd, { colors: P.blot, count: 50, rmin: 40, rmax: 140, alpha: 0.4, hard: 0.1 });
       blurWrap(cv, 2);
       const M = massField(rnd, s, 5, 0.8);
-      toneBy(g, s, M.F, shadowOf(P.base, 0.3), lightOf(P.base, 0.25), 0.4, 0.3);
-      // scuffs and boot prints: soft dark smears with a lit far edge
-      for (let i = 0; i < 40; i++) {
-        const x = rnd() * s, y = rnd() * s, r = range(rnd, 6, 11), rot = rnd() * TAU;
-        wrap(s, x, y, r * 2, (X, Y) => { blob(g, X, Y, r, r * 0.45, rot, shadowOf(P.base, 0.4), 0.35, 0.5); blob(g, X + 1.5, Y + 2, r * 0.8, r * 0.3, rot, lightOf(P.base, 0.3), 0.3, 0.5); });
-      }
-      lumps(g, s, rnd, 170, { r: [3, 7.5], colors: P.clod, shadow: P.gap, shadowA: 0.45, sq: 0.72, litA: 0.6, shadeA: 0.5 });
-      lumps(g, s, rnd, 110, { r: [1.4, 2.8], colors: P.peb.map(c => mix(c, P.base, 0.35)), shadow: P.gap, shadowA: 0.65, sides: 6 });
-      lumps(g, s, rnd, 14, { r: [4, 7], colors: P.peb, shadow: P.gap, shadowA: 0.5 });
-      if (b === 'badlands' || b === 'desert') cracks(g, s, rnd, { color: shadowOf(P.base, 0.6), count: 6, len: [16, 44], width: [1, 1.8], alpha: 0.4 });
-      // straw or blades trodden into it
+      toneBy(g, s, M.F, shadowOf(P.base, 0.3), lightOf(P.base, 0.25), 0.36, 0.28);
+      cellDirt(g, s, rnd, { cells: 13, warp: 18, grout: P.gap, groutA: 0.09, lit: lightOf(P.base, 0.4), litA: 0.24, shade: shadowOf(P.base, 0.25), shadeA: 0.16 });
+      cellDirt(g, s, rnd, { cells: 24, warp: 9, grout: P.gap, groutA: 0.1, lit: lightOf(P.base, 0.35), litA: 0.24, shade: shadowOf(P.base, 0.25), shadeA: 0.16, where: (x, y) => M(x, y) * 1.4 - 0.4 });
+      scuffs(g, s, rnd, 40, P.base);
+      const along = (b === 'badlands' || b === 'desert') ? crackNet(g, s, rnd, 3, { color: shadowOf(P.base, 0.5), lit: lightOf(P.base, 0.5), alpha: 0.35, litA: 0.35, len: [60, 150], width: [1, 1.6] }) : [];
+      stoneClusters(g, s, rnd, 9, { colors: P.peb, at: along.filter(() => rnd() < 0.4), contact: P.gap, contactA: 0.45 });
       const G = GRASS[b];
       bladePass(g, s, rnd, b === 'desert' ? 16 : 60, [...G.body, G.root], [6, 12], [1.2, 1.9], 0.6, [-1.6, 1.6]);
       glaze(g, s, s, '#ffdca0', 0.06, 'soft-light');
@@ -1247,38 +1678,54 @@ for (const b of ['meadow', 'fields', 'badlands', 'desert']) {
 // ---- roads (road space) -----------------------------------------------------------------------
 
 register('road_meadow', {
-  family: 'terrain', size: 512, note: 'anchor: Elwynn red-brown dirt road in clods, two ruts with lit rims, a grassy crown, grass creeping in from ragged edges',
+  family: 'terrain', size: 512, note: 'anchor: Elwynn red-brown packed dirt road: cobbly soft clods, lighter worn patches, broken shallow wheel tracks, soft dark cracks, a broken grassy crown, ragged grass at the edges',
   paint(g, s, rnd) {
-    paintRoad(g, s, rnd, { ...BIO.meadow.road,
-      extra(g, s, rnd, c, mpx, ruts) {
-        // a few dark wet spots in the ruts
-        for (let i = 0; i < 6; i++) {
-          const y = rnd() * s, rx = pick(rnd, ruts), L = range(rnd, 16, 36);
-          wrap(s, rx(y), y, L, (X, Y) => { blob(g, X, Y, 7, L, 0, '#3a2a20', 0.35, 0.5); blob(g, X - 2, Y - L * 0.3, 2.5, L * 0.5, 0, '#8a9aa8', 0.3, 0.4); });
-        }
-        roadGrass(g, s, rnd, c, mpx, GRASS.meadow, { crown: true, edgeN: 170, crownN: 80 });
-      } });
+    const c = s / 2, mpx = s / 10;
+    fill(g, s, s, '#8a5a3a');
+    mottle(g, s, rnd, { colors: ['#a0603a', '#9a7650', '#7e5034', '#94643e', '#a86c44', '#8c6a48'], count: 50, rmin: 40, rmax: 150, alpha: 0.45, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
+    roadProfile(g, s, '#6a4630', '#b08a64');
+    blurWrap(g.canvas, 2);
+    cellDirt(g, s, rnd, { cells: 15, warp: 14, grout: '#5a3a26', groutA: 0.38, lit: '#bc8e62', litA: 0.42, shade: '#6a4228', shadeA: 0.3 });
+    const M = massField(rnd, s, 5, 1.2);
+    cellDirt(g, s, rnd, { cells: 26, warp: 9, grout: '#5a3a26', groutA: 0.28, lit: '#bc8e62', litA: 0.3, shade: '#6a4228', shadeA: 0.2, where: (x, y) => M(x, y) * 1.4 - 0.4 });
+    worn(g, s, rnd, 16, [c - 1.1 * mpx, c, c + 1.1 * mpx], '#b8906a', [0.14, 0.26]);
+    softRuts(g, s, rnd, [c - 1.1 * mpx, c + 1.15 * mpx], { w: 1.35 * mpx, color: '#6a4630', alpha: 0.26, presence: 0.6 });
+    const along = crackNet(g, s, rnd, 4, { color: '#4e3022', lit: '#c8986a', alpha: 0.32, litA: 0.32, len: [70, 180], width: [1.2, 2] });
+    stoneClusters(g, s, rnd, 12, { colors: ['#b09a7a', '#9a8468', '#c0aa8a', '#80705e'], at: along.filter(() => rnd() < 0.35), where: x => (Math.abs(x - c) < 2.8 * mpx ? 1 : 0.15) });
+    roadGrass(g, s, rnd, c, mpx, GRASS.meadow, { crown: true, edgeN: 130, crownN: 24, fineN: 300, crownOn: 0.4 });
+    glaze(g, s, s, '#ffdca0', 0.08, 'soft-light');
+    soften(g.canvas, 0.5);
   },
 });
 register('road_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: pale dusty road, straw and hoofprints, dry gold grass creeping in at the edges',
+  family: 'terrain', size: 512, note: 'Westfall: pale dusty road, no ruts: a hoof-churned middle, straw, dry gold grass creeping in at the edges',
   paint(g, s, rnd) {
-    paintRoad(g, s, rnd, { ...BIO.fields.road, clods: 220, clodR: [2.5, 6],
-      extra(g, s, rnd, c, mpx) {
-        // hoofprints along the crown: little horseshoe hollows, shaded inside on the upper left
-        for (let i = 0; i < 70; i++) {
-          const x = c + range(rnd, -0.5, 0.5) * mpx, y = rnd() * s, r = range(rnd, 4, 5.5);
-          wrap(s, x, y, r * 2, (X, Y) => {
-            g.save(); g.lineCap = 'round';
-            g.strokeStyle = rgba('#7a5e3c', 0.55); g.lineWidth = 2.6; g.beginPath(); g.arc(X, Y, r, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
-            g.strokeStyle = rgba('#e8d4a8', 0.45); g.lineWidth = 1.2; g.beginPath(); g.arc(X + 1, Y + 1.2, r, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
-            g.restore();
-          });
-        }
-        // loose straw
-        bladePass(g, s, rnd, 260, ['#e2c56a', '#c9a64e', '#f0dc98', '#b8963e'], [7, 15], [1.2, 1.9], 0.75, [-1.6, 1.6], [-0.1, 0.1]);
-        roadGrass(g, s, rnd, c, mpx, GRASS.fields, { crown: false, edgeN: 150 });
-      } });
+    const c = s / 2, mpx = s / 10;
+    fill(g, s, s, '#b4966a');
+    mottle(g, s, rnd, { colors: ['#a88a5e', '#c4a678', '#caae80', '#9c7e56', '#b89a6e'], count: 50, rmin: 40, rmax: 150, alpha: 0.42, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
+    roadProfile(g, s, '#8a7040', '#dcc69c');
+    blurWrap(g.canvas, 2);
+    cellDirt(g, s, rnd, { cells: 12, warp: 18, grout: '#7a5e3c', groutA: 0.12, lit: '#e0caa0', litA: 0.26, shade: '#8a6c48', shadeA: 0.16 });
+    worn(g, s, rnd, 14, [c - 1.4 * mpx, c + 1.4 * mpx], '#e0cca4', [0.14, 0.24]);
+    // the middle, churned by hooves: scuffs and hoofprints, densest on the crown
+    for (let i = 0; i < 110; i++) {
+      const x = c + range(rnd, -1, 1) * range(rnd, 0, 0.8) * mpx, y = rnd() * s, r = range(rnd, 4, 7), rot = range(rnd, -0.5, 0.5) + Math.PI / 2;
+      wrap(s, x, y, r * 2, (X, Y) => { blob(g, X, Y, r, r * 0.55, rot, '#8a6c48', 0.3, 0.5); blob(g, X + 1.2, Y + 1.6, r * 0.8, r * 0.3, rot, '#e8d4ac', 0.3, 0.5); });
+    }
+    for (let i = 0; i < 26; i++) {
+      const x = c + range(rnd, -0.6, 0.6) * mpx, y = rnd() * s, r = range(rnd, 3.5, 5.5);
+      wrap(s, x, y, r * 2, (X, Y) => {
+        g.save(); g.lineCap = 'round';
+        g.strokeStyle = rgba('#7a5e3c', 0.32); g.lineWidth = 2.6; g.beginPath(); g.arc(X, Y, r, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
+        g.strokeStyle = rgba('#ecd8ae', 0.26); g.lineWidth = 1.2; g.beginPath(); g.arc(X + 1, Y + 1.2, r, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
+        g.restore();
+      });
+    }
+    stoneClusters(g, s, rnd, 6, { colors: ['#d4c0a0', '#bca888', '#e0d0b0', '#9c8a70'], where: x => (Math.abs(x - c) < 2.6 * mpx ? 1 : 0.1), contact: '#6a5034' });
+    bladePass(g, s, rnd, 240, ['#e2c56a', '#c9a64e', '#f0dc98', '#b8963e'], [7, 15], [1.3, 2], 0.75, [-1.6, 1.6], [-0.1, 0.1]);   // loose straw
+    roadGrass(g, s, rnd, c, mpx, GRASS.fields, { crown: false, edgeN: 150, fineN: 500 });
+    glaze(g, s, s, '#ffe2a8', 0.08, 'soft-light');
+    soften(g.canvas, 0.5);
   },
 });
 register('road_snow', {
@@ -1319,40 +1766,56 @@ register('road_snow', {
   },
 });
 register('road_badlands', {
-  family: 'terrain', size: 512, note: 'Badlands: dark red compacted gravel road with angular stones',
+  family: 'terrain', size: 512, note: 'Badlands: dark red compacted gravel, one wandering track, angular gravel in clusters, dust blown onto the shoulders',
   paint(g, s, rnd) {
-    paintRoad(g, s, rnd, { ...BIO.badlands.road, clods: 160, clodR: [2.5, 6], pebN: 700, stoneN: 46, angular: true, rutW: 0.5,
-      extra(g, s, rnd, c, mpx) {
-        lumps(g, s, rnd, 220, { r: [1.6, 3.4], colors: BIO.badlands.road.peb, shadow: '#3e1e16', shadowA: 0.55, sides: 5, jag: 0.38, where: x => (Math.abs(x - c) < 0.55 * mpx ? 1 : 0.2) });
-        // dust blown onto the shoulders
-        for (let i = 0; i < 20; i++) {
-          const side = rnd() < 0.5, x = side ? range(rnd, 0, 100) : range(rnd, s - 100, s), y = rnd() * s, r = range(rnd, 20, 46);
-          const rot = range(rnd, -0.3, 0.3); wrap(s, x, y, r * 1.6, (X, Y) => blob(g, X, Y, r * 1.4, r * 0.7, rot, '#b88a5e', 0.25, 0.3));
-        }
-        grassTufts(g, s, rnd, 14, { ...GRASS.badlands, r: [6, 11], blades: [5, 8], len: [9, 16], wid: [2, 3], where: x => (x < 80 || x > s - 80 ? 1 : 0) });
-      } });
+    const c = s / 2, mpx = s / 10;
+    fill(g, s, s, '#94583a');
+    mottle(g, s, rnd, { colors: ['#8a5034', '#a2623e', '#9c5c3c', '#7e4a32', '#a86a46'], count: 50, rmin: 40, rmax: 150, alpha: 0.42, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
+    roadProfile(g, s, '#7a4430', '#b07a56');
+    blurWrap(g.canvas, 2);
+    cellDirt(g, s, rnd, { cells: 20, warp: 16, grout: '#4a2418', groutA: 0.12, lit: '#c48460', litA: 0.26, shade: '#6e3a26', shadeA: 0.2 });
+    softRuts(g, s, rnd, [c], { w: 1.6 * mpx, color: '#6a3a26', alpha: 0.3, presence: 0.8, wob: 34 });
+    worn(g, s, rnd, 10, [c - 1.5 * mpx, c + 1.5 * mpx], '#b8805c', [0.12, 0.2]);
+    const along = crackNet(g, s, rnd, 3, { color: '#4a2418', lit: '#d09068', alpha: 0.28, litA: 0.3, len: [60, 160], width: [1, 1.6] });
+    const peb = ['#b07858', '#8e5a42', '#c48a64', '#7a5a4c', '#a08070'];
+    stoneClusters(g, s, rnd, 26, { colors: peb, r: [1.6, 3.8], k: [4, 9], spread: [6, 16], sides: [4, 5], asp: [0.45, 0.95], at: along.filter(() => rnd() < 0.4), where: x => (Math.abs(x - c) < 3 * mpx ? 0.8 : 0.4), contact: '#3e1e16' });
+    stoneClusters(g, s, rnd, 30, { colors: peb, r: [0.9, 1.7], k: [3, 7], spread: [4, 10], sides: [4, 5], contact: '#3e1e16', contactA: 0.4 });
+    for (let i = 0; i < 20; i++) {           // dust blown onto the shoulders
+      const side = rnd() < 0.5, x = side ? range(rnd, 0, 100) : range(rnd, s - 100, s), y = rnd() * s, r = range(rnd, 20, 46);
+      const rot = range(rnd, -0.3, 0.3); wrap(s, x, y, r * 1.6, (X, Y) => blob(g, X, Y, r * 1.4, r * 0.7, rot, '#b88a5e', 0.25, 0.3));
+    }
+    grassTufts(g, s, rnd, 14, { ...GRASS.badlands, r: [6, 11], blades: [5, 8], len: [9, 16], wid: [2, 3], where: x => (x < 80 || x > s - 80 ? 1 : 0) });
+    glaze(g, s, s, '#ffcf98', 0.08, 'soft-light');
+    soften(g.canvas, 0.5);
   },
 });
 register('road_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: loose sandy track, soft filled ruts, sand drifts crossing it',
+  family: 'terrain', size: 512, note: 'Tanaris: loose sandy track, a thin wind-packed crust, soft filled ruts that vanish under rippled drift tongues',
   paint(g, s, rnd) {
-    paintRoad(g, s, rnd, { ...BIO.desert.road, clods: 90, clodR: [2.5, 5], pebN: 120, stoneN: 8, rutW: 0.6,
-      extra(g, s, rnd, c, mpx) {
-        // tongues of drifting sand crossing the track, rippled
-        const H = rippleHeight(rnd, s, { per: 20, warp: 18, warp2: 4, tilt: 2, lee: 0.28, fade: [0.0, 0.5], floor: 0 });
-        const M = new Float32Array(s * s);
-        const tongues = []; for (let i = 0; i < 5; i++) tongues.push([rnd() * s, rnd() * s, range(rnd, 50, 90)]);
-        const tm = coreMask(s, tongues, 0.6, 1.3);
-        const img = g.getImageData(0, 0, s, s), D = img.data, Sd = hex('#e2c492');
-        for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
-          const i = y * s + x, e = Math.min(x, s - x) / s;
-          const m = Math.min(1, tm(x, y) * 1.8 + sst(0.2, 0.0, e) * 0.9);
-          M[i] = m;
-          const a = m * 0.85; D[i * 4] += (Sd.r - D[i * 4]) * a; D[i * 4 + 1] += (Sd.g - D[i * 4 + 1]) * a; D[i * 4 + 2] += (Sd.b - D[i * 4 + 2]) * a;
-        }
-        g.putImageData(img, 0, 0);
-        shadeHeight(g, s, H, { k: 0.6, lit: '#f6e4ba', dark: '#b88a5a', litA: 0.55, darkA: 0.7, mask: M });
-      } });
+    const c = s / 2, mpx = s / 10;
+    fill(g, s, s, '#d0aa76');
+    mottle(g, s, rnd, { colors: ['#c49c6a', '#dab886', '#e0c08e', '#b89060', '#d4b080'], count: 46, rmin: 40, rmax: 150, alpha: 0.4, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
+    roadProfile(g, s, '#b89060', '#ead0a0');
+    blurWrap(g.canvas, 2);
+    cellDirt(g, s, rnd, { cells: 10, warp: 18, grout: '#a8845a', groutA: 0.14, lit: '#f0d8aa', litA: 0.22, shade: '#b08a5e', shadeA: 0.14 });
+    softRuts(g, s, rnd, [c - 1.1 * mpx, c + 1.1 * mpx], { w: 0.95 * mpx, color: '#a8845a', alpha: 0.2, presence: 0.55 });
+    stoneClusters(g, s, rnd, 5, { colors: ['#dccaa6', '#c0a682', '#e8d8b6', '#a89070'], r: [1.4, 3], contact: '#8a6a44', contactA: 0.4 });
+    // tongues of drifting sand crossing the track, rippled; they bury the ruts
+    const H = rippleHeight(rnd, s, { per: 20, warp: 18, warp2: 4, tilt: 2, lee: 0.28, fade: [0.0, 0.5], floor: 0 });
+    const Mk = new Float32Array(s * s);
+    const tongues = []; for (let i = 0; i < 5; i++) tongues.push([rnd() * s, rnd() * s, range(rnd, 50, 90)]);
+    const tm = coreMask(s, tongues, 0.6, 1.3);
+    const img = g.getImageData(0, 0, s, s), D = img.data, Sd = hex('#e2c492');
+    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+      const i = y * s + x, e = Math.min(x, s - x) / s;
+      const m = Math.min(1, tm(x, y) * 1.8 + sst(0.2, 0.0, e) * 0.9);
+      Mk[i] = m;
+      const a = m * 0.85; D[i * 4] += (Sd.r - D[i * 4]) * a; D[i * 4 + 1] += (Sd.g - D[i * 4 + 1]) * a; D[i * 4 + 2] += (Sd.b - D[i * 4 + 2]) * a;
+    }
+    g.putImageData(img, 0, 0);
+    shadeHeight(g, s, H, { k: 0.6, lit: '#f6e4ba', dark: '#b88a5a', litA: 0.55, darkA: 0.7, mask: Mk });
+    glaze(g, s, s, '#ffe6b8', 0.08, 'soft-light');
+    soften(g.canvas, 0.5);
   },
 });
 
@@ -1368,40 +1831,45 @@ const GRANITE = {
 const BIG_PLANES = [{ cells: [3, 3], w: 0.85, amp: 1.0, tilt: 0.7, lean: [-0.3, 0.9] }, { cells: [9, 11], w: 0.6, amp: 0.35, tilt: 0.35, lean: [-0.5, 0.9] }];
 
 register('cliff_meadow', {
-  family: 'terrain', size: 512, note: 'Elwynn: a few big gray granite masses, cream-lit tops and blue-purple shade, soft moss pads, rain streaks (~11 m tile)',
+  family: 'terrain', size: 512, note: 'Elwynn: big rounded gray granite masses, cream-lit upper-left, cool undersides, moss pads on the tops, rain streaks (~11 m tile)',
   paint(g, s, rnd, h, cv) {
-    paintRockFace(g, s, rnd, {
-      ...GRANITE, facets: BIG_PLANES, shelfN: 5, span: [0.12, 0.4], crackFrac: 0.26, facetK: 1.5, contrast: 1.7, chipMin: 0.35, slabVar: 0.1,
-      colors: ['#7e7c78', '#787672', '#86827c', '#7a7672', '#827e78'], blot: ['#6d7a4a', '#9a948a', '#6a6a78', '#86786c'],
-      light: '#d2c8b2', shadow: '#4e4c5c', crack: '#3e3c4a', glaze: '#ffe6b8',
-      cover: { shade: '#4e5a36', mid: '#6d7a4a', lit: '#8a9460', minUp: 0.25, slope: 2, top: 0.55, facet: 0.9, amt: 1.0, patch: [0.45, 0.85], edge: [0.3, 0.7], max: 0.72, lipShadow: '#3a3c48' },
-      stains: 26, stain: '#34323e', stainA: 0.18, tuft: ['#4e7a28', '#6a9a34', '#8cb24a'], tuftN: 18, lichen: ['#b8b878', '#c8b070', '#9aa070'],
+    massRock(g, s, rnd, {
+      fill: [3, 4], big: 5, bigR: [85, 135], asp: [0.55, 1.8], small: 0, sx: 1, sy: 1, rot: 1.2, warp: 20, tilt: 0.1,
+      dome: 38, zs: 20, smooth: 0.17, exp: 2.3, bulge: 10, soft: 2, relief: 0.8, contrast: 2.3, planes: 0.5, shSlope: 0.5, castA: 0.45, tone: 0.12, hueMix: 0.35,
+      crease: 0.32, creaseW: 5, creaseD: 4, creaseA: 0.5, creaseC: '#4a4650',
+      colors: ['#8a847a', '#827d74', '#908a80', '#7f7b74', '#948c80'], blot: ['#6d7a4a', '#a29a8e', '#6e6e7a', '#8e8070'],
+      light: '#dccfae', shadow: '#5a5c6a', cast: '#5e5e6c', deep: '#4c4852', glaze: '#ffe6b8',
+      cover: { p: 0.45, up: 0.24, shade: '#4a5634', mid: '#66744a', lit: '#869650', max: 0.78 },
+      stains: 26, stain: '#3a3844', stainA: 0.16, tuft: ['#4e7a28', '#6a9a34', '#8cb24a'], tuftN: 14, lichen: ['#b8b878', '#c8b070', '#9aa070'], chisel: 150, cracks: 10,
     }, cv);
   },
 });
 register('cliff_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: warm sandstone masses, long ledges, tufted dry grass hanging over the lips',
+  family: 'terrain', size: 512, note: 'Westfall: warm sandstone in long rounded slabs and ledges, lit tops, cool undersides, vertical joints, dry grass on the lips',
   paint(g, s, rnd, h, cv) {
-    paintRockFace(g, s, rnd, {
-      ...GRANITE, facets: [{ cells: [3, 3], w: 0.85, amp: 1.0, tilt: 0.55, lean: [-0.1, 0.9] }, BIG_PLANES[1]], shelfN: 5, span: [0.26, 0.5], shelfH: 1.2, crackFrac: 0.3, facetK: 0.95, contrast: 1.4, chipMin: 0.35,
-      colors: ['#a08460', '#a88c66', '#987c5a', '#b09270', '#9c805c'], blot: ['#b8986e', '#8a6e50', '#c4a47c', '#94785a'],
-      light: '#e2c69c', shadow: '#5c4838', crack: '#4c3a2e', glaze: '#ffe2a8',
-      cover: { shade: '#7a6634', mid: '#9a8442', lit: '#c0a656', minUp: 0.3, slope: 2, top: 0.5, facet: 0.4, amt: 0.9, patch: [0.5, 0.85], edge: [0.3, 0.65], max: 0.5, lipShadow: '#4a3a30' },
-      stains: 26, stain: '#4a3a30', stainA: 0.12, fringe: ['#c8a85a', '#b8963e', '#e2c56a', '#8a7a3a', '#d8bc6a'], fringeN: 46, lichen: ['#c8b070', '#d0a860'],
+    massRock(g, s, rnd, {
+      fill: [3, 7], big: 5, bigR: [80, 120], asp: [3, 6], ledgeN: 4, ledgeL: [90, 230], small: 0, sx: 1, sy: 1, rot: 0.08, warp: 12, tilt: 0.05,
+      dome: 22, zs: 14, smooth: 0.12, exp: 4.5, bulge: 5, soft: 2, relief: 1.0, contrast: 2.5, planes: 0.35, shSlope: 0.5, castA: 0.5, tone: 0.07, hueMix: 0.4,
+      crease: 0.36, creaseW: 5, creaseD: 4, creaseA: 0.45, creaseC: '#5a4636',
+      colors: ['#a8875a', '#b08f62', '#9c7c52', '#b4946a', '#a28258'], blot: ['#c4a274', '#8a6e50', '#b89870', '#94785a'],
+      light: '#e2be84', shadow: '#68544a', cast: '#6a5448', deep: '#54402f', glaze: '#ffe2a8',
+      cover: { p: 0.5, up: 0.3, shade: '#8a7438', mid: '#a68e46', lit: '#c8ae5c', max: 0.65 },
+      stains: 18, stain: '#5a4636', stainA: 0.1, fringe: ['#c8a85a', '#b8963e', '#e2c56a', '#8a7a3a', '#d8bc6a'], fringeN: 22, lichen: ['#c8b070', '#d0a860'],
+      chisel: 120, chiselA: 0.1, cracks: 4, joints: 5, undercut: '#3e2e26',
     }, cv);
   },
 });
 register('cliff_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: big rounded blue-gray granite masses, thick lumpy snow caps on a few ledges, powder dusted down the faces, a few small icicle groups',
+  family: 'terrain', size: 512, note: 'Dun Morogh: big rounded blue-gray granite masses, powder on every top, a few thick lumpy snow caps with a blue shadow under them, small icicle groups',
   paint(g, s, rnd, h, cv) {
-    paintRockFace(g, s, rnd, {
-      ...GRANITE, facets: [{ cells: [3, 4], w: 0.85, amp: 1.1, tilt: 0.5, lean: [-0.4, 0.9] }, { cells: [9, 12], w: 0.6, amp: 0.4, tilt: 0.3, lean: [-0.5, 0.9] }],
-      shelfN: 3, span: [0.16, 0.42], shelfH: 1.4, cap: [30, 48], crackFrac: 0.22, crackW: 2, facetK: 1.4, contrast: 1.5, chipMin: 0.3,
-      colors: ['#7c8592', '#76808e', '#828a98', '#7a8290'], blot: ['#6a7282', '#929aa8', '#7a7a8a', '#848c9a'],
-      light: '#bec8d6', shadow: '#4e566c', crack: '#4a5268', glaze: '#e4ecff',
-      cover: { shade: '#b4c2d4', mid: '#dfe6ee', lit: '#f4f6f8', minUp: 0.32, slope: 1.4, top: 0, facet: 0, amt: 1.0, patch: [0.35, 0.7], edge: [0.3, 0.6], max: 0.85, lipShadow: '#5a6888' },
-      powder: 0.5, powderC: '#e4eaf2', capC: ['#f4f6f8', '#d4dde8'], capShadow: '#9fb0c8', icicles: 5,
-      stains: 24, stain: '#e8eef6', stainA: 0.12, lichen: ['#a8b0a0', '#c0c4b0'],
+    massRock(g, s, rnd, {
+      fill: [3, 4], big: 5, bigR: [85, 135], asp: [0.6, 1.8], small: 0, sx: 1, sy: 1, rot: 1.0, warp: 20, tilt: 0.1,
+      dome: 38, zs: 20, smooth: 0.17, exp: 2.3, bulge: 10, soft: 2, relief: 0.8, contrast: 1.9, planes: 0.5, shSlope: 0.5, castA: 0.4, tone: 0.07, hueMix: 0.35,
+      crease: 0.3, creaseW: 5, creaseD: 4, creaseA: 0.5, creaseC: '#444c62',
+      colors: ['#757c88', '#808894', '#9098a6', '#7a828e', '#8a92a0'], blot: ['#6a7282', '#9aa2b0', '#7a7a8a', '#848c9a'],
+      light: '#d0d8e4', shadow: '#4e566c', cast: '#56607a', deep: '#3e465c', glaze: '#e4ecff',
+      powder: { up: 0.22, a: 0.55 }, powderC: '#e8eef6', caps: { n: 4, T: [8, 16], up: 0.3 }, capShadow: '#9fb0c8', icicles: 3,
+      stains: 20, stain: '#3c4458', stainA: 0.12, lichen: ['#a8b0a0', '#c0c4b0'], chisel: 140, cracks: 8,
     }, cv);
   },
 });
@@ -1437,35 +1905,46 @@ register('cliff_desert', {
 });
 
 // ---- mud and slush (road space: x across the road, 10 m; y along it) ---------------------------
-// Puddles are irregular flat shapes stretched along the road and gathered in the rut lines, filled
-// with a soft sky reflection inside a dark wet rim; churned clods and wheel smears around them.
+// Puddles are cut from a domain-warped noise field by a threshold (so no outline is a union of
+// circles), drawn to the wheel tracks and stretched along the road. The water reflects the sky at
+// its far (upper) edge and darkens toward the near edge; a brown sediment rim rings it. Churned
+// clods, soft wheel tracks and boot smears around them.
 
-function puddles(g, s, rnd, list, { sky, rim, alpha = 0.7, hi }) {
-  const shapes = list.map(([x, y, L, W]) => {
-    const n = 2 + Math.floor(rnd() * 2), parts = [];
-    for (let k = 0; k < n; k++) parts.push([x + range(rnd, -0.2, 0.2) * W, y + (k / (n - 1) - 0.5) * L * 0.45, W * range(rnd, 0.42, 0.6), L * range(rnd, 0.32, 0.45), range(rnd, -0.15, 0.15)]);
-    return { x, y, L, W, parts };
-  });
-  const path = (cg, sh, X, Y, grow) => { for (const [px, py, rx, ry, rot] of sh.parts) { const cx = X + px - sh.x, cy = Y + py - sh.y; cg.moveTo(cx + (rx + grow) * Math.cos(rot), cy + (rx + grow) * Math.sin(rot)); cg.ellipse(cx, cy, rx + grow, ry + grow, rot, 0, TAU); } };
-  // the wet rim: the shape grown a little, soft
-  const Rl = makeCanvas(s), rg = Rl.getContext('2d');
-  rg.fillStyle = rim;
-  for (const sh of shapes) wrap(s, sh.x, sh.y, sh.L, (X, Y) => { rg.beginPath(); path(rg, sh, X, Y, 3.5); rg.fill(); });
-  blurWrap(Rl, 2);
-  g.save(); g.globalAlpha = 0.75; g.drawImage(Rl, 0, 0); g.restore();
-  // the water: a sky gradient top to bottom of each puddle
-  layered(g, s, alpha, lg => {
-    for (const sh of shapes) wrap(s, sh.x, sh.y, sh.L, (X, Y) => {
-      const gr = lg.createLinearGradient(0, Y - sh.L * 0.5, 0, Y + sh.L * 0.5);
-      gr.addColorStop(0, sky[0]); gr.addColorStop(1, sky[1]);
-      lg.fillStyle = gr; lg.beginPath(); path(lg, sh, X, Y, 0); lg.fill();
-    });
-  });
-  // one soft highlight streak along each, on its upper-left
-  for (const sh of shapes) {
-    const [px, py, rx, ry] = sh.parts[0];
-    wrap(s, sh.x, sh.y, sh.L, (X, Y) => stroke(g, [[X + px - sh.x - rx * 0.35, Y + py - sh.y - ry * 0.2], [X - sh.W * 0.15, Y + sh.L * 0.1]], 2.4, 0.8, hi, 0.4));
+function puddles(g, s, rnd, { far, near, sediment, cover = 0.17, ice = null, glint = '#eef4f8' }) {
+  const N = s * s, c = s / 2, mpx = s / 10;
+  const F = fbmLo(rnd, s, 3, 5, 0.55, 0.5), WX = fbmLo(rnd, s, 2, 6, 0.5), WY = fbmLo(rnd, s, 2, 6, 0.5);
+  const ruts = [c - 1.05 * mpx + range(rnd, -6, 6), c + 1.05 * mpx + range(rnd, -6, 6)];
+  const V = new Float32Array(N);
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const u = ((Math.round(x + WX[y * s + x] * 22) % s) + s) % s, v = ((Math.round(y + WY[y * s + x] * 40) % s) + s) % s;
+    let aff = 0; for (const rx of ruts) aff = Math.max(aff, Math.exp(-(((x - rx) / (0.6 * mpx)) ** 2)));
+    V[y * s + x] = F[v * s + u] + aff * 0.45 - (Math.abs(x - c) > 2.5 * mpx ? 0.6 : 0);
   }
+  // the threshold that leaves `cover` of the tile under water
+  const sorted = Float32Array.from(V).sort(), thr = sorted[Math.floor(N * (1 - cover))];
+  const M = new Float32Array(N);
+  for (let k = 0; k < N; k++) M[k] = sst(thr - 0.012, thr + 0.012, V[k]);
+  const Mb = blurField(Float32Array.from(M), s, 3, 2);
+  // rows since the puddle began, per column (the far edge is the top)
+  const RT = new Float32Array(N);
+  for (let x = 0; x < s; x++) { let r = 0; for (let yy = 0; yy < 2 * s; yy++) { const y = yy % s, k = y * s + x; r = M[k] > 0.5 ? r + 1 : 0; if (yy >= s) RT[k] = r; } }
+  const IC = ice ? fbmLo(rnd, s, 3, 9, 0.6) : null;
+  const img = g.getImageData(0, 0, s, s), D = img.data;
+  const Fa = hex(far), Ne = hex(near), Se = hex(sediment), Ic = ice ? hex(ice) : null, Gl = hex(glint);
+  const mixD = (o, c2, a) => { D[o] += (c2.r - D[o]) * a; D[o + 1] += (c2.g - D[o + 1]) * a; D[o + 2] += (c2.b - D[o + 2]) * a; };
+  const gl = periodic(rnd, 11, 0.4, 8);
+  for (let k = 0; k < N; k++) {
+    const o = k * 4, m = M[k], ring = Math.max(0, Math.min(1, (Mb[k] - m) * 3.2));
+    if (ring > 0.01) mixD(o, Se, ring * 0.6);
+    if (m > 0.01) {
+      const f = sst(0, 56, RT[k]);
+      const w = { r: Fa.r + (Ne.r - Fa.r) * f, g: Fa.g + (Ne.g - Fa.g) * f, b: Fa.b + (Ne.b - Fa.b) * f };
+      mixD(o, w, m * 0.92);
+      if (RT[k] > 1 && RT[k] < 5 && gl((k % s) / s) > 0.35) mixD(o, Gl, 0.55);     // a glint along the far edge
+      if (ice && IC[k] > 0.15) mixD(o, Ic, m * sst(0.15, 0.2, IC[k]) * 0.75);       // skins of ice
+    }
+  }
+  g.putImageData(img, 0, 0);
 }
 
 function churn(g, s, rnd, P) {
@@ -1473,73 +1952,57 @@ function churn(g, s, rnd, P) {
   fill(g, s, s, P.base);
   mottle(g, s, rnd, { colors: P.blot, count: 54, rmin: 30, rmax: 120, alpha: 0.42, hard: 0.12, stretch: 1.6, rot: Math.PI / 2 });
   blurWrap(g.canvas, 2);
-  // wheel smears along the ruts: long churned grooves, a dark wet core and a lit lip
-  const ruts = [c - 1.05 * mpx, c + 1.05 * mpx];
-  for (const x0 of ruts) {
-    const wob = periodic(rnd, 3, 1.2, 1), wob2 = periodic(rnd, 3, 1, 4);
-    const pts = k => { const o = []; for (let y = -24; y <= s + 24; y += 8) o.push([x0 + k + wob(y / s) * 9 + wob2(y / s) * 3, y]); return o; };
-    layered(g, s, 0.45, lg => stroke(lg, pts(0), 30, 30, P.rut, 1));
-    layered(g, s, 0.55, lg => stroke(lg, pts(1), 12, 12, P.wet, 1));
-    layered(g, s, 0.5, lg => stroke(lg, pts(17), 5, 5, P.lip, 1));
-  }
-  // hoof and boot smears
-  for (let i = 0; i < 60; i++) {
-    const x = rnd() * s, y = rnd() * s, r = range(rnd, 5, 9), rot = range(rnd, -0.4, 0.4) + Math.PI / 2;
-    wrap(s, x, y, r * 2, (X, Y) => { blob(g, X, Y, r, r * 0.55, rot, P.wet, 0.45, 0.55); blob(g, X + 1.5, Y + 2, r * 0.8, r * 0.3, rot, P.lip, 0.35, 0.5); });
-  }
-  // churned clods, lit on top with dark undersides
-  lumps(g, s, rnd, P.clodN, { r: [4, 10], colors: P.clod, lit: P.clodLit, shade: P.clodDark, shadow: P.gap, shadowA: 0.55, sq: 0.7, litA: 0.75, shadeA: 0.7 });
-  lumps(g, s, rnd, 50, { r: [1.5, 3], colors: P.peb, shadow: P.gap, shadowA: 0.5, sides: 6 });
-  // puddles: most in the ruts, some between
-  const list = [];
-  for (let i = 0; i < 9; i++) list.push([pick(rnd, ruts) + range(rnd, -6, 6), rnd() * s, range(rnd, 70, 150), range(rnd, 22, 34)]);
-  for (let i = 0; i < 4; i++) list.push([range(rnd, 0.15, 0.85) * s, rnd() * s, range(rnd, 50, 100), range(rnd, 30, 50)]);
-  puddles(g, s, rnd, list, P.puddle);
+  cellDirt(g, s, rnd, { cells: 11, warp: 20, grout: P.gap, groutA: 0.1, lit: P.clodLit, litA: 0.32, shade: P.clodDark, shadeA: 0.3 });
+  softRuts(g, s, rnd, [c - 1.05 * mpx, c + 1.05 * mpx], { w: 1.5 * mpx, color: P.rut, alpha: 0.32, presence: 0.9, wob: 8 });
+  softRuts(g, s, rnd, [c - 1.05 * mpx, c + 1.05 * mpx], { w: 0.75 * mpx, color: P.wet, alpha: 0.4, presence: 0.75, wob: 9 });
+  scuffs(g, s, rnd, 60, P.base, [5, 10]);
+  stoneClusters(g, s, rnd, 6, { colors: P.peb, contact: P.gap, contactA: 0.45 });
+  puddles(g, s, rnd, P.puddle);
   if (P.extra) P.extra(g, s, rnd);
   glaze(g, s, s, P.glaze, 0.06, 'soft-light');
   soften(g.canvas, 0.55);
 }
 
 register('mud', {
-  family: 'terrain', size: 512, note: 'wet churned mud in road space: wheel smears, clods, puddles stretched along the ruts with a sky reflection',
+  family: 'terrain', size: 512, note: 'wet churned mud in road space: soft wheel tracks, clods, puddles along the tracks reflecting the sky, a sediment rim',
   paint(g, s, rnd) {
     churn(g, s, rnd, {
-      base: '#56402c', blot: ['#4a3626', '#634a32', '#3e2e22', '#6e5438', '#58432e'], rut: '#3e2c20', wet: '#2e2018', lip: '#8a6a48',
-      clod: ['#6e5236', '#7a5c3e', '#62482f'], clodLit: '#8a6a48', clodDark: '#3a2818', gap: '#241810', peb: ['#8a7660', '#6e5c4a', '#a08c74'], clodN: 60,
-      puddle: { sky: ['#8fa4b8', '#5f6a70'], rim: '#3a2a1e', alpha: 0.7, hi: '#e4eef4' }, glaze: '#ffd8a0',
+      base: '#56402c', blot: ['#4a3626', '#634a32', '#3e2e22', '#6e5438', '#58432e'], rut: '#3e2c20', wet: '#2e2018',
+      clodLit: '#8a6a48', clodDark: '#3a2818', gap: '#241810', peb: ['#8a7660', '#6e5c4a', '#a08c74'],
+      puddle: { far: '#a9c6d6', near: '#5a6a78', sediment: '#6a5034', cover: 0.18 }, glaze: '#ffd8a0',
     });
   },
 });
 
 register('slush', {
-  family: 'terrain', size: 512, note: 'Dun Morogh mud: gray-brown slush, lumps of dirty snow, icy puddles along the ruts (road space)',
+  family: 'terrain', size: 512, note: 'Dun Morogh mud: gray-white mush, lumps of dirty snow, gray slush pools with skins of ice (road space)',
   paint(g, s, rnd) {
     churn(g, s, rnd, {
-      base: '#7a766e', blot: ['#6e6862', '#8a8884', '#5e5854', '#9a9ea2', '#74706a'], rut: '#5a5650', wet: '#46424a', lip: '#b8bec6',
-      clod: ['#a8acb2', '#9ea2a8', '#b2b6bc'], clodLit: '#d6dce2', clodDark: '#6e727a', gap: '#4a4650', peb: ['#8a8e96', '#6e6c6a', '#a09c98'], clodN: 60,
-      puddle: { sky: ['#a8b8c8', '#6a7480'], rim: '#4a4a50', alpha: 0.65, hi: '#f0f4f8' }, glaze: '#e8f0ff',
-      extra(g, s, rnd) { lumps(g, s, rnd, 18, { r: [10, 18], colors: ['#c8ccd2', '#bcc2ca'], lit: '#e8ecf0', shade: '#8a8f96', shadow: '#5a5e6a', shadowA: 0.45, sq: 0.6 }); },
+      base: '#8a8884', blot: ['#7e7a74', '#9a9a98', '#6e6a66', '#aeb2b6', '#868480'], rut: '#68645e', wet: '#56524e',
+      clodLit: '#e2e6ea', clodDark: '#727680', gap: '#4a4650', peb: ['#8a8e96', '#6e6c6a', '#a09c98'],
+      puddle: { far: '#c4ccd4', near: '#7c848c', sediment: '#6a6660', cover: 0.16, ice: '#e2e8ee', glint: '#f6f8fa' }, glaze: '#e8f0ff',
+      extra(g, s, rnd) { lumps(g, s, rnd, 16, { r: [10, 18], colors: ['#d6dadf', '#c8ced6'], lit: '#f0f2f4', shade: '#9aa0a8', shadow: '#6a6e78', shadowA: 0.3, sq: 0.6 }); },
     });
   },
 });
 
 register('mud_badlands', {
-  family: 'terrain', size: 512, note: 'Badlands mud: red clay churned wet, rusty puddles along the ruts (road space)',
+  family: 'terrain', size: 512, note: 'Badlands mud: red clay churned wet, rusty puddles along the tracks (road space)',
   paint(g, s, rnd) {
     churn(g, s, rnd, {
-      base: '#7a4430', blot: ['#6e3c2a', '#8a5034', '#5e3424', '#94583a', '#7e4630'], rut: '#5a2e20', wet: '#3e2018', lip: '#b07050',
-      clod: ['#8a5034', '#96583a', '#7a4630'], clodLit: '#b8785a', clodDark: '#4a2418', gap: '#2e140e', peb: ['#a07058', '#8a5a44', '#b48870'], clodN: 60,
-      puddle: { sky: ['#a8a0a8', '#6e5a58'], rim: '#4a2418', alpha: 0.6, hi: '#f0e4e0' }, glaze: '#ffcf98',
+      base: '#7a4430', blot: ['#6e3c2a', '#8a5034', '#5e3424', '#94583a', '#7e4630'], rut: '#5a2e20', wet: '#3e2018',
+      clodLit: '#b8785a', clodDark: '#4a2418', gap: '#2e140e', peb: ['#a07058', '#8a5a44', '#b48870'],
+      puddle: { far: '#9c8a88', near: '#5e3e34', sediment: '#5a2a1c', cover: 0.15 }, glaze: '#ffcf98',
     });
   },
 });
 register('mud_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris wash: dark wet sand churned along the track, a few shallow puddles in the ruts (road space)',
+  family: 'terrain', size: 512, note: 'Tanaris wash: dark wet sand churned along the track, a few shallow pools in the tracks (road space)',
   paint(g, s, rnd) {
     churn(g, s, rnd, {
-      base: '#9c7a52', blot: ['#8e6e48', '#a8865c', '#86663e', '#b08e62', '#987650'], rut: '#7a5a3a', wet: '#5e4430', lip: '#d0b080',
-      clod: ['#a8865c', '#b49266', '#96744c'], clodLit: '#d4b486', clodDark: '#6a4e32', gap: '#4a3420', peb: ['#c8b08c', '#a88e6c', '#dcc8a4'], clodN: 50,
-      puddle: { sky: ['#b8c4cc', '#8a8a80'], rim: '#6a4e34', alpha: 0.55, hi: '#f4f0e4' }, glaze: '#ffe6b8',
+      base: '#9c7a52', blot: ['#8e6e48', '#a8865c', '#86663e', '#b08e62', '#987650'], rut: '#7a5a3a', wet: '#5e4430',
+      clodLit: '#d4b486', clodDark: '#6a4e32', gap: '#4a3420', peb: ['#c8b08c', '#a88e6c', '#dcc8a4'],
+      puddle: { far: '#bccad2', near: '#7a7a70', sediment: '#6a4e34', cover: 0.12 }, glaze: '#ffe6b8',
     });
   },
 });
@@ -1574,11 +2037,19 @@ register('terrain_macro', {
 // A chunky tuft: a few WIDE blades fanning up from (cx, by), each shading from the ground's own
 // mid tone at the root (so the tuft grows out of the ground, not on top of it) to a lit tip; the
 // left side of each blade catches the light, blades on the right of the tuft sit in its shade.
-function tuft(g, cx, by, rnd, { n = 9, spread = 60, len = [110, 220], wid = [14, 22], fan = 0.8, cols, tip, base = '#4f7a2c', bend = 0.35 }) {
+function tuft(g, cx, by, rnd, { n = 9, spread = 60, len = [110, 220], wid = [14, 22], fan = 0.8, cols, tip, base = '#4f7a2c', bend = 0.35, back = 2 }) {
   const B = [];
   for (let i = 0; i < n; i++) {
     const t = range(rnd, -1, 1) * (0.35 + 0.65 * rnd());
     B.push({ t, a: t * fan * 0.9 + range(rnd, -0.18, 0.18), L: range(rnd, len[0], len[1]) * (1 - Math.abs(t) * 0.35), w: range(rnd, wid[0], wid[1]), c: pick(rnd, cols), tp: tip ? pick(rnd, tip) : null, b: range(rnd, -bend, bend) });
+  }
+  // one or two darker blades behind, for depth
+  for (let i = 0; i < back; i++) {
+    const t = (i % 2 ? 1 : -1) * range(rnd, 0.3, 0.9), a = t * fan + range(rnd, -0.15, 0.15), L = range(rnd, len[0], len[1]) * 0.95, w = range(rnd, wid[0], wid[1]) * 1.1;
+    const c0 = shadowOf(pick(rnd, cols), 0.38), bx = cx + t * spread * 0.7, b = range(rnd, -bend, bend) + a * 0.4;
+    const gr = g.createLinearGradient(bx, by, bx + Math.sin(a + b) * L, by - Math.cos(a + b) * L);
+    gr.addColorStop(0, shadowOf(base, 0.2)); gr.addColorStop(0.5, c0); gr.addColorStop(1, mix(c0, tip ? tip[0] : c0, 0.35));
+    blade2(g, bx, by, L, a, w, gr, b);
   }
   B.sort((a, b) => Math.abs(b.t) - Math.abs(a.t));          // outer blades first, the centre ones on top
   for (const bl of B) {
@@ -1624,9 +2095,9 @@ function flowersCell(g, ox, oy, rnd, { petals, centers, leaf, grass, n = 7 }) {
 }
 
 // A dense patch of wheat: a thicket of stalks, heads crowding together at the top.
-function wheatCell(g, ox, oy, rnd, { stalk, head, headLit, n = 26, base = '#8a7034' }) {
+function wheatCell(g, ox, oy, rnd, { stalk, head, headLit, n = 26, base = '#8a7034', h = [170, 244], spread = 100 }) {
   const S = [];
-  for (let i = 0; i < n; i++) S.push({ x: ox + 128 + range(rnd, -100, 100) * Math.sqrt(rnd()), h: range(rnd, 170, 244) });
+  for (let i = 0; i < n; i++) S.push({ x: ox + 128 + range(rnd, -spread, spread) * Math.sqrt(rnd()), h: range(rnd, h[0], h[1]) });
   S.sort((a, b) => a.h - b.h);
   // the dark mass of stalks at the bottom
   for (const st of S) stroke(g, [[st.x, oy + 254], [st.x + range(rnd, -6, 6), oy + 254 - st.h * 0.55]], 7, 4, base, 1);
@@ -1671,7 +2142,7 @@ function sageCell(g, ox, oy, rnd, { leaf, lit, wood }) {
 function clutterAtlas(cells) {
   return (g, s, rnd) => {
     cells.forEach((fn, i) => {
-      const ox = (i % 2) * 256, oy = Math.floor(i / 2) * 256;
+      const ox = (i % 4) * 256, oy = Math.floor(i / 4) * 256;
       g.save(); g.beginPath(); g.rect(ox + 2, oy + 2, 252, 252); g.clip();
       fn(g, ox, oy, rnd);
       g.restore();
@@ -1679,46 +2150,89 @@ function clutterAtlas(cells) {
   };
 }
 
+// A broadleaf clump (plantain, dock): a rosette of broad leaves, each lit along its upper-left half.
+function leafCell(g, ox, oy, rnd, { leaf, lit, vein, n = 9 }) {
+  const L = [];
+  for (let i = 0; i < n; i++) L.push({ a: range(rnd, -1.25, 1.25), len: range(rnd, 70, 130), w: range(rnd, 22, 34), c: jitter(pick(rnd, leaf), rnd, 0.06) });
+  L.sort((p, q) => Math.abs(q.a) - Math.abs(p.a));
+  for (const l of L) {
+    const x0 = ox + 128 + l.a * 18, y0 = oy + 250, ex = x0 + Math.sin(l.a) * l.len, ey = y0 - Math.cos(l.a) * l.len * 0.8;
+    const mx = (x0 + ex) / 2, my = (y0 + ey) / 2, rot = Math.atan2(ey - y0, ex - x0);
+    ellipse(g, mx + 2, my + 3, l.len * 0.5, l.w * 0.5, rot, shadowOf(l.c, 0.45), 0.8);
+    ellipse(g, mx, my, l.len * 0.5, l.w * 0.5, rot, l.c);
+    blob(g, mx - Math.sin(rot) * l.w * 0.15 - 4, my - 4, l.len * 0.38, l.w * 0.22, rot, pick(rnd, lit), 0.55, 0.4);
+    stroke(g, [[x0, y0], [mx, my - 2], [ex, ey]], 2.2, 0.8, vein, 0.6);
+  }
+}
+
 register('clutter_meadow', {
-  family: 'terrain', size: 512, alpha: true, note: 'cells: chunky grass tuft, tall grass with seed heads, buttercups+daisies, peacebloom (purple)',
+  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: chunky tuft, short bushy tuft, buttercups+daisies, peacebloom, tall grass with seed heads, broadleaf clump, dark leaning tuft, clover with white flowers',
   paint: clutterAtlas([
-    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 66, len: [120, 210], wid: [16, 24], cols: ['#5b8a2e', '#66923a', '#6e9a36', '#548230'], tip: ['#b8cc5c', '#c6d06a', '#a8c452'], base: '#4f7a2c' }),
-    (g, ox, oy, rnd) => {
-      tuft(g, ox + 128, oy + 254, rnd, { n: 8, spread: 60, len: [150, 236], wid: [13, 19], cols: ['#62902e', '#709a36', '#7aa03c'], tip: ['#d4d878', '#e0d488'], base: '#4f7a2c' });
-      for (let i = 0; i < 5; i++) { const x = ox + 128 + range(rnd, -60, 60); const [tx, ty] = stem(g, x, oy + 250, range(rnd, 170, 235), range(rnd, -0.2, 0.2), '#7a9a3a', 3.5); ellipse(g, tx, ty - 7, 5.5, 14, 0, '#c8b868'); ellipse(g, tx - 1.5, ty - 9, 2.6, 8, 0, '#f0e4a0'); }
-    },
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 66, len: [120, 210], wid: [16, 24], cols: ['#5b8a2e', '#66923a', '#6e9a36', '#548230'], tip: ['#b8cc5c', '#c6d06a', '#a8c452'], base: '#3f5a22' }),
+    (g, ox, oy, rnd) => { tuft(g, ox + 128, oy + 254, rnd, { n: 14, spread: 80, len: [80, 140], wid: [16, 24], fan: 1.1, cols: ['#5e8a32', '#6a9238', '#58842e'], tip: ['#9cb447', '#c8d060'], base: '#3f5a22', back: 3 }); },
     (g, ox, oy, rnd) => flowersCell(g, ox, oy, rnd, { petals: ['#f6d84a', '#fbe36a', '#fff8ec', '#f8f2e0'], centers: ['#e8a030', '#d88a28'], leaf: '#4a7a28', grass: GRASS.meadow }),
     (g, ox, oy, rnd) => flowersCell(g, ox, oy, rnd, { petals: ['#b48ad8', '#9a78d0', '#c8a0e0', '#e8a0b8'], centers: ['#f4d860', '#fff0a0'], leaf: '#3e6e28', grass: GRASS.meadow }),
+    (g, ox, oy, rnd) => {
+      tuft(g, ox + 128, oy + 254, rnd, { n: 8, spread: 60, len: [150, 236], wid: [14, 20], cols: ['#62902e', '#709a36', '#7aa03c'], tip: ['#d4d878', '#e0d488'], base: '#3f5a22' });
+      for (let i = 0; i < 4; i++) { const x = ox + 128 + range(rnd, -60, 60); const [tx, ty] = stem(g, x, oy + 250, range(rnd, 170, 235), range(rnd, -0.2, 0.2), '#7a9a3a', 4); ellipse(g, tx, ty - 8, 7, 16, 0, '#b8a860'); ellipse(g, tx - 2, ty - 10, 3.4, 9, 0, '#e8dc98'); }
+    },
+    (g, ox, oy, rnd) => { tuft(g, ox + 128, oy + 254, rnd, { n: 5, spread: 70, len: [70, 120], wid: [12, 18], cols: ['#5e8a32', '#6a9238'], tip: ['#a8bc4c'], base: '#3f5a22', back: 1 }); leafCell(g, ox, oy, rnd, { leaf: ['#4e7e2c', '#5a8a30', '#46742a'], lit: ['#8cb04a', '#9cbc52'], vein: '#a8c070' }); },
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 10, spread: 62, len: [110, 190], wid: [14, 21], fan: 0.7, cols: ['#4a7a28', '#548230', '#4e7a2a'], tip: ['#8eac42', '#a8bc4c'], base: '#33501f', bend: 0.55 }),
+    (g, ox, oy, rnd) => {
+      for (let i = 0; i < 26; i++) {           // clover: little three-leaf clusters
+        const x = ox + 128 + range(rnd, -95, 95), y = oy + 250 - range(rnd, 6, 70), c = pick(rnd, ['#4e7e2c', '#5a8a30', '#629236']);
+        for (let k = 0; k < 3; k++) { const a = k / 3 * TAU + rnd(); ellipse(g, x + Math.cos(a) * 7 + 1, y + Math.sin(a) * 5 + 2, 8, 6, a, shadowOf(c, 0.4), 0.8); ellipse(g, x + Math.cos(a) * 7, y + Math.sin(a) * 5, 8, 6, a, c); blob(g, x + Math.cos(a) * 6 - 2, y + Math.sin(a) * 4 - 2, 4, 3, a, '#a8c860', 0.5, 0.4); }
+      }
+      for (let i = 0; i < 8; i++) flowerHead(g, ox + 128 + range(rnd, -80, 80), oy + 250 - range(rnd, 50, 100), range(rnd, 9, 13), pick(rnd, ['#fff8ec', '#f8f0e0', '#f4e8f0']), '#e8c040', rnd, 7);
+    },
   ]),
 });
 register('clutter_fields', {
-  family: 'terrain', size: 512, alpha: true, note: 'cells: golden tuft, a dense wheat patch, green-gold tuft, poppies',
+  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: golden tuft, a dense tall wheat patch, a sparse short wheat patch, green-gold tuft, poppies, wispy golden tuft, golden seed grass, a straw clump',
   paint: clutterAtlas([
-    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 10, spread: 70, len: [120, 216], wid: [13, 20], cols: ['#b49a4c', '#c2a654', '#a89246', '#bca050'], tip: ['#f0dc98', '#ecd486', '#f6e4a8'], base: '#a08440', fan: 0.65 }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 10, spread: 70, len: [120, 216], wid: [13, 20], cols: ['#b49a4c', '#c2a654', '#a89246', '#bca050'], tip: ['#f0dc98', '#ecd486', '#f6e4a8'], base: '#8a7a3a', fan: 0.65 }),
     (g, ox, oy, rnd) => wheatCell(g, ox, oy, rnd, { stalk: ['#b8963e', '#c8a44a', '#a8883a'], head: '#d8b05a', headLit: '#f4dc90', n: 26 }),
-    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 66, len: [100, 190], wid: [13, 19], cols: ['#8a9a40', '#9c9c48', '#a8a04c'], tip: ['#e0d07a', '#d8d888'], base: '#8a7c3a' }),
+    (g, ox, oy, rnd) => wheatCell(g, ox, oy, rnd, { stalk: ['#c09a44', '#b08c3e', '#caa650'], head: '#dcb862', headLit: '#f8e4a0', n: 13, h: [130, 200], spread: 80 }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 66, len: [100, 190], wid: [13, 19], cols: ['#8a9a40', '#9c9c48', '#a8a04c'], tip: ['#e0d07a', '#d8d888'], base: '#6a6630' }),
     (g, ox, oy, rnd) => flowersCell(g, ox, oy, rnd, { petals: ['#d8483a', '#e45a40', '#c83a30', '#f0d060'], centers: ['#2a2020', '#3a2a20'], leaf: '#5a7a2a', grass: GRASS.fieldsGreen }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 12, spread: 74, len: [130, 230], wid: [9, 14], cols: ['#c8a24a', '#d0ac52', '#bc9a44'], tip: ['#f6e4a4', '#f0d888'], base: '#8a7a3a', fan: 1.0, bend: 0.6 }),
+    (g, ox, oy, rnd) => {
+      tuft(g, ox + 128, oy + 254, rnd, { n: 7, spread: 60, len: [90, 160], wid: [11, 16], cols: ['#b49a4c', '#c2a654'], tip: ['#f0dc98'], base: '#8a7a3a' });
+      for (let i = 0; i < 7; i++) { const x = ox + 128 + range(rnd, -70, 70); const [tx, ty] = stem(g, x, oy + 250, range(rnd, 150, 230), range(rnd, -0.25, 0.25), '#b8a050', 3); for (let k = 0; k < 6; k++) { const s2 = k % 2 ? 1 : -1; ellipse(g, tx + s2 * 5, ty - k * 5, 4, 6, s2 * 0.5, k % 3 ? '#e2c87a' : '#c8a656'); } }
+    },
+    (g, ox, oy, rnd) => {
+      for (let i = 0; i < 40; i++) { const x = ox + 128 + range(rnd, -80, 80), y = oy + 250 - range(rnd, 0, 40); const a = range(rnd, -1.4, 1.4), L = range(rnd, 40, 90); stroke(g, [[x, y], [x + Math.sin(a) * L, y - Math.abs(Math.cos(a)) * L * 0.4]], 4, 3, pick(rnd, ['#e2c56a', '#c9a64e', '#f0dc98', '#b8963e']), 1); }
+      tuft(g, ox + 128, oy + 254, rnd, { n: 5, spread: 50, len: [60, 110], wid: [10, 15], cols: ['#c8a24a', '#bc9a44'], tip: ['#f0d888'], base: '#8a7a3a', back: 1 });
+    },
   ]),
 });
 register('clutter_badlands', {
-  family: 'terrain', size: 512, alpha: true, note: 'cells: dry tuft, dead twigs, sage, thin dry grass',
+  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: dry tuft, dead twigs, sage, thin dry grass, red dry tuft, a small dead bush, gray sage, a tiny dry tuft',
   paint: clutterAtlas([
-    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 10, spread: 64, len: [80, 170], wid: [9, 14], cols: ['#b89858', '#a88a50', '#c8a868', '#9a7a48'], tip: ['#ead4a0', '#e2c88a'], base: '#9a7048', fan: 1.0, bend: 0.6 }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 10, spread: 64, len: [80, 170], wid: [9, 14], cols: ['#b89858', '#a88a50', '#c8a868', '#9a7a48'], tip: ['#ead4a0', '#e2c88a'], base: '#7a5a38', fan: 1.0, bend: 0.6 }),
     (g, ox, oy, rnd) => twigsCell(g, ox, oy, rnd, { col: '#6a4a36', lit: '#a88a70', n: 6 }),
     (g, ox, oy, rnd) => sageCell(g, ox, oy, rnd, { leaf: ['#8a9a78', '#7a8a6a', '#9aa888'], lit: ['#c8d4b0', '#b8c8a0'], wood: '#5e4636' }),
-    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 8, spread: 60, len: [60, 140], wid: [8, 12], cols: ['#c8a868', '#b89858'], tip: ['#f0dcae'], base: '#a87850', fan: 1.2, bend: 0.8 }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 8, spread: 60, len: [60, 140], wid: [8, 12], cols: ['#c8a868', '#b89858'], tip: ['#f0dcae'], base: '#8a6440', fan: 1.2, bend: 0.8 }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 60, len: [70, 150], wid: [9, 13], cols: ['#b07850', '#a06c48', '#bc8a5c'], tip: ['#e8c090', '#dcb080'], base: '#6a4430', fan: 1.0, bend: 0.7 }),
+    (g, ox, oy, rnd) => { twigsCell(g, ox, oy, rnd, { col: '#5a4030', lit: '#9a7a62', n: 9 }); },
+    (g, ox, oy, rnd) => sageCell(g, ox, oy, rnd, { leaf: ['#98a090', '#88907e', '#a8ae9c'], lit: ['#d4dac4'], wood: '#5a4636' }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 7, spread: 44, len: [40, 90], wid: [8, 12], cols: ['#b89858', '#c8a868'], tip: ['#ecd6a4'], base: '#8a6440', fan: 1.1, bend: 0.5, back: 1 }),
   ]),
 });
 register('clutter_desert', {
-  family: 'terrain', size: 512, alpha: true, note: 'cells: dry tuft, bleached twigs, desert sage, tiny desert flowers',
+  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: dry tuft, bleached twigs, desert sage, tiny desert flowers, pale dune grass, bleached twigs, small sage, a tiny dry tuft',
   paint: clutterAtlas([
-    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 60, len: [70, 150], wid: [8, 13], cols: ['#c4ae72', '#b8a468', '#d4bc80'], tip: ['#f2e2b4', '#ecdcaa'], base: '#c8a070', fan: 1.0, bend: 0.7 }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 60, len: [70, 150], wid: [8, 13], cols: ['#c4ae72', '#b8a468', '#d4bc80'], tip: ['#f2e2b4', '#ecdcaa'], base: '#a07a50', fan: 1.0, bend: 0.7 }),
     (g, ox, oy, rnd) => twigsCell(g, ox, oy, rnd, { col: '#8a7058', lit: '#d8c8b0', n: 5 }),
     (g, ox, oy, rnd) => sageCell(g, ox, oy, rnd, { leaf: ['#9aa488', '#8a9a7c', '#aab496'], lit: ['#d8e0c4'], wood: '#7a6048' }),
     (g, ox, oy, rnd) => {
       sageCell(g, ox, oy, rnd, { leaf: ['#7a8a5c', '#6a7a50'], lit: ['#b8c890'], wood: '#6a5040' });
       for (let i = 0; i < 9; i++) flowerHead(g, ox + 128 + range(rnd, -70, 70), oy + 250 - range(rnd, 40, 130), range(rnd, 8, 12), pick(rnd, ['#f0a0c0', '#f8d070', '#f4f0e0']), '#c87a30', rnd, 5);
     },
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 12, spread: 70, len: [140, 230], wid: [7, 11], cols: ['#d4c088', '#c8b47a', '#dcc894'], tip: ['#f6ecc8'], base: '#a88a5a', fan: 1.0, bend: 0.8 }),
+    (g, ox, oy, rnd) => twigsCell(g, ox, oy, rnd, { col: '#9a8068', lit: '#e8dcc4', n: 4 }),
+    (g, ox, oy, rnd) => sageCell(g, ox, oy, rnd, { leaf: ['#a4ac90', '#949e84'], lit: ['#dce4cc'], wood: '#7a6048' }),
+    (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 7, spread: 44, len: [40, 90], wid: [7, 11], cols: ['#c4ae72', '#d4bc80'], tip: ['#f2e2b4'], base: '#a07a50', fan: 1.1, bend: 0.5, back: 1 }),
   ]),
 });
 
@@ -1738,7 +2252,7 @@ function snowMound(g, cx, by, w, h, rnd) {
   g.drawImage(L, cx - 128, by - 256 + 2);
 }
 register('clutter_snow', {
-  family: 'terrain', size: 512, alpha: true, note: 'cells: dry grass through snow, frosted heather twigs, snowy juniper sprig, snow tussock',
+  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: dry grass through snow, frosted heather twigs, snowy juniper sprig, snow tussock, a snow drift with grass tips, short dry grass, a dead frosted shrub, a small drift',
   paint: clutterAtlas([
     (g, ox, oy, rnd) => {
       tuft(g, ox + 128, oy + 254, rnd, { n: 9, spread: 60, len: [80, 170], wid: [8, 13], cols: ['#a8946a', '#bca878', '#8e8456', '#c4b282'], tip: ['#eadcae', '#f2e6c0'], base: '#8a7c60', fan: 0.9, bend: 0.5 });
@@ -1748,7 +2262,7 @@ register('clutter_snow', {
       twigsCell(g, ox, oy, rnd, { col: '#5a4448', lit: '#9a8a90', n: 6 });
       for (let i = 0; i < 70; i++) {          // frost on the twig tips
         const x = ox + 128 + range(rnd, -90, 90), y = oy + range(rnd, 40, 200);
-        const d = g.getImageData(Math.max(0, Math.min(511, Math.round(x))), Math.max(0, Math.min(511, Math.round(y))), 1, 1).data;
+        const d = g.getImageData(Math.max(0, Math.min(1023, Math.round(x))), Math.max(0, Math.min(511, Math.round(y))), 1, 1).data;
         if (d[3] > 100) { blob(g, x, y - 2, 5, 3.5, 0, '#f4f6fa', 0.9, 0.5); blob(g, x + 1, y, 3, 2, 0, '#9fb0cc', 0.4, 0.4); }
       }
       snowMound(g, ox + 128, oy + 256, 50, 14, rnd);
@@ -1778,6 +2292,21 @@ register('clutter_snow', {
       for (let i = 0; i < 18; i++) { const x = ox + 128 + range(rnd, -70, 70), y = oy + range(rnd, 70, 200); const d = g.getImageData(Math.round(x), Math.round(y), 1, 1).data; if (d[3] > 100) { blob(g, x, y - 2, 7, 4, 0, '#f4f6fa', 0.9, 0.55); blob(g, x + 1, y + 1, 4, 2, 0, '#9fb0cc', 0.4, 0.4); } }
       snowMound(g, ox + 128, oy + 256, 56, 14, rnd);
     },
+    (g, ox, oy, rnd) => {
+      tuft(g, ox + 128, oy + 254, rnd, { n: 6, spread: 60, len: [50, 100], wid: [8, 12], cols: ['#a8946a', '#bca878'], tip: ['#eadcae'], base: '#8a7a5a', fan: 1.0, bend: 0.5, back: 1 });
+      snowMound(g, ox + 128, oy + 256, 104, 60, rnd);
+    },
+    (g, ox, oy, rnd) => { tuft(g, ox + 128, oy + 254, rnd, { n: 8, spread: 50, len: [60, 120], wid: [8, 12], cols: ['#b4a274', '#a8946a', '#c4b282'], tip: ['#f0e4bc'], base: '#8a7c60', fan: 1.1, bend: 0.6, back: 1 }); snowMound(g, ox + 128, oy + 256, 50, 12, rnd); },
+    (g, ox, oy, rnd) => {
+      twigsCell(g, ox, oy, rnd, { col: '#4e3c3a', lit: '#8a7a7c', n: 8 });
+      for (let i = 0; i < 90; i++) {
+        const x = ox + 128 + range(rnd, -100, 100), y = oy + range(rnd, 30, 220);
+        const d = g.getImageData(Math.max(0, Math.min(1023, Math.round(x))), Math.max(0, Math.min(511, Math.round(y))), 1, 1).data;
+        if (d[3] > 100) { blob(g, x, y - 2, 6, 3.5, 0, '#f4f6fa', 0.9, 0.5); blob(g, x + 1, y, 3, 2, 0, '#9fb0cc', 0.4, 0.4); }
+      }
+      snowMound(g, ox + 128, oy + 256, 60, 18, rnd);
+    },
+    (g, ox, oy, rnd) => { snowMound(g, ox + 128, oy + 256, 90, 40, rnd); tuft(g, ox + 110, oy + 236, rnd, { n: 4, spread: 26, len: [30, 60], wid: [6, 9], cols: ['#a8946a'], tip: ['#eadcae'], base: '#8a7a5a', back: 0 }); },
   ]),
 });
 // ---- the sky: painted cloud bands, one per biome (x = azimuth, y = elevation; bottom = horizon) --
@@ -1799,69 +2328,112 @@ function cloudBand(spec) {
     const at = (x, r, fn) => { for (const o of [-VW, 0, VW]) if (x + o > -r && x + o < VW + r) fn(x + o); };
     // an overcast cap: a gray-blue stratus deck with a lumpy lit top, lying along the horizon
     if (spec.overcast) {
-      const O = spec.overcast, top = periodic(rnd, 8, 0.8, 2), lumpsN = Math.round(VW / 60);
+      const O = spec.overcast, top = periodic(rnd, 8, 0.8, 2), lumpsN = Math.round(VW / 120);
       lay(O.d, cg => {
         cg.fillStyle = O.base;
         cg.beginPath(); cg.moveTo(0, h);
         for (let i = 0; i <= 200; i++) { const x = i / 200 * VW; cg.lineTo(x, O.y + top(i / 200) * O.amp); }
         cg.lineTo(VW, h); cg.closePath(); cg.fill();
         for (let i = 0; i < lumpsN; i++) {
-          const x = (i + rnd()) / lumpsN * VW, y = O.y + top(x / VW) * O.amp, r = range(rnd, 30, 70);
+          const x = rnd() * VW, r = range(rnd, 24, 110), y = O.y + top(x / VW) * O.amp + range(rnd, -0.1, 0.35) * r;
           at(x, r, X => { blob(cg, X, y + r * 0.3, r * 1.2, r * 0.6, 0, O.base, 1, 0.85); blob(cg, X - r * 0.2, y + r * 0.05, r * 0.8, r * 0.35, 0, O.lit, 0.8, 0.8); });
         }
         const gr = cg.createLinearGradient(0, O.y, 0, h); gr.addColorStop(0, rgba(O.base, 0)); gr.addColorStop(0.5, rgba(O.under, 0.5)); gr.addColorStop(1, rgba(O.under, 0.8));
         cg.globalCompositeOperation = 'source-atop'; cg.fillStyle = gr; cg.fillRect(0, O.y, VW, h - O.y); cg.globalCompositeOperation = 'source-over';
       });
     }
-    // cirrus: chains of long dabs, crisp along their length
+    // cirrus: each streak is 3-6 short feathered strokes in a loose echelon, tapered at both ends,
+    // bent a little, never one long smooth arc
     const C = spec.cirrus;
     if (C) for (let i = 0; i < C.n; i++) {
-      const x0 = rnd() * VW, y0 = range(rnd, C.y[0], C.y[1]), Ln = range(rnd, C.len[0], C.len[1]), bend = range(rnd, -50, 50), th = range(rnd, C.th[0], C.th[1]);
-      const n = Math.round(Ln / 34);
-      lay(range(rnd, C.d[0], C.d[1]), cg => at(x0, Ln, X => {
-        for (let k = 0; k < n; k++) {
-          const t = k / (n - 1), x = X + (t - 0.5) * Ln, y = y0 + Math.sin(t * Math.PI) * bend + range(rnd, -4, 4);
-          blob(cg, x, y, range(rnd, 50, 110), th * range(rnd, 0.5, 1.1) * Math.sin(0.15 + t * 2.8), range(rnd, -0.05, 0.05), pick(rnd, ['#f2f2f4', '#e4e8f0']), range(rnd, 0.5, 0.9), 0.45);
+      const x0 = rnd() * VW, y0 = range(rnd, C.y[0], C.y[1]), m = 3 + Math.floor(rnd() * 4), th = range(rnd, C.th[0], C.th[1]), slope = range(rnd, -0.08, 0.08);
+      lay(range(rnd, C.d[0], C.d[1]), cg => {
+        let sx = x0, sy = y0;
+        for (let j = 0; j < m; j++) {
+          const Ln = range(rnd, 220, 600) * (C.len[1] / 1700), n = Math.max(5, Math.round(Ln / 40)), bend = range(rnd, -18, 18), tw = th * range(rnd, 0.6, 1.1);
+          const strands = 2 + Math.floor(rnd() * 3);
+          at(sx, Ln, X => {
+            for (let q = 0; q < strands; q++) {
+              const oy = (q - (strands - 1) / 2) * tw * 0.9 + range(rnd, -2, 2), ox = range(rnd, -0.15, 0.15) * Ln, lk = range(rnd, 0.55, 1);
+              for (let k = 0; k < n; k++) {
+                const t2 = k / (n - 1), x = X + ox + (t2 - 0.5) * Ln * lk, y = sy + oy + Math.sin(t2 * Math.PI) * bend + (t2 - 0.5) * Ln * slope + range(rnd, -2, 2);
+                const taper = Math.sin(Math.PI * (0.06 + t2 * 0.88));
+                blob(cg, x, y, range(rnd, 30, 60), Math.max(1.2, tw * 0.45 * taper * range(rnd, 0.7, 1.1)), range(rnd, -0.05, 0.05), pick(rnd, ['#f4f4f6', '#e8ecf2']), range(rnd, 0.3, 0.55) * taper, 0.2);
+              }
+            }
+          });
+          sx += Ln * range(rnd, 0.55, 0.95); sy += range(rnd, -14, 14) + Ln * slope * 0.6;
         }
-      }));
+      });
     }
-    // cumulus: clusters of crisp puffs over a flat shaded base, an internal cool shadow under the lit top-left
+    // cumulus: puffs of very different sizes merged into one silhouette, shaded per pixel from the
+    // merged form (light from the upper left and in front), so only the lower-right side of each
+    // bulge turns cool and nothing outside the white is ever shaded; feathered edges, a flat
+    // slightly cooler base, a few torn wisps
     const clusters = spec.clusters(rnd, VW);
     clusters.sort((a, b) => a.yb - b.yb);
+    const CU = new Float32Array(w * h * 4);          // premultiplied rgba, composited back to front
+    const Lc = [-0.5, -0.55, 0.67], Ln = Math.hypot(...Lc), LIT = hex('#fffaf2'), MID = hex('#eceef4'), SHD = hex('#b4bcd4'), BASE = hex('#a8b0cc');
     for (const K of clusters) {
       const n = Math.round(K.puffs ?? range(rnd, 10, 18)), puffs = [];
       for (let k = 0; k < n; k++) {
-        const t = (k + rnd() * 0.9) / n, mid = 1 - Math.abs(t - 0.5) * 1.8;
-        const r = K.h * range(rnd, 0.3, 0.5) * (0.5 + mid * 0.7);
-        puffs.push({ x: K.x + (t - 0.5) * K.w * 0.9, y: K.yb - r * 0.5 - Math.max(0, mid) * K.h * range(rnd, 0.05, 0.4), r });
+        const t2 = (k + rnd() * 0.9) / n, mid = 1 - Math.abs(t2 - 0.5) * 1.8;
+        const r = K.h * range(rnd, 0.16, 0.5) * (0.55 + mid * 0.65);          // sizes vary three to one
+        puffs.push({ x: K.x + (t2 - 0.5) * K.w * 0.9, y: K.yb - r * 0.45 - Math.max(0, mid) * K.h * range(rnd, 0.05, 0.42), r });
       }
       for (let k = 0; k < (K.towers ?? 1); k++) {
-        const r = K.h * range(rnd, 0.24, 0.36);
+        const r = K.h * range(rnd, 0.22, 0.36);
         puffs.push({ x: K.x + range(rnd, -0.28, 0.28) * K.w, y: K.yb - K.h + r * range(rnd, 0.9, 1.3), r });
       }
-      puffs.sort((a, b) => b.y - a.y);
-      lay(K.d, cg => at(K.x, K.w, X => {
+      const X0 = Math.floor((K.x - K.w * 0.8) / VX), X1 = Math.ceil((K.x + K.w * 0.8) / VX), Y0 = Math.max(0, Math.floor(K.yb - K.h * 1.4)), Y1 = Math.min(h - 1, Math.ceil(K.yb + 2));
+      const cx = K.x, cyc = K.yb - K.h * 0.45, gw = K.w * 0.55, gh = K.h * 0.6, fe = 5 * VX;
+      for (let y = Y0; y <= Y1; y++) for (let xx = X0; xx <= X1; xx++) {
+        const vx = xx * VX + 0.5 * VX;
+        let best = -1, bh = 0, nx = 0, ny = 0, cov = 0;
+        for (const p of puffs) {
+          const dx = vx - p.x, dy = y - p.y, d2 = dx * dx + dy * dy;
+          if (d2 >= p.r * p.r) continue;
+          const hh = Math.sqrt(p.r * p.r - d2);
+          cov = Math.max(cov, Math.min(1, (p.r - Math.sqrt(d2)) / fe));
+          if (hh + p.r * 0.15 > bh) { bh = hh + p.r * 0.15; best = p; nx = dx / p.r; ny = dy / p.r; }
+        }
+        if (!best || cov <= 0) continue;
+        // blend the puff's own normal with the whole cloud's, so bulges read but never ring
+        const gx = (vx - cx) / gw, gy = (y - cyc) / gh;
+        let mx = nx * 0.6 + gx * 0.4 * 0.7, my = ny * 0.6 + gy * 0.4 * 0.7;
+        const mz = Math.sqrt(Math.max(0.05, 1 - mx * mx - my * my)), ml = Math.hypot(mx, my, mz);
+        let L = (mx * Lc[0] + my * Lc[1] + mz * Lc[2]) / (ml * Ln);
+        L = Math.max(0, Math.min(1, (L - 0.15) / 0.8));
+        L = L * 0.65 + 0.35 * Math.round(L * 3) / 3;                               // a few painted planes
+        const c = L > 0.55 ? mixRGB(MID, LIT, (L - 0.55) / 0.45) : mixRGB(SHD, MID, L / 0.55);
+        const base = sst(K.yb - K.h * 0.3, K.yb, y) * 0.5;                      // the flat base, a little cooler
+        const cr = c.r + (BASE.r - c.r) * base, cg = c.g + (BASE.g - c.g) * base, cb = c.b + (BASE.b - c.b) * base;
+        const a = cov * K.d * sst(K.yb + 1, K.yb - 3, y);
+        const X = ((xx % w) + w) % w, o = (y * w + X) * 4;
+        CU[o] = cr * a + CU[o] * (1 - a); CU[o + 1] = cg * a + CU[o + 1] * (1 - a); CU[o + 2] = cb * a + CU[o + 2] * (1 - a); CU[o + 3] = a + CU[o + 3] * (1 - a);
+      }
+      // torn wisps trailing off the sides and the base
+      lay(K.d * 0.8, cg => at(K.x, K.w, X => {
         const dx = X - K.x;
-        cg.save();
-        cg.beginPath(); cg.rect(X - K.w, K.yb - K.h * 3, K.w * 2, K.h * 3 + 2); cg.clip();      // the flat base
-        for (const p of puffs) blob(cg, p.x + dx + p.r * 0.12, p.y + p.r * 0.14, p.r * 1.04, p.r, 0, '#9ca4c0', 1, 0.86);
-        for (const p of puffs) blob(cg, p.x + dx - p.r * 0.06, p.y - p.r * 0.1, p.r * 0.88, p.r * 0.84, 0, '#a8b0c8', 1, 0.85);
-        for (const p of puffs) blob(cg, p.x + dx - p.r * 0.2, p.y - p.r * 0.26, p.r * 0.7, p.r * 0.64, 0, '#dfe2ec', 1, 0.82);
-        for (const p of puffs) blob(cg, p.x + dx - p.r * 0.32, p.y - p.r * 0.38, p.r * 0.46, p.r * 0.42, 0, '#fffaf0', 1, 0.8);
-        const gr = cg.createLinearGradient(0, K.yb - K.h * 0.4, 0, K.yb);
-        gr.addColorStop(0, 'rgba(140,148,180,0)'); gr.addColorStop(1, 'rgba(130,138,172,0.7)');
-        cg.globalCompositeOperation = 'source-atop';
-        cg.fillStyle = gr; cg.fillRect(X - K.w, K.yb - K.h * 0.4, K.w * 2, K.h * 0.4 + 2);
-        cg.restore();
+        for (let k = 0; k < 3 + Math.floor(rnd() * 3); k++) {
+          const wx = K.x + range(rnd, -0.5, 0.5) * K.w + dx, wy = K.yb - range(rnd, 0.02, 0.3) * K.h, L2 = range(rnd, 0.2, 0.45) * K.w, th = range(rnd, 0.04, 0.08) * K.h, dir = wx > X ? 1 : -1;
+          for (let q = 0; q < 6; q++) { const t2 = q / 5; blob(cg, wx + dir * t2 * L2, wy + t2 * th * 1.5, L2 * 0.22 * (1 - t2 * 0.6), th * (1 - t2 * 0.7), 0, '#eef0f4', 0.45 * (1 - t2 * 0.8), 0.2); }
+        }
       }));
     }
+    {
+      const cu = makeCanvas(w, h), cgx = cu.getContext('2d'), img = cgx.createImageData(w, h), D = img.data;
+      for (let i = 0; i < w * h; i++) { const a = CU[i * 4 + 3]; if (a <= 0) continue; D[i * 4] = CU[i * 4] / a; D[i * 4 + 1] = CU[i * 4 + 1] / a; D[i * 4 + 2] = CU[i * 4 + 2] / a; D[i * 4 + 3] = Math.round(a * 255); }
+      cgx.putImageData(img, 0, 0);
+      g.drawImage(cu, 0, 0);
+    }
+    feather(g, w, h, 1.6);
     // a haze band low along the horizon
     if (spec.haze) {
       const gr = g.createLinearGradient(0, h - spec.haze.h, 0, h);
       gr.addColorStop(0, 'rgba(240,236,230,0)'); gr.addColorStop(1, `rgba(240,236,230,${spec.haze.a})`);
       g.fillStyle = gr; g.fillRect(0, h - spec.haze.h, w, spec.haze.h);
     }
-    blurWrapX(g, w, h, 0.5);
     g.save(); g.globalCompositeOperation = 'destination-out';
     const gr = g.createLinearGradient(0, h - 40, 0, h); gr.addColorStop(0, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(0,0,0,1)');
     g.fillStyle = gr; g.fillRect(0, h - 40, w, 40);
@@ -1875,8 +2447,8 @@ const CLOUDS = {
     cirrus: { n: 4, y: [40, 180], len: [600, 1300], th: [8, 18], d: [0.25, 0.4] },
     clusters: (rnd, VW) => {
       const o = [];
-      for (let i = 0; i < 7; i++) { const W = range(rnd, 260, 440); o.push({ x: (i + rnd() * 0.6) / 7 * VW, yb: range(rnd, 380, 470), w: W, h: W * range(rnd, 0.42, 0.6), d: range(rnd, 0.7, 0.95), towers: 2 + Math.floor(rnd() * 3), puffs: range(rnd, 14, 22) }); }
-      for (let i = 0; i < 12; i++) { const W = range(rnd, 110, 220); o.push({ x: rnd() * VW, yb: range(rnd, 455, 498), w: W, h: W * range(rnd, 0.3, 0.42), d: range(rnd, 0.5, 0.85), towers: 1, puffs: range(rnd, 7, 11) }); }
+      for (let i = 0; i < 7; i++) { const W = range(rnd, 260, 440); o.push({ x: (i + rnd() * 0.6) / 7 * VW, yb: range(rnd, 270, 330), w: W, h: W * range(rnd, 0.42, 0.6), d: range(rnd, 0.75, 0.95), towers: 2 + Math.floor(rnd() * 3), puffs: range(rnd, 14, 22) }); }
+      for (let i = 0; i < 10; i++) { const W = range(rnd, 110, 220); o.push({ x: rnd() * VW, yb: range(rnd, 350, 395), w: W, h: W * range(rnd, 0.3, 0.42), d: range(rnd, 0.5, 0.8), towers: 1, puffs: range(rnd, 7, 11) }); }
       return o;
     },
   },
@@ -1885,30 +2457,30 @@ const CLOUDS = {
     cirrus: { n: 2, y: [60, 200], len: [500, 1000], th: [6, 14], d: [0.2, 0.3] },
     clusters: (rnd, VW) => {
       const o = [];
-      for (const [row, n, W0, W1] of [[452, 16, 140, 300], [482, 20, 90, 200]]) for (let i = 0; i < n; i++) {
+      for (const [row, n, W0, W1] of [[335, 14, 140, 300], [380, 18, 90, 200]]) for (let i = 0; i < n; i++) {
         const W = range(rnd, W0, W1);
         o.push({ x: (i + rnd() * 0.8) / n * VW, yb: row + range(rnd, -8, 8), w: W, h: W * range(rnd, 0.3, 0.4), d: range(rnd, 0.7, 0.95), towers: rnd() < 0.5 ? 1 : 0, puffs: range(rnd, 8, 13) });
       }
-      for (let i = 0; i < 4; i++) { const W = range(rnd, 200, 320); o.push({ x: rnd() * VW, yb: range(rnd, 330, 390), w: W, h: W * 0.38, d: 0.8, towers: 1, puffs: 12 }); }
+      for (let i = 0; i < 4; i++) { const W = range(rnd, 200, 320); o.push({ x: rnd() * VW, yb: range(rnd, 250, 300), w: W, h: W * 0.38, d: 0.8, towers: 1, puffs: 12 }); }
       return o;
     },
   },
   snow: {
     note: 'Dun Morogh: high cirrus and a gray-blue overcast cap lying over the peaks',
-    overcast: { y: 400, amp: 34, base: '#b8c0d0', lit: '#e8ecf4', under: '#8a94a8', d: 0.9 },
+    overcast: { y: 355, amp: 30, base: '#c4ccda', lit: '#eef0f6', under: '#9aa4b8', d: 0.85 },
     cirrus: { n: 10, y: [30, 300], len: [700, 1700], th: [8, 20], d: [0.3, 0.5] },
-    clusters: (rnd, VW) => { const o = []; for (let i = 0; i < 4; i++) { const W = range(rnd, 220, 380); o.push({ x: rnd() * VW, yb: range(rnd, 410, 440), w: W, h: W * 0.4, d: 0.85, towers: 2, puffs: 14 }); } return o; },
+    clusters: (rnd, VW) => { const o = []; for (let i = 0; i < 4; i++) { const W = range(rnd, 220, 380); o.push({ x: rnd() * VW, yb: range(rnd, 300, 340), w: W, h: W * 0.4, d: 0.85, towers: 2, puffs: 14 }); } return o; },
   },
   badlands: {
     note: 'Badlands: long streaky cirrus and dusty haze, a few small cumulus far off',
-    cirrus: { n: 14, y: [30, 330], len: [1000, 2200], th: [12, 28], d: [0.4, 0.65] },
-    clusters: (rnd, VW) => { const o = []; for (let i = 0; i < 3; i++) { const W = range(rnd, 120, 200); o.push({ x: rnd() * VW, yb: range(rnd, 470, 495), w: W, h: W * 0.35, d: 0.6, towers: 1, puffs: 9 }); } return o; },
+    cirrus: { n: 8, y: [30, 300], len: [1000, 2200], th: [14, 30], d: [0.3, 0.5] },
+    clusters: (rnd, VW) => { const o = []; for (let i = 0; i < 3; i++) { const W = range(rnd, 120, 200); o.push({ x: rnd() * VW, yb: range(rnd, 360, 390), w: W, h: W * 0.35, d: 0.6, towers: 1, puffs: 9 }); } return o; },
     haze: { h: 120, a: 0.35 },
   },
   desert: {
     note: 'Tanaris: a nearly clear sky, one or two wisps',
     cirrus: { n: 3, y: [80, 260], len: [500, 900], th: [6, 12], d: [0.3, 0.45] },
-    clusters: (rnd, VW) => [{ x: rnd() * VW, yb: 488, w: 150, h: 50, d: 0.6, towers: 1, puffs: 8 }],
+    clusters: (rnd, VW) => [{ x: rnd() * VW, yb: 380, w: 150, h: 50, d: 0.55, towers: 1, puffs: 8 }],
     haze: { h: 80, a: 0.2 },
   },
 };
@@ -1926,12 +2498,12 @@ for (const b of Object.keys(CLOUDS)) {
 const MTN = {
   meadow: [
     { col: '#7d92a4', lo: 0.30, hi: 0.95, kind: 'peak', n: 13, hero: [[0.0, 0.07, 1], [0.5, 0.06, 0.95]] },
-    { col: '#5f8070', lo: 0.22, hi: 0.62, kind: 'hill', n: 16, hero: [[0.37, 0.09, 1], [0.87, 0.08, 0.95]] },
+    { col: '#5f8070', lo: 0.22, hi: 0.62, kind: 'hill', n: 16, hero: [[0.37, 0.09, 1], [0.87, 0.08, 0.95]], dots: 120, dotC: '#3a5a40' },
     { col: '#4a6a3e', lo: 0.20, hi: 0.5, kind: 'forest', n: 30, hero: [[0.71, 0.05, 1]] },
   ],
   fields: [
     { col: '#94978a', lo: 0.25, hi: 0.70, kind: 'hill', n: 15, hero: [[0.0, 0.08, 1], [0.5, 0.07, 0.9]] },
-    { col: '#a29a66', lo: 0.18, hi: 0.48, kind: 'hill', n: 18, hero: [[0.37, 0.08, 1], [0.87, 0.08, 1]] },
+    { col: '#a29a66', lo: 0.18, hi: 0.48, kind: 'hill', n: 18, hero: [[0.37, 0.08, 1], [0.87, 0.08, 1]], dots: 40, dotC: '#6a7040' },
     { col: '#6f7e40', lo: 0.14, hi: 0.36, kind: 'forest', n: 18, hero: [[0.71, 0.04, 1]] },
   ],
   badlands: [
@@ -1984,11 +2556,13 @@ function peakAt(P, kind, x, w) {        // height of shape P at column x (wrappe
   if (kind === 'forest') return P.h * Math.sqrt(1 - u * u);
   if (kind === 'pines') return P.h * Math.pow(1 - e, 0.9) * (1 - 0.1 * (Math.floor((1 - e) * 4) % 2));
   if (kind === 'mesa') {
-    // a notched caprock, a short cliff, then a flared talus apron
-    const cap = P.h * (1 - Math.max(0, P.notch(x / w)) * 0.14 - Math.max(0, -P.notch(x / w * 3.1)) * 0.06);
-    if (e < 0.42) return cap;
-    if (e < 0.52) return cap - (cap * 0.36) * sst(0.42, 0.52, e);
-    return P.h * 0.64 * Math.pow(1 - (e - 0.52) / 0.48, 1.5);
+    // a caprock with a jittered top and rounded shoulders, a cliff whose sides taper (never
+    // vertical), then a flared talus apron
+    const cap = P.h - 3 - P.notch(x / w) * 4 - P.notch(x / w * 3.7 + 0.3) * 2.5;
+    const sh = sst(0.3, 0.4, e);
+    if (e < 0.4) return cap - sh * 4;
+    if (e < 0.6) { const f = (e - 0.4) / 0.2; return cap - 4 - (cap * 0.38) * (f * f * 0.4 + f * 0.6); }
+    return P.h * 0.6 * Math.pow(1 - (e - 0.6) / 0.4, 1.6);
   }
   const v = u < P.skew ? (u + 1) / (P.skew + 1) : (1 - u) / (1 - P.skew);
   if (kind === 'dune') return P.h * Math.pow(Math.max(0, v), 1.3);
@@ -2007,7 +2581,7 @@ for (const b of Object.keys(MTN)) {
       MTN[b].forEach((L, row) => {
         const peaks = mtnRow(rnd, L, w, rowH);
         const tree = L.kind === 'forest' || L.kind === 'pines';
-        const base = hex(L.col), lit = hex(lightOf(L.col, 0.4)), dark = hex(shadowOf(L.col, 0.32)), haze = hex(mix(L.col, '#e8eef0', 0.3));
+        const base = hex(L.col), lit = hex(mix(lightOf(L.col, 0.45), '#fff0d0', 0.15)), dark = hex(mix(shadowOf(L.col, 0.36), L.cool || '#6a7aa4', 0.3)), haze = hex(mix(L.col, '#e8eef0', 0.3));
         const bandC = [hex(shade(L.col, 0.88)), hex(lightOf(L.col, 0.18)), hex(shadowOf(L.col, 0.12))];
         const rough = periodic(rnd, 9, 0.6, 30), roll = periodic(rnd, 6, 1.1, 2);
         const snowLit = hex('#f4f6fa'), snowShd = hex('#aebfd8'), snowRough = periodic(rnd, 8, 0.7, 12);
@@ -2043,17 +2617,17 @@ for (const b of Object.keys(MTN)) {
               f = -bu * 0.9 + (1 - vy) * 0.5 - 0.15;
             } else if (L.kind === 'mesa') {
               const e = Math.abs(bu);
-              if (e < 0.42) f = hb > best.h * 0.97 - 2 ? 0.75 : (bu < 0 ? 0.25 : -0.15) - depth * 0.2;          // caprock: lit top, its face
-              else if (e < 0.52) f = bu < 0 ? 0.5 : -0.65;                                                      // the cliff
-              else f = (bu < 0 ? 0.3 : -0.35) + 0.15;                                                            // the talus, paler
+              if (e < 0.4) f = hb > best.h - 9 ? 0.75 : (bu < 0 ? 0.42 : -0.38) - depth * 0.15;          // caprock: lit top, its two faces
+              else if (e < 0.6) f = bu < 0 ? 0.55 : -0.7;                                                // the tapered cliff
+              else f = (bu < 0 ? 0.32 : -0.38) + 0.12;                                                   // the talus, paler
             } else {
               // two or three broad planes per side, divided by the angle from the summit
               const ang = Math.atan2(bu * best.wid, (best.h - hb) + 2);
-              f = (bu < best.skew ? 0.42 : -0.45) * (0.7 + 0.3 * (1 - depth)) + Math.tanh(Math.sin(ang * 1.3 + best.ph) * 3) * 0.16;
+              f = (bu < best.skew ? 0.6 : -0.62) * (0.7 + 0.3 * (1 - depth)) + Math.tanh(Math.sin(ang * 1.3 + best.ph) * 3) * 0.2;
             }
             r = base.r; gg = base.g; bb = base.b;
             if (f > 0) mixTo(lit, Math.min(1, f) * 0.85); else mixTo(dark, Math.min(1, -f) * 0.85);
-            if (L.kind === 'mesa' && Math.abs(bu) < 0.52) mixTo(bandC[Math.floor((hb / Math.max(1, best.h)) * 3 + best.strat * 3) % 3], 0.32);
+            if (L.kind === 'mesa' && Math.abs(bu) < 0.6 && best !== BASE) { mixTo(bandC[Math.floor((hb / Math.max(1, best.h)) * 3 + best.strat * 3) % 3], 0.3); const sp = (hb + best.strat * 40) / (5 + best.strat * 4); if (sp - Math.floor(sp) < 0.22) mixTo(dark, 0.2); }
             if (L.snow && best !== BASE) {                                   // snow caps, lower on the lit planes
               const rel = hb / Math.max(1, best.h);
               const line = 1 - L.snow * (0.7 + 0.6 * best.strat) - (f > 0 ? 0.08 : 0) + sr * 0.08 - (tree ? 0.15 : 0);
@@ -2070,10 +2644,26 @@ for (const b of Object.keys(MTN)) {
         }
       });
       g.putImageData(img, 0, 0);
+      // dark tree clumps dotted over the hills (only where there is land: source-atop)
+      MTN[b].forEach((L, row) => {
+        if (!L.dots) return;
+        g.save(); g.globalCompositeOperation = 'source-atop';
+        const rowH = h / 3, y0 = row * rowH;
+        for (let i = 0; i < L.dots; i++) {
+          const x = rnd() * w, y = y0 + rowH * range(rnd, 0.35, 0.92), k = 3 + Math.floor(rnd() * 5), r0 = range(rnd, 2.2, 4.2);
+          for (let j = 0; j < k; j++) {
+            const xx = x + range(rnd, -9, 9), yy = y + range(rnd, -3, 3), r = r0 * range(rnd, 0.6, 1.2);
+            for (const X of [xx - w, xx, xx + w]) { blob(g, X + 0.6, yy + 0.6, r * 1.1, r, 0, shadowOf(L.dotC, 0.3), 0.9, 0.6); blob(g, X, yy, r, r * 0.9, 0, L.dotC, 0.95, 0.6); blob(g, X - r * 0.3, yy - r * 0.35, r * 0.5, r * 0.4, 0, lightOf(L.dotC, 0.3), 0.6, 0.5); }
+          }
+        }
+        g.restore();
+      });
       blurWrapX(g, w, h, 0.8);
     },
   });
 }
+// Feather a band (alpha and colour) that wraps around the sky horizontally.
+function feather(g, w, h, px) { blurWrapX(g, w, h, px); }
 // Blur a band that wraps around the sky horizontally (no seam at u = 0 / 1).
 function blurWrapX(g, w, h, px) {
   const m = Math.ceil(px * 4) + 2, big = makeCanvas(w + 2 * m, h), bg = big.getContext('2d');

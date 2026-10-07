@@ -224,9 +224,9 @@ export function initAtmosphere(_scene, _camera, _renderer) {
   // (never less hazed than the fogged hills in front of them; the near row's hero shapes sit at
   // u = 0.71, the mid row's at 0.37 / 0.87 and the far row's at 0 / 0.5: straight down the road)
   const LAYERS = [
-    { row: 0, R: 1050, lo: -0.07, hi: 0.23, fogK: 0.74, light: 0.95, reps: 1, offs: 0.0 },
-    { row: 1, R: 820, lo: -0.06, hi: 0.15, fogK: 0.64, light: 0.92, reps: 1, offs: 0.37 },
-    { row: 2, R: 620, lo: -0.05, hi: 0.1, fogK: 0.54, light: 0.9, reps: 2, offs: 0.71 },
+    { row: 0, R: 1050, lo: -0.07, hi: 0.23, fogK: 0.62, light: 0.95, reps: 1, offs: 0.0 },
+    { row: 1, R: 820, lo: -0.06, hi: 0.15, fogK: 0.52, light: 0.92, reps: 1, offs: 0.37 },
+    { row: 2, R: 620, lo: -0.05, hi: 0.1, fogK: 0.42, light: 0.9, reps: 2, offs: 0.71 },
   ];
   rings = LAYERS.map((L, i) => {
     const h = (L.hi - L.lo) * L.R;
