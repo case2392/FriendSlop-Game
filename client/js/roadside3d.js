@@ -568,7 +568,7 @@ function finish(B, ctx, parent, clusters, track = null) {
   // to the shadow's shape but would cost a shadow-pass draw call each
   const ranked = [...B.buckets.values()].filter(b => !NO_SHADOW.test(baseName(b.mat)) && !/[#!]/.test(b.mat.slice(baseName(b.mat).length))).map(b => [b, areas.get(b)]).sort((a, b) => b[1] - a[1]);
   const cTotal = ranked.reduce((s, [, a]) => s + a, 0);
-  const casters = new Set(ranked.filter(([, a], i) => i < 4 || a > cTotal * 0.15).map(([b]) => b));
+  const casters = new Set(ranked.filter(([, a], i) => i < 3 || a > cTotal * 0.2).map(([b]) => b));
   for (const b of B.buckets.values()) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(b.p, 3));
@@ -1479,7 +1479,7 @@ function buildGateBars(B, g, ctx) {
   }
   // the hasp and padlock at the closing end
   B.box('rs_iron', 0.32, 0.4, 0.06, -hx + 0.22, 1.55, -hz - 0.1, { r: 0.015 });
-  B.box('rs_brass', 0.17, 0.2, 0.08, -hx + 0.22, 1.38, -hz - 0.16, { r: 0.03 });
+  B.box(K.band === 'rs_brass' ? 'rs_brass' : 'rs_iron', 0.17, 0.2, 0.08, -hx + 0.22, 1.38, -hz - 0.16, { r: 0.03, tint: [1.3, 1.15, 0.8] });
   B.torus('rs_iron', 0.06, 0.018, -hx + 0.22, 1.5, -hz - 0.16, { seg: 10, tseg: 5 });
   if (ctx.snow) {
     for (const sz of [-1, 1]) {
@@ -1832,7 +1832,7 @@ function previewStop(type, rot = 0, only = null) {
 export const PREVIEW = {
   rs_semi: previewStop('semi'), rs_yard: previewStop('yard'), rs_crash: previewStop('crash'),
   rs_junk: previewStop('junk'), rs_gas: previewStop('gas'), rs_dino: previewStop('dino'),
-  rs_cab: previewStop('semi', 0, s => s.part === 'cab' || s.part === 'trailer_front'), rs_pumps: previewStop('gas', 0, s => s.part === 'pump'),
+  rs_cab: previewStop('semi', 0, s => s.part === 'cab' || s.part === 'trailer_front'), rs_pumps: previewStop('gas', 0, s => s.part === 'pump'), rs_hitch: previewStop('semi', Math.PI / 2, s => s.part === 'cab' || s.part === 'trailer_front' || s.part === 'trailer_floor'),
   rs_semi_side: previewStop('semi', Math.PI / 2), rs_semi_rear: previewStop('semi', Math.PI), rs_crash_side: previewStop('crash', Math.PI / 2),
   rs_dino_side: previewStop('dino', -Math.PI / 2), rs_gas_side: previewStop('gas', Math.PI / 2), rs_yard_side: previewStop('yard', Math.PI / 2),
   rs_gate: ({ biome = 'meadow' } = {}) => {

@@ -1124,7 +1124,7 @@ register('loot_gnomecoat', {
       const x = (i + 0.5) * w / 9 + range(rnd, -6, 6), spread = range(rnd, 6, 12);
       wrapX(w, x, 30, X => {
         stroke(g, [[X, yb + 4], [X + spread * 0.3, (yb + h) / 2], [X + spread * 0.6, h + 2]], 2, range(rnd, 9, 14), '#26385a', 0.55);
-        stroke(g, [[X - 5, yb + 6], [X - 6 + spread * 0.2, (yb + h) / 2], [X - 8 + spread * 0.4, h + 2]], 1.5, range(rnd, 5, 8), '#6a86ac', 0.45);
+        stroke(g, [[X - 6, yb + 6], [X - 7 + spread * 0.2, (yb + h) / 2], [X - 9 + spread * 0.4, h + 2]], 3, range(rnd, 7, 10), '#5a76a0', 0.35);
       });
     }
     // the chest: softer folds toward the arms, light on the shoulders
@@ -1198,14 +1198,19 @@ register('loot_gnomeface', {
       }
     }
     for (const dy of [-12, -16]) line(g, [[fx - 10, ey + dy], [fx, ey + dy - 1.5], [fx + 10, ey + dy]], 1, '#a86a5a', 0.35);   // forehead wrinkles
-    // white hair round the back of the head and over the ears, under the hat
+    // white hair round the back of the head and over the ears, under the hat: a mass of broad locks
     const hair = (x0, x1) => {
-      for (let i = 0; i < 46; i++) {
-        const x = range(rnd, x0, x1), y0 = range(rnd, 2, 26), L = range(rnd, 40, 80), c = pick(rnd, ['#e8e2d6', '#d8d0c4', '#f4efe6', '#b8b0b0']);
-        const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([x + Math.sin(t * 3 + x) * 3, y0 + L * t]); }
-        stroke(g, pts, range(rnd, 5, 8), 1.5, c, 0.85);
+      rect(g, x0, 0, x1 - x0, h * 0.75, '#c8c0bc');
+      g.fillStyle = lin(g, 0, h * 0.6, 0, h * 0.8, [[0, '#c8c0bc'], [1, '#c8c0bc', 0]]); g.fillRect(x0, h * 0.6, x1 - x0, h * 0.2);
+      const n = Math.round((x1 - x0) / 13);
+      for (let i = 0; i < n; i++) {
+        const x = x0 + (i + 0.5) * (x1 - x0) / n + range(rnd, -4, 4), L = range(rnd, 56, 96), wd = range(rnd, 11, 20), curl = range(rnd, -6, 6), lean = range(rnd, -6, 6);
+        const pts = []; for (let k = 0; k <= 7; k++) { const t = k / 7; pts.push([x + Math.sin(t * Math.PI) * curl + lean * t, -4 + L * t]); }
+        stroke(g, pts.map(([a, b]) => [a + 3, b + 2]), wd * 1.1, wd * 0.4, '#7a7488', 0.42);
+        stroke(g, pts, wd, wd * 0.35, '#e4dcd0', 1);
+        stroke(g, pts.slice(0, 6).map(([a, b]) => [a - wd * 0.25, b]), wd * 0.32, wd * 0.1, '#fff8e8', 0.85);
+        const [ex, ey] = pts[7]; line(g, [[ex - 2, ey - 3], [ex + curl * 0.5, ey + 1], [ex + curl, ey - 2]], 2.4, '#d0c8c0', 0.8);
       }
-      for (let i = 0; i < 12; i++) { const x = range(rnd, x0, x1); stroke(g, [[x, range(rnd, 8, 30)], [x + 2, range(rnd, 50, 80)]], 2, 0.6, '#fff8ec', 0.6); }
     };
     hair(-4, w * 0.29); hair(w * 0.71, w + 4);
     g.fillStyle = lin(g, 0, 0, 0, 24, [[0, '#d8d0c4', 0.8], [1, '#d8d0c4', 0]]); g.fillRect(0, 0, w, 24);
@@ -1830,9 +1835,12 @@ function coverPaint(g, s, rnd, biome) {
     patch(46, 44, 5, 11, ['#5d6b3c', '#6d7a4a', '#55663a', '#667544', '#4f5e32'], '#9aa860', '#3a4428', { fringe: ['#4f7d2a', '#6f9c34', '#5d6b3c'] });
     for (let i = 0; i < 12; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 4, (X, Y) => ellipse(g, X, Y, 1.6, 1.6, 0, pick(rnd, ['#f0e6a0', '#e8a0b0', '#fff8e0']))); }
   } else if (biome === 'fields') {
-    patch(14, 26, 3, 7, ['#8a8a48', '#9a8a44', '#7a7a40'], '#c8b870', '#4a4428', { fringe: ['#a99a45', '#c9ac52', '#e2c56a'] });
-    for (let i = 0; i < 160; i++) { const x = rnd() * s, y = rnd() * s, c = pick(rnd, ['#a99a45', '#c9ac52', '#e2c56a', '#8a7a3a']); wrap(s, x, y, 14, (X, Y) => blade(g, X, Y, range(rnd, 7, 14), range(rnd, -0.8, 0.8), range(rnd, 1.6, 2.6), c, 1, range(rnd, -0.4, 0.4))); }
-    for (let i = 0; i < 26; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 2.5, 5); wrap(s, x, y, r, (X, Y) => blob(g, X, Y, r, r * 0.8, 0, pick(rnd, ['#d89a3a', '#e8b048']), 1, 0.7)); }
+    // Westfall rock: crusts of yellow-orange lichen and tufts of dry grass in the hollows
+    patch(30, 30, 3, 7, ['#c8a848', '#d89a3a', '#b8a858', '#d8b050'], '#f0d888', '#7a6a30', { rim: 0.35, hard: 0.65 });
+    for (let i = 0; i < 26; i++) {
+      const cx = rnd() * s, cy = rnd() * s;
+      for (let k = 0; k < 9; k++) { const c = pick(rnd, ['#a99a45', '#c9ac52', '#e2c56a', '#8a7a3a']); wrap(s, cx, cy, 16, (X, Y) => blade(g, X + (rnd() - 0.5) * 6, Y + (rnd() - 0.5) * 3, range(rnd, 7, 14), range(rnd, -0.9, 0.9), range(rnd, 1.6, 2.6), c, 1, range(rnd, -0.4, 0.4))); }
+    }
   } else if (biome === 'snow') {
     g.fillStyle = rgba('#e8eef4', 0.82); g.fillRect(0, 0, s, s);
     patch(30, 40, 8, 18, ['#f2f4f8', '#e8eef4', '#f7f4ec'], '#ffffff', '#b8c8dc', { rim: 0.6, hard: 0.45 });

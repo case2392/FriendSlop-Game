@@ -14,7 +14,7 @@ import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas } from './props3d.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
-import { zoneText } from './labels.js';
+import { zoneText, uiText } from './labels.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -73,7 +73,7 @@ function toast(text, color = '#fff', secs = 4) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.style.borderColor = color;
-  el.innerHTML = `<span class="tmsg" data-c="${color}" style="--c:${color}">${text}</span>`;
+  el.innerHTML = `<span class="tmsg" data-c="${color}" style="--c:${color}">${uiText(text)}</span>`;
   $('toasts').prepend(el);
   while ($('toasts').children.length > 5) $('toasts').lastChild.remove();
   setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 600); }, secs * 1000);
@@ -325,13 +325,13 @@ async function buildDay(m) {
   S.gatesOpen = new Set();
   S.lw = new LocalWorld(W, S.parts);
   setBiome(W.biome);
-  zoneText(W.biomeName, `Day ${m.day} of ${C.DAYS}`);
   S.wv = buildWorld(W);
   scene.add(S.wv.group);
   S.mapCv = mapCanvas(W);
   rvView.setParts(S.parts);
   S.interp.reset();
   S.dayLabel = m.day;
+  zoneText(W.biomeName, `Day ${m.day} of ${C.DAYS}`);   // after the build: the fade starts on the next rendered frames
   worldBuilding = false;
   for (const fn of S.pendingAfterWorld || []) fn();
   S.pendingAfterWorld = [];
@@ -408,7 +408,7 @@ net.on('meta', m => {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<div class="pm" style="--c:${p.color}">${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}<span class="pn">${escapeHtml(p.name)}</span>${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</div>`).join('');
+  $('roster').innerHTML = m.players.map(p => `<div class="pm" style="--c:${p.color}"><span class="pf"><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i></span></div>`).join('');
 });
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
@@ -474,9 +474,9 @@ function showReceipt(m) {
   $('receipt').innerHTML = `
     <h2>Day ${m.day} Receipt</h2>
     <div class="filigree"></div>
-    ${row('Pawned', '+' + fmt$(m.sold), 'good')}
-    ${row('Gambling', (m.gamble >= 0 ? '+' : '') + fmt$(m.gamble), m.gamble >= 0 ? 'good' : 'bad')}
-    ${row('Medical bills', '-' + fmt$(m.bills), m.bills ? 'bad' : '')}
+    ${row('Pawned', (m.sold ? '+' : '') + fmt$(m.sold), m.sold ? 'good' : '')}
+    ${row('Gambling', (m.gamble > 0 ? '+' : '') + fmt$(m.gamble), m.gamble > 0 ? 'good' : m.gamble < 0 ? 'bad' : '')}
+    ${row('Medical bills', (m.bills ? '-' : '') + fmt$(m.bills), m.bills ? 'bad' : '')}
     ${row('Loot broken', fmt$(m.broken) + ' of stuff', m.broken ? 'bad' : '')}
     ${row('Payment', m.paid ? `PAID ${fmt$(m.due)}` : `MISSED (${fmt$(m.due)})`, m.paid ? 'good' : 'bad')}
     ${row('Bank', fmt$(m.bank))}

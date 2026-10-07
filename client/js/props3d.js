@@ -288,12 +288,12 @@ const BUILDERS = {
     for (const sx of [-1, 1]) B.add(sphere(1, 12, 8), R.boot, { at: mat4(sx * 0.054, -0.21, 0.032, 0, sx * 0.15, 0, [0.05, 0.03, 0.082]) });
     // a fat bell of a coat; the belt lands on GNOME.belt in v
     B.add(lathe([[0, -0.205, 0], [0.098, -0.205, 0.02], [0.114, -0.19, 0.08], [0.118, -0.15, 0.2], [0.112, -0.115, 0.32], [0.109, -0.105, GNOME.belt[0]], [0.107, -0.08, GNOME.belt[1]],
-      [0.098, -0.05, 0.56], [0.084, -0.02, 0.72], [0.06, 0.005, 0.88], [0.035, 0.015, 0.96], [0, 0.02, 1]], 16), coat);
+      [0.098, -0.05, 0.56], [0.084, -0.02, 0.72], [0.06, 0.005, 0.88], [0.035, 0.015, 0.96], [0, 0.02, 1]], 16), coat, { at: mat4(0, 0, 0, 0, 0, 0, [1.06, 1, 1.04]) });
     B.add(new THREE.TorusGeometry(0.054, 0.022, 8, 20), R.gnomefur, { at: mat4(0, 0.006, 0.004, Math.PI / 2, 0, 0) });
     // arms round the belly; chunky leather mittens with a thumb, half in the beard
     for (const sx of [-1, 1]) {
-      B.add(sphere(1, 10, 7), coat, { at: mat4(sx * 0.082, -0.012, 0.0, 0, 0, 0, [0.036, 0.036, 0.036]) });
-      B.add(limb([sx * 0.084, -0.016, 0.004], [sx * 0.058, -0.09, 0.084], 0.032, 0.026, 10), coat);
+      B.add(sphere(1, 10, 7), coat, { at: mat4(sx * 0.088, -0.012, 0.0, 0, 0, 0, [0.038, 0.037, 0.037]) });
+      B.add(limb([sx * 0.09, -0.016, 0.004], [sx * 0.058, -0.09, 0.084], 0.032, 0.026, 10), coat);
       B.add(sphere(1, 12, 8), R.boot, { at: mat4(sx * 0.05, -0.1, 0.1, 0.3, sx * -0.3, 0, [0.042, 0.032, 0.036]) });
       B.add(sphere(1, 8, 6), R.boot, { at: mat4(sx * 0.03, -0.083, 0.112, 0.4, 0, sx * 0.5, [0.016, 0.021, 0.016]) });
     }
@@ -608,37 +608,37 @@ const BUILDERS = {
     // underneath, the green back on top), the same way the statue's body is mapped.
     const hide = { uv: 'fn', fn: (x, y, z, nx, ny) => [Math.min(1, Math.max(0, (z + 0.8) / 1.6)), 0.06 + 0.9 * (0.5 + 0.5 * ny)], crease: 80 };
     const head = [
-      { z: -0.42, w: 0.2, top: 0.24, bot: -0.12 }, { z: -0.36, w: 0.33, top: 0.38, bot: -0.22 }, { z: -0.24, w: 0.41, top: 0.47, bot: -0.28 },
-      { z: -0.06, w: 0.43, top: 0.5, bot: -0.3 }, { z: 0.12, w: 0.4, top: 0.44, bot: -0.3 }, { z: 0.28, w: 0.34, top: 0.3, bot: -0.28 },
-      { z: 0.42, w: 0.3, top: 0.2, bot: -0.26 }, { z: 0.54, w: 0.3, top: 0.2, bot: -0.25 }, { z: 0.64, w: 0.29, top: 0.19, bot: -0.22 },
-      { z: 0.72, w: 0.24, top: 0.15, bot: -0.17 }, { z: 0.765, w: 0.14, top: 0.08, bot: -0.09 }, { z: 0.78, w: 0.05, top: 0.03, bot: -0.03 },
+      { z: -0.42, w: 0.2, top: 0.26, bot: -0.12 }, { z: -0.36, w: 0.33, top: 0.4, bot: -0.22 }, { z: -0.24, w: 0.41, top: 0.5, bot: -0.28 },
+      { z: -0.06, w: 0.43, top: 0.53, bot: -0.3 }, { z: 0.12, w: 0.4, top: 0.46, bot: -0.3 }, { z: 0.28, w: 0.33, top: 0.32, bot: -0.28 },
+      { z: 0.42, w: 0.3, top: 0.25, bot: -0.27 }, { z: 0.54, w: 0.31, top: 0.25, bot: -0.26 }, { z: 0.64, w: 0.3, top: 0.23, bot: -0.23 },
+      { z: 0.72, w: 0.25, top: 0.18, bot: -0.18 }, { z: 0.765, w: 0.15, top: 0.1, bot: -0.1 }, { z: 0.78, w: 0.05, top: 0.03, bot: -0.03 },
     ];
     B.add(loft(head, 22, 2.4), R.dino, hide);
     const at = z => { let i = 1; while (i < head.length - 1 && head[i].z < z) i++; const a = head[i - 1], b = head[i], f = Math.min(1, Math.max(0, (z - a.z) / (b.z - a.z))); return { w: a.w + (b.w - a.w) * f, top: a.top + (b.top - a.top) * f, bot: a.bot + (b.bot - a.bot) * f }; };
     const surfX = (z, y) => { const h = at(z), mid = (h.top + h.bot) / 2, hh = (h.top - h.bot) / 2, t = Math.min(1, Math.abs((y - mid) / hh)); return h.w * Math.pow(Math.max(0, 1 - Math.pow(t, 2.4)), 1 / 2.4); };
     // the smile: a dark groove round the muzzle, curling up at the corners, with blunt peg teeth
-    const smileAt = s => { const as = Math.abs(s), z = 0.777 - 0.56 * Math.pow(as, 0.75), y = -0.06 + 0.1 * Math.pow(as, 2.4); return [Math.sign(s) * surfX(z, y), y, z]; };
+    const smileAt = s => { const as = Math.abs(s), z = 0.777 - 0.4 * Math.pow(as, 0.75), y = -0.07 + 0.11 * Math.pow(as, 2.2); return [Math.sign(s) * surfX(z, y), y, z]; };
     const smile = [];
     for (let k = -16; k <= 16; k++) { const [x, y, z] = smileAt(k / 16); smile.push([x * 0.985, y, z + (k === 0 ? 0.003 : 0)]); }
     B.add(tube(smile, 0.022, 64, 6), R.rubber, { tint: [1.5, 0.62, 0.52] });
     const rnd = rngFrom('dino-teeth');
-    for (const sx of [-1, 1]) for (let k = 0; k < 6; k++) {
-      const [x, y, z] = smileAt(sx * (0.1 + k * 0.105)), r = range(rnd, 0.02, 0.035);
+    for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) {
+      const [x, y, z] = smileAt(sx * (0.1 + k * 0.13)), r = range(rnd, 0.022, 0.034);
       B.add(sphere(1, 8, 6), R.ivory, { at: mat4(x * 0.97, y - r * 0.75, z, 0, 0, 0, [r, r * 1.35, r]) });
     }
     // big round eyes on the sides of the dome, heavy lids rolled over their tops, brow bumps
     for (const sx of [-1, 1]) {
-      const ez = 0.1, ey = 0.18, ex = sx * (surfX(ez, ey) - 0.03);
-      const E = mat4(ex, ey, ez, -0.15, sx * (Math.PI / 2 - 0.62), 0);
+      const ez = 0.13, ey = 0.15, ex = sx * (surfX(ez, ey) - 0.035);
+      const E = mat4(ex, ey, ez, -0.1, sx * (Math.PI / 2 - 0.42), 0);
       B.add(sphere(0.108, 16, 12), R.eye, { at: E, crease: 80 });
-      const lidM = E.clone().multiply(mat4(0, 0.006, 0, -0.42, 0, 0, 1.16));
+      const lidM = E.clone().multiply(mat4(0, 0.004, 0, -0.42, 0, 0, 1.1));
       B.add(lathe([[0.1, 0, 0.5], [0.094, 0.034, 0.6], [0.072, 0.07, 0.75], [0.04, 0.092, 0.9], [0, 0.1, 1]], 16), R.dino, { ...hide, at: lidM });
-      B.add(sphere(1, 12, 8), R.dino, { ...hide, at: mat4(ex * 0.78, ey + 0.12, ez + 0.02, 0, sx * 0.3, sx * 0.35, [0.12, 0.045, 0.13]) });
+      B.add(sphere(1, 12, 8), R.dino, { ...hide, at: mat4(ex * 0.82, ey + 0.11, ez + 0.03, 0, sx * 0.3, sx * 0.45, [0.11, 0.04, 0.12]) });
     }
     // nostril bumps on top of the snout tip
     for (const sx of [-1, 1]) {
-      B.add(sphere(1, 10, 7), R.dino, { ...hide, at: mat4(sx * 0.07, 0.19, 0.66, 0, 0, 0, [0.042, 0.03, 0.05]) });
-      B.add(sphere(1, 8, 5), R.rubber, { at: mat4(sx * 0.073, 0.214, 0.68, -0.6, 0, 0, [0.019, 0.009, 0.021]), tint: [1.1, 0.8, 0.7] });
+      B.add(sphere(1, 10, 7), R.dino, { ...hide, at: mat4(sx * 0.07, 0.21, 0.68, 0, 0, 0, [0.042, 0.03, 0.05]) });
+      B.add(sphere(1, 8, 5), R.rubber, { at: mat4(sx * 0.073, 0.232, 0.7, -0.6, 0, 0, [0.019, 0.009, 0.021]), tint: [1.1, 0.8, 0.7] });
     }
     // the broken neck: up from a plaster break at the back-bottom into the underside of the skull,
     // three rusty rebar stubs poking out of the break
@@ -671,7 +671,7 @@ const LUMPS = [
   { c: [-0.25, -0.05, 0.0], r: [1.25, 1.0, 1.15], rz: 0.02, top: 0.8 },     // the main stone, a broken flat top
   { c: [0.78, -0.32, 0.32], r: [0.9, 0.72, 0.85], rz: -0.24, top: 0.62 },   // a slab leaning off it
   { c: [0.7, 0.32, -0.42], r: [0.62, 0.44, 0.56], rz: 0.18, top: 0.7 },     // an overhanging shoulder
-  { c: [-0.2, -0.84, 0.05], r: [1.55, 0.3, 1.25], rz: 0.03, top: 0.85 },     // the wide foot
+  { c: [-0.1, -0.86, 0.1], r: [1.35, 0.26, 1.15], rz: 0.03, top: 0.85 },     // the foot, a low skirt round the base
 ];
 function boulderGeo(biome) {
   const [, hx, hy, hz] = LOOT.boulder.shape;
