@@ -208,6 +208,9 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 #stamFill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px; background-color: #f0cc2c; background-image: var(--tx-bar, linear-gradient(#fff, #aaa)); background-size: 256px 100%; background-blend-mode: multiply; transition: width 0.08s; }
 #stamFill.low { background-color: #d8331e; }
 #stamCap { position: absolute; right: 0; top: 0; bottom: 0; border-radius: 0 2px 2px 0; background: repeating-linear-gradient(135deg, #3a0f0a 0 5px, #220806 5px 10px); box-shadow: inset 2px 0 0 #000; }
+/* the round portrait on the left, like a WoW unit frame */
+.stamina::before { content: ''; position: absolute; left: -46px; top: 50%; width: 52px; height: 52px; margin-top: -26px; z-index: 1;
+  background: var(--tx-ico-bolt) center / 58% no-repeat, var(--tx-ring) center / contain no-repeat; filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.6)); }
 .stam-label { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; color: #fff; text-shadow: var(--outline); letter-spacing: 1px; pointer-events: none; }
 
 .walkie { right: 18px; bottom: 18px; display: flex; align-items: center; gap: 6px; padding: 5px 12px 5px 8px; font-size: 14px; color: #f3e6c8; }

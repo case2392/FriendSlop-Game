@@ -69,8 +69,8 @@ const SKIN = [
   ['parchment', 'ui_parchment'], ['stone', 'ui_stone'], ['wood', 'ui_wood'], ['leather', 'ui_leather'], ['bar', 'ui_bar'],
   ['frame-gold', 'ui_frame_gold'], ['frame-silver', 'ui_frame_silver'], ['editbox', 'ui_editbox'],
   ['btn-red', 'ui_btn_red'], ['btn-stone', 'ui_btn_stone'],
-  ['filigree', 'ui_filigree'], ['endcap', 'ui_endcap'], ['seal', 'ui_seal'],
-  ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'key', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull']
+  ['filigree', 'ui_filigree'], ['endcap', 'ui_endcap'], ['seal', 'ui_seal'], ['ring', 'ui_ring'],
+  ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'key', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt']
     .map(n => [`ico-${n}`, `ui_ico_${n}`]),
 ];
 function installSkin() {

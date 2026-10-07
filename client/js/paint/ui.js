@@ -521,6 +521,28 @@ icon('skull', 'knocked out', (g, s, rnd) => {
   for (const x of [27, 32, 37]) stroke(g, [[x, 45], [x, 51]], 1.5, 1.5, '#3a2e24', 0.8);
 });
 
+icon('bolt', 'stamina', (g, s, rnd) => {
+  const m = mask(s, s, mg => { mg.beginPath(); mg.moveTo(38, 5); mg.lineTo(15, 36); mg.lineTo(30, 36); mg.lineTo(24, 59); mg.lineTo(50, 24); mg.lineTo(34, 24); mg.lineTo(42, 5); mg.closePath(); mg.fill(); });
+  emboss(g, m, { ...PAL.gold, light: '#ffe98a', mid: '#f2b630', low: '#b8701a' }, rnd, { d: 1.6, outline: 1.3 });
+});
+
+// Round gold portrait ring (unit frames): 128px, transparent outside, dark slate inside.
+register('ui_ring', { size: 128, family: F, alpha: true, note: 'portrait ring for unit-frame bars', paint(g, s, rnd) {
+  const c = s / 2;
+  const gr = g.createRadialGradient(c - 10, c - 12, 4, c, c, 48);
+  gr.addColorStop(0, '#4a4e58'); gr.addColorStop(1, '#16171b');
+  g.fillStyle = gr; g.beginPath(); g.arc(c, c, 48, 0, Math.PI * 2); g.fill();
+  for (let i = 0; i < 8; i++) { g.strokeStyle = rgba('#000', 0.3 * (1 - i / 8)); g.lineWidth = 2; g.beginPath(); g.arc(c, c, 46 - i * 2, 0, Math.PI * 2); g.stroke(); }
+  const m = mask(s, s, mg => {
+    const ring = new Path2D(); ring.arc(c, c, 60, 0, Math.PI * 2); ring.arc(c, c, 47, 0, Math.PI * 2, true);
+    mg.fill(ring);
+    for (const a of [-Math.PI / 2, Math.PI / 2]) { mg.beginPath(); mg.arc(c + Math.cos(a) * 54, c + Math.sin(a) * 54, 7, 0, Math.PI * 2); mg.fill(); }
+  });
+  emboss(g, m, PAL.gold, rnd, { d: 2, outline: 1.3, shadow: 0.6, glints: 6 });
+  g.strokeStyle = rgba('#3a2208', 0.6); g.lineWidth = 1.4; g.beginPath(); g.arc(c, c, 53.5, 0, Math.PI * 2); g.stroke();
+  for (const a of [-Math.PI / 2, Math.PI / 2]) gem(g, c + Math.cos(a) * 54, c + Math.sin(a) * 54, 4.5, '#23559e');
+} });
+
 // ---- the title-screen vista ----------------------------------------------------------------
 
 // A painted golden-hour road vista (the login screen). Big soft shapes first,
