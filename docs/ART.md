@@ -69,11 +69,11 @@ and towns. Nobody should ever confuse one day's screenshot for another's.
 
 | Biome | Grass / ground | Dirt / road | Rock | Sky top → horizon | Fog |
 |---|---|---|---|---|---|
-| meadow | `#4f7d2a` `#6f9c34` `#9cb447` (lit tips) | `#7c5b3a` `#9a7650` | `#77746e` `#97918a` mossy `#6d7a4a` | `#5d9fd8` → `#cfe6e2` | `#b6d0e4` |
-| fields | `#a99a45` `#c9ac52` `#e2c56a` wheat | `#94704a` `#b18c5c` | `#8a8170` | `#7fb6e6` → `#efe2b8` | `#dccfa4` |
-| snow | snow `#e8eef4` `#cfdbe6` (blue shadow) `#f7f4ec` (sunlit) | slush/gravel `#8a8478` `#a39d90` | granite `#6f7682` `#8e96a3` | `#5f9edc` → `#e4eef4` | `#d6e2ec` |
-| badlands | dust `#b98457` `#cf9a62` | `#a77650` | strata `#8e3e22` `#b4552f` `#cf7a45` `#e3a066` | `#6aa2d8` → `#f0c9a0` | `#d9a982` |
-| desert | sand `#d9b87f` `#e8cc96` `#c79c62` | `#bf9a68` | `#b7895e` `#d4ab7c` | `#78b6e8` → `#f6e3b8` | `#efd8aa` |
+| meadow | `#4f7d2a` `#6f9c34` `#9cb447` (lit tips) | `#7c5b3a` `#9a7650` | `#77746e` `#97918a` mossy `#6d7a4a` | `#5d9fd8` → `#cfe6e2` | `#a9c6d6` |
+| fields | `#a99a45` `#c9ac52` `#e2c56a` wheat | `#94704a` `#b18c5c` | `#8a8170` | `#7fb6e6` → `#efe2b8` | `#d4cfb4` |
+| snow | snow `#e8eef4` `#cfdbe6` (blue shadow) `#f7f4ec` (sunlit) | slush/gravel `#8a8478` `#a39d90` | granite `#6f7682` `#8e96a3` | `#4e94dc` → `#e2edf4` | `#d2e0ec` |
+| badlands | dust `#b98457` `#cf9a62` | `#a77650` | strata `#8e3e22` `#b4552f` `#cf7a45` `#e3a066` | `#6aa2d8` → `#f0c9a0` | `#dcb69c` |
+| desert | sand `#d9b87f` `#e8cc96` `#c79c62` | `#bf9a68` | `#b7895e` `#d4ab7c` | `#78b6e8` → `#f6e3b8` | `#ecd6ae` |
 
 ## Technical conventions
 

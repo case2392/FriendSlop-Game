@@ -13,7 +13,7 @@ import { Interp } from './interp.js';
 import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas } from './props3d.js';
-import { PlayerView, Hands } from './people.js';
+import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText } from './labels.js';
 
 const $ = id => document.getElementById(id);
@@ -311,7 +311,11 @@ async function buildDay(m) {
   worldBuilding = true;
   await physReady;
   const W = generateLeg(m.seed, m.day);
-  if (S.wv) { scene.remove(S.wv.group); S.wv.group.traverse(o => { if (o.geometry) o.geometry.dispose(); }); }
+  if (S.wv) {
+    scene.remove(S.wv.group);
+    S.wv.terrain?.dispose?.();   // the grass clutter's instance buffers (materials are cached per biome)
+    S.wv.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh) o.skeleton?.dispose(); });
+  }
   if (S.lw) S.lw.free();
   for (const p of S.props.values()) scene.remove(p.mesh);
   S.props.clear();
@@ -392,6 +396,13 @@ net.on('meta', m => {
   renderVoiceUI();
   const mine = m.players.find(p => p.id === S.selfId);
   if (mine) { hands.setColor(mine.color); S.myWalkie = mine.walkie; S.myColor = mine.color; }
+  // paint other players' looks while the browser is idle, so someone joining mid-game doesn't stall a frame
+  const idle = window.requestIdleCallback || (f => setTimeout(f, 30));
+  for (const p of m.players) {
+    if (p.id === S.selfId || S.views.has(p.id) || (S.prewarmed ||= new Set()).has(p.id)) continue;
+    S.prewarmed.add(p.id);
+    idle(() => { try { prewarmPlayer(p); } catch (e) { console.warn('prewarm failed', e); } });
+  }
   for (const [id, v] of S.views) {
     const p = m.players.find(q => q.id === id);
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
