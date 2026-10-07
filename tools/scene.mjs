@@ -21,21 +21,21 @@ fs.mkdirSync(OUT, { recursive: true });
 const PORT = 8000 + Math.floor(Math.random() * 900);
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
-await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('no server')), 10000); });
+await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('no server')), 60000); });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const errors = [];
 async function open(name) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await ctx.newPage();
-  page.setDefaultTimeout(180000);   // several agents may be rendering on swiftshader at once
+  page.setDefaultTimeout(240000);   // several agents may be rendering on swiftshader at once
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/404|favicon/.test(m.text())) errors.push(`[${name}] ${m.text()}`); });
-  await page.goto(`http://localhost:${PORT}`, { timeout: 180000 });
+  await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
   await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
   await page.fill('#nameInput', name);
   return page;
 }
-const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 20, null, { timeout: 120000 });
+const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 20, null, { timeout: 400000 });
 const quiet = p => p.evaluate(() => { const S = window.__nmd; S.noRender = true; S.forceLock = true; document.getElementById('clickToPlay').classList.add('hidden'); document.getElementById('toasts').style.display = 'none'; });
 const ev = (p, fn, arg) => p.evaluate(fn, arg);
 const wait = (p, ms) => p.waitForTimeout(ms);
@@ -50,11 +50,11 @@ await dave.fill('#codeInput', code);
 await dave.click('#joinBtn');
 await ready(dave);
 await quiet(steve); await quiet(dave);
-await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 20000 });
+await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 120000 });
 const send = m => steve.evaluate(m => window.__nmd.send(m), m);
 if (DAY !== 1) {
   await send({ t: 'dbg', op: 'day', d: DAY });
-  for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, DAY, { timeout: 60000 });
+  for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, DAY, { timeout: 240000 });
   await wait(steve, 1500);
 }
 const setClock = async (h, night = false) => {

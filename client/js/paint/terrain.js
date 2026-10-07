@@ -997,7 +997,7 @@ register('cliff_snow', {
       shelfN: 9, shelfH: 1.3, crackFrac: 0.45,
       colors: ['#6f7682', '#7e8694', '#666c7a', '#8a92a0', '#727888'], blot: ['#5c6274', '#9aa2b0', '#7a7a88', '#6a7484'],
       light: '#f2ecdc', shadow: '#363c5e', crack: '#2c3048', glaze: '#e4ecff', facetK: 1.1,
-      cover: { shade: '#a6b4ca', mid: '#d8e0ea', lit: '#fbf8f0', minUp: 0.06, slope: 4, top: 2.4, facet: 0.45, amt: 1.6, patch: [0.15, 0.55], edge: [0.12, 0.45], max: 1, lipShadow: '#3a4466' },
+      cover: { shade: '#a6b4ca', mid: '#d8e0ea', lit: '#fbf8f0', minUp: 0.06, slope: 4, top: 2.6, facet: 0.2, amt: 1.6, patch: [0.15, 0.55], edge: [0.12, 0.45], max: 1, lipShadow: '#3a4466' },
       pillows: ['#ffffff', '#e8eef6', '#8496b8'], icicles: 26,
       stains: 40, stain: '#eef2f8', stainA: 0.14, lichen: ['#a8b0a0', '#c0c4b0'],
     }, cv);
