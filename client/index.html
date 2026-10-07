@@ -4,31 +4,37 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>NO MONEY DOWN</title>
+<link rel="preload" href="/fonts/marcellus-latin-400.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/cinzel-latin-900.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/css/style.css">
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🚐</text></svg>">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='44' fill='%23c99433' stroke='%234b2e0c' stroke-width='8'/><text x='50' y='68' font-size='54' text-anchor='middle' font-family='Georgia' font-weight='bold' fill='%234b2e0c'>$</text></svg>">
 </head>
 <body>
 
-<div id="loading" class="loading">loading the desert…</div>
+<div id="loading" class="loading"><span>Loading the road</span><i><b></b></i></div>
 
-<!-- ============ MENU ============ -->
+<!-- ============ MENU (the login screen) ============ -->
 <div id="menu" class="screen">
   <div class="title-wrap">
     <p class="kicker">a friendslop road trip</p>
-    <h1 class="game-title">NO MONEY <span>DOWN</span></h1>
+    <h1 class="game-title"><span class="t1">No Money</span><span class="t2">Down</span></h1>
+    <div class="filigree"></div>
     <p class="tagline">You and the boys bought a $250,000 RV with no money down.<br>Payments are due every night. None of you have jobs.</p>
   </div>
-  <div class="menu-card">
+  <div class="menu-card framed">
+    <label class="fl" for="nameInput">Character Name</label>
     <input id="nameInput" maxlength="16" placeholder="your name, chief" autocomplete="off">
-    <button id="hostBtn" class="btn big green">START A TRIP</button>
+    <button id="hostBtn" class="btn big green">Start a Trip</button>
+    <div class="or"><span>or join the boys</span></div>
     <div class="join-row">
       <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
-      <button id="joinBtn" class="btn big pink">JOIN</button>
+      <button id="joinBtn" class="btn big pink">Join</button>
     </div>
-    <input id="seedInput" maxlength="10" placeholder="trip seed (optional — same seed, same roads)" autocomplete="off" class="seed">
+    <input id="seedInput" maxlength="10" placeholder="trip seed (optional · same seed, same roads)" autocomplete="off" class="seed">
     <p id="menuError" class="error-text"></p>
   </div>
   <p class="footer-note">1–6 players · first-person co-op · proximity voice · one shared bank account · five days to pay off the RV</p>
+  <p class="version">Version 1.0.5 (Slopmaster 9000) · No Money Down Inc.</p>
 </div>
 
 <!-- ============ THE GAME ============ -->
@@ -51,61 +57,62 @@
   <div id="holdBar" class="holdbar hidden"><div></div></div>
   <div id="heldLabel" class="held hidden"></div>
   <div id="driveHint" class="drive hidden"></div>
-  <div id="stamina" class="stamina hidden"><div id="stamFill"></div><div id="stamCap"></div></div>
-  <div id="walkieHint" class="walkie hidden">📻 hold T</div>
+  <div id="stamina" class="stamina hidden"><div id="stamFill"></div><div id="stamCap"></div><span class="stam-label">Stamina</span></div>
+  <div id="walkieHint" class="walkie hidden"><i class="ico ico-walkie"></i>hold <kbd>T</kbd></div>
 
   <div id="toasts" class="toasts"></div>
+  <div id="zoneText" class="zone-text hidden"><div class="zt-title"></div><div class="zt-sub"></div></div>
   <div id="flash" class="flash hidden"></div>
-  <div id="clickToPlay" class="click-to-play hidden">CLICK TO PLAY<small>F1 for controls</small></div>
-  <div id="koOverlay" class="ko hidden"><b>💫 KNOCKED OUT</b><span id="koT"></span></div>
+  <div id="clickToPlay" class="click-to-play hidden">Click to Play<small>F1 for controls</small></div>
+  <div id="koOverlay" class="ko hidden"><div class="ko-box"><i class="ico ico-skull"></i><b>You have been knocked out.</b><span id="koT"></span></div></div>
 
   <div id="keypad" class="panel keypad hidden">
-    <h3>🚧 RANGER GATE</h3>
-    <p>4-digit code. It's painted on the rock up on the canyon rim.</p>
+    <h3>Ranger Gate</h3>
+    <p>Four-digit code. It's painted on the rock up on the canyon rim.</p>
     <input id="kpInput" maxlength="4" inputmode="numeric" placeholder="____" autocomplete="off">
-    <div class="row"><button id="kpGo" class="btn small green">ENTER</button><button id="kpCancel" class="btn small gray">CANCEL</button></div>
+    <div class="row"><button id="kpGo" class="btn small green">Enter</button><button id="kpCancel" class="btn small gray">Cancel</button></div>
   </div>
 
-  <div id="receipt" class="panel receipt hidden"></div>
-  <div id="overScreen" class="panel over hidden"></div>
+  <div id="receipt" class="panel receipt parchment hidden"></div>
+  <div id="overScreen" class="panel over parchment hidden"></div>
 
-  <div id="help" class="panel help hidden">
-    <h3>HOW TO NOT GET REPO'D</h3>
+  <div id="help" class="panel help parchment hidden">
+    <h3>How to Not Get Repo'd</h3>
     <div class="cols">
       <div>
         <span class="hd">Body</span>
         <p><kbd>WASD</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump · <kbd>Ctrl</kbd> crouch</p>
-        <p><kbd>Hold LMB</kbd> GRAB — loot, or any steep rock to <b>climb</b> it (watch your stamina). <kbd>Space</kbd> while climbing = lunge.</p>
+        <p><kbd>Hold LMB</kbd> GRAB: loot, or any steep rock to <b>climb</b> it (watch your stamina). <kbd>Space</kbd> while climbing = lunge.</p>
         <p><kbd>RMB</kbd> throw · <kbd>Q</kbd> drop · <kbd>wheel</kbd> hold distance</p>
-        <p><kbd>E</kbd> use — seats, door, winch, bell, buttons, keypad, bunk · hold on a knocked-out friend to pick them up</p>
+        <p><kbd>E</kbd> use: seats, door, winch, bell, buttons, keypad, bunk · hold on a knocked-out friend to pick them up</p>
         <p><kbd>MMB</kbd> ping · <kbd>1-6</kbd> emotes</p>
       </div>
       <div>
         <span class="hd">The RV</span>
         <p><kbd>E</kbd> on the driver's seat. <kbd>WASD</kbd> drive, <kbd>Space</kbd> brake, <kbd>H</kbd> horn.</p>
         <p><b>Winch:</b> <kbd>E</kbd> the front bumper to take the hook, carry it to a post or dead tree, <kbd>E</kbd> to clip it, then the driver hits <kbd>R</kbd> to reel in.</p>
-        <p>Walk into the RV to push it. The <b>road map</b> is on the dash — only the person holding it can read it.</p>
+        <p>Walk into the RV to push it. The <b>road map</b> is on the dash. Only the person holding it can read it.</p>
         <span class="hd">The money</span>
         <p>One shared bank. Pawn loot in town, gamble at the casino, pay the Repo Man by midnight. Miss it and he takes part of the RV.</p>
       </div>
     </div>
-    <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (buy one at the store) · <kbd>F1</kbd> this screen</p>
-    <label class="sens">mouse sensitivity <input id="sensInput" type="range" min="0.3" max="2.5" step="0.05"></label>
-    <button class="btn small gray" onclick="document.getElementById('help').classList.add('hidden')">GOT IT</button>
+    <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (buy one at the store) · <kbd>F1</kbd> this page</p>
+    <label class="sens">Mouse sensitivity <input id="sensInput" type="range" min="0.3" max="2.5" step="0.05"></label>
+    <button class="btn small green" onclick="document.getElementById('help').classList.add('hidden')">Got It</button>
   </div>
 
   <div id="voiceDock" class="voice-dock">
-    <button id="voiceJoinBtn" class="btn small green">🎙 JOIN VOICE</button>
+    <button id="voiceJoinBtn" class="btn small green">JOIN VOICE</button>
     <div id="voiceLive" class="voice-live hidden">
-      <button id="voiceMuteBtn" class="voice-btn" title="mute / unmute (M)">🎙</button>
+      <button id="voiceMuteBtn" class="voice-btn" title="mute / unmute (M)"></button>
       <span id="voiceTxHint" class="voice-hint"></span>
-      <button id="voiceCfgBtn" class="voice-btn" title="voice settings">⚙️</button>
-      <button id="voiceLeaveBtn" class="voice-btn" title="leave voice">✕</button>
+      <button id="voiceCfgBtn" class="voice-btn cfg" title="voice settings"></button>
+      <button id="voiceLeaveBtn" class="voice-btn leave" title="leave voice"></button>
     </div>
     <div id="voiceErr" class="voice-err hidden"></div>
   </div>
   <div id="voicePanel" class="panel voice-panel hidden">
-    <h3>🎙 VOICE</h3>
+    <h3>Voice Chat</h3>
     <p class="voice-note">Proximity chat: the boys sound like they're where they are. Walls muffle. Walkie-talkies (T) reach anyone else who owns one.</p>
     <label class="vrow">Mic <select id="voiceMicSel"></select></label>
     <div class="vrow"><span>Mode</span>
@@ -114,7 +121,7 @@
     </div>
     <label class="vrow">Volume <input id="voiceMasterVol" type="range" min="0" max="1" step="0.05"></label>
     <div id="voicePeerRows"></div>
-    <button id="voicePanelClose" class="btn small gray">CLOSE</button>
+    <button id="voicePanelClose" class="btn small green">Close</button>
   </div>
 </div>
 

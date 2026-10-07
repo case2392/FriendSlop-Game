@@ -4,14 +4,14 @@
 //   node tools/scene.mjs camp,road,town [outdir] [day 1-5] [hour] [seed]
 //
 // Views: camp road vista wall poi(=every stop on the leg) gate grade winch town pawn casino
-//        pawnin casinoin repo rv rvin crew hands loot night   (or "all")
+//        pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin crew hands loot night   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3-4 badlands, 5 desert.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 
-const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
+const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
 const [viewArg = 'camp,road,town', OUT = 'test/screenshots/scene', dayArg = '1', hourArg = '10', seed = '777'] = process.argv.slice(2);
 const views = viewArg === 'all' ? ALL : viewArg.split(',').filter(Boolean);
 const DAY = Math.max(1, Math.min(5, +dayArg | 0)), HOUR = +hourArg;
@@ -174,6 +174,9 @@ for (const v of views) {
       await shot(dave, v);
     } else if (v === 'repo') {
       await camAt(T.repo.x - 7.5, T.repo.z - 3.5, T.repo.x - 0.8, T.y + 1.5, T.repo.z + 0.3);
+      await shot(dave, v);
+    } else if (v === 'lot') {
+      await camAt(4, T.z + 118, 14, T.y + 1.6, T.z + 138);
       await shot(dave, v);
     } else if (v === 'rv') {
       const r = await dave.evaluate(() => window.__nmd.rv.p);

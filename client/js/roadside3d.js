@@ -583,7 +583,7 @@ function buildSemi(B, p, parts, ctx) {
       }
       B.box('rs_iron', 0.08, 0.16, s.hz * 2 + 0.1, s.x + sx * (s.hx + 0.04), s.y + s.hy - 0.08, s.z, { r: 0.03, rot: true });
       B.box('rs_iron', 0.1, 0.24, s.hz * 2 + 0.1, s.x + sx * (s.hx + 0.05), s.y - s.hy + 0.12, s.z, { r: 0.03, rot: true });
-      for (const [z0, z1] of [[zr + 0.1, -0.6], [-0.3, zf - 0.1]]) B.box('rs_planks', 0.07, 0.36, z1 - z0, s.x + sx * (s.hx + 0.09), s.y - s.hy + 0.42, (z0 + z1) / 2, { r: 0.02, rot: false, off: [z0, 0.3], jit: 0.02 });
+      for (const [z0, z1] of [[zr + 0.1, -0.6], [-0.3, zf - 0.1]]) B.box('rs_slats', 0.07, 0.36, z1 - z0, s.x + sx * (s.hx + 0.09), s.y - s.hy + 0.42, (z0 + z1) / 2, { r: 0.02, rot: false, off: [z0, 0.3], jit: 0.02 });
       B.box('rs_iron', 0.18, s.hy * 2 + 0.2, 0.18, s.x + sx * 0.03, s.y, zr - 0.04, { r: 0.04 });
       B.box('rs_iron', 0.16, s.hy * 2 + 0.2, 0.16, s.x + sx * 0.03, s.y, zf + 0.02, { r: 0.04 });
       B.quad('rs_decal_freight#', 5.0, 1.25, s.x + sx * (s.hx + 0.012), s.y + 0.2, s.z - 0.2, { ry: sx * Math.PI / 2 });
@@ -611,10 +611,10 @@ function buildSemi(B, p, parts, ctx) {
     }
     if (ramp) {
       B.box('rs_slats', ramp.hx * 2, ramp.hy * 2, ramp.hz * 2, ramp.x, ramp.y, ramp.z, { r: 0.02, rot: true, ry: ramp.ry });
-      for (let k = 0; k < 4; k++) B.box('rs_timber', ramp.hx * 2 - 0.12, 0.04, 0.07, ramp.x, ramp.y + ramp.hy + 0.02, ramp.z - ramp.hz + 0.3 + k * 0.65, { rot: true, r: 0.01 });
+      for (let k = 0; k < 4; k++) B.box('rs_iron', ramp.hx * 2 - 0.12, 0.04, 0.07, ramp.x, ramp.y + ramp.hy + 0.02, ramp.z - ramp.hz + 0.3 + k * 0.65, { r: 0.01, tint: [0.75, 0.6, 0.5] });
       for (const zz of [ramp.z - ramp.hz + 0.25, ramp.z + ramp.hz - 0.25]) {
         const gy = B.ground(ramp.x, zz), top = ramp.y - ramp.hy, hh = top - gy + 0.1;
-        if (hh > 0.03) B.box('rs_timber', ramp.hx * 2 - 0.25, hh, 0.3, ramp.x, gy - 0.1 + hh / 2, zz, { rot: true, r: 0.02 });
+        if (hh > 0.03) B.box('rs_slats', ramp.hx * 2 - 0.25, hh, 0.3, ramp.x, gy - 0.1 + hh / 2, zz, { r: 0.02, tint: [0.8, 0.72, 0.65] });
       }
     }
     // weather on the ground
@@ -693,7 +693,7 @@ function buildYard(B, p, parts, ctx, decor) {
       B.box('rs_timber', 0.09, 0.06, t.hz * 2 - 0.1, lx, y1 - 0.03, 0, { rot: true, r: 0.015 });
     }
     // something for sale under the table
-    B.box(pick(rnd, ['rs_crate_a', 'rs_crate_b']), 0.5, 0.42, 0.42, (rnd() < 0.5 ? -1 : 1) * 0.42, 0.21, 0.02, { r: 0.03, ry: range(rnd, -0.2, 0.2) });
+    B.box('rs_crate_a', 0.5, 0.42, 0.42, (rnd() < 0.5 ? -1 : 1) * 0.42, 0.21, 0.02, { r: 0.03, ry: range(rnd, -0.2, 0.2) });
     B.pop();
   }
   for (const l of L.filter(s => s.part === 'table_legs')) B.box('rs_timber', l.hx * 2, 0.12, 0.06, l.x, 0.36, l.z, { rot: true, ry: l.ry, r: 0.015 });
@@ -703,7 +703,7 @@ function buildYard(B, p, parts, ctx, decor) {
   const d = decor.find(e => e.k === 'umbrella');
   if (d) {
     B.frame(d.x, d.y, d.z, d.ry || 0);
-    barrel(B, 'rs_barrel', 0.27, 0.62, 0, 0.31, 0, {});
+    B.box('rs_crate_a', 0.56, 0.52, 0.56, 0, 0.26, 0, { r: 0.03, ry: 0.4 });
     B.push(M4(0, 0.55, 0, 0.03, 0, 0.06));
     B.cyl('rs_timber', 0.04, 0.045, 2.35, 0, 1.12, 0, { seg: 6, caps: false });
     const canvas = ctx.biome === 'snow' || ctx.biome === 'desert' ? 'rs_canvas_blue~' : 'rs_canvas~';
@@ -713,7 +713,7 @@ function buildYard(B, p, parts, ctx, decor) {
       const a = TAU * k / 8;
       B.tube('rs_iron', [V(0, 1.95, 0), V(Math.sin(a) * 1.55, 1.7, Math.cos(a) * 1.55)], 0.012, { seg: 4 });
     }
-    B.ell('rs_brass', 0.06, 0.08, 0.06, 0, 2.3, 0, { seg: 8, rings: 5 });
+    B.ell('rs_iron', 0.06, 0.08, 0.06, 0, 2.3, 0, { seg: 8, rings: 5 });
     if (ctx.snow) B.lathe('rs_snow!', [[1.45, 1.86], [1.1, 2.0], [0.6, 2.16], [0.2, 2.27], [0, 2.3]], 0, 0, 0, { seg: 8, S: 2, noAO: true });
     B.pop();
   }

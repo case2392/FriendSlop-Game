@@ -14,6 +14,7 @@ import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas } from './props3d.js';
 import { PlayerView, Hands } from './people.js';
+import { zoneText } from './labels.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -72,7 +73,7 @@ function toast(text, color = '#fff', secs = 4) {
   const el = document.createElement('div');
   el.className = 'toast';
   el.style.borderColor = color;
-  el.innerHTML = `<span style="color:${color}">●</span> ${text}`;
+  el.innerHTML = `<span class="tmsg" data-c="${color}" style="--c:${color}">${text}</span>`;
   $('toasts').prepend(el);
   while ($('toasts').children.length > 5) $('toasts').lastChild.remove();
   setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 600); }, secs * 1000);
@@ -320,6 +321,7 @@ async function buildDay(m) {
   S.gatesOpen = new Set();
   S.lw = new LocalWorld(W, S.parts);
   setBiome(W.biome);
+  zoneText(W.biomeName, `Day ${m.day} of ${C.DAYS}`);
   S.wv = buildWorld(W);
   scene.add(S.wv.group);
   S.mapCv = mapCanvas(W);
@@ -395,7 +397,7 @@ net.on('meta', m => {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<span style="color:${p.color}">${p.walkie ? '📻' : ''}${p.voice ? '🎙' : ''}${escapeHtml(p.name)}${p.id === m.host ? ' 👑' : ''}</span>`).join('');
+  $('roster').innerHTML = m.players.map(p => `<div class="pm" style="--c:${p.color}">${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}<span class="pn">${escapeHtml(p.name)}</span>${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</div>`).join('');
 });
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
@@ -459,16 +461,17 @@ function escapeHtml(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;
 function showReceipt(m) {
   const row = (k, v, cls = '') => `<div class="rrow ${cls}"><span>${k}</span><b>${v}</b></div>`;
   $('receipt').innerHTML = `
-    <h2>🧾 DAY ${m.day} RECEIPT</h2>
+    <h2>Day ${m.day} Receipt</h2>
+    <div class="filigree"></div>
     ${row('Pawned', '+' + fmt$(m.sold), 'good')}
     ${row('Gambling', (m.gamble >= 0 ? '+' : '') + fmt$(m.gamble), m.gamble >= 0 ? 'good' : 'bad')}
     ${row('Medical bills', '-' + fmt$(m.bills), m.bills ? 'bad' : '')}
     ${row('Loot broken', fmt$(m.broken) + ' of stuff', m.broken ? 'bad' : '')}
     ${row('Payment', m.paid ? `PAID ${fmt$(m.due)}` : `MISSED (${fmt$(m.due)})`, m.paid ? 'good' : 'bad')}
     ${row('Bank', fmt$(m.bank))}
-    ${!m.paid ? `<p class="bad">The Repo Man took: ${!m.parts.doors && m.parts.roof ? 'THE DOORS' : !m.parts.roof ? 'THE ROOF' : '—'}</p>` : ''}
+    ${!m.paid ? `<p class="bad">The Repo Man took: <b>${!m.parts.doors && m.parts.roof ? 'the doors' : !m.parts.roof ? 'the roof' : 'nothing (yet)'}</b></p>` : ''}
     <p class="hint">Campfire's lit. The store is open. When everyone's in a bunk (E on the bed in the RV), day ${m.day + 1} starts.</p>
-    <button class="btn small gray" id="receiptClose">OK</button>`;
+    <button class="btn small green" id="receiptClose">Okay</button>`;
   $('receipt').classList.remove('hidden');
   $('receiptClose').onclick = () => $('receipt').classList.add('hidden');
   sfx.sleep();
@@ -476,8 +479,8 @@ function showReceipt(m) {
 function showOver(m) {
   const s = m.stats || {};
   $('overScreen').innerHTML = m.won
-    ? `<h1 class="won">YOU OWN THE RV</h1><p>Five days, ${fmt$(s.sold || 0)} of pawned junk, and the Slopmaster 9000 is finally, legally, yours.</p>`
-    : `<h1 class="lost">REPO'D</h1><p>Day ${m.day}. The Repo Man hooks the Slopmaster and drives off into the sunset without you.</p>`;
+    ? `<h1 class="won">You Own the RV</h1><div class="filigree"></div><p>Five days, ${fmt$(s.sold || 0)} of pawned junk, and the Slopmaster 9000 is finally, legally, yours.</p>`
+    : `<h1 class="lost">Repo'd</h1><div class="filigree"></div><p>Day ${m.day}. The Repo Man hooks the Slopmaster and drives off into the sunset without you.</p>`;
   $('overScreen').innerHTML += `
     <div class="rrow"><span>Pawned in total</span><b>${fmt$(s.sold || 0)}</b></div>
     <div class="rrow"><span>Medical bills</span><b>${fmt$(s.bills || 0)}</b></div>

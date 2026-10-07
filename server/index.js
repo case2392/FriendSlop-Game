@@ -19,6 +19,7 @@ const PORT = Number(process.env.PORT || (portArg !== -1 ? process.argv[portArg +
 const MIME = {
   '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
   '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json',
+  '.woff2': 'font/woff2', '.woff': 'font/woff', '.txt': 'text/plain',
 };
 
 const server = http.createServer((req, res) => {
