@@ -686,8 +686,8 @@ function facialHair(g, K, S, T, rnd) {
   if (f === 'goatee') {
     // painted onto the chin and down the neck front, where the modeled tuft samples it
     g.save(); K.poly([[-3.2, -9.0], [3.2, -9.0], [3.6, -12], [2.6, -17], [0, -20], [-2.6, -17], [-3.6, -12]]); g.clip();
-    K.B(0, -13, 4, 7, roots, 0.9, 0.5);
-    beardClumps(g, K, hc, rnd, { x0: -3.4, x1: 3.4, yTop: topOf(GOATEE_TOP), yBot: () => -19.5, n: 5, w: [1.1, 1.6], pull: 0.6, roots, lit });
+    K.B(0, -13, 4, 7, mix(roots, hc, 0.35), 0.9, 0.5);
+    beardClumps(g, K, hc, rnd, { x0: -3.2, x1: 3.2, yTop: topOf(GOATEE_TOP), yBot: () => -19.5, n: 3, w: [1.7, 2.3], pull: 0.6, roots: mix(roots, hc, 0.35), lit });
     g.restore();
     paintMustache(g, K, hc, T, { droop: 1.4, width: 0.9 });
   }
