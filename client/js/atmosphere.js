@@ -20,10 +20,10 @@ const cur = {};              // the current interpolated palette (THREE.Color / 
 // night bend it. Keys: top (zenith), hor (just above the horizon), fog (= the horizon itself),
 // sun color/intensity, hemi sky/ground/intensity, cloud lit/shade/alpha, mountain light, motes.
 const DAY = {
-  meadow:   { top: '#4a8fd2', hor: '#cfe6e2', fog: '#a8c8c4', hSky: '#d4e8ee', hGnd: '#6e7c44', sun: '#fff0cc', near: 18, far: 430 },
-  fields:   { top: '#5ea2e0', hor: '#efe2b8', fog: '#dccfa4', hSky: '#e4ecee', hGnd: '#9c8a50', sun: '#fff0c8', near: 22, far: 520 },
-  badlands: { top: '#5a96d4', hor: '#f0c9a0', fog: '#d9a982', hSky: '#e6e6ea', hGnd: '#a8643c', sun: '#fff0d0', near: 22, far: 500 },
-  desert:   { top: '#66aae6', hor: '#f6e3b8', fog: '#efd8aa', hSky: '#eeeeec', hGnd: '#c8a070', sun: '#fff4dc', near: 30, far: 600 },
+  meadow:   { top: '#4c8fd4', hor: '#d4e7ee', fog: '#b7d0dc', hSky: '#d8eaf0', hGnd: '#6e7c44', sun: '#fff0cc', near: 34, far: 560 },
+  fields:   { top: '#5ea2e0', hor: '#efe8cc', fog: '#d9d8c0', hSky: '#e6eeee', hGnd: '#9c8a50', sun: '#fff0c8', near: 36, far: 620 },
+  badlands: { top: '#5a96d4', hor: '#f0d6b8', fog: '#dcc0a6', hSky: '#e8e8ec', hGnd: '#a8643c', sun: '#fff0d0', near: 40, far: 640 },
+  desert:   { top: '#66aae6', hor: '#f4e4c2', fog: '#ecdcbe', hSky: '#eeeeec', hGnd: '#c8a070', sun: '#fff4dc', near: 45, far: 720 },
 };
 const MOTE = { meadow: '#fff6d0', fields: '#fff0b8', badlands: '#f4c89a', desert: '#f6e0b0' };
 
