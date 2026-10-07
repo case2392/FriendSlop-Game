@@ -51,7 +51,7 @@ const thOf = u => Math.PI - TAU * u;          // u .5 = front (+x), .25 = right 
 const gauss = (x, s) => Math.exp(-(x * x) / (s * s));
 
 // bone indices
-const B = { body: 0, hips: 1, spine: 2, chest: 3, neck: 4, head: 5, armL: 6, foreL: 7, handL: 8, armR: 9, foreR: 10, handR: 11, legL: 12, shinL: 13, footL: 14, legR: 15, shinR: 16, footR: 17, flapF: 18, flapB: 19, flapF2: 20, hat: 21 };
+const B = { body: 0, hips: 1, spine: 2, chest: 3, neck: 4, head: 5, armL: 6, foreL: 7, handL: 8, armR: 9, foreR: 10, handR: 11, legL: 12, shinL: 13, footL: 14, legR: 15, shinR: 16, footR: 17, flapF: 18, flapB: 19, flapF2: 20, hat: 21, map: 22 };
 const ARM = s => s < 0 ? [B.armL, B.foreL, B.handL] : [B.armR, B.foreR, B.handR];
 const LEG = s => s < 0 ? [B.legL, B.shinL, B.footL] : [B.legR, B.shinR, B.footR];
 // spine joints (meters, body space)
@@ -616,6 +616,7 @@ function bodyParts(S, F) {
   if (S.dress) P.push(...dressParts(S));
   if (S.apron) P.push(...apronParts(S));
   if (S.pack) P.push(...packParts(S));
+  if (S.outfit === 'player') P.push(...mapParts());
   if (S.chain) P.push(...chainParts(S));
   if (S.bib) P.push(...bibParts(S));
   for (const s of [-1, 1]) { P.push(...armParts(S, F, s)); P.push(...legParts(S, F, s)); }
@@ -738,6 +739,16 @@ function apronParts(S) {
     reg: ACC, uv: (u, v) => [u, v], inside: (u, v) => [0, Y0 + (Y1 - Y0) * v, 0],
     bones: p => { if (p[1] > 0.955) return torsoWeights(p); const t = sstep(0.95, 0.8, p[1]); return [[B.hips, 1 - t], [B.flapF, t]]; },
   });
+}
+
+// The road map held up in front of the chest (third person). It rides the `map` bone, which
+// sits at zero scale (collapsed out of sight inside the chest) unless the map is out.
+const MAP_AT = [0.4, 1.17, 0];
+function mapParts() {
+  return slab((u, v) => {
+    const x = (u - 0.5) * 0.3, y = (v - 0.5) * 0.22, curl = 0.012 * (x / 0.15) ** 2;
+    return [MAP_AT[0] - y * 0.55 + curl, MAP_AT[1] + y * 0.84, x];       // tilted back toward the reader's face
+  }, 6, 2, 0.004, { reg: REG.gear, uv: (u, v) => [1 - u, v], bones: B.map, inside: () => [MAP_AT[0] - 0.2, MAP_AT[1] + 0.1, 0] });
 }
 
 // A rolled bedroll strapped high across the shoulder blades, sagging a little in the middle.
@@ -1009,6 +1020,7 @@ function makeSkeleton(F) {
   for (const f of [by.flapF, by.flapB]) { by.hips.add(f); f.position.set(0, J.hipY - J.hips, 0); }
   by.flapF.add(by.flapF2); by.flapF2.position.set(0.17, FLAP2_Y - J.hipY, 0);
   by.head.add(by.hat);
+  by.chest.add(by.map); by.map.position.set(MAP_AT[0], MAP_AT[1] - J.chest, MAP_AT[2]); by.map.scale.setScalar(1e-4);
   return bones;
 }
 
@@ -1043,7 +1055,7 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 
 // ---- posing --------------------------------------------------------------------------------
 
-const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'hatOff'];
+const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'hatOff', 'mapK'];
 function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.16; P.eL = P.eR = 0.3; P.inL = P.inR = 0.08; P.wristL = P.wristR = 0.1; return P; }
 // NPC stances: the Repo Man stands hands-on-hips, the Dealer deals, Ed leans on his counter
 const STANCE = {
@@ -1082,6 +1094,7 @@ function applyPose(ch, P) {
   // a brimmed hat tipped forward over the face (knocked out): pivot forward, settle on the nose
   b.hat.rotation.set(0, 0, -1.42 * P.hatOff);
   b.hat.position.set(0.112 / HU * P.hatOff, 0.025 / HU * P.hatOff, 0);
+  b.map.scale.setScalar(Math.max(1e-4, Math.min(1, P.mapK)));
   // the skirt front follows the forward-most thigh, the back the back-most one
   const fwd = Math.max(0, P.lL, P.lR) * 0.96;
   b.flapF.rotation.set(0, 0, fwd);
@@ -1171,7 +1184,7 @@ function playerPose(st, m) {
     // carrying: forearms forward under the load; the map: held up in front, head down
     T.aL = T.aR = map ? 0.55 : 0.7; T.eL = T.eR = map ? 1.15 : 0.95; T.abL = T.abR = map ? 0.12 : 0.24; T.inL = T.inR = map ? 0.35 : 0.42;
     T.wristL = T.wristR = map ? 0.3 : 0.2;
-    if (map) T.head = Math.max(T.head, 0.35);
+    if (map) { T.head = Math.max(T.head, 0.35); T.mapK = 1; }
     else T.bend -= 0.05;
   }
   const e = m.emote;
@@ -1302,12 +1315,13 @@ function fpHandGeometry(side) {
   // the hand: a broad padded block down -z, back of the hand up, swelling at the knuckles
   const HR = [[0.016, 0.044, 0.031, 0], [-0.02, 0.053, 0.036, 0.3], [-0.058, 0.057, 0.036, 0.6], [-0.078, 0.06, 0.041, 0.78], [-0.09, 0.059, 0.039, 0.88], [-0.1, 0.054, 0.03, 0.96], [-0.106, 0.0, 0.0, 1]];
   P.push(seg(HR.map(([y, w, d, v]) => ({ y, w, d, db: d * 0.85, n: 2.8, v })), FP.palm, 18));
-  // fingers: thick, two-jointed, relaxed curl; knuckle bulges at the joints
-  const fx = [-0.038, -0.0128, 0.0128, 0.037], len = [0.84, 1.0, 0.95, 0.76];
+  // fingers: thick, two-jointed, each curled a little differently (the index straightest, the
+  // little finger tucked in), fanned slightly apart so they read as fingers, not a paddle
+  const fx = [-0.041, -0.014, 0.0135, 0.04], len = [0.86, 1.0, 0.95, 0.76], curl = [0.8, 0.95, 1.1, 1.3], fan = [-0.05, -0.015, 0.02, 0.06];
   fx.forEach((x, i) => {
-    const L = len[i], y0 = 0.006 - Math.abs(x) * 0.15;
-    const path = bez([x, y0, -0.088], [x, y0 + 0.002, -0.088 - 0.055 * L], [x * 1.04, y0 - 0.022 * L, -0.088 - 0.085 * L], [x * 1.04, y0 - 0.05 * L, -0.088 - 0.082 * L]);
-    P.push(tube(v => path(v).map(c => c * k), v => (0.0168 - 0.0025 * v) * k * (1 + 0.1 * gauss(v - 0.5, 0.08) + 0.06 * gauss(v - 0.05, 0.06)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 8, 9, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
+    const L = len[i], c = curl[i], y0 = 0.006 - Math.abs(x) * 0.15, xe = x + fan[i] * 0.09;
+    const path = bez([x, y0, -0.088], [x + fan[i] * 0.04, y0 + 0.002, -0.088 - 0.055 * L], [xe, y0 - 0.022 * L * c, -0.088 - 0.085 * L], [xe, y0 - 0.05 * L * c, -0.088 - 0.082 * L / c]);
+    P.push(tube(v => path(v).map(c => c * k), v => (0.0155 - 0.0022 * v) * k * (1 + 0.1 * gauss(v - 0.5, 0.08) + 0.06 * gauss(v - 0.05, 0.06)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 8, 9, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
   });
   const tp = bez([-0.042, -0.01, -0.012], [-0.066, -0.01, -0.04], [-0.07, -0.016, -0.07], [-0.056, -0.024, -0.092]);
   P.push(tube(v => tp(v).map(c => c * k), v => (0.0185 - 0.004 * v) * k * (1 + 0.08 * gauss(v - 0.5, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.15 + v * 0.85) * Math.PI), 0.35), 8, 8, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));

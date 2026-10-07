@@ -1327,6 +1327,7 @@ function paintMetal(g, r, rnd) {
 // NPC gear: the Repo Man's aviators (top: lens, then frame) and his tow chain (bottom).
 function paintGear(g, r, S, rnd) {
   const V = v => RY(r, v);
+  if (S.outfit === 'player') return paintMapSheet(g, r, rnd);
   clip(g, r, () => {
     // lenses: dark glass reflecting a sky gradient and a hard white glint
     gradV(g, r.x, V(1), r.w, V(0.75) - V(1), [[0, '#6a7c96'], [0.45, '#2a3040'], [0.55, '#1e1a24'], [1, '#3a3028']]);
@@ -1353,6 +1354,21 @@ function paintGear(g, r, S, rnd) {
     }
   });
 }
+// A player's road map, held up in third person (the gear region; players wear no NPC gear):
+// creased parchment, a winding road in brown ink, a few marks, darker worn edges.
+function paintMapSheet(g, r, rnd) {
+  clip(g, r, () => {
+    gradV(g, r.x, r.y, r.w, r.h, [[0, '#efe0b8'], [0.5, '#e2cf9e'], [1, '#c9b07a']]);
+    for (let i = 0; i < 8; i++) blob(g, r.x + rnd() * r.w, r.y + rnd() * r.h, range(rnd, 6, 16), range(rnd, 6, 16), 0, pick(rnd, ['#b8975e', '#f4e8c8']), 0.25, 0.1);
+    for (const f of [0.33, 0.66]) { stroke(g, [[r.x, r.y + r.h * f], [r.x + r.w, r.y + r.h * f]], 1.6, 1.6, '#a88a58', 0.6); stroke(g, [[r.x, r.y + r.h * f - 1.5], [r.x + r.w, r.y + r.h * f - 1.5]], 1, 1, '#fff4d8', 0.5); }
+    stroke(g, [[r.x + r.w / 2, r.y], [r.x + r.w / 2, r.y + r.h]], 1.4, 1.4, '#a88a58', 0.5);
+    stroke(g, [[r.x + 8, r.y + r.h - 8], [r.x + 22, r.y + r.h * 0.7], [r.x + 14, r.y + r.h * 0.45], [r.x + 36, r.y + r.h * 0.3], [r.x + 30, r.y + 10]], 2.4, 2.4, '#6a4426', 0.85);   // the road
+    for (const [u, v] of [[0.3, 0.75], [0.62, 0.3], [0.5, 0.55]]) ellipse(g, RX(r, u), RY(r, v), 2.4, 2.4, 0, '#8a2a20', 0.85);
+    stroke(g, [[RX(r, 0.6), RY(r, 0.12)], [RX(r, 0.72), RY(r, 0.2)]], 1.6, 1.6, '#8a2a20', 0.8); stroke(g, [[RX(r, 0.72), RY(r, 0.12)], [RX(r, 0.6), RY(r, 0.2)]], 1.6, 1.6, '#8a2a20', 0.8);   // X marks the pawn shop
+    for (const [x0, y0, x1, y1] of [[r.x, r.y, r.x + r.w, r.y], [r.x, r.y + r.h, r.x + r.w, r.y + r.h], [r.x, r.y, r.x, r.y + r.h], [r.x + r.w, r.y, r.x + r.w, r.y + r.h]]) stroke(g, [[x0, y0], [x1, y1]], 6, 6, '#a8875a', 0.45);
+  });
+}
+
 // The bedroll strapped high on a player's back (256 × 64): the roll (v .4-1: u around it,
 // v along it; u .25 is its top) and its spiral end (v 0-.38, mapped round the center).
 function paintPack(g, r, S, rnd) {

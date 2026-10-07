@@ -21,6 +21,7 @@ fs.mkdirSync(OUT, { recursive: true });
 const PORT = 8000 + Math.floor(Math.random() * 900);
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
+process.on('unhandledRejection', e => { console.log('FAILED:', e.message.split('\n')[0]); if (errors.length) console.log('page errors:\n' + errors.slice(0, 20).join('\n')); process.exit(1); });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('no server')), 60000); });
 const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
 const errors = [];
@@ -44,17 +45,22 @@ const steve = await open('Steve');
 await steve.fill('#seedInput', seed);
 await steve.click('#hostBtn');
 await ready(steve);
-const code = await steve.evaluate(() => window.__nmd.code);
-const dave = await open('Dave');
-await dave.fill('#codeInput', code);
-await dave.click('#joinBtn');
-await ready(dave);
-await quiet(steve); await quiet(dave);
-await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 120000 });
+// SOLO=1: one client only (half the CPU; nobody else in the 'crew' view). Steve is also the camera.
+const SOLO = process.env.SOLO === '1';
+let dave = steve;
+if (!SOLO) {
+  const code = await steve.evaluate(() => window.__nmd.code);
+  dave = await open('Dave');
+  await dave.fill('#codeInput', code);
+  await dave.click('#joinBtn');
+  await ready(dave);
+}
+await quiet(steve); if (!SOLO) await quiet(dave);
+if (!SOLO) await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 120000 });
 const send = m => steve.evaluate(m => window.__nmd.send(m), m);
 if (DAY !== 1) {
   await send({ t: 'dbg', op: 'day', d: DAY });
-  for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw && window.__nmd.rv, DAY, { timeout: 240000 });
+  for (const p of SOLO ? [steve] : [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw && window.__nmd.rv, DAY, { timeout: 240000 });
   await wait(steve, 1500);
 }
 const setClock = async (h, night = false) => {
@@ -74,7 +80,7 @@ async function shot(p, name, { hud = true, settle = 1400 } = {}) {
 }
 // stand Dave at (x,z) on the ground, look at (tx,ty,tz)
 const camAt = (x, z, tx, ty, tz, who = dave) => ev(who, ([x, z, tx, ty, tz]) => { const S = window.__nmd; const y = S.W.heightAt(x, z); S.me.teleport(x, y + 0.05, z, 0); S.aimAt(tx, ty, tz); }, [x, z, tx, ty, tz]);
-const steveAt = (x, z, yaw) => ev(steve, ([x, z, yaw]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, yaw); }, [x, z, yaw]);
+const steveAt = (x, z, yaw) => SOLO ? Promise.resolve() : ev(steve, ([x, z, yaw]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, yaw); }, [x, z, yaw]);
 const W = await steve.evaluate(() => { const W = window.__nmd.W; return { LEN: W.LEN, town: W.town, pois: W.pois.map(p => ({ type: p.type, x: p.x, z: p.z, side: p.side })), obstacles: W.obstacles, anchors: W.anchors, camp: W.camp, biome: W.biome }; });
 const rx = z => steve.evaluate(z => window.__nmd.W.roadX(z), z);
 const hy = (x, z) => steve.evaluate(([x, z]) => window.__nmd.W.heightAt(x, z), [x, z]);
