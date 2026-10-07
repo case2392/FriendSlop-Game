@@ -10,10 +10,9 @@
 import { THREE, canvasTex, labelSprite, shadowy, tex, scene } from './gfx.js';
 import { buildCharacter } from './people.js';
 import { isRoadside } from './roadside3d.js';
-import { canvasFor } from './paint/index.js';
 import { signCanvas, muteColor } from './paint/architecture.js';
 import { Batch, Kit, mat, matrix, sstep } from './town_kit.js';
-import { buildBuilding, styleFor, STYLES, winMat, glassMat, lantern, barrel, crate, flames } from './town_build.js';
+import { buildBuilding, STYLES, winMat, glassMat, lantern, barrel, crate, flames } from './town_build.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 
@@ -127,8 +126,8 @@ function buildSigns(W, batch, group, near, ctx) {
       group.add(m);
       continue;
     }
-    const att = ctx.attached.get(s) || null;
-    const style = signStyle(s, !!att);
+    const att = ctx.attached.get(s) || null, can = ctx.onCanopy && ctx.onCanopy.get(s);
+    const style = signStyle(s, !!(att || can));
     const px = Math.max(256, Math.min(1000, Math.round(s.w * (style === 'billboard' ? 120 : 112))));
     items.push({ s, att, style, fi: faces.length });
     faces.push({ lines: s.lines, w: s.w, h: s.h, px, bg: s.bg, fg: s.fg, style, seed: `${Math.round(s.x)},${Math.round(s.z)}` });
@@ -152,6 +151,18 @@ function buildSigns(W, batch, group, near, ctx) {
     const { s, att, style } = it;
     const uv = atlas.rect(it.fi);
     const face = (K, z, back = false) => K.add(faceMat, remapUV(new THREE.PlaneGeometry(s.w, s.h), uv), { uv: 'keep', at: matrix(0, 0, z, back ? Math.PI : 0), shade: false, cast: false });
+    const can = ctx.onCanopy && ctx.onCanopy.get(s);
+    if (can) {
+      // standing on the front edge of the pump canopy (decor 'canopy': 8 x 0.3 x 4 m), painted both sides
+      const K = new Kit(batch, matrix(can.x, can.y, can.z, can.ry), shadeSign);
+      K.push(0, 0.15 + 0.12 + s.h / 2, 1.75);
+      K.box(wood, s.w + 0.22, s.h + 0.22, 0.1, 0, 0, 0, { tile: 1.2, grain: 'x', seg: [1, 1, 1] });
+      face(K, 0.052); face(K, -0.052, true);
+      for (const sx of [-1, 1]) K.box(iron, 0.07, 0.3, 0.07, sx * s.w * 0.38, -s.h / 2 - 0.14, 0, { tile: 0.5 });
+      for (const sx of [-1, 1]) lantern({ glows: ctx.glows }, [sx * (s.w / 2 + 0.2), 0.1, 0.25], 0.38, false, K);
+      K.pop();
+      continue;
+    }
     if (att) {
       // on the building's front, in front of its gable / false front / parapet
       const info = ctx.bInfo.get(att.b);
@@ -416,9 +427,9 @@ function towWagon(K, glows) {
   }
   K.box(iron, 2.4, 0.18, 0.2, 0, 0.82, 3.6, { grain: 'x', tile: 1 });
   // a goblin cow-catcher: slanted iron bars
-  for (let k = 0; k < 7; k++) { const x = -0.9 + k * 0.3; K.beam(iron, [x, 0.78, 3.66], [x * 0.55, 0.16, 4.25], 0.06, 0.06); }
-  K.beam(iron, [-0.55, 0.18, 4.24], [0.55, 0.18, 4.24], 0.07, 0.07);
-  K.beam(iron, [-0.8, 0.5, 3.95], [0.8, 0.5, 3.95], 0.05, 0.05);
+  for (let k = 0; k < 7; k++) { const x = -0.9 + k * 0.3; K.beam(iron, [x, 0.74, 3.66], [x * 0.6, 0.22, 4.02], 0.06, 0.06); }
+  K.beam(iron, [-0.6, 0.23, 4.02], [0.6, 0.23, 4.02], 0.07, 0.07);
+  K.beam(iron, [-0.8, 0.5, 3.84], [0.8, 0.5, 3.84], 0.05, 0.05);
   // REPO plates on the cab doors
   for (const sx of [-1, 1]) K.add(mat('repo_plate'), new THREE.PlaneGeometry(1.5, 0.75), { uv: 'keep', at: matrix(sx * 1.012, 1.38, 2.0, sx * Math.PI / 2), shade: false });
   // the boiler and its stack
@@ -456,6 +467,36 @@ function towTruck(t, batch = null, glows = []) {
   towWagon(K, glows);
   if (own) { const g = new THREE.Group(); B.build(g); return g; }
   return null;
+}
+
+// ---- Westfall windmill (farm towns): a landmark behind the shops, sails turning ----------------
+
+function windmill(batch, x, y, z, ry, sailsBatch) {
+  const K = new Kit(batch, matrix(x, y, z, ry), (lx, ly) => 0.7 + 0.3 * sstep(0, 2, ly));
+  const pl = mat('planks_weathered'), st = mat('stone_found'), wh = mat('wood_white'), wd = mat('timber_dark');
+  K.cyl(st, [0, -0.5, 0], [0, 1.2, 0], 2.7, 2.6, { sides: 10, tile: 2.2, uvScale: [6, 1] });
+  K.cyl(pl, [0, 1.2, 0], [0, 9.2, 0], 2.35, 1.55, { sides: 8, uvScale: [4, 2.6] });
+  K.add(wd, new THREE.TorusGeometry(2.0, 0.12, 5, 8), { uv: 'keep', at: matrix(0, 5.0, 0, Math.PI / 8, Math.PI / 2) });
+  K.cyl(wd, [0, 9.1, 0], [0, 9.4, 0], 1.75, 1.75, { sides: 8 });
+  K.add(mat('thatch'), new THREE.ConeGeometry(2.1, 3.2, 10), { uv: 'keep', uvScale: [3, 1.5], at: matrix(0, 11.0, 0, 0.2) });
+  K.add(wd, new THREE.ConeGeometry(0.2, 0.7, 6), { uv: 'keep', at: matrix(0, 12.8, 0) });
+  // door, windows, a little balcony rail
+  K.box(mat('door_plank'), 1.0, 2.0, 0.1, 0, 2.2, 2.32, { uv: 'keep', rx: -0.05 });
+  K.box(wd, 1.3, 0.2, 0.2, 0, 3.3, 2.3, { grain: 'x' });
+  for (const [a, h] of [[0.6, 4.2], [-0.7, 6.3], [2.2, 5.5]]) { const r = 2.35 - (h - 1.2) / 8 * 0.8 + 0.02; K.quad(winMat(), 0.6, 0.8, Math.sin(a) * r, h, Math.cos(a) * r, { ry: a, shade: false }); }
+  // the hub and the axle (sails are added separately so they can turn)
+  K.cyl(wd, [0, 8.0, 0.8], [0, 8.0, 2.4], 0.28, 0.24, { sides: 8 });
+  const S = new Kit(sailsBatch, new THREE.Matrix4(), () => 1);
+  S.cyl(wd, [0, 0, -0.1], [0, 0, 0.35], 0.42, 0.42, { sides: 10 });
+  for (let k = 0; k < 4; k++) {
+    S.push(0, 0, 0.2, 0, 0, k * Math.PI / 2);
+    S.beam(wd, [0, 0, 0], [0, 6.2, 0], 0.22, 0.18);
+    S.add(mat('plaster_inner', { side: THREE.DoubleSide }), new THREE.PlaneGeometry(1.5, 4.8), { uv: 'keep', uvScale: [0.5, 1.4], at: matrix(0.85, 3.6, 0.06), tint: '#e8dcc4' });
+    for (let j = 0; j <= 6; j++) S.box(wh, 1.75, 0.07, 0.06, 0.85, 1.2 + j * 0.8, 0.1, { grain: 'x', seg: [1, 1, 1] });
+    S.box(wh, 0.07, 4.9, 0.06, 1.7, 3.6, 0.1, { seg: [1, 1, 1] });
+    S.pop();
+  }
+  return V3(0, 8.0, 2.5).applyMatrix4(K.root);
 }
 
 // ---- interactables -------------------------------------------------------------------------------
@@ -551,12 +592,17 @@ export function buildStructures(W) {
   const T = W.town;
 
   // buildings, with their signs matched first (the front gable is sized to carry the sign)
-  const attached = new Map(), bySign = new Map();
-  for (const s of W.signs) { const m = matchSign(s, W.buildings); if (m) { attached.set(s, m); bySign.set(m.b, s); } }
+  const attached = new Map(), bySign = new Map(), onCanopy = new Map();
+  for (const s of W.signs) {
+    const m = matchSign(s, W.buildings);
+    if (!m) continue;
+    const cz = m.b.kind === 'gas' && W.decor.find(d => d.k === 'canopy' && Math.hypot(d.x - m.b.x, d.z - m.b.z) < 10);
+    if (cz) onCanopy.set(s, cz); else { attached.set(s, m); bySign.set(m.b, s); }
+  }
   const bInfo = new Map();
   for (const b of W.buildings) {
-    const s = bySign.get(b);
-    const info = buildBuilding(batch, b, s ? { w: s.w, h: s.h, top: s.y + s.h / 2 - b.y, bottom: s.y - s.h / 2 - b.y } : null);
+    const s = bySign.get(b), m = s && attached.get(s);
+    const info = buildBuilding(batch, b, s ? { w: s.w, h: s.h, top: m.ly + s.h / 2, bottom: m.ly - s.h / 2 } : null);
     bInfo.set(b, info);
     glows.push(...info.glows);
   }
@@ -575,11 +621,32 @@ export function buildStructures(W) {
   const tags = [];
   const store = W.buildings.find(b => b.kind === 'store');
   for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90' }[u.arg] || ''], w: 0.46, h: 0.26 });
-  buildSigns(W, batch, group, near, { attached, bInfo, glows, tags, style: S, tagRy: store ? store.ry : 0 });
+  buildSigns(W, batch, group, near, { attached, onCanopy, bInfo, glows, tags, style: S, tagRy: store ? store.ry : 0 });
 
   for (const d of W.decor) if (d.k === 'lamp') lampPost(batch, d, style, glows);
 
   dressInteriors(W, batch, { glows });
+
+  // farm towns get a windmill behind the shops, on a spot clear of trees and colliders
+  let sails = null;
+  if (style === 'farm') {
+    const spots = [[36, 28], [38, 34], [-33, 16], [-36, 62], [37, 98]];   // across the street from the Repo Man first: seen from the town gate
+    for (const [sx, sz] of spots) {
+      const x = sx, z = T.z + sz;
+      const clear = W.cyls.every(cy => Math.hypot(cy.x - x, cy.z - z) > 5.5) && W.decor.every(d => d.k === 'flowers' || d.k === 'wheat' || Math.hypot(d.x - x, d.z - z) > 5) &&
+        W.statics.every(st => st.mat === 'invisible' || Math.hypot(st.x - x, st.z - z) > Math.max(st.hx, st.hz) + 4) && W.buildings.every(b => Math.hypot(b.x - x, b.z - z) > Math.max(b.w, b.dep) / 2 + 5);
+      if (!clear) continue;
+      const sb = new Batch();
+      const hub = windmill(batch, x, W.heightAt(x, z), z, sx < 0 ? Math.PI / 2 : -Math.PI / 2, sb);
+      sails = new THREE.Group();
+      sb.build(sails);
+      sails.position.copy(hub);
+      sails.rotation.order = 'YXZ';
+      sails.rotation.y = sx < 0 ? Math.PI / 2 : -Math.PI / 2;
+      group.add(sails);
+      break;
+    }
+  }
 
   // NPCs: Honest Ed, the clerk, the dealer, the Repo Man (people.js dresses them by color)
   const npc = (spot, color, opts, label) => {
@@ -719,6 +786,7 @@ export function buildStructures(W) {
         winM.emissiveIntensity = 0.3 + 1.1 * night;
         glassM2.emissiveIntensity = 0.85 + 0.6 * night;
       }
+      if (sails) sails.rotation.z = t * 0.35;
       if (gp) gp.material.uniforms.uOpacity.value = (0.16 + 0.84 * night) * (1 + 0.06 * Math.sin(t * 9.1) * Math.sin(t * 5.3));
     },
     pawnLabel, bjLabel, flipLabel, cardGroup, coin, hitPad, standPad,
@@ -783,4 +851,5 @@ export const PREVIEW = {
   casino_frontier: () => previewTown('frontier', ['casino']),
   casino_adobe: () => previewTown('adobe', ['casino']),
   casino_furniture: () => previewFurniture(),
+  windmill: () => { const b = new Batch(), sb = new Batch(); const hub = windmill(b, 0, 0, 0, 0, sb); const g = new THREE.Group(); b.build(g); const sg = new THREE.Group(); sb.build(sg); sg.position.copy(hub); sg.rotation.z = 0.4; g.add(sg); return g; },
 };

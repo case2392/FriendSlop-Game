@@ -72,6 +72,8 @@ function shader(b) {
       return [k, k * 0.94, k * 0.86];
     }
     let k = 0.62 + 0.38 * sstep(-0.3, 1.6, y);
+    // a soft, uneven wash so long walls aren't one flat value
+    k *= 0.95 + 0.05 * Math.sin(x * 0.83 + z * 0.61 + 1.3) * Math.sin(y * 0.9 + x * 0.27);
     if (ny < -0.5) k *= 0.62;
     else if (Math.abs(ny) < 0.5 && y < H + 0.05) k *= 1 - 0.2 * sstep(H - 1.1, H, y);
     return [k, k * 0.98, k * 0.95];
@@ -115,14 +117,14 @@ function onWall(c, side, fn) { const f = FRAMES(c)[side]; c.K.push(f.at[0], 0, f
 
 function walls(c) {
   const { K, S, H, ix, dw, D, W, R } = c;
-  const m = mat(S.wall), seg = [1, Math.max(2, Math.ceil(H / 0.6)), 1];
-  const o = { uvSpace: 'kit', tile: S.wallTile, seg, uvOff: [R(), R()], tint: S.wallTint };
-  K.box(m, 2 * ix, H, 0.3, 0, H / 2, -D / 2, o);
-  K.box(m, 0.3, H, D + 0.3, -W / 2, H / 2, 0, o);
-  K.box(m, 0.3, H, D + 0.3, W / 2, H / 2, 0, o);
+  const m = mat(S.wall), ny = Math.max(2, Math.ceil(H / 0.6)), sg = L => Math.max(1, Math.ceil(L / 1.6));
+  const o = { uvSpace: 'kit', tile: S.wallTile, uvOff: [R(), R()], tint: S.wallTint };
+  K.box(m, 2 * ix, H, 0.3, 0, H / 2, -D / 2, { ...o, seg: [sg(W), ny, 1] });
+  K.box(m, 0.3, H, D + 0.3, -W / 2, H / 2, 0, { ...o, seg: [1, ny, sg(D)] });
+  K.box(m, 0.3, H, D + 0.3, W / 2, H / 2, 0, { ...o, seg: [1, ny, sg(D)] });
   const segW = ix - dw;
-  K.box(m, segW, H, 0.3, -(dw + segW / 2), H / 2, D / 2, o);
-  K.box(m, segW, H, 0.3, dw + segW / 2, H / 2, D / 2, o);
+  K.box(m, segW, H, 0.3, -(dw + segW / 2), H / 2, D / 2, { ...o, seg: [sg(segW), ny, 1] });
+  K.box(m, segW, H, 0.3, dw + segW / 2, H / 2, D / 2, { ...o, seg: [sg(segW), ny, 1] });
   K.box(m, 2 * dw, 0.8, 0.3, 0, H - 0.4, D / 2, { ...o, seg: [1, 2, 1] });
 }
 
@@ -313,8 +315,9 @@ function framing(c) {
     const qm = mat('granite_block'), n = Math.floor((H - (S.baseH || 0)) / 0.55);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) for (let k = 0; k < n; k++) {
       const y = (S.baseH || 0) + 0.3 + k * 0.55, long = (k & 1) ? 0.85 : 0.5;
-      K.box(qm, long, 0.5, 0.42, sx * (ox - long / 2 + 0.06), y, sz * (oz - 0.21 + 0.06), { tile: 2.2, tint: '#d0d4de', seg: [1, 1, 1] });
-      K.box(qm, 0.42, 0.5, (k & 1) ? 0.5 : 0.85, sx * (ox - 0.21 + 0.06), y, sz * (oz - ((k & 1) ? 0.5 : 0.85) / 2 + 0.06), { tile: 2.2, tint: '#d0d4de', seg: [1, 1, 1] });
+      // (0.36 deep, so they stop 1 cm short of the inner wall face)
+      K.box(qm, long, 0.5, 0.36, sx * (ox - long / 2 + 0.06), y, sz * (oz - 0.11), { tile: 2.2, tint: '#d0d4de', seg: [1, 1, 1] });
+      K.box(qm, 0.36, 0.5, (k & 1) ? 0.5 : 0.85, sx * (ox - 0.11), y, sz * (oz - ((k & 1) ? 0.5 : 0.85) / 2 + 0.06), { tile: 2.2, tint: '#d0d4de', seg: [1, 1, 1] });
     }
   }
   if (S.cornerBoards || S.cornerPosts) {
@@ -340,7 +343,7 @@ function framing(c) {
     const am = mat(S.wall);
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const hgt = H * 0.75 + R() * 0.4;
-      K.box(am, 0.9, hgt, 0.9, sx * (ox - 0.2), hgt / 2, sz * (oz - 0.2), {
+      K.box(am, 0.9, hgt, 0.9, sx * (ox + 0.16), hgt / 2, sz * (oz + 0.16), {
         uvSpace: 'kit', tile: c.S.wallTile, seg: [2, 3, 2], warp: v => { const t = (v.y + hgt / 2) / hgt; const k = 1 - 0.55 * t * t; v.x = (v.x + sx * 0.45) * k - sx * 0.45; v.z = (v.z + sz * 0.45) * k - sz * 0.45; },
       });
     }
@@ -493,7 +496,8 @@ function pitchedRoof(c) {
   let hsNeed = c.dw + 1.4;
   if (sign) hsNeed = Math.max(hsNeed, sign.w / 2 + 0.35 + Math.max(0, sign.top - H) / tp);
   const mainApex = H + oz * tp;
-  const cross = kind === 'gable' && hsNeed < ox * 0.86 && H + hsNeed * tp < mainApex - 0.35;
+  // (gas stations keep a plain front gable: the pump canopy hangs right in front of them)
+  const cross = kind === 'gable' && b.kind !== 'gas' && hsNeed < ox * 0.86 && H + hsNeed * tp < mainApex - 0.35;
   if (!cross) {
     // one roof, ridge running front to back: the whole front is a gable
     const P = profileOf(c, ox, kind, kind === 'gambrel' ? S.pitch : Math.min(S.pitch, Math.atan(maxRise * 1.15 / ox) / D2R), eave);
@@ -843,6 +847,34 @@ function extras(c) {
       K.beam(mat('wood_light'), [x - 0.95, 2.2, 0.17], [x + 0.95, 2.2, 0.17], 0.08, 0.08);
       K.beam(mat('wood_light'), [x - 0.95, 0.5, 0.45], [x + 0.95, 0.5, 0.45], 0.08, 0.08);
       K.push(x, 1.35, 0.32, 0, -0.18); K.quad(mat('hide_patch', { side: THREE.DoubleSide }), 1.5, 1.5, 0, 0, 0, { uv: 'keep', uvScale: [0.5, 0.5] }); K.pop();
+    });
+  }
+  if (nm === 'alpine') {
+    // a firewood stack against the side wall, snow on top
+    onWall(c, 'left', () => {
+      const lm = mat('wood_light'), x0 = -0.6;
+      for (let row = 0; row < 4; row++) for (let k = 0; k < 7 - row; k++) {
+        const x = x0 + (k - (6 - row) / 2) * 0.27, y = 0.14 + row * 0.24;
+        K.cyl(lm, [x, y, 0.08], [x + (R() - 0.5) * 0.04, y, 0.95], 0.13, 0.13, { sides: 7, tint: '#b89068' });
+        K.add(mat('wood_light'), new THREE.CircleGeometry(0.125, 7), { uv: 'keep', at: matrix(x, y, 0.955), tint: '#e0c090' });
+      }
+      K.box(mat('snow_roof'), 1.5, 0.12, 0.95, x0, 1.12, 0.5, { tile: 2, seg: [3, 1, 2], warp: v => { v.y += 0.05 * Math.sin(v.x * 5) - Math.abs(v.x) * 0.08; } });
+    });
+  }
+  if (nm === 'adobe') {
+    // a pueblo ladder up to the roof and clay pots by the door
+    onWall(c, 'right', () => {
+      const ts = c.wins.filter(w => w.side === 'right').map(w => w.t).sort((a, b) => a - b);
+      const lm = mat(S.beam), x = ts.length > 1 ? (ts[0] + ts[1]) / 2 : ts.length ? ts[0] + (ts[0] > 0 ? -1.5 : 1.5) : 0.6;
+      for (const s of [-1, 1]) K.beam(lm, [x + s * 0.28, 0, 0.75], [x + s * 0.28, H + 1.1, 0.1], 0.08, 0.08);
+      for (let k = 0; k < Math.floor((H + 0.9) / 0.42); k++) { const t = (k + 0.6) * 0.42 / (H + 1.1); K.box(lm, 0.62, 0.06, 0.06, x, t * (H + 1.1), 0.75 - t * 0.65, { grain: 'x', tile: 1.2 }); }
+    });
+    onWall(c, 'front', () => {
+      const pts = [[0, 0], [0.16, 0.02], [0.24, 0.18], [0.22, 0.38], [0.11, 0.52], [0.12, 0.6], [0, 0.6]].map(([r, y]) => new THREE.Vector2(r, y));
+      for (const [x, z, k] of [[c.dw + 0.65, 0.35, 1], [c.dw + 1.05, 0.5, 0.8], [-(c.dw + 0.7), 0.4, 1.1]]) {
+        const g = new THREE.LatheGeometry(pts, 10);
+        K.add(mat('adobe'), g, { uv: 'keep', uvScale: [1, 0.5], at: matrix(x, 0, z, x * 2, 0, 0, k), tint: '#c88a60' });
+      }
     });
   }
   if (nm === 'adobe' && S.pipes) {

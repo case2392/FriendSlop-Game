@@ -5,13 +5,14 @@
 // Walls (512, tile, ~3 m a tile; up in the texture = up in the world):
 //   plaster_cream (timber)  stone_found (foundations)  planks_weathered + planks_barnred (farm)
 //   granite_block (alpine)  log_wall + planks_rough (frontier)  adobe (desert)
+//   plaster_inner / granite_inner / adobe_inner: the indoor versions (no holes or snow repeating)
 // Roofs (512, tile, ~2.6 m a tile; up in the texture = up the slope):
 //   shingles_red (timber)  thatch + shingles_wood (farm)  slate_roof + snow_roof (alpine)  hide_patch (frontier)
-// Trim, metal, cloth (256, tile): timber_dark  wood_light  iron_wrought  brass  metal_green  metal_red  canvas_stripe
+// Trim, metal, cloth (256, tile): timber_dark  wood_light  wood_white  iron_wrought  brass  metal_green  metal_red  canvas_stripe
 // Interiors: floor_planks + carpet_casino (512, tile)  rug_red (256)  felt_table (512×256)
 //   shelf_goods + store_goods (512×256, tile across)
 // Pieces (no tiling): door_plank  window_lead  lantern_glass  slot_face  flip_face  coin_face  pad_hit  pad_stand
-//   repo_plate  banner_red  barrel  crate  flowerbox  glow_soft
+//   repo_plate  banner_red  barrel  crate  flowerbox  embers  glow_soft
 // Signs: signCanvas(lines, opts) paints a sign face (wooden board, gilded board, billboard or a
 // paint daub) for town3d.js; sign_demo_* are registered so the gallery shows them.
 import {
@@ -211,8 +212,8 @@ function shingles(g0, s, rnd, { rows, minW, maxW, colors, gapColor, round = 0.45
     };
     for (const ox of (x < 0 ? [0, s] : x + w > s ? [0, -s] : [0])) {
       // the soft shadow this shingle drops on the row below
-      g.save(); g.globalAlpha = 0.34; g.fillStyle = INK; g.filter = 'blur(2.5px)';
-      g.fillRect(x + ox + 2, y + h - 3, w, 7); g.restore();
+      g.fillStyle = grad(g, 0, y + h - 3, 0, y + h + 7, [[0, INK, 0.38], [0.45, INK, 0.2], [1, INK, 0]]);
+      g.fillRect(x + ox + 1, y + h - 3, w + 2, 10);
       clipped(g, () => path(ox), () => {
         const c = r.c;
         g.fillStyle = grad(g, 0, y, 0, y + h, [[0, shadowOf(c, 0.55)], [overhang / (1 + overhang) + 0.05, shadowOf(c, 0.2)], [0.6, c], [0.95, lightOf(c, light * 0.4)], [1, shadowOf(c, 0.3)]]);
@@ -293,14 +294,14 @@ function rubble(g, s, rnd, { rows, minW, maxW, colors, grout, groutCols, light =
         pts.push([X + Math.sign(cs) * Math.pow(Math.abs(cs), 2 / p) * hw * j, Y + Math.sign(sn) * Math.pow(Math.abs(sn), 2 / p) * hh * j]);
       }
       // contact shadow into the grout on the lower right
-      g.save(); g.globalAlpha = 0.5; g.fillStyle = INK; g.filter = 'blur(2px)'; g.translate(2.5, 3); polyPath(g, pts); g.fill(); g.restore();
+      g.save(); g.fillStyle = INK; g.globalAlpha = 0.22; g.translate(3.5, 4); polyPath(g, pts); g.fill(); g.globalAlpha = 0.3; g.translate(-1.5, -1.5); polyPath(g, pts); g.fill(); g.restore();
       clipped(g, () => polyPath(g, pts), () => {
         g.fillStyle = grad(g, X - hw, Y - hh, X + hw * 0.6, Y + hh, [[0, lightOf(c, light * 0.7)], [0.5, c], [1, shadowOf(c, light * 0.8)]]);
         g.fillRect(X - hw - 2, Y - hh - 2, hw * 2 + 4, hh * 2 + 4);
         for (let i = 0; i < 5; i++) blob(g, X + (rr() - 0.5) * hw * 1.6, Y + (rr() - 0.5) * hh * 1.6, range(rr, hw * 0.2, hw * 0.6), range(rr, hh * 0.2, hh * 0.5), rr() * 3, rr() < 0.5 ? lightOf(c, 0.3) : shadowOf(c, 0.3), 0.28, 0.15);
         for (let i = 0; i < 3; i++) ellipse(g, X + (rr() - 0.5) * hw * 1.6, Y + (rr() - 0.5) * hh * 1.6, range(rr, 1, 2.5), range(rr, 1, 2), 0, shadowOf(c, 0.5), 0.5);
         // bevel: lit upper-left rim, shaded lower-right rim
-        g.save(); g.translate(-2.5, -2.5); g.lineWidth = 5; g.strokeStyle = rgba(lightOf(c, 0.45), 0.4); g.filter = 'blur(1px)'; polyPath(g, pts); g.stroke(); g.restore();
+        g.save(); g.translate(-2.5, -2.5); g.lineWidth = 5; g.strokeStyle = rgba(lightOf(c, 0.45), 0.35); polyPath(g, pts); g.stroke(); g.restore();
         g.save(); g.translate(2.5, 2.5); g.lineWidth = 6; g.strokeStyle = rgba(shadowOf(c, 0.6), 0.6); polyPath(g, pts); g.stroke(); g.restore();
         if (moss && rr() < moss) for (let i = 0; i < 3; i++) blob(g, X + (rr() - 0.5) * hw * 1.6, Y + hh * range(rr, 0.2, 0.9), range(rr, 4, 12), range(rr, 3, 7), 0, pick(rr, mossCols), 0.45, 0.35);
       });
@@ -515,7 +516,7 @@ register('log_wall', {
 register('planks_rough', {
   family: F, size: 512, note: 'frontier boards: wide, horizontal, sun-baked orange-brown, split and nailed',
   paint(g, s, rnd, h, cv) {
-    planks(g, s, rnd, { rows: 6, minL: 160, maxL: 420, colors: ['#9a6a42', '#8a5c3a', '#a87a4e', '#7e5636', '#94683e'], gap: 5, gapColor: '#241816', rowJitter: 0.35, grain: 14, weather: 0.5, splits: 0.7, nails: 4, knots: 0.45, endShade: 0.25 });
+    planks(g, s, rnd, { rows: 7, minL: 300, maxL: 560, colors: ['#9a6a42', '#8a5c3a', '#a87a4e', '#7e5636', '#94683e', '#a07450'], gap: 5, gapColor: '#241816', rowJitter: 0.45, grain: 16, weather: 0.5, splits: 0.7, nails: 4, knots: 0.45, endShade: 0.2 });
     glaze(g, s, s, '#ffd8a0', 0.12, 'soft-light');
     blurTile(cv, 0.4);
   },
@@ -1288,9 +1289,8 @@ function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#
 function chips(g, x, y, w, h, rnd, n, wood = '#7a5434') {
   for (let i = 0; i < n; i++) {
     const e = rnd() * 4 | 0, t = rnd(), d = Math.pow(rnd(), 2.5) * Math.min(w, h) * 0.3;
-    const cx = e === 0 ? x + d : e === 1 ? x + w - d : x + t * w, cy = e === 2 ? y + d : e === 3 ? y + h - d : e < 2 ? y + t * h : 0;
+    const cx = e === 0 ? x + d : e === 1 ? x + w - d : x + t * w, cy = e === 2 ? y + d : e === 3 ? y + h - d : y + t * h;
     const r = range(rnd, 1.5, 5);
-    if (e >= 2 && !cy) continue;
     ellipse(g, cx, cy, r * range(rnd, 1, 2.2), r, rnd() * 3, wood, 0.9);
     blob(g, cx + r * 0.3, cy + r * 0.4, r, r * 0.5, 0, INK, 0.25, 0.4);
   }
