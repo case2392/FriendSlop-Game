@@ -17,7 +17,7 @@
 // paint daub) for town3d.js; sign_demo_* are registered so the gallery shows them.
 import {
   register, fill, rowLayout, paintRects, mottle, cracks, glaze, blurTile, blob, range, pick, wrap, streaks, ellipse,
-  mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, rngFrom, hashStr,
+  mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, rngFrom, hashStr, worley, paintCells,
 } from './core.js';
 
 const F = 'architecture';
@@ -256,18 +256,20 @@ function thatch(g0, s, rnd, { rows = 5, base = '#5e4628', cols, tips, shadow = 0
     for (let x = 0; x <= s + 8; x += 8) g.lineTo(x, y0 + H * (1.02 + 0.06 * Math.sin(x / s * TAU * 5 + d.seed)) + 8);
     g.lineTo(s + 8, y0 + H * 0.7); g.lineTo(-8, y0 + H * 0.7); g.closePath(); g.fill(); g.restore();
     const n = Math.round(s * 2.2);
+    const comb = range(rr, -0.14, 0.14);
     for (const [layer, list, a] of [[0, cols.slice(0, 2), 1], [1, cols, 1], [2, tips, 1]]) {
-      for (let k = 0; k < n * (layer === 2 ? 0.45 : 0.7); k++) {
-        const x = rr() * s, start = y0 - H * 0.35 + rr() * H * 0.45 + layer * H * 0.12;
-        const len = H * range(rr, 0.9, 1.35) - layer * H * 0.12, ang = Math.PI + range(rr, -0.12, 0.12), w = range(rr, 1.8, 3.6);
+      for (let k = 0; k < n * (layer === 2 ? 0.3 : 0.7); k++) {
+        const x = rr() * s, start = layer === 2 ? y0 - H * 0.32 + rr() * H * 0.18 : y0 - H * 0.35 + rr() * H * 0.45 + layer * H * 0.12;
+        const len = layer === 2 ? H * range(rr, 0.3, 0.55) : H * range(rr, 0.9, 1.35) - layer * H * 0.12, ang = Math.PI + comb + range(rr, -0.07, 0.07), w = range(rr, 1.8, 3.6);
         const c = pick(rr, list), bend = range(rr, -0.12, 0.12);
         const pts = [];
         for (let t = 0; t <= 4; t++) { const u = t / 4, aa = ang + bend * u * u; pts.push([x + Math.sin(aa) * len * u, start - Math.cos(aa) * len * u]); }
         for (const dx of (x < 12 ? [0, s] : x > s - 12 ? [0, -s] : [0])) line(g, pts.map(([u, v]) => [u + dx, v]), w, c, a);
       }
     }
-    // a lit sheen across the middle of the course and a binding rod shadow at its top
-    g.save(); g.globalAlpha = 0.16; g.fillStyle = grad(g, 0, y0, 0, y0 + H, [[0, '#2a1e14', 0], [0.55, '#fff0c0', 1], [1, '#fff0c0', 0]]); g.fillRect(0, y0, s, H); g.restore();
+    // the course's lower third goes dark (it is in the shade of the one above), its top catches the light
+    // (only just above its ragged butt edge: thatch is not a stack of logs)
+    g.save(); g.fillStyle = grad(g, 0, y0 - H * 0.35, 0, y0 + H, [[0, '#6e5a32', 0], [0.72, '#6e5a32', 0], [0.92, '#4a3a22', 0.3], [1, '#4a3a22', 0.12]]); g.fillRect(0, y0 - H * 0.35, s, H * 1.35); g.restore();
   };
   for (const dy of [s, 0]) for (let i = rows - 1; i >= 0; i--) course(data[i], dy);
   g0.drawImage(off, 0, s / 2, s, s, 0, 0, s, s);
@@ -350,54 +352,77 @@ function plates(g, s, rnd, { colors, rows = 2, minW = 90, maxW = 200, gap = 3, r
 
 // A hole in the plaster showing bricks or stones underneath; the plaster rim is lit on the
 // far side of the hole (lower right) and casts a shadow into it on the near side.
-function plasterHole(g, s, rnd, x, y, r, { brick = ['#9a5a3e', '#a8684a', '#8a4e36'], mortar = '#6a5446', plaster }) {
+function plasterHole(g, s, rnd, x, y, r, { brick = ['#9a5a3e', '#a8684a', '#8a4e36'], mortar = '#6a5446', plaster, squash = 0.8 }) {
   const seed = Math.floor(rnd() * 1e9);
-  wrap(s, x, y, r * 1.6, (X, Y) => {
+  wrap(s, x, y, r * 1.8, (X, Y) => {
     const rr = rngFrom(seed), pts = [];
-    const n = 11;
-    for (let k = 0; k < n; k++) { const th = k / n * TAU; const rad = r * range(rr, 0.6, 1.15); pts.push([X + Math.cos(th) * rad * 1.35, Y + Math.sin(th) * rad * 0.8]); }
+    const n = 13;
+    for (let k = 0; k < n; k++) { const th = k / n * TAU; const rad = r * range(rr, 0.55, 1.2); pts.push([X + Math.cos(th) * rad * 1.35, Y + Math.sin(th) * rad * squash]); }
+    // a soft darker stain round the hole (dirt collects at the broken edge)
+    g.save(); g.filter = 'blur(5px)'; g.globalAlpha = 0.22; g.fillStyle = shadowOf(plaster, 0.35);
+    g.translate(X, Y); g.scale(1.18, 1.22); g.translate(-X, -Y); polyPath(g, pts); g.fill(); g.restore();
     clipped(g, () => polyPath(g, pts), () => {
       g.fillStyle = mortar; g.fillRect(X - r * 2, Y - r * 2, r * 4, r * 4);
-      const bh = Math.max(12, r * 0.42), bw = bh * 2.2;
+      const bh = Math.max(11, r * 0.4), bw = bh * 2.2;
       for (let row = -6; row <= 6; row++) for (let col = -6; col <= 6; col++) {
-        const bx = X + col * bw + (row & 1) * bw / 2, by = Y + row * bh;
+        const bx = X + col * bw + (row & 1) * bw / 2 + (rr() - 0.5) * 3, by = Y + row * bh;
         const c = jitter(pick(rr, brick), rr, 0.08);
-        g.fillStyle = grad(g, bx, by, bx, by + bh, [[0, lightOf(c, 0.25)], [0.5, c], [1, shadowOf(c, 0.3)]]);
-        g.beginPath(); g.roundRect(bx + 1.5, by + 1.5, bw - 3, bh - 3, 2); g.fill();
+        g.fillStyle = grad(g, bx, by, bx, by + bh, [[0, lightOf(c, 0.22)], [0.5, c], [1, shadowOf(c, 0.3)]]);
+        g.beginPath(); g.roundRect(bx + 1.6, by + 1.6, bw - 3.2, bh - 3.2, 2.5); g.fill();
       }
-      g.save(); g.translate(5, 5); g.lineWidth = 12; g.strokeStyle = rgba(INK, 0.45); g.filter = 'blur(3px)'; polyPath(g, pts); g.stroke(); g.restore();
+      // the plaster's upper-left lip throws a soft shadow into the hole
+      g.save(); g.translate(4, 5); g.lineWidth = 14; g.strokeStyle = rgba(INK, 0.5); g.filter = 'blur(3px)'; polyPath(g, pts); g.stroke(); g.restore();
     });
-    g.save(); g.translate(-1.2, -1.2); g.lineWidth = 3; g.strokeStyle = rgba(shadowOf(plaster, 0.4), 0.55); g.filter = 'blur(0.8px)'; polyPath(g, pts); g.stroke(); g.restore();
-    g.save(); g.translate(1.2, 1.4); g.lineWidth = 2.5; g.strokeStyle = rgba(lightOf(plaster, 0.3), 0.45); g.filter = 'blur(0.8px)'; polyPath(g, pts); g.stroke(); g.restore();
+    // the broken lip: lit only on the lower right (it faces the light), shaded on the upper left
+    g.save(); g.beginPath(); g.rect(X - r * 3, Y - r * 3, r * 6, r * 6); polyPath(g, pts); g.clip('evenodd');
+    g.save(); g.translate(1.6, 1.8); g.lineWidth = 3; g.strokeStyle = rgba(lightOf(plaster, 0.35), 0.6); g.filter = 'blur(0.7px)'; polyPath(g, pts); g.stroke(); g.restore();
+    g.save(); g.translate(-1.4, -1.6); g.lineWidth = 2.6; g.strokeStyle = rgba(shadowOf(plaster, 0.35), 0.45); g.filter = 'blur(0.9px)'; polyPath(g, pts); g.stroke(); g.restore();
+    g.restore();
   });
 }
 
 // ---- wall textures ----------------------------------------------------------------------------------
 
-function plasterPaint(g, s, rnd, cv, holes) {
-  {
-    fill(g, s, s, '#dccdaa');
-    mottle(g, s, rnd, { colors: ['#ecdfbe', '#c8b48c', '#d8c49c', '#e8d8b4', '#bdae92', '#c4b496'], count: 60, rmin: 40, rmax: 150, alpha: 0.5, hard: 0.08 });
-    mottle(g, s, rnd, { colors: ['#a89c88', '#b0a488', '#9a9484'], count: 10, rmin: 50, rmax: 120, alpha: 0.16, hard: 0.05 });
-    blurTile(cv, 4);
-    for (let i = 0; i < 70; i++) {
-      const x = rnd() * s, y = rnd() * s, L = range(rnd, 24, 70), a = range(rnd, -0.6, 0.6), w = range(rnd, 8, 20);
-      const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([x + Math.cos(a) * L * t, y + Math.sin(a) * L * t + Math.sin(t * 3) * 4]); }
-      const c = rnd() < 0.55 ? '#efe5ca' : '#c4b28c';
-      wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.1));
-    }
-    mottle(g, s, rnd, { colors: ['#b8a682', '#a8987a', '#f2e8d0'], count: 260, rmin: 1.5, rmax: 4, alpha: 0.22, hard: 0.6 });
-    if (holes) {
-      plasterHole(g, s, rnd, s * 0.28, s * 0.3, 46, { plaster: '#ddcfae' });
-      plasterHole(g, s, rnd, s * 0.74, s * 0.78, 30, { plaster: '#ddcfae', brick: ['#8e8a80', '#9e988a', '#7e7a72'], mortar: '#5a5048' });
-    }
-    cracks(g, s, rnd, { color: '#7a6a58', count: 6, len: [18, 60], width: [0.7, 1.3], alpha: 0.4 });
-    streaks(g, s, rnd, { colors: ['#a89878', '#b0a080'], count: 18, len: [40, 140], width: [3, 9], angle: Math.PI, wobble: 0.05, alpha: 0.07 });
-    glaze(g, s, s, '#fff0d0', 0.12, 'soft-light');
-    blurTile(cv, 0.5);
+// Rain streaks running down from a ledge at y0 (x0..x1), wrapped.
+function rainStreaks(g, s, rnd, x0, x1, y0, col, n, alpha) {
+  for (let i = 0; i < n; i++) {
+    const x = range(rnd, x0, x1), L = range(rnd, 30, 150), w = range(rnd, 3, 10);
+    wrap(s, x, y0 + L / 2, L, (X, Y) => {
+      g.save(); g.globalAlpha = alpha * range(rnd, 0.5, 1);
+      g.fillStyle = grad(g, 0, Y - L / 2, 0, Y + L / 2, [[0, col, 1], [0.6, col, 0.6], [1, col, 0]]);
+      g.beginPath(); g.ellipse(X, Y, w / 2, L / 2, 0, 0, TAU); g.fill(); g.restore();
+    });
   }
 }
-register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: cream, trowelled, a few cracks and holes showing brick', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, true); } });
+
+function plasterPaint(g, s, rnd, cv, holes) {
+  fill(g, s, s, '#dccdaa');
+  // three related creams in big soft blotches, then smaller ones
+  mottle(g, s, rnd, { colors: ['#e8dcb8', '#d8c8a0', '#e4d4c0'], count: 22, rmin: 90, rmax: 220, alpha: 0.55, hard: 0.05 });
+  mottle(g, s, rnd, { colors: ['#ecdfbe', '#c8b48c', '#d8c49c', '#e8d8b4', '#bdae92', '#c4b496'], count: 50, rmin: 30, rmax: 120, alpha: 0.4, hard: 0.08 });
+  mottle(g, s, rnd, { colors: ['#a89c88', '#b0a488', '#9a9484'], count: 10, rmin: 50, rmax: 120, alpha: 0.14, hard: 0.05 });
+  blurTile(cv, 4);
+  // trowel strokes
+  for (let i = 0; i < 80; i++) {
+    const x = rnd() * s, y = rnd() * s, L = range(rnd, 24, 80), a = range(rnd, -0.6, 0.6), w = range(rnd, 8, 22);
+    const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([x + Math.cos(a) * L * t, y + Math.sin(a) * L * t + Math.sin(t * 3) * 4]); }
+    const c = rnd() < 0.55 ? '#f2e8ce' : '#c4b28c';
+    wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.1));
+  }
+  mottle(g, s, rnd, { colors: ['#b8a682', '#a8987a', '#f2e8d0'], count: 220, rmin: 1.5, rmax: 4, alpha: 0.2, hard: 0.6 });
+  // rain streaks from beams and sills (the tile is ~3 m: a few ledges)
+  for (const y0 of [s * 0.02, s * 0.4, s * 0.71]) rainStreaks(g, s, rnd, 0, s, y0, '#b8a888', 9, 0.16);
+  if (holes) {
+    // 6 holes of varied size and shape: brick and fieldstone showing through
+    const bricks = { plaster: '#ddcfae' }, stones = { plaster: '#ddcfae', brick: ['#8e8a80', '#9e988a', '#7e7a72'], mortar: '#5a5048' };
+    const spots = [[0.18, 0.22, 44, bricks], [0.66, 0.12, 22, stones], [0.82, 0.55, 34, bricks], [0.36, 0.62, 18, bricks], [0.55, 0.9, 28, stones], [0.08, 0.84, 14, stones]];
+    for (const [fx, fy, r, o] of spots) plasterHole(g, s, rnd, s * (fx + (rnd() - 0.5) * 0.06), s * (fy + (rnd() - 0.5) * 0.06), r * range(rnd, 0.85, 1.15), { ...o, squash: range(rnd, 0.6, 0.95) });
+  }
+  cracks(g, s, rnd, { color: '#7a6a58', count: 7, len: [18, 60], width: [0.7, 1.3], alpha: 0.4 });
+  glaze(g, s, s, '#fff0d0', 0.12, 'soft-light');
+  blurTile(cv, 0.5);
+}
+register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: three creams, trowel strokes, rain streaks, six holes of brick and stone with lit lower lips', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, true); } });
 register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: the same cream, no holes (they would repeat every tile)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
 
 register('stone_found', {
@@ -439,51 +464,97 @@ register('planks_barnred', {
   },
 });
 
-function granitePaint(g, s, rnd, cv, snow) {
-  {
-    const rects = rowLayout(s, rnd, { rows: 4, minW: 120, maxW: 250, rowJitter: 0.25 });
-    paintRects(g, s, rects, rnd, {
-      colors: ['#7c8494', '#8e96a3', '#6f7682', '#868c98', '#7a7f8c'], gap: 7, gapColor: '#363444', radius: 10, bevel: 9, light: 0.5, varAmt: 0.08,
-      inner(gg, X, Y, w, hh, c, r) {
-        for (let i = 0; i < 6; i++) blob(gg, X + r() * w, Y + r() * hh, range(r, 20, 60), range(r, 12, 34), r() * 3, r() < 0.5 ? lightOf(c, 0.3) : shadowOf(c, 0.3), 0.25, 0.15);
-        for (let i = 0; i < 12; i++) { const x = X + r() * w, y = Y + r() * hh; line(gg, [[x, y], [x + range(r, 4, 10), y + range(r, -2, 2)]], 1.1, shadowOf(c, 0.4), 0.35); }
-        for (let i = 0; i < 6; i++) ellipse(gg, X + r() * w, Y + r() * hh, range(r, 1, 2.4), range(r, 1, 2), 0, rgba('#e8e4f0', 0.5));
-      },
-    });
-    if (snow) for (const r of rects) {
-      const x = r.x + 4, w = r.w - 8, y = r.y + 3.5;
-      const seed = Math.floor(rnd() * 1e9);
-      wrapRect(s, x, y - 2, w, 12, (dx, dy) => {
-        const rr = rngFrom(seed);
-        g.save(); g.fillStyle = '#f2f6fa';
-        g.beginPath(); g.moveTo(x + dx, y + dy);
-        for (let k = 0; k <= 12; k++) g.lineTo(x + dx + w * k / 12, y + dy + range(rr, 2, 7) * (k > 0 && k < 12 ? 1 : 0.3));
-        g.lineTo(x + dx + w, y + dy - 1); g.closePath(); g.fill(); g.restore();
-        blob(g, x + dx + w / 2, y + dy + 6, w * 0.5, 2.5, 0, '#a8b8d0', 0.35, 0.3);
-      });
+// Coursed ashlar: rows of uneven height, squarish blocks (now and then a small odd one) with
+// chipped corners, chisel marks, a lit top-left edge, a shadowed lower edge and warm dark mortar.
+// snow: the share of blocks with a cap of snow on their top.
+function ashlar(g, s, rnd, { colors, mortar = '#3c3636', snow = 0 }) {
+  fill(g, s, s, mortar);
+  mottle(g, s, rnd, { colors: [shadowOf(mortar, 0.2), lightOf(mortar, 0.15)], count: 50, rmin: 4, rmax: 14, alpha: 0.5, hard: 0.4 });
+  const hs = []; let tot = 0;
+  while (tot < s - 50) { const h = range(rnd, 40, 95); hs.push(h); tot += h; }
+  const k = s / tot;
+  let y = 0;
+  const blocks = [];
+  for (const h0 of hs) {
+    const h = h0 * k, x0 = rnd() * s;
+    let x = x0;
+    while (x < x0 + s - 24) {
+      let w = rnd() < 0.14 ? range(rnd, 34, 58) : range(rnd, Math.max(70, h * 1.3), Math.max(130, h * 3.0));
+      if (x + w > x0 + s - 34) w = x0 + s - x;
+      blocks.push({ x, y, w, h });
+      x += w;
     }
-    cracks(g, s, rnd, { color: '#2e2c3a', count: 6, len: [20, 60], width: [0.8, 1.5], alpha: 0.45 });
-    mottle(g, s, rnd, { colors: ['#9aa8a0', '#8a9a8a'], count: 14, rmin: 8, rmax: 22, alpha: 0.12, hard: 0.3 });
-    glaze(g, s, s, '#dce8ff', 0.12, 'soft-light');
-    blurTile(cv, 0.5);
+    y += h;
   }
+  for (const bk of blocks) {
+    const seed = Math.floor(rnd() * 1e9), c = jitter(pick(rnd, colors), rnd, 0.06), gap = range(rnd, 3, 4.2), capped = rnd() < snow;
+    wrapRect(s, bk.x, bk.y, bk.w, bk.h, (dx, dy) => {
+      const rr = rngFrom(seed);
+      const X = bk.x + dx + gap, Y = bk.y + dy + gap, w = bk.w - 2 * gap, h = bk.h - 2 * gap;
+      const J = () => (rr() - 0.5) * 2.6;
+      const ch = [0, 1, 2, 3].map(() => rr() < 0.38 ? range(rr, 7, 15) : range(rr, 2, 5));
+      const pts = [
+        [X + ch[0], Y + J()], [X + w * 0.35, Y + J()], [X + w * 0.7, Y + J()], [X + w - ch[1], Y + J()],
+        [X + w + J(), Y + ch[1]], [X + w + J(), Y + h * 0.5], [X + w + J(), Y + h - ch[2]],
+        [X + w - ch[2], Y + h + J()], [X + w * 0.6, Y + h + J()], [X + w * 0.3, Y + h + J()], [X + ch[3], Y + h + J()],
+        [X + J(), Y + h - ch[3]], [X + J(), Y + h * 0.5], [X + J(), Y + ch[0]],
+      ];
+      g.save(); g.fillStyle = INK; g.globalAlpha = 0.3; g.filter = 'blur(1.5px)'; g.translate(2.5, 3); polyPath(g, pts); g.fill(); g.restore();
+      clipped(g, () => polyPath(g, pts), () => {
+        g.fillStyle = grad(g, X, Y, X + w * 0.45, Y + h, [[0, lightOf(c, 0.2)], [0.45, c], [1, shadowOf(c, 0.28)]]);
+        g.fillRect(X - 4, Y - 4, w + 8, h + 8);
+        for (let i = 0; i < 5; i++) blob(g, X + rr() * w, Y + rr() * h, range(rr, w * 0.15, w * 0.4), range(rr, h * 0.2, h * 0.45), rr() * 3, rr() < 0.5 ? lightOf(c, 0.18) : shadowOf(c, 0.22), 0.25, 0.12);
+        // chisel marks: short parallel strokes, not dots
+        const ang = range(rr, -0.95, -0.45);
+        for (let i = 0; i < Math.round(w * h / 700); i++) {
+          const x = X + rr() * w, yy = Y + rr() * h, L = range(rr, 5, 12);
+          line(g, [[x, yy], [x + Math.cos(ang) * L, yy + Math.sin(ang) * L]], range(rr, 1, 1.7), shadowOf(c, 0.35), 0.3);
+          line(g, [[x + 1.2, yy + 1.2], [x + 1.2 + Math.cos(ang) * L, yy + 1.2 + Math.sin(ang) * L]], 0.8, lightOf(c, 0.3), 0.22);
+        }
+        if (rr() < 0.35) { const x = X + rr() * w; line(g, [[x, Y + h * 0.2], [x + range(rr, -6, 6), Y + h * 0.6], [x + range(rr, -8, 8), Y + h * 0.9]], 1.2, INK, 0.45); }
+        // lit upper-left edge, shadowed lower-right edge (strokes of the outline shifted inward)
+        g.save(); g.translate(2, 2); g.lineWidth = 4; g.strokeStyle = rgba('#b8b4a8', 0.5); polyPath(g, pts); g.stroke(); g.restore();
+        g.save(); g.translate(-2.5, -2.5); g.lineWidth = 5; g.strokeStyle = rgba('#4e4a50', 0.55); polyPath(g, pts); g.stroke(); g.restore();
+        if (capped) {
+          g.save(); g.fillStyle = '#f2f5f8'; g.beginPath(); g.moveTo(X - 3, Y - 3);
+          for (let k = 0; k <= 10; k++) { const t = k / 10; g.lineTo(X + t * w, Y + 2 + range(rr, 3, 9) * Math.sin(Math.PI * t)); }
+          g.lineTo(X + w + 3, Y - 3); g.closePath(); g.fill(); g.restore();
+          blob(g, X + w / 2, Y + 9, w * 0.42, 3, 0, '#9fb0cc', 0.35, 0.3);
+          blob(g, X + w * 0.35, Y + 3, w * 0.25, 2, 0, '#ffffff', 0.7, 0.4);
+        }
+      });
+    });
+  }
+  cracks(g, s, rnd, { color: '#2e2a30', count: 5, len: [20, 60], width: [0.8, 1.4], alpha: 0.4 });
+  mottle(g, s, rnd, { colors: ['#8a8a6a', '#7a7a60'], count: 10, rmin: 8, rmax: 22, alpha: 0.12, hard: 0.3 });
 }
-register('granite_block', { family: F, size: 512, note: 'Kharanos ashlar: big blue-gray granite blocks, chisel marks, snow on the ledges', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, true); } });
+function granitePaint(g, s, rnd, cv, snow) {
+  ashlar(g, s, rnd, { colors: ['#7d7a74', '#8f8a80', '#6f7682', '#858078', '#9a8a6a', '#7a7670', '#8a8478'], mortar: '#3c3636', snow: snow ? 0.38 : 0 });
+  glaze(g, s, s, '#ffe8c8', 0.08, 'soft-light');
+  blurTile(cv, 0.5);
+}
+register('granite_block', { family: F, size: 512, note: 'Kharanos ashlar: uneven courses of warm gray granite, chipped corners, chisel marks, snow caps on some blocks', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, true); } });
 register('granite_inner', { family: F, size: 512, note: 'indoor ashlar: no snow', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, false); } });
 
+// log courses (fractions of the 3 m tile, top of the canvas first): town_build lines the 3D log ends up with them
+export const LOG_ROWS = [0.17, 0.115, 0.155, 0.125, 0.18, 0.11, 0.145];
+
 register('log_wall', {
-  family: F, size: 512, note: 'frontier log wall: peeled horizontal logs, round-shaded, mud chinking',
+  family: F, size: 512, note: 'frontier log wall: peeled logs of uneven girth, dark mud chinking with dried edges, checks',
   paint(g, s, rnd, h, cv) {
-    const rows = 7, H = s / rows;
-    fill(g, s, s, '#8e7254');
-    mottle(g, s, rnd, { colors: ['#a08262', '#7a5e44', '#968060'], count: 120, rmin: 3, rmax: 10, alpha: 0.5, hard: 0.4 });
+    fill(g, s, s, '#5a4030');
+    mottle(g, s, rnd, { colors: ['#6a4e38', '#4a3426', '#7a5e44'], count: 140, rmin: 3, rmax: 10, alpha: 0.5, hard: 0.4 });
     const per = (k, a, ph) => x => a * Math.sin(TAU * k * x / s + ph);
-    for (let i = 0; i < rows; i++) {
-      const y0 = i * H, c = jitter(pick(rnd, ['#8a5a36', '#7e5232', '#94643c', '#86583a']), rnd, 0.06);
+    let y0 = 0;
+    for (const f of LOG_ROWS) {
+      const H = f * s, c = jitter(pick(rnd, ['#8a5a36', '#7e5232', '#94643c', '#86583a', '#9a6c44']), rnd, 0.06);
       const top = per(1 + Math.floor(rnd() * 2), range(rnd, 1, 3), rnd() * TAU), bot = per(2, range(rnd, 1, 2.5), rnd() * TAU);
-      const yT = x => y0 + 6 + top(x), yB = x => y0 + H - 5 + bot(x);
-      // shadow cast onto the chinking below the log
-      g.save(); g.globalAlpha = 0.45; g.fillStyle = INK; g.filter = 'blur(3px)';
+      const gapT = range(rnd, 4, 8), gapB = range(rnd, 4, 7);
+      const yT = x => y0 + gapT + top(x), yB = x => y0 + H - gapB + bot(x);
+      // dried, lighter edges of the chinking along the log
+      line(g, Array.from({ length: 34 }, (_, k) => [k * s / 32 - 8, yB(k * s / 32 - 8) + 3]), 2, '#8a7058', 0.45);
+      line(g, Array.from({ length: 34 }, (_, k) => [k * s / 32 - 8, yT(k * s / 32 - 8) - 2.5]), 1.6, '#8a7058', 0.35);
+      g.save(); g.globalAlpha = 0.5; g.fillStyle = INK; g.filter = 'blur(3px)';
       g.beginPath(); g.moveTo(-32, yB(-32)); for (let x = -32; x <= s + 32; x += 16) g.lineTo(x, yB(x) + 5); g.lineTo(s + 32, yB(s + 32) - 6); g.lineTo(-32, yB(-32) - 6); g.closePath(); g.fill(); g.restore();
       const body = () => { g.beginPath(); g.moveTo(0, yT(0)); for (let x = 0; x <= s; x += 16) g.lineTo(x, yT(x)); for (let x = s; x >= 0; x -= 16) g.lineTo(x, yB(x)); g.closePath(); };
       clipped(g, body, () => {
@@ -498,15 +569,17 @@ register('log_wall', {
           const pts = []; for (let x = 0; x <= s; x += 8) pts.push([x, y + Math.sin(TAU * k1 * x / s + ph) * a]);
           line(g, pts, range(rnd, 0.7, 1.6), rnd() < 0.7 ? shadowOf(c, 0.5) : lightOf(c, 0.4), 0.35);
         }
-        // a long check (crack) along the log
-        const cy = y0 + range(rnd, 0.35, 0.6) * H, cx = rnd() * s, L = range(rnd, 80, 200);
-        wrap(s, cx, cy, L, (X, Y) => { line(g, [[X, Y + 1.2], [X + L, Y + 2.2]], 2.2, lightOf(c, 0.5), 0.35); line(g, [[X, Y], [X + L * 0.5, Y + 1.5], [X + L, Y + 1]], 1.6, INK, 0.6); });
-        // weathered gray patches where the bark came off unevenly
+        // checks (cracks) along the log
+        for (let k = 0; k < 2; k++) {
+          const cy = y0 + range(rnd, 0.35, 0.6) * H, cx = rnd() * s, L = range(rnd, 60, 200);
+          wrap(s, cx, cy, L, (X, Y) => { line(g, [[X, Y + 1.2], [X + L, Y + 2.2]], 2.2, lightOf(c, 0.5), 0.35); line(g, [[X, Y], [X + L * 0.5, Y + 1.5], [X + L, Y + 1]], 1.6, INK, 0.6); });
+        }
         for (let k = 0; k < 3; k++) {
           const x = rnd() * s, y = y0 + H * range(rnd, 0.3, 0.6), L = range(rnd, 30, 90);
           wrap(s, x, y, L, (X, Y) => blob(g, X, Y, L, H * 0.18, 0, '#a09484', 0.18, 0.2));
         }
       });
+      y0 += H;
     }
     glaze(g, s, s, '#ffd8a8', 0.12, 'soft-light');
     blurTile(cv, 0.5);
@@ -514,37 +587,58 @@ register('log_wall', {
 });
 
 register('planks_rough', {
-  family: F, size: 512, note: 'frontier boards: wide, horizontal, sun-baked orange-brown, split and nailed',
+  family: F, size: 512, note: 'frontier clapboards: long horizontal boards of uneven width, sun-bleached tops, rare butt joints, dark gaps',
   paint(g, s, rnd, h, cv) {
-    planks(g, s, rnd, { rows: 7, minL: 300, maxL: 560, colors: ['#9a6a42', '#8a5c3a', '#a87a4e', '#7e5636', '#94683e', '#a07450'], gap: 5, gapColor: '#241816', rowJitter: 0.45, grain: 16, weather: 0.5, splits: 0.7, nails: 4, knots: 0.45, endShade: 0.2 });
+    fill(g, s, s, '#3a2418');
+    const hs = []; let tot = 0;
+    while (tot < s - 18) { const hh = range(rnd, 18, 34); hs.push(hh); tot += hh; }
+    const k = s / tot;
+    let y = 0;
+    for (const h0 of hs) {
+      const hh = h0 * k, x0 = rnd() * s;
+      let x = x0;
+      while (x < x0 + s - 12) {
+        let L = range(rnd, 300, 500); if (x + L > x0 + s - 40) L = x0 + s - x;
+        const c = jitter(pick(rnd, ['#8a5a36', '#94643c', '#7e5232', '#9a6a40', '#86583a', '#8e6040']), rnd, 0.06), seed = Math.floor(rnd() * 1e9);
+        wrapRect(s, x, y, L, hh, (dx, dy) => plank(g, x + dx + 1.2, y + dy + 1, L - 2.4, hh - 2.6, c, rngFrom(seed), { grain: 5, galpha: 0.35, knots: 0.25, bevel: 2, light: 0.55, splits: 0.35, weather: 0.7, nails: 2, endShade: 0.25 }));
+        x += L;
+      }
+      // the board's sun-bleached top edge, and the soft shadow it throws on the board below
+      wrapRect(s, 0, y, s, hh, (dx, dy) => {
+        g.save(); g.fillStyle = grad(g, 0, y + dy, 0, y + dy + hh * 0.45, [[0, '#c09a6a', 0.38], [1, '#c09a6a', 0]]); g.fillRect(0, y + dy + 1, s, hh * 0.45); g.restore();
+        g.save(); g.fillStyle = grad(g, 0, y + dy + hh, 0, y + dy + hh + 6, [[0, INK, 0.45], [1, INK, 0]]); g.fillRect(0, y + dy + hh, s, 6); g.restore();
+      });
+      y += hh;
+    }
+    mottle(g, s, rnd, { colors: ['#a49c8c', '#6a5640'], count: 24, rmin: 30, rmax: 90, alpha: 0.12, hard: 0.1, stretch: 3, rot: 0 });
     glaze(g, s, s, '#ffd8a0', 0.12, 'soft-light');
     blurTile(cv, 0.4);
   },
 });
 
 function adobePaint(g, s, rnd, cv, holes) {
-  {
-    fill(g, s, s, '#d0a676');
-    mottle(g, s, rnd, { colors: ['#e0bc8e', '#bc8e60', '#d8b080', '#c4966a', '#e6c89c', '#b48a64'], count: 56, rmin: 40, rmax: 150, alpha: 0.5, hard: 0.08 });
-    blurTile(cv, 4);
-    for (let i = 0; i < 60; i++) {
-      const x = rnd() * s, y = rnd() * s, L = range(rnd, 30, 80), a = range(rnd, -0.4, 0.4), w = range(rnd, 10, 24);
-      const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([x + Math.cos(a) * L * t, y + Math.sin(a) * L * t + Math.sin(t * 3) * 5]); }
-      const c = rnd() < 0.5 ? '#e8c89c' : '#b88c60';
-      wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.09));
-    }
-    mottle(g, s, rnd, { colors: ['#a87c52', '#f0d8b0', '#b8885c'], count: 320, rmin: 1.5, rmax: 4, alpha: 0.24, hard: 0.6 });
-    if (holes) {
-      plasterHole(g, s, rnd, s * 0.3, s * 0.68, 48, { plaster: '#d0a676', brick: ['#a87650', '#b88458', '#9a6a46'], mortar: '#7a5838' });
-      plasterHole(g, s, rnd, s * 0.8, s * 0.22, 30, { plaster: '#d0a676', brick: ['#a87650', '#b88458', '#9a6a46'], mortar: '#7a5838' });
-    }
-    cracks(g, s, rnd, { color: '#6a4628', count: 9, len: [20, 70], width: [0.8, 1.6], alpha: 0.45 });
-    streaks(g, s, rnd, { colors: ['#a07850', '#8a6644'], count: 22, len: [50, 160], width: [3, 10], angle: Math.PI, wobble: 0.05, alpha: 0.08 });
-    glaze(g, s, s, '#ffe0b0', 0.14, 'soft-light');
-    blurTile(cv, 0.6);
+  fill(g, s, s, '#dbb48c');
+  mottle(g, s, rnd, { colors: ['#e6c49e', '#d0a47c', '#e2bc94'], count: 20, rmin: 90, rmax: 220, alpha: 0.55, hard: 0.05 });
+  mottle(g, s, rnd, { colors: ['#f2d8ae', '#c4946c', '#dcb088', '#ccA078', '#ecd0a6', '#b88a66'], count: 50, rmin: 30, rmax: 130, alpha: 0.45, hard: 0.08 });
+  blurTile(cv, 4);
+  for (let i = 0; i < 70; i++) {
+    const x = rnd() * s, y = rnd() * s, L = range(rnd, 30, 80), a = range(rnd, -0.4, 0.4), w = range(rnd, 10, 24);
+    const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([x + Math.cos(a) * L * t, y + Math.sin(a) * L * t + Math.sin(t * 3) * 5]); }
+    const c = rnd() < 0.5 ? '#f2d8ae' : '#a87c5c';
+    wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.09));
   }
+  mottle(g, s, rnd, { colors: ['#a87c5c', '#f6e0bc', '#b8885c'], count: 280, rmin: 1.5, rmax: 4, alpha: 0.22, hard: 0.6 });
+  for (const y0 of [s * 0.05, s * 0.5]) rainStreaks(g, s, rnd, 0, s, y0, '#a07858', 8, 0.14);
+  if (holes) {
+    const o = { plaster: '#dbb48c', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52'], mortar: '#7a5838' };
+    const spots = [[0.3, 0.68, 38], [0.8, 0.22, 22], [0.12, 0.2, 15]];
+    for (const [fx, fy, r] of spots) plasterHole(g, s, rnd, s * (fx + (rnd() - 0.5) * 0.06), s * (fy + (rnd() - 0.5) * 0.06), r * range(rnd, 0.85, 1.15), { ...o, squash: range(rnd, 0.6, 0.95) });
+  }
+  cracks(g, s, rnd, { color: '#6a4628', count: 9, len: [20, 70], width: [0.8, 1.6], alpha: 0.42 });
+  glaze(g, s, s, '#ffe4c0', 0.14, 'soft-light');
+  blurTile(cv, 0.6);
 }
-register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud plaster, soft blotches, cracks, exposed mud bricks', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, true); } });
+register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm pinkish mud plaster, cool shadows, rain streaks, mud bricks showing', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, true); } });
 register('adobe_inner', { family: F, size: 512, note: 'indoor adobe: no exposed bricks', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, false); } });
 
 // ---- roofs ----------------------------------------------------------------------------------
@@ -578,25 +672,38 @@ register('slate_roof', {
 });
 
 register('thatch', {
-  family: F, size: 512, note: 'Westfall thatch: golden straw courses with ragged hanging edges',
+  family: F, size: 512, note: 'Westfall thatch: muted straw courses combed at a slant, dark undersides, lit tips, gray weathering and moss',
   paint(g, s, rnd, h, cv) {
-    thatch(g, s, rnd, { rows: 5, base: '#5a4226', cols: ['#9a7a40', '#a88848', '#8a6a38', '#b49450'], tips: ['#d4b468', '#c8a85c', '#e0c478', '#bc9c54'] });
-    glaze(g, s, s, '#ffe0a0', 0.12, 'soft-light');
+    thatch(g, s, rnd, { rows: 5, base: '#3e3020', cols: ['#a88a4a', '#9a7e44', '#8e7440', '#a4884e'], tips: ['#d8bc78', '#cbb070', '#c4a86a'] });
+    mottle(g, s, rnd, { colors: ['#8a8070', '#7e7666', '#948a78'], count: 26, rmin: 30, rmax: 90, alpha: 0.22, hard: 0.08, stretch: 1.6, rot: 0 });
+    mottle(g, s, rnd, { colors: ['#6a7040', '#5e6638'], count: 14, rmin: 12, rmax: 34, alpha: 0.2, hard: 0.2 });
+    glaze(g, s, s, '#f0d8a8', 0.08, 'soft-light');
     blurTile(cv, 0.6);
   },
 });
 
 register('snow_roof', {
-  family: F, size: 256, note: 'snow on roofs and ledges: soft lumps, icy blue shadows, glints',
+  family: F, size: 256, note: 'snow on roofs and ledges: sunlit cream tops, blue-lavender troughs, soft wind ripples, glints',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#e6edf4');
-    mottle(g, s, rnd, { colors: ['#f6f8fa', '#d4dfec', '#c8d6e8', '#fbfaf4'], count: 30, rmin: 20, rmax: 70, alpha: 0.45, hard: 0.1 });
-    for (let i = 0; i < 26; i++) {
-      const x = rnd() * s, y = rnd() * s, r = range(rnd, 10, 30);
-      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X + r * 0.3, Y + r * 0.35, r, r * 0.6, 0, '#a9bcd8', 0.35, 0.2); blob(g, X - r * 0.2, Y - r * 0.2, r * 0.8, r * 0.5, 0, '#ffffff', 0.6, 0.25); });
+    fill(g, s, s, '#e4ebf3');
+    mottle(g, s, rnd, { colors: ['#fbf8f0', '#d2dceb', '#b6c6dc', '#f4f2ea'], count: 26, rmin: 26, rmax: 80, alpha: 0.5, hard: 0.08 });
+    // wind ripples: long soft ridges, lit on top and blue in the trough below
+    for (let i = 0; i < 14; i++) {
+      const y = rnd() * s, x0 = rnd() * s, L = range(rnd, 50, 140), a = range(rnd, 2, 5), ph = rnd() * TAU, wl = range(rnd, 40, 90);
+      const pts = []; for (let x = 0; x <= L; x += 6) pts.push([x0 + x, y + Math.sin(x / wl * TAU + ph) * a]);
+      const lw = range(rnd, 5, 10);
+      wrap(s, x0 + L / 2, y, L, (X, Y) => {
+        const dx = X - x0 - L / 2, dy = Y - y;
+        line(g, pts.map(([u, v]) => [u + dx, v + dy + 4]), lw, '#b0c0da', 0.16);
+        line(g, pts.map(([u, v]) => [u + dx, v + dy]), lw * 0.6, '#fffbf0', 0.22);
+      });
     }
-    for (let i = 0; i < 70; i++) { const x = rnd() * s, y = rnd() * s; ellipse(g, x, y, range(rnd, 0.6, 1.4), range(rnd, 0.6, 1.4), 0, '#ffffff', 0.9); }
-    glaze(g, s, s, '#e8f0ff', 0.12, 'soft-light');
+    for (let i = 0; i < 20; i++) {
+      const x = rnd() * s, y = rnd() * s, r = range(rnd, 10, 28);
+      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X + r * 0.3, Y + r * 0.35, r, r * 0.6, 0, '#a9bcd8', 0.3, 0.2); blob(g, X - r * 0.2, Y - r * 0.2, r * 0.8, r * 0.5, 0, '#fffdf6', 0.55, 0.25); });
+    }
+    for (let i = 0; i < 60; i++) { const x = rnd() * s, y = rnd() * s; ellipse(g, x, y, range(rnd, 0.6, 1.4), range(rnd, 0.6, 1.4), 0, '#ffffff', 0.9); }
+    glaze(g, s, s, '#e8f0ff', 0.1, 'soft-light');
     blurTile(cv, 0.8);
   },
 });
@@ -645,9 +752,18 @@ register('hide_patch', {
 // ---- trim, metal, cloth --------------------------------------------------------------------------
 
 register('timber_dark', {
-  family: F, size: 256, note: 'dark oak beams and posts: grain along v, splits, knots',
+  family: F, size: 256, note: 'dark oak beams and posts: lit and shaded streaks along the grain, splits, knots, end checks',
   paint(g, s, rnd, h, cv) {
-    grainTile(g, s, rnd, { base: '#5a3e2c', dark: ['#3a281e', '#432e22', '#2e2026'], lite: ['#7a5a40', '#86664a'], lines: 40, splits: 4, knots: 2 });
+    grainTile(g, s, rnd, { base: '#5e4330', dark: ['#2a1c14', '#3a281e', '#33241c'], lite: ['#7a5a3c', '#8a6848', '#74563a'], lines: 50, splits: 6, knots: 3, alpha: 0.5 });
+    // broad worn highlights and shaded hollows running along the beam
+    for (let i = 0; i < 7; i++) {
+      const x = rnd() * s, w = range(rnd, 8, 26), lit = rnd() < 0.55;
+      for (const dx of [-s, 0, s]) blob(g, x + dx, s / 2, w, s * 0.75, 0, lit ? '#8a6a4c' : '#2a1c14', lit ? 0.2 : 0.22, 0.1);
+    }
+    for (let i = 0; i < 10; i++) {
+      const x = rnd() * s, y = rnd() * s, L = range(rnd, 4, 10);
+      wrap(s, x, y, 12, (X, Y) => { line(g, [[X, Y], [X + range(rnd, -2, 2), Y + L]], 1.6, '#1e1410', 0.55); line(g, [[X + 1.2, Y], [X + 1.2, Y + L]], 0.8, '#9a7a58', 0.35); });
+    }
     glaze(g, s, s, '#ffd8b0', 0.1, 'soft-light');
     blurTile(cv, 0.4);
   },
@@ -673,26 +789,31 @@ register('wood_white', {
 });
 
 register('iron_wrought', {
-  family: F, size: 128, note: 'dark wrought iron: hammered, rust blooms, lit scratches',
+  family: F, size: 128, note: 'wrought iron: hammered blue-gray, lit scratches, rust blooms',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#46444c');
-    mottle(g, s, rnd, { colors: ['#58565e', '#38363e', '#64626c'], count: 24, rmin: 6, rmax: 22, alpha: 0.55, hard: 0.2 });
-    mottle(g, s, rnd, { colors: ['#7a4630', '#8e5232', '#6a3a28'], count: 12, rmin: 3, rmax: 10, alpha: 0.5, hard: 0.35 });
-    streaks(g, s, rnd, { colors: ['#9a98a4', '#b0aeb8'], count: 14, len: [5, 16], width: [0.6, 1.1], angle: 1.2, wobble: 0.3, alpha: 0.45 });
+    fill(g, s, s, '#4a4650');
+    mottle(g, s, rnd, { colors: ['#5c5864', '#3a3840', '#6a6672', '#7a7480'], count: 26, rmin: 6, rmax: 22, alpha: 0.5, hard: 0.2 });
+    mottle(g, s, rnd, { colors: ['#7a4630', '#8e5232', '#6a3a28'], count: 12, rmin: 3, rmax: 10, alpha: 0.45, hard: 0.35 });
+    streaks(g, s, rnd, { colors: ['#9a98a4', '#b0aeb8'], count: 16, len: [5, 16], width: [0.6, 1.1], angle: 1.2, wobble: 0.3, alpha: 0.45 });
     blurTile(cv, 0.5);
   },
 });
 
 register('brass', {
-  family: F, size: 256, note: 'goblin brass: brushed, warm highlights, green patina, rivets',
+  family: F, size: 256, note: 'goblin brass: warm gold, lit edges, dark creases, green patina in the recesses, rivets',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#b08a3c');
     mottle(g, s, rnd, { colors: ['#c8a050', '#8a6a2c', '#d8b860', '#a07a34'], count: 30, rmin: 14, rmax: 50, alpha: 0.45, hard: 0.1, stretch: 2.5, rot: 0 });
-    streaks(g, s, rnd, { colors: ['#e8cc78', '#7a5a24'], count: 90, len: [20, 90], width: [0.6, 1.4], angle: Math.PI / 2, wobble: 0.02, alpha: 0.3 });
-    mottle(g, s, rnd, { colors: ['#5a8a6a', '#6a9a78'], count: 14, rmin: 3, rmax: 10, alpha: 0.28, hard: 0.3 });
+    streaks(g, s, rnd, { colors: ['#f0d080', '#7a5a24'], count: 70, len: [20, 90], width: [0.6, 1.4], angle: Math.PI / 2, wobble: 0.02, alpha: 0.28 });
+    // seams: a dark crease with a lit lip, patina collecting in the crease
+    for (const y of [s * 0.25, s * 0.75]) {
+      line(g, [[0, y + 2], [s, y + 2]], 5, '#5a4018', 0.55);
+      line(g, [[0, y - 1.5], [s, y - 1.5]], 2, '#f0d080', 0.6);
+      for (let i = 0; i < 10; i++) { const x = rnd() * s; wrap(s, x, y + 3, 20, (X, Y) => blob(g, X, Y, range(rnd, 6, 16), range(rnd, 2, 4), 0, '#6a8a5a', 0.55, 0.3)); }
+      for (let k = 0; k < 8; k++) rivet(g, (k + 0.5) * s / 8, y + 10, 3.2, '#c8a050');
+    }
+    mottle(g, s, rnd, { colors: ['#6a8a5a', '#5a7a52'], count: 12, rmin: 3, rmax: 9, alpha: 0.3, hard: 0.3 });
     for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 30, (X, Y) => blob(g, X, Y, range(rnd, 10, 26), range(rnd, 3, 6), -0.5, '#fff0b8', 0.35, 0.3)); }
-    for (let k = 0; k < 8; k++) for (const y of [10, s / 2 + 10]) rivet(g, (k + 0.5) * s / 8, y, 3.2, '#c8a050');
-    line(g, [[0, 2], [s, 2]], 3, '#6a4e22', 0.5); line(g, [[0, s / 2 + 2], [s, s / 2 + 2]], 3, '#6a4e22', 0.5);
     blurTile(cv, 0.4);
   },
 });
@@ -715,23 +836,25 @@ register('metal_red', {
   },
 });
 
-register('canvas_stripe', {
-  family: F, size: 256, note: 'awning canvas: faded red and cream stripes along v, sagging folds, stains',
-  paint(g, s, rnd, h, cv) {
-    const n = 8, W = s / n;
-    for (let i = 0; i < n; i++) { g.fillStyle = i % 2 ? '#e0d2b2' : '#a8463a'; g.fillRect(i * W, 0, W, s); }
-    mottle(g, s, rnd, { colors: ['#f0e4c8', '#8a6a50', '#c8b490'], count: 30, rmin: 10, rmax: 40, alpha: 0.18, hard: 0.1 });
-    for (let k = 0; k < 4; k++) {
-      const y = (k + 0.5) * s / 4 + range(rnd, -6, 6);
-      g.fillStyle = grad(g, 0, y - 18, 0, y + 18, [[0, '#2a2030', 0], [0.5, '#2a2030', 0.16], [0.6, '#fff4dc', 0.16], [1, '#fff4dc', 0]]);
-      g.fillRect(0, y - 18, s, 36);
-    }
-    for (let i = 0; i < n; i++) line(g, [[i * W, 0], [i * W, s]], 1.2, '#5a3a30', 0.35);
-    streaks(g, s, rnd, { colors: ['#7a5a40'], count: 8, len: [20, 60], width: [3, 7], angle: Math.PI, wobble: 0.1, alpha: 0.12 });
-    glaze(g, s, s, '#ffe8c0', 0.12, 'soft-light');
-    blurTile(cv, 0.6);
-  },
-});
+function canvasStripes(g, s, rnd, cv, dark, light) {
+  const n = 8, W = s / n;
+  for (let i = 0; i < n; i++) { g.fillStyle = i % 2 ? light : dark; g.fillRect(i * W, 0, W, s); }
+  mottle(g, s, rnd, { colors: ['#f0e4c8', '#8a6a50', '#c8b490'], count: 30, rmin: 10, rmax: 40, alpha: 0.18, hard: 0.1 });
+  for (let k = 0; k < 4; k++) {
+    const y = (k + 0.5) * s / 4 + range(rnd, -6, 6);
+    g.fillStyle = grad(g, 0, y - 18, 0, y + 18, [[0, '#2a2030', 0], [0.5, '#2a2030', 0.16], [0.6, '#fff4dc', 0.16], [1, '#fff4dc', 0]]);
+    g.fillRect(0, y - 18, s, 36);
+  }
+  for (let i = 0; i < n; i++) line(g, [[i * W, 0], [i * W, s]], 1.2, '#5a3a30', 0.35);
+  streaks(g, s, rnd, { colors: ['#7a5a40'], count: 8, len: [20, 60], width: [3, 7], angle: Math.PI, wobble: 0.1, alpha: 0.12 });
+  // sun-faded patches
+  mottle(g, s, rnd, { colors: ['#f4ead4'], count: 8, rmin: 30, rmax: 70, alpha: 0.12, hard: 0.05 });
+  glaze(g, s, s, '#ffe8c0', 0.12, 'soft-light');
+  blurTile(cv, 0.6);
+}
+register('canvas_stripe', { family: F, size: 256, note: 'awning canvas: faded rust and cream stripes, folds, stains', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, '#a84a30', '#e0d2b2'); } });
+register('canvas_teal', { family: F, size: 256, note: 'awning canvas: faded teal and cream', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, '#4a8a8a', '#e2d6b8'); } });
+register('canvas_mustard', { family: F, size: 256, note: 'awning canvas: mustard and cream', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, '#c89a3a', '#e6dcc0'); } });
 
 // ---- interiors ----------------------------------------------------------------------------------
 
@@ -746,32 +869,62 @@ register('floor_planks', {
 });
 
 register('carpet_casino', {
-  family: F, size: 512, note: 'gambling hall carpet: deep red with a gold diamond lattice and coin medallions',
+  family: F, size: 512, note: 'gambling hall carpet: deep red, a hand-drawn gold lattice, three kinds of medallion, worn paths and faded patches',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#7a2226');
+    fill(g, s, s, '#7a2026');
     mottle(g, s, rnd, { colors: ['#8a2a2c', '#6a1c22', '#842830'], count: 40, rmin: 20, rmax: 80, alpha: 0.4, hard: 0.1 });
-    const P = 128;
-    // fine damask dots
-    for (let y = 16; y < s; y += 32) for (let x = 16 + ((y / 32) & 1) * 16; x < s; x += 32) ellipse(g, x, y, 2.2, 2.2, 0, '#9a3a34', 0.6);
-    for (const dir of [1, -1]) for (let k = -4; k <= 8; k++) {
-      const pts = dir > 0 ? [[k * P - 10, -10], [k * P + s + 10, s + 10]] : [[k * P + 10, -10], [k * P - s - 10, s + 10]];
-      line(g, pts.map(([x, y]) => [x + 1.5, y + 2]), 10, '#3a0e14', 0.55);
-      line(g, pts, 7, '#b88a3c', 1);
-      line(g, pts.map(([x, y]) => [x - 1, y - 1.2]), 2.2, '#f0d088', 0.7);
+    // small damask sprigs
+    for (let i = 0; i < 70; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 8, (X, Y) => { ellipse(g, X, Y, 3, 1.6, rnd() * 3, '#9a3a34', 0.6); ellipse(g, X + 2, Y + 2, 1.6, 1.6, 0, '#a8483c', 0.5); }); }
+    // the lattice: hand-wobbled gold strokes, a dark under-stroke and a light upper edge
+    const P = 256;
+    for (const dir of [1, -1]) for (let k = -3; k <= 4; k++) {
+      const pts = [];
+      for (let t = 0; t <= 24; t++) { const u = t / 24; const x = dir > 0 ? k * P - 10 + (s + 20) * u : k * P + 10 - (s + 20) * u; pts.push([x + Math.sin(u * 17 + k) * 1.4 + (rnd() - 0.5) * 1.2, -10 + (s + 20) * u]); }
+      line(g, pts.map(([x, y]) => [x + 1.5, y + 2]), 7, '#3a0e14', 0.5);
+      line(g, pts, range(rnd, 3.5, 5), '#b88a3a', 0.72);
+      line(g, pts.map(([x, y]) => [x - 0.8, y - 1]), 1.3, '#f0d088', 0.45);
     }
-    const centers = [];
-    for (let i = 0; i < 4; i++) for (let j = 0; j < 4; j++) { centers.push([64 + 128 * i, 128 * j]); centers.push([128 * i, 64 + 128 * j]); }
-    for (const [x, y] of centers) wrap(s, x, y, 30, (X, Y) => {
-      for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; ellipse(g, X + Math.cos(a) * 15, Y + Math.sin(a) * 15, 9, 5, a, '#5a1418', 0.9); ellipse(g, X + Math.cos(a) * 15, Y + Math.sin(a) * 15, 7, 3.5, a, '#c89a48', 0.9); }
-      ellipse(g, X + 1.5, Y + 2, 12, 12, 0, '#3a0e14', 0.5);
-      ellipse(g, X, Y, 11, 11, 0, '#c49440');
-      ellipse(g, X, Y, 7.5, 7.5, 0, '#8a6424');
-      blob(g, X - 3, Y - 3.5, 5, 4, 0, '#ffe8a0', 0.7, 0.4);
-    });
-    for (let y = 0; y < s; y += P) for (let x = 0; x < s; x += P) wrap(s, x, y, 8, (X, Y) => { ellipse(g, X, Y, 6, 6, 0, '#3a0e14', 0.7); ellipse(g, X, Y, 4, 4, 0, '#d8b060'); });
-    mottle(g, s, rnd, { colors: ['#4a1418', '#a04a40'], count: 26, rmin: 20, rmax: 70, alpha: 0.12, hard: 0.1 });
+    // three medallion designs at the lattice cells
+    const med = (X, Y, kind) => {
+      if (kind === 0) {
+        for (let k = 0; k < 6; k++) { const a = k * TAU / 6; ellipse(g, X + Math.cos(a) * 20, Y + Math.sin(a) * 20, 12, 6, a, '#5a1418', 0.85); ellipse(g, X + Math.cos(a) * 20, Y + Math.sin(a) * 20, 9.5, 4.5, a, '#c89a48', 0.8); }
+        ellipse(g, X + 1.5, Y + 2, 15, 15, 0, '#3a0e14', 0.5); ellipse(g, X, Y, 14, 14, 0, '#c49440'); ellipse(g, X, Y, 9, 9, 0, '#8a6424');
+        blob(g, X - 4, Y - 4, 6, 5, 0, '#ffe8a0', 0.6, 0.4);
+      } else if (kind === 1) {
+        g.save(); g.translate(X, Y); g.rotate(Math.PI / 4);
+        g.fillStyle = '#3a0e14'; g.globalAlpha = 0.5; g.fillRect(-15, -13, 32, 32); g.globalAlpha = 1;
+        g.fillStyle = '#b88a3a'; g.fillRect(-16, -16, 32, 32); g.fillStyle = '#6a1a20'; g.fillRect(-11, -11, 22, 22); g.fillStyle = '#c89a48'; g.fillRect(-5, -5, 10, 10);
+        g.restore();
+        for (let k = 0; k < 4; k++) { const a = k * Math.PI / 2; ellipse(g, X + Math.cos(a) * 28, Y + Math.sin(a) * 28, 5, 5, 0, '#c89a48', 0.85); }
+      } else {
+        for (let k = 0; k < 8; k++) { const a = k * TAU / 8; line(g, [[X, Y], [X + Math.cos(a) * 24, Y + Math.sin(a) * 24]], 3, '#b88a3a', 0.75); ellipse(g, X + Math.cos(a) * 24, Y + Math.sin(a) * 24, 4, 4, 0, '#d8b060', 0.9); }
+        ellipse(g, X, Y, 10, 10, 0, '#5a1418'); ellipse(g, X, Y, 6, 6, 0, '#d8b060');
+      }
+    };
+    let i = 0;
+    for (let y = 0; y < s; y += P / 2) for (let x = (y / (P / 2)) % 2 ? P / 2 : 0; x < s; x += P) { const kind = i++ % 3; wrap(s, x + P / 4, y + P / 4, 40, (X, Y) => med(X, Y, kind)); }
+    // worn traffic paths and sun-faded patches
+    for (let k = 0; k < 6; k++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 120, (X, Y) => blob(g, X, Y, range(rnd, 50, 110), range(rnd, 25, 60), rnd() * 3, '#4a1418', 0.22, 0.05)); }
+    for (let k = 0; k < 4; k++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 100, (X, Y) => blob(g, X, Y, range(rnd, 40, 90), range(rnd, 30, 70), rnd() * 3, '#b06a5a', 0.14, 0.05)); }
+    for (let k = 0; k < 400; k++) ellipse(g, rnd() * s, rnd() * s, 0.9, 0.9, 0, rnd() < 0.5 ? '#a04040' : '#4a1418', 0.25);
     glaze(g, s, s, '#ffd0a0', 0.1, 'soft-light');
-    blurTile(cv, 0.8);
+    blurTile(cv, 0.7);
+  },
+});
+
+register('carpet_border', {
+  family: F, w: 512, h: 64, note: 'the casino carpet border band: gold guard stripes and a running scroll on dark red (tiles along u)',
+  paint(g, s, rnd, H, cv) {
+    const W = 512;
+    g.fillStyle = '#4a1418'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#b88a3a'; g.fillRect(0, 6, W, 5); g.fillRect(0, H - 11, W, 5);
+    g.fillStyle = '#f0d088'; g.globalAlpha = 0.45; g.fillRect(0, 6, W, 1.5); g.fillRect(0, H - 11, W, 1.5); g.globalAlpha = 1;
+    const pts = []; for (let x = -4; x <= W + 4; x += 4) pts.push([x, H / 2 + Math.sin(x / W * TAU * 8) * 9]);
+    line(g, pts.map(([x, y]) => [x + 1, y + 1.5]), 5, '#2a0a0e', 0.5);
+    line(g, pts, 3.5, '#c89a48', 0.85);
+    for (let k = 0; k < 8; k++) { const x = (k + 0.25) * W / 8; ellipse(g, x, H / 2 - 9, 3.5, 3.5, 0, '#d8b060'); ellipse(g, x + W / 16, H / 2 + 9, 3.5, 3.5, 0, '#d8b060'); }
+    for (let k = 0; k < 30; k++) blob(g, rnd() * W, rnd() * H, range(rnd, 10, 30), range(rnd, 5, 12), 0, '#2a0a0e', 0.16, 0.1);
+    glaze(g, W, H, '#ffd0a0', 0.1, 'soft-light');
   },
 });
 
@@ -825,32 +978,31 @@ register('felt_table', {
   },
 });
 
-// a row of goods on shelves (two shelves per tile), tiling across
-function shelfTile(g, W, H, rnd, cv, items) {
-  planks(g, W, rnd, { rows: 4, minL: 200, maxL: 512, colors: ['#4e3424', '#563a28', '#48301f'], gap: 2, gapColor: '#1e1418', grain: 6, galpha: 0.25, knots: 0.2, bevel: 2, light: 0.25 });
-  // planks() fills a W×W square; we only keep the top W×H
-  const shelfY = [H * 0.47, H * 0.97];
-  g.fillStyle = grad(g, 0, 0, 0, H, [[0, '#120c14', 0.45], [0.47, '#120c14', 0], [0.5, '#120c14', 0.45], [0.97, '#120c14', 0]]); g.fillRect(0, 0, W, H);
-  for (const sy of shelfY) {
-    const top = sy - H * 0.47;
-    // goods standing on this shelf
-    let x = rnd() * 20;
-    while (x < W - 10) {
-      const it = pick(rnd, items), w = it.w * range(rnd, 0.85, 1.15), hh = it.h * range(rnd, 0.85, 1.15);
+// Shelves full of goods: one wide strip (W×H, not tiling) with three shelf boards at SHELF_LEVELS
+// (fractions of H from the top). town_build puts 3D shelf boards and uprights at the same heights.
+export const SHELF_LEVELS = [0.3, 0.63, 0.97];
+function shelfStrip(g, W, H, rnd, items) {
+  fill(g, W, H, '#1e1418');
+  for (let i = 0; i < 4; i++) plank(g, 0, i * H / 4 + 1, W, H / 4 - 2, jitter(pick(rnd, ['#4e3424', '#563a28', '#48301f']), rnd, 0.05), rnd, { grain: 8, galpha: 0.25, knots: 0.3, bevel: 2, light: 0.25 });
+  g.fillStyle = grad(g, 0, 0, 0, H, [[0, '#120c14', 0.5], [0.3, '#120c14', 0.05], [0.33, '#120c14', 0.5], [0.63, '#120c14', 0.05], [0.66, '#120c14', 0.5], [0.97, '#120c14', 0.05]]); g.fillRect(0, 0, W, H);
+  let prev = 0;
+  for (const f of SHELF_LEVELS) {
+    const sy = H * f, room = sy - prev - 10;
+    let x = rnd() * 16, last = -1;
+    while (x < W - 12) {
+      let k = Math.floor(rnd() * items.length); if (k === last) k = (k + 1) % items.length; last = k;
+      const it = items[k], sc = Math.min(1, room * 0.86 / it.h), w = it.w * sc * range(rnd, 0.85, 1.15), hh = it.h * sc * range(rnd, 0.85, 1.12);
+      if (x + w > W - 6) break;
       const cx = x + w / 2, by = sy - 6;
-      if (by - hh > top + 4) {
-        for (const dx of (cx - w < 0 ? [0, W] : cx + w > W ? [0, -W] : [0])) {
-          blob(g, cx + dx + w * 0.25, by, w * 0.7, 5, 0, '#120c14', 0.6, 0.3);
-          it.draw(g, cx + dx, by, w, hh, rnd);
-        }
-      }
-      x += w + range(rnd, 2, 14);
+      blob(g, cx + w * 0.25, by, w * 0.7, 5, 0, '#120c14', 0.6, 0.3);
+      it.draw(g, cx, by, w, hh, rnd);
+      x += w + range(rnd, 2, 16) + (rnd() < 0.1 ? 30 : 0);
     }
-    // the shelf board
     g.fillStyle = grad(g, 0, sy - 6, 0, sy + 6, [[0, '#a07048'], [0.4, '#7a5234'], [1, '#3e2a20']]);
     g.fillRect(0, sy - 6, W, 12);
     line(g, [[0, sy - 5.5], [W, sy - 5.5]], 1.4, '#d8a870', 0.7);
     g.fillStyle = grad(g, 0, sy + 6, 0, sy + 18, [[0, '#120c14', 0.55], [1, '#120c14', 0]]); g.fillRect(0, sy + 6, W, Math.min(12, H - sy - 6));
+    prev = sy;
   }
 }
 // goods painters: (g, cx, bottomY, w, h, rnd), lit from the upper left
@@ -947,30 +1099,44 @@ const coil = (g, x, y, w, h) => {
 };
 
 register('shelf_goods', {
-  family: F, w: 512, h: 256, note: 'pawn shop shelves: vases, books, a lute, goblets, a skull, a helm, a CRT, a chest (tiles across)',
+  family: F, w: 1024, h: 256, note: 'pawn shop shelves (one long strip): vases, books, a lute, goblets, skulls, helms, CRTs, chests',
   paint(g, s, rnd, H, cv) {
-    shelfTile(g, 512, H, rnd, cv, [
+    shelfStrip(g, 1024, H, rnd, [
       { w: 34, h: 70, draw: vessel('#4a6a8a') }, { w: 40, h: 62, draw: vessel('#a8603a', 0.45, 0.5) }, { w: 50, h: 60, draw: book },
       { w: 44, h: 96, draw: lute }, { w: 26, h: 44, draw: goblet }, { w: 34, h: 34, draw: skull }, { w: 44, h: 52, draw: helm },
       { w: 66, h: 56, draw: crtBox }, { w: 58, h: 46, draw: chest }, { w: 30, h: 58, draw: vessel('#6a8a5a', 0.3, 0.7) },
+      { w: 30, h: 50, draw: vessel('#c8b8a0', 0.6, 0.5) }, { w: 40, h: 40, draw: vessel('#7a3a5a', 0.4, 0.6) },
     ]);
-    glaze(g, 512, H, '#ffd8a8', 0.12, 'soft-light');
+    glaze(g, 1024, H, '#ffd8a8', 0.12, 'soft-light');
   },
 });
 
 register('store_goods', {
-  family: F, w: 512, h: 256, note: 'general store shelves: jars, sacks, bread, potions, cheese, rope (tiles across)',
+  family: F, w: 1024, h: 256, note: 'general store shelves (one long strip): jars, sacks, bread, potions, cheese, rope',
   paint(g, s, rnd, H, cv) {
-    shelfTile(g, 512, H, rnd, cv, [
+    shelfStrip(g, 1024, H, rnd, [
       { w: 30, h: 48, draw: vessel('#c8b8a0', 0.7, 0.6) }, { w: 46, h: 64, draw: sack('#b09a6e') }, { w: 54, h: 30, draw: loaf },
       { w: 26, h: 46, draw: potion('#b83a2c') }, { w: 26, h: 46, draw: potion('#3a6ab0') }, { w: 26, h: 46, draw: potion('#4a9a3a') },
       { w: 52, h: 34, draw: cheese }, { w: 50, h: 44, draw: coil }, { w: 34, h: 54, draw: vessel('#7a5a3a', 0.4, 0.55) }, { w: 44, h: 58, draw: sack('#9a8458') },
+      { w: 28, h: 40, draw: vessel('#5a7a8a', 0.6, 0.5) }, { w: 26, h: 46, draw: potion('#c8a030') },
     ]);
-    glaze(g, 512, H, '#ffd8a8', 0.12, 'soft-light');
+    glaze(g, 1024, H, '#ffd8a8', 0.12, 'soft-light');
   },
 });
 
 // ---- pieces ------------------------------------------------------------------------------------
+
+// Wear over a painted badge: a darker vignette, a soft lit top-left, scratches and worn edges.
+function wear(g, W, H, rnd, { edge = '#2a1a14', lit = '#fff0c8', scratches = 24 } = {}) {
+  const vg = g.createRadialGradient(W * 0.38, H * 0.32, Math.min(W, H) * 0.15, W * 0.5, H * 0.5, Math.max(W, H) * 0.75);
+  vg.addColorStop(0, rgba(lit, 0.12)); vg.addColorStop(0.55, rgba(lit, 0)); vg.addColorStop(1, rgba(edge, 0.42));
+  g.fillStyle = vg; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < scratches; i++) {
+    const x = rnd() * W, y = rnd() * H, a = range(rnd, -0.6, 0.6) + (rnd() < 0.5 ? 0 : Math.PI / 2), L = range(rnd, 6, 26);
+    line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], range(rnd, 0.6, 1.2), rnd() < 0.6 ? '#f0e4c8' : edge, 0.3);
+  }
+  chips(g, 0, 0, W, H, rnd, Math.round((W + H) / 18), '#5a4632');
+}
 
 register('door_plank', {
   family: F, w: 256, h: 512, note: 'plank door with iron straps, studs and a ring pull',
@@ -1075,6 +1241,7 @@ register('slot_face', {
     g.fillStyle = grad(g, 0, 420, 0, 480, [[0, '#2a1018'], [1, '#6a4a2a']]); g.beginPath(); g.roundRect(36, 420, W - 72, 56, 14); g.fill();
     for (let k = 0; k < 7; k++) ellipse(g, 60 + rnd() * (W - 120), 455 + rnd() * 12, 10, 4, 0, '#e0b048');
     for (const [x, y] of [[24, 24], [W - 24, 24], [24, H - 24], [W - 24, H - 24], [24, H / 2 + 60], [W - 24, H / 2 + 60]]) rivet(g, x, y, 5, '#c8a050');
+    wear(g, W, H, rnd);
     glaze(g, W, H, '#ffe0b0', 0.1, 'soft-light');
   },
 });
@@ -1111,6 +1278,7 @@ register('flip_face', {
     g.fillStyle = '#100808'; g.fillText('DOUBLE', s / 2 + 2, py - 14 + 3); g.fillStyle = '#f0c860'; g.fillText('DOUBLE', s / 2, py - 14);
     g.font = `bold 24px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`; g.fillStyle = '#e0b858'; g.fillText('OR NOTHING', s / 2, py + 22); g.restore();
     for (const x of [58, s - 58]) rivet(g, x, py, 6, '#d8b060');
+    wear(g, s, s, rnd, { scratches: 40 });
     glaze(g, s, s, '#ffe0b0', 0.1, 'soft-light');
   },
 });
@@ -1125,25 +1293,35 @@ register('coin_face', {
     for (let k = 0; k < 28; k++) { const a = k / 28 * TAU; ellipse(g, c + Math.cos(a) * (c - 4), c + Math.sin(a) * (c - 4), 2, 2, 0, '#fff0b0', 0.8); }
     g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 64px Georgia, 'Liberation Serif', serif`;
     g.fillStyle = '#6a4818'; g.fillText('$', c + 2, c + 4); g.fillStyle = '#ffe890'; g.fillText('$', c, c + 1); g.restore();
+    for (let i = 0; i < 14; i++) { const x = rnd() * s, y = rnd() * s, a = rnd() * 3; line(g, [[x, y], [x + Math.cos(a) * 9, y + Math.sin(a) * 9]], 0.8, rnd() < 0.5 ? '#fff4c0' : '#7a5418', 0.4); }
+    const vg = g.createRadialGradient(c - 18, c - 18, 8, c, c, c); vg.addColorStop(0, 'rgba(255,248,210,0.15)'); vg.addColorStop(0.6, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(60,36,10,0.4)');
+    g.fillStyle = vg; g.fillRect(0, 0, s, s);
   },
 });
 
 function padRug(g, s, rnd, { field, border, text, fg }) {
   const c = s / 2;
-  fill(g, s, s, border);
-  const ring = (r, col) => { ellipse(g, c, c, r, r, 0, col); };
-  ring(c, '#d8c090'); ring(c - 8, border); ring(c - 22, '#d8b868'); ring(c - 28, field);
-  for (let k = 0; k < 24; k++) { const a = k / 24 * TAU; ellipse(g, c + Math.cos(a) * (c - 15), c + Math.sin(a) * (c - 15), 4, 4, 0, '#e8d090'); }
-  for (let i = 0; i < 30; i++) blob(g, c + (rnd() - 0.5) * s * 0.6, c + (rnd() - 0.5) * s * 0.6, range(rnd, 10, 30), range(rnd, 8, 20), 0, rnd() < 0.5 ? lightOf(field, 0.2) : shadowOf(field, 0.2), 0.25, 0.2);
+  g.clearRect(0, 0, s, s);
+  // a frayed fringe all round, then the border bands, the field, a worn middle
+  for (let k = 0; k < 200; k++) { const a = k / 200 * TAU + rnd() * 0.02, r0 = c - 14, r1 = c - range(rnd, 1, 5); line(g, [[c + Math.cos(a) * r0, c + Math.sin(a) * r0], [c + Math.cos(a) * r1 + (rnd() - 0.5) * 2, c + Math.sin(a) * r1 + (rnd() - 0.5) * 2]], 1.6, rnd() < 0.7 ? '#d8c8a0' : '#b8a880', 0.95); }
+  const ring = (r, col) => ellipse(g, c, c, r, r, 0, col);
+  ring(c - 12, '#d8c090'); ring(c - 18, border); ring(c - 30, '#b89858'); ring(c - 35, field);
+  for (let k = 0; k < 24; k++) { const a = k / 24 * TAU; ellipse(g, c + Math.cos(a) * (c - 24), c + Math.sin(a) * (c - 24), 3.6, 3.6, 0, '#d8c080'); }
+  for (let i = 0; i < 30; i++) blob(g, c + (rnd() - 0.5) * s * 0.55, c + (rnd() - 0.5) * s * 0.55, range(rnd, 10, 30), range(rnd, 8, 20), 0, rnd() < 0.5 ? lightOf(field, 0.18) : shadowOf(field, 0.2), 0.25, 0.2);
+  blob(g, c + 6, c + 10, s * 0.24, s * 0.18, 0.4, shadowOf(field, 0.35), 0.25, 0.1);   // trodden
   g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
-  let size = 70; g.font = `bold ${size}px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`;
-  while (g.measureText(text).width > s * 0.66) { size -= 3; g.font = `bold ${size}px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`; }
-  g.fillStyle = rgba(INK, 0.55); g.fillText(text, c + 3, c + 5);
+  let size = 66; g.font = `bold ${size}px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`;
+  while (g.measureText(text).width > s * 0.62) { size -= 3; g.font = `bold ${size}px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`; }
+  g.fillStyle = rgba(INK, 0.5); g.fillText(text, c + 2.5, c + 4.5);
   g.fillStyle = fg; g.fillText(text, c, c + 2); g.restore();
-  for (let y = 0; y < s; y += 3) line(g, [[0, y], [s, y]], 0.7, '#2a2030', 0.05);
+  // woven rows, a worn bald patch and the edge darkened with grime
+  g.save(); g.globalCompositeOperation = 'source-atop';
+  for (let y = 0; y < s; y += 3) line(g, [[0, y], [s, y]], 0.8, '#2a2030', 0.07);
+  for (let i = 0; i < 18; i++) blob(g, rnd() * s, rnd() * s, range(rnd, 6, 18), range(rnd, 4, 10), 0, '#c8b890', 0.16, 0.3);
+  g.restore();
 }
-register('pad_hit', { family: F, size: 256, note: 'round rug: HIT', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#8e2e28', border: '#3a2430', text: 'HIT', fg: '#f4e2b4' }); } });
-register('pad_stand', { family: F, size: 256, note: 'round rug: STAND', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#2e4a7a', border: '#2a2438', text: 'STAND', fg: '#f4e2b4' }); } });
+register('pad_hit', { family: F, size: 256, alpha: true, note: 'round woven rug: HIT, worn and fringed', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#8a3428', border: '#3a2430', text: 'HIT', fg: '#f0dcb0' }); } });
+register('pad_stand', { family: F, size: 256, alpha: true, note: 'round woven rug: STAND, faded blue, worn and fringed', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#34507a', border: '#2a2438', text: 'STAND', fg: '#ecdcb4' }); } });
 
 register('banner_red', {
   family: F, w: 128, h: 256, alpha: true, note: 'hanging banner: red cloth, gold border, coin emblem, swallowtail',
@@ -1227,11 +1405,14 @@ register('flowerbox', {
 });
 
 register('embers', {
-  family: F, size: 128, note: 'brazier coals: dark lumps with glowing orange cracks (emissive)',
+  family: F, size: 128, note: 'brazier coals: dark lumps packed together, ash on their tops, glowing orange in the cracks between (emissive; tiles)',
   paint(g, s, rnd) {
     fill(g, s, s, '#ff8a30');
-    for (let i = 0; i < 40; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 6, 14); wrap(s, x, y, r, (X, Y) => { ellipse(g, X, Y, r, r * 0.8, rnd() * 3, '#3a2a26'); blob(g, X - r * 0.3, Y - r * 0.3, r * 0.5, r * 0.4, 0, '#6a4a3a', 0.6, 0.4); }); }
-    for (let i = 0; i < 30; i++) blob(g, rnd() * s, rnd() * s, range(rnd, 4, 10), range(rnd, 3, 8), 0, pick(rnd, ['#ffd070', '#ff9a40', '#fff0b0']), 0.6, 0.4);
+    paintCells(g, worley(s, 5, rnd, 0.9), { colors: ['#2a1a14', '#3a241a', '#22160f', '#30201a'], grout: '#ff8a30', groutW: 0.9, bevel: 5, dome: 0.3, light: 0.5, varAmt: 0.1, rnd });
+    // ash greying the tops of some coals, hot spots glowing through others
+    for (let i = 0; i < 14; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 12, (X, Y) => blob(g, X, Y, range(rnd, 4, 8), range(rnd, 2, 5), 0, '#6a6058', 0.5, 0.3)); }
+    for (let i = 0; i < 10; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 10, (X, Y) => blob(g, X, Y, range(rnd, 2, 5), range(rnd, 1.5, 4), 0, '#ff6a20', 0.55, 0.3)); }
+    for (let i = 0; i < 8; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 8, (X, Y) => blob(g, X, Y, range(rnd, 1.5, 3), range(rnd, 1, 2.5), 0, '#fff0b0', 0.7, 0.4)); }
   },
 });
 
@@ -1241,6 +1422,205 @@ register('glow_soft', {
     const gr = g.createRadialGradient(s / 2, s / 2, 0, s / 2, s / 2, s / 2);
     gr.addColorStop(0, 'rgba(255,244,214,1)'); gr.addColorStop(0.18, 'rgba(255,220,150,0.75)'); gr.addColorStop(0.5, 'rgba(255,180,90,0.22)'); gr.addColorStop(1, 'rgba(255,160,80,0)');
     g.fillStyle = gr; g.fillRect(0, 0, s, s);
+  },
+});
+
+// ---- frontier, desert, farm pieces ---------------------------------------------------------------
+
+register('board_rough', {
+  family: F, size: 256, note: 'a single rough frontier board: orange-brown, sun-grayed, grain along v (false fronts)',
+  paint(g, s, rnd, h, cv) {
+    grainTile(g, s, rnd, { base: '#8a5a36', dark: ['#5a3a22', '#4e3220', '#3a2418'], lite: ['#c09a6a', '#b08a5c'], lines: 40, splits: 6, knots: 3, alpha: 0.45 });
+    mottle(g, s, rnd, { colors: ['#a49c8c', '#9a9284', '#b0a08a'], count: 18, rmin: 10, rmax: 40, alpha: 0.22, hard: 0.15, stretch: 3, rot: Math.PI / 2 });
+    glaze(g, s, s, '#ffd8a0', 0.1, 'soft-light');
+    blurTile(cv, 0.4);
+  },
+});
+
+register('bone', {
+  family: F, size: 128, note: 'ivory bone and tusk: cream with soft growth rings and a dirty base',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#e8dcc0');
+    for (let y = 0; y < s; y += range(rnd, 6, 14)) { line(g, [[0, y], [s, y + range(rnd, -2, 2)]], range(rnd, 1, 3), '#c8b898', 0.35); }
+    mottle(g, s, rnd, { colors: ['#f6eedc', '#d0c0a0', '#bca888'], count: 18, rmin: 6, rmax: 24, alpha: 0.35, hard: 0.15 });
+    blurTile(cv, 0.6);
+  },
+});
+
+register('rope', {
+  family: F, size: 128, note: 'twisted hemp rope: diagonal strands, lit and shaded (tiles)',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#7a6440');
+    const P = 16;
+    for (let k = -2 * s; k < 2 * s; k += P) for (const dx of [0]) {
+      const a = [k + dx, -s], b = [k + dx + s * 1.5, 2 * s];
+      line(g, [a, b], P * 0.95, '#b49c68', 1, 'butt');
+      line(g, [[a[0] - P * 0.22, a[1]], [b[0] - P * 0.22, b[1]]], P * 0.3, '#d8c08a', 0.8, 'butt');
+      line(g, [[a[0] + P * 0.36, a[1]], [b[0] + P * 0.36, b[1]]], P * 0.2, '#5a4428', 0.7, 'butt');
+    }
+    for (let i = 0; i < 60; i++) { const x = rnd() * s, y = rnd() * s; line(g, [[x, y], [x + 5, y + 9]], 0.8, rnd() < 0.5 ? '#e8d8a8' : '#5a4428', 0.4); }
+    blurTile(cv, 0.4);
+  },
+});
+
+register('burlap', {
+  family: F, size: 128, note: 'sack cloth: coarse beige weave, a few stains (tiles)',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#b8a078');
+    for (let y = 0; y < s; y += 4) line(g, [[0, y], [s, y]], 2, rnd() < 0.5 ? '#c8b088' : '#a08a62', 0.6);
+    for (let x = 0; x < s; x += 4) line(g, [[x, 0], [x, s]], 1.6, rnd() < 0.5 ? '#c4ac84' : '#9a845c', 0.45);
+    mottle(g, s, rnd, { colors: ['#8a7450', '#d0bc94'], count: 12, rmin: 8, rmax: 26, alpha: 0.25, hard: 0.1 });
+    blurTile(cv, 0.5);
+  },
+});
+
+register('latillas', {
+  family: F, size: 256, note: 'adobe ceiling: thin peeled sticks laid side by side across the vigas (along u)',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#3a2a1e');
+    let y = 0;
+    while (y < s - 4) {
+      const hh = Math.min(s - y, range(rnd, 9, 15)), c = jitter(pick(rnd, ['#b89470', '#a8845e', '#c4a07a', '#9a7856']), rnd, 0.06);
+      g.fillStyle = grad(g, 0, y, 0, y + hh, [[0, lightOf(c, 0.35)], [0.4, c], [1, shadowOf(c, 0.5)]]);
+      g.beginPath(); g.roundRect(0, y + 0.8, s, hh - 1.6, hh / 2); g.fill();
+      for (let k = 0; k < 3; k++) { const x = rnd() * s; wrap(s, x, y + hh / 2, 40, (X, Y) => blob(g, X, Y, range(rnd, 10, 40), hh * 0.25, 0, '#6a4a30', 0.3, 0.3)); }
+      y += hh;
+    }
+    glaze(g, s, s, '#ffd8a8', 0.1, 'soft-light');
+    blurTile(cv, 0.4);
+  },
+});
+
+register('banner_hide', {
+  family: F, w: 128, h: 256, alpha: true, note: 'a rust-red hide banner with painted tribal marks and a ragged bottom (alpha)',
+  paint(g, s, rnd, H) {
+    const W = 128;
+    const pts = [[4, 0], [W - 4, 0], [W - 8 + (rnd() - 0.5) * 6, H * 0.5], [W - 2, H * 0.78]];
+    for (let k = 0; k <= 6; k++) pts.push([W - 4 - k * (W - 8) / 6, H * (0.86 + (k % 2 ? 0.1 : 0) + (rnd() - 0.5) * 0.06)]);
+    pts.push([2, H * 0.78], [8 + (rnd() - 0.5) * 6, H * 0.5]);
+    clipped(g, () => polyPath(g, pts), () => {
+      g.fillStyle = grad(g, 0, 0, W, 0, [[0, '#a8502e'], [0.5, '#8e3e22'], [1, '#6a2c18']]); g.fillRect(0, 0, W, H);
+      mottle(g, W, rnd, { colors: ['#b45a34', '#6a2a16', '#9a4426'], count: 26, rmin: 8, rmax: 30, alpha: 0.35, hard: 0.15 });
+      g.save(); g.lineCap = 'round'; g.strokeStyle = '#e8d4a8'; g.lineWidth = 6; g.globalAlpha = 0.85;
+      g.beginPath(); g.moveTo(W * 0.25, H * 0.2); g.lineTo(W * 0.5, H * 0.32); g.lineTo(W * 0.75, H * 0.2); g.stroke();
+      g.beginPath(); g.arc(W / 2, H * 0.48, 18, 0, TAU); g.stroke();
+      g.beginPath(); g.moveTo(W * 0.5, H * 0.56); g.lineTo(W * 0.5, H * 0.72); g.stroke();
+      for (const sx of [-1, 1]) { g.beginPath(); g.moveTo(W / 2 + sx * 30, H * 0.6); g.lineTo(W / 2 + sx * 40, H * 0.7); g.stroke(); }
+      g.fillStyle = '#2a1a14'; g.beginPath(); g.arc(W / 2, H * 0.48, 7, 0, TAU); g.fill();
+      g.restore();
+      for (let k = 0; k < 6; k++) blob(g, rnd() * W, rnd() * H, range(rnd, 6, 16), range(rnd, 4, 10), 0, '#3a1a10', 0.25, 0.3);
+    });
+    g.save(); g.lineWidth = 3; g.strokeStyle = rgba('#3a1a10', 0.7); polyPath(g, pts); g.stroke(); g.restore();
+    for (let x = 10; x < W - 6; x += 16) { ellipse(g, x, 7, 3, 3, 0, '#2a1a14'); line(g, [[x, 7], [x + 2, -2]], 2, '#c8b088', 0.9); }
+  },
+});
+
+// a rug shape on a transparent ground; shape(g) paints it
+function rugCanvas(g, s, rnd, shape) { g.clearRect(0, 0, s, s); shape(); }
+register('rug_bear', {
+  family: F, size: 256, alpha: true, note: 'a bear-skin rug seen from above: brown fur, four paws, a head (alpha)',
+  paint(g, s, rnd) {
+    rugCanvas(g, s, rnd, () => {
+      const c = s / 2, fur = ['#5a3a24', '#6a4630', '#4a2e1c', '#7a5438'];
+      const body = () => { g.beginPath(); g.ellipse(c, c + 8, s * 0.26, s * 0.34, 0, 0, TAU); };
+      for (const [x, y, a] of [[-1, -1, -0.7], [1, -1, 0.7], [-1, 1, 0.6], [1, 1, -0.6]]) {
+        g.save(); g.translate(c + x * s * 0.22, c + 8 + y * s * 0.2); g.rotate(a);
+        g.fillStyle = '#4a2e1c'; g.beginPath(); g.ellipse(x * s * 0.1, 0, s * 0.14, s * 0.06, 0, 0, TAU); g.fill();
+        for (let k = 0; k < 4; k++) ellipse(g, x * s * 0.22, (k - 1.5) * 5, 3, 2, 0, '#e8dcc0');
+        g.restore();
+      }
+      g.fillStyle = '#5a3a24'; body(); g.fill();
+      ellipse(g, c, c - s * 0.33, s * 0.11, s * 0.1, 0, '#5a3a24');
+      ellipse(g, c, c - s * 0.41, s * 0.05, s * 0.045, 0, '#7a5a40');
+      ellipse(g, c, c - s * 0.44, 4, 3, 0, '#1e1410');
+      for (const x of [-1, 1]) { ellipse(g, c + x * s * 0.08, c - s * 0.38, 7, 6, 0, '#4a2e1c'); ellipse(g, c + x * s * 0.045, c - s * 0.35, 2.5, 2.5, 0, '#1e1410'); }
+      g.save(); g.globalCompositeOperation = 'source-atop';
+      for (let i = 0; i < 900; i++) { const x = rnd() * s, y = rnd() * s, a = Math.atan2(y - c, x - c); line(g, [[x, y], [x + Math.cos(a) * 6, y + Math.sin(a) * 6]], 1.4, pick(rnd, fur), 0.5); }
+      blob(g, c - 20, c - 10, s * 0.15, s * 0.22, 0, '#8a6448', 0.25, 0.2);
+      g.restore();
+    });
+  },
+});
+
+register('rug_hide', {
+  family: F, size: 256, alpha: true, note: 'a stretched hide rug with lacing holes and a painted ring (alpha)',
+  paint(g, s, rnd) {
+    rugCanvas(g, s, rnd, () => {
+      const c = s / 2, pts = [];
+      for (let k = 0; k < 16; k++) { const a = k / 16 * TAU, r = (k % 4 === 0 ? 0.48 : k % 2 ? 0.38 : 0.42) * s * range(rnd, 0.92, 1.05); pts.push([c + Math.cos(a) * r, c + Math.sin(a) * r * 0.82]); }
+      clipped(g, () => polyPath(g, pts), () => {
+        const rg = g.createRadialGradient(c - 20, c - 24, 6, c, c, s * 0.5); rg.addColorStop(0, '#d8b88c'); rg.addColorStop(0.6, '#b08a5c'); rg.addColorStop(1, '#7a5a3a');
+        g.fillStyle = rg; g.fillRect(0, 0, s, s);
+        mottle(g, s, rnd, { colors: ['#c8a478', '#8a6644', '#e0c49c'], count: 30, rmin: 8, rmax: 30, alpha: 0.3, hard: 0.15 });
+        g.save(); g.strokeStyle = '#7a3020'; g.lineWidth = 7; g.globalAlpha = 0.75; g.beginPath(); g.arc(c, c, s * 0.17, 0, TAU); g.stroke();
+        g.lineWidth = 4; for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; g.beginPath(); g.moveTo(c + Math.cos(a) * s * 0.21, c + Math.sin(a) * s * 0.21); g.lineTo(c + Math.cos(a) * s * 0.28, c + Math.sin(a) * s * 0.28); g.stroke(); } g.restore();
+      });
+      g.save(); g.lineWidth = 3; g.strokeStyle = rgba('#4a3020', 0.8); polyPath(g, pts); g.stroke(); g.restore();
+      for (const [x, y] of pts) { ellipse(g, x + (c - x) * 0.06, y + (c - y) * 0.06, 3, 3, 0, '#2a1a14'); }
+    });
+  },
+});
+
+register('rug_braid', {
+  family: F, size: 256, alpha: true, note: 'an oval braided rag rug in faded farmhouse colours (alpha)',
+  paint(g, s, rnd) {
+    rugCanvas(g, s, rnd, () => {
+      const c = s / 2, cols = ['#8a3a2c', '#c8a868', '#5a6a4a', '#a87850', '#e0d0b0', '#6a4a5a'];
+      for (let r = 0; r < 14; r++) {
+        const rx = s * 0.47 - r * 8, ry = s * 0.36 - r * 8 * 0.77;
+        if (ry < 4) break;
+        const col = cols[(r + Math.floor(rnd() * 2)) % cols.length];
+        g.save(); g.lineWidth = 8.5; g.strokeStyle = col; g.beginPath(); g.ellipse(c, c, rx, ry, 0, 0, TAU); g.stroke();
+        g.setLineDash([5, 4]); g.lineWidth = 3; g.strokeStyle = rgba(lightOf(col, 0.4), 0.5); g.beginPath(); g.ellipse(c, c, rx - 1.5, ry - 1.5, 0, 0, TAU); g.stroke(); g.restore();
+      }
+      g.save(); g.globalCompositeOperation = 'source-atop';
+      mottle(g, s, rnd, { colors: ['#2a2030', '#f0e4c8'], count: 20, rmin: 10, rmax: 40, alpha: 0.12, hard: 0.1 });
+      g.restore();
+    });
+  },
+});
+
+register('rug_desert', {
+  family: F, size: 256, alpha: true, note: 'a striped desert kilim with stepped diamonds and fringed ends (alpha)',
+  paint(g, s, rnd) {
+    rugCanvas(g, s, rnd, () => {
+      const y0 = 16, y1 = s - 16;
+      g.fillStyle = '#b8603a'; g.fillRect(8, y0, s - 16, y1 - y0);
+      const bands = ['#e0c890', '#3a5a6a', '#8a2a20', '#e0c890', '#2a2030'];
+      for (let k = 0; k < 10; k++) { g.fillStyle = bands[k % bands.length]; g.fillRect(8, y0 + 6 + k * 23, s - 16, 6); }
+      for (let k = 0; k < 3; k++) {
+        const cx = s / 2, cy = y0 + 40 + k * 75;
+        for (let st = 4; st >= 1; st--) { g.fillStyle = st % 2 ? '#e8d4a0' : '#2a3a4a'; g.beginPath(); g.moveTo(cx, cy - st * 9); g.lineTo(cx + st * 14, cy); g.lineTo(cx, cy + st * 9); g.lineTo(cx - st * 14, cy); g.closePath(); g.fill(); }
+      }
+      for (let x = 10; x < s - 10; x += 5) { line(g, [[x, 2], [x + (rnd() - 0.5) * 3, y0]], 2, '#e0d4b0'); line(g, [[x, s - 2], [x + (rnd() - 0.5) * 3, y1]], 2, '#e0d4b0'); }
+      g.save(); g.globalCompositeOperation = 'source-atop';
+      for (let y = y0; y < y1; y += 3) line(g, [[0, y], [s, y]], 0.7, '#2a2030', 0.08);
+      mottle(g, s, rnd, { colors: ['#f0e0c0', '#5a2a1a'], count: 20, rmin: 10, rmax: 40, alpha: 0.12, hard: 0.1 });
+      g.restore();
+    });
+  },
+});
+
+register('sail_canvas', {
+  family: F, w: 128, h: 512, alpha: true, note: 'windmill sail cloth: weathered cream canvas, seams, patches, dirt runs, frayed edges (alpha)',
+  paint(g, s, rnd, H) {
+    const W = 128;
+    g.clearRect(0, 0, W, H);
+    const pts = [[3, 2]];
+    for (let y = 2; y <= H - 2; y += 16) pts.push([W - 3 - rnd() * 4, y]);
+    for (let y = H - 2; y >= 2; y -= 16) pts.push([3 + rnd() * 4, y]);
+    clipped(g, () => polyPath(g, pts), () => {
+      g.fillStyle = grad(g, 0, 0, W, 0, [[0, '#e8dcc0'], [0.5, '#d6c9aa'], [1, '#b8a888']]); g.fillRect(0, 0, W, H);
+      mottle(g, W, rnd, { colors: ['#e8dec4', '#c4b494', '#cfc2a2'], count: 30, rmin: 10, rmax: 40, alpha: 0.35, hard: 0.1 });
+      for (let k = 1; k < 4; k++) { const y = H * k / 4; line(g, [[0, y], [W, y]], 3, '#9a8a6a', 0.55); line(g, [[0, y + 3], [W, y + 3]], 1, '#f0e8d0', 0.4); }
+      for (let k = 0; k < 3; k++) {
+        const x = range(rnd, 14, W - 50), y = range(rnd, 20, H - 70), w = range(rnd, 26, 44), h = range(rnd, 30, 60), c = pick(rnd, ['#c8b48c', '#b8a07a', '#d8ccb0']);
+        g.fillStyle = c; g.fillRect(x, y, w, h);
+        g.save(); g.setLineDash([3, 3]); g.strokeStyle = '#6a5a40'; g.lineWidth = 1.2; g.strokeRect(x + 2, y + 2, w - 4, h - 4); g.restore();
+      }
+      streaks(g, W, rnd, { colors: ['#8a7a5a', '#7a6a4a'], count: 14, len: [40, 160], width: [3, 8], angle: Math.PI, wobble: 0.05, alpha: 0.15 });
+      g.fillStyle = grad(g, 0, 0, W, 0, [[0, INK, 0.25], [0.1, INK, 0], [0.9, INK, 0], [1, INK, 0.3]]); g.fillRect(0, 0, W, H);
+    });
   },
 });
 
@@ -1257,6 +1637,7 @@ function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#
   const tot = weights.reduce((a, b) => a + b, 0);
   let yy = y;
   g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
+  let size0 = 0;
   lines.forEach((ln, i) => {
     const lh = h * weights[i] / tot;
     let size = Math.floor(lh * 0.86);
@@ -1264,11 +1645,37 @@ function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#
     g.font = font();
     g.letterSpacing = `${Math.round(size * track)}px`;
     while (g.measureText(ln).width > w * 0.93 && size > 8) { size -= 1; g.font = font(); g.letterSpacing = `${Math.round(size * track)}px`; }
+    if (i === 0) size0 = size;
+    else if (size < size0 * 0.55) {
+      // keep the second line at least 55% of the first: squeeze it sideways instead of shrinking it
+      const want = Math.floor(size0 * 0.55), wNow = g.measureText(ln).width;
+      size = want; g.font = font(); g.letterSpacing = `${Math.round(size * track * 0.5)}px`;
+      const k = Math.min(1, w * 0.95 / g.measureText(ln).width);
+      if (k < 1) { g.save(); g.translate(x + w / 2, 0); g.scale(k, 1); g.translate(-(x + w / 2), 0); g.__sq = true; }
+    }
     const cy = yy + lh / 2 + size * 0.04, cx = x + w / 2, o = Math.max(1.5, size * 0.05);
     if (carved) {
-      g.fillStyle = rgba(lit, 0.5); g.fillText(ln, cx + o * 0.6, cy + o * 0.8);
-      g.fillStyle = shadowOf(fg, 0.1); g.fillText(ln, cx, cy);
-      g.fillStyle = rgba(INK, 0.55); g.fillText(ln, cx - o * 0.25, cy - o * 0.35);
+      // cut into the wood, then filled with paint: a lit lower-right lip, the dark cut, the paint
+      // inside it, and the cut's shadow left along the upper-left inner edge
+      g.lineJoin = 'round';
+      if (i > 0) { g.lineWidth = Math.max(1, size * 0.05); }
+      g.fillStyle = rgba('#f0d8a8', 0.45); g.fillText(ln, cx + o * 0.55, cy + o * 0.7);
+      g.fillStyle = '#2a1a12'; g.fillText(ln, cx, cy);
+      if (i > 0) { g.strokeStyle = '#2a1a12'; g.strokeText(ln, cx, cy); }
+      const tw = Math.ceil(g.measureText(ln).width + size), th = Math.ceil(size * 1.5);
+      const setup = gg => { gg.font = g.font; gg.letterSpacing = g.letterSpacing; gg.textAlign = 'center'; gg.textBaseline = 'middle'; gg.lineJoin = 'round'; gg.lineWidth = g.lineWidth; };
+      const cv2 = makeCanvas(tw, th), g2 = cv2.getContext('2d'), cv3 = makeCanvas(tw, th), g3 = cv3.getContext('2d');
+      setup(g2); setup(g3);
+      g2.fillStyle = '#000'; g2.fillText(ln, tw / 2, th / 2);
+      if (i > 0) { g2.strokeStyle = '#000'; g2.strokeText(ln, tw / 2, th / 2); }
+      // the paint: the same glyphs nudged down-right, kept only inside the cut, so the cut's
+      // dark wall shows along the upper-left inner edge
+      g3.fillStyle = gold ? grad(g3, 0, th * 0.2, 0, th * 0.8, [[0, '#fff0b0'], [0.5, '#e8c060'], [1, '#b88a30']]) : fg;
+      g3.fillText(ln, tw / 2 + o * 0.45, th / 2 + o * 0.55);
+      if (i > 0) { g3.strokeStyle = g3.fillStyle; g3.strokeText(ln, tw / 2 + o * 0.45, th / 2 + o * 0.55); }
+      g2.globalCompositeOperation = 'source-in';
+      g2.drawImage(cv3, 0, 0);
+      g.drawImage(cv2, cx - tw / 2, cy - th / 2);
     } else {
       g.save(); g.filter = `blur(${Math.max(1, o * 0.6)}px)`; g.fillStyle = rgba(shadow, 0.6); g.fillText(ln, cx + o, cy + o * 1.3); g.restore();
       if (gold) {
@@ -1278,8 +1685,10 @@ function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#
       } else {
         g.fillStyle = rgba(lit, 0.45); g.fillText(ln, cx - o * 0.4, cy - o * 0.4);
         g.fillStyle = fg; g.fillText(ln, cx, cy);
+        if (i > 0) { g.lineWidth = Math.max(1, size * 0.045); g.strokeStyle = fg; g.lineJoin = 'round'; g.strokeText(ln, cx, cy); }
       }
     }
+    if (g.__sq) { g.restore(); g.__sq = false; }
     yy += lh;
   });
   g.restore();
@@ -1294,6 +1703,17 @@ function chips(g, x, y, w, h, rnd, n, wood = '#7a5434') {
     ellipse(g, cx, cy, r * range(rnd, 1, 2.2), r, rnd() * 3, wood, 0.9);
     blob(g, cx + r * 0.3, cy + r * 0.4, r, r * 0.5, 0, INK, 0.25, 0.4);
   }
+}
+
+// The roadside billboard palette: oxblood, mustard, teal or cream, by the hue asked for.
+function billboardPaint(bg) {
+  if (!bg || bg.startsWith('rgba')) return '#7a3028';
+  const { h, s, l } = hsl(bg);
+  if (l > 0.82 || s < 0.15) return '#e6d6b0';
+  const deg = h * 360;
+  if (deg < 22 || deg >= 290) return '#7a3028';
+  if (deg < 70) return '#b88a34';
+  return '#3f6e6a';
 }
 
 // Paint a sign face. style: 'board' (painted panel on a planked board), 'carved' (letters cut into
@@ -1339,7 +1759,7 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
   if (style === 'billboard') {
     const n = Math.max(3, Math.round(h / 60));
     boards(n, wood, 0.6);
-    const paint = muteColor(bg, { sMax: 0.48, lMin: 0.3, lMax: 0.66 });
+    const paint = billboardPaint(bg);
     const bd = m * 0.07;
     g.save(); g.globalAlpha = 0.92;
     g.fillStyle = mix(paint, '#e8d8b0', 0.55); g.fillRect(bd * 0.5, bd * 0.5, w - bd, h - bd);
@@ -1348,20 +1768,21 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
     for (let i = 0; i < 40; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 20, 70), range(rnd, 10, 40), 0, rnd() < 0.5 ? lightOf(paint, 0.25) : shadowOf(paint, 0.25), 0.18, 0.15);
     for (let i = 0; i < n; i++) { const y = i * h / n; line(g, [[0, y], [w, y]], 2.4, '#1e1418', 0.7); line(g, [[0, y + 2.5], [w, y + 2.5]], 1.4, '#fff0d0', 0.18); }
     chips(g, 0, 0, w, h, rnd, Math.round(w * h / 4000));
-    signText(g, lines, bd * 2.2, bd * 1.6, w - bd * 4.4, h - bd * 3.2, { fg: fgCol(fg), track: 0.05 });
+    signText(g, lines, bd * 2.2, bd * 1.6, w - bd * 4.4, h - bd * 3.2, { fg: paint === '#e6d6b0' ? '#5a2a20' : '#f2e2b8', track: 0.05 });
+    chips(g, bd, bd, w - 2 * bd, h - 2 * bd, rnd, Math.round(w * h / 9000), '#8a6a4a');
     streaks(g, Math.max(w, h), rnd, { colors: ['#5a4030'], count: 12, len: [20, 80], width: [2, 6], angle: Math.PI, alpha: 0.12 });
     glaze(g, w, h, '#ffe0b0', 0.1, 'soft-light');
     return cv;
   }
   // 'board' and 'carved': a planked board with a pegged frame
-  boards(Math.max(2, Math.round(h / 85)));
+  boards(Math.max(2, Math.round(h / 85)), style === 'carved' ? ['#7a5a3c', '#86643f', '#8a6844', '#7e5e40'] : wood, style === 'carved' ? 0.35 : 0.2);
   const fr = m * 0.1;
   for (const [x, y, ww, hh, v] of [[0, 0, w, fr, false], [0, h - fr, w, fr, false], [0, 0, fr, h, true], [w - fr, 0, fr, h, true]]) plank(g, x, y, ww, hh, '#5a3a24', rnd, { vertical: v, grain: 6, bevel: 3, light: 0.5 });
   g.fillStyle = grad(g, 0, fr, 0, fr + 10, [[0, INK, 0.5], [1, INK, 0]]); g.fillRect(fr, fr, w - 2 * fr, 10);
   g.fillStyle = grad(g, fr, 0, fr + 8, 0, [[0, INK, 0.4], [1, INK, 0]]); g.fillRect(fr, fr, 8, h - 2 * fr);
   for (const [x, y] of [[fr / 2, fr / 2], [w - fr / 2, fr / 2], [fr / 2, h - fr / 2], [w - fr / 2, h - fr / 2]]) nailHead(g, x, y, Math.max(2.5, fr * 0.16), '#4a4448');
   if (style === 'carved') {
-    signText(g, lines, fr * 1.3, fr * 1.1, w - fr * 2.6, h - fr * 2.2, { fg: '#3a2418', carved: true, track: 0.06 });
+    signText(g, lines, fr * 1.3, fr * 1.1, w - fr * 2.6, h - fr * 2.2, { fg: '#f6e8bc', carved: true, track: 0.06 });
   } else {
     const paint = muteColor(bg, { sMax: 0.5, lMin: 0.28, lMax: 0.7 });
     const px = fr * 1.25, py = fr * 1.2, pw = w - px * 2, ph = h - py * 2;

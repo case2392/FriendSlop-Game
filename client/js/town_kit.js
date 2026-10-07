@@ -8,8 +8,13 @@ import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
 const E = new THREE.Euler(), Q = new THREE.Quaternion();
 const AX = ['x', 'y', 'z'];
 
-// the town's materials: painted, smooth Lambert, vertex colors on
-export function mat(name, o = {}) { return painted(name, { vertexColors: true, ...o }); }
+// the town's materials: painted, smooth Lambert, vertex colors on (tagged with their texture name)
+export function mat(name, o = {}) { const m = painted(name, { vertexColors: true, ...o }); m.userData.paint = name; return m; }
+
+// One shadow policy per material, so a material's indoor and outdoor parts merge into one mesh (and
+// one shadow draw): flat, glowing or indoor-only surfaces never cast, everything else does.
+const NO_CAST = new Set(['window_lead', 'lantern_glass', 'flowerbox', 'banner_red', 'banner_hide', 'rug_red', 'rug_bear', 'rug_hide', 'rug_braid', 'rug_desert',
+  'carpet_casino', 'carpet_border', 'felt_table', 'shelf_goods', 'store_goods', 'latillas', 'embers', 'slot_face', 'flip_face', 'repo_plate', 'plaster_inner', 'granite_inner']);
 
 export function matrix(x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1) {
   E.set(rx, ry, rz, 'YXZ'); Q.setFromEuler(E);
@@ -62,6 +67,8 @@ export function planarUV(geo, { tile = 1, tileV = null, grain = 'y', off = [0, 0
 export class Batch {
   constructor() { this.lists = new Map(); }
   add(material, geo, { cast = true, receive = true } = {}) {
+    const pn = material.userData && material.userData.paint;
+    if (pn !== undefined) { cast = !NO_CAST.has(pn); receive = true; }
     if (geo.index) geo = geo.toNonIndexed();
     for (const k of Object.keys(geo.attributes)) if (!['position', 'normal', 'uv', 'color'].includes(k)) geo.deleteAttribute(k);
     if (!geo.attributes.normal) geo.computeVertexNormals();
@@ -101,9 +108,20 @@ export class ClusterBatch {
     if (!b) this.batches.set(k, b = new Batch());
     b.add(material, geo, opts);
   }
+  // one group per cluster under parent; returns [{ key, group, center, radius }]
   build(parent) {
     const out = [];
-    for (const b of this.batches.values()) out.push(...b.build(parent));
+    for (const [key, b] of this.batches) {
+      const group = new THREE.Group();
+      group.name = 'cluster:' + key;
+      const meshes = b.build(group);
+      if (!meshes.length) continue;
+      const box = new THREE.Box3();
+      for (const m of meshes) box.union(m.geometry.boundingBox);
+      const sphere = box.getBoundingSphere(new THREE.Sphere());
+      parent.add(group);
+      out.push({ key, group, center: sphere.center, radius: sphere.radius });
+    }
     this.batches.clear();
     return out;
   }
