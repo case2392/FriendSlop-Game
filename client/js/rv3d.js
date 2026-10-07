@@ -4,10 +4,12 @@
 // half-timbered frame of chunky dark beams, brass lamps and trim, riveted iron, fat painted tires
 // on spoked red hubs, and a goblin winch on the nose. Inside: an inn room on wheels.
 //
-// Draw calls: everything static is merged per material (8 meshes); the roof, the rear wall and the
-// door are their own groups (the Repo Man takes them, see setParts); the wheels and the tow strap
-// are instanced. The interior matches shared/rv.js (RV_PARTS) box for box: walls, floor, roof,
-// door, dash, seats, table, benches, counter, shower stall, bunks, steps and bumpers.
+// Draw calls: everything static is merged per material (about ten meshes, of which only the body,
+// the trim and the snow cast shadows); the roof, the rear wall and the door are their own groups
+// (the Repo Man takes them, see setParts); the wheels and the tow strap are instanced. ~21 meshes
+// in all, against ~110 for the old box-built RV. The interior matches shared/rv.js (RV_PARTS) box
+// for box: walls, floor, roof, door, dash, seats, table, benches, counter, shower stall, bunks,
+// steps and bumpers.
 // The road grime and the snow follow the day's biome (atmo.biome).
 import { THREE, painted, tex, canvasTex } from './gfx.js';
 import { atmo } from './atmosphere.js';

@@ -15,7 +15,7 @@ let sky, skyMat, sun, hemi, rings = [], motes, motesMat;
 let biome = 'meadow';
 let lastNow = 0, clock = 0;
 const cur = {};              // the current interpolated palette (THREE.Color / numbers)
-export const atmo = { sparkle: 0, biome: 'meadow' };
+export const atmo = { sparkle: 0, biome: 'meadow', night: 0 };   // night: 0 day .. 1 full night (lamps, lit windows)
 
 // ---- palettes ---------------------------------------------------------------------------------
 // One "day" palette per biome (docs/ART.md table), plus how dawn, golden hour, sunset, dusk and
@@ -306,6 +306,7 @@ export function setTimeOfDay(hour, night = false) {
   scene.fog.far = cur.far;
   sun.userData.dir = lightDir;
   atmo.sparkle = biome === 'snow' ? cur.spark : 0;
+  atmo.night = Math.max(0, Math.min(1, cur.fire));
 
   const U = skyMat.uniforms;
   U.top.value.copy(cur.top); U.hor.value.copy(cur.hor); U.fogC.value.copy(cur.fog);

@@ -3,7 +3,7 @@
 //
 //   node tools/scene.mjs camp,road,town [outdir] [day 1-5] [hour] [seed]
 //
-// Views: camp road vista wall poi(=every stop on the leg) gate grade town pawn casino
+// Views: camp road vista wall poi(=every stop on the leg) gate grade winch town pawn casino
 //        pawnin casinoin repo rv rvin crew hands loot night   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3-4 badlands, 5 desert.
@@ -11,7 +11,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 
-const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'gate', 'grade', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
+const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
 const [viewArg = 'camp,road,town', OUT = 'test/screenshots/scene', dayArg = '1', hourArg = '10', seed = '777'] = process.argv.slice(2);
 const views = viewArg === 'all' ? ALL : viewArg.split(',').filter(Boolean);
 const DAY = Math.max(1, Math.min(5, +dayArg | 0)), HOUR = +hourArg;
@@ -54,7 +54,7 @@ await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout:
 const send = m => steve.evaluate(m => window.__nmd.send(m), m);
 if (DAY !== 1) {
   await send({ t: 'dbg', op: 'day', d: DAY });
-  for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, DAY, { timeout: 240000 });
+  for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw && window.__nmd.rv, DAY, { timeout: 240000 });
   await wait(steve, 1500);
 }
 const setClock = async (h, night = false) => {
@@ -130,6 +130,30 @@ for (const v of views) {
       await shot(dave, v);
       const a = W.anchors[0];
       if (a) { await camAt(a.x - 2.6, a.z - 2.6, a.x, a.y - 0.4, a.z); await shot(dave, 'anchor'); }
+    } else if (v === 'winch') {
+      // the RV at the foot of the grade, Steve carries the hook up and clips it to the anchor, cable taut
+      const g = W.obstacles.find(o => o.type === 'grade');
+      const rz = g.z0 - 7, rxx = await rx(rz);
+      await send({ t: 'dbg', op: 'tpRV', x: rxx, z: rz, yaw: 0 });
+      await wait(steve, 1500);
+      await ev(steve, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x, S.W.heightAt(r.x, r.z + 5.4) + 0.05, r.z + 5.4, Math.PI); S.me.pitch = 0.5; });
+      await wait(steve, 900);
+      await ev(steve, () => window.__nmd.press('use'));
+      await wait(steve, 700);
+      const anc = W.anchors[0];
+      for (let i = 1; i <= 12; i++) {
+        await ev(steve, ([ax, az, f]) => { const S = window.__nmd; const r = S.rv.p; const x = r.x + (ax - 0.9 - r.x) * f, z = r.z + 5.4 + (az - 0.9 - r.z - 5.4) * f; S.me.teleport(x, S.W.heightAt(x, z) + 0.1, z, 0); }, [anc.x, anc.z, i / 12]);
+        await wait(steve, 250);
+      }
+      await wait(steve, 800);
+      await ev(steve, () => window.__nmd.press('use'));
+      await wait(steve, 800);
+      console.log('  hook', JSON.stringify(await steve.evaluate(() => window.__nmd.hook)));
+      const cx = rxx - 11, cz = rz - 7;
+      await camAt(cx, cz, rxx + 1, (await hy(rxx, rz + 10)) + 1.5, rz + 13);
+      await shot(dave, v);
+      await camAt(anc.x - 3, anc.z - 3.5, anc.x, anc.y - 0.3, anc.z);
+      await shot(dave, 'winch-anchor');
     } else if (v === 'town') {
       await steveAt(3.5, T.z + 26, Math.PI);
       await camAt(4.5, T.z - 6, 3, T.y + 2.6, T.z + 70);

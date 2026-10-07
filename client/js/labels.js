@@ -41,7 +41,9 @@ export function labelSprite(text, color = '#fff', px = 40) {
     sp.userData.t = t; sp.userData.c = c;
     const g = cv.getContext('2d');
     g.clearRect(0, 0, 512, 96);
-    g.font = `bold ${px}px 'Trebuchet MS', sans-serif`;
+    let size = px;   // shrink long text to fit the canvas instead of clipping it
+    g.font = `bold ${size}px 'Trebuchet MS', sans-serif`;
+    while (g.measureText(t).width > 488 && size > 12) { size -= 2; g.font = `bold ${size}px 'Trebuchet MS', sans-serif`; }
     g.textAlign = 'center'; g.textBaseline = 'middle';
     g.lineWidth = 8; g.strokeStyle = 'rgba(20,16,31,0.85)'; g.strokeText(t, 256, 50);
     g.fillStyle = c; g.fillText(t, 256, 50);
