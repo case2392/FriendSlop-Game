@@ -3,36 +3,40 @@
 //
 // Style: WoW Classic humans with a dash of OSRS chunk: big shoulders under domed
 // pauldrons, a barrel chest, a leather jerkin skirt with a tabard in the player's
-// color hanging front and back, big gauntleted gloves, knee boots with turned-down
-// cuffs, a bedroll on the back. Each person is ONE SkinnedMesh (one draw call + one
-// in the shadow pass) on a 20-bone skeleton, textured with ONE hand-painted 512×768
-// atlas from paint/characters.js (painted faces with lidded eyes and heavy brows,
-// chunky painted hair, stitched leather, gold trim). Geometry is smooth lathes,
-// tubes and thick slabs, all built here; the detail lives in the texture.
+// color hanging front and back, big gauntleted gloves with real thumbs, knee boots with
+// turned-down cuffs, a bedroll high on the back. Each person is ONE SkinnedMesh (one
+// draw call + one in the shadow pass) on a 22-bone skeleton, textured with ONE
+// hand-painted 512×768 atlas from paint/characters.js. The face is modeled (a big nose,
+// a heavy brow ridge over deep sockets, cheekbones, a square jaw) and painted with
+// its light baked in; beards and mustaches are modeled sheets and rolls that take their
+// texture from the painted face. Geometry is smooth lathes, tubes and thick slabs, all
+// built here; the detail lives in the texture.
 //
-// The town folk: Honest Ed (burly, bald, a grizzled beard, rolled sleeves and a
+// The town folk: Honest Ed (burly, bald, a forked grizzled beard, rolled sleeves and a
 // leather shop apron), the clerk (a barmaid's laced bodice, puffed blouse sleeves,
-// a long gathered skirt with an apron), the Dealer (pressed shirt with sleeve
-// garters, pinstriped vest, green visor, slick hair, red-lit eyes) and the Repo Man
-// (scale 1.25 and bulked up besides: plaid flannel, overalls, work gloves, a beanie,
-// brass aviators and a tow chain worn like a bandolier, standing hands on hips).
+// a long gathered skirt with an apron, a high bun), the Dealer (pressed shirt with sleeve
+// garters, pinstriped vest, green celluloid visor, slick hair, red-lit eyes) and the
+// Repo Man (scale 1.25 and a brute besides: a barrel chest, trapezius and forearms,
+// plaid flannel, an overall bib, work gloves, a beanie, brass aviators and a tow chain
+// worn like a bandolier, standing hands on hips).
 //
 // Frames: root at the feet; the model faces local +x inside, and root.rotation.y
 // = -PI/2 turns it to face +z (unchanged from the old egg people). Bones rotate
-// about local z to swing forward (legs, arms, head nod), as before. Two extra
-// bones (flapF, flapB) carry the front and back of the skirt and tabard: they
-// follow the forward-most / back-most thigh, so the cloth never cuts the legs.
+// about local z to swing forward (legs, arms, head nod), as before. Extra bones:
+// flapF / flapB carry the front and back of the skirt and tabard (they follow the
+// forward-most / back-most thigh, so the cloth never cuts the legs), flapF2 lets the
+// front flap's hem hang over the knees when sitting, and `hat` (a child of the head)
+// carries a brimmed hat, which tips over the face when its wearer is knocked out.
 //
-// HEAD FRAME (for accessories added to `head`, e.g. the Repo Man's shades in
-// town3d.js): +x = where the face points, +y = up, +z = the character's right.
-// The head bone has a uniform local scale of 1 head unit: HU = 0.025 × HS / 3.5 =
-// 0.00886 m (× the character's scale). Everything on the head scales with HS, so in
-// head units the landmarks never move: the eyes sit at about (13, 3.5, ±4.5), the
-// nose bridge front at x ≈ 16, the skull half-width at the eyes is ≈ 13, the crown
-// at y ≈ 22, the chin at y ≈ -12. The old sunglasses transform, position
-// (16.5, 4, 0) with BoxGeometry(4, 5, 30), still sits right across the eyes. The
-// Repo Man wears modeled brass aviators of his own there, so a box added to his head
-// is kept attached but hidden (see buildCharacter).
+// HEAD FRAME (for accessories added to `head`): +x = where the face points, +y = up,
+// +z = the character's right. The head bone has a uniform local scale of 1 head unit:
+// HU = 0.025 × HS / 3.5 = 0.00886 m (× the character's scale). Everything on the head
+// scales with HS, so in head units the landmarks never move: the eyes sit at about
+// (11.5, 3.5, ±4), deep under the brow ridge; the nose bridge front at x ≈ 14 at eye
+// height and the nose tip at about (18.5, -1.5, 0); the skull half-width at the eyes is
+// ≈ 12.7, the crown at y ≈ 22, the chin at y ≈ -12. An accessory at (16.5, 4, 0) (the
+// old placeholder shades) still sits just in front of the eyes. The Repo Man wears
+// modeled brass aviators of his own.
 import { THREE, painted, tex, labelSprite, canvasTex } from './gfx.js';
 import * as C from '/shared/constants.js';
 import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
@@ -193,7 +197,7 @@ function slab(fn, nu, nv, thick, o) {
   for (let k = 0; k < ii.length; k += 3) { const t = ii[k + 1]; ii[k + 1] = ii[k + 2]; ii[k + 2] = t; }
   inner.setIndex(ii);
   if (o.uvInner) { const U = inner.attributes.uv; for (let k = 0; k < U.count; k++) { const [a, b] = o.uvInner(U.getX(k), U.getY(k)); U.setXY(k, a, b); } }
-  const parts = [outer, inner];
+  const parts = o.noInner ? [outer] : [outer, inner];      // (noInner: the back face is never seen; the rims still give the edge its thickness)
   const edges = [];
   const W = nu + 1;
   if (!o.closed) { edges.push([...Array(nv + 1).keys()].map(i => i * W)); edges.push([...Array(nv + 1).keys()].map(i => i * W + nu)); }
@@ -358,7 +362,7 @@ function headParts(S) {
   }
   if (L.facial === 'goatee') {
     // a small tapered tuft hugging the chin
-    parts.push(...beardSurface(S, { thMax: 0.3, top: GOATEE_TOP, bot: a => -0.09 - 0.03 * (1 - (a / 0.3) ** 2), off1: 0.011, taper: 0.65, nu: 8 }));
+    parts.push(...beardSurface(S, { thMax: 0.34, top: GOATEE_TOP, bot: a => -0.088 - 0.024 * (1 - (a / 0.34) ** 2), off1: 0.008, taper: 0.5, nu: 8 }));
   }
   if (L.facial === 'mustache') parts.push(mustacheTube(S, { w: 0.42, droop: 0.012, r: 0.0105, curl: true }));
   if (S.shades) parts.push(...shadesParts());
@@ -378,7 +382,7 @@ function beardSurface(S, { thMax, top, bot, off0 = 0.003, off1 = 0.016, taper = 
     if (dy >= CH) return toHead(facePt(th, dy * HS, off, fem));
     const p0 = facePt(th, CH * HS, off, fem), t = (CH - dy) / 0.05;
     return toHead([p0[0] + 0.016 * t - 0.006 * t * t, dy * HS, p0[2] * (1 - taper * Math.min(1, t))]);
-  }, nu, 6, 0.008, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(u, v); return [headU(th), headV(dy)]; }, bones: B.head, inside: () => toHead(HC) });
+  }, nu, 6, 0.008, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(u, v); return [headU(th), headV(dy)]; }, bones: B.head, inside: () => toHead(HC), noInner: true });
 }
 // A mustache: a thick tapered roll under the nose sweeping out past the mouth corners
 // and drooping (or curling up at the ends: a handlebar). Textured from the face, where
@@ -670,7 +674,7 @@ function skirtParts(S) {
       const [x, z] = ringAt(th, y, skirtOff(pn, y));
       return [x, y, z];
     }, 10, 5, 0.01, {
-      reg: REG.skirt, uv: (u, v) => [(pn.q + 0.02 + u * 0.96) / 4, skirtV(yOf(v))],
+      reg: REG.skirt, uv: (u, v) => [(pn.q + 0.02 + u * 0.96) / 4, skirtV(yOf(v))], noInner: true,
       // the side panels follow their thigh three-quarters of the way, so a seated
       // person's skirt drapes over the thighs instead of jutting out flat
       bones: p => { const t = sstep(0.97, 0.86, p[1]) * (pn.q % 2 ? 0.75 : 1); return [[B.hips, 1 - t], [pn.bone, t]]; },
@@ -759,7 +763,7 @@ function bibParts(S) {
     const yy = Math.min(y, top + (y - 1.35)), th = a * (0.62 - 0.12 * sstep(1.1, 1.3, yy));
     const R = torsoRing(yy, S), [x, z] = ringXZ(th, R.w + 0.012, R.d + 0.012, R.db, R.n);
     return [x, yy, z];
-  }, 12, 6, 0.008, { reg: REG.apron, uv: (u, v) => [u, v], bones: torsoWeights, inside: (u, v) => [0, 1.02 + 0.33 * v, 0] });
+  }, 12, 6, 0.008, { reg: REG.apron, uv: (u, v) => [u, v], bones: torsoWeights, inside: (u, v) => [0, 1.02 + 0.33 * v, 0], noInner: true });
 }
 
 // The Repo Man's tow chain, worn like a bandolier over his right shoulder.
@@ -946,7 +950,7 @@ function pauldron(S, F, s, size) {
     const th = thOf(u), f = (1 - v) * fmax;
     const lip = 1 + 0.075 * gauss(v, 0.07);
     return pt(th, f, R * lip * (1 + 0.05 * Math.cos(th)));
-  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, uvInner: innerIn(REG.paul, 0.02, 0.26) }));
+  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, noInner: true }));
   const out = [0, -0.25, s]; const ol = Math.hypot(...out);
   const thOut = Math.atan2((out[0] * E2[0] + out[1] * E2[1] + out[2] * E2[2]) / ol, (out[0] * E1[0] + out[1] * E1[1] + out[2] * E1[2]) / ol);
   P.push(...slab((u, v) => {

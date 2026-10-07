@@ -1,55 +1,60 @@
 // Terrain: the painted ground. One splat shader (MeshLambertMaterial + onBeforeCompile, so
-// lights, shadows and fog keep working) blends per biome: two grounds by large-scale noise,
-// bare dirt in clearings, the dirt road by distance from its centerline (sampled in road
-// space so the ruts follow it, with a ragged painterly edge), mud in the mud stretches, and
-// cliff rock by slope (projected from the side so strata stay level; two samples at
-// different scales, crossfaded and gently warped by macro noise, so a long wall never shows
-// the same ledge twice). Baked ambient occlusion darkens crevices with a cool tint. On the
-// snow day the mud is slush and the plain snow glints in low sun (a view-dependent sparkle
-// whose strength comes from atmosphere.js). Beyond the playable heightfield an apron of
-// unreachable hills carries the land (and the road) out to the horizon, and instanced
-// ground clutter (tufts, flowers, wheat, snowy grass and twigs) is recycled around the camera.
+// lights, shadows and fog keep working) blends per biome: the main ground at two scales (picked
+// patch by patch, so the tile never shows), a second ground in big blobs of noise, bare dirt in
+// clearings (scorched and ashy round the fires), the dirt road by distance from its centerline
+// (sampled in road space so the ruts follow it, with a ragged painterly edge), mud in the mud
+// stretches (also in road space, its puddles lying in the ruts), and cliff rock by slope:
+// projected from the side on steep faces (x or z picked by a dithered, sharpened normal blend, so
+// a 45° slope never smears two projections together), from above on moderate slopes, with two
+// scales crossfaded so a long wall never repeats its ledges. Broad warm/cool and value fields
+// (40-80 m) and baked ambient occlusion sit on top. On the snow day the mud is slush and the
+// plain snow glints in low direct sun. Beyond the playable heightfield an apron of unreachable
+// hills carries the land out to the horizon; at both ends the road's valley bends away behind a
+// shoulder and closes over a saddle. Instanced ground clutter grows in patches around the camera.
 //
-// Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos) }
+// Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos), dispose() }
 // The visible grid is exactly the physics heightfield (same vertices, same diagonal split).
 import { THREE, tex, renderer } from './gfx.js';
-import { canvasFor } from './paint/index.js';
+import { canvasFor, has } from './paint/index.js';
 import { atmo } from './atmosphere.js';
 import { fbm, noise2 } from '/shared/rng.js';
+import { BIOME_BY_DAY } from '/shared/world.js';
 
 const CHUNK = 40;            // cells per terrain chunk side (100 m): few draw calls, still culls
 const SHOULDER = 1.7;        // the road texture runs this far past the driven edge on each side
+const MUD_TILE = 10;         // the mud texture spans 10 m across the road, like the road texture
 
-// Per-biome look. Scales are meters per texture tile.
+// Per-biome look. scale: meters per tile [ground, ground2, dirt, cliff].
+// clutter: cell size (m), slots per cell, patch noise scale (m), how sparse (density), cards [w, h, weight].
 const CFG = {
   meadow: {
-    hw: 3.0, scale: [5.5, 7.5, 6, 11], mud: 6, roadLen: 10, cliff: [0.27, 0.36], cliffN: [0.14, 0.06], g2: [0.56, 0.5],
-    ao: [0.5, 0.52, 0.7], tintA: [1.1, 1.04, 0.8], tintB: [0.84, 0.95, 0.98], macro: 0.26, macro2: 0.16,
-    clutter: { cell: 1.05, radius: 23, density: 0.95, flowers: 0.16,
-      cards: [[0.8, 0.55, 0.55], [0.7, 0.8, 0.25], [0.6, 0.5, 0.1], [0.6, 0.5, 0.1]] },      // [w, h, weight]
+    hw: 3.0, scale: [7, 9, 6, 11], cliff: [0.27, 0.36], cliffN: [0.1, 0.05], g2: [0.56, 0.5],
+    ao: [0.5, 0.52, 0.7], tintA: [1.12, 1.04, 0.78], tintB: [0.82, 0.95, 1.0], macro: 0.4, macro2: 0.16,
+    clutter: { cell: 2.2, slots: 4, radius: 23, patch: 9, density: 1.0, spread: 0.8, flowers: 0.16,
+      cards: [[0.85, 0.6, 0.55], [0.75, 0.85, 0.25], [0.65, 0.55, 0.1], [0.65, 0.55, 0.1]] },
   },
   fields: {
-    hw: 3.0, scale: [5.5, 7, 6, 11], mud: 6, roadLen: 10, cliff: [0.27, 0.36], cliffN: [0.14, 0.06], g2: [0.6, 0.45],
-    ao: [0.55, 0.52, 0.66], tintA: [1.06, 1.0, 0.86], tintB: [0.92, 1.0, 0.98], macro: 0.22,
-    clutter: { cell: 1.1, radius: 23, density: 0.9, flowers: 0.06,
-      cards: [[0.8, 0.6, 0.6], [0.8, 0.95, 0.12], [0.75, 0.55, 0.28], [0.6, 0.5, 0.06]] },
+    hw: 3.0, scale: [7, 9, 6, 11], cliff: [0.27, 0.36], cliffN: [0.1, 0.05], g2: [0.6, 0.45],
+    ao: [0.55, 0.52, 0.66], tintA: [1.08, 1.0, 0.84], tintB: [0.9, 0.98, 1.0], macro: 0.36,
+    clutter: { cell: 2.2, slots: 4, radius: 23, patch: 10, density: 0.95, spread: 0.85, flowers: 0.06, wheat: 0.3,
+      cards: [[0.85, 0.62, 0.6], [0.95, 1.0, 0.12], [0.8, 0.58, 0.28], [0.65, 0.55, 0.06]] },
   },
   snow: {
-    hw: 3.0, scale: [6.5, 8, 6, 11], mud: 6, roadLen: 10, cliff: [0.22, 0.32], cliffN: [0.12, 0.06], g2: [0.58, 0.42],
-    ao: [0.6, 0.67, 0.86], tintA: [1.03, 1.01, 0.97], tintB: [0.9, 0.95, 1.05], macro: 0.14, macro2: 0.1, mudTex: 'slush', sparkle: true,
-    clutter: { cell: 1.5, radius: 22, density: 0.36, flowers: 0,
-      cards: [[0.8, 0.55, 0.5], [0.8, 0.6, 0.2], [0.85, 0.5, 0.18], [0.95, 0.45, 0.4]] },
+    hw: 3.0, scale: [8, 9, 6, 11], cliff: [0.22, 0.32], cliffN: [0.12, 0.06], g2: [0.67, 0.42],
+    ao: [0.6, 0.67, 0.86], tintA: [1.03, 1.01, 0.96], tintB: [0.9, 0.95, 1.06], macro: 0.2, macro2: 0.1, mudTex: 'slush', sparkle: true,
+    clutter: { cell: 3.0, slots: 3, radius: 22, patch: 10, density: 0.5, spread: 1.0, flowers: 0,
+      cards: [[0.8, 0.55, 0.55], [0.8, 0.6, 0.22], [0.7, 0.42, 0.05], [0.95, 0.75, 0.4]] },
   },
   badlands: {
-    hw: 3.1, scale: [6.5, 7, 6, 17], mud: 6, roadLen: 10, cliff: [0.12, 0.22], cliffN: [0.1, 0.06], g2: [0.6, 0.35],
-    ao: [0.52, 0.42, 0.55], tintA: [1.06, 1.0, 0.9], tintB: [0.94, 0.96, 1.02], macro: 0.2,
-    clutter: { cell: 1.6, radius: 22, density: 0.3, flowers: 0,
+    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.22], cliffN: [0.1, 0.06], g2: [0.6, 0.35], strata: true, mudTex: 'mud_badlands',
+    ao: [0.52, 0.42, 0.55], tintA: [1.07, 1.0, 0.9], tintB: [0.92, 0.95, 1.03], macro: 0.32,
+    clutter: { cell: 3.2, slots: 3, radius: 22, patch: 12, density: 0.42, spread: 1.0, flowers: 0,
       cards: [[0.75, 0.5, 0.5], [0.8, 0.55, 0.2], [0.75, 0.5, 0.15], [0.7, 0.5, 0.15]] },
   },
   desert: {
-    hw: 3.1, scale: [7, 7, 6, 16], mud: 6, roadLen: 10, cliff: [0.21, 0.33], cliffN: [0.14, 0.06], g2: [0.62, 0.3],
-    ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.92], tintB: [0.95, 0.97, 1.02], macro: 0.18,
-    clutter: { cell: 2.1, radius: 22, density: 0.12, flowers: 0,
+    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.38, 0.52], cliffN: [0.14, 0.06], g2: [0.62, 0.3], strata: true, dunes: true, mudTex: 'mud_desert',
+    ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.9], tintB: [0.94, 0.97, 1.03], macro: 0.3,
+    clutter: { cell: 4.0, slots: 2, radius: 22, patch: 12, density: 0.3, spread: 1.0, flowers: 0,
       cards: [[0.7, 0.45, 0.55], [0.75, 0.5, 0.2], [0.7, 0.45, 0.15], [0.6, 0.45, 0.1]] },
   },
 };
@@ -70,8 +75,7 @@ function rawTex(name, linear = false) {
 }
 let macroTex = null;
 
-// SwiftShader (headless screenshots, software GPUs) gets a lighter path: no second
-// anti-tiling fetch of the main ground, and less anisotropic filtering.
+// SwiftShader (headless screenshots, software GPUs) gets less anisotropic filtering.
 let cheapGPU = null;
 function isCheapGPU() {
   if (cheapGPU != null) return cheapGPU;
@@ -85,73 +89,87 @@ function isCheapGPU() {
   return cheapGPU;
 }
 
+// One splat material per biome (its textures are cached anyway), so revisiting a biome reuses it.
+const splatCache = new Map();
 function splatMaterial(biome, cfg) {
+  if (splatCache.has(biome)) return splatCache.get(biome);
   macroTex ||= rawTex('terrain_macro', true);
   const cheap = isCheapGPU();
   const T = n => { const t = tex(n); if (cheap && t.anisotropy > 2) { t.anisotropy = 2; t.needsUpdate = true; } return t; };
   const U = {
     tG1: { value: T(`ground_${biome}`) }, tG2: { value: T(`ground2_${biome}`) }, tDirt: { value: T(`dirt_${biome}`) },
     tRoad: { value: T(`road_${biome}`) }, tCliff: { value: T(`cliff_${biome}`) }, tMud: { value: T(cfg.mudTex || 'mud') }, tMacro: { value: macroTex },
-    uSpark: { value: 0 },
-    uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(cfg.mud, cfg.roadLen, cfg.macro, cfg.macro2 ?? 0.12) },
+    uSpark: { value: 0 }, uFire: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uRoadSpan: { value: 2 * (cfg.hw + SHOULDER) },
+    uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(MUD_TILE, 10, cfg.macro, cfg.macro2 ?? 0.12) },
     uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uCliffN: { value: new THREE.Vector2(...cfg.cliffN) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
     uAO: { value: new THREE.Vector3(...cfg.ao) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   m.userData.U = U;
   m.defines = {};
-  if (cheap) m.defines.TERRAIN_CHEAP = 1;
   if (cfg.sparkle) m.defines.TERRAIN_SPARKLE = 1;
-  m.customProgramCacheKey = () => 'terrain-splat-v7' + (cheap ? 'c' : '') + (cfg.sparkle ? 's' : '');
+  if (cfg.strata) m.defines.TERRAIN_STRATA = 1;
+  if (cfg.dunes) m.defines.TERRAIN_DUNES = 1;
+  const key = 'terrain-splat-v8' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '');
+  m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-        attribute vec4 aRoad; attribute vec4 aSplat;
-        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm;`)
+        attribute vec4 aRoad; attribute vec4 aSplat; attribute float aCv;
+        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
-        vRoad = aRoad; vSplat = aSplat;
+        vRoad = aRoad; vSplat = aSplat; vCv = aCv;
         vTPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
         vTNrm = normalize(mat3(modelMatrix) * objectNormal);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
         uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro;
-        uniform vec4 uScale, uMisc; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB; uniform float uSpark;
-        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm;
+        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB; uniform float uSpark, uRoadSpan;
+        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv;
         float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
         float tHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
         `)
       .replace('#include <map_fragment>', `
         float tSpark = 0.0;
         {
-          // Each optional layer is fetched only where it can show; every blend weight is zero at
-          // its branch boundary, so the fetches can use ordinary implicit derivatives.
+          // Each optional layer is fetched only where it can show, and every blend weight is
+          // faded to zero at its branch boundary, so the fetches can use implicit derivatives.
           const mat2 ROT = mat2(0.8, -0.6, 0.6, 0.8);       // a rotated frame breaks the tile grid
           vec3 wp = vTPos; vec3 nr = normalize(vTNrm);
           vec2 xz = wp.xz, xr = ROT * xz;
           // large-scale noise comes per vertex (vRoad.zw, vSplat.w); one fetch gives the medium/fine noise
           vec4 mB = texture2D(tMacro, xr / 61.0 + vec2(0.31, 0.77));   // r: ~7-20 m, g: ~3-9 m, b: ~1-3 m
           float nE = mB.b;
-          // ground: the main ground (two scales), then the second ground in big painterly patches
-          vec3 g1 = texture2D(tG1, xz / uScale.x).rgb;
-          #ifndef TERRAIN_CHEAP
-            g1 = mix(g1, texture2D(tG1, xr / (uScale.x * 2.3) + 0.37).rgb, 0.22 + 0.3 * mB.g);
-          #endif
+          // ground: two scales of the main ground, picked patch by patch so neither tile shows; on
+          // steep slopes (where a top-down projection stretches) a blurrier mip, so nothing streaks
+          float sBias = smoothstep(0.12, 0.45, 1.0 - nr.y) * 2.5 + smoothstep(80.0, 260.0, distance(cameraPosition, wp)) * 1.5;
+          vec3 g1 = texture2D(tG1, xz / uScale.x, sBias).rgb;
+          vec3 g1b = texture2D(tG1, xr / (uScale.x * 2.3) + 0.37, sBias).rgb;
+          g1 = mix(g1, g1b, smoothstep(0.36, 0.64, mB.g + (nE - 0.5) * 0.4) * 0.85);
           vec3 col = g1;
           float gW = 1.0;              // how much of the plain ground is left (for the snow sparkle)
-          float n2 = vSplat.w + (mB.r - 0.5) * 0.22 + (nE - 0.5) * 0.12;
+          // the second ground in big blobs of noise
+          float n2 = vSplat.w + (mB.r - 0.5) * 0.28 + (nE - 0.5) * 0.1;
           if (n2 > uG2.x - 0.1 - 0.3 * uG2.y) {
-            vec3 g2 = texture2D(tG2, xr / uScale.y).rgb;
-            col = mix(g1, g2, smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y));
+            vec3 g2 = texture2D(tG2, xr / uScale.y, sBias).rgb;
+            float w2 = smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y);
+            col = mix(g1, g2, w2);
           }
-          // clearings: bare packed dirt
+          // clearings: bare packed dirt; scorched and ashy round the fires
           if (vSplat.y > 0.005) {
             vec3 dt = texture2D(tDirt, xr / uScale.z).rgb;
             float w = smoothstep(0.3, 0.62, vSplat.y + (nE - 0.5) * 0.5 + (tLum(dt) - tLum(col)) * 0.6 + (mB.g - 0.5) * 0.3 - 0.1);
             col = mix(col, dt, w * smoothstep(0.005, 0.12, vSplat.y));
             gW *= 1.0 - 0.7 * w * smoothstep(0.005, 0.12, vSplat.y);
+            float fd = min(distance(xz, uFire.xy), distance(xz, uFire.zw)) + (nE - 0.5) * 0.7;
+            if (fd < 2.8) {
+              // (linear colours: soot is very dark, ash a cool gray)
+              col = mix(col, col * vec3(0.42, 0.42, 0.44) + vec3(0.035, 0.034, 0.034), (1.0 - smoothstep(1.5, 2.7, fd)) * 0.8);   // ash
+              col = mix(col, vec3(0.022, 0.019, 0.017), (1.0 - smoothstep(0.85, 1.75, fd)) * 0.8);                                // soot
+            }
           }
-          // the road, in road space; the ground's lit blades lap over its ragged edge
+          // the road, in road space; the ground laps over its ragged edge
           if (vRoad.y < 2.6) {
             vec3 rc = texture2D(tRoad, vec2(clamp(vRoad.x, 0.004, 0.996), wp.z / uMisc.y)).rgb;
             float edge = vRoad.y + (nE - 0.5) * 1.5 + (mB.g - 0.5) * 1.0;
@@ -159,54 +177,56 @@ function splatMaterial(biome, cfg) {
             col = mix(col, rc, rw);
             gW *= 1.0 - rw;
           }
-          // mud
+          // mud, in road space too: its puddles lie along the ruts
           if (vSplat.x > 0.005) {
-            vec3 md = texture2D(tMud, xr / uMisc.x).rgb;
+            vec3 md = texture2D(tMud, vec2((vRoad.x - 0.5) * uRoadSpan / uMisc.x + 0.5, wp.z / uMisc.x)).rgb;
             float w = smoothstep(0.32, 0.58, vSplat.x + (mB.g - 0.5) * 0.7 + (nE - 0.5) * 0.35);
             col = mix(col, md, w * smoothstep(0.005, 0.1, vSplat.x));
             gW *= 1.0 - w;
           }
-          // cliffs by slope, projected from the side (strata stay level); patchy outcrops by noise.
-          // Two samples at different horizontal scales, crossfaded by macro noise, hide the repeat.
+          // cliffs by slope; patchy outcrops by noise
           float slope = 1.0 - nr.y;
           float sn = (mB.r - 0.5) * uCliffN.x + (mB.g - 0.5) * uCliffN.y + (vSplat.w - 0.5) * uCliffN.x;
-          if (slope + sn > uCliff.x - 0.1) {
-            vec2 an = pow(abs(nr.xz) + 0.001, vec2(4.0)); an /= (an.x + an.y);
-            float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
+          float cB = slope + sn;
+          if (cB > uCliff.x - 0.1) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
-            vec3 cc = vec3(0.0); float aw = 0.0;
-            // far walls use the rock at 2.5x its size: fewer, bigger masses instead of a fine repeat
-            float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp));
-            if (an.x > 0.03) {
+            float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
+            float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp));   // far walls: the rock at 2.5x, bigger masses
+            // side projection: x- or z-facing, from a sharpened normal blend dithered by noise
+            vec2 an = pow(abs(nr.xz) + 0.001, vec2(8.0));
+            float sx = smoothstep(0.32, 0.68, an.x / (an.x + an.y) + (nE - 0.5) * 0.5);
+            vec3 cc = vec3(0.0);
+            if (sx > 0.01) {
               vec2 p = vec2(wp.z, wp.y) / uScale.w + cw;
               vec3 c1 = vec3(0.0);
-              if (farK < 0.999) {
-                c1 = texture2D(tCliff, p).rgb;
-                c1 = mix(c1, texture2D(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21)).rgb, xb);
-              }
+              if (farK < 0.999) c1 = mix(texture2D(tCliff, p).rgb, texture2D(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21)).rgb, xb);
               if (farK > 0.001) c1 = mix(c1, texture2D(tCliff, p * 0.4 + vec2(0.13, 0.57)).rgb, farK);
-              cc += an.x * c1; aw += an.x;
+              cc += sx * c1;
             }
-            if (an.y > 0.03) {
+            if (sx < 0.99) {
               vec2 p = vec2(-wp.x, wp.y) / uScale.w + vec2(0.5, 0.0) + cw;
               vec3 c2 = vec3(0.0);
-              if (farK < 0.999) {
-                c2 = texture2D(tCliff, p).rgb;
-                c2 = mix(c2, texture2D(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47)).rgb, xb);
-              }
+              if (farK < 0.999) c2 = mix(texture2D(tCliff, p).rgb, texture2D(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47)).rgb, xb);
               if (farK > 0.001) c2 = mix(c2, texture2D(tCliff, p * 0.4 + vec2(0.71, 0.29)).rgb, farK);
-              cc += an.y * c2; aw += an.y;
+              cc += (1.0 - sx) * c2;
             }
-            cc /= aw;
-            // height blend: the lit, protruding parts of the rock break through the grass first,
-            // so a partial blend reads as rocks poking out, never as a translucent smear
-            float wk = smoothstep(uCliff.x, uCliff.y, slope + sn);
-            wk = smoothstep(0.38, 0.62, wk + (tLum(cc) - 0.42) * 0.9 * (1.0 - wk) + (nE - 0.5) * 0.15);
+            // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces
+            #ifdef TERRAIN_STRATA
+              float topK = 1.0 - smoothstep(0.3, 0.5, slope);
+              if (topK > 0.01) cc = mix(cc, texture2D(tG2, xz / (uScale.y * 0.8) + 0.41).rgb * vec3(0.92, 0.9, 0.9), topK);
+            #endif
+            // height blend: the lit, protruding parts of the rock break through the ground first
+            float wk = smoothstep(uCliff.x, uCliff.y, cB);
+            wk = smoothstep(0.38, 0.62, wk + (min(tLum(cc), 0.7) - 0.42) * 0.9 * (1.0 - wk) + (nE - 0.5) * 0.15);
+            wk *= smoothstep(uCliff.x - 0.1, uCliff.x - 0.03, cB);      // zero at the branch boundary
+            #ifdef TERRAIN_DUNES
+              wk *= 1.0 - smoothstep(-0.05, 0.35, vCv);                // dune crests stay sand
+            #endif
             col = mix(col, cc, wk);
             gW *= 1.0 - wk;
           }
-          // macro variation: warm and cool regions, a little value drift
-          col *= mix(uTintA, uTintB, smoothstep(0.15, 0.85, vRoad.z * 0.65 + mB.r * 0.5 - 0.075));
+          // broad (40-80 m) warm and cool regions and value drift, then finer drift
+          col *= mix(uTintA, uTintB, smoothstep(0.1, 0.9, vRoad.z * 1.3 + mB.r * 0.45 - 0.37));
           col *= 1.0 + (vRoad.w - 0.5) * uMisc.z + (mB.g - 0.5) * uMisc.w;
           // baked occlusion, cool in the crevices
           col *= mix(uAO, vec3(1.0), vSplat.z);
@@ -228,26 +248,31 @@ function splatMaterial(biome, cfg) {
         }`)
       .replace('#include <opaque_fragment>', `
         #ifdef TERRAIN_SPARKLE
-          outgoingLight += vec3(1.0, 0.97, 0.9) * tSpark * uSpark;
+        {
+          // only where the sun (or the moon) reaches: compare the direct light with the albedo
+          float dl = dot(reflectedLight.directDiffuse, vec3(0.3, 0.55, 0.15)) / max(1e-3, dot(diffuseColor.rgb, vec3(0.3, 0.55, 0.15)));
+          outgoingLight += vec3(1.0, 0.97, 0.9) * tSpark * uSpark * smoothstep(0.2, 0.42, dl);
+        }
         #endif
         #include <opaque_fragment>`);
   };
+  splatCache.set(biome, m);
   return m;
 }
 
 // ---- per-vertex data for the playable grid ---------------------------------------------------
 
-// Low-frequency noise, per vertex: [warm/cool tint, value drift, second-ground mask], each 0..1.
+// Low-frequency noise, per vertex: [warm/cool tint (~60 m), value drift (~45 m), second-ground mask (~30 m)], each 0..1.
 const n01 = v => Math.max(0, Math.min(1, 0.5 + v * 0.85));
 function lowNoise(W, x, z) {
-  return [n01(fbm(x / 130, z / 130, W.seed + 401, 2)), n01(fbm(x / 75, z / 75, W.seed + 402, 2)), n01(fbm(x / 34, z / 34, W.seed + 403, 3))];
+  return [n01(fbm(x / 62, z / 62, W.seed + 401, 2)), n01(fbm(x / 45, z / 45, W.seed + 402, 2)), n01(fbm(x / 30, z / 30, W.seed + 403, 3))];
 }
 
 function vertexData(W, cfg, clearings) {
   const { nx, nz, cell, X0, Z0, heights } = W;
   const NZ1 = nz + 1, NV = (nx + 1) * NZ1;
   const Hc = (ix, iz) => heights[(ix < 0 ? 0 : ix > nx ? nx : ix) * NZ1 + (iz < 0 ? 0 : iz > nz ? nz : iz)];
-  const nrm = new Float32Array(NV * 3), road = new Float32Array(NV * 4), spl = new Float32Array(NV * 4);
+  const nrm = new Float32Array(NV * 3), road = new Float32Array(NV * 4), spl = new Float32Array(NV * 4), cvA = new Float32Array(NV);
   const AO_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
   const AO_STEPS = [1, 2, 4, 7, 12];
   for (let ix = 0; ix <= nx; ix++) {
@@ -289,13 +314,14 @@ function vertexData(W, cfg, clearings) {
         occ += best / Math.sqrt(1 + best * best);          // sin of the horizon angle
       }
       occ /= AO_DIRS.length;
-      // convexity: ridges catch a little extra light, hollows lose some
+      // convexity: ridges catch a little extra light, hollows lose some (and dune crests stay sand)
       const cv = h0 - (Hc(ix + 2, iz) + Hc(ix - 2, iz) + Hc(ix, iz + 2) + Hc(ix, iz - 2)) / 4;
+      cvA[v] = Math.max(-1, Math.min(1, cv * 0.5));
       const ao = Math.max(0.3, Math.min(1.08, 1 - occ * 0.95 + Math.max(-0.12, Math.min(0.08, cv * 0.06))));
       spl[v * 4] = mud; spl[v * 4 + 1] = clr; spl[v * 4 + 2] = ao; spl[v * 4 + 3] = n2;
     }
   }
-  return { nrm, road, spl };
+  return { nrm, road, spl, cvA };
 }
 
 function buildChunks(W, data, mat, group) {
@@ -305,12 +331,13 @@ function buildChunks(W, data, mat, group) {
     for (let cz = 0; cz < nz; cz += CHUNK) {
       const ex = Math.min(nx, cx + CHUNK), ez = Math.min(nz, cz + CHUNK);
       const vx = ex - cx + 1, vz = ez - cz + 1, n = vx * vz;
-      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), rd = new Float32Array(n * 4), sp = new Float32Array(n * 4);
+      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), rd = new Float32Array(n * 4), sp = new Float32Array(n * 4), cv = new Float32Array(n);
       for (let i = 0; i < vx; i++) for (let j = 0; j < vz; j++) {
         const lv = i * vz + j, ix = cx + i, iz = cz + j, gv = ix * NZ1 + iz;
         pos[lv * 3] = X0 + ix * cell; pos[lv * 3 + 1] = heights[gv]; pos[lv * 3 + 2] = Z0 + iz * cell;
         for (let k = 0; k < 3; k++) nor[lv * 3 + k] = data.nrm[gv * 3 + k];
         for (let k = 0; k < 4; k++) { sp[lv * 4 + k] = data.spl[gv * 4 + k]; rd[lv * 4 + k] = data.road[gv * 4 + k]; }
+        cv[lv] = data.cvA[gv];
       }
       const idx = [];
       for (let i = 0; i < vx - 1; i++) for (let j = 0; j < vz - 1; j++) {
@@ -322,6 +349,7 @@ function buildChunks(W, data, mat, group) {
       geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
       geo.setAttribute('aRoad', new THREE.BufferAttribute(rd, 4));
       geo.setAttribute('aSplat', new THREE.BufferAttribute(sp, 4));
+      geo.setAttribute('aCv', new THREE.BufferAttribute(cv, 1));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mat);
@@ -344,19 +372,29 @@ function buildApron(W, cfg, data, mat, group) {
   for (let z = Z0; z < Zend - 0.01; z += STEP) zs.push(z);
   for (let z = Zend; z <= Zend + OUT + 0.01; z += STEP) zs.push(z);
   const rx0 = W.roadX(Z0), rx1 = W.roadX(W.Z1);
+  // past each end the road's valley bends away to one side behind a shoulder, then closes
+  const bend0 = (W.seed & 1) ? 1 : -1, bend1 = (W.seed & 2) ? 1 : -1;
+  const pastOf = z => (z > Zend ? z - Zend : z < Z0 ? Z0 - z : 0);
+  const rxA = z => {
+    const past = pastOf(z);
+    if (past <= 0) return W.roadX(Math.max(Z0, Math.min(W.Z1, z)));
+    const b = z > Zend ? bend1 : bend0, r0 = z > Zend ? rx1 : rx0;
+    return r0 + b * (0.4 * Math.max(0, past - 30) + 34 * sstep(20, 150, past) * (0.7 + 0.5 * fbm(z / 90, 3.3, W.seed + 907, 2)));
+  };
   const hA = (x, z) => {
     const cx = Math.max(X0, Math.min(X1, x)), cz = Math.max(Z0, Math.min(Zend, z));
     const base = W.heightAt(cx, cz);
     const dOut = Math.hypot(x - cx, z - cz);
     if (dOut <= 0) return base;
-    const rx = z < Z0 ? rx0 : z > Zend ? rx1 : 1e9;
-    const f = Math.abs(x) > X1 - 1 ? 1 : sstep(12, 110, Math.abs(x - rx));      // keep a valley open along the road
-    const bumps = fbm(x / 70, z / 70, W.seed + 901, 3) * 22 * sstep(0, 90, dOut) * (0.35 + 0.65 * f);
+    const past = pastOf(z);
+    let f = Math.abs(x) > X1 - 1 ? 1 : past > 0 ? sstep(12, 110, Math.abs(x - rxA(z))) : 1;   // the valley along the road...
+    f = Math.max(f, sstep(110, 200, past));                                                      // ...closes over a saddle
+    const bumps = fbm(x / 70, z / 70, W.seed + 901, 3) * 22 * sstep(0, 90, dOut);
     const rise = dOut * (0.03 + 0.22 * f) + sstep(180, OUT, dOut) * 70 * (0.5 + 0.5 * f) + bumps;
     return base + rise;
   };
   const NX = xs.length, NZ = zs.length;
-  const pos = [], nor = [], rd = [], sp = [], idx = [];
+  const pos = [], nor = [], rd = [], sp = [], cvs = [], idx = [];
   const vid = new Int32Array(NX * NZ).fill(-1);
   const inside = (x, z) => x > X0 && x < X1 && z > Z0 && z < Zend;
   const vert = (i, j) => {
@@ -364,12 +402,13 @@ function buildApron(W, cfg, data, mat, group) {
     if (vid[k] >= 0) return vid[k];
     const x = xs[i], z = zs[j], y = hA(x, z);
     const e = 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
-    const cz = Math.max(Z0, Math.min(W.Z1, z)), hwz = roadHW(W, cfg, cz), d = x - W.roadX(cz);
+    const cz = Math.max(Z0, Math.min(W.Z1, z)), hwz = roadHW(W, cfg, cz), d = x - rxA(z);
     vid[k] = pos.length / 3;
     pos.push(x, y, z); nor.push(-hx / l, 1 / l, -hz / l);
     const [nt, nv, n2] = lowNoise(W, x, z);
-    rd.push(d / (2 * (hwz + SHOULDER)) + 0.5, Math.abs(d) - hwz, nt, nv);
+    rd.push(d / (2 * (hwz + SHOULDER)) + 0.5, Math.abs(d) - hwz + sstep(50, 150, pastOf(z)) * 12, nt, nv);   // the track peters out up the saddle
     sp.push(0, 0, 1, n2);
+    cvs.push(0);
     return vid[k];
   };
   for (let i = 0; i < NX - 1; i++) for (let j = 0; j < NZ - 1; j++) {
@@ -391,6 +430,7 @@ function buildApron(W, cfg, data, mat, group) {
       pos.push(x, yy, z); nor.push(data.nrm[gv * 3], data.nrm[gv * 3 + 1], data.nrm[gv * 3 + 2]);
       for (let k = 0; k < 4; k++) rd.push(data.road[gv * 4 + k]);
       sp.push(0, data.spl[gv * 4 + 1], data.spl[gv * 4 + 2], data.spl[gv * 4 + 3]);
+      cvs.push(data.cvA[gv]);
     }
     if (prev >= 0) idx.push(prev, prev + 1, t, t, prev + 1, t + 1, t, prev + 1, prev, t + 1, prev + 1, t);
     prev = t;
@@ -400,6 +440,7 @@ function buildApron(W, cfg, data, mat, group) {
   geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
   geo.setAttribute('aRoad', new THREE.Float32BufferAttribute(rd, 4));
   geo.setAttribute('aSplat', new THREE.Float32BufferAttribute(sp, 4));
+  geo.setAttribute('aCv', new THREE.Float32BufferAttribute(cvs, 1));
   geo.setIndex(idx);
   geo.computeBoundingSphere();
   const m = new THREE.Mesh(geo, mat);
@@ -446,6 +487,7 @@ function clutterTex(biome) {
 }
 
 // Three crossed quads, both windings, normals straight up so the cards light like the ground.
+let cardGeo = null;
 function cardGeometry() {
   const pos = [], uv = [], nor = [], idx = [];
   for (let q = 0; q < 3; q++) {
@@ -464,9 +506,13 @@ function cardGeometry() {
   return g;
 }
 
-function clutterMaterial(biome, U) {
+const clutterMatCache = new Map();
+function clutterMaterial(biome) {
+  if (clutterMatCache.has(biome)) return clutterMatCache.get(biome);
+  const U = { uTime: { value: 0 } };
   const m = new THREE.MeshLambertMaterial({ map: clutterTex(biome), alphaTest: 0.45, side: THREE.FrontSide });
   m.alphaToCoverage = true;
+  m.userData.U = U;
   m.customProgramCacheKey = () => 'terrain-clutter-v1';
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = U.uTime;
@@ -486,6 +532,7 @@ function clutterMaterial(biome, U) {
       .replace('#include <uv_vertex>', `#include <uv_vertex>
         vMapUv = vMapUv * 0.5 + aCard.xy;`);
   };
+  clutterMatCache.set(biome, m);
   return m;
 }
 
@@ -525,21 +572,28 @@ function exclusion(W) {
   };
 }
 
+// Clutter grows in patches: the ground is cut into cells around the camera, and a slow noise
+// (6-12 m) decides how many tufts each cell holds (about 40% of cells none, about 20% a dense
+// clump of three to five); a cell's tufts gather round one spot and mostly share one kind.
 class Clutter {
   constructor(W, cfg, biome) {
     this.W = W; this.cfg = cfg; this.C = cfg.clutter;
     this.blocked = exclusion(W);
-    this.U = { uTime: { value: 0 } };
-    this.cell = this.C.cell;
+    this.cell = this.C.cell; this.K = this.C.slots;
     this.N = Math.ceil(2 * this.C.radius / this.cell) + 1;
     this.half = Math.floor(this.N / 2);
     this.wsum = this.C.cards.reduce((a, c) => a + c[2], 0);
     const patches = this.patches();
-    const near = this.N * this.N;
+    const near = this.N * this.N * this.K;
     this.base = patches.length;
     this.count = patches.length + near;
     this.aCard = new Float32Array(this.count * 3);
-    this.mesh = new THREE.InstancedMesh(cardGeometry(), clutterMaterial(biome, this.U), this.count);
+    cardGeo ||= cardGeometry();
+    const geo = new THREE.BufferGeometry();
+    for (const n of ['position', 'uv', 'normal']) geo.setAttribute(n, cardGeo.attributes[n]);
+    geo.setIndex(cardGeo.index);
+    this.mesh = new THREE.InstancedMesh(geo, clutterMaterial(biome), this.count);
+    this.U = this.mesh.material.userData.U;
     this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     this.mesh.geometry.setAttribute('aCard', new THREE.InstancedBufferAttribute(this.aCard, 3));
     this.mesh.frustumCulled = false;
@@ -547,8 +601,8 @@ class Clutter {
     this.mesh.receiveShadow = true;
     this.m4 = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.v = new THREE.Vector3(); this.sv = new THREE.Vector3(); this.up = new THREE.Vector3(0, 1, 0);
     patches.forEach((p, i) => this.set(i, p.x, p.y, p.z, p.ry, p.w, p.h, p.card, p.fade));
-    this.ki = new Int32Array(near).fill(-2147483648);
-    this.kj = new Int32Array(near).fill(-2147483648);
+    this.ki = new Int32Array(this.N * this.N).fill(-2147483648);
+    this.kj = new Int32Array(this.N * this.N).fill(-2147483648);
     for (let s = 0; s < near; s++) this.hide(this.base + s);
   }
   set(i, x, y, z, ry, w, h, card, fade) {
@@ -583,15 +637,15 @@ class Clutter {
       const wheat = d.k === 'wheat';
       const r = cellRng(Math.round(d.x * 10), Math.round(d.z * 10), W.seed + 5);
       const R = (wheat ? 2.2 : 1.3) * (d.s || 1) + 0.6;
-      const n = Math.round((wheat ? 34 : 14) * (d.s || 1));
+      const n = Math.round((wheat ? 30 : 14) * (d.s || 1));
       for (let k = 0; k < n; k++) {
         const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * R;
         const x = d.x + Math.cos(a) * rr, z = d.z + Math.sin(a) * rr * (wheat ? 0.8 : 1);
         if (!this.okAt(x, z, 0.8)) continue;
         let card, w, h;
         if (wheat) {
-          card = W.biome === 'fields' ? 1 : 0; w = 0.85 + r() * 0.4; h = 0.95 + r() * 0.35;
-          if (r() < 0.15) { card = 0; h *= 0.6; }
+          card = W.biome === 'fields' ? 1 : 0; w = 0.95 + r() * 0.45; h = 0.95 + r() * 0.35;
+          if (r() < 0.12) { card = 0; h *= 0.6; }
         } else {
           card = r() < 0.7 ? (r() < 0.55 ? 2 : 3) : 0;
           if (W.biome === 'fields' && card !== 0) card = r() < 0.7 ? 3 : 2;
@@ -602,17 +656,28 @@ class Clutter {
     }
     return out;
   }
-  place(i, ci, cj) {
-    const W = this.W, C = this.C, r = cellRng(ci, cj, W.seed);
-    const x = (ci + r()) * this.cell, z = (cj + r()) * this.cell;
-    const pad = 0.35 + r() * 1.3;
-    const dens = C.density * Math.max(0, Math.min(1.3, 0.45 + 0.95 * (fbm(x / 21, z / 21, W.seed + 77, 2) + 0.35)));
-    if (r() > dens || !this.okAt(x, z, pad)) { this.hide(i); return; }
-    const flowerish = noise2(x / 7.5, z / 7.5, W.seed + 31) > 0.42;
-    const card = this.pickCard(r(), flowerish);
-    const [cw, chh] = C.cards[card];
-    const k = 0.75 + r() * 0.55;
-    this.set(i, x, W.heightAt(x, z) - 0.04, z, r() * 6.283, cw * k, chh * k, card, C.radius);
+  place(s, ci, cj) {
+    const W = this.W, C = this.C, K = this.K, r = cellRng(ci, cj, W.seed);
+    const cx = (ci + 0.5) * this.cell, cz = (cj + 0.5) * this.cell;
+    // how many tufts this cell holds, from the patch noise
+    const q = fbm(cx / C.patch, cz / C.patch, W.seed + 77, 2);
+    let n = q < -0.06 ? 0 : q < 0.05 ? 1 : q < 0.13 ? 2 : q < 0.21 ? 3 : 4;
+    n = Math.max(0, Math.min(K, Math.round(n * C.density * (K / 4) + (r() - 0.5) * 0.8)));
+    const flowerish = noise2(cx / 7.5, cz / 7.5, W.seed + 31) > 0.42;
+    const wheaty = C.wheat && noise2(cx / 11, cz / 11, W.seed + 53) > 1 - C.wheat * 2;
+    const main = wheaty ? 1 : this.pickCard(r(), flowerish);
+    const px = (ci + 0.25 + r() * 0.5) * this.cell, pz = (cj + 0.25 + r() * 0.5) * this.cell;
+    for (let k = 0; k < K; k++) {
+      const i = this.base + s * K + k;
+      if (k >= n) { this.hide(i); continue; }
+      const a = r() * 6.283, rr = Math.sqrt(r()) * C.spread;
+      const x = px + Math.cos(a) * rr, z = pz + Math.sin(a) * rr;
+      if (!this.okAt(x, z, 0.35 + r() * 1.1)) { this.hide(i); continue; }
+      const card = r() < 0.75 ? main : this.pickCard(r(), flowerish);
+      const [cw, chh] = C.cards[card];
+      const sc = 0.7 + r() * 0.7;
+      this.set(i, x, W.heightAt(x, z) - 0.04, z, r() * 6.283, cw * sc, chh * sc, card, C.radius);
+    }
   }
   update(t, cam) {
     this.U.uTime.value = t;
@@ -626,12 +691,22 @@ class Clutter {
         const s = a * N + b;
         if (this.ki[s] === i && this.kj[s] === j) continue;
         this.ki[s] = i; this.kj[s] = j;
-        this.place(this.base + s, i, j);
+        this.place(s, i, j);
         dirty = true;
       }
     }
     if (dirty) { this.mesh.instanceMatrix.needsUpdate = true; this.mesh.geometry.attributes.aCard.needsUpdate = true; }
   }
+  dispose() { this.mesh.dispose(); this.mesh.geometry.dispose(); }
+}
+
+// ---- prewarming: paint the next day's textures in idle time at night ---------------------------
+
+const prewarmed = new Set();
+function prewarmQueue(biome) {
+  const cfg = CFG[biome];
+  return [`ground_${biome}`, `ground2_${biome}`, `dirt_${biome}`, `road_${biome}`, cfg?.mudTex || 'mud', `cliff_${biome}`, `clutter_${biome}`, `sky_mtn_${biome}`, `sky_clouds_${biome}`]
+    .filter(n => has(n) && !prewarmed.has(n));
 }
 
 // ---- assembly ----------------------------------------------------------------------------------
@@ -654,19 +729,28 @@ export function buildTerrain(W) {
   const cfg = CFG[biome];
   const group = new THREE.Group();
   const mat = splatMaterial(biome, cfg);
+  const fires = W.decor.filter(d => d.k === 'fire');
+  mat.userData.U.uFire.value.set(fires[0]?.x ?? 1e5, fires[0]?.z ?? 1e5, fires[1]?.x ?? 1e5, fires[1]?.z ?? 1e5);
   const data = vertexData(W, cfg, clearingsOf(W));
   buildChunks(W, data, mat, group);
   buildApron(W, cfg, data, mat, group);
   const clutter = new Clutter(W, cfg, biome);
   group.add(clutter.mesh);
-  let started = false;
+  for (const n of prewarmQueue(biome)) prewarmed.add(n);
+  // tomorrow's textures are painted one at a time while the night lasts (no stall at dawn)
+  const next = BIOME_BY_DAY[W.day] || null;
+  let queue = next && next !== biome ? prewarmQueue(next) : [], idleAt = 0;
   return {
     group,
     update(dt, t, camPos) {
       if (cfg.sparkle) mat.userData.U.uSpark.value = atmo.sparkle;
+      if (queue.length && atmo.night > 0.6 && t > idleAt && typeof requestIdleCallback === 'function') {
+        idleAt = t + 1.5;
+        requestIdleCallback(() => { const n = queue.shift(); if (n && !prewarmed.has(n)) { try { canvasFor(n); } catch {} prewarmed.add(n); } }, { timeout: 4000 });
+      }
       if (!camPos) return;
       clutter.update(t, camPos);
-      started = true;
     },
+    dispose() { clutter.dispose(); queue = []; },
   };
 }

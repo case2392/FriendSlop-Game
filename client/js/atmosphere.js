@@ -1,8 +1,9 @@
-// Atmosphere: the sky dome (per-biome gradient, sun and moon, stars, a band of painted
-// cumulus), three rings of painted distant mountains tinted into the haze, fog that matches
-// the horizon, a hemisphere light with a per-biome ground bounce, a warm sun with soft
-// shadows, and drifting motes (dust by day, fireflies at dusk, snowflakes in the mountains).
-// No tone mapping. Owned by the terrain/atmosphere art pass (see docs/ART.md).
+// Atmosphere: the sky dome (per-biome gradient, sun and moon, stars, a band of painted clouds
+// that is different for every biome), three rings of painted distant land tinted into a heavy
+// haze, fog that matches the horizon, a hemisphere light with a per-biome ground bounce, a warm
+// sun with soft shadows (snapped to its shadow-map texels so edges never crawl), and drifting
+// motes (dust by day, fireflies at dusk, snowflakes in the mountains). No tone mapping.
+// Owned by the terrain/atmosphere art pass (see docs/ART.md).
 //
 // API: initAtmosphere(scene, camera, renderer) once; setBiome(b) before each day's world;
 // setTimeOfDay(hour, night) and updateSun(focus) every frame. `atmo` exposes a few live values
@@ -24,18 +25,19 @@ export const atmo = { sparkle: 0, biome: 'meadow', night: 0 };   // night: 0 day
 // clouds (coverage: 0 = the full painted band, higher = only the dense cores), near/far fog,
 // and the night's own colors (snow nights are brighter: moonlight on snow).
 const DAY = {
-  meadow: { top: '#4686d4', hor: '#cfe4ee', fog: '#b6d0e4', hSky: '#d6e8f2', hGnd: '#6a7a42', sun: '#fff0cc', near: 60, far: 860, light: 1, clouds: 0.08,
+  meadow: { top: '#4686d4', hor: '#c6dfea', fog: '#a9c6d6', hSky: '#d6e8f2', hGnd: '#6a7a42', sun: '#fff0cc', near: 40, far: 560, light: 1, clouds: 0.04,
     night: { top: '#0a1432', hor: '#22385e', fog: '#1c2c4c', hSky: '#5c74b0', hGnd: '#1e2638', hemiI: 1.45, sun: '#a6b8e8' } },
-  fields: { top: '#5a9ee2', hor: '#f0e6c4', fog: '#dcd4b4', hSky: '#ece8dc', hGnd: '#a08c50', sun: '#fff0c4', near: 70, far: 920, light: 1, clouds: 0.18,
+  fields: { top: '#5a9ee2', hor: '#eae4cc', fog: '#d4cfb4', hSky: '#ece8dc', hGnd: '#a08c50', sun: '#fff0c4', near: 50, far: 680, light: 1, clouds: 0.04,
     night: { top: '#0e1430', hor: '#2c3456', fog: '#242a44', hSky: '#6670a6', hGnd: '#2a2830', hemiI: 1.45, sun: '#b0b8e0' } },
-  snow: { top: '#4e94dc', hor: '#e2edf4', fog: '#d2e0ec', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 55, far: 780, light: 0.8, clouds: 0.0,
+  snow: { top: '#4e94dc', hor: '#e2edf4', fog: '#d2e0ec', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 35, far: 520, light: 0.8, clouds: 0.0,
     night: { top: '#0c1a3c', hor: '#2c4874', fog: '#24385c', hSky: '#7090cc', hGnd: '#3a4a6c', hemiI: 1.55, sun: '#b4caf4' } },
-  badlands: { top: '#5492d4', hor: '#f2d0ac', fog: '#dcb896', hSky: '#ece4e0', hGnd: '#a8603a', sun: '#fff0d0', near: 70, far: 900, light: 1, clouds: 0.28,
+  badlands: { top: '#5492d4', hor: '#f0cfb0', fog: '#dcb69c', hSky: '#ece4e0', hGnd: '#a8603a', sun: '#fff0d0', near: 50, far: 680, light: 1, clouds: 0.02,
     night: { top: '#120f2e', hor: '#3c2c50', fog: '#2c2236', hSky: '#7466a0', hGnd: '#2e2224', hemiI: 1.4, sun: '#b8b0e0' } },
-  desert: { top: '#5aa4e8', hor: '#f6e2ba', fog: '#ecd6ae', hSky: '#f0ece4', hGnd: '#c89c68', sun: '#fff4d8', near: 80, far: 1000, light: 0.95, clouds: 0.42,
+  desert: { top: '#5aa4e8', hor: '#f6e2ba', fog: '#ecd6ae', hSky: '#f0ece4', hGnd: '#c89c68', sun: '#fff4d8', near: 50, far: 650, light: 0.95, clouds: 0.0,
     night: { top: '#0c1232', hor: '#30365c', fog: '#262a44', hSky: '#7078ac', hGnd: '#3a3230', hemiI: 1.45, sun: '#b0b8e4' } },
 };
 const MOTE = { meadow: '#fff6d0', fields: '#fff0b8', snow: '#ffffff', badlands: '#f4c89a', desert: '#f6e0b0' };
+const PHASE = { meadow: 0.0, fields: 0.31, snow: 0.57, badlands: 0.12, desert: 0.79 };   // each biome's clouds start elsewhere
 
 const C = c => new THREE.Color(c);
 const mixHex = (a, b, t) => '#' + C(a).lerp(C(b), t).getHexString();
@@ -56,9 +58,10 @@ function keysFor(b) {
     cLit: '#5a6a96', cShade: '#1c2440', cA: 0.75, mtn: 0.34, star: 1, moteA: 0, fire: 1, spark: 0.35, near: 14, far: 380 };
   const dawn = { ...sunset, top: '#4a6ab4', hor: '#f2b496', fog: mixHex(D.fog, '#d8a8a0', 0.45), sun: '#ffb088', sunI: 1.2 * K, hSky: '#d0b8c0', hemiI: 1.5 * K,
     cLit: '#ffd0b0', cShade: '#8a84a8', star: 0.15, fire: 0.3, spark: 1.6 };
-  if (b === 'snow') {        // cold, crisp light in the pass: bluer shadows, pinker dawn on the snow
+  if (b === 'snow') {        // cold, crisp light in the pass: warm-lit snow against blue shadows, pinker dawn
     dawn.hor = '#f6c0b0'; dawn.hSky = '#d8c4d8'; golden.hSky = mixHex(D.hSky, '#f4dcc8', 0.4);
-    sunset.hSky = '#d8b8c4'; sunset.hGnd = mixHex(D.hGnd, '#7a6a8a', 0.4);
+    golden.sun = '#ffc890'; golden.hGnd = '#8290b0';
+    sunset.sun = '#ffb27a'; sunset.hSky = '#c8b8d0'; sunset.hGnd = '#7a86a8'; sunset.sunI = 1.6 * K; sunset.hemiI = 1.45 * K;
   }
   return [
     [0, night], [4.6, night], [5.7, dawn], [7.2, golden], [9.0, day], [15.8, day], [17.6, golden], [18.8, sunset], [19.8, dusk], [20.9, night], [24, night],
@@ -70,6 +73,10 @@ for (const b of Object.keys(DAY)) KEYS[b] = keysFor(b).map(([h, k]) => {
   for (const [n, v] of Object.entries(k)) o[n] = typeof v === 'string' ? C(v) : v;
   return o;
 });
+const KEYN = Object.keys(KEYS.meadow[0]).filter(n => n !== 'h');     // the keys, once (no per-frame garbage)
+const COLN = KEYN.filter(n => KEYS.meadow[0][n].isColor);
+const MOTEC = Object.fromEntries(Object.entries(MOTE).map(([b, c]) => [b, C(c)]));
+const FIREFLY = C('#c8ff70');
 
 // ---- shaders ---------------------------------------------------------------------------------
 
@@ -128,7 +135,7 @@ void main(){
   vec4 t = texture2D(map, uv);
   if (t.a < 0.01) discard;
   vec3 c = t.rgb * hemi * light;
-  float k = fogK + (1.0 - fogK) * 0.6 * (1.0 - smoothstep(0.0, 0.5, vUv.y));   // denser haze toward the valley floor
+  float k = fogK + (1.0 - fogK) * 0.45 * (1.0 - smoothstep(0.0, 0.25, vUv.y));   // denser haze at the very foot (behind the hills), so nothing floats
   c = mix(c, fogC, clamp(k, 0.0, 1.0));
   gl_FragColor = vec4(c, t.a);
   #include <colorspace_fragment>
@@ -159,13 +166,20 @@ void main(){ vec2 q = gl_PointCoord - 0.5; float r = length(q); float a = smooth
 
 // ---- setup ---------------------------------------------------------------------------------
 
-function canvasTexture(name, { repeatU = true } = {}) {
+function canvasTexture(name, { repeatU = true, mips = true } = {}) {
   const t = new THREE.CanvasTexture(canvasFor(name));
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = repeatU ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
   t.wrapT = THREE.ClampToEdgeWrapping;
   t.anisotropy = 4;
+  if (!mips) { t.generateMipmaps = false; t.minFilter = THREE.LinearFilter; }   // the band is magnified; mips would seam at u = 0
   return t;
+}
+const cloudTex = new Map();
+function clouds(b) {
+  const name = has(`sky_clouds_${b}`) ? `sky_clouds_${b}` : 'sky_clouds';
+  if (!cloudTex.has(name)) cloudTex.set(name, canvasTexture(name, { mips: false }));
+  return cloudTex.get(name);
 }
 const mtnTex = new Map();
 function mountains(b) {
@@ -196,7 +210,7 @@ export function initAtmosphere(_scene, _camera, _renderer) {
       top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, fogC: { value: new THREE.Color() },
       sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() }, moonDir: { value: new THREE.Vector3(0.55, 0.42, 0.72).normalize() },
       cLit: { value: new THREE.Color() }, cShade: { value: new THREE.Color() }, cA: { value: 1 }, cCov: { value: 0 }, star: { value: 0 }, cloudU: { value: 0 }, sunVis: { value: 1 },
-      tClouds: { value: canvasTexture('sky_clouds') },
+      tClouds: { value: clouds(biome) },
     },
     vertexShader: SKY_VS, fragmentShader: SKY_FS,
   });
@@ -207,10 +221,12 @@ export function initAtmosphere(_scene, _camera, _renderer) {
 
   // three rings of distant ranges: drawn right after the sky, before anything else, without
   // writing depth, so the real terrain always paints over them (they are scenery, not geometry)
+  // (never less hazed than the fogged hills in front of them; the near row's hero shapes sit at
+  // u = 0.71, the mid row's at 0.37 / 0.87 and the far row's at 0 / 0.5: straight down the road)
   const LAYERS = [
-    { row: 0, R: 1050, lo: -0.07, hi: 0.23, fogK: 0.6, light: 0.95, reps: 1, offs: 0.0 },
-    { row: 1, R: 820, lo: -0.06, hi: 0.15, fogK: 0.42, light: 0.92, reps: 1, offs: 0.37 },
-    { row: 2, R: 620, lo: -0.05, hi: 0.1, fogK: 0.28, light: 0.9, reps: 2, offs: 0.71 },
+    { row: 0, R: 1050, lo: -0.07, hi: 0.23, fogK: 0.74, light: 0.95, reps: 1, offs: 0.0 },
+    { row: 1, R: 820, lo: -0.06, hi: 0.15, fogK: 0.64, light: 0.92, reps: 1, offs: 0.37 },
+    { row: 2, R: 620, lo: -0.05, hi: 0.1, fogK: 0.54, light: 0.9, reps: 2, offs: 0.71 },
   ];
   rings = LAYERS.map((L, i) => {
     const h = (L.hi - L.lo) * L.R;
@@ -257,6 +273,7 @@ export function setBiome(b) {
   biome = KEYS[b] ? b : 'meadow';
   atmo.biome = biome;
   if (rings.length) { const t = mountains(biome); for (const m of rings) m.material.uniforms.map.value = t; }
+  if (skyMat) skyMat.uniforms.tClouds.value = clouds(biome);
   if (skyMat) setTimeOfDay(lastHour, lastNight);
 }
 
@@ -266,11 +283,11 @@ let lastHour = 10, lastNight = false;
 const tmpA = new THREE.Color(), tmpB = new THREE.Color();
 const sunDir = new THREE.Vector3(), moonDir = new THREE.Vector3(0.55, 0.42, 0.72).normalize(), lightDir = new THREE.Vector3();
 
+for (const n of COLN) cur[n] = new THREE.Color();
 function lerpKey(a, b, t) {
-  for (const n of Object.keys(a)) {
-    if (n === 'h') continue;
-    const va = a[n], vb = b[n];
-    if (va && va.isColor) { (cur[n] ||= new THREE.Color()).copy(va).lerp(vb, t); }
+  for (let i = 0; i < KEYN.length; i++) {
+    const n = KEYN[i], va = a[n], vb = b[n];
+    if (va.isColor) cur[n].copy(va).lerp(vb, t);
     else cur[n] = va + (vb - va) * t;
   }
 }
@@ -323,12 +340,12 @@ export function setTimeOfDay(hour, night = false) {
     const U2 = motesMat.uniforms;
     if (biome === 'snow') {
       U2.uFall.value = 1;
-      U2.uCol.value.set(MOTE.snow).lerp(cur.hSky, 0.25);
+      U2.uCol.value.copy(MOTEC.snow).lerp(cur.hSky, 0.25);
       U2.uAlpha.value = 0.55 + 0.25 * cur.star;
       U2.uSize.value = 0.075;
     } else {
       const ff = cur.fire * (biome === 'meadow' || biome === 'fields' ? 1 : 0.25);
-      tmpB.set(MOTE[biome]).lerp(C('#c8ff70'), Math.min(1, ff));
+      tmpB.copy(MOTEC[biome]).lerp(FIREFLY, Math.min(1, ff));
       U2.uFall.value = 0;
       U2.uCol.value.copy(tmpB);
       U2.uAlpha.value = Math.max(cur.moteA * (biome === 'meadow' ? 0.6 : 1), ff * 1.4);
@@ -338,15 +355,21 @@ export function setTimeOfDay(hour, night = false) {
 }
 const smooth = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 
+const sR = new THREE.Vector3(), sUp = new THREE.Vector3(), sF = new THREE.Vector3(), Y_UP = new THREE.Vector3(0, 1, 0);
 export function updateSun(focus) {
   const now = performance.now() / 1000;
   const dt = lastNow ? Math.min(0.1, now - lastNow) : 0;
   lastNow = now; clock += dt;
   const d = sun.userData.dir || lightDir;
-  sun.position.set(focus.x + d.x * 120, focus.y + d.y * 120, focus.z + d.z * 120);
-  sun.target.position.set(focus.x, focus.y, focus.z);
+  // snap the shadow box to its own texel grid, seen from the light, so shadow edges never crawl
+  sR.crossVectors(Y_UP, d).normalize(); sUp.crossVectors(d, sR);
+  const texel = (sun.shadow.camera.right - sun.shadow.camera.left) / sun.shadow.mapSize.x;
+  const fx = focus.x * sR.x + focus.y * sR.y + focus.z * sR.z, fy = focus.x * sUp.x + focus.y * sUp.y + focus.z * sUp.z;
+  sF.set(focus.x, focus.y, focus.z).addScaledVector(sR, Math.round(fx / texel) * texel - fx).addScaledVector(sUp, Math.round(fy / texel) * texel - fy);
+  sun.position.set(sF.x + d.x * 120, sF.y + d.y * 120, sF.z + d.z * 120);
+  sun.target.position.copy(sF);
   sky.position.copy(camera.position);
   for (const m of rings) m.position.copy(camera.position);
-  skyMat.uniforms.cloudU.value = (clock * 0.0009) % 1;
+  skyMat.uniforms.cloudU.value = (clock * 0.0009 + PHASE[biome]) % 1;
   if (motesMat) { motesMat.uniforms.uTime.value = clock; motesMat.uniforms.uCam.value.copy(camera.position); }
 }

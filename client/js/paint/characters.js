@@ -161,7 +161,7 @@ export const dressV = y => (y - DRESS_Y0) / (DRESS_Y1 - DRESS_Y0);
 
 // ---- who is who ---------------------------------------------------------------------
 
-export const SKIN_TONES = ['#dfa47b', '#c98c5e', '#a6704a', '#7c5038', '#ecbe9a', '#5e3c2b'];
+export const SKIN_TONES = ['#dfa47b', '#c98c5e', '#a6704a', '#81563c', '#ecbe9a', '#694431'];
 const LOOKS = [
   { hair: 'short', hairColor: '#5c3a1f', facial: 'stubble', eyes: '#4a5c74', female: false },
   { hair: 'short', hairColor: '#231b1a', facial: 'mustache', eyes: '#4a3220', female: false },
@@ -543,6 +543,7 @@ function paintHead(g, r, S, rnd) {
     const vJ = headV(-0.094);
     gradV(g, r.x, r.y, r.w, r.h, [[0, T.light], [1 - 0.79, mix(T.light, T.base, 0.4)], [1 - 0.6, T.base], [1 - 0.2, T.base], [1 - vJ - 0.02, mix(T.base, T.shadow, 0.35)], [1 - vJ + 0.015, mix(T.shadow, T.cool, 0.4)], [1 - 0.03, mix(T.base, T.shadow, 0.55)], [1, mix(T.shadow, T.cool, 0.3)]]);
     for (let i = 0; i < 22; i++) wblob(g, r, r.x + rnd() * r.w, r.y + rnd() * r.h * 0.85, range(rnd, 14, 40), range(rnd, 8, 22), rnd() * 3, pick(rnd, [T.light, T.shadow, T.blush, T.cool]), 0.13, 0.1);
+    weave(g, r.x, r.y, r.w, r.h, T.base, rnd, { a: 0.045, len: [2, 4], dir: 0.3 });     // faint brushwork in the skin
     // the big planes: the sides of the head turn away (cool), the front of the face catches the light
     for (const s of [-1, 1]) {
       B(s * 17, -2, 6, 13, T.cool, 0.42, 0.1);
@@ -715,7 +716,8 @@ function facialHair(g, K, S, T, rnd) {
 function hairFlow(g, base, rnd, { x0, x1, ys, ye, count = 9, width = [18, 26], lean = () => 0, sheen = 0.45, wrapW = 0, root = 0.5 }) {
   const deep = mix(shadowOf(base, 0.62), INK, 0.2), dark = shadowOf(base, 0.42);
   const mids = [base, mix(base, lightOf(base, 0.3), 0.55), shade(base, 0.9), mix(base, '#7a4a30', 0.12)];
-  const hi = mix(lightOf(base, 0.7), '#ffe6b4', 0.3);
+  const dk = hsl(base).l < 0.15;     // black hair: a cool, quieter sheen
+  const hi = dk ? mix(lightOf(base, 0.9), '#8a96b0', 0.35) : mix(lightOf(base, 0.7), '#ffe6b4', 0.3);
   const list = [];
   for (let pass = 0; pass < 2; pass++) for (let i = 0; i < count; i++) {
     const t = (i + 0.15 + rnd() * 0.7 + pass * 0.5) / count, x = x0 + (x1 - x0) * t;
@@ -733,7 +735,7 @@ function hairFlow(g, base, rnd, { x0, x1, ys, ye, count = 9, width = [18, 26], l
     stroke(g, P.map(([a, b]) => [a + W * 0.26, b]), W * 0.4, W * 0.1, mix(lk.c, dark, 0.6), 1);             // its shadow side
     stroke(g, P.map(([a, b]) => [a - W * 0.22, b - 1]), W * 0.3, W * 0.06, mix(lk.c, lightOf(lk.c, 0.4), 0.7), 1);   // lit top-left edge
     const k = Math.max(1, Math.min(6, Math.round((sheen + lk.s) * 8))), [ax, ay] = P[k], [bx, by] = P[k + 1];
-    blob(g, (ax + bx) / 2 - W * 0.14, (ay + by) / 2, W * 0.5, W * 0.15, Math.atan2(by - ay, bx - ax), hi, 0.55, 0.25);
+    blob(g, (ax + bx) / 2 - W * 0.14, (ay + by) / 2, W * 0.5, W * 0.15, Math.atan2(by - ay, bx - ax), hi, dk ? 0.35 : 0.55, 0.25);
     stroke(g, P.slice(0, 2), W * 0.95, W * 0.85, mix(lk.c, shadowOf(lk.c, 0.35), root), 0.85);           // darker at the roots
   }
 }
