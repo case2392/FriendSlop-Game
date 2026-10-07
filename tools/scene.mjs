@@ -45,8 +45,8 @@ const steve = await open('Steve');
 await steve.fill('#seedInput', seed);
 await steve.click('#hostBtn');
 await ready(steve);
-// SOLO=1: one client only (half the CPU; nobody else in the 'crew' view). Steve is also the camera.
-const SOLO = process.env.SOLO === '1';
+// One client unless the 'crew' view needs a second player to pose (SOLO=0 forces two, SOLO=1 forces one).
+const SOLO = process.env.SOLO ? process.env.SOLO === '1' : !views.includes('crew');   // two clients only when someone has to pose
 let dave = steve;
 if (!SOLO) {
   const code = await steve.evaluate(() => window.__nmd.code);
