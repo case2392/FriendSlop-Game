@@ -9,7 +9,7 @@ import { THREE, tex, painted, canvasTex, shadowy } from './gfx.js';
 import { LOOT } from '/shared/loot.js';
 import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V } from './paint/props.js';
 import { mergeGeometries, mergeVertices } from '/vendor/BufferGeometryUtils.js';
-import { rngFrom, mix, shade, rgba, blob, ellipse, stroke as pstroke, range, pick, makeCanvas } from './paint/core.js';
+import { rngFrom, rgba, blob, ellipse, range, pick, makeCanvas } from './paint/core.js';
 
 const V3 = THREE.Vector3;
 const TAU = Math.PI * 2;
@@ -66,6 +66,14 @@ function creaseNormals(geo, deg = 50) {
   }
   geo.setAttribute('normal', new THREE.BufferAttribute(out, 3));
   return geo;
+}
+
+// After a non-uniform scale the normals need the inverse-transpose; for a pure scale that is 1/s per axis.
+function creaseNormalsKeep(g) {
+  const n = g.attributes.normal; if (!n) return;
+  g.computeBoundingBox();
+  // scale was applied to positions only by BufferGeometry.scale, which also transforms normals correctly
+  for (let i = 0; i < n.count; i++) { const x = n.getX(i), y = n.getY(i), z = n.getZ(i), L = Math.hypot(x, y, z) || 1; n.setXYZ(i, x / L, y / L, z / L); }
 }
 
 // A box with chamfered, rounded edges (two facets per edge), its faces tagged for box UVs.
@@ -203,8 +211,14 @@ class Build {
     return this;
   }
   // merge, then darken toward the bottom (contact shadow) and in a soft band under overhangs
-  done({ ao = 0.32, aoH = 0.3 } = {}) {
+  done({ ao = 0.32, aoH = 0.3, fit = null } = {}) {
     const g = mergeGeometries(this.parts, false);
+    if (fit) {     // stretch to fill the collider box [hx, hy, hz]
+      g.computeBoundingBox();
+      const b = g.boundingBox, c = b.getCenter(new V3()), sz = b.getSize(new V3());
+      g.translate(-c.x, -c.y, -c.z); g.scale(2 * fit[0] / sz.x, 2 * fit[1] / sz.y, 2 * fit[2] / sz.z);
+      creaseNormalsKeep(g);
+    }
     g.computeBoundingBox();
     const y0 = g.boundingBox.min.y, H = Math.max(0.05, g.boundingBox.max.y - y0), k = Math.min(aoH, H * 0.45);
     const p = g.attributes.position, c = g.attributes.color, nr = g.attributes.normal;
@@ -241,7 +255,7 @@ const BUILDERS = {
     B.add(sphere(0.075, 14, 10), face, { at: mat4(0, 0.062, 0.01) });
     B.add(sphere(1, 10, 7), R.skin, { at: mat4(0, 0.054, 0.086, 0, 0, 0, [0.021, 0.02, 0.021]) });
     // the beard: a fat cone from the cheeks to the belly, laid against the chest; a mustache
-    B.add(lathe([[0, -0.14, 0], [0.02, -0.12, 0.12], [0.056, -0.07, 0.42], [0.074, -0.02, 0.7], [0.072, 0.01, 0.88], [0.05, 0.03, 0.96], [0, 0.034, 1]], 12), beard, { at: mat4(0, 0.044, 0.048, -0.22, 0, 0, [1, 1, 0.6]) });
+    B.add(lathe([[0, -0.14, 0], [0.02, -0.12, 0.12], [0.056, -0.07, 0.42], [0.074, -0.02, 0.7], [0.072, 0.01, 0.88], [0.05, 0.03, 0.96], [0, 0.034, 1]], 12), beard, { at: mat4(0, 0.044, 0.05, -0.2, 0, 0, [1.18, 1.12, 0.62]) });
     for (const sx of [-1, 1]) B.add(sphere(1, 8, 5), beard, { at: mat4(sx * 0.024, 0.041, 0.082, 0, sx * 0.3, sx * -0.4, [0.03, 0.012, 0.018]), tint: 1.08 });
     // the hat, its tip flopping back and to one side, and a rolled brim
     B.add(lathe([[0.078, 0.104, 0], [0.077, 0.12, 0.1], [0.063, 0.153, 0.32], [0.044, 0.186, 0.56], [0.026, 0.214, 0.78], [0.01, 0.233, 0.94], [0, 0.24, 1]], 14), hat,
@@ -318,7 +332,7 @@ const BUILDERS = {
     B.add(rbox(0.6, 0.03, 0.5, 0.01), R.wood, { uv: 'box', at: mat4(0, -0.285, -0.02), tint: 0.75 });
     // the cabinet, tapering toward the tube at the back
     const taper = v => { const f = Math.max(0, (0.05 - v.z) / 0.34); v.x *= 1 - 0.2 * f; v.y = (v.y) * (1 - 0.16 * f) - 0.02 * f; };
-    B.add(rbox(0.68, 0.47, 0.58, 0.04), R.wood, { uv: 'box', faces: { pz: R.tvfront }, at: mat4(0, -0.035, -0.01), warp: taper });
+    B.add(rbox(0.68, 0.47, 0.58, 0.04), R.wood, { uv: 'box', faces: { pz: R.tvfront, nz: sub(R.tvfront, 0.77, 0.47, 0.94, 0.86) }, at: mat4(0, -0.035, -0.01), warp: taper });
     // the screen: a bulging pane sitting in the recess
     const [u0, v0, u1, v1] = TV_LAYOUT.screen, fw = 0.68, fh = 0.47, fz = 0.28;
     const sw = (u1 - u0) * fw * 0.97, sh = (v1 - v0) * fh * 0.97, scx = -fw / 2 + (u0 + u1) / 2 * fw, scy = -0.035 - fh / 2 + (v0 + v1) / 2 * fh;
@@ -337,7 +351,7 @@ const BUILDERS = {
 
   neon() {     // the old neon OPEN sign, as a lantern-lit painted shop board
     const B = new Build();
-    B.add(rbox(0.8, 0.42, 0.06, 0.014), R.wood, { uv: 'box', faces: { pz: R.sign, nz: R.sign }, at: mat4(0, -0.04, 0) });
+    B.add(rbox(0.8, 0.42, 0.08, 0.016), R.wood, { uv: 'box', faces: { pz: R.sign, nz: R.sign }, at: mat4(0, -0.04, 0) });
     B.add(rbox(0.98, 0.026, 0.032, 0.008), R.rubber, { uv: 'box', at: mat4(0, 0.232, 0), tint: 1.3 });
     for (const sx of [-1, 1]) {
       // rings holding the board up
@@ -346,7 +360,7 @@ const BUILDERS = {
       const x = sx * 0.452;
       B.add(new THREE.TorusGeometry(0.014, 0.004, 4, 8), R.rubber, { at: mat4(x, 0.212, 0, 0, Math.PI / 2, 0), tint: 1.3 });
       B.add(lathe([[0, 0], [0.045, 0], [0.04, 0.012], [0.012, 0.04], [0, 0.045]], 4), R.rubber, { at: mat4(x, 0.155, 0, 0, Math.PI / 4, 0), tint: 1.2 });
-      B.add(rbox(0.062, 0.09, 0.062, 0.006), R.lantern, { uv: 'box', faces: { py: R.rubber, ny: R.rubber }, at: mat4(x, 0.11, 0) });
+      B.add(rbox(0.07, 0.09, 0.07, 0.006), R.lantern, { uv: 'box', faces: { py: R.rubber, ny: R.rubber }, at: mat4(x, 0.11, 0) });
       B.add(lathe([[0, 0], [0.042, 0], [0.042, 0.012], [0, 0.014]], 4), R.rubber, { at: mat4(x, 0.054, 0, 0, Math.PI / 4, 0), tint: 1.2 });
     }
     return B.done({ ao: 0.12, aoH: 0.1 });
@@ -354,7 +368,7 @@ const BUILDERS = {
 
   guitar() {
     const B = new Build();
-    const BW = 0.36, BH = 0.62, y0 = -0.5, depth = 0.072, bev = 0.012;
+    const BW = 0.36, BH = 0.62, y0 = -0.5, depth = 0.09, bev = 0.012;
     const shape = new THREE.Shape(GUITAR_OUTLINE.map(([x, y]) => new THREE.Vector2(x * (BW - 2 * bev * 0.8), y * (BH - 2 * bev * 0.8) + y0 + bev * 0.8)));
     const body = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: true, bevelThickness: bev, bevelSize: bev * 0.8, bevelSegments: 2, curveSegments: 4 });
     body.translate(0, 0, -depth / 2);
@@ -456,15 +470,15 @@ const BUILDERS = {
     const hide = { uv: 'planar', axis: 'x', bounds: [-0.75, -0.45, 0.75, 0.46], space: 'final', crease: 75 };
     // the skull: deep and broad at the back, a brow over the eye, a long snout with a nose bump
     const head = [
-      { z: -0.62, w: 0.34, top: 0.3, bot: -0.03 }, { z: -0.5, w: 0.44, top: 0.39, bot: -0.07 }, { z: -0.3, w: 0.49, top: 0.44, bot: -0.09 },
-      { z: -0.1, w: 0.47, top: 0.41, bot: -0.09 }, { z: 0.1, w: 0.4, top: 0.33, bot: -0.08 }, { z: 0.3, w: 0.34, top: 0.29, bot: -0.07 },
-      { z: 0.5, w: 0.29, top: 0.29, bot: -0.06 }, { z: 0.63, w: 0.24, top: 0.25, bot: -0.05 }, { z: 0.72, w: 0.15, top: 0.17, bot: -0.03 }, { z: 0.75, w: 0.05, top: 0.08, bot: 0.0 },
+      { z: -0.62, w: 0.33, top: 0.33, bot: -0.04 }, { z: -0.5, w: 0.43, top: 0.43, bot: -0.08 }, { z: -0.32, w: 0.47, top: 0.47, bot: -0.1 },
+      { z: -0.14, w: 0.45, top: 0.45, bot: -0.1 }, { z: 0.06, w: 0.38, top: 0.37, bot: -0.09 }, { z: 0.26, w: 0.31, top: 0.33, bot: -0.08 },
+      { z: 0.46, w: 0.26, top: 0.33, bot: -0.07 }, { z: 0.6, w: 0.22, top: 0.3, bot: -0.06 }, { z: 0.7, w: 0.15, top: 0.22, bot: -0.04 }, { z: 0.75, w: 0.05, top: 0.11, bot: 0.0 },
     ];
     B.add(loft(head, 18, 2.4), R.dino, hide);
     const at = (st, z) => { let i = 1; while (i < st.length - 1 && st[i].z < z) i++; const a = st[i - 1], b = st[i], f = Math.min(1, Math.max(0, (z - a.z) / (b.z - a.z))); return { w: a.w + (b.w - a.w) * f, top: a.top + (b.top - a.top) * f, bot: a.bot + (b.bot - a.bot) * f }; };
     // the lower jaw, hinged at the back and hanging open
     const jaw = [
-      { z: -0.52, w: 0.36, top: -0.07, bot: -0.3 }, { z: -0.32, w: 0.4, top: -0.07, bot: -0.36 }, { z: -0.08, w: 0.37, top: -0.07, bot: -0.31 },
+      { z: -0.52, w: 0.35, top: -0.07, bot: -0.34 }, { z: -0.32, w: 0.39, top: -0.07, bot: -0.4 }, { z: -0.08, w: 0.35, top: -0.07, bot: -0.33 },
       { z: 0.16, w: 0.31, top: -0.07, bot: -0.26 }, { z: 0.4, w: 0.26, top: -0.07, bot: -0.22 }, { z: 0.58, w: 0.2, top: -0.07, bot: -0.19 }, { z: 0.66, w: 0.09, top: -0.08, bot: -0.15 },
     ];
     const J = new THREE.Matrix4().makeTranslation(0, -0.08, -0.48).multiply(new THREE.Matrix4().makeRotationX(0.2)).multiply(new THREE.Matrix4().makeTranslation(0, 0.08, 0.48));
@@ -486,12 +500,12 @@ const BUILDERS = {
     // eyes tucked under heavy brow ridges, nostrils on the nose bump, the broken neck
     for (const sx of [-1, 1]) {
       const ez = -0.2, h = at(head, ez);
-      B.add(sphere(0.06, 12, 8), R.eye, { at: mat4(sx * (h.w * 0.86), 0.25, ez, 0, sx * (Math.PI / 2 - 0.3), 0) });
-      B.add(sphere(1, 12, 7), R.dino, { ...hide, at: mat4(sx * (h.w * 0.78), 0.335, ez + 0.02, 0, sx * 0.25, sx * 0.35, [0.13, 0.06, 0.17]) });
-      B.add(sphere(1, 8, 5), R.rubber, { at: mat4(sx * 0.075, 0.262, 0.62, -0.5, 0, 0, [0.03, 0.016, 0.03]), tint: 1.2 });
+      B.add(sphere(0.08, 12, 8), R.eye, { at: mat4(sx * (h.w * 0.8), 0.28, ez + 0.03, 0, sx * (Math.PI / 2 - 0.55), 0) });
+      B.add(sphere(1, 12, 7), R.dino, { ...hide, at: mat4(sx * (h.w * 0.7), 0.38, ez + 0.03, 0, sx * 0.2, sx * 0.3, [0.13, 0.055, 0.18]) });
+      B.add(sphere(1, 8, 5), R.rubber, { at: mat4(sx * 0.072, 0.3, 0.6, -0.5, 0, 0, [0.03, 0.016, 0.03]), tint: 1.2 });
     }
-    B.add(lathe([[0, 0], [0.29, 0], [0.3, 0.01]], 16), R.plaster, { uv: 'planar', axis: 'y', bounds: [-0.3, -0.3, 0.3, 0.3], at: mat4(0, 0.135, -0.623, -Math.PI / 2, 0, 0, [1.08, 1, 0.53]) });
-    return B.done({ ao: 0.3, aoH: 0.25 });
+    B.add(lathe([[0, 0], [0.29, 0], [0.3, 0.01]], 16), R.plaster, { uv: 'planar', axis: 'y', bounds: [-0.3, -0.3, 0.3, 0.3], at: mat4(0, 0.145, -0.623, -Math.PI / 2, 0, 0, [1.05, 1, 0.6]) });
+    return B.done({ ao: 0.3, aoH: 0.25, fit: [0.5, 0.45, 0.745] });
   },
 
   map() {      // the leather map case (the paper itself is a second mesh with the map canvas)
@@ -506,17 +520,17 @@ function boulderGeo(biome) {
   const [, hx, hy, hz] = LOOT.boulder.shape;
   const rnd = rngFrom('boulder-' + biome);
   const cuts = [];
-  for (let k = 0; k < 6; k++) { const a = rnd() * TAU, e = range(rnd, -0.2, 0.75); cuts.push([new V3(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).normalize(), range(rnd, 0.78, 0.92)]); }
+  for (let k = 0; k < 10; k++) { const a = k / 10 * TAU + rnd() * 0.5, e = range(rnd, -0.25, 0.9); cuts.push([new V3(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).normalize(), range(rnd, 0.7, 0.88)]); }
   const ph = Array.from({ length: 6 }, () => rnd() * TAU);
-  const g = sphere(1, 20, 12);
+  const g = sphere(1, 16, 10);
   const p = g.attributes.position, v = new V3();
   for (let i = 0; i < p.count; i++) {
     v.fromBufferAttribute(p, i);
     // toward a box (fills the collider's corners), lumpy, a few flat broken planes
-    v.set(Math.sign(v.x) * Math.pow(Math.abs(v.x), 0.62), Math.sign(v.y) * Math.pow(Math.abs(v.y), 0.7), Math.sign(v.z) * Math.pow(Math.abs(v.z), 0.62));
+    v.set(Math.sign(v.x) * Math.pow(Math.abs(v.x), 0.72), Math.sign(v.y) * Math.pow(Math.abs(v.y), 0.8), Math.sign(v.z) * Math.pow(Math.abs(v.z), 0.72));
     const n = 1 + 0.07 * Math.sin(v.x * 3.1 + ph[0]) * Math.sin(v.z * 2.7 + ph[1]) + 0.05 * Math.sin(v.y * 4.3 + ph[2] + v.x * 2) + 0.03 * Math.sin(v.z * 7 + ph[3]);
     v.multiplyScalar(n);
-    for (const [nn, d] of cuts) { const e = v.dot(nn) - d; if (e > 0) v.addScaledVector(nn, -e * 0.9); }
+    for (const [nn, d] of cuts) { const e = v.dot(nn) - d; if (e > 0) v.addScaledVector(nn, -e * 0.97); }
     if (v.y < -0.82) v.y = -0.82 + (v.y + 0.82) * 0.15;
     p.setXYZ(i, v.x, v.y, v.z);
   }
@@ -527,7 +541,7 @@ function boulderGeo(biome) {
   const uv = g.attributes.uv;
   for (let i = 0; i < p.count; i++) uv.setY(i, 0.01 + 0.98 * (p.getY(i) + hy) / (2 * hy));
   const out = g.toNonIndexed();
-  creaseNormals(out, 48);
+  creaseNormals(out, 36);
   const col = new Float32Array(out.attributes.position.count * 3), q = out.attributes.position;
   for (let i = 0; i < q.count; i++) { const t = Math.min(1, (q.getY(i) + hy) / 0.9), k = 0.62 + 0.38 * t * t * (3 - 2 * t); col[i * 3] = k; col[i * 3 + 1] = k; col[i * 3 + 2] = k * 1.02; }
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
@@ -654,15 +668,21 @@ export function mapCanvas(W) {
   // the land along the road, painted in the zone's colors, and the canyon walls inked as hills
   const z0 = Wd.Z0 + 30, z1 = Wd.Z1 - 20;
   const X = z => 34 + (z - z0) / (z1 - z0) * 444;
-  const Y = x => 196 - x * 1.5;
+  const Y = x => 200 - x * 1.55;
   for (let i = 0; i < 70; i++) { const z = z0 + rnd() * (z1 - z0), x = Wd.roadX(z) + range(rnd, -40, 40); blob(g, X(z), Y(x), range(rnd, 18, 40), range(rnd, 12, 26), 0, pick(rnd, B.land), 0.4, 0.15); }
   for (const side of [-1, 1]) {
     for (let z = z0 + 8; z < z1; z += range(rnd, 13, 22)) {
       const x = Wd.roadX(z) + side * range(rnd, 34, 46), px = X(z), py = Y(x), h = range(rnd, 9, 15), w = range(rnd, 9, 14);
-      g.save(); g.beginPath(); g.moveTo(px - w, py); g.quadraticCurveTo(px - w * 0.3, py - h * 1.1, px, py - h); g.quadraticCurveTo(px + w * 0.4, py - h * 0.9, px + w, py);
+      g.save(); g.beginPath(); g.moveTo(px - w, py);
+      if (Wd.biome === 'badlands') { g.lineTo(px - w * 0.55, py - h); g.lineTo(px + w * 0.5, py - h); g.lineTo(px + w, py); }
+      else if (Wd.biome === 'desert') { g.quadraticCurveTo(px - w * 0.1, py - h * 0.9, px + w * 0.35, py - h * 0.55); g.quadraticCurveTo(px + w * 0.7, py - h * 0.2, px + w * 1.2, py); }
+      else if (Wd.biome === 'snow') { g.lineTo(px - w * 0.2, py - h * 1.15); g.lineTo(px + w * 0.15, py - h * 0.85); g.lineTo(px + w * 0.35, py - h); g.lineTo(px + w, py); }
+      else { g.quadraticCurveTo(px - w * 0.3, py - h * (Wd.biome === 'fields' ? 0.7 : 1.1), px, py - h * (Wd.biome === 'fields' ? 0.65 : 1)); g.quadraticCurveTo(px + w * 0.4, py - h * 0.9, px + w, py); }
       g.fillStyle = rgba(B.hill, 0.55); g.fill(); g.strokeStyle = rgba('#3a2a1e', 0.75); g.lineWidth = 1.1; g.stroke();
-      g.beginPath(); g.moveTo(px + 1, py - h + 2); g.quadraticCurveTo(px + w * 0.4, py - h * 0.5, px + w * 0.6, py - 1); g.strokeStyle = rgba('#3a2a1e', 0.35); g.stroke(); g.restore();
-      if (Wd.biome === 'snow') { g.save(); g.beginPath(); g.moveTo(px - w * 0.35, py - h * 0.62); g.quadraticCurveTo(px - w * 0.1, py - h * 1.0, px, py - h); g.lineTo(px + w * 0.3, py - h * 0.65); g.closePath(); g.fillStyle = '#fbfbf6'; g.fill(); g.restore(); }
+      if (Wd.biome === 'badlands') { for (const f of [0.35, 0.65]) { g.beginPath(); g.moveTo(px - w * (1 - f * 0.45), py - h * (1 - f)); g.lineTo(px + w * (0.5 + f * 0.5), py - h * (1 - f)); g.strokeStyle = rgba('#5a2a18', 0.45); g.stroke(); } }
+      else { g.beginPath(); g.moveTo(px + 1, py - h + 2); g.quadraticCurveTo(px + w * 0.4, py - h * 0.5, px + w * 0.6, py - 1); g.strokeStyle = rgba('#3a2a1e', 0.35); g.stroke(); }
+      g.restore();
+      if (Wd.biome === 'snow') { g.save(); g.beginPath(); g.moveTo(px - w * 0.55, py - h * 0.6); g.lineTo(px - w * 0.2, py - h * 1.15); g.lineTo(px + w * 0.05, py - h * 0.9); g.lineTo(px - w * 0.1, py - h * 0.62); g.closePath(); g.fillStyle = '#fbfbf6'; g.fill(); g.restore(); }
     }
   }
   for (let i = 0; i < 46; i++) { const z = z0 + rnd() * (z1 - z0), side = rnd() < 0.5 ? -1 : 1, x = Wd.roadX(z) + side * range(rnd, 12, 30); tinyTree(g, B.tree, X(z), Y(x), rnd); }
@@ -677,28 +697,41 @@ export function mapCanvas(W) {
   path(); g.strokeStyle = '#c89a5e'; g.lineWidth = 5; g.stroke();
   path(); g.setLineDash([6, 7]); g.strokeStyle = 'rgba(90,58,30,0.6)'; g.lineWidth = 1; g.stroke(); g.setLineDash([]);
   g.restore();
+  // labels never sit on each other: each tries a few spots and takes the first free one
+  const taken = [];
+  const free = (x0, y0, x1, y1) => x0 > 12 && x1 < CW - 12 && y0 > 10 && y1 < CH - 10 && !taken.some(r => x0 < r[2] && x1 > r[0] && y0 < r[3] && y1 > r[1]);
+  const claim = (x0, y0, x1, y1) => taken.push([x0, y0, x1, y1]);
+  const textW = (txt, size) => { g.save(); g.font = `bold ${size}px Georgia, 'Liberation Serif', serif`; const w = g.measureText(txt).width; g.restore(); return w; };
+  const place = (x, y, w, h, offs) => { for (const [dx, dy] of offs) { const cx = x + dx, cy = y + dy; if (free(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2)) { claim(cx - w / 2, cy - h / 2, cx + w / 2, cy + h / 2); return [cx, cy]; } } const [dx, dy] = offs[0]; return [x + dx, y + dy]; };
+  claim(14, 12, 250, 58); claim(CW - 74, 18, CW - 14, 84);
   // distance ticks every 100 m from camp
   for (let z = 0; z <= Wd.LEN; z += 100) {
     const px = X(z), py = Y(Wd.roadX(z));
     g.fillStyle = '#3a2a1e'; g.fillRect(px - 1, py + 5, 2, 7);
     inkText(g, String(z), px, py + 19, { size: 10, weight: 'normal' });
+    claim(px - 10, py + 13, px + 10, py + 25);
   }
-  // obstacles in red ink
-  for (const o of Wd.obstacles) {
-    const px = X(o.z), py = Y(Wd.roadX(o.z));
-    const above = (o.id ?? 0) % 2 === 0;
-    const iy = py + (above ? -26 : 30);
-    g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (above ? -6 : 6)); g.lineTo(px, iy + (above ? 8 : -8)); g.stroke(); g.restore();
-    obstacleIcon(g, o.type, px, iy);
-    inkText(g, (OBST_NAMES[o.type] || o.type).toUpperCase(), px, iy + (above ? -14 : 15), { size: 10, color: '#8a1e14' });
-    g.save(); g.strokeStyle = '#a8241a'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); g.restore();
-  }
-  // the stops
+  for (const [x, y] of road) claim(x - 4, y - 4, x + 4, y + 4);
+  // the stops: a medallion on the spot, the name beside it
+  for (const p of Wd.pois) { const px = X(p.z), py = Y(p.x); claim(px - 13, py - 13, px + 13, py + 13); }
+  for (const l of Wd.landmarks) { const px = X(l.z), py = Y(l.x); claim(px - 9, py - 11, px + 9, py + 6); }
   for (const p of Wd.pois) {
-    const px = X(p.z), py = Y(p.x);
+    const px = X(p.z), py = Y(p.x), name = POI_NAMES[p.type] || p.type, w = textW(name, 10.5) + 4;
     mapIcon(g, p.type, px, py, 0.95);
-    inkText(g, POI_NAMES[p.type] || p.type, px, py + (p.x > Wd.roadX(p.z) ? -20 : 21), { size: 10.5, color: '#1e3a5a' });
-    if (p.type === 'crash') inkText(g, '(up the mesa)', px, py + (p.x > Wd.roadX(p.z) ? -31 : 32), { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
+    const up = p.x > Wd.roadX(p.z) ? -1 : 1;
+    const [lx, ly] = place(px, py, w, 12, [[0, 21 * up], [0, -21 * up], [w / 2 + 16, 0], [-w / 2 - 16, 0], [0, 33 * up], [0, -33 * up]]);
+    inkText(g, name, lx, ly, { size: 10.5, color: '#1e3a5a' });
+    if (p.type === 'crash') { const [mx, my] = place(lx, ly, 62, 10, [[0, 11 * Math.sign(ly - py || 1)], [0, -11], [0, 11]]); inkText(g, '(up the mesa)', mx, my, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' }); }
+  }
+  // obstacles in red ink: an X on the road, the sign off to one side on a dotted leader
+  for (const o of Wd.obstacles) {
+    const px = X(o.z), py = Y(Wd.roadX(o.z)), name = (OBST_NAMES[o.type] || o.type).toUpperCase(), w = Math.max(28, textW(name, 10)) + 4;
+    const [cx, cy] = place(px, py, w, 32, [[0, -30], [0, 32], [0, -52], [0, 54], [w / 2 + 12, -26], [-w / 2 - 12, -26], [0, -74], [0, 76]]);
+    const iy = cy + (cy < py ? 6 : -6), ly = cy + (cy < py ? -8 : 9);
+    g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (cy < py ? -5 : 5)); g.lineTo(cx, iy + (cy < py ? 7 : -7)); g.stroke(); g.restore();
+    obstacleIcon(g, o.type, cx, iy);
+    inkText(g, name, cx, ly, { size: 10, color: '#8a1e14' });
+    g.save(); g.strokeStyle = '#a8241a'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); g.restore();
   }
   // landmarks
   for (const l of Wd.landmarks) {
@@ -708,11 +741,16 @@ export function mapCanvas(W) {
       g.beginPath(); g.ellipse(0, 0, 4, 5, 0, 0, TAU); g.fill(); g.stroke();
       g.beginPath(); g.moveTo(-3, -3); g.quadraticCurveTo(-9, -6, -8, -10); g.moveTo(3, -3); g.quadraticCurveTo(9, -6, 8, -10); g.stroke();
       g.fillStyle = '#3a2a1e'; g.fillRect(-2.2, -1.5, 1.5, 1.5); g.fillRect(0.8, -1.5, 1.5, 1.5); g.restore();
-      inkText(g, 'cow skull', px, py + 12, { size: 9, italic: true, weight: 'normal', color: '#5a3a6a' });
+      claim(px - 9, py - 11, px + 9, py + 6);
+      const [lx, ly] = place(px, py, 46, 10, [[0, 12], [0, -16], [30, 0], [-30, 0]]);
+      inkText(g, 'cow skull', lx, ly, { size: 9, italic: true, weight: 'normal', color: '#5a3a6a' });
     } else {
       g.save(); g.translate(px, py); g.strokeStyle = '#3a2a1e'; g.lineWidth = 1;
       g.fillStyle = '#8a6a40'; g.fillRect(-0.8, -2, 1.6, 7); g.fillStyle = '#e8d4a0'; g.fillRect(-7, -7, 14, 6); g.strokeRect(-7, -7, 14, 6); g.restore();
-      inkText(g, `"${l.label}"`, px, py - 13, { size: 8.5, italic: true, weight: 'normal', color: '#5a3a6a' });
+      claim(px - 7, py - 7, px + 7, py + 5);
+      const txt = `"${l.label}"`, w = textW(txt, 8.5) * 0.9 + 4;
+      const [lx, ly] = place(px, py, w, 10, [[0, -13], [0, 12], [w / 2 + 10, -3], [-w / 2 - 10, -3], [0, -24], [0, 23]]);
+      inkText(g, txt, lx, ly, { size: 8.5, italic: true, weight: 'normal', color: '#5a3a6a' });
     }
   }
   // camp and town
@@ -737,11 +775,16 @@ export function mapCanvas(W) {
   inkText(g, '100 m', 20 + sb / 2, CH - 40, { size: 9, weight: 'normal' });
   // burnt, ragged edges: char outside a jagged line, a scorched brown halo inside it
   const edge = [];
-  const jag = (t, k) => 7 + 5 * Math.sin(t * 0.23 + k) + 3 * Math.sin(t * 0.71 + k * 2) + range(rnd, 0, 3);
-  for (let x = 0; x <= CW; x += 6) edge.push([x, jag(x, 1)]);
-  for (let y = 0; y <= CH; y += 6) edge.push([CW - jag(y, 2), y]);
-  for (let x = CW; x >= 0; x -= 6) edge.push([x, CH - jag(x, 3)]);
-  for (let y = CH; y >= 0; y -= 6) edge.push([jag(y, 4), y]);
+  const bites = Array.from({ length: 4 }, (_, k) => ({ side: k + 1, at: range(rnd, 0.15, 0.85), w: range(rnd, 24, 60), d: range(rnd, 6, 14) }));
+  const jag = (t, k) => {
+    let j = 6 + 2.6 * Math.sin(t * 0.045 + k * 1.7) + 1.8 * Math.sin(t * 0.13 + k * 2.3) + 1.1 * Math.sin(t * 0.41 + k) + range(rnd, 0, 1.2);
+    for (const b of bites) if (b.side === k) { const L = k % 2 ? CW : CH, d = Math.abs(t - b.at * L) / b.w; if (d < 1) j += b.d * (1 - d * d); }
+    return j;
+  };
+  for (let x = 0; x <= CW; x += 4) edge.push([x, jag(x, 1)]);
+  for (let y = 0; y <= CH; y += 4) edge.push([CW - jag(y, 2), y]);
+  for (let x = CW; x >= 0; x -= 4) edge.push([x, CH - jag(x, 3)]);
+  for (let y = CH; y >= 0; y -= 4) edge.push([jag(y, 4), y]);
   g.save();
   g.beginPath(); g.rect(0, 0, CW, CH); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
   g.fillStyle = '#2e1e14'; g.fill('evenodd');
@@ -756,10 +799,10 @@ export function mapCanvas(W) {
 function demoWorld() {
   return {
     seed: 1, day: 1, LEN: 900, Z0: -90, Z1: 1075, biome: 'meadow', biomeName: 'The Westmeadow Road',
-    roadX: z => 9 * Math.sin(z / 95) + 4 * Math.sin(z / 37),
-    pois: [{ type: 'gas', z: 140, x: 22 }, { type: 'yard', z: 300, x: -18 }, { type: 'crash', z: 470, x: 26 }, { type: 'junk', z: 640, x: -20 }, { type: 'dino', z: 790, x: 18 }],
+    roadX: z => 22 * Math.sin(z / 95) + 7 * Math.sin(z / 33),
+    pois: [{ type: 'gas', z: 140 }, { type: 'yard', z: 300 }, { type: 'crash', z: 470 }, { type: 'junk', z: 640 }, { type: 'dino', z: 790 }].map((p, i) => ({ ...p, x: 22 * Math.sin(p.z / 95) + 7 * Math.sin(p.z / 33) + (i % 2 ? -18 : 20) })),
     obstacles: [{ type: 'mud', z: 220, id: 0 }, { type: 'boulder', z: 400, id: 1 }, { type: 'grade', z: 560, id: 2 }],
-    landmarks: [{ kind: 'billboard', z: 260, x: 14, label: 'LUCKY SLOP' }, { kind: 'skull', z: 700, x: -16 }],
+    landmarks: [{ kind: 'billboard', z: 250, x: 30, label: 'LUCKY SLOP' }, { kind: 'skull', z: 705, x: -30 }],
   };
 }
 
@@ -821,5 +864,5 @@ export const PREVIEW = {
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); return g;
   }])),
   // the map sheet standing up, big, for reading it
-  mapsheet: () => { const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.19), new THREE.MeshBasicMaterial({ map: canvasTex(mapCanvas(null)), side: THREE.DoubleSide })); m.position.y = 0.7; const g = new THREE.Group(); g.add(m); return g; },
+  mapsheet: (o = {}) => { const W = { ...demoWorld(), biome: o.biome || 'meadow', day: ['meadow', 'fields', 'snow', 'badlands', 'desert'].indexOf(o.biome || 'meadow') + 1 }; const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.19), new THREE.MeshBasicMaterial({ map: canvasTex(mapCanvas(W)), side: THREE.DoubleSide })); m.position.y = 0.7; const g = new THREE.Group(); g.add(m); return g; },
 };

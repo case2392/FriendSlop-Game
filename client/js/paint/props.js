@@ -171,6 +171,15 @@ function stitches(g, pts, step, len, color, hole = '#2a1a14', alpha = 0.9) {
     acc = (acc + L) % step;
   }
 }
+// A painterly pass: re-lay the picture as short brush strokes picked from its own colors, along a flow.
+function brushify(g, w, h, rnd, { n = 1200, len = [3, 8], wid = [1.2, 2.6], alpha = 0.45, flow = () => 0 } = {}) {
+  const D = g.getImageData(0, 0, w, h).data;
+  for (let i = 0; i < n; i++) {
+    const x = rnd() * w, y = rnd() * h, k = ((y | 0) * w + (x | 0)) * 4;
+    const c = `rgb(${D[k]},${D[k + 1]},${D[k + 2]})`, a = flow(x, y) + (rnd() - 0.5) * 0.5, L = range(rnd, len[0], len[1]);
+    line(g, [[x - Math.cos(a) * L / 2, y - Math.sin(a) * L / 2], [x + Math.cos(a) * L / 2, y + Math.sin(a) * L / 2]], range(rnd, wid[0], wid[1]), c, alpha);
+  }
+}
 // Darken toward the border (a painted ambient-occlusion frame).
 function vignette(g, x, y, w, h, color = '#1e1622', alpha = 0.35, k = 0.18) {
   g.save();
@@ -663,7 +672,7 @@ register('loot_slot', {
 register('loot_screen', {
   family: F, size: 128, note: 'CRT glass: smoky green-gray, curved, a window reflection and a faint glow of a picture',
   paint(g, s, rnd, h, cv) {
-    g.fillStyle = radial(g, s * 0.5, s * 0.5, 4, s * 0.72, [[0, '#5a7470'], [0.5, '#3a5250'], [0.85, '#22302e'], [1, '#141c1c']]); g.fillRect(0, 0, s, s);
+    g.fillStyle = radial(g, s * 0.5, s * 0.5, 4, s * 0.75, [[0, '#6e8c86'], [0.55, '#4a6662'], [0.9, '#2e4040'], [1, '#1e2a2a']]); g.fillRect(0, 0, s, s);
     // the ghost of a picture: a gnome waving (it's always the gnome channel)
     blob(g, s * 0.52, s * 0.6, 22, 30, 0, '#7aa098', 0.22, 0.3);
     blob(g, s * 0.52, s * 0.34, 12, 18, 0, '#9a6a60', 0.18, 0.3);
@@ -674,7 +683,7 @@ register('loot_screen', {
     line(g, [[s * 0.25, s * 0.13], [s * 0.24, s * 0.43]], 2.5, '#22302e', 0.25);
     const arc = []; for (let k = 0; k <= 10; k++) { const a = Math.PI * (1.05 + k / 10 * 0.4); arc.push([s * 0.5 + Math.cos(a) * s * 0.4, s * 0.55 + Math.sin(a) * s * 0.42]); }
     line(g, arc, 2, '#f4fffc', 0.5);
-    vignette(g, 0, 0, s, s, '#0a1010', 0.55, 0.12);
+    vignette(g, 0, 0, s, s, '#0a1010', 0.4, 0.08);
     blurTile(cv, 0.6);
   },
 });
@@ -918,6 +927,7 @@ register('loot_portrait', {
       stroke(g, pts, 2.5 - i * 0.2, 0.6, i < 3 ? '#c8d4ff' : '#7a8ad8', 0.55 - i * 0.05);
     }
     g.restore();
+    brushify(g, w, h, rnd, { n: 2600, len: [3, 7], wid: [1.2, 2.4], alpha: 0.5, flow: (x, y) => Math.atan2(y - cy, x - cx) + Math.PI / 2 });
     // gold signature in the corner
     letters(g, 'E.P.', w - 30, h - 14, 13, { rnd, jit: 0.05, shadow: 0, fill: ['#e8c870', '#a87a30'] });
     glaze(g, w, h, '#ffe0c0', 0.06);
@@ -1222,12 +1232,6 @@ function boulderPaint(g, w, rnd, h, biome) {
       blob(g, X - rx * 0.2, y - ry * 0.25, rx * 0.8, ry * 0.7, a, lightOf(pick(rnd, B.cols), 0.25), 0.22, 0.3);
     });
   }
-  // ledges: a lit lip over a shaded underside
-  for (let i = 0; i < 9; i++) {
-    const x = rnd() * w, y = range(rnd, 0.25, 0.7) * h, L = range(rnd, 40, 120), pts = [];
-    for (let k = 0; k <= 8; k++) pts.push([x + L * k / 8, y + Math.sin(k * 0.8 + i) * 3]);
-    wrapX(w, x + L / 2, L, X => { const p = pts.map(([u, v]) => [u - x - L / 2 + X, v]); line(g, p.map(([u, v]) => [u, v + 4]), 6, shadowOf(B.base, 0.6), 0.35); line(g, p, 2.5, lightOf(B.base, 0.5), 0.55); });
-  }
   if (biome === 'badlands') {   // horizontal strata bands
     for (let y = 0; y < h; y += range(rnd, 10, 22)) { const c = pick(rnd, ['#8e3e22', '#b4552f', '#cf7a45', '#e3a066']); rect(g, 0, y, w, range(rnd, 4, 10), c, 0.28); line(g, [[0, y], [w, y]], 1.5, '#5a2a18', 0.3); }
   }
@@ -1236,15 +1240,15 @@ function boulderPaint(g, w, rnd, h, biome) {
   // the ground line: earth and grime at the bottom
   g.fillStyle = lin(g, 0, Y(0.2), 0, h, [[0, B.ground, 0], [0.6, B.ground, 0.45], [1, shadowOf(B.ground, 0.4), 0.8]]); g.fillRect(0, Y(0.2), w, h - Y(0.2));
   // the zone's cover on top: ragged lower edge, lit on top
-  const edge = x => Y(0.68) + Math.sin(x / w * TAU * 3 + 1) * 10 + Math.sin(x / w * TAU * 7) * 5;
+  const edge = x => Y(0.79) + Math.sin(x / w * TAU * 3 + 1) * 9 + Math.sin(x / w * TAU * 7) * 5;
   const capPath = (e = 0) => { g.beginPath(); g.moveTo(0, 0); for (let x = 0; x <= w; x += 4) g.lineTo(x, edge(x) + e); g.lineTo(w, 0); g.closePath(); };
   if (biome === 'meadow' || biome === 'fields') {
     const dark = biome === 'meadow' ? ['#3e5e22', '#4a6e28'] : ['#8a7a34', '#9a8a3e'];
     const mid = biome === 'meadow' ? ['#5a8a2e', '#6a9a34'] : ['#b89a48', '#c8aa52'];
     const lit = biome === 'meadow' ? ['#8ab444', '#9cc04e'] : ['#e2c56a', '#ecd48a'];
     g.save(); capPath(6); g.fillStyle = rgba(shadowOf(B.base, 0.5), 0.35); g.fill(); g.restore();
-    g.save(); capPath(); g.fillStyle = lin(g, 0, 0, 0, Y(0.68), [[0, lit[0]], [0.5, mid[0]], [1, dark[0]]]); g.fill(); g.clip();
-    for (let i = 0; i < 70; i++) { const x = rnd() * w, y = rnd() * Y(0.6); wrapX(w, x, 16, X => blob(g, X, y, range(rnd, 6, 16), range(rnd, 4, 9), 0, pick(rnd, [...dark, ...mid, ...lit]), 0.5, 0.3)); }
+    g.save(); capPath(); g.fillStyle = lin(g, 0, 0, 0, Y(0.79), [[0, lit[0]], [0.5, mid[0]], [1, dark[0]]]); g.fill(); g.clip();
+    for (let i = 0; i < 70; i++) { const x = rnd() * w, y = rnd() * Y(0.72); wrapX(w, x, 16, X => blob(g, X, y, range(rnd, 6, 16), range(rnd, 4, 9), 0, pick(rnd, [...dark, ...mid, ...lit]), 0.5, 0.3)); }
     g.restore();
     for (let i = 0; i < 260; i++) { const x = rnd() * w, y = edge(x) + range(rnd, -4, 8); wrapX(w, x, 10, X => blade(g, X, y, range(rnd, 5, 12), range(rnd, -0.6, 0.6), range(rnd, 1.4, 2.4), pick(rnd, [...dark, ...mid]), 0.9, range(rnd, -0.3, 0.3))); }
     // grass and dirt at the foot too
@@ -1252,16 +1256,16 @@ function boulderPaint(g, w, rnd, h, biome) {
     if (biome === 'fields') for (let i = 0; i < 26; i++) { const x = rnd() * w, y = range(rnd, 0.3, 0.7) * h; wrapX(w, x, 8, X => blob(g, X, y, range(rnd, 3, 7), range(rnd, 2, 5), 0, pick(rnd, ['#d89a3a', '#c8b04a', '#e8c060']), 0.6, 0.5)); }   // lichen
   } else if (biome === 'snow') {
     g.save(); capPath(8); g.fillStyle = rgba('#3a4a6a', 0.35); g.fill(); g.restore();
-    g.save(); capPath(); g.fillStyle = lin(g, 0, 0, 0, Y(0.68), [[0, '#fbf8f0'], [0.6, '#e8eef4'], [1, '#bccbe0']]); g.fill(); g.clip();
-    for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * Y(0.6); wrapX(w, x, 20, X => blob(g, X, y, range(rnd, 10, 24), range(rnd, 4, 8), 0, pick(rnd, ['#cfdbe6', '#b8c8dc', '#ffffff']), 0.5, 0.3)); }
+    g.save(); capPath(); g.fillStyle = lin(g, 0, 0, 0, Y(0.79), [[0, '#fbf8f0'], [0.6, '#e8eef4'], [1, '#bccbe0']]); g.fill(); g.clip();
+    for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * Y(0.72); wrapX(w, x, 20, X => blob(g, X, y, range(rnd, 10, 24), range(rnd, 4, 8), 0, pick(rnd, ['#cfdbe6', '#b8c8dc', '#ffffff']), 0.5, 0.3)); }
     g.restore();
     for (let i = 0; i < 18; i++) { const x = rnd() * w, y = edge(x); wrapX(w, x, 8, X => { const L = range(rnd, 6, 18); stroke(g, [[X, y - 2], [X + range(rnd, -1, 1), y + L]], range(rnd, 3, 6), 1, '#e8eef4', 0.85); }); }   // drips and drifts
     for (let i = 0; i < 30; i++) { const x = rnd() * w, y = range(rnd, 0.3, 0.6) * h; wrapX(w, x, 14, X => blob(g, X, y, range(rnd, 6, 14), range(rnd, 2, 4), 0, '#eef2f8', 0.7, 0.5)); }   // snow on the ledges
     g.fillStyle = lin(g, 0, Y(0.12), 0, h, [[0, '#e8eef4', 0], [1, '#dfe6ee', 0.8]]); g.fillRect(0, Y(0.12), w, h - Y(0.12));
   } else {
     const dust = biome === 'badlands' ? ['#cf9a62', '#b98457', '#e0ae74'] : ['#e8cc96', '#d9b87f', '#f2dcaa'];
-    g.save(); capPath(); g.fillStyle = lin(g, 0, 0, 0, Y(0.68), [[0, dust[2], 0.95], [1, dust[0], 0.6]]); g.fill(); g.clip();
-    for (let i = 0; i < 50; i++) { const x = rnd() * w, y = rnd() * Y(0.6); wrapX(w, x, 20, X => blob(g, X, y, range(rnd, 10, 26), range(rnd, 3, 7), 0, pick(rnd, dust), 0.45, 0.3)); }
+    g.save(); capPath(); g.fillStyle = lin(g, 0, 0, 0, Y(0.79), [[0, dust[2], 0.95], [1, dust[0], 0.6]]); g.fill(); g.clip();
+    for (let i = 0; i < 50; i++) { const x = rnd() * w, y = rnd() * Y(0.72); wrapX(w, x, 20, X => blob(g, X, y, range(rnd, 10, 26), range(rnd, 3, 7), 0, pick(rnd, dust), 0.45, 0.3)); }
     g.restore();
     for (let i = 0; i < 24; i++) { const x = rnd() * w, y = range(rnd, 0.25, 0.65) * h; wrapX(w, x, 14, X => blob(g, X, y, range(rnd, 8, 18), range(rnd, 2, 4), 0, dust[1], 0.55, 0.4)); }
     g.fillStyle = lin(g, 0, Y(0.16), 0, h, [[0, dust[0], 0], [1, dust[1], 0.85]]); g.fillRect(0, Y(0.16), w, h - Y(0.16));

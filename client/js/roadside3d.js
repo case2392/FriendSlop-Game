@@ -60,15 +60,15 @@ function tintOf(hex, ref = '#e2d6bc') {
 const DENS = {
   rs_tin: 2, rs_tin_red: 2, rs_planks: 1, rs_planks_gray: 1, rs_timber: 1.5, rs_iron: 0.5, rs_brass: 1, rs_scrap: 1.5, rs_stone: 1.6,
   rs_warn: 1.6, rs_wing: 1.6, rs_gingham: 0.6, rs_bark: 1.2, rs_rv: 3, rs_snow: 2, rs_dust: 2, rs_sand: 2, rs_dirt: 2, rs_tire: 0.6,
-  rs_fascia: 2, rs_shingles: 1.2, rs_dino: 2.5, rs_canvas: 3, rs_canvas_blue: 3,
+  rs_fascia: 2, rs_shingles: 1.2, rs_slats: 2, rs_dino: 2.5, rs_canvas: 3, rs_canvas_blue: 3,
 };
-const FIT = new Set(['rs_hub', 'rs_hub_cream', 'rs_glass', 'rs_grille', 'rs_crate_a', 'rs_crate_b', 'rs_crate_c', 'rs_barrel', 'rs_barrel_lid', 'rs_drum',
+const FIT = new Set(['rs_blanket', 'rs_hub', 'rs_hub_cream', 'rs_glass', 'rs_grille', 'rs_crate_a', 'rs_crate_b', 'rs_crate_c', 'rs_barrel', 'rs_barrel_lid', 'rs_drum',
   'rs_drum_red', 'rs_pump_face', 'rs_keypad', 'rs_logend', 'rs_rv_window', 'rs_boards', 'rs_headlamp', 'rs_ice', 'rs_decal_freight', 'rs_ranger_board',
   'rs_plaque', 'rs_roundel']);
 // flags on a material name: ! no top cover, * glows, ~ double-sided, # alpha-tested decal (no shadow, no LOD)
 const baseName = m => m.replace(/[!*~#]+$/, '');
 const densOf = m => { const b = baseName(m); return b.startsWith('rs_steel_') ? 2 : (DENS[b] || 1); };
-const NO_SHADOW = /^(rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid)$/;
+const NO_SHADOW = /^(rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid)$/;
 
 // Per-biome: ground grime (vertex AO tint), drifts, the top cover, paint schemes.
 const BIO = {
@@ -429,6 +429,20 @@ class Builder {
     g.dispose();
     this.emit(mat, T, this.place(x, y, z, o), o);
   }
+  // a cloth sheet lying on the ground (rugs): a grid draped over the terrain, fitted UVs
+  sheet(mat, w, d, x, z, o = {}) {
+    const nx = o.nx || 6, nz = o.nz || 4, ry = o.ry || 0, c = Math.cos(ry), sn = Math.sin(ry), lift = o.lift ?? 0.03;
+    const P = [];
+    for (let j = 0; j <= nz; j++) for (let i = 0; i <= nx; i++) {
+      const u = i / nx, v = j / nz, lx = (u - 0.5) * w, lz = (v - 0.5) * d;
+      const px = x + lx * c + lz * sn, pz = z - lx * sn + lz * c;
+      const wob = Math.sin(i * 2.1 + j * 1.3) * 0.012;
+      P.push({ p: [px, this.ground(px, pz) + lift + wob, pz], n: [0, 1, 0], uv: [u, v] });
+    }
+    const T = [], at = (i, j) => P[j * (nx + 1) + i];
+    for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) T.push(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1));
+    this.emit(mat, T, new THREE.Matrix4(), { noAO: true, ...o });
+  }
   // a flat quad facing +z (decals, roundels)
   quad(mat, w, h, x, y, z, o = {}) {
     const a = { p: [-w / 2, -h / 2, 0], n: [0, 0, 1], uv: [0, 0] }, b = { p: [w / 2, -h / 2, 0], n: [0, 0, 1], uv: [1, 0] };
@@ -445,6 +459,12 @@ function finish(B, ctx, parent, clusters, track = null) {
   const fp = [], fn = [], fc = [];
   const box = new THREE.Box3(), tmp = new V3();
   const cov = ctx.cover ? avgLin(ctx.cover.tex) : null;
+  // only the few materials that carry most of the surface cast shadows: the trim adds nothing
+  // to the shadow's shape but would cost a shadow-pass draw call each
+  const area = b => { let a = 0; const P = b.p; for (let i = 0; i < P.length; i += 9) { const ux = P[i + 3] - P[i], uy = P[i + 4] - P[i + 1], uz = P[i + 5] - P[i + 2], vx = P[i + 6] - P[i], vy = P[i + 7] - P[i + 1], vz = P[i + 8] - P[i + 2]; a += Math.hypot(uy * vz - uz * vy, uz * vx - ux * vz, ux * vy - uy * vx) / 2; } return a; };
+  const ranked = [...B.buckets.values()].filter(b => !NO_SHADOW.test(baseName(b.mat)) && !/[#!]/.test(b.mat.slice(baseName(b.mat).length))).map(b => [b, area(b)]).sort((a, b) => b[1] - a[1]);
+  const total = ranked.reduce((s, [, a]) => s + a, 0);
+  const casters = new Set(ranked.filter(([, a], i) => i < 6 || a > total * 0.12).map(([b]) => b));
   for (const b of B.buckets.values()) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(b.p, 3));
@@ -454,7 +474,7 @@ function finish(B, ctx, parent, clusters, track = null) {
     g.computeBoundingSphere();
     const m = new THREE.Mesh(g, rsMat(b.mat, ctx));
     const base = baseName(b.mat), flags = b.mat.slice(base.length);
-    m.castShadow = !NO_SHADOW.test(base) && !flags.includes('#');
+    m.castShadow = casters.has(b);
     m.receiveShadow = true;
     m.name = 'rs:' + b.mat;
     near.add(m);
@@ -540,7 +560,7 @@ function buildSemi(B, p, parts, ctx) {
   const sides = L.filter(s => s.part === 'trailer_side');
   if (fl) {
     const zr = fl.z - fl.hz, zf = fl.z + fl.hz, hw = fl.hx;
-    B.box('rs_iron', fl.hx * 2, fl.hy * 2, fl.hz * 2, fl.x, fl.y, fl.z, { r: 0.03, faces: { py: { m: 'rs_planks', rot: true } } });
+    B.box('rs_iron', fl.hx * 2, fl.hy * 2, fl.hz * 2, fl.x, fl.y, fl.z, { r: 0.03, faces: { py: { m: 'rs_slats', rot: true } } });
     for (const sx of [-1, 1]) B.box('rs_iron', 0.16, 0.24, fl.hz * 2 - 0.4, fl.x + sx * 0.55, fl.y - fl.hy - 0.12, fl.z, { r: 0.03 });
     for (let k = 0; k < 5; k++) B.box('rs_iron', 1.3, 0.1, 0.12, fl.x, fl.y - fl.hy - 0.1, zr + 1 + k * 2.4, { r: 0.02 });
     // rear bumper bar, tandem wheels, axles, mud flaps
@@ -554,7 +574,7 @@ function buildSemi(B, p, parts, ctx) {
     // sides: painted steel outside, plank liner inside, ribs, rails, corner posts, the freight lettering
     for (const s of sides) {
       const sx = Math.sign(s.x) || 1, outer = sx > 0 ? 'px' : 'nx', inner = sx > 0 ? 'nx' : 'px';
-      B.box('rs_iron', s.hx * 2, s.hy * 2, s.hz * 2, s.x, s.y, s.z, { r: 0.02, faces: { [outer]: { m: P, rot: false }, [inner]: 'rs_planks_gray' }, off: [rnd(), 0.13] });
+      B.box('rs_iron', s.hx * 2, s.hy * 2, s.hz * 2, s.x, s.y, s.z, { r: 0.02, faces: { [outer]: { m: P, rot: false }, [inner]: 'rs_slats' }, off: [rnd(), 0.13] });
       const nr = 8;
       for (let i = 0; i <= nr; i++) {
         const zz = zr + 0.35 + (zf - zr - 0.7) * i / nr;
@@ -563,11 +583,12 @@ function buildSemi(B, p, parts, ctx) {
       }
       B.box('rs_iron', 0.08, 0.16, s.hz * 2 + 0.1, s.x + sx * (s.hx + 0.04), s.y + s.hy - 0.08, s.z, { r: 0.03, rot: true });
       B.box('rs_iron', 0.1, 0.24, s.hz * 2 + 0.1, s.x + sx * (s.hx + 0.05), s.y - s.hy + 0.12, s.z, { r: 0.03, rot: true });
+      for (const [z0, z1] of [[zr + 0.1, -0.6], [-0.3, zf - 0.1]]) B.box('rs_planks', 0.07, 0.36, z1 - z0, s.x + sx * (s.hx + 0.09), s.y - s.hy + 0.42, (z0 + z1) / 2, { r: 0.02, rot: false, off: [z0, 0.3], jit: 0.02 });
       B.box('rs_iron', 0.18, s.hy * 2 + 0.2, 0.18, s.x + sx * 0.03, s.y, zr - 0.04, { r: 0.04 });
       B.box('rs_iron', 0.16, s.hy * 2 + 0.2, 0.16, s.x + sx * 0.03, s.y, zf + 0.02, { r: 0.04 });
       B.quad('rs_decal_freight#', 5.0, 1.25, s.x + sx * (s.hx + 0.012), s.y + 0.2, s.z - 0.2, { ry: sx * Math.PI / 2 });
     }
-    if (front) B.box('rs_iron', front.hx * 2, front.hy * 2, front.hz * 2, front.x, front.y, front.z, { r: 0.02, faces: { pz: P, nz: 'rs_planks_gray' } });
+    if (front) B.box('rs_iron', front.hx * 2, front.hy * 2, front.hz * 2, front.x, front.y, front.z, { r: 0.02, faces: { pz: P, nz: 'rs_slats' } });
     if (roof) {
       B.box('rs_iron', roof.hx * 2, roof.hy * 2, roof.hz * 2, roof.x, roof.y, roof.z, { r: 0.03, faces: { py: { m: 'rs_tin', rot: true } } });
       for (const sx of [-1, 1]) for (const zz of [zf - 0.08, zr + 0.08]) B.box('rs_headlamp*', 0.12, 0.08, 0.07, roof.x + sx * (roof.hx - 0.12), roof.y - roof.hy - 0.05, zz, { tint: zz > 0 ? [1, 0.75, 0.45] : [1, 0.4, 0.32] });
@@ -589,7 +610,7 @@ function buildSemi(B, p, parts, ctx) {
       B.pop();
     }
     if (ramp) {
-      B.box('rs_planks_gray', ramp.hx * 2, ramp.hy * 2, ramp.hz * 2, ramp.x, ramp.y, ramp.z, { r: 0.02, rot: true, ry: ramp.ry });
+      B.box('rs_slats', ramp.hx * 2, ramp.hy * 2, ramp.hz * 2, ramp.x, ramp.y, ramp.z, { r: 0.02, rot: true, ry: ramp.ry });
       for (let k = 0; k < 4; k++) B.box('rs_timber', ramp.hx * 2 - 0.12, 0.04, 0.07, ramp.x, ramp.y + ramp.hy + 0.02, ramp.z - ramp.hz + 0.3 + k * 0.65, { rot: true, r: 0.01 });
       for (const zz of [ramp.z - ramp.hz + 0.25, ramp.z + ramp.hz - 0.25]) {
         const gy = B.ground(ramp.x, zz), top = ramp.y - ramp.hy, hh = top - gy + 0.1;
@@ -605,17 +626,18 @@ function buildSemi(B, p, parts, ctx) {
   if (cab) {
     const cx = cab.x, cz = cab.z, hx = cab.hx, hz = cab.hz, fz = cz + hz, bz = cz - hz, top = cab.y + cab.hy;
     B.box('rs_iron', 1.7, 0.26, hz * 2 + 0.2, cx, 0.58, cz, { r: 0.03 });
-    for (const sx of [-1, 1]) wheel(B, cx + sx * (hx - 0.16), 0.5, cz - 0.1, 0.5, 0.34, {});
+    for (const sx of [-1, 1]) wheel(B, cx + sx * (hx - 0.14), 0.56, cz - 0.1, 0.56, 0.38, {});
+    for (const sx of [-1, 1]) B.cyl(C, 0.66, 0.66, 0.44, cx + sx * (hx - 0.12), 0.56, cz - 0.1, { rz: Math.PI / 2, arc: [-0.15, Math.PI + 0.3], caps: false, seg: 10, s: [1, 1, 1] });
     const ly0 = 0.55, ly1 = 1.5;
     B.box(C, hx * 2, ly1 - ly0, hz * 2, cx, (ly0 + ly1) / 2, cz, { r: 0.08, faces: { ny: 'rs_iron' }, off: [0.2, 0.4] });
     B.box('rs_grille', 1.3, 0.74, 0.06, cx, 1.02, fz + 0.02, { r: 0.02 });
     for (const sx of [-1, 1]) B.cyl('rs_brass', 0.19, 0.19, 0.13, cx + sx * 0.86, 1.02, fz + 0.05, { rx: Math.PI / 2, caps: 'rs_headlamp*', seg: 12, bevel: 0.02 });
     // the upper cab: tapered, rounded, windshield, side windows
-    const uh = top - ly1, TAP = 0.92;
+    const uh = top - ly1, TAP = 0.9;
     const inset = yy => 1 - (1 - TAP) * clamp01((yy - ly1) / uh);
-    B.box(C, hx * 2, uh, hz * 2, cx, ly1 + uh / 2, cz, { r: 0.16, taper: TAP, off: [0.6, 0.1] });
+    B.box(C, hx * 2, uh, hz * 2, cx, ly1 + uh / 2, cz, { r: 0.26, taper: TAP, off: [0.6, 0.1] });
     const tilt = Math.atan((1 - TAP) * hz / uh);
-    for (const sx of [-1, 1]) B.box('rs_glass', 0.98, 0.72, 0.04, cx + sx * 0.52 * inset(2.45), 2.45, cz + hz * inset(2.45) + 0.005, { rx: -tilt, r: 0.01 });
+    for (const sx of [-1, 1]) B.box('rs_glass', 0.98, 0.72, 0.04, cx + sx * 0.52 * inset(2.45), 2.45, cz + hz * inset(2.45) - 0.008, { rx: -tilt, r: 0.01 });
     B.box(C, 0.08, 0.76, 0.06, cx, 2.45, cz + hz * inset(2.45) + 0.01, { rx: -tilt });
     for (const sx of [-1, 1]) {
       const xx = cx + sx * (hx * inset(2.5) + 0.005);
@@ -675,6 +697,8 @@ function buildYard(B, p, parts, ctx, decor) {
     B.pop();
   }
   for (const l of L.filter(s => s.part === 'table_legs')) B.box('rs_timber', l.hx * 2, 0.12, 0.06, l.x, 0.36, l.z, { rot: true, ry: l.ry, r: 0.015 });
+  // a blanket spread out in front of the tables: the cheap stuff goes on the ground
+  B.sheet('rs_blanket', 4.4, 2.6, range(rnd, -0.3, 0.3), 2.35, { ry: range(rnd, -0.08, 0.08) });
   // the umbrella
   const d = decor.find(e => e.k === 'umbrella');
   if (d) {
@@ -739,6 +763,8 @@ function buildCrash(B, p, parts, ctx, decor) {
       const wx = fus.x - 2.7, wz = fz0 + 2.8, gy = B.ground(wx, wz);
       B.cyl('rs_tire', 0.3, 0.3, 0.14, wx, gy + 0.06, wz, { caps: 'rs_hub', fit: true, uRep: 6, bevel: 0.035, seg: 14, rx: 0.12 });
     }
+    // a column of smoke rising off the engine marks the wreck from the road
+    if (ctx.smokes) ctx.smokes.push(B.world(fus.x, fy + 0.4, zN - 0.2));
     // furrow ploughed by the nose
     B.mound(ctx.bio.ground, 1.5, 0.48, 1.0, fus.x, B.ground(fus.x, zN + 0.7) - 0.12, zN + 0.7, { jit: 0.08 });
   }
@@ -971,11 +997,12 @@ function buildGateStatic(B, g, ctx) {
   }
   for (const sz of [-1, 1]) B.box('rs_timber', px * 2 + 1.3, 0.42, 0.32, 0, beamY, sz * 0.44, { r: 0.06, rot: true, jit: 0.03 });
   // a little shingled roof over the arch
-  for (const sz of [-1, 1]) B.box('rs_shingles', px * 2 + 1.9, 0.08, 0.82, 0, beamY + 0.42, sz * 0.32, { rx: sz * 0.48, faces: { ny: 'rs_planks_gray' }, r: 0.02 });
-  B.box('rs_timber', px * 2 + 2.0, 0.12, 0.16, 0, beamY + 0.62, 0, { r: 0.03, rot: true });
+  for (const sz of [-1, 1]) B.box('rs_shingles', px * 2 + 2.2, 0.16, 1.05, 0, beamY + 0.5, sz * 0.42, { rx: sz * 0.5, faces: { ny: 'rs_planks_gray' }, r: 0.04 });
+  B.box('rs_timber', px * 2 + 2.3, 0.16, 0.2, 0, beamY + 0.76, 0, { r: 0.04, rot: true });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) B.box('rs_iron', 0.5, 0.06, 0.5, sx * px, beamY + 0.27, sz * 0.44, { r: 0.02 });
   if (ctx.snow) for (const sz of [-1, 1]) {
-    snowCap(B, px * 2 + 1.9, 0.8, 0, beamY + 0.46 - 0.0, sz * 0.32, { t: 0.16, rx: sz * 0.48 });
-    icicles(B, -px - 0.9, sz * 0.7, px + 0.9, sz * 0.7, beamY + 0.24, rnd);
+    snowCap(B, px * 2 + 2.2, 1.0, 0, beamY + 0.55, sz * 0.42, { t: 0.2, rx: sz * 0.5 });
+    icicles(B, -px - 1.0, sz * 0.88, px + 1.0, sz * 0.88, beamY + 0.2, rnd);
   }
   // the station's carved board, hung on chains facing the road both ways
   B.box('rs_timber', 3.6, 0.95, 0.1, 0, 4.4, -0.44, { r: 0.03, faces: { nz: { m: 'rs_ranger_board', fit: true }, pz: { m: 'rs_ranger_board', fit: true } } });
@@ -1107,8 +1134,8 @@ function buildParkedRV(B, s, ctx) {
   B.cyl('rs_tire', 0.4, 0.4, 0.2, -0.4, top + 0.1, 1.7, { caps: 'rs_hub_cream', fit: true, uRep: 6, bevel: 0.05, seg: 14 });
   B.box('rs_crate_a', 0.5, 0.42, 0.5, 0.5, top + 0.2, 2.4, { r: 0.03, ry: 0.3 });
   if (ctx.snow) {
-    snowCap(B, hx * 2 - 0.2, hz * 2 - 0.2, 0, top, 0, { t: 0.2 });
-    for (const sx of [-1, 1]) icicles(B, sx * (hx + 0.02), -hz, sx * (hx + 0.02), hz, top - 0.15, rnd);
+    snowCap(B, hx * 2 + 0.04, hz * 2 - 0.1, 0, top - 0.04, 0, { t: 0.22 });
+    for (const sx of [-1, 1]) icicles(B, sx * (hx + 0.04), -hz + 0.2, sx * (hx + 0.04), hz - 0.2, top + 0.02, rnd, { max: 0.3 });
   }
   if (ctx.driftMat) { drift(B, ctx, -hx - 0.05, 0.5, 0.6, 3.2, ctx.snow ? 0.5 : 0.36, 0); drift(B, ctx, hx + 0.05, -2.2, 0.45, 1.3, 0.26, 0); }
 }
@@ -1120,8 +1147,37 @@ function makeCtx(W) {
   const bio = BIO[biome];
   return {
     W, biome, bio, H: (x, z) => W.heightAt(x, z), ao: bio.ao, aoH: 0.9,
-    snow: biome === 'snow', driftMat: bio.drift, cover: bio.cover,
+    snow: biome === 'snow', driftMat: bio.drift, cover: bio.cover, smokes: [],
   };
+}
+
+// Cartoon smoke: soft gray puffs that rise, swell, drift downwind and shrink away, one instanced
+// draw call per wreck.
+const PUFFS = 12;
+let PUFF_GEO = null, SMOKE_MAT = null;
+function makeSmoke(at, seed) {
+  if (!PUFF_GEO) PUFF_GEO = new THREE.SphereGeometry(1, 14, 10);
+  if (!SMOKE_MAT) SMOKE_MAT = new THREE.MeshLambertMaterial({ color: '#ffffff', transparent: true, opacity: 0.42, depthWrite: false, emissive: '#3a3640' });
+  const m = new THREE.InstancedMesh(PUFF_GEO, SMOKE_MAT, PUFFS);
+  m.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+  m.castShadow = false; m.receiveShadow = false; m.frustumCulled = false; m.name = 'rs:smoke';
+  const c = new THREE.Color();
+  for (let i = 0; i < PUFFS; i++) m.setColorAt(i, c.set('#9a96a0').lerp(new THREE.Color('#f0ece6'), (i % 3) / 3));
+  m.renderOrder = 2;
+  return { mesh: m, at, seed: (seed % 1000) / 1000, wind: (seed % 628) / 100 };
+}
+const _m4 = new THREE.Matrix4(), _qq = new THREE.Quaternion(), _sv = new V3(), _pv = new V3();
+function updateSmoke(s, t) {
+  const sx = Math.cos(s.wind), sz = Math.sin(s.wind);
+  for (let i = 0; i < PUFFS; i++) {
+    const k = ((t * 0.09 + s.seed + i / PUFFS) % 1 + 1) % 1;
+    const rise = k * 9, drift = k * k * 3.5, sc = (0.45 + 1.9 * k) * (1 - smooth(0.8, 1, k)) + 0.01;
+    _pv.set(s.at.x + sx * drift + Math.sin(i * 2.1 + t * 0.7) * 0.15, s.at.y + rise, s.at.z + sz * drift + Math.cos(i * 1.7 + t * 0.6) * 0.15);
+    _sv.set(sc, sc * 0.85, sc);
+    _qq.setFromEuler(_e.set(0, i * 1.3 + t * 0.1, 0));
+    s.mesh.setMatrixAt(i, _m4.compose(_pv, _qq, _sv));
+  }
+  s.mesh.instanceMatrix.needsUpdate = true;
 }
 
 const POI_BUILDERS = { semi: buildSemi, yard: buildYard, crash: buildCrash, junk: buildJunk, gas: buildGas, dino: buildDino };
@@ -1206,10 +1262,18 @@ export function buildRoadside(W) {
   const rvs = loose.filter(s => s.part === 'parked_rv');
   if (rvs.length) { const B = new Builder(ctx); for (const s of rvs) buildParkedRV(B, s, ctx); finish(B, ctx, group, clusters); }
 
+  const smokes = ctx.smokes.map((at, i) => makeSmoke(at, seedOf(at.x, at.z, i)));
+  for (const s of smokes) { updateSmoke(s, 0); group.add(s.mesh); }
+
   const _c = new V3();
   return {
     group, gates,
     update(dt, t, camPos) {
+      for (const s of smokes) {
+        const far = camPos ? s.at.distanceTo(camPos) > 1000 : false;
+        s.mesh.visible = !far;
+        if (!far) updateSmoke(s, t || 0);
+      }
       for (const g of gates.values()) {
         g.open += (g.target - g.open) * Math.min(1, dt * 1.5);
         g.bars.position.x = g.open * g.hx * 1.9;

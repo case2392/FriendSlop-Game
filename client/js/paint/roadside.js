@@ -7,7 +7,8 @@
 // Tiling (world-space UVs; "tile" = meters per repeat as roadside3d.js maps them):
 //   rs_steel_<cream|red|blue|green|teal|mustard>  riveted painted steel plates (2 m)
 //   rs_tin, rs_tin_red        corrugated sheet roofing, ribs along v (2 m)
-//   rs_planks, rs_planks_gray boards along u (1 m)          rs_timber  dark beam, grain along v (1.5 m)
+//   rs_planks, rs_planks_gray boards along u (1 m)   rs_slats  long narrow boards (2 m)   rs_timber  dark beam, grain along v (1.5 m)
+//   rs_shingles (1.2 m)  rs_dirt (2 m)
 //   rs_iron (0.5 m)  rs_brass (1 m)  rs_tire (tread, u around)  rs_gingham (0.6 m)  rs_canvas (stripes along u)
 //   rs_wing (doped canvas, ribs along v, 1.6 m)  rs_scrap (1.5 m)  rs_stone (1.6 m)  rs_warn (1.6 m)
 //   rs_bark (u around, v along)  rs_dino (u along the body; v = 0 belly .. 1 back, from the normal)
@@ -15,7 +16,8 @@
 //   rs_snow, rs_dust, rs_sand (drifts and caps)   rs_cover_snow|dust|sand (alpha = breakup noise, for the
 //   world-space top-cover shader)   rs_ice (icicles)
 // Fitted (one image per face): rs_hub, rs_glass, rs_grille, rs_crate_a|b|c, rs_barrel, rs_barrel_lid,
-//   rs_drum, rs_drum_red, rs_pump_face, rs_keypad, rs_logend, rs_rv_window, rs_boards, rs_headlamp
+//   rs_drum, rs_drum_red, rs_pump_face, rs_keypad, rs_logend, rs_rv_window, rs_boards, rs_headlamp, rs_blanket,
+//   rs_ranger_board, rs_plaque; alpha decals: rs_decal_freight, rs_roundel
 import {
   register, fill, mottle, stroke, pebbles, cracks, glaze, blurTile, range, pick, wrap, blob, ellipse,
   mix, shade, lightOf, shadowOf, jitter, rgba, rngFrom, rowLayout, paintRects, streaks,
@@ -736,10 +738,13 @@ register('rs_dino', {
     g.fillRect(0, 0, s, s);
     mottle(g, s, rnd, { colors: ['#6e9c4c', '#4a7a3a', '#7aa456', '#5a8040'], count: 40, rmin: 14, rmax: 46, alpha: 0.3, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
     // tiger stripes over the back, tapering down the flank
-    for (let i = 0; i < 7; i++) {
-      const x = (i + 0.3 + rnd() * 0.4) * s / 7, w = range(rnd, 9, 15), L = range(rnd, 0.32, 0.5) * s, bend = range(rnd, -14, 14);
-      const pts = []; for (let k = 0; k <= 6; k++) { const tt = k / 6; pts.push([x + Math.sin(tt * 2.2) * bend, -4 + tt * L]); }
-      for (const dx of [-s, 0, s]) { stroke(g, pts.map(([u, v]) => [u + dx + 2, v + 3]), w + 3, 1, '#1e2a1a', 0.18); stroke(g, pts.map(([u, v]) => [u + dx, v]), w, 1.5, '#2e4a28', 0.75); }
+    // broad soft saddle bands across the back, like a painted circus beast
+    for (let i = 0; i < 5; i++) {
+      const x = (i + 0.2 + rnd() * 0.6) * s / 5, w = range(rnd, 18, 26), L = range(rnd, 0.3, 0.42) * s, bend = range(rnd, 10, 22);
+      for (let k = 0; k <= 10; k++) {
+        const tt = k / 10, cx = x + tt * bend, cy = tt * L, r = w * (1 - tt * 0.45) / 2;
+        wrap(s, cx, cy, r * 1.4, (X, Y) => blob(g, X, Y, r, r * 0.9, 0.3, '#2e4a28', 0.4, 0.45));
+      }
     }
     // soft scales: big, low contrast, lit on the upper left
     const cols = 11, W = s / cols;
@@ -905,7 +910,7 @@ register('rs_rv', {
     for (let i = 0; i < 3; i++) {
       const x = (i + 0.3) * s / 3;
       g.fillStyle = grad(g, x - 2, 0, x + 4, 0, [[0, INK, 0.4], [1, '#fff0d0', 0.2]]); g.fillRect(x - 2, s * 0.1, 6, s * 0.76);
-      for (let y = s * 0.16; y < s * 0.84; y += 19) { rivet(g, x + 6, y, 2.2, '#9a9284'); if (rnd() < 0.25) rustRun(g, s, x + 6, y + 2, range(rnd, 8, 26), 2.2, 0.4, rnd); }
+      for (let y = s * 0.16; y < s * 0.84; y += 19) { rivet(g, x + 6, y, 2.2, '#9a9284'); if (rnd() < 0.2) rustRun(g, s, x + 6, y + 2, range(rnd, 6, 18), 1.4, 0.3, rnd); }
     }
     for (let i = 0; i < 10; i++) chip(g, s, rnd() * s, range(rnd, 0.15, 0.85) * s, range(rnd, 2.5, 6), '#7a6a5a', rnd);
     for (let i = 0; i < 5; i++) dent(g, s, rnd() * s, range(rnd, 0.2, 0.8) * s, range(rnd, 10, 22), '#d8ccb0', 0.5);
@@ -913,7 +918,7 @@ register('rs_rv', {
     g.fillStyle = grad(g, 0, s * 0.7, 0, s, [[0, '#6a5a44', 0], [0.6, '#6a5a44', 0.35], [1, '#4a3a2c', 0.65]]); g.fillRect(0, 0, s, s);
     streaks(g, s, rnd, { colors: ['#6a5040', '#7a6048'], count: 26, len: [6, 30], width: [1.2, 3], angle: 0, wobble: 0.6, alpha: 0.3 });
     // rust runs from the roof seam
-    for (let i = 0; i < 8; i++) rustRun(g, s, rnd() * s, s * 0.12, range(rnd, 20, 70), range(rnd, 2, 4), 0.35, rnd);
+    for (let i = 0; i < 8; i++) rustRun(g, s, rnd() * s, s * 0.12, range(rnd, 14, 44), range(rnd, 1.2, 2.2), 0.28, rnd);
     glaze(g, s, s, '#ffe2b8', 0.1, 'soft-light');
     blurTile(cv, 0.5);
   },
@@ -1124,7 +1129,8 @@ register('rs_plaque', {
     g.lineWidth = 3; g.strokeStyle = rgba('#5a4018', 0.8); g.strokeRect(8, 8, w - 16, h - 16);
     g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = SERIF(30); g.fillStyle = rgba('#fff0c0', 0.5); g.fillText('SLOPASAURUS', w / 2 + 1, 38 + 1.5); g.fillStyle = '#3a2a14'; g.fillText('SLOPASAURUS', w / 2, 38);
-    g.font = FONT(14); g.fillStyle = '#3a2a14'; g.fillText('HEAD STOLEN 1987 · DO NOT CLIMB', w / 2, 70);
+    g.font = FONT(12); g.fillStyle = '#3a2a14';
+    { const txt = 'HEAD STOLEN 1987 · DO NOT CLIMB', m = g.measureText(txt).width, k = Math.min(1, (w - 44) / m); g.save(); g.translate(w / 2, 70); g.scale(k, 1); g.fillText(txt, 0, 0); g.restore(); }
     g.restore();
     for (let i = 0; i < 10; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 4, 14), range(rnd, 3, 8), rnd() * 3, '#5a8a6a', 0.3, 0.3);
     for (const [x, y] of [[14, 14], [w - 14, 14], [14, h - 14], [w - 14, h - 14]]) rivet(g, x, y, 4, '#c8a050');
@@ -1140,5 +1146,44 @@ register('rs_roundel', {
     g.fillStyle = grad(g, c - 22, c - 22, c + 22, c + 22, [[0, '#f0d890'], [1, '#6a4e22']]); g.beginPath(); g.arc(c, c, 22, 0, TAU); g.fill();
     ellipse(g, c, c, 7, 7, 0, '#2a2030');
     blob(g, c - 30, c - 34, 26, 10, -0.6, '#ffffff', 0.25, 0.3);
+  },
+});
+
+register('rs_blanket', {
+  family: F, size: 256, note: 'yard-sale blanket (fitted): a woven rag rug in muted bands, zigzags, frayed fringe at the ends, soft creases',
+  paint(g, s, rnd) {
+    fill(g, s, s, '#d8c8a0');
+    const bands = [['#8e3a2c', 22], ['#d8c8a0', 10], ['#3e5a7e', 18], ['#c8963a', 12], ['#d8c8a0', 8], ['#6a7a3a', 16], ['#d8c8a0', 10], ['#8e3a2c', 30]];
+    let y = 14;
+    const half = [];
+    for (const [c, h] of bands) { half.push([y, h, c]); y += h; }
+    const draw = (yy, h, c) => { g.fillStyle = c; g.fillRect(0, yy, s, h); };
+    for (const [yy, h, c] of half) { draw(yy, h, c); draw(s - yy - h, h, c); }
+    // zigzags in the middle field
+    g.save(); g.beginPath();
+    for (let x = 0; x <= s; x += 16) g.lineTo(x, s / 2 + (x / 16 % 2 ? -10 : 10));
+    g.lineWidth = 6; g.strokeStyle = '#8e3a2c'; g.stroke(); g.restore();
+    for (let x = 8; x < s; x += 32) { polyPath(g, [[x, s / 2 - 26], [x + 8, s / 2 - 18], [x, s / 2 - 10], [x - 8, s / 2 - 18]]); g.fillStyle = '#3e5a7e'; g.fill(); polyPath(g, [[x + 16, s / 2 + 10], [x + 24, s / 2 + 18], [x + 16, s / 2 + 26], [x + 8, s / 2 + 18]]); g.fillStyle = '#c8963a'; g.fill(); }
+    // weave: short rows of stitches
+    for (let yy = 0; yy < s; yy += 4) line(g, [[0, yy], [s, yy]], 0.8, '#2a2030', 0.08);
+    for (let i = 0; i < 400; i++) { const x = rnd() * s, yy = rnd() * s; line(g, [[x, yy], [x + 3, yy]], 1, rnd() < 0.5 ? '#fff4dc' : '#2a2030', 0.12); }
+    // creases
+    for (let i = 0; i < 3; i++) { const x = range(rnd, 0.2, 0.8) * s; g.fillStyle = grad(g, x - 14, 0, x + 14, 0, [[0, INK, 0], [0.45, INK, 0.16], [0.6, '#fff4dc', 0.18], [1, '#fff4dc', 0]]); g.fillRect(x - 14, 0, 28, s); }
+    // fringe at both ends, a stain, dust toward the edges
+    for (let x = 2; x < s; x += 5) { line(g, [[x, 0], [x + range(rnd, -2, 2), 12]], 2, '#e8dcc0', 0.9); line(g, [[x, s], [x + range(rnd, -2, 2), s - 12]], 2, '#e8dcc0', 0.9); }
+    blob(g, s * 0.7, s * 0.35, 18, 12, 0.4, '#6a5034', 0.25, 0.3);
+    const vg = g.createRadialGradient(s / 2, s / 2, s * 0.3, s / 2, s / 2, s * 0.75); vg.addColorStop(0, rgba('#6a5a40', 0)); vg.addColorStop(1, rgba('#6a5a40', 0.35));
+    g.fillStyle = vg; g.fillRect(0, 0, s, s);
+    blurTile(g.canvas, 0.6);
+  },
+});
+
+register('rs_slats', {
+  family: F, size: 256, note: 'long narrow boards along u (trailer liners and decks, ramps): 8 per tile, one butt joint each, scuffed and grayed',
+  paint(g, s, rnd, h, cv) {
+    boards(g, s, rnd, { rows: 8, minL: 230, maxL: 420, colors: ['#8a7058', '#94785c', '#7e6650', '#9a8064', '#86705a'], gap: 3, nails: 2, grain: 6, weather: 0.45, rowJitter: 0.1 });
+    streaks(g, s, rnd, { colors: ['#5a4636', '#c8b090'], count: 24, len: [20, 70], width: [1, 2.5], angle: Math.PI / 2, wobble: 0.08, alpha: 0.18 });
+    glaze(g, s, s, '#ffe0b8', 0.1, 'soft-light');
+    blurTile(cv, 0.4);
   },
 });
