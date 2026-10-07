@@ -90,6 +90,25 @@ export class Batch {
   }
 }
 
+// Batches per spatial cluster (the town core, each roadside stop, each lone sign), so far-away
+// clusters are culled by the camera and the shadow camera. keyFn(x, z) → cluster key.
+export class ClusterBatch {
+  constructor(keyFn) { this.keyFn = keyFn; this.batches = new Map(); }
+  add(material, geo, opts) {
+    geo.computeBoundingBox();
+    const bb = geo.boundingBox, k = this.keyFn((bb.min.x + bb.max.x) / 2, (bb.min.z + bb.max.z) / 2);
+    let b = this.batches.get(k);
+    if (!b) this.batches.set(k, b = new Batch());
+    b.add(material, geo, opts);
+  }
+  build(parent) {
+    const out = [];
+    for (const b of this.batches.values()) out.push(...b.build(parent));
+    this.batches.clear();
+    return out;
+  }
+}
+
 // A builder with a transform stack. root maps the kit's frame to the world; parts are added in
 // the current local frame. shadeFn(x, y, z, nx, ny, nz) → multiplier (number or [r, g, b]) in
 // the kit's frame gives vertex-color lighting (AO, grime, interiors).
@@ -159,6 +178,47 @@ export class Kit {
     const g = new THREE.CylinderGeometry(r1, r0, L, o.sides || 8, o.hseg || 1, !!o.open);
     const circ = Math.PI * (r0 + r1);
     return this.add(material, g, { uv: 'keep', uvScale: o.uvScale || [Math.max(1, Math.round(circ / (o.tile || 1.2))), L / (o.tile || 1.2)], ...o, at: M });
+  }
+  // a tube through pts [[x, y, z], ...] (local frame); r = number | [r per point] | fn(t 0..1, angle, i).
+  // o.sides, o.caps (default true), o.tile (m per texture repeat along the tube), o.uRep (repeats around)
+  tube(material, pts, r, o = {}) {
+    const sides = o.sides || 8, n = pts.length, P = pts.map(p => new THREE.Vector3(p[0], p[1], p[2]));
+    const pos = [], uv = [], idx = [];
+    let prevN = null, along = 0;
+    const tile = o.tile || 1.2, uRep = o.uRep || 1;
+    const rad = (i, a) => typeof r === 'function' ? r(i / (n - 1), a, i) : Array.isArray(r) ? r[i] : r;
+    for (let i = 0; i < n; i++) {
+      const t = (i === 0 ? P[1].clone().sub(P[0]) : i === n - 1 ? P[n - 1].clone().sub(P[n - 2]) : P[i + 1].clone().sub(P[i - 1])).normalize();
+      let N;
+      if (prevN) N = prevN.clone().sub(t.clone().multiplyScalar(prevN.dot(t)));
+      if (!N || N.lengthSq() < 1e-6) { const up = Math.abs(t.y) > 0.9 ? new THREE.Vector3(1, 0, 0) : new THREE.Vector3(0, 1, 0); N = up.sub(t.clone().multiplyScalar(up.dot(t))); }
+      N.normalize(); prevN = N;
+      const B = new THREE.Vector3().crossVectors(t, N);
+      if (i > 0) along += P[i].distanceTo(P[i - 1]);
+      for (let k = 0; k <= sides; k++) {
+        const a = k / sides * Math.PI * 2, rr = rad(i, a);
+        pos.push(P[i].x + (N.x * Math.cos(a) + B.x * Math.sin(a)) * rr, P[i].y + (N.y * Math.cos(a) + B.y * Math.sin(a)) * rr, P[i].z + (N.z * Math.cos(a) + B.z * Math.sin(a)) * rr);
+        uv.push(k / sides * uRep, along / tile);
+      }
+    }
+    for (let i = 0; i < n - 1; i++) for (let k = 0; k < sides; k++) {
+      const a = i * (sides + 1) + k, b = a + sides + 1;
+      idx.push(a, a + 1, b, b, a + 1, b + 1);
+    }
+    if (o.caps !== false) {
+      for (const [i, s] of [[0, -1], [n - 1, 1]]) {
+        const c0 = pos.length / 3;
+        pos.push(P[i].x, P[i].y, P[i].z); uv.push(0.5, along / tile * (i ? 1 : 0));
+        const base = i * (sides + 1);
+        for (let k = 0; k < sides; k++) { if (s > 0) idx.push(c0, base + k, base + k + 1); else idx.push(c0, base + k + 1, base + k); }
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return this.add(material, g, { uv: 'keep', ...o });
   }
   // a prism: polygon pts [[x, y], ...] in the local xy plane, extruded depth d along +z from z0
   prism(material, pts, z0, d, o = {}) {
