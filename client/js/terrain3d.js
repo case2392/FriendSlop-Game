@@ -1,61 +1,261 @@
-// Terrain: the painted ground (splatting), the road, mud, ground clutter.
+// Terrain: the painted ground. One splat shader (MeshLambertMaterial + onBeforeCompile, so
+// lights, shadows and fog keep working) blends per biome: two grounds by large-scale noise,
+// bare dirt in clearings, the dirt road by distance from its centerline (sampled in road
+// space so the ruts follow it, with a ragged painterly edge), mud in the mud stretches, and
+// cliff rock by slope (projected from the side so strata stay level). Baked ambient
+// occlusion darkens crevices with a cool tint. Beyond the playable heightfield an apron of
+// unreachable hills carries the land (and the road) out to the horizon, and instanced
+// ground clutter (tufts, flowers, wheat) is recycled around the camera.
+//
 // Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos) }
-import { THREE, canvasTex, flat, shadowy } from './gfx.js';
-import { fbm } from '/shared/rng.js';
-import { inMud } from '/shared/world.js';
+// The visible grid is exactly the physics heightfield (same vertices, same diagonal split).
+import { THREE, tex, renderer } from './gfx.js';
+import { canvasFor } from './paint/index.js';
+import { fbm, noise2 } from '/shared/rng.js';
 
-const CHUNK = 24;
-const STRATA = ['#b9573a', '#cc6d45', '#a64a33', '#d88252', '#b65f3d'];
-const col = c => new THREE.Color(c);
+const CHUNK = 40;            // cells per terrain chunk side (100 m): few draw calls, still culls
+const SHOULDER = 1.7;        // the road texture runs this far past the driven edge on each side
 
-function terrainColor(W, x, y, z, ny, seed) {
-  const n = fbm(x / 9, z / 9, seed + 77, 2);
-  if (inMud(W, x, z)) return col('#5b4331').lerp(col('#3f2c1f'), 0.5 + n * 0.5);
-  const dRoad = Math.abs(x - W.roadX(z));
-  const inTown = z > W.LEN - 10 || z < 2;
-  if (ny < 0.8) {
-    const band = Math.floor((y + n * 0.7 + 50) / 1.7) % STRATA.length;
-    const c = col(STRATA[band]);
-    return ny < 0.45 ? c : c.lerp(col('#c98a5a'), (ny - 0.45) / 0.35 * 0.5);
-  }
-  if (dRoad < 7.5 && !inTown) return col('#c4a37f').lerp(col('#b08f6c'), 0.5 + n * 0.5);
-  const base = inTown ? col('#e2c08f') : col('#e3b06e');
-  base.lerp(col('#d39457'), 0.5 + n * 0.5);
-  const hi = y - W.roadY(z);
-  if (hi > 6 && ny > 0.9) base.lerp(col('#b7a467'), 0.35);   // scrubby mesa tops
-  return base;
+// Per-biome look. Scales are meters per texture tile.
+const CFG = {
+  meadow: {
+    hw: 3.0, scale: [5.5, 7.5, 6, 9], mud: 6, roadLen: 10, cliff: [0.2, 0.32], g2: [0.56, 0.5],
+    ao: [0.5, 0.52, 0.7], tintA: [1.06, 1.03, 0.86], tintB: [0.9, 1.0, 1.02], macro: 0.24,
+    clutter: { cell: 1.05, radius: 23, density: 0.95, flowers: 0.16,
+      cards: [[0.8, 0.55, 0.55], [0.7, 0.8, 0.25], [0.6, 0.5, 0.1], [0.6, 0.5, 0.1]] },      // [w, h, weight]
+  },
+  fields: {
+    hw: 3.0, scale: [5.5, 7, 6, 9], mud: 6, roadLen: 10, cliff: [0.2, 0.32], g2: [0.6, 0.45],
+    ao: [0.55, 0.52, 0.66], tintA: [1.06, 1.0, 0.86], tintB: [0.92, 1.0, 0.98], macro: 0.22,
+    clutter: { cell: 1.1, radius: 23, density: 0.9, flowers: 0.06,
+      cards: [[0.8, 0.6, 0.6], [0.8, 0.95, 0.12], [0.75, 0.55, 0.28], [0.6, 0.5, 0.06]] },
+  },
+  badlands: {
+    hw: 3.1, scale: [6.5, 7, 6, 11], mud: 6, roadLen: 10, cliff: [0.13, 0.24], g2: [0.6, 0.35],
+    ao: [0.52, 0.42, 0.55], tintA: [1.06, 1.0, 0.9], tintB: [0.94, 0.96, 1.02], macro: 0.2,
+    clutter: { cell: 1.6, radius: 22, density: 0.3, flowers: 0,
+      cards: [[0.75, 0.5, 0.5], [0.8, 0.55, 0.2], [0.75, 0.5, 0.15], [0.7, 0.5, 0.15]] },
+  },
+  desert: {
+    hw: 3.1, scale: [7, 7, 6, 10], mud: 6, roadLen: 10, cliff: [0.16, 0.28], g2: [0.62, 0.3],
+    ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.92], tintB: [0.95, 0.97, 1.02], macro: 0.18,
+    clutter: { cell: 2.1, radius: 22, density: 0.12, flowers: 0,
+      cards: [[0.7, 0.45, 0.55], [0.75, 0.5, 0.2], [0.7, 0.45, 0.15], [0.6, 0.45, 0.1]] },
+  },
+};
+
+const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
+
+// Road half-width along the leg: the town's main street is wider.
+const roadHW = (W, cfg, z) => cfg.hw + 1.8 * sstep(W.LEN + 2, W.LEN + 22, z);
+
+// ---- the splat material --------------------------------------------------------------------
+
+function rawTex(name, linear = false) {
+  if (!linear) return tex(name);
+  const t = new THREE.CanvasTexture(canvasFor(name));
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.NoColorSpace;
+  return t;
+}
+let macroTex = null;
+
+// SwiftShader (headless screenshots, software GPUs) gets a lighter path: no second
+// anti-tiling fetch of the main ground, and less anisotropic filtering.
+let cheapGPU = null;
+function isCheapGPU() {
+  if (cheapGPU != null) return cheapGPU;
+  cheapGPU = false;
+  try {
+    const gl = renderer?.getContext();
+    const ext = gl && gl.getExtension('WEBGL_debug_renderer_info');
+    const name = ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : (gl ? gl.getParameter(gl.RENDERER) : '');
+    cheapGPU = /swiftshader|llvmpipe|software/i.test(String(name));
+  } catch { cheapGPU = false; }
+  return cheapGPU;
 }
 
-function buildTerrainMesh(W, group) {
+function splatMaterial(biome, cfg) {
+  macroTex ||= rawTex('terrain_macro', true);
+  const cheap = isCheapGPU();
+  const T = n => { const t = tex(n); if (cheap && t.anisotropy > 2) { t.anisotropy = 2; t.needsUpdate = true; } return t; };
+  const U = {
+    tG1: { value: T(`ground_${biome}`) }, tG2: { value: T(`ground2_${biome}`) }, tDirt: { value: T(`dirt_${biome}`) },
+    tRoad: { value: T(`road_${biome}`) }, tCliff: { value: T(`cliff_${biome}`) }, tMud: { value: T('mud') }, tMacro: { value: macroTex },
+    uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(cfg.mud, cfg.roadLen, cfg.macro, 0) },
+    uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
+    uAO: { value: new THREE.Vector3(...cfg.ao) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
+  };
+  const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
+  m.userData.U = U;
+  if (cheap) m.defines = { TERRAIN_CHEAP: 1 };
+  m.customProgramCacheKey = () => 'terrain-splat-v3' + (cheap ? 'c' : '');
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, U);
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute vec4 aRoad; attribute vec4 aSplat;
+        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        vRoad = aRoad; vSplat = aSplat;
+        vTPos = (modelMatrix * vec4(transformed, 1.0)).xyz;
+        vTNrm = normalize(mat3(modelMatrix) * objectNormal);`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro;
+        uniform vec4 uScale, uMisc; uniform vec2 uCliff, uG2; uniform vec3 uAO, uTintA, uTintB;
+        varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm;
+        float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
+        `)
+      .replace('#include <map_fragment>', `
+        {
+          // Each optional layer is fetched only where it can show; every blend weight is zero at
+          // its branch boundary, so the fetches can use ordinary implicit derivatives.
+          const mat2 ROT = mat2(0.8, -0.6, 0.6, 0.8);       // a rotated frame breaks the tile grid
+          vec3 wp = vTPos; vec3 nr = normalize(vTNrm);
+          vec2 xz = wp.xz, xr = ROT * xz;
+          // large-scale noise comes per vertex (vRoad.zw, vSplat.w); one fetch gives the medium/fine noise
+          vec4 mB = texture2D(tMacro, xr / 61.0 + vec2(0.31, 0.77));   // r: ~7-20 m, g: ~3-9 m, b: ~1-3 m
+          float nE = mB.b;
+          // ground: the main ground (two scales), then the second ground in big painterly patches
+          vec3 g1 = texture2D(tG1, xz / uScale.x).rgb;
+          #ifndef TERRAIN_CHEAP
+            g1 = mix(g1, texture2D(tG1, xr / (uScale.x * 2.3) + 0.37).rgb, 0.22 + 0.3 * mB.g);
+          #endif
+          vec3 col = g1;
+          float n2 = vSplat.w + (mB.r - 0.5) * 0.22 + (nE - 0.5) * 0.12;
+          if (n2 > uG2.x - 0.1 - 0.3 * uG2.y) {
+            vec3 g2 = texture2D(tG2, xr / uScale.y).rgb;
+            col = mix(g1, g2, smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y));
+          }
+          // clearings: bare packed dirt
+          if (vSplat.y > 0.005) {
+            vec3 dt = texture2D(tDirt, xr / uScale.z).rgb;
+            float w = smoothstep(0.3, 0.62, vSplat.y + (nE - 0.5) * 0.5 + (tLum(dt) - tLum(col)) * 0.6 + (mB.g - 0.5) * 0.3 - 0.1);
+            col = mix(col, dt, w * smoothstep(0.005, 0.12, vSplat.y));
+          }
+          // the road, in road space; the ground's lit blades lap over its ragged edge
+          if (vRoad.y < 2.6) {
+            vec3 rc = texture2D(tRoad, vec2(clamp(vRoad.x, 0.004, 0.996), wp.z / uMisc.y)).rgb;
+            float edge = vRoad.y + (nE - 0.5) * 1.5 + (mB.g - 0.5) * 1.0;
+            col = mix(col, rc, 1.0 - smoothstep(-0.35, 0.35, edge + clamp(tLum(col) - tLum(rc), -0.3, 0.3) * 1.6));
+          }
+          // mud
+          if (vSplat.x > 0.005) {
+            vec3 md = texture2D(tMud, xr / uMisc.x).rgb;
+            float w = smoothstep(0.32, 0.58, vSplat.x + (mB.g - 0.5) * 0.7 + (nE - 0.5) * 0.35);
+            col = mix(col, md, w * smoothstep(0.005, 0.1, vSplat.x));
+          }
+          // cliffs by slope, projected from the side (strata stay level)
+          float slope = 1.0 - nr.y;
+          if (slope > uCliff.x - 0.16) {
+            vec2 an = pow(abs(nr.xz) + 0.001, vec2(4.0)); an /= (an.x + an.y);
+            vec3 cc = vec3(0.0); float aw = 0.0;
+            if (an.x > 0.03) { cc += an.x * texture2D(tCliff, vec2(wp.z, wp.y) / uScale.w).rgb; aw += an.x; }
+            if (an.y > 0.03) { cc += an.y * texture2D(tCliff, vec2(-wp.x, wp.y) / uScale.w + 0.5).rgb; aw += an.y; }
+            cc /= aw;
+            float wk = smoothstep(uCliff.x, uCliff.y, slope + (mB.r - 0.5) * 0.06 + (nE - 0.5) * 0.06 + clamp(tLum(cc) - tLum(col), -0.2, 0.2) * 0.2);
+            col = mix(col, cc, wk);
+          }
+          // macro variation: warm and cool regions, a little value drift
+          col *= mix(uTintA, uTintB, smoothstep(0.2, 0.8, vRoad.z));
+          col *= 1.0 + (vRoad.w - 0.5) * uMisc.z;
+          // baked occlusion, cool in the crevices
+          col *= mix(uAO, vec3(1.0), vSplat.z);
+          diffuseColor.rgb *= col;
+        }`);
+  };
+  return m;
+}
+
+// ---- per-vertex data for the playable grid ---------------------------------------------------
+
+// Low-frequency noise, per vertex: [warm/cool tint, value drift, second-ground mask], each 0..1.
+const n01 = v => Math.max(0, Math.min(1, 0.5 + v * 0.85));
+function lowNoise(W, x, z) {
+  return [n01(fbm(x / 130, z / 130, W.seed + 401, 2)), n01(fbm(x / 75, z / 75, W.seed + 402, 2)), n01(fbm(x / 34, z / 34, W.seed + 403, 3))];
+}
+
+function vertexData(W, cfg, clearings) {
   const { nx, nz, cell, X0, Z0, heights } = W;
-  const H = (ix, iz) => heights[ix * (nz + 1) + iz];
-  const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95, flatShading: true });
-  const a = new THREE.Vector3(), b = new THREE.Vector3(), c = new THREE.Vector3(), ab = new THREE.Vector3(), ac = new THREE.Vector3();
+  const NZ1 = nz + 1, NV = (nx + 1) * NZ1;
+  const Hc = (ix, iz) => heights[(ix < 0 ? 0 : ix > nx ? nx : ix) * NZ1 + (iz < 0 ? 0 : iz > nz ? nz : iz)];
+  const nrm = new Float32Array(NV * 3), road = new Float32Array(NV * 4), spl = new Float32Array(NV * 4);
+  const AO_DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  const AO_STEPS = [1, 2, 4, 7, 12];
+  for (let ix = 0; ix <= nx; ix++) {
+    const x = X0 + ix * cell;
+    for (let iz = 0; iz <= nz; iz++) {
+      const v = ix * NZ1 + iz, z = Z0 + iz * cell, h0 = heights[v];
+      // smooth normal from central differences
+      const dx = (Hc(ix + 1, iz) - Hc(ix - 1, iz)) / ((Math.min(ix + 1, nx) - Math.max(ix - 1, 0)) * cell);
+      const dz = (Hc(ix, iz + 1) - Hc(ix, iz - 1)) / ((Math.min(iz + 1, nz) - Math.max(iz - 1, 0)) * cell);
+      const l = Math.hypot(dx, 1, dz);
+      nrm[v * 3] = -dx / l; nrm[v * 3 + 1] = 1 / l; nrm[v * 3 + 2] = -dz / l;
+      // road space
+      const hwz = roadHW(W, cfg, z), d = x - W.roadX(z);
+      road[v * 4] = d / (2 * (hwz + SHOULDER)) + 0.5;
+      road[v * 4 + 1] = Math.abs(d) - hwz;
+      const [nt, nv, n2] = lowNoise(W, x, z);
+      road[v * 4 + 2] = nt; road[v * 4 + 3] = nv;
+      // mud
+      let mud = 0;
+      for (const m of W.mud) {
+        const wz = sstep(m.z0 - 4, m.z0 + 5, z) * (1 - sstep(m.z1 - 5, m.z1 + 4, z));
+        if (wz > 0 && Math.abs(d) < m.hw) mud = Math.max(mud, wz * (1 - 0.72 * sstep(5, 26, Math.abs(d))));
+      }
+      // clearings
+      let clr = 0;
+      for (const c of clearings) {
+        const dd = Math.hypot(x - c.x, z - c.z);
+        if (dd < c.r1) clr = Math.max(clr, (1 - sstep(c.r0, c.r1, dd)) * c.k);
+      }
+      // ambient occlusion: how much of the sky the surrounding terrain hides
+      let occ = 0;
+      for (const [ax, az] of AO_DIRS) {
+        const dl = Math.hypot(ax, az) * cell;
+        let best = 0;
+        for (const s of AO_STEPS) {
+          const t = (Hc(ix + ax * s, iz + az * s) - h0) / (dl * s);
+          if (t > best) best = t;
+        }
+        occ += best / Math.sqrt(1 + best * best);          // sin of the horizon angle
+      }
+      occ /= AO_DIRS.length;
+      // convexity: ridges catch a little extra light, hollows lose some
+      const cv = h0 - (Hc(ix + 2, iz) + Hc(ix - 2, iz) + Hc(ix, iz + 2) + Hc(ix, iz - 2)) / 4;
+      const ao = Math.max(0.3, Math.min(1.08, 1 - occ * 0.95 + Math.max(-0.12, Math.min(0.08, cv * 0.06))));
+      spl[v * 4] = mud; spl[v * 4 + 1] = clr; spl[v * 4 + 2] = ao; spl[v * 4 + 3] = n2;
+    }
+  }
+  return { nrm, road, spl };
+}
+
+function buildChunks(W, data, mat, group) {
+  const { nx, nz, cell, X0, Z0, heights } = W;
+  const NZ1 = nz + 1;
   for (let cx = 0; cx < nx; cx += CHUNK) {
     for (let cz = 0; cz < nz; cz += CHUNK) {
       const ex = Math.min(nx, cx + CHUNK), ez = Math.min(nz, cz + CHUNK);
-      const pos = [], cols = [];
-      const tri = (p0, p1, p2) => {
-        a.set(...p0); b.set(...p1); c.set(...p2);
-        ab.subVectors(b, a); ac.subVectors(c, a);
-        const nrm = ab.cross(ac).normalize();
-        const mx = (a.x + b.x + c.x) / 3, my = (a.y + b.y + c.y) / 3, mz = (a.z + b.z + c.z) / 3;
-        const k = terrainColor(W, mx, my, mz, nrm.y, W.seed);
-        pos.push(...p0, ...p1, ...p2);
-        for (let i = 0; i < 3; i++) cols.push(k.r, k.g, k.b);
-      };
-      for (let ix = cx; ix < ex; ix++) {
-        for (let iz = cz; iz < ez; iz++) {
-          const x0 = X0 + ix * cell, z0 = Z0 + iz * cell, x1 = x0 + cell, z1 = z0 + cell;
-          const p00 = [x0, H(ix, iz), z0], p10 = [x1, H(ix + 1, iz), z0], p01 = [x0, H(ix, iz + 1), z1], p11 = [x1, H(ix + 1, iz + 1), z1];
-          tri(p00, p01, p10);
-          tri(p10, p01, p11);
-        }
+      const vx = ex - cx + 1, vz = ez - cz + 1, n = vx * vz;
+      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), rd = new Float32Array(n * 4), sp = new Float32Array(n * 4);
+      for (let i = 0; i < vx; i++) for (let j = 0; j < vz; j++) {
+        const lv = i * vz + j, ix = cx + i, iz = cz + j, gv = ix * NZ1 + iz;
+        pos[lv * 3] = X0 + ix * cell; pos[lv * 3 + 1] = heights[gv]; pos[lv * 3 + 2] = Z0 + iz * cell;
+        for (let k = 0; k < 3; k++) nor[lv * 3 + k] = data.nrm[gv * 3 + k];
+        for (let k = 0; k < 4; k++) { sp[lv * 4 + k] = data.spl[gv * 4 + k]; rd[lv * 4 + k] = data.road[gv * 4 + k]; }
+      }
+      const idx = [];
+      for (let i = 0; i < vx - 1; i++) for (let j = 0; j < vz - 1; j++) {
+        const p00 = i * vz + j, p01 = i * vz + j + 1, p10 = (i + 1) * vz + j, p11 = (i + 1) * vz + j + 1;
+        idx.push(p00, p01, p10, p10, p01, p11);    // Rapier's split: the (+x,-z)/(-x,+z) diagonal
       }
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-      geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
-      geo.computeVertexNormals();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
+      geo.setAttribute('aRoad', new THREE.BufferAttribute(rd, 4));
+      geo.setAttribute('aSplat', new THREE.BufferAttribute(sp, 4));
+      geo.setIndex(idx);
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mat);
       m.receiveShadow = true;
@@ -65,61 +265,340 @@ function buildTerrainMesh(W, group) {
   }
 }
 
-function roadTexture() {
-  const cv = document.createElement('canvas');
-  cv.width = 256; cv.height = 512;
-  const g = cv.getContext('2d');
-  g.fillStyle = '#4a4648'; g.fillRect(0, 0, 256, 512);
-  for (let i = 0; i < 2600; i++) {
-    const v = 50 + Math.random() * 40;
-    g.fillStyle = `rgb(${v},${v - 2},${v + 2})`;
-    g.fillRect(Math.random() * 256, Math.random() * 512, 2, 2);
-  }
-  for (let i = 0; i < 7; i++) { g.strokeStyle = 'rgba(25,22,24,0.6)'; g.lineWidth = 2; g.beginPath(); let x = Math.random() * 256, y = Math.random() * 512; g.moveTo(x, y); for (let k = 0; k < 6; k++) { x += (Math.random() - 0.5) * 40; y += Math.random() * 30; g.lineTo(x, y); } g.stroke(); }
-  g.fillStyle = '#f2c14e';
-  g.fillRect(121, 0, 6, 200); g.fillRect(129, 0, 6, 200);
-  g.fillStyle = '#e8e4da';
-  g.fillRect(10, 0, 6, 512); g.fillRect(240, 0, 6, 512);
-  return canvasTex(cv, { repeat: [1, 1] });
-}
+// ---- the apron: unreachable land past the edges, so the world never ends in a cliff ----------
 
-function buildRoad(W, group) {
-  const pos = [], uv = [], cols = [], idx = [];
-  const ACROSS = [-3.7, -1.8, 0, 1.8, 3.7];
-  let row = 0;
-  for (let z = W.Z0 + 2; z <= W.Z1 - 2; z += 1.5) {
-    const x = W.roadX(z);
-    const dx = (W.roadX(z + 0.5) - W.roadX(z - 0.5));
-    const nl = Math.hypot(dx, 1);
-    const px = 1 / nl, pz = -dx / nl;            // perpendicular
-    const mud = inMud(W, x, z);
-    ACROSS.forEach((o, i) => {
-      const vx = x + px * o, vz = z + pz * o;
-      pos.push(vx, W.heightAt(vx, vz) + 0.06, vz);
-      uv.push(i / (ACROSS.length - 1), z / 9);
-      const k = mud ? [0.45, 0.33, 0.24] : [1, 1, 1];
-      cols.push(...k);
-    });
-    if (row > 0) {
-      const b0 = (row - 1) * ACROSS.length, b1 = row * ACROSS.length;
-      for (let i = 0; i < ACROSS.length - 1; i++) idx.push(b0 + i, b1 + i, b0 + i + 1, b0 + i + 1, b1 + i, b1 + i + 1);
+function buildApron(W, cfg, data, mat, group) {
+  const { nx, nz, cell, X0, Z0, heights } = W;
+  const X1 = X0 + nx * cell, Zend = Z0 + nz * cell, NZ1 = nz + 1;
+  const OUT = 340, STEP = 10;
+  const xs = [], zs = [];
+  for (let x = X0 - OUT; x <= X1 + OUT + 0.01; x += STEP) xs.push(x);
+  for (let z = Z0 - OUT; z < Z0; z += STEP) zs.push(z);
+  for (let z = Z0; z < Zend - 0.01; z += STEP) zs.push(z);
+  for (let z = Zend; z <= Zend + OUT + 0.01; z += STEP) zs.push(z);
+  const rx0 = W.roadX(Z0), rx1 = W.roadX(W.Z1);
+  const hA = (x, z) => {
+    const cx = Math.max(X0, Math.min(X1, x)), cz = Math.max(Z0, Math.min(Zend, z));
+    const base = W.heightAt(cx, cz);
+    const dOut = Math.hypot(x - cx, z - cz);
+    if (dOut <= 0) return base;
+    const rx = z < Z0 ? rx0 : z > Zend ? rx1 : 1e9;
+    const f = Math.abs(x) > X1 - 1 ? 1 : sstep(12, 110, Math.abs(x - rx));      // keep a valley open along the road
+    const bumps = fbm(x / 70, z / 70, W.seed + 901, 3) * 22 * sstep(0, 90, dOut) * (0.35 + 0.65 * f);
+    const rise = dOut * (0.03 + 0.22 * f) + sstep(180, OUT, dOut) * 70 * (0.5 + 0.5 * f) + bumps;
+    return base + rise;
+  };
+  const NX = xs.length, NZ = zs.length;
+  const pos = [], nor = [], rd = [], sp = [], idx = [];
+  const vid = new Int32Array(NX * NZ).fill(-1);
+  const inside = (x, z) => x > X0 && x < X1 && z > Z0 && z < Zend;
+  const vert = (i, j) => {
+    const k = i * NZ + j;
+    if (vid[k] >= 0) return vid[k];
+    const x = xs[i], z = zs[j], y = hA(x, z);
+    const e = 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
+    const cz = Math.max(Z0, Math.min(W.Z1, z)), hwz = roadHW(W, cfg, cz), d = x - W.roadX(cz);
+    vid[k] = pos.length / 3;
+    pos.push(x, y, z); nor.push(-hx / l, 1 / l, -hz / l);
+    const [nt, nv, n2] = lowNoise(W, x, z);
+    rd.push(d / (2 * (hwz + SHOULDER)) + 0.5, Math.abs(d) - hwz, nt, nv);
+    sp.push(0, 0, 1, n2);
+    return vid[k];
+  };
+  for (let i = 0; i < NX - 1; i++) for (let j = 0; j < NZ - 1; j++) {
+    if (inside((xs[i] + xs[i + 1]) / 2, (zs[j] + zs[j + 1]) / 2)) continue;
+    const a = vert(i, j), b = vert(i, j + 1), c = vert(i + 1, j), d = vert(i + 1, j + 1);
+    idx.push(a, b, c, c, b, d);
+  }
+  // a skirt hanging from the playable grid's rim hides T-junction slivers against the coarser apron
+  const rim = [];
+  for (let ix = 0; ix <= nx; ix++) rim.push([ix, 0]);
+  for (let iz = 1; iz <= nz; iz++) rim.push([nx, iz]);
+  for (let ix = nx - 1; ix >= 0; ix--) rim.push([ix, nz]);
+  for (let iz = nz - 1; iz >= 0; iz--) rim.push([0, iz]);
+  let prev = -1;
+  for (const [ix, iz] of rim) {
+    const gv = ix * NZ1 + iz, x = X0 + ix * cell, z = Z0 + iz * cell, y = heights[gv];
+    const t = pos.length / 3;
+    for (const yy of [y, y - 4]) {
+      pos.push(x, yy, z); nor.push(data.nrm[gv * 3], data.nrm[gv * 3 + 1], data.nrm[gv * 3 + 2]);
+      for (let k = 0; k < 4; k++) rd.push(data.road[gv * 4 + k]);
+      sp.push(0, data.spl[gv * 4 + 1], data.spl[gv * 4 + 2], data.spl[gv * 4 + 3]);
     }
-    row++;
+    if (prev >= 0) idx.push(prev, prev + 1, t, t, prev + 1, t + 1, t, prev + 1, prev, t + 1, prev + 1, t);
+    prev = t;
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  geo.setAttribute('color', new THREE.Float32BufferAttribute(cols, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('aRoad', new THREE.Float32BufferAttribute(rd, 4));
+  geo.setAttribute('aSplat', new THREE.Float32BufferAttribute(sp, 4));
   geo.setIndex(idx);
-  geo.computeVertexNormals();
-  const m = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: roadTexture(), vertexColors: true, roughness: 0.92, polygonOffset: true, polygonOffsetFactor: -2 }));
+  geo.computeBoundingSphere();
+  const m = new THREE.Mesh(geo, mat);
   m.receiveShadow = true;
   group.add(m);
 }
 
+// ---- ground clutter ----------------------------------------------------------------------------
+
+// The clutter atlas as a DataTexture: transparent texels take their cell's average color so
+// mipmaps don't grow dark fringes around the blades.
+const clutterTexCache = new Map();
+function clutterTex(biome) {
+  if (clutterTexCache.has(biome)) return clutterTexCache.get(biome);
+  const cv = canvasFor(`clutter_${biome}`);
+  const w = cv.width, h = cv.height;
+  const src = cv.getContext('2d').getImageData(0, 0, w, h).data;
+  const out = new Uint8Array(w * h * 4);
+  const avg = [];
+  for (let cy = 0; cy < 2; cy++) for (let cx = 0; cx < 2; cx++) {
+    let r = 0, g = 0, b = 0, n = 0;
+    for (let y = cy * h / 2; y < (cy + 1) * h / 2; y++) for (let x = cx * w / 2; x < (cx + 1) * w / 2; x++) {
+      const k = (y * w + x) * 4;
+      if (src[k + 3] > 200) { r += src[k]; g += src[k + 1]; b += src[k + 2]; n++; }
+    }
+    avg.push(n ? [r / n, g / n, b / n] : [90, 110, 60]);
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = (y * w + x) * 4, o = ((h - 1 - y) * w + x) * 4;     // flip rows: canvas top → v = 1
+    const a = src[k + 3];
+    if (a < 24) { const c = avg[(y < h / 2 ? 0 : 2) + (x < w / 2 ? 0 : 1)]; out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; }
+    else { out[o] = src[k]; out[o + 1] = src[k + 1]; out[o + 2] = src[k + 2]; }
+    out[o + 3] = a;
+  }
+  const t = new THREE.DataTexture(out, w, h, THREE.RGBAFormat);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.generateMipmaps = true;
+  t.minFilter = THREE.LinearMipmapLinearFilter;
+  t.magFilter = THREE.LinearFilter;
+  t.anisotropy = 4;
+  t.needsUpdate = true;
+  clutterTexCache.set(biome, t);
+  return t;
+}
+
+// Three crossed quads, both windings, normals straight up so the cards light like the ground.
+function cardGeometry() {
+  const pos = [], uv = [], nor = [], idx = [];
+  for (let q = 0; q < 3; q++) {
+    const a = q * Math.PI / 3 + 0.2, c = Math.cos(a) * 0.5, s = Math.sin(a) * 0.5;
+    const b = pos.length / 3;
+    pos.push(-c, 0, -s, c, 0, s, c, 1, s, -c, 1, -s);
+    uv.push(0, 0, 1, 0, 1, 1, 0, 1);
+    for (let k = 0; k < 4; k++) nor.push(0, 1, 0);
+    idx.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  g.setIndex(idx);
+  return g;
+}
+
+function clutterMaterial(biome, U) {
+  const m = new THREE.MeshLambertMaterial({ map: clutterTex(biome), alphaTest: 0.45, side: THREE.FrontSide });
+  m.alphaToCoverage = true;
+  m.customProgramCacheKey = () => 'terrain-clutter-v1';
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uTime = U.uTime;
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', `#include <common>
+        attribute vec3 aCard; uniform float uTime;`)
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        {
+          vec3 ip = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
+          float cd = distance(ip.xz, cameraPosition.xz);
+          transformed *= 1.0 - smoothstep(aCard.z * 0.62, aCard.z, cd);   // shrink into the ground, no popping
+          float sw = sin(uTime * 1.5 + ip.x * 0.37 + ip.z * 0.23) * 0.6 + sin(uTime * 2.6 + ip.z * 0.9 + ip.x * 0.2) * 0.3;
+          float hy = position.y * position.y;
+          transformed.x += sw * 0.07 * hy;
+          transformed.z += sw * 0.035 * hy;
+        }`)
+      .replace('#include <uv_vertex>', `#include <uv_vertex>
+        vMapUv = vMapUv * 0.5 + aCard.xy;`);
+  };
+  return m;
+}
+
+// Small deterministic generator keyed on a grid cell.
+function cellRng(i, j, seed) {
+  let a = (Math.imul(i, 374761393) ^ Math.imul(j, 668265263) ^ Math.imul(seed, 1442695041)) >>> 0;
+  return () => {
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+// Where clutter must not grow: building floors, stalls, tables, trunks...
+function exclusion(W) {
+  const x0 = W.X0, z0 = W.Z0, NX = Math.ceil(W.nx * W.cell) + 1, NZ = Math.ceil(W.Z1 - W.Z0) + 2;
+  const grid = new Uint8Array(NX * NZ);
+  const mark = (cx, cz, hx, hz, ry, pad) => {
+    const s = Math.sin(ry), c = Math.cos(ry), R = Math.hypot(hx, hz) + pad;
+    const gx0 = Math.max(0, Math.floor(cx - R - x0)), gx1 = Math.min(NX - 1, Math.ceil(cx + R - x0));
+    const gz0 = Math.max(0, Math.floor(cz - R - z0)), gz1 = Math.min(NZ - 1, Math.ceil(cz + R - z0));
+    for (let gx = gx0; gx <= gx1; gx++) for (let gz = gz0; gz <= gz1; gz++) {
+      const px = x0 + gx + 0.5 - cx, pz = z0 + gz + 0.5 - cz;
+      const lx = px * c - pz * s, lz = px * s + pz * c;
+      if (Math.abs(lx) < hx + pad && Math.abs(lz) < hz + pad) grid[gx * NZ + gz] = 1;
+    }
+  };
+  for (const st of W.statics) if (st.mat !== 'invisible' && st.hx < 40 && st.hz < 40) mark(st.x, st.z, st.hx, st.hz, st.ry || 0, 0.6);
+  for (const c of W.cyls) mark(c.x, c.z, c.r, c.r, 0, 0.25);
+  for (const d of W.decor) if (d.k === 'fire') mark(d.x, d.z, 1.6, 1.6, 0, 0.5);
+  return (x, z) => {
+    const gx = Math.floor(x - x0), gz = Math.floor(z - z0);
+    if (gx < 0 || gz < 0 || gx >= NX || gz >= NZ) return true;
+    return grid[gx * NZ + gz] === 1;
+  };
+}
+
+class Clutter {
+  constructor(W, cfg, biome) {
+    this.W = W; this.cfg = cfg; this.C = cfg.clutter;
+    this.blocked = exclusion(W);
+    this.U = { uTime: { value: 0 } };
+    this.cell = this.C.cell;
+    this.N = Math.ceil(2 * this.C.radius / this.cell) + 1;
+    this.half = Math.floor(this.N / 2);
+    this.wsum = this.C.cards.reduce((a, c) => a + c[2], 0);
+    const patches = this.patches();
+    const near = this.N * this.N;
+    this.base = patches.length;
+    this.count = patches.length + near;
+    this.aCard = new Float32Array(this.count * 3);
+    this.mesh = new THREE.InstancedMesh(cardGeometry(), clutterMaterial(biome, this.U), this.count);
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    this.mesh.geometry.setAttribute('aCard', new THREE.InstancedBufferAttribute(this.aCard, 3));
+    this.mesh.frustumCulled = false;
+    this.mesh.castShadow = false;
+    this.mesh.receiveShadow = true;
+    this.m4 = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.v = new THREE.Vector3(); this.sv = new THREE.Vector3(); this.up = new THREE.Vector3(0, 1, 0);
+    patches.forEach((p, i) => this.set(i, p.x, p.y, p.z, p.ry, p.w, p.h, p.card, p.fade));
+    this.ki = new Int32Array(near).fill(-2147483648);
+    this.kj = new Int32Array(near).fill(-2147483648);
+    for (let s = 0; s < near; s++) this.hide(this.base + s);
+  }
+  set(i, x, y, z, ry, w, h, card, fade) {
+    this.q.setFromAxisAngle(this.up, ry);
+    this.m4.compose(this.v.set(x, y, z), this.q, this.sv.set(w, h, w));
+    this.mesh.setMatrixAt(i, this.m4);
+    this.aCard[i * 3] = (card % 2) * 0.5; this.aCard[i * 3 + 1] = card < 2 ? 0.5 : 0; this.aCard[i * 3 + 2] = fade;
+  }
+  hide(i) { this.m4.makeScale(0, 0, 0); this.mesh.setMatrixAt(i, this.m4); }
+  okAt(x, z, roadPad) {
+    const W = this.W;
+    if (x < W.X0 + 2 || x > W.X0 + W.nx * W.cell - 2 || z < W.Z0 + 2 || z > W.Z1 - 2) return false;
+    if (Math.abs(x - W.roadX(z)) < roadHW(W, this.cfg, z) + roadPad) return false;
+    if (this.blocked(x, z)) return false;
+    const e = 0.7, gx = W.heightAt(x + e, z) - W.heightAt(x - e, z), gz = W.heightAt(x, z + e) - W.heightAt(x, z - e);
+    if (Math.hypot(gx, gz) / (2 * e) > 0.8) return false;        // no tufts on cliff faces
+    for (const m of W.mud) if (z > m.z0 - 2 && z < m.z1 + 2 && Math.abs(x - W.roadX(z)) < 22) return false;
+    return true;
+  }
+  pickCard(r, flowerish) {
+    const cards = this.C.cards;
+    if (flowerish && this.C.flowers > 0 && r < 0.55) return r < 0.3 ? 2 : 3;
+    let t = r * this.wsum;
+    for (let k = 0; k < cards.length; k++) { if ((t -= cards[k][2]) < 0) return k; }
+    return 0;
+  }
+  // W.decor 'flowers' and 'wheat' become dense static patches.
+  patches() {
+    const W = this.W, out = [];
+    for (const d of W.decor) {
+      if (d.k !== 'flowers' && d.k !== 'wheat') continue;
+      const wheat = d.k === 'wheat';
+      const r = cellRng(Math.round(d.x * 10), Math.round(d.z * 10), W.seed + 5);
+      const R = (wheat ? 2.2 : 1.3) * (d.s || 1) + 0.6;
+      const n = Math.round((wheat ? 34 : 14) * (d.s || 1));
+      for (let k = 0; k < n; k++) {
+        const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * R;
+        const x = d.x + Math.cos(a) * rr, z = d.z + Math.sin(a) * rr * (wheat ? 0.8 : 1);
+        if (!this.okAt(x, z, 0.8)) continue;
+        let card, w, h;
+        if (wheat) {
+          card = W.biome === 'fields' ? 1 : 0; w = 0.85 + r() * 0.4; h = 0.95 + r() * 0.35;
+          if (r() < 0.15) { card = 0; h *= 0.6; }
+        } else {
+          card = r() < 0.7 ? (r() < 0.55 ? 2 : 3) : 0;
+          if (W.biome === 'fields' && card !== 0) card = r() < 0.7 ? 3 : 2;
+          w = 0.6 + r() * 0.25; h = 0.5 + r() * 0.25;
+        }
+        out.push({ x, y: W.heightAt(x, z) - 0.04, z, ry: r() * 6.283, w, h, card, fade: wheat ? 170 : 110 });
+      }
+    }
+    return out;
+  }
+  place(i, ci, cj) {
+    const W = this.W, C = this.C, r = cellRng(ci, cj, W.seed);
+    const x = (ci + r()) * this.cell, z = (cj + r()) * this.cell;
+    const pad = 0.35 + r() * 1.3;
+    const dens = C.density * Math.max(0, Math.min(1.3, 0.45 + 0.95 * (fbm(x / 21, z / 21, W.seed + 77, 2) + 0.35)));
+    if (r() > dens || !this.okAt(x, z, pad)) { this.hide(i); return; }
+    const flowerish = noise2(x / 7.5, z / 7.5, W.seed + 31) > 0.42;
+    const card = this.pickCard(r(), flowerish);
+    const [cw, chh] = C.cards[card];
+    const k = 0.75 + r() * 0.55;
+    this.set(i, x, W.heightAt(x, z) - 0.04, z, r() * 6.283, cw * k, chh * k, card, C.radius);
+  }
+  update(t, cam) {
+    this.U.uTime.value = t;
+    const N = this.N, ci = Math.floor(cam.x / this.cell), cj = Math.floor(cam.z / this.cell);
+    const i0 = ci - this.half, j0 = cj - this.half;
+    let dirty = false;
+    for (let a = 0; a < N; a++) {
+      const i = i0 + ((a - i0) % N + N) % N;
+      for (let b = 0; b < N; b++) {
+        const j = j0 + ((b - j0) % N + N) % N;
+        const s = a * N + b;
+        if (this.ki[s] === i && this.kj[s] === j) continue;
+        this.ki[s] = i; this.kj[s] = j;
+        this.place(this.base + s, i, j);
+        dirty = true;
+      }
+    }
+    if (dirty) { this.mesh.instanceMatrix.needsUpdate = true; this.mesh.geometry.attributes.aCard.needsUpdate = true; }
+  }
+}
+
+// ---- assembly ----------------------------------------------------------------------------------
+
+function clearingsOf(W) {
+  const out = [];
+  if (W.camp?.fire) out.push({ x: W.camp.fire.x, z: W.camp.fire.z, r0: 3.2, r1: 7.5, k: 1 });
+  if (W.town?.fire) out.push({ x: W.town.fire.x, z: W.town.fire.z, r0: 3.0, r1: 7, k: 1 });
+  for (const p of W.pois || []) if (p.type !== 'crash') out.push({ x: p.x, z: p.z, r0: 5.5, r1: 11, k: p.type === 'yard' ? 0.6 : 0.95 });
+  for (const b of W.buildings || []) {
+    const r = Math.max(b.w, b.dep) * 0.5;
+    out.push({ x: b.x + Math.sin(b.ry) * (b.dep * 0.5 + 1.5), z: b.z + Math.cos(b.ry) * (b.dep * 0.5 + 1.5), r0: 1.5, r1: Math.min(6, r * 0.6), k: 0.8 });   // the trodden doorstep
+  }
+  for (const d of W.decor) if (d.k === 'wheat') out.push({ x: d.x, z: d.z, r0: 1.0, r1: 2.6 * (d.s || 1) + 0.8, k: 0.75 });  // tilled under the wheat
+  return out;
+}
+
 export function buildTerrain(W) {
+  const biome = CFG[W.biome] ? W.biome : 'meadow';
+  const cfg = CFG[biome];
   const group = new THREE.Group();
-  buildTerrainMesh(W, group);
-  buildRoad(W, group);
-  return { group, update(dt, t, camPos) {} };
+  const mat = splatMaterial(biome, cfg);
+  const data = vertexData(W, cfg, clearingsOf(W));
+  buildChunks(W, data, mat, group);
+  buildApron(W, cfg, data, mat, group);
+  const clutter = new Clutter(W, cfg, biome);
+  group.add(clutter.mesh);
+  let started = false;
+  return {
+    group,
+    update(dt, t, camPos) {
+      if (!camPos) return;
+      clutter.update(t, camPos);
+      started = true;
+    },
+  };
 }

@@ -1,91 +1,324 @@
-// Atmosphere: sky dome, sun, hemisphere light, fog, and time of day, per biome.
+// Atmosphere: the sky dome (per-biome gradient, sun and moon, stars, a band of painted
+// cumulus), three rings of painted distant mountains tinted into the haze, fog that matches
+// the horizon, a hemisphere light with a per-biome ground bounce, a warm sun with soft
+// shadows, and drifting motes (dust by day, fireflies at dusk). No tone mapping.
 // Owned by the terrain/atmosphere art pass (see docs/ART.md).
+//
+// API: initAtmosphere(scene, camera, renderer) once; setBiome(b) before each day's world;
+// setTimeOfDay(hour, night) and updateSun(focus) every frame.
 import * as THREE from '/vendor/three.module.js';
+import { canvasFor, has } from './paint/index.js';
 
 let scene, camera, renderer;
-let sky, skyMat, sun, hemi;
+let sky, skyMat, sun, hemi, rings = [], motes, motesMat;
 let biome = 'meadow';
+let lastNow = 0, clock = 0;
+const cur = {};              // the current interpolated palette (THREE.Color / numbers)
+
+// ---- palettes ---------------------------------------------------------------------------------
+// One "day" palette per biome (docs/ART.md table), plus how dawn, golden hour, sunset, dusk and
+// night bend it. Keys: top (zenith), hor (just above the horizon), fog (= the horizon itself),
+// sun color/intensity, hemi sky/ground/intensity, cloud lit/shade/alpha, mountain light, motes.
+const DAY = {
+  meadow:   { top: '#4a8fd2', hor: '#cfe6e2', fog: '#a8c8c4', hSky: '#d4e8ee', hGnd: '#6e7c44', sun: '#fff0cc', near: 18, far: 430 },
+  fields:   { top: '#5ea2e0', hor: '#efe2b8', fog: '#dccfa4', hSky: '#e4ecee', hGnd: '#9c8a50', sun: '#fff0c8', near: 22, far: 520 },
+  badlands: { top: '#5a96d4', hor: '#f0c9a0', fog: '#d9a982', hSky: '#e6e6ea', hGnd: '#a8643c', sun: '#fff0d0', near: 22, far: 500 },
+  desert:   { top: '#66aae6', hor: '#f6e3b8', fog: '#efd8aa', hSky: '#eeeeec', hGnd: '#c8a070', sun: '#fff4dc', near: 30, far: 600 },
+};
+const MOTE = { meadow: '#fff6d0', fields: '#fff0b8', badlands: '#f4c89a', desert: '#f6e0b0' };
+
+const C = c => new THREE.Color(c);
+const mixHex = (a, b, t) => '#' + C(a).lerp(C(b), t).getHexString();
+
+function keysFor(b) {
+  const D = DAY[b];
+  const day = { top: D.top, hor: D.hor, fog: D.fog, sun: D.sun, sunI: 2.15, hSky: D.hSky, hGnd: D.hGnd, hemiI: 2.05, shadow: 0.62,
+    cLit: '#fffaf2', cShade: '#a9b2cc', cA: 1, mtn: 1, star: 0, mote: MOTE[b], moteA: 0.45, fire: 0, near: D.near, far: D.far };
+  const golden = { ...day, top: mixHex(D.top, '#5a78c0', 0.35), hor: mixHex(D.hor, '#f8d29a', 0.55), fog: mixHex(D.fog, '#e8c08c', 0.45),
+    sun: '#ffd49a', sunI: 1.95, hSky: mixHex(D.hSky, '#f0dcc0', 0.5), hemiI: 1.85, cLit: '#fff0d0', cShade: '#b0a0b8', moteA: 0.6 };
+  const sunset = { ...day, top: '#3e5aa6', hor: '#f7b583', fog: mixHex(D.fog, '#e89c7c', 0.62), sun: '#ff9c5c', sunI: 1.45,
+    hSky: '#e2b6a8', hGnd: mixHex(D.hGnd, '#6a4a5a', 0.4), hemiI: 1.6, shadow: 0.55, cLit: '#ffc890', cShade: '#9a7896', mtn: 0.82, moteA: 0.5, fire: 0.5,
+    near: D.near * 0.8, far: D.far * 0.9 };
+  const dusk = { ...day, top: '#262e68', hor: '#c06a7a', fog: mixHex('#7a5a7a', D.fog, 0.15), sun: '#ff7a58', sunI: 0.7,
+    hSky: '#8a7aa0', hGnd: '#3a3040', hemiI: 1.25, shadow: 0.45, cLit: '#e88a7a', cShade: '#4a3c64', cA: 0.9, mtn: 0.55, star: 0.25, moteA: 0, fire: 1,
+    near: D.near * 0.6, far: D.far * 0.7 };
+  const night = { ...day, top: '#0a1230', hor: '#24375e', fog: '#1d2a4a', sun: '#a6b8e8', sunI: 0.75,
+    hSky: '#5c74b0', hGnd: '#1e2236', hemiI: 1.45, shadow: 0.4, cLit: '#5a6a96', cShade: '#1c2440', cA: 0.75, mtn: 0.32, star: 1, moteA: 0, fire: 1,
+    near: 10, far: 300 };
+  const dawn = { ...sunset, top: '#4a6ab4', hor: '#f2b496', fog: mixHex(D.fog, '#d8a8a0', 0.5), sun: '#ffb088', sunI: 1.2, hSky: '#d0b8c0', hemiI: 1.5,
+    cLit: '#ffd0b0', cShade: '#8a84a8', star: 0.15, fire: 0.3 };
+  return [
+    [0, night], [4.6, night], [5.7, dawn], [7.2, golden], [9.0, day], [15.8, day], [17.6, golden], [18.8, sunset], [19.8, dusk], [20.9, night], [24, night],
+  ];
+}
+const KEYS = {};
+for (const b of Object.keys(DAY)) KEYS[b] = keysFor(b).map(([h, k]) => {
+  const o = { h };
+  for (const [n, v] of Object.entries(k)) o[n] = typeof v === 'string' ? C(v) : v;
+  return o;
+});
+
+// ---- shaders ---------------------------------------------------------------------------------
+
+const SKY_VS = `varying vec3 vP;
+void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); gl_Position.z = gl_Position.w * 0.99999; }`;
+const SKY_FS = `uniform vec3 top, hor, fogC, sunDir, sunCol, moonDir, cLit, cShade;
+uniform float cA, star, cloudU, sunVis;
+uniform sampler2D tClouds;
+varying vec3 vP;
+float h31(vec3 p){ p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
+void main(){
+  vec3 d = normalize(vP);
+  float e = d.y;
+  // gradient: fog at the horizon itself, the pale horizon band just above, the zenith above that
+  vec3 c = mix(hor, top, pow(smoothstep(0.0, 1.0, e), 0.62));
+  c = mix(c, fogC, 1.0 - smoothstep(-0.02, 0.09, e));
+  // sun glow, wide and warm along the horizon at golden hour and sunset
+  float s = max(dot(d, sunDir), 0.0);
+  vec2 hz = normalize(d.xz + 1e-5), sz = normalize(sunDir.xz + 1e-5);
+  float az = max(dot(hz, sz), 0.0);
+  float low = 1.0 - smoothstep(0.05, 0.55, sunDir.y);
+  c += sunCol * (pow(s, 6.0) * 0.16 + pow(s, 48.0) * 0.32) * sunVis;
+  c = mix(c, sunCol * 1.05, pow(az, 3.0) * exp(-max(e, 0.0) * 7.0) * low * 0.55 * sunVis);
+  // stars
+  if (star > 0.0 && e > 0.0) {
+    vec3 sp = d * 220.0; vec3 ce = floor(sp); float h = h31(ce);
+    if (h > 0.985) { vec3 o = vec3(h31(ce + 3.1), h31(ce + 7.7), h31(ce + 1.3)); float dd = length(sp - ce - o * 0.6 - 0.2);
+      c += vec3(0.9, 0.92, 1.0) * smoothstep(0.32, 0.0, dd) * star * smoothstep(0.0, 0.25, e) * (0.4 + 0.6 * h31(ce + 9.0)); }
+  }
+  // the moon
+  float m = dot(d, moonDir);
+  c += vec3(0.85, 0.9, 1.0) * (smoothstep(0.99935, 0.99955, m) * 0.9 + pow(max(m, 0.0), 160.0) * 0.12) * star;
+  // the sun disk
+  c += sunCol * smoothstep(0.99955, 0.9998, s) * 1.6 * sunVis;
+  // painted cumulus band: x = azimuth, y = elevation (0 at the horizon)
+  float u = atan(d.z, d.x) / 6.2831853 + 0.5 + cloudU;
+  float v = (e + 0.02) / 0.6;
+  if (v > 0.0 && v < 1.0) {
+    vec4 cl = texture2D(tClouds, vec2(u, v));
+    float L = dot(cl.rgb, vec3(0.3, 0.55, 0.15));
+    vec3 cc = mix(cShade, cLit, smoothstep(0.6, 0.98, L));
+    cc += sunCol * pow(az, 6.0) * low * 0.35 * sunVis * (1.0 - smoothstep(0.6, 0.95, L));   // lit rims toward a low sun
+    float a = cl.a * cA * (1.0 - smoothstep(0.8, 1.0, v));
+    c = mix(c, cc, a);
+  }
+  gl_FragColor = vec4(c, 1.0);
+  #include <colorspace_fragment>
+}`;
+
+const RING_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
+const RING_FS = `uniform sampler2D map; uniform float row, fogK, light, reps, offs; uniform vec3 fogC, hemi;
+varying vec2 vUv;
+void main(){
+  vec2 uv = vec2(vUv.x * reps + offs, (2.0 - row + clamp(vUv.y, 0.004, 0.996)) / 3.0);
+  vec4 t = texture2D(map, uv);
+  if (t.a < 0.01) discard;
+  vec3 c = t.rgb * hemi * light;
+  float k = fogK + (1.0 - fogK) * 0.7 * (1.0 - smoothstep(0.0, 0.55, vUv.y));   // denser haze toward the valley floor
+  c = mix(c, fogC, clamp(k, 0.0, 1.0));
+  gl_FragColor = vec4(c, t.a);
+  #include <colorspace_fragment>
+}`;
+
+const MOTE_VS = `uniform float uTime, uSize; uniform vec3 uCam; attribute float aSeed; varying float vA;
+void main(){
+  vec3 box = vec3(44.0, 9.0, 44.0);
+  vec3 p = position;
+  p.x += sin(uTime * 0.31 + aSeed * 6.0) * 1.6 + uTime * 0.35;
+  p.y += sin(uTime * 0.53 + aSeed * 11.0) * 0.7;
+  p.z += cos(uTime * 0.27 + aSeed * 4.0) * 1.6 + uTime * 0.12;
+  p = mod(p - uCam + box * 0.5, box) - box * 0.5 + uCam;
+  p.y = uCam.y - 1.2 + mod(position.y + sin(uTime * 0.4 + aSeed * 3.0), 6.5);
+  vec4 mv = modelViewMatrix * vec4(p, 1.0);
+  float dist = -mv.z;
+  vA = (1.0 - smoothstep(12.0, 22.0, dist)) * smoothstep(0.6, 2.0, dist) * (0.55 + 0.45 * sin(uTime * (1.3 + aSeed) + aSeed * 40.0));
+  gl_PointSize = uSize * (0.6 + aSeed * 0.6) * 300.0 / max(dist, 0.5);
+  gl_Position = projectionMatrix * mv;
+}`;
+const MOTE_FS = `uniform vec3 uCol; uniform float uAlpha; varying float vA;
+void main(){ vec2 q = gl_PointCoord - 0.5; float r = length(q); float a = smoothstep(0.5, 0.0, r); a = a * a;
+  gl_FragColor = vec4(uCol, a * vA * uAlpha);
+  #include <colorspace_fragment>
+}`;
+
+// ---- setup ---------------------------------------------------------------------------------
+
+function canvasTexture(name, { repeatU = true } = {}) {
+  const t = new THREE.CanvasTexture(canvasFor(name));
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = repeatU ? THREE.RepeatWrapping : THREE.ClampToEdgeWrapping;
+  t.wrapT = THREE.ClampToEdgeWrapping;
+  t.anisotropy = 4;
+  return t;
+}
+const mtnTex = new Map();
+function mountains(b) {
+  const name = has(`sky_mtn_${b}`) ? `sky_mtn_${b}` : 'sky_mtn_meadow';
+  if (!mtnTex.has(name)) mtnTex.set(name, canvasTexture(name));
+  return mtnTex.get(name);
+}
 
 export function initAtmosphere(_scene, _camera, _renderer) {
   scene = _scene; camera = _camera; renderer = _renderer;
-  scene.fog = new THREE.Fog(0xf0c89a, 120, 620);
-  hemi = new THREE.HemisphereLight(0xbfe3ff, 0xc9905a, 0.85);
+  scene.fog = new THREE.Fog(0xa8c8c4, 20, 450);
+  hemi = new THREE.HemisphereLight(0xd4e8ee, 0x6e7c44, 2.0);
   scene.add(hemi);
-  sun = new THREE.DirectionalLight(0xfff1d6, 2.6);
+  sun = new THREE.DirectionalLight(0xfff0cc, 2.1);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
   const sc = sun.shadow.camera;
   sc.left = -55; sc.right = 55; sc.top = 55; sc.bottom = -55; sc.near = 1; sc.far = 260;
   sun.shadow.bias = -0.0006;
   sun.shadow.normalBias = 0.04;
+  if ('intensity' in sun.shadow) sun.shadow.intensity = 0.62;
   scene.add(sun);
   scene.add(sun.target);
 
-  // gradient sky dome
   skyMat = new THREE.ShaderMaterial({
-    side: THREE.BackSide, depthWrite: false, fog: false,
+    side: THREE.BackSide, depthWrite: false, depthTest: false, fog: false,
     uniforms: {
-      top: { value: new THREE.Color(0x3d8ee8) },
-      mid: { value: new THREE.Color(0xa7d3f5) },
-      bot: { value: new THREE.Color(0xf7d9a8) },
-      sunDir: { value: new THREE.Vector3(0, 1, 0) },
-      sunCol: { value: new THREE.Color(0xfff2cc) },
+      top: { value: new THREE.Color() }, hor: { value: new THREE.Color() }, fogC: { value: new THREE.Color() },
+      sunDir: { value: new THREE.Vector3(0, 1, 0) }, sunCol: { value: new THREE.Color() }, moonDir: { value: new THREE.Vector3(0.55, 0.42, 0.72).normalize() },
+      cLit: { value: new THREE.Color() }, cShade: { value: new THREE.Color() }, cA: { value: 1 }, star: { value: 0 }, cloudU: { value: 0 }, sunVis: { value: 1 },
+      tClouds: { value: canvasTexture('sky_clouds') },
     },
-    vertexShader: `varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
-    fragmentShader: `uniform vec3 top; uniform vec3 mid; uniform vec3 bot; uniform vec3 sunDir; uniform vec3 sunCol; varying vec3 vP;
-      void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(mid, top, pow(clamp(h*1.6,0.0,1.0),0.8)) : mix(mid, bot, clamp(-h*5.0,0.0,1.0));
-        c = mix(c, bot, smoothstep(0.18, -0.02, h) * 0.6);
-        float s = max(dot(normalize(vP), sunDir), 0.0); c += sunCol * (pow(s, 600.0) * 2.5 + pow(s, 12.0) * 0.25);
-        gl_FragColor = vec4(c, 1.0); }`,
+    vertexShader: SKY_VS, fragmentShader: SKY_FS,
   });
-  sky = new THREE.Mesh(new THREE.SphereGeometry(1200, 32, 16), skyMat);
-  sky.renderOrder = -1;
+  sky = new THREE.Mesh(new THREE.SphereGeometry(1200, 48, 24), skyMat);
+  sky.renderOrder = -10;
+  sky.frustumCulled = false;
   scene.add(sky);
 
+  // three rings of distant ranges: drawn right after the sky, before anything else, without
+  // writing depth, so the real terrain always paints over them (they are scenery, not geometry)
+  const LAYERS = [
+    { row: 0, R: 1050, lo: -0.07, hi: 0.23, fogK: 0.66, light: 0.95, reps: 1, offs: 0.0 },
+    { row: 1, R: 820, lo: -0.06, hi: 0.15, fogK: 0.5, light: 0.92, reps: 1, offs: 0.37 },
+    { row: 2, R: 620, lo: -0.05, hi: 0.1, fogK: 0.36, light: 0.9, reps: 2, offs: 0.71 },
+  ];
+  rings = LAYERS.map((L, i) => {
+    const h = (L.hi - L.lo) * L.R;
+    const geo = new THREE.CylinderGeometry(L.R, L.R, h, 96, 1, true);
+    geo.translate(0, L.lo * L.R + h / 2, 0);
+    const mat = new THREE.ShaderMaterial({
+      side: THREE.BackSide, depthWrite: false, fog: false, transparent: false,
+      blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+      uniforms: { map: { value: mountains(biome) }, row: { value: L.row }, fogK: { value: L.fogK }, light: { value: L.light }, reps: { value: L.reps }, offs: { value: L.offs },
+        fogC: { value: new THREE.Color() }, hemi: { value: new THREE.Color(1, 1, 1) } },
+      vertexShader: RING_VS, fragmentShader: RING_FS,
+    });
+    const m = new THREE.Mesh(geo, mat);
+    m.renderOrder = -9 + i;
+    m.frustumCulled = false;
+    m.userData.L = L;
+    scene.add(m);
+    return m;
+  });
+
+  // motes: dust by day, fireflies at dusk
+  const N = 140;
+  const pos = new Float32Array(N * 3), seed = new Float32Array(N);
+  let s = 12345;
+  const r = () => { s = (s * 16807) % 2147483647; return s / 2147483647; };
+  for (let i = 0; i < N; i++) { pos[i * 3] = r() * 44; pos[i * 3 + 1] = r() * 6.5; pos[i * 3 + 2] = r() * 44; seed[i] = r(); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  g.setAttribute('aSeed', new THREE.BufferAttribute(seed, 1));
+  motesMat = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false,
+    uniforms: { uTime: { value: 0 }, uSize: { value: 0.06 }, uCam: { value: new THREE.Vector3() }, uCol: { value: new THREE.Color() }, uAlpha: { value: 0 } },
+    vertexShader: MOTE_VS, fragmentShader: MOTE_FS,
+  });
+  motes = new THREE.Points(g, motesMat);
+  motes.frustumCulled = false;
+  motes.renderOrder = 5;
+  scene.add(motes);
+
+  setTimeOfDay(10);
 }
 
-export function setBiome(b) { biome = b; }
+export function setBiome(b) {
+  biome = KEYS[b] ? b : 'meadow';
+  if (rings.length) { const t = mountains(biome); for (const m of rings) m.material.uniforms.map.value = t; }
+  if (skyMat) setTimeOfDay(lastHour, lastNight);
+}
 
-const lerpC = (a, b, t) => new THREE.Color(a).lerp(new THREE.Color(b), t);
-// key colors through the day: [hour, top, mid, bottom, sunColor, sunIntensity, hemiIntensity, fog]
-const KEYS = [
-  [3.5, 0x1b2247, 0x4b4f86, 0xd98a6a, 0xff9a62, 0.4, 0.35, 0x6d5d7d],
-  [5.6, 0x4a86d4, 0xf4c7a1, 0xf7b27a, 0xffc890, 1.9, 0.75, 0xf2c39a],
-  [7.5, 0x3b84dc, 0xbfdcf2, 0xf5cf9c, 0xffe2b8, 2.4, 0.85, 0xf0cba2],
-  [10, 0x2f7fe0, 0x9fd0f6, 0xf3dcb0, 0xfff1d6, 2.7, 0.9, 0xeed2ad],
-  [15, 0x2b78da, 0xa6d2f4, 0xf3d8a8, 0xfff0d0, 2.7, 0.9, 0xeccfa6],
-  [18.3, 0x3c5fb0, 0xf6b48a, 0xff8d5c, 0xff9c5a, 2.0, 0.65, 0xeca27e],
-  [19.6, 0x2a2f6e, 0xb2618a, 0xff7a52, 0xff6e4a, 1.0, 0.45, 0x9a6278],
-  [21, 0x0b1030, 0x1f2a5a, 0x3b2f55, 0x9fb4ff, 0.42, 0.32, 0x22263f],
-  [24.5, 0x060a1f, 0x131b3e, 0x21203a, 0x8ea6ff, 0.34, 0.28, 0x161a2e],
-];
+// ---- time of day ---------------------------------------------------------------------------
+
+let lastHour = 10, lastNight = false;
+const tmpA = new THREE.Color(), tmpB = new THREE.Color();
+const sunDir = new THREE.Vector3(), moonDir = new THREE.Vector3(0.55, 0.42, 0.72).normalize(), lightDir = new THREE.Vector3();
+
+function lerpKey(a, b, t) {
+  for (const n of Object.keys(a)) {
+    if (n === 'h') continue;
+    const va = a[n], vb = b[n];
+    if (va && va.isColor) { (cur[n] ||= new THREE.Color()).copy(va).lerp(vb, t); }
+    else cur[n] = va + (vb - va) * t;
+  }
+}
 
 export function setTimeOfDay(hour, night = false) {
+  lastHour = hour; lastNight = night;
   if (night) hour = 22.5;
-  let a = KEYS[0], b = KEYS[KEYS.length - 1];
-  for (let i = 0; i < KEYS.length - 1; i++) if (hour >= KEYS[i][0] && hour <= KEYS[i + 1][0]) { a = KEYS[i]; b = KEYS[i + 1]; break; }
-  const t = b[0] === a[0] ? 0 : Math.min(1, Math.max(0, (hour - a[0]) / (b[0] - a[0])));
-  skyMat.uniforms.top.value.copy(lerpC(a[1], b[1], t));
-  skyMat.uniforms.mid.value.copy(lerpC(a[2], b[2], t));
-  skyMat.uniforms.bot.value.copy(lerpC(a[3], b[3], t));
-  sun.color.copy(lerpC(a[4], b[4], t));
-  sun.intensity = a[5] + (b[5] - a[5]) * t;
-  hemi.intensity = a[6] + (b[6] - a[6]) * t;
-  scene.fog.color.copy(lerpC(a[7], b[7], t));
-  renderer.toneMappingExposure = hour > 20 || hour < 6 ? 1.25 : 1.05;
-  // sun arc: rises east (+x), sets west (-x), slightly south
-  const ang = ((Math.min(Math.max(hour, 4.2), 20.6) - 4.0) / 17) * Math.PI;
-  const dir = new THREE.Vector3(Math.cos(ang), Math.max(0.12, Math.sin(ang)), -0.35).normalize();
-  if (hour > 20.5 || hour < 5) dir.set(-0.3, 0.8, 0.4).normalize(); // moonlight
-  skyMat.uniforms.sunDir.value.copy(dir);
-  skyMat.uniforms.sunCol.value.copy(sun.color);
-  sun.userData.dir = dir;
+  hour = ((hour % 24) + 24) % 24;
+  const K = KEYS[biome];
+  let i = 0;
+  while (i < K.length - 2 && hour > K[i + 1].h) i++;
+  const a = K[i], b = K[i + 1];
+  const t = b.h === a.h ? 0 : Math.min(1, Math.max(0, (hour - a.h) / (b.h - a.h)));
+  lerpKey(a, b, t);
+
+  // the sun's arc: up in the east (+x) at 6, down in the west (-x) just before 20
+  const ang = (hour - 6.0) / 13.8 * Math.PI;
+  sunDir.set(Math.cos(ang), Math.sin(ang), -0.38).normalize();
+  // lights come from the sun by day and the moon by night, crossfading in the twilight
+  const toMoon = Math.max(1 - smooth(4.6, 5.9, hour), smooth(19.7, 20.9, hour));
+  lightDir.copy(sunDir);
+  if (lightDir.y < 0.16) { lightDir.y = 0.16; lightDir.normalize(); }
+  lightDir.lerp(moonDir, toMoon).normalize();
+
+  sun.color.copy(cur.sun);
+  sun.intensity = cur.sunI;
+  if ('intensity' in sun.shadow) sun.shadow.intensity = cur.shadow;
+  hemi.color.copy(cur.hSky);
+  hemi.groundColor.copy(cur.hGnd);
+  hemi.intensity = cur.hemiI;
+  scene.fog.color.copy(cur.fog);
+  scene.fog.near = cur.near;
+  scene.fog.far = cur.far;
+  sun.userData.dir = lightDir;
+
+  const U = skyMat.uniforms;
+  U.top.value.copy(cur.top); U.hor.value.copy(cur.hor); U.fogC.value.copy(cur.fog);
+  U.sunDir.value.copy(sunDir); U.sunCol.value.copy(cur.sun);
+  U.sunVis.value = smooth(-0.12, 0.02, sunDir.y);
+  U.cLit.value.copy(cur.cLit); U.cShade.value.copy(cur.cShade); U.cA.value = cur.cA; U.star.value = cur.star;
+
+  // mountains take the haze color and a light level from the hemisphere sky
+  tmpA.copy(cur.hSky).multiplyScalar(Math.min(1.15, cur.hemiI / 2.05) * cur.mtn);
+  for (const m of rings) { m.material.uniforms.fogC.value.copy(cur.fog); m.material.uniforms.hemi.value.copy(tmpA); }
+
+  // motes: warm dust in the day, fireflies once the light goes
+  if (motesMat) {
+    const ff = cur.fire * (biome === 'meadow' || biome === 'fields' ? 1 : 0.25);
+    tmpB.set(MOTE[biome]).lerp(C('#c8ff70'), Math.min(1, ff));
+    motesMat.uniforms.uCol.value.copy(tmpB);
+    motesMat.uniforms.uAlpha.value = Math.max(cur.moteA * (biome === 'meadow' ? 0.6 : 1), ff * 1.4);
+    motesMat.uniforms.uSize.value = ff > 0.3 ? 0.11 : 0.055;
+  }
 }
+const smooth = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 
 export function updateSun(focus) {
-  const d = sun.userData.dir || new THREE.Vector3(0.3, 1, -0.3);
+  const now = performance.now() / 1000;
+  const dt = lastNow ? Math.min(0.1, now - lastNow) : 0;
+  lastNow = now; clock += dt;
+  const d = sun.userData.dir || lightDir;
   sun.position.set(focus.x + d.x * 120, focus.y + d.y * 120, focus.z + d.z * 120);
   sun.target.position.set(focus.x, focus.y, focus.z);
   sky.position.copy(camera.position);
+  for (const m of rings) m.position.copy(camera.position);
+  skyMat.uniforms.cloudU.value = (clock * 0.0009) % 1;
+  if (motesMat) { motesMat.uniforms.uTime.value = clock; motesMat.uniforms.uCam.value.copy(camera.position); }
 }
-
