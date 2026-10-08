@@ -209,6 +209,22 @@ canyon walls, the obstacle placement and the POIs. Like PEAK's daily
 mountain, there's a **daily trip seed**, so every group drives the same
 roads that day.
 
+**Every day is a different place.** The trip runs through five biomes in a
+fixed order, each with its own ground, rock, plants, sky, fog and town
+style (details in [ART.md](ART.md)):
+
+| Day | Road | Biome | Town |
+|---|---|---|---|
+| 1 | The Westmeadow Road | meadow: oak groves, gray outcrops | Paydirt (timber-framed) |
+| 2 | Goldenfield Pike | fields: golden grass, haybales, a windmill | Busted Flats (farmsteads) |
+| 3 | Frostpeak Pass | snow: pines, granite, snow on every ledge | Last Chance (alpine stone halls) |
+| 4 | The Redrock Badlands | badlands: red strata, hoodoos, buttes | Snake Eyes (frontier outpost) |
+| 5 | The Lost Wages Flats | desert: dunes, sandstone arches, palms | Lost Wages (adobe) |
+
+The biome changes the scenery and the walls (snow and badlands canyons are
+higher and narrower), not the rules: every day has the same obstacle types
+and the same economy, so the difficulty curve stays in the quota.
+
 **Obstacles.** Each one is designed around a specific co-op verb:
 
 | Obstacle | What happens | Verb it demands | Inspiration |
@@ -216,7 +232,7 @@ roads that day.
 | **The Grade** | A washed-out slope too steep for the engine | Someone climbs the cliff with the winch hook, clips it to the anchor post at the top, and the driver reels in | RVTY + PEAK |
 | **The Boulder** | A 2-ton rock in a narrow pass | Shove it with 3+ bodies, or winch it off the edge | physics + headcount |
 | **The Mud Flat** | The wheels lose grip | Everyone out and push. Unloading heavy loot helps. | RVTY |
-| **The Ranger Gate** | Locked gate, 4-digit keypad | The code is painted on a sign on top of a mesa. Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
+| **The Ranger Gate** | Locked gate, 4-digit keypad | The code is brushed on a slab of rock up on the canyon rim (a sign at the gate says which rim). Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
 | *The Washout Gap* (M2) | A gap in the road | Carry planks from the junk pile and lay a bridge. The RV crosses on raycast wheels. | RVTY |
 | *Rockfall* (M2) | Falling rocks knock people over | Timing, and somebody's medical bill | PEAK |
@@ -410,7 +426,17 @@ Things the systems will produce without being scripted:
   routed through WebAudio: panner (HRTF), occlusion low-pass, and a radio
   band-pass path for walkies.
 - **Client:** Three.js, no build step, no assets. All geometry and textures
-  are procedural, and sound is synthesized.
+  are procedural, and sound is synthesized. The art target is a 2004
+  hand-painted MMO (see [ART.md](ART.md)). Textures are painted on canvases
+  at load time by `client/js/paint/*`, one family per domain on a shared
+  brush toolkit. Each domain has its own renderer (terrain, nature, town,
+  roadside, RV, props, people). Static geometry is merged per material and
+  per spatial cluster, so far clusters cull.
+- **Colliders live in world gen, renderers follow them.** `shared/world.js`
+  decides every solid thing's collider (tree boles, rocks by shape, shop
+  shelves, yard props, the rim-code slab). Each renderer reads those sizes
+  and fits its mesh to them, so the server, every client and the picture
+  agree.
 - **Steam path (later):** Electron shell, with Steam networking relay for
   NAT traversal.
 
@@ -418,8 +444,8 @@ Things the systems will produce without being scripted:
 
 | Milestone | Contents |
 |---|---|
-| **M1: vertical slice** (this branch) | First-person body, grab/carry/throw, climbing and stamina, KO and bills; the RV with driving, riding, pushing and the winch; loot and fragility; a generated desert leg with the Grade, Boulder, Mud and Ranger Gate; a town with pawn, blackjack, double-or-nothing and the Repo Man; 5 days with quotas; repossession; the paper map; walkies; spatial voice |
-| **M2: content** | Route forks, more biomes (red canyon, pine mountains, the Strip), the ledge road, the washout gap, rockfall, about 30 loot items, slots, physical roulette chips, store items, more RV parts, a fuel can loop, flat tires |
+| **M1: vertical slice** (this branch) | First-person body, grab/carry/throw, climbing and stamina, KO and bills; the RV with driving, riding, pushing and the winch; loot and fragility; five generated legs in five biomes with the Grade, Boulder, Mud and Ranger Gate; a hand-painted art pass; a town with pawn, blackjack, double-or-nothing and the Repo Man; 5 days with quotas; repossession; the paper map; walkies; spatial voice |
+| **M2: content** | Route forks, more biomes (the Strip, a swamp, a coast), the ledge road, the washout gap, rockfall, about 30 loot items, slots, physical roulette chips, store items, more RV parts, a fuel can loop, flat tires |
 | **M3: feel** | Real ragdolls, a procedural radio with stations in the RV, better animation, weather (dust storms kill visibility, so there's more talking), night driving with headlights |
 | **M4: ship** | Steam build, Steam networking, achievements, daily trip seed leaderboard ("lowest medical bills"), a $5–8 price point |
 
@@ -428,9 +454,14 @@ Things the systems will produce without being scripted:
 All of this is implemented and covered by `test/logic.mjs` (31 server checks
 over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
 
-- Seeded 5-day runs. Each leg has a camp, a road through canyon walls, mesas,
-  4–8 stops, 2–5 obstacles (grade, mud, boulder, ranger gate), billboards and
-  a cow skull as map landmarks, and a town.
+- Seeded 5-day runs through five biomes (meadow, fields, snow, badlands,
+  desert), each with its own town style. Each leg has a camp, a road through
+  canyon walls, mesas, 4–8 stops, 2–5 obstacles (grade, mud, boulder, ranger
+  gate), billboards and a cow skull as map landmarks, and a town.
+- The art pass: hand-painted procedural textures, splatted terrain with
+  ground clutter, per-biome sky, fog, clouds and horizon rings, groves of
+  big oaks, hoodoos, buttes and arches, five town styles with furnished
+  interiors, and stylized human characters.
 - The RV on raycast wheels with a walkable interior, seats, a door, bunks,
   a dash odometer and clock, and a front winch with a payout spool, anchors
   and a reel. Riders stay glued to it on every client, and it can run you
