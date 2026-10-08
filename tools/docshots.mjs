@@ -217,8 +217,8 @@ await ev(steve, () => document.getElementById('receipt').classList.remove('hidde
 await shot(steve, '_receipt');
 
 }
-if (want('biomes')) { // 10. one road view per biome: days 2 (fields), 3 (badlands), 5 (desert)
-  for (const [day, name] of [[2, 'fields'], [3, 'badlands'], [5, 'desert']]) {
+if (want('biomes')) { // 10. one road view per biome after the first: days 2 (fields), 3 (snow), 4 (badlands), 5 (desert)
+  for (const [day, name] of [[2, 'fields'], [3, 'snow'], [4, 'badlands'], [5, 'desert']]) {
     await send({ t: 'dbg', op: 'day', d: day });
     for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, day, { timeout: 180000 });
     await send({ t: 'dbg', op: 'clock', h: 10.5 });
