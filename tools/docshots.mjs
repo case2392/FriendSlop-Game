@@ -27,10 +27,22 @@ async function open(name) {
 const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 400000 });
 const quiet = p => p.evaluate(() => { const S = window.__nmd; S.noRender = true; S.forceLock = true; document.getElementById('clickToPlay').classList.add('hidden'); document.getElementById('toasts').style.display = 'none'; });
 const ev = (p, fn, arg) => p.evaluate(fn, arg);
-const wait = (p, ms) => p.waitForTimeout(ms);
+// wait at least `ms` AND at least `n` game frames: on software GL a client can run under 1 fps, and it reads
+// aim and input, sends its pose and draws teleports only once per frame
+const wait = async (p, ms, n = 3) => {
+  const f0 = await p.evaluate(() => window.__nmd?.frames || 0);
+  await p.waitForTimeout(ms);
+  await p.waitForFunction(f => (window.__nmd?.frames || 0) >= f, f0 + n, { timeout: 180000 });
+};
+// until Dave's copy of Steve stands where Steve really is (snapshots reach a slow page late)
+const daveSeesSteve = async () => {
+  const p = await steve.evaluate(() => window.__nmd.me.pos);
+  await dave.waitForFunction(([x, z]) => [...window.__nmd.views.values()].some(v => v.group.visible && Math.hypot(v.group.position.x - x, v.group.position.z - z) < 1.0), [p.x, p.z], { timeout: 180000 }).catch(() => console.log('  (Dave never saw Steve at his spot)'));
+};
 async function shot(p, name, { hud = true, settle = 1100 } = {}) {
-  await p.evaluate(h => { window.__nmd.noRender = false; for (const id of ['hud', 'roster', 'prompt', 'voiceDock', 'heldLabel', 'stamina']) { const e = document.getElementById(id); if (e) e.style.visibility = h ? '' : 'hidden'; } }, hud);
-  await p.waitForTimeout(settle);
+  // (the use prompt never shows: it reads as a UI bug in a still)
+  await p.evaluate(h => { window.__nmd.noRender = false; for (const id of ['hud', 'roster', 'prompt', 'voiceDock', 'heldLabel', 'stamina']) { const e = document.getElementById(id); if (e) e.style.visibility = h && id !== 'prompt' ? '' : 'hidden'; } }, hud);
+  await wait(p, settle, 3);   // fresh frames drawn after the last teleport
   if (name.startsWith('_')) { await p.evaluate(() => { window.__nmd.noRender = true; }); return; }   // positioning-only steps
   await p.screenshot({ path: `${OUT}/${name}.jpg`, type: 'jpeg', quality: 86 });
   await p.evaluate(() => { window.__nmd.noRender = true; });
@@ -66,7 +78,7 @@ await ev(steve, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(
 await ev(dave, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.3, r.y + 0.1, r.z - 1.2, 0); S.me.pitch = 0.1; });
 await wait(steve, 900);
 await ev(steve, () => window.__nmd.press('use'));
-await steve.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 24000 });
+await steve.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 120000 });
 await steve.keyboard.down('w');
 await wait(steve, 7000);
 await ev(dave, () => { const S = window.__nmd; const q = S.rv.q; S.me.yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.x * q.x + q.y * q.y)) - 0.12; S.me.pitch = 0.12; });
@@ -104,6 +116,7 @@ if (want('carrying')) { // 4. carrying a TV down the road
   const z2 = 157, x2 = await roadX(z2);
   await ev(dave, ([x, y, z]) => { const S = window.__nmd; S.me.teleport(x, y + 0.1, z, Math.PI); }, [x2 - 1, await hAt(x2 - 1, z2), z2]);
   await wait(dave, 700);
+  await daveSeesSteve();
   await ev(dave, () => { const S = window.__nmd; const v = [...S.views.values()][0]; S.aimAt(v.group.position.x, v.group.position.y + 1.1, v.group.position.z); });
   await shot(dave, 'carrying');
   await ev(steve, () => window.__nmd.press('release'));
@@ -123,9 +136,11 @@ if (want('climbing')) { // 5. climbing the canyon wall
   await wait(steve, 600);
   await steve.mouse.down(); await steve.keyboard.down('w');
   await wait(steve, 2800);
+  await steve.waitForFunction(b => window.__nmd.me.pos.y > b + 2.5, wall.base, { timeout: 240000 }).catch(() => console.log('  (Steve did not get 2.5 m up the wall)'));
   await steve.keyboard.up('w');
   await ev(dave, w => { const S = window.__nmd; const W = S.W; const x = w.x - 10, z = w.z - 7; S.me.teleport(x, W.heightAt(x, z) + 0.1, z, 0); }, wall);
   await wait(dave, 600);
+  await daveSeesSteve();
   await ev(dave, () => { const S = window.__nmd; const v = [...S.views.values()][0]; S.aimAt(v.group.position.x, v.group.position.y + 1.4, v.group.position.z); S.me.pitch -= 0.08; });
   await shot(dave, 'climbing');
   await ev(steve, () => { window.__nmd.me.pitch = 0.95; window.__nmd.me.yaw += Math.PI; });
@@ -158,9 +173,11 @@ if (want('winch')) { // 7. the winch: RV at the foot of the grade, hook up top, 
   await wait(steve, 1500);
   await ev(steve, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x, S.W.heightAt(r.x, r.z + 5.4) + 0.05, r.z + 5.4, Math.PI); S.me.pitch = 0.5; });
   await wait(steve, 900);
+  await steve.waitForFunction(() => /winch hook/.test(window.__nmd.target()?.label || ''), null, { timeout: 120000 }).catch(() => {});
   console.log('  winch target:', await steve.evaluate(() => window.__nmd.target()?.label));
   await ev(steve, () => window.__nmd.press('use'));
   await wait(steve, 700);
+  await steve.waitForFunction(() => window.__nmd.me.hasHook || (window.__nmd.hook?.state || 0) !== 0, null, { timeout: 120000 }).catch(() => {});
   console.log('  hasHook:', await steve.evaluate(() => window.__nmd.me.hasHook), 'hook', JSON.stringify(await steve.evaluate(() => window.__nmd.hook)));
   const anc = W.anchors[0];
   for (let i = 1; i <= 12; i++) {
@@ -168,9 +185,11 @@ if (want('winch')) { // 7. the winch: RV at the foot of the grade, hook up top, 
     await wait(steve, 250);
   }
   await wait(steve, 800);
+  await steve.waitForFunction(() => /hook the winch/.test(window.__nmd.target()?.label || ''), null, { timeout: 120000 }).catch(() => {});
   console.log('  anchor target:', await steve.evaluate(() => window.__nmd.target()?.label));
   await ev(steve, () => window.__nmd.press('use'));
   await wait(steve, 800);
+  await steve.waitForFunction(() => window.__nmd.hook?.state === 2, null, { timeout: 120000 }).catch(() => {});
   console.log('  hook after anchor', JSON.stringify(await steve.evaluate(() => window.__nmd.hook)));
   const camX = rx - 11, camZ = rz - 7;
   await ev(dave, ([x, y, z, tx, ty, tz]) => { const S = window.__nmd; S.me.teleport(x, y + 0.1, z, 0); S.aimAt(tx, ty, tz); }, [camX, await hAt(camX, camZ), camZ, rx + 1, (await hAt(rx, rz + 10)) + 1.5, rz + 13]);
@@ -184,7 +203,7 @@ await send({ t: 'dbg', op: 'tpRV', x: 0, z: W.LEN + 6, yaw: 0 });
 await send({ t: 'dbg', op: 'phase', ph: 'road' });
 await send({ t: 'dbg', op: 'clock', h: 18.4 });
 await send({ t: 'dbg', op: 'bank', v: 3100 });
-await steve.waitForFunction(() => window.__nmd.g?.town === 1, null, { timeout: 45000 });
+await steve.waitForFunction(() => window.__nmd.g?.town === 1, null, { timeout: 120000 });
 const T = W.town;
 await ev(dave, T => { const S = window.__nmd; S.me.teleport(4.5, T.y + 0.05, T.z - 6, 0); S.aimAt(3, T.y + 2.6, T.z + 70); }, T);
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(3.5, T.y + 0.05, T.z + 26, Math.PI); }, T);
@@ -203,7 +222,7 @@ await send({ t: 'dbg', op: 'spawn', type: 'vase', x: T.pawn.x, y: T.pawn.y + 0.4
 await send({ t: 'dbg', op: 'spawn', type: 'neon', x: T.pawn.x, y: T.pawn.y + 0.4, z: T.pawn.z + 1.0, value: 380 });
 await send({ t: 'dbg', op: 'spawn', type: 'painting', x: T.pawn.x, y: T.pawn.y + 0.4, z: T.pawn.z - 0.2, value: 450 });
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(T.pawn.x + 3.6, T.y + 0.05, T.pawn.z + 0.4, -Math.PI / 2); S.aimAt(T.pawn.x - 1.2, T.pawn.y + 0.5, T.pawn.z - 0.2); }, T);
-await steve.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 24000 });
+await steve.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 120000 });
 await shot(steve, 'pawn');
 
 // 9. night at the RV lot
@@ -212,7 +231,7 @@ const pay = await steve.evaluate(() => window.__nmd.W.uses.find(u => u.kind === 
 await ev(steve, ([u, T]) => { window.__nmd.me.teleport(u.x + 1, T.y + 0.05, u.z, 0); }, [pay, T]);
 await wait(steve, 900);
 await send({ t: 'use', id: pay.id });
-await steve.waitForFunction(() => window.__nmd.g?.ph === 'night', null, { timeout: 24000 });
+await steve.waitForFunction(() => window.__nmd.g?.ph === 'night', null, { timeout: 120000 });
 await wait(steve, 1500);
 await ev(dave, T => { const S = window.__nmd; document.getElementById('receipt').classList.add('hidden'); S.me.teleport(T.fire.x - 4.5, T.y + 0.05, T.fire.z - 5.5, 0); S.aimAt(T.fire.x + 4, T.y + 1.0, T.fire.z + 3); }, T);
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(T.fire.x + 1.6, T.y + 0.05, T.fire.z - 1.2, -0.8); }, T);
