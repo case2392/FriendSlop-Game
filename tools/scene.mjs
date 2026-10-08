@@ -1,12 +1,13 @@
-// In-game screenshots for art work: boots the server, two clients (Dave holds the
-// camera, Steve poses), jumps to named viewpoints on a given day, saves PNGs.
+// In-game screenshots for art work: boots the server and one client (two when the
+// 'crew' view needs Steve to pose; SOLO=0/1 overrides), jumps to named viewpoints on
+// a given day, saves PNGs.
 //
 //   node tools/scene.mjs camp,road,town [outdir] [day 1-5] [hour] [seed]
 //
 // Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) boulder gate grade winch town pawn casino
 //        pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin crew hands loot night   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
-// 3-4 badlands, 5 desert.
+// 3 snow, 4 badlands, 5 desert.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
