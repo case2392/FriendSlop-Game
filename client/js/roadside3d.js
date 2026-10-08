@@ -1283,7 +1283,31 @@ function buildCrash(B, p, parts, ctx, decor) {
   // shape the mesa has.
   if (p.mesa) {
     const side = p.side || 1, r0 = p.mesa.r;
-    B.frame(p.x, d.y, p.z, -side * Math.PI / 2);   // local +z points at the road
+    // local +z points at the road, turned up to forty degrees either way onto the straightest stretch of rim
+    // in reach (a drape centred on a lobe's nose, or across a diagonal bit of rim, hangs down both sides and
+    // stands up like a tent), keeping the cloth, the wing panel and the coil clear of the fuselage and the loot behind it
+    // (the wreck's own wing stands well clear above them)
+    const pc = Math.cos(d.ry), ps = Math.sin(d.ry);
+    const clash = (lx, lz, pad) => {
+      const w = B.world(lx, 0, lz), dx = w.x - d.x, dz = w.z - d.z, x = dx * pc - dz * ps, z = dx * ps + dz * pc;
+      return (Math.abs(x) < 0.9 + pad && Math.abs(z) < 3.4 + pad) || (Math.abs(x) < 2.6 + pad && z < -2.9 + pad && z > -5.2 - pad);
+    };
+    let best = 0, bestK = Infinity;
+    for (const da of [0, -0.23, 0.23, -0.46, 0.46, -0.7, 0.7]) {
+      B.frame(p.x, d.y, p.z, -side * Math.PI / 2 + da);
+      const xs = [-3, -2, -1, 0, 1, 2, 3], lips = [];
+      for (const x of xs) {
+        let z = Math.max(1, r0 * 0.3), y = B.ground(x, z);
+        for (; z < r0 + 12; z += 0.1) { const y2 = B.ground(x, z + 0.1); if (y - y2 > 0.1) break; y = y2; }
+        lips.push(z);
+      }
+      // spread of the lip across the cloth, a nose bulging out in the middle, and the turn away from the road
+      const zL = lips[3], nose = Math.max(0, zL - (lips[0] + lips[6]) / 2);
+      let k = (Math.max(...lips) - Math.min(...lips)) * 0.6 + nose * 3 + Math.abs(da) * (da * side > 0 ? 5 : 1.5);   // (rather toward the oncoming RV)
+      for (const [lx, lz] of [[-3, lips[0] - 2], [3, lips[6] - 2], [0, zL - 2], [-4.8, zL - 0.6], [4.5, zL - 0.8]]) if (clash(lx, lz, 0.3)) k += 10;
+      if (k < bestK) { bestK = k; best = da; }
+    }
+    B.frame(p.x, d.y, p.z, -side * Math.PI / 2 + best);
     const DZ = 0.04;
     // the ground's profile along local +z at local x: samples [z, y, s], the lip (where it first steepens past
     // forty-five degrees) and a lookup by arc length that also gives the outward normal
@@ -1377,7 +1401,7 @@ function buildCrash(B, p, parts, ctx, decor) {
         const t = k / NP, a = a0 + TAU * NT * t, R = lerp(0.3, 0.2, t), x = cx + Math.cos(a) * R, z = c0.z + Math.sin(a) * R;
         coil.push(V(x, B.ground(x, z) + 0.035 + 0.035 * NT * t, z));
       }
-      B.tube('rs_rope', coil, 0.035, { seg: 6, lod0: false });
+      B.tube('rs_rope', coil, 0.035, { seg: 6, lod0: false, ends: true });
       // the payout: from the coil's outer end over the lip, down about 1.2 m and back (traced on the face itself,
       // so no chord cuts through the rock)
       const end = coil[coil.length - 1];
@@ -1817,12 +1841,13 @@ function buildDino(B, p, parts, ctx) {
     // stays inside the torso box (its outer face on the box's side)
     const sx = Math.sign(l.x - bx) || 1, fo = torso ? Math.min(Math.abs(l.x - bx), 1.2) : ax - 0.62, fz = l.z, front = fz > bz;
     const at = k => bx + sx * fo * k;
-    const lr = torso ? Math.min(0.5, l.hx + 0.06) : 0.58, lean = front ? 0.06 : -0.02, thigh = front ? lr + 0.02 : lr + 0.08, knee = torso ? l.y + l.hy : ptop + 0.72;
-    const hr = front ? [0.5, 0.64, 0.66] : [0.55, 0.72, 0.76], hxc = torso ? sx * (T.hx - hr[0] - 0.01) + bx : at(0.75), hyc = yc - (front ? 0.28 : 0.34);
-    const pts = [V(at(1), ptop + 0.02, fz + lean), V(at(1), ptop + 0.3, fz + lean * 0.9), V(at(0.97), knee, fz + lean * 0.6), V(at(0.82), knee + 0.45, fz + lean * 0.25),
-      V(at(0.56), yc - 0.15, fz + lean * 0.1), V(at(0.4), yc + 0.1, fz)];
-    B.tube('rs_dino', pts, [lr + 0.06, lr, lr - 0.04, thigh, 0.45, 0.42], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint, capEnd: true });
-    B.ell('rs_dino', hr[0], hr[1], hr[2], hxc, hyc, fz + lean * 0.3, { seg: 14, rings: 8, uvFn: (pl, nl) => [pl.z / S + 0.13, lerp(0.42, 0.72, vOf(nl, [sx * 0.8, 0.6, 0], 0.1))], tint });
+    const lr = torso ? Math.min(0.5, l.hx + 0.06) : 0.58, lean = front ? 0.06 : -0.02, thigh = front ? lr + 0.04 : lr + 0.12, knee = torso ? l.y + l.hy : ptop + 0.72;
+    // the thigh swells into a round haunch on the flank (its outer face on the torso box's side) and narrows
+    // back into the body, its end capped well inside the flank
+    const hip = Math.min(thigh * 0.95, T.hx - fo * 0.7 - 0.03);
+    const pts = [V(at(1), ptop + 0.02, fz + lean), V(at(1), ptop + 0.3, fz + lean * 0.9), V(at(0.97), knee, fz + lean * 0.6), V(at(0.84), knee + 0.4, fz + lean * 0.3),
+      V(at(0.7), yc - 0.2, fz + lean * 0.1), V(at(0.5), yc + 0.12, fz), V(at(0.35), yc + 0.3, fz)];
+    B.tube('rs_dino', pts, [lr + 0.06, lr, lr - 0.02, thigh, hip, 0.36, 0.2], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint, capEnd: true });
     for (const k of [-1, 0, 1]) B.ell('rs_dino', 0.13, 0.1, 0.13, at(1) + k * 0.3, ptop + 0.09, fz + lean + 0.56 - Math.abs(k) * 0.13, { seg: 8, rings: 4, uvFn: () => [0.3 + k * 0.1, 0.06], tint: tint.map(c => c * 1.12) });
   }
   if (neck) {

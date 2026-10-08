@@ -1559,25 +1559,65 @@ function paintMapSheet(g, r, rnd) {
 
 // The bedroll strapped high on a player's back (256 × 64): the roll (v .4-1: u around it,
 // v along it; u .25 is its top) and its spiral end (v 0-.38, mapped round the center).
-// The Dealer's cards (in the pack region, which only players use): the face (u 0-.48), cream with a
-// red heart and its corner index, and the back (u .52-1), deep red with a gold lattice and border.
+// The Dealer's cards (in the pack region, which only players use). people.js maps a card's face onto
+// u .02-.46 and its back onto u .54-.98 (v .06-.94 for both), so the texture is squeezed ~2.9x across
+// against the card: shapes are drawn in card space (1 wide, 1.43 tall) through cardSpace() so they
+// come out the right shape on the card; lines are drawn in pixels, at least 1.5 px either way. The
+// face: an ace of hearts on cream. The back, which the room sees across the table: a white margin,
+// a thin red rule, and a cream panel under a red diamond lattice with a brass-and-red medallion, so
+// the fan reads as light playing cards in his dark fist even across the room.
+const CARD_U = [[0.02, 0.46], [0.54, 0.98]], CARD_V = [0.06, 0.94], CARD_H = 1 / 0.7;
+function cardSpace(g, r, side, fn) {
+  const [u0, u1] = CARD_U[side], x0 = RX(r, u0), x1 = RX(r, u1), y0 = RY(r, CARD_V[1]), y1 = RY(r, CARD_V[0]);
+  g.save(); g.translate(x0, y0); g.scale(x1 - x0, (y1 - y0) / CARD_H); fn(); g.restore();
+  return { x0, x1, y0, y1 };
+}
 function paintCards(g, r, rnd) {
-  const U = u => RX(r, u), V = v => RY(r, v);
-  clip(g, r, () => {
-    fill0(g, r, '#2a2026');
-    const face = { x: U(0.01), y: V(0.97), w: r.w * 0.47, h: V(0.03) - V(0.97) }, back = { x: U(0.52), y: V(0.97), w: r.w * 0.47, h: V(0.03) - V(0.97) };
-    gradV(g, face.x, face.y, face.w, face.h, [[0, '#f6efdc'], [1, '#d8ccb0']]);
-    g.save(); g.strokeStyle = '#9a8a6a'; g.lineWidth = 2; g.strokeRect(face.x + 2, face.y + 2, face.w - 4, face.h - 4); g.restore();
-    const heart = (x, y, k) => { g.save(); g.translate(x, y); g.scale(k, k); g.beginPath(); g.moveTo(0, 6); g.bezierCurveTo(-9, -1, -5, -9, 0, -3); g.bezierCurveTo(5, -9, 9, -1, 0, 6); g.fillStyle = '#b02a2a'; g.fill(); g.restore(); };
-    heart(face.x + face.w / 2, face.y + face.h / 2, 1.6);
-    heart(face.x + 9, face.y + 18, 0.6); heart(face.x + face.w - 9, face.y + face.h - 16, 0.6);
-    g.save(); g.fillStyle = '#b02a2a'; g.font = 'bold 12px serif'; g.fillText('A', face.x + 5, face.y + 12); g.restore();
-    gradV(g, back.x, back.y, back.w, back.h, [[0, '#9a3030'], [1, '#6a1e22']]);
-    g.save(); g.beginPath(); g.rect(back.x + 4, back.y + 4, back.w - 8, back.h - 8); g.clip();
-    g.strokeStyle = '#d8b060'; g.globalAlpha = 0.7; g.lineWidth = 1.2;
-    for (let k = -back.h; k < back.w + back.h; k += 9) { g.beginPath(); g.moveTo(back.x + k, back.y); g.lineTo(back.x + k + back.h, back.y + back.h); g.stroke(); g.beginPath(); g.moveTo(back.x + k + back.h, back.y); g.lineTo(back.x + k, back.y + back.h); g.stroke(); }
+  const heart = (x, y, k, col) => { g.save(); g.translate(x, y); g.scale(k, k); g.beginPath(); g.moveTo(0, 0.42); g.bezierCurveTo(-0.62, -0.05, -0.36, -0.62, 0, -0.2); g.bezierCurveTo(0.36, -0.62, 0.62, -0.05, 0, 0.42); g.fillStyle = col; g.fill(); g.restore(); };
+  const diamond = (x, y, w, h, col) => { g.beginPath(); g.moveTo(x, y - h); g.lineTo(x + w, y); g.lineTo(x, y + h); g.lineTo(x - w, y); g.closePath(); g.fillStyle = col; g.fill(); };
+  // a pixel-space frame (inset in card units) at least 1.5 px thick either way
+  const frame = (b, inset, px, col, a = 1) => {
+    const sx = b.x1 - b.x0, sy = (b.y1 - b.y0) / CARD_H, ix = b.x0 + inset * sx, iy = b.y0 + inset * sy, w = sx - 2 * inset * sx, h = (b.y1 - b.y0) - 2 * inset * sy;
+    g.save(); g.globalAlpha = a; g.fillStyle = col;
+    g.fillRect(ix, iy, w, px); g.fillRect(ix, iy + h - px, w, px); g.fillRect(ix, iy, px, h); g.fillRect(ix + w - px, iy, px, h);
     g.restore();
-    g.save(); g.strokeStyle = '#e8c878'; g.lineWidth = 2; g.strokeRect(back.x + 3, back.y + 3, back.w - 6, back.h - 6); g.strokeStyle = '#f2ead6'; g.lineWidth = 2; g.strokeRect(back.x + 1, back.y + 1, back.w - 2, back.h - 2); g.restore();
+  };
+  clip(g, r, () => {
+    fill0(g, r, '#f2ead8');     // (bleed round both cards: the rims and the mip filter sample it as a white card edge)
+    // the face: an ace of hearts on cream, lit from the top
+    const F = cardSpace(g, r, 0, () => {
+      const gr = g.createLinearGradient(0, 0, 0, CARD_H); gr.addColorStop(0, '#fbf5e6'); gr.addColorStop(1, '#e4d8bc');
+      g.fillStyle = gr; g.fillRect(-0.05, -0.05, 1.1, CARD_H + 0.1);
+      heart(0.5, CARD_H / 2, 0.42, '#7a1c20'); heart(0.5, CARD_H / 2 - 0.012, 0.4, '#b8302c');
+      g.save(); g.globalAlpha = 0.45; heart(0.44, CARD_H / 2 - 0.06, 0.12, '#f4b8a0'); g.restore();
+      heart(0.16, 0.34, 0.13, '#b8302c'); heart(0.84, CARD_H - 0.34, 0.13, '#b8302c');
+      g.save(); g.fillStyle = '#b02a2a'; g.font = 'bold 0.2px serif'; g.textAlign = 'center'; g.fillText('A', 0.16, 0.22); g.restore();
+    });
+    frame(F, 0.05, 1.5, '#b8a888', 0.8);
+    // the back: white margin, red rule, a cream panel under a red diamond lattice, a medallion
+    const Bk = cardSpace(g, r, 1, () => {
+      const m = 0.085, pw = 1 - 2 * m, ph = CARD_H - 2 * m;
+      g.fillStyle = '#f6f0e0'; g.fillRect(-0.05, -0.05, 1.1, CARD_H + 0.1);
+      g.save(); g.beginPath(); g.rect(m, m, pw, ph); g.clip();
+      const gr = g.createLinearGradient(0, 0, 0, CARD_H); gr.addColorStop(0, '#f0e2c2'); gr.addColorStop(1, '#dcc8a0'); g.fillStyle = gr; g.fillRect(m, m, pw, ph);
+      // the lattice: a harlequin of tall diamonds, red rows and cream rows (a row's diamonds touch
+      // the next row's along their edges), a cream pip in each red one and a red pip in each cream one
+      const cw = 0.21, ch = 0.25;
+      for (let iy = -1; iy * ch / 2 < CARD_H + ch; iy++) for (let ix = -1; ix * cw < 1 + cw; ix++) {
+        const x = ix * cw + (iy & 1 ? cw / 2 : 0), y = iy * ch / 2;
+        if (iy & 1) { diamond(x, y, cw * 0.44, ch * 0.44, '#a82c2a'); diamond(x, y, cw * 0.13, ch * 0.13, '#f0dcb4'); }
+        else diamond(x, y, cw * 0.12, ch * 0.12, '#b8402e');
+      }
+      // the medallion: a brass oval ringed in dark red, a red heart on it
+      g.beginPath(); g.ellipse(0.5, CARD_H / 2, 0.24, 0.26, 0, 0, Math.PI * 2); g.fillStyle = '#7a1c20'; g.fill();
+      g.beginPath(); g.ellipse(0.5, CARD_H / 2, 0.2, 0.22, 0, 0, Math.PI * 2); g.fillStyle = '#d8b060'; g.fill();
+      g.beginPath(); g.ellipse(0.47, CARD_H / 2 - 0.06, 0.1, 0.08, -0.4, 0, Math.PI * 2); g.fillStyle = 'rgba(255,240,196,0.55)'; g.fill();
+      heart(0.5, CARD_H / 2 + 0.01, 0.2, '#a82c2a');
+      g.restore();
+    });
+    frame(Bk, 0.07, 1.5, '#7a1c20', 0.95);     // the red rule round the panel
+    frame(Bk, 0.0, 1, '#a89878', 0.7);          // and a faint warm edge, so the fanned cards part from each other
+    frame(F, 0.0, 1, '#a89878', 0.7);
   });
 }
 function paintPack(g, r, S, rnd) {

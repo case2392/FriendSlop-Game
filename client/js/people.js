@@ -852,13 +852,20 @@ function cardParts(S, F) {
   const n = toBind([-0.85, 0.45, 0.18]), up0 = toBind([0.4, 1, 0.05]), side = new V3().crossVectors(up0, n).normalize(), up = new V3().crossVectors(n, side).normalize();
   const { k, kl } = handSize(S, F), pivot = new V3(sh[0] + 0.012 * k, sh[1] + WRIST - 0.075 * kl, sh[2] + 0.026 * k).addScaledVector(n, 0.012 * k);
   const W = 0.07 * k / 1.16, H = 0.1 * k / 1.16, reg = REG.pack, P = [];   // (cards sized to the hand holding them)
+  // The backs face the room and a little down, away from every lamp, so lit honestly they'd go a
+  // dark smudge: like painted foliage cards, their normals are bent up toward the room and the
+  // lights, so the cream backs read as cards from across the table.
+  const backN = toBind([0.6, 0.78, -0.18]);
   [-0.55, -0.28, 0, 0.28, 0.55].forEach((phi, i) => {
     const c = Math.cos(phi), sn = Math.sin(phi);
     const ax = side.clone().multiplyScalar(c).addScaledVector(up, sn), ay = up.clone().multiplyScalar(c).addScaledVector(side, -sn);
-    P.push(...slab((u, v) => {
+    const card = slab((u, v) => {
       const p = pivot.clone().addScaledVector(ax, (u - 0.5) * W).addScaledVector(ay, v * H - 0.018).addScaledVector(n, (i - 2) * 0.0016);
       return [p.x, p.y, p.z];
-    }, 1, 1, 0.0018, { reg, uv: (u, v) => [0.02 + u * 0.44, 0.06 + v * 0.88], uvInner: (a, b) => { const [tu, tv] = localUV(reg, a, b); return atlasUV(reg, tu + 0.52, tv); }, bones: B.handL, inside: () => { const q = pivot.clone().addScaledVector(n, -0.1); return [q.x, q.y, q.z]; } }));
+    }, 1, 1, 0.0018, { reg, uv: (u, v) => [0.02 + u * 0.44, 0.06 + v * 0.88], uvInner: (a, b) => { const [tu, tv] = localUV(reg, a, b); return atlasUV(reg, tu + 0.52, tv); }, bones: B.handL, inside: () => { const q = pivot.clone().addScaledVector(n, -0.1); return [q.x, q.y, q.z]; } });
+    const BN = card[1].attributes.normal;
+    for (let q = 0; q < BN.count; q++) BN.setXYZ(q, backN.x, backN.y, backN.z);
+    P.push(...card);
   });
   return P;
 }
@@ -945,13 +952,15 @@ function chainParts(S) {
 
 const ROLL_DY = ARM_LM.roll;   // where a rolled sleeve sits (a little over halfway down the upper arm)
 const ARM_UP = [   // dy below the shoulder joint, half-width across (z), front, back: a round deltoid, a
-  [0.064, 0.0, 0.0, 0.0],     // tapering upper arm, a slim elbow, a forearm swell, a slim wrist
+  [0.064, 0.0, 0.0, 0.0],     // tapering upper arm (armParts swells it at the biceps: ARM_SWELL), a slim elbow, a forearm swell, a slim wrist
   [0.056, 0.05, 0.056, 0.054],
   [0.036, 0.082, 0.086, 0.084],
   [0.005, 0.094, 0.092, 0.088],
   [-0.05, 0.089, 0.086, 0.08],
   [-0.11, 0.08, 0.082, 0.074],
+  [-0.14, 0.0766, 0.079, 0.0714],
   [-0.18, 0.072, 0.075, 0.068],
+  [-0.215, 0.068, 0.0705, 0.065],
   [-0.25, 0.064, 0.066, 0.062],
   [-0.3, 0.06, 0.062, 0.061],
   [-0.35, 0.064, 0.069, 0.06],
@@ -996,6 +1005,11 @@ function handSize(S, F) {
 }
 // the forearm's girth over the table (1.2: a thick WoW forearm under the big shoulders)
 const FOREARM_K = 1.2;
+// The upper arm's swell: biceps in front, triceps behind, ~10% of girth in a soft bump centered 16 cm
+// below the shoulder joint, so the sleeve under the pauldron reads as a meaty arm, not a pipe.
+// [center dy, width, across, front, back] (a woman's is half as much)
+const ARM_SWELL = [-0.16, 0.05, 0.09, 0.12, 0.1];
+const swellAt = (dy, fem) => { const [c, wd, kw, kd, kb] = ARM_SWELL, g = gauss(dy - c, wd) * (fem ? 0.5 : 1); return [1 + kw * g, 1 + kd * g, 1 + kb * g]; };
 const WRIST = ARM_LM.wrist;
 function armParts(S, F, s) {
   const [ua, fa, ha] = ARM(s), sh = F.shoulder(s);
@@ -1014,7 +1028,8 @@ function armParts(S, F, s) {
       if (S.arms === 'shirt') roll += 0.009 * gauss(dy + 0.09, 0.03) - 0.006 * gauss(dy + 0.125, 0.012);                           // the puff over a sleeve garter
       // a brute's (and Ed's) forearms swell toward the elbow; a rolled sleeve tapers in toward the shoulder
       const f = (dy < -0.31 ? 1 + (fk - 1) * gauss(dy + 0.37, 0.06) : 1) * (rolled ? 0.82 + 0.18 * sstep(-0.02, -0.2, dy) : 1) * fore(dy);
-      return [dy, w * ak * f + roll, d * ak * f + roll, db * ak * f + roll];
+      const [sw, sd, sb] = swellAt(dy, F.fem);
+      return [dy, w * ak * f * sw + roll, d * ak * f * sd + roll, db * ak * f * sb + roll];
     }),
     ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => { const f = FK * (bare ? ak : 1); return [dy, w * f, d * f, db * f]; }),
     ...HAND.map(([dy, w, d, db]) => [dy, w * hk, d * hk, db * hk]),
@@ -1269,12 +1284,13 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 // ---- posing --------------------------------------------------------------------------------
 
 const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'wiL', 'wiR', 'wtL', 'wtR', 'hatOff', 'mapK', 'toe', 'sway'];
-// At rest the arms bow: the upper arm hangs out from the shoulder pad, the elbow bends ~15 deg
-// forward and the forearm swings back in (inL), so the big hands hang by the front of the thighs,
+// At rest the arms bow: the upper arm hangs out from the shoulder pad (the elbow juts a few cm out
+// of the torso's silhouette), the elbow bends ~15 deg forward and the forearm swings back in (inL),
+// so the big hands hang by the front of the thighs,
 // turned in toward them a little more at the wrist (wiL), never stiff tubes straight down. Standing
 // or walking, a player's hands also roll knuckles-forward (wtL, a twist about the hand's own long
 // axis: HAND_ROLL), so you see the broad backs of the big gloves, not their thin edges.
-function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.28; P.eL = P.eR = 0.26; P.inL = P.inR = 0.26; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
+function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.34; P.eL = P.eR = 0.26; P.inL = P.inR = 0.2; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
 // The heroic WoW idle, layered on a pose by weight w (0 = none): feet apart and turned out, knees
 // a little soft, chest up, and a slow (~4.5 s) weight shift: the hips sway and roll over one leg
 // while the opposite shoulder dips.
@@ -1376,7 +1392,10 @@ function playerPose(st, m) {
     T.aL = T.aR = 0.8; T.eL = T.eR = 0.85; T.inL = T.inR = 0.3; T.head = -st.pitch * 0.4; T.spread = 0.08; T.bend = 0.05;
   } else if (st.mode === M.CLIMB) {
     const c = Math.sin(t * 5 + id);
-    T.aL = 2.75 + c * 0.35; T.aR = 2.75 - c * 0.35; T.eL = 0.35 - c * 0.25; T.eR = 0.35 + c * 0.25; T.abL = T.abR = 0.22;
+    // (raised overhead, a positive ab would tip the arms in over the head: they spread out in a V
+    // instead, the forearms straight on, so the hands reach up outside even a wide brim)
+    T.aL = 2.75 + c * 0.35; T.aR = 2.75 - c * 0.35; T.eL = 0.35 - c * 0.25; T.eR = 0.35 + c * 0.25; T.abL = T.abR = -0.25;
+    T.inL = T.inR = 0; T.wiL = T.wiR = 0;
     T.lL = 0.55 + c * 0.4; T.lR = 0.55 - c * 0.4; T.kL = -0.9 - c * 0.4; T.kR = -0.9 + c * 0.4; T.lean = 0.1; T.head = -0.35;
   } else if (st.mode === M.AIR) {
     T.lL = 0.75; T.lR = -0.2; T.kL = -1.15; T.kR = -0.5; T.fL = 0.3; T.aL = 1.5; T.aR = 1.1; T.abL = T.abR = 0.5; T.eL = T.eR = 0.55; T.lean = 0.06;
@@ -1421,10 +1440,10 @@ function playerPose(st, m) {
   }
   const e = m.emote;
   if (e) {
-    if (e === '😂') { T.aL = 2.5 + Math.sin(t * 14) * 0.3; T.aR = 2.5 - Math.sin(t * 14) * 0.3; T.eL = T.eR = 0.6; T.bend = 0.15; T.head = -0.4; drop = Math.abs(Math.sin(t * 14)) * 0.06; }
+    if (e === '😂') { T.aL = 2.5 + Math.sin(t * 14) * 0.3; T.aR = 2.5 - Math.sin(t * 14) * 0.3; T.eL = T.eR = 0.6; T.abL = T.abR = -0.08; T.inL = T.inR = 0.06; T.bend = 0.15; T.head = -0.4; drop = Math.abs(Math.sin(t * 14)) * 0.06; }
     else if (e === '😭') { T.aL = 0.9; T.aR = 0.9; T.eL = T.eR = 2.0; T.inL = T.inR = 0.5; T.abL = T.abR = 0.25; T.head = 0.7; T.bend = -0.35; T.headY = Math.sin(t * 6) * 0.15; }
     else if (e === '💀') { tip = Math.PI / 2 - 0.06; T.aL = Math.sin(t * 19) * 1.6; T.aR = -T.aL; T.abL = T.abR = 0.8; T.lL = Math.sin(t * 17) * 0.4; T.lR = -T.lL; }
-    else if (e === '🤬') { T.aL = 2.3 + Math.sin(t * 22) * 0.6; T.aR = 2.3 - Math.sin(t * 22) * 0.6; T.eL = T.eR = 0.8; T.lL = Math.sin(t * 19) * 0.8; T.lR = -T.lL; T.kL = T.kR = -0.5; T.bend = -0.15; }
+    else if (e === '🤬') { T.aL = 2.3 + Math.sin(t * 22) * 0.6; T.aR = 2.3 - Math.sin(t * 22) * 0.6; T.eL = T.eR = 0.8; T.abL = T.abR = -0.06; T.inL = T.inR = 0.1; T.lL = Math.sin(t * 19) * 0.8; T.lR = -T.lL; T.kL = T.kR = -0.5; T.bend = -0.15; }
     else if (e === '👑') { T.aL = 2.9; T.aR = 2.9; T.abL = T.abR = 0.5; T.eL = T.eR = 0.15; T.lean = -0.08; T.bend = 0.2; T.head = -0.35; }
     else { spin = 12; T.abL = T.abR = 1.3; T.eL = T.eR = 0.2; }
   }
@@ -1687,7 +1706,7 @@ export const PREVIEW = {
   repoman: () => buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }).root,
   walker: () => posed('#00E5FF', { hatIndex: 2, skinIndex: 2 }, { lL: 0.55, lR: -0.5, kL: -0.15, kR: -0.85, fR: 0.3, aL: -0.45, aR: 0.45, eL: 0.4, eR: 0.75, bend: -0.08, tw: 0.08, ctw: -0.12 }),
   sitter: () => posed('#FFA033', { hatIndex: 3, skinIndex: 3 }, { lL: 1.5, lR: 1.5, kL: -1.5, kR: -1.5, aL: 0.8, aR: 0.8, eL: 0.85, eR: 0.85 }),
-  climber: () => posed('#B26EFF', { hatIndex: 4, skinIndex: 4 }, { aL: 2.9, aR: 2.5, eL: 0.3, eR: 0.5, lL: 0.9, lR: 0.2, kL: -1.2, kR: -0.5 }),
+  climber: () => posed('#B26EFF', { hatIndex: 4, skinIndex: 4 }, { aL: 2.9, aR: 2.5, eL: 0.3, eR: 0.5, abL: -0.25, abR: -0.25, inL: 0, inR: 0, wiL: 0, wiR: 0, lL: 0.9, lR: 0.2, kL: -1.2, kR: -0.5 }),
   walking: () => viewIn(2, {}, { speed: 4.4, frames: 47 }),
   running: () => viewIn(0, { flags: F_.SPRINT }, { speed: 7, frames: 52 }),
   crouching: () => viewIn(1, { flags: F_.CROUCH }),
