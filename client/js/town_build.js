@@ -61,7 +61,7 @@ export const STYLES = {
     },
     barn: {
       kinds: ['casino', 'gas'], wall: 'planks_barnred', roof: 'shingles_wood', layout: 'gambrel', thick: 0.3, eave: 0.7, barge: true, gableFill: 'planks_barnred', ridge: 'tile', chimney: null,
-      trim: 'wood_white', trimTint: '#a89884', cornerMat: 'wood_white', cornerTint: '#a89884', baseH: 0.7, barnFrame: true, extraWins: 2, roofTile: 2.2,
+      trim: 'wood_white', trimTint: '#a89884', cornerMat: 'wood_white', cornerTint: '#a89884', baseH: 0.7, barnFrame: true, extraWins: 2, roofTile: 2.2, win: 'barn',
     },
   },
   alpine: {
