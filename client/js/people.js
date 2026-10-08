@@ -2,8 +2,8 @@
 // (buildCharacter, used by town3d.js) and your own first-person hands (Hands).
 //
 // Style: WoW Classic humans with a dash of OSRS chunk: big shoulders, a barrel chest, a leather
-// jerkin skirt with a tabard in the player's color hanging front and back, big gloves with real
-// thumbs and grooved fingers, knee boots with turned-down cuffs and a welted sole, a bedroll on
+// jerkin skirt with a tabard in the player's color hanging front and back, thick forearms and big
+// gloves with real thumbs and grooved fingers (arms bowed at rest, knuckles forward), knee boots with turned-down cuffs and a welted sole, a bedroll on
 // the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 23-bone
 // skeleton, textured with ONE hand-painted 512×768 atlas from paint/characters.js. The face is
 // modeled (a broad blunt nose, a heavy brow ridge over deep sockets, cheekbones, a square chin
@@ -851,7 +851,7 @@ function cardParts(S, F) {
   const toBind = v => new V3(...v).normalize().applyMatrix4(Ri);
   const n = toBind([-0.85, 0.45, 0.18]), up0 = toBind([0.4, 1, 0.05]), side = new V3().crossVectors(up0, n).normalize(), up = new V3().crossVectors(n, side).normalize();
   const { k, kl } = handSize(S, F), pivot = new V3(sh[0] + 0.012 * k, sh[1] + WRIST - 0.075 * kl, sh[2] + 0.026 * k).addScaledVector(n, 0.012 * k);
-  const W = 0.07, H = 0.1, reg = REG.pack, P = [];
+  const W = 0.07 * k / 1.16, H = 0.1 * k / 1.16, reg = REG.pack, P = [];   // (cards sized to the hand holding them)
   [-0.55, -0.28, 0, 0.28, 0.55].forEach((phi, i) => {
     const c = Math.cos(phi), sn = Math.sin(phi);
     const ax = side.clone().multiplyScalar(c).addScaledVector(up, sn), ay = up.clone().multiplyScalar(c).addScaledVector(side, -sn);
@@ -1232,6 +1232,7 @@ function makeSkeleton(F) {
   for (const f of [by.flapF, by.flapB]) { by.hips.add(f); f.position.set(0, J.hipY - J.hips, 0); }
   by.flapF.add(by.flapF2); by.flapF2.position.set(0.17, FLAP2_Y - J.hipY, 0);
   by.head.add(by.hat);
+  by.handL.rotation.order = by.handR.rotation.order = 'XZY';
   by.chest.add(by.map); by.map.position.set(MAP_AT[0], MAP_AT[1] - J.chest, MAP_AT[2]);    // (bound at scale 1; applyPose collapses it)
   return bones;
 }
@@ -1267,11 +1268,13 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 
 // ---- posing --------------------------------------------------------------------------------
 
-const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'wiL', 'wiR', 'hatOff', 'mapK', 'toe', 'sway'];
+const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'wiL', 'wiR', 'wtL', 'wtR', 'hatOff', 'mapK', 'toe', 'sway'];
 // At rest the arms bow: the upper arm hangs out from the shoulder pad, the elbow bends ~15 deg
 // forward and the forearm swings back in (inL), so the big hands hang by the front of the thighs,
-// turned in toward them a little more at the wrist (wiL), never stiff tubes straight down.
-function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.27; P.eL = P.eR = 0.26; P.inL = P.inR = 0.3; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
+// turned in toward them a little more at the wrist (wiL), never stiff tubes straight down. Standing
+// or walking, a player's hands also roll knuckles-forward (wtL, a twist about the hand's own long
+// axis: HAND_ROLL), so you see the broad backs of the big gloves, not their thin edges.
+function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.28; P.eL = P.eR = 0.26; P.inL = P.inR = 0.26; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
 // The heroic WoW idle, layered on a pose by weight w (0 = none): feet apart and turned out, knees
 // a little soft, chest up, and a slow (~4.5 s) weight shift: the hips sway and roll over one leg
 // while the opposite shoulder dips.
@@ -1289,8 +1292,10 @@ const STANCE = {
   ed: { aL: 0.35, aR: 0.35, eL: 1.05, eR: 1.05, inL: 0.75, inR: 0.75, abL: 0.18, abR: 0.18, bend: -0.04 },
   clerk: { aL: 0.1, aR: 0.12, eL: 0.5, eR: 0.45, inL: 0.5, inR: 0.45, abL: 0.08, abR: 0.08 },
 };
+const HAND_ROLL = 0.45;
 function idlePose(ch, t) {
   const st = STANCE[ch.spec.outfit] || {}, P = { ...restPose(), ...st }, k = ch.seed;
+  if (!STANCE[ch.spec.outfit]) P.wtL = P.wtR = HAND_ROLL;
   const br = Math.sin(t * 1.7 + k);
   heroicIdle(P, t, k, st.spread ? 0.4 : 1);
   if (ch.spec.outfit === 'dealer') P.bend -= 0.05;          // (leaning on his table)
@@ -1310,7 +1315,7 @@ function applyPose(ch, P) {
   b.footL.rotation.set(-P.roll, 0, P.fL); b.footR.rotation.set(-P.roll, 0, P.fR);
   b.armL.rotation.set(P.abL, 0, P.aL); b.armR.rotation.set(-P.abR, 0, P.aR);
   b.foreL.rotation.set(-P.inL, 0, P.eL); b.foreR.rotation.set(P.inR, 0, P.eR);
-  b.handL.rotation.set(-P.wiL, 0, P.wristL); b.handR.rotation.set(P.wiR, 0, P.wristR);
+  b.handL.rotation.set(-P.wiL, -P.wtL, P.wristL); b.handR.rotation.set(P.wiR, P.wtR, P.wristR);   // (order XZY: roll, then flex, then tilt in)
   b.hips.position.y = J.hips + P.bob; b.hips.position.z = P.sway;
   b.hips.rotation.set(-P.roll, P.tw * 0.5, 0);
   b.spine.rotation.set(P.roll * 0.75, P.tw * 0.5, P.bend * 0.5);
@@ -1395,6 +1400,7 @@ function playerPose(st, m) {
     T.roll += 0.035 * g * Math.sin(ph);
     T.bend = -(sprint ? 0.22 : 0.07) * g; T.lean = (sprint ? 0.09 : 0.03) * g;
     T.abL += 0.06 * g; T.abR += 0.06 * g;
+    T.wtL = T.wtR = HAND_ROLL;
     // idle on top: the heroic stance, breathing, a slow weight shift
     heroicIdle(T, t, id, 1 - g);
     T.bend += -0.012 - br * 0.012 * (1 - g);
@@ -1409,7 +1415,7 @@ function playerPose(st, m) {
     const map = st.flags & F.MAP;
     // carrying: forearms forward under the load; the map: held up in front, head down
     T.aL = T.aR = map ? 0.55 : 0.7; T.eL = T.eR = map ? 1.15 : 0.95; T.abL = T.abR = map ? 0.12 : 0.24; T.inL = T.inR = map ? 0.35 : 0.42;
-    T.wristL = T.wristR = map ? 0.3 : 0.2;
+    T.wristL = T.wristR = map ? 0.3 : 0.2; T.wtL = T.wtR = 0;
     if (map) { T.head = Math.max(T.head, 0.35); T.mapK = 1; }
     else T.bend -= 0.05;
   }

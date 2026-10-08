@@ -659,99 +659,93 @@ const BUILDERS = {
   },
 
   dino() {
-    // The roadside sauropod's goofy fiberglass head, snapped off with a thick stub of its neck: a
-    // round dome with big slit-pupil eyes up on its top corners under heavy brows, plates down the
-    // spine, a blunt snout with its nostrils on top, the jaw hanging open over a pink tongue and two
-    // rows of cream peg teeth. The head and neck share one painted hide (loot_dinohead) wrapped
-    // round them; the lower jaw and the inside of the mouth have their own cells.
+    // The roadside sauropod's painted-plaster head, snapped off with a thick stub of its neck, carved
+    // to match the statue: a tall round dome of a skull with a raised brow, a short, blunt, rounded
+    // muzzle with its nostrils up on top, friendly round eyes on the sides of the head under heavy
+    // brow ridges, and a deep, stubby, round-chinned lower jaw hanging a crack open in a smile (a few
+    // small blunt teeth at the front, a pink tongue). The head and neck share one painted hide
+    // (loot_dinohead: the statue's plates and colours) wrapped round them; the lower jaw and the
+    // inside of the mouth have their own cells.
     const B = new Build(), D = DINO, pw = D.pw, rnd = rngFrom('dino-head');
     const vOf = z => Math.min(1, Math.max(0, (z - D.z0) / (D.z1 - D.z0)));
-    // the small bumps (plates, brows, lids, nostrils) take a plain strip of hide, lit by their normal
+    // the small bumps (brows, lids, nostrils, spine knobs) take a plain strip of hide, lit by their normal
     const PLAIN = sub(R.dinomouth, 2 / 3, 0, 1, 1);
     const hide = { uv: 'fn', fn: (x, y, z, nx, ny) => [0.5 + 0.4 * nx, Math.min(0.98, Math.max(0.02, 0.5 + 0.48 * ny))], crease: 80 };
-    const head = [
-      { z: -0.47, w: 0.27, top: 0.27, bot: -0.02 }, { z: -0.41, w: 0.33, top: 0.38, bot: -0.05 }, { z: -0.29, w: 0.36, top: 0.45, bot: -0.07 },
-      { z: -0.14, w: 0.375, top: 0.48, bot: -0.075 }, { z: 0.02, w: 0.36, top: 0.43, bot: -0.07 }, { z: 0.17, w: 0.3, top: 0.32, bot: -0.06 },
-      { z: 0.32, w: 0.275, top: 0.255, bot: -0.05 }, { z: 0.48, w: 0.28, top: 0.245, bot: -0.04 }, { z: 0.6, w: 0.275, top: 0.24, bot: -0.03 },
-      { z: 0.68, w: 0.235, top: 0.215, bot: -0.02 }, { z: 0.735, w: 0.16, top: 0.17, bot: 0.0 }, { z: 0.765, w: 0.07, top: 0.12, bot: 0.03 }, { z: 0.775, w: 0.01, top: 0.085, bot: 0.065 },
-    ];
+    const head = D.head;
     B.add(loftU(head, { segs: 32, pw, v: [vOf(head[0].z), vOf(head[head.length - 1].z)] }), R.dinohead, { crease: 80 });
-    // the lower jaw, swung open about the hinge under the back of the skull
-    const jaw = [
-      { z: -0.34, w: 0.2, top: -0.05, bot: -0.19 }, { z: -0.27, w: 0.285, top: -0.05, bot: -0.26 }, { z: -0.12, w: 0.305, top: -0.055, bot: -0.3 },
-      { z: 0.08, w: 0.29, top: -0.06, bot: -0.3 }, { z: 0.28, w: 0.27, top: -0.06, bot: -0.27 }, { z: 0.46, w: 0.255, top: -0.06, bot: -0.24 },
-      { z: 0.59, w: 0.23, top: -0.06, bot: -0.205 }, { z: 0.665, w: 0.17, top: -0.065, bot: -0.165 }, { z: 0.7, w: 0.08, top: -0.08, bot: -0.13 }, { z: 0.71, w: 0.01, top: -0.1, bot: -0.11 },
-    ];
-    const open = 0.21, hy = -0.06, hz = D.hinge;
+    // the lower jaw: deep and short, its round chin tucked in under the muzzle, swung a crack open
+    const jaw = D.jaw;
+    const open = D.open, hy = D.hingeY, hz = D.hinge;
     const jawM = new THREE.Matrix4().makeTranslation(0, hy, hz).multiply(new THREE.Matrix4().makeRotationX(open)).multiply(new THREE.Matrix4().makeTranslation(0, -hy, -hz));
     B.add(loftU(jaw, { segs: 28, pw }), R.dinojaw, { at: jawM, crease: 80 });
     // inside the mouth: a dark cavity between the jaws, open at the front, the throat at the back
     const jawAt = z => { const zl = hz + (z - hz) / Math.cos(open), s = secAt(jaw, zl); return { y: hy + (s.top - hy) * Math.cos(open) - (zl - hz) * Math.sin(open), w: s.w }; };
-    const cav = [-0.25, -0.18, -0.06, 0.1, 0.26, 0.42, 0.56, 0.645].map(z => { const u = secAt(head, z), j = jawAt(z); return { z, w: Math.min(u.w, j.w) - 0.05, top: u.bot + 0.05, bot: j.y - 0.045 }; });
+    const cav = [-0.12, -0.02, 0.1, 0.22, 0.34, 0.44, 0.52].map(z => { const u = secAt(head, z), j = jawAt(z); return { z, w: Math.min(u.w, j.w) - 0.06, top: u.bot + 0.04, bot: j.y - 0.035 }; });
     B.add(loftU(cav, { segs: 20, pw: 4, inside: true, caps: [true, false] }), sub(R.dinomouth, 0, 0, 1 / 3, 1), { crease: 80 });
-    // the tongue lying in the jaw, its tip curling up
+    // a fat pink tongue lying in the jaw, its tip just showing
     B.add(sphere(1, 16, 10), sub(R.dinomouth, 1 / 3, 0, 2 / 3, 1), {
-      uv: 'fn', fn: (x, y, z) => [Math.min(1, Math.max(0, (x + 0.16) / 0.32)), Math.min(1, Math.max(0, (z + 0.17) / 0.68))],
-      at: jawM.clone().multiply(mat4(0, -0.075, 0.15, 0, 0, 0, [0.15, 0.05, 0.31])), crease: 80,
-      warp: v => { if (v.y < 0) v.y *= 0.5; else v.y -= 0.22 * Math.exp(-((v.x / 0.3) ** 2)) * v.y; if (v.z > 0.35) v.y += (v.z - 0.35) ** 2 * 1.6; },
+      uv: 'fn', fn: (x, y, z) => [Math.min(1, Math.max(0, (x + 0.2) / 0.4)), Math.min(1, Math.max(0, (z + 0.02) / 0.58))],
+      at: jawM.clone().multiply(mat4(0, -0.085, 0.27, 0, 0, 0, [0.2, 0.05, 0.27])), crease: 80,
+      warp: v => { if (v.y < 0) v.y *= 0.5; else v.y -= 0.2 * Math.exp(-((v.x / 0.3) ** 2)) * v.y; if (v.z > 0.4) v.y += (v.z - 0.4) ** 2 * 1.2; },
     });
-    // two rows of big cream peg teeth, interleaved
+    // small blunt teeth at the front only: a short row in the upper jaw, two in the lower
     for (const sd of [-1, 1]) {
-      const zs = [0.04, 0.16, 0.28, 0.4, 0.52, 0.63];
-      for (const [k, z0] of zs.entries()) {
-        const z = z0 + range(rnd, -0.015, 0.015), p = secPoint(secAt(head, z), sd < 0 ? D.lipU + 0.012 : 1 - D.lipU - 0.012, pw), L = range(rnd, 0.075, 0.095) * (k === 5 ? 0.85 : 1);
-        B.add(peg([p[0] * 0.97, p[1] + 0.025, p[2]], [p[0] * 1.02, p[1] - L, p[2] + 0.01], range(rnd, 0.027, 0.032)), R.ivory, { crease: 70 });
+      for (const [k, z0] of [0.36, 0.45, 0.53, 0.6].entries()) {
+        const z = z0 + range(rnd, -0.01, 0.01), p = secPoint(secAt(head, z), sd < 0 ? D.lipU + 0.02 : 1 - D.lipU - 0.02, pw), L = range(rnd, 0.04, 0.05) * (k === 3 ? 0.8 : 1);
+        B.add(peg([p[0] * 0.96, p[1] + 0.02, p[2]], [p[0] * 0.98, p[1] - L, p[2] + 0.005], range(rnd, 0.024, 0.028)), R.ivory, { crease: 70 });
       }
-      { const p = secPoint(secAt(head, 0.715), sd < 0 ? 0.06 : 0.94, pw); B.add(peg([p[0], p[1] + 0.02, p[2] - 0.01], [p[0] * 1.1, p[1] - 0.07, p[2] + 0.015], 0.026), R.ivory, { crease: 70 }); }
-      for (const [k, zl] of [0.1, 0.23, 0.36, 0.49, 0.6].entries()) {
-        const p = secPoint(secAt(jaw, zl + range(rnd, -0.015, 0.015)), sd < 0 ? 0.5 - D.jawLipU + 0.01 : 0.5 + D.jawLipU - 0.01, pw), L = range(rnd, 0.065, 0.08) * (k === 4 ? 0.85 : 1);
-        const a = new V3(p[0] * 0.98, p[1] - 0.02, p[2]).applyMatrix4(jawM), b = new V3(p[0] * 1.02, p[1] + L, p[2] - 0.005).applyMatrix4(jawM);
-        B.add(peg(a.toArray(), b.toArray(), range(rnd, 0.025, 0.03)), R.ivory, { crease: 70 });
+      for (const zl of [0.44, 0.53]) {
+        const p = secPoint(secAt(jaw, zl + range(rnd, -0.01, 0.01)), sd < 0 ? 0.5 - D.jawLipU + 0.02 : 0.5 + D.jawLipU - 0.02, pw), L = range(rnd, 0.035, 0.045);
+        const a = new V3(p[0] * 0.97, p[1] - 0.02, p[2]).applyMatrix4(jawM), b = new V3(p[0] * 0.98, p[1] + L, p[2]).applyMatrix4(jawM);
+        B.add(peg(a.toArray(), b.toArray(), range(rnd, 0.022, 0.026)), R.ivory, { crease: 70 });
       }
     }
-    // big eyes up on the dome's top corners: an amber slit-pupil eyeball, a heavy lid, a brow ridge
+    // friendly round eyes on the sides of the skull, looking out and a little forward: a big painted
+    // eyeball half under a heavy lid, and over it a raised brow ridge running up onto the dome
     for (const sd of [-1, 1]) {
       const s = secAt(head, D.eye.z), p = secPoint(s, 0.5 + sd * D.eye.u, pw), mid = (s.top + s.bot) / 2;
-      const n = new V3(p[0] / s.w, (p[1] - mid) / ((s.top - s.bot) / 2), 0).normalize(), r = 0.125;
-      const c = new V3(...p).addScaledVector(n, -0.03);
-      const look = new V3(sd * 0.5, 0.22, 0.84).normalize(), ry = Math.atan2(look.x, look.z), rx = -Math.asin(look.y);
+      const n = new V3(p[0] / s.w, (p[1] - mid) / ((s.top - s.bot) / 2), 0).normalize(), r = 0.105;
+      const c = new V3(...p).addScaledVector(n, -0.035);
+      const look = new V3(sd * 0.8, 0.08, 0.6).normalize(), ry = Math.atan2(look.x, look.z), rx = -Math.asin(look.y);
       const E = mat4(c.x, c.y, c.z, rx, ry, 0);
       B.add(sphere(r, 16, 12), R.eye, { at: E, crease: 80 });
-      B.add(lathe([[r * 1.08, -0.004], [r * 1.06, r * 0.32], [r * 0.92, r * 0.62], [r * 0.6, r * 0.88], [r * 0.25, r * 1.02], [0, r * 1.06]], 18), PLAIN, { ...hide, at: E.clone().multiply(mat4(0, 0, 0, -0.3, 0, 0)) });
-      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(c.x + sd * 0.004, c.y + 0.11, c.z - 0.035, 0.12, sd * 0.25, sd * -0.3, [0.13, 0.062, 0.105]), tint: 0.95 });
+      B.add(lathe([[r * 1.1, -0.004], [r * 1.08, r * 0.34], [r * 0.94, r * 0.64], [r * 0.62, r * 0.9], [r * 0.26, r * 1.04], [0, r * 1.08]], 18), PLAIN, { ...hide, at: E.clone().multiply(mat4(0, 0, 0, -0.62, 0, 0)) });
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(c.x - sd * 0.01, c.y + 0.1, c.z + 0.005, 0.2, sd * 0.5, sd * -0.45, [0.075, 0.06, 0.15]), tint: 0.97 });
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(c.x - sd * 0.07, c.y + 0.13, c.z - 0.07, -0.3, sd * 0.4, sd * -0.6, [0.06, 0.045, 0.12]), tint: 0.93 });
+      // a soft round cheek under the eye
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(c.x - sd * 0.035, c.y - 0.15, c.z + 0.02, 0, sd * 0.3, 0, [0.07, 0.07, 0.12]), tint: 1.02 });
     }
-    // nostrils on top of the snout
+    // nostrils up on top of the muzzle
     for (const sd of [-1, 1]) {
       const p = secPoint(secAt(head, D.nostril.z), 0.5 + sd * D.nostril.u, pw);
-      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(p[0], p[1] - 0.012, p[2], 0, 0, sd * -0.2, [0.055, 0.032, 0.065]) });
-      B.add(sphere(1, 10, 6), R.rubber, { at: mat4(p[0] + sd * 0.004, p[1] + 0.014, p[2] + 0.012, -0.5, 0, sd * -0.2, [0.022, 0.009, 0.03]), tint: [1.25, 0.75, 0.7] });
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(p[0], p[1] - 0.01, p[2], -0.2, 0, sd * -0.25, [0.055, 0.034, 0.06]) });
+      B.add(sphere(1, 10, 6), R.rubber, { at: mat4(p[0] + sd * 0.006, p[1] + 0.016, p[2] + 0.012, -0.6, 0, sd * -0.25, [0.024, 0.009, 0.026]), tint: [1.25, 0.75, 0.7] });
     }
-    // plates down the spine, dark green, biggest over the back of the dome
-    for (const [z, s] of [[0.08, 0.6], [-0.06, 0.8], [-0.21, 0.95], [-0.35, 1]]) {
+    // round knobs down the back of the skull, as on the statue's spine
+    for (const [z, sc] of [[-0.2, 0.75], [-0.32, 0.9]]) {
       const t = secPoint(secAt(head, z), 0.5, pw);
-      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(0, t[1] - 0.008, z, 0.15, 0, 0, [0.05 * s, 0.07 * s, 0.08 * s]), tint: 0.78 });
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(0, t[1] - 0.02, z, 0.4, 0, 0, [0.06 * sc, 0.055 * sc, 0.08 * sc]), tint: 0.82 });
     }
     // the neck: a thick stub dropping steeply down and back out of the skull (it held the head up),
     // flaring a little to the break, which faces the ground
-    const neck = [{ z: 0, w: 0.3, top: 0.27, bot: -0.27 }, { z: 0.14, w: 0.305, top: 0.275, bot: -0.275 }, { z: 0.26, w: 0.32, top: 0.285, bot: -0.285 }, { z: 0.34, w: 0.34, top: 0.295, bot: -0.295 }];
-    const NL = 0.34, nS = new V3(0, 0.07, -0.37), nM = mat4(nS.x, nS.y, nS.z, 0.92, Math.PI, 0);
+    const neck = D.neck, NL = neck[neck.length - 1].z, nS = new V3(...D.neckAt), nM = mat4(nS.x, nS.y, nS.z, D.neckTilt, Math.PI, 0);
     const nEnd = new V3(0, 0, NL).applyMatrix4(nM);
     const jag = v => { if (v.z > NL - 0.001) { const a = Math.atan2(v.y, v.x); v.z += 0.04 * Math.sin(a * 5 + 1.3) + 0.022 * Math.sin(a * 11 + 0.4) + 0.012 * Math.sin(a * 23) - 0.012; } };
     B.add(loftU(neck, { segs: 30, pw: 2.2, v: [vOf(nS.z), vOf(nEnd.z)], caps: [false, false] }), R.dinohead, { at: nM, flipU: true, crease: 80, warp: jag });
-    for (const [lz, s] of [[0.08, 0.95], [0.22, 0.85]]) {
-      const q = new V3(0, secAt(neck, lz).top - 0.01, lz).applyMatrix4(nM);
-      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(q.x, q.y, q.z, 0.6, 0, 0, [0.055 * s, 0.07 * s, 0.085 * s]), tint: 0.78 });
+    for (const [lz, sc] of [[0.12, 0.95], [0.27, 0.85]]) {
+      const q = new V3(0, secAt(neck, lz).top - 0.015, lz).applyMatrix4(nM);
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(q.x, q.y, q.z, D.neckTilt - 0.3, 0, 0, [0.065 * sc, 0.06 * sc, 0.09 * sc]), tint: 0.82 });
     }
     // the break: a jagged oval of plaster round the hollow, three rusty rebar stubs
     const brk = [], ns = neck[neck.length - 1];
     for (let k = 0; k < 28; k++) { const t = k / 28 * TAU, j = range(rnd, 0.93, 1.03); brk.push([Math.cos(t) * ns.w * j, Math.sin(t) * ns.top * j]); }
     const brkM = nM.clone().multiply(mat4(0, 0, NL - 0.03));
     B.add(shapeFace(brk), R.plaster, { uv: 'planar', axis: 'z', bounds: [-ns.w * 1.03, -ns.top * 1.03, ns.w * 1.03, ns.top * 1.03], at: brkM, crease: 30 });
-    for (const [bx, by] of [[-0.2, 0.08], [0.17, 0.12], [0.04, -0.17]]) {
+    for (const [bx, by] of [[-0.22, 0.09], [0.19, 0.13], [0.04, -0.19]]) {
       const pts = [[bx, by, -0.02], [bx * 1.05, by * 1.05, 0.05], [bx * 1.25 + 0.02, by * 1.1 - 0.03, 0.1]].map(p => new V3(...p).applyMatrix4(brkM).toArray());
-      B.add(tube(pts, 0.014, 6, 5), R.rubber, { tint: RUST });
+      B.add(tube(pts, 0.015, 6, 5), R.rubber, { tint: RUST });
     }
-    return B.done({ ao: 0.28, aoH: 0.3, fit: [0.5, 0.45, 0.75] });
+    return B.done({ ao: 0.28, aoH: 0.3, fit: [0.52, 0.45, 0.75] });
   },
 
   map() {      // the leather map case: a rolled edge, a strap with a buckle (the paper is a second mesh)
@@ -1354,7 +1348,7 @@ function demoWorld() {
 
 // ---- the loot twinkle --------------------------------------------------------------------------------
 
-// A golden glint hangs ~0.3 m over every loose piece of loot within ~30 m, each pulsing on its own
+// A golden glint hangs ~0.3 m over every loose piece of loot within ~30 m (full to 26 m, gone by 40), each pulsing on its own
 // phase (alpha 0.5 → 1 over 1.6 s), like the sparkle over a lootable thing in WoW, so a stop's
 // grabbable things stand out from the crates, barrels and tyres dressing it. All of them are ONE
 // THREE.Points: one draw call, no shadow. Its onBeforeRender gathers the nearest pieces and hands their
@@ -1362,7 +1356,7 @@ function demoWorld() {
 // It hides (fading) what someone is holding, anything tumbling or flying, and what rides in or on
 // the RV; it fades out with distance. No hook in main.js: loot registers itself when it's added to the
 // scene, and the game state (window.__nmd) says who holds what and where the RV is.
-const TW = { N: 40, far: 34, fade: 10, near: 0.7, lift: 0.3, period: 1.6, minPx: 9, maxPx: 30 };
+const TW = { N: 40, far: 40, fade: 14, near: 0.7, lift: 0.3, period: 1.6, minPx: 10, maxPx: 30 };
 const twLoose = new Set();
 let twCloud = null, twSeq = 0, twLast = 0, twDemo = false;
 const twC = new V3(), twE = [];
@@ -1434,7 +1428,9 @@ function twinkleOn(obj, type) {
   obj.addEventListener('removed', twRemoved);
   return obj;
 }
-// what someone is holding: mine by id, other players' by their HOLDING flag and the piece nearest their aim
+// what someone is holding: mine by id; for each other player whose pose says they're holding something
+// (and it isn't the map), the piece within arm's reach that sits closest to their aim (a heavy piece being
+// dragged trails well below it, so there's no distance cut-off beyond the reach)
 function twHeld(S, list) {
   const held = new Set();
   if (!S) return held;
@@ -1443,24 +1439,25 @@ function twHeld(S, list) {
   for (const pl of S.meta.players || []) {
     if (pl.id === S.selfId) continue;
     const s = S.interp.samplePlayer(pl.id, S.renderT);
-    if (!s || !(s.flags & FLAG.HOLDING)) continue;
+    if (!s || !(s.flags & FLAG.HOLDING) || (s.flags & FLAG.MAP)) continue;
     let p = s.p, yaw = s.yaw;
     if (s.par && S.rv) { p = toWorld(S.rv.p, S.rv.q, s.p); yaw += qYaw(S.rv.q); }
     const ex = p.x, ey = p.y + ((s.flags & FLAG.CROUCH) ? 1.05 : PLAYER.EYE), ez = p.z, cp = Math.cos(s.pitch);
     const dx = Math.sin(yaw) * cp, dy = -Math.sin(s.pitch), dz = Math.cos(yaw) * cp;
-    let best = null, bd = 0.7;
+    let best = null, bs = Infinity;
     for (const o of list) {
-      const u = o.userData.tw, mx = o.matrixWorld.elements, qx = mx[12] - ex, qy = mx[13] - ey, qz = mx[14] - ez, t = qx * dx + qy * dy + qz * dz;
-      if (t < 0.3 || t > GRAB.HOLD_MAX + 0.9) continue;
-      const off = Math.hypot(qx - t * dx, qy - t * dy, qz - t * dz) - Math.max(...u.half);
-      if (off < bd) { bd = off; best = o; }
+      const hm = Math.max(...o.userData.tw.half), mx = o.matrixWorld.elements, qx = mx[12] - ex, qy = mx[13] - ey, qz = mx[14] - ez;
+      const r = Math.hypot(qx, qy, qz), t = qx * dx + qy * dy + qz * dz;
+      if (r > PLAYER.REACH + 1.6 + hm || t < -0.3) continue;
+      const sc = Math.hypot(qx - t * dx, qy - t * dy, qz - t * dz) - hm + 0.25 * Math.max(0, Math.abs(t - GRAB.HOLD_DEFAULT) - 1);
+      if (sc < bs) { bs = sc; best = o; }
     }
     if (best) held.add(best);
   }
   return held;
 }
 function twUpdate(renderer, scene, camera) {
-  const now = performance.now(), dt = Math.min(0.1, Math.max(0, (now - (twLast || now)) / 1000));
+  const now = performance.now(), dt = Math.min(0.5, Math.max(0, (now - (twLast || now)) / 1000));
   twLast = now;
   const S = typeof window !== 'undefined' ? window.__nmd : null;
   const U = this.material.uniforms, cam = camera.getWorldPosition(twC);
@@ -1583,6 +1580,8 @@ export const PREVIEW = {
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); return g;
   }])),
   // the same, turned round to show the back
+  // the dino head seen from low in front (its nose tipped up at the camera)
+  lf_dino: () => { const o = buildProp('dino', null), g = new THREE.Group(); g.add(o); o.scale.setScalar(1.1); o.rotation.set(-0.38, 0.35, 0); return g; },
   ...Object.fromEntries(['tv', 'slot', 'safe', 'gnome', 'dino', 'painting', 'neon'].map(k => [`b_${k}`, () => {
     const o = buildProp(k, null), bb = new THREE.Box3().setFromObject(o), s = bb.getSize(new V3());
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); o.rotation.y = Math.PI; return g;

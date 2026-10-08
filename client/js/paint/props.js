@@ -134,14 +134,31 @@ export const KEY_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '5�
 
 export const TIRE_V = { treadLo: 0.38, treadHi: 0.62, wallLo: [0.16, 0.24], wallHi: [0.76, 0.84], textLo: [0.02, 0.15], textHi: [0.85, 0.98] };
 
-// The dino head (meters, before props3d fits it to the collider). The head and neck share one hide
-// cell: u round the cross-section (0.5 = the spine, 0 / 1 = the underside), v along z from the
-// neck's break (z0) to the snout (z1). In front of the hinge the underside is the roof of the open
-// mouth (pink, inside the lip line at lipU). The lower jaw has its own cell: u round it (0.5 = the
-// floor of the mouth, lip at 0.5 ± jawLipU), v from its hinge end (jz0) to the chin (jz1).
+// The dino head (meters, before props3d fits it to the collider): the sauropod statue's head, a tall
+// domed skull and a short round muzzle. The head and neck share one hide cell: u round the
+// cross-section (0.5 = the spine, 0 / 1 = the underside), v along z from z0 (behind the neck's break)
+// to the snout (z1). In front of the hinge the underside is the roof of the mouth (pink, inside the lip
+// line at lipU). The lower jaw has its own cell: u round it (0.5 = the floor of the mouth, lip at
+// 0.5 ± jawLipU), v from its hinge end to the chin. head / jaw / neck are the lofts' sections
+// { z, w (half width), top, bot }; the neck leaves the skull at neckAt, tilted neckTilt down and back.
 export const DINO = {
-  z0: -0.92, z1: 0.78, hinge: -0.26, lipU: 0.135, jz0: -0.34, jz1: 0.71, jawLipU: 0.13,
-  eye: { z: -0.03, u: 0.145 }, nostril: { z: 0.6, u: 0.055 }, pw: 2.4,
+  z0: -0.62, z1: 0.75, hinge: -0.18, hingeY: -0.12, open: 0.1, lipU: 0.1, jawLipU: 0.12,
+  eye: { z: 0.12, u: 0.18 }, nostril: { z: 0.64, u: 0.075 }, pw: 2.4,
+  head: [
+    { z: -0.36, w: 0.22, top: 0.22, bot: -0.08 }, { z: -0.3, w: 0.34, top: 0.35, bot: -0.17 }, { z: -0.2, w: 0.43, top: 0.43, bot: -0.23 },
+    { z: -0.06, w: 0.47, top: 0.46, bot: -0.25 }, { z: 0.08, w: 0.46, top: 0.445, bot: -0.24 }, { z: 0.2, w: 0.42, top: 0.38, bot: -0.21 },
+    { z: 0.3, w: 0.385, top: 0.3, bot: -0.18 }, { z: 0.4, w: 0.365, top: 0.27, bot: -0.165 }, { z: 0.5, w: 0.35, top: 0.255, bot: -0.155 },
+    { z: 0.59, w: 0.32, top: 0.24, bot: -0.145 }, { z: 0.66, w: 0.265, top: 0.215, bot: -0.13 }, { z: 0.71, w: 0.185, top: 0.18, bot: -0.105 },
+    { z: 0.74, w: 0.095, top: 0.135, bot: -0.07 }, { z: 0.75, w: 0.02, top: 0.09, bot: -0.035 },
+  ],
+  jaw: [
+    { z: -0.22, w: 0.26, top: -0.1, bot: -0.24 }, { z: -0.12, w: 0.38, top: -0.1, bot: -0.33 }, { z: 0.02, w: 0.43, top: -0.11, bot: -0.4 },
+    { z: 0.18, w: 0.41, top: -0.115, bot: -0.42 }, { z: 0.34, w: 0.37, top: -0.12, bot: -0.39 }, { z: 0.48, w: 0.33, top: -0.125, bot: -0.34 },
+    { z: 0.58, w: 0.27, top: -0.13, bot: -0.28 }, { z: 0.64, w: 0.18, top: -0.135, bot: -0.225 }, { z: 0.67, w: 0.08, top: -0.14, bot: -0.18 },
+    { z: 0.675, w: 0.02, top: -0.15, bot: -0.165 },
+  ],
+  neck: [{ z: 0, w: 0.33, top: 0.3, bot: -0.3 }, { z: 0.2, w: 0.34, top: 0.31, bot: -0.31 }, { z: 0.38, w: 0.36, top: 0.325, bot: -0.325 }, { z: 0.5, w: 0.38, top: 0.34, bot: -0.34 }],
+  neckAt: [0, 0.02, -0.2], neckTilt: 0.42,
 };
 
 // ---- small painting helpers ---------------------------------------------------------------------------

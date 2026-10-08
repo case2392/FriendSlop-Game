@@ -11,9 +11,9 @@
 //   9-slice:   ui_frame_gold (416, slice 80, middle repeats)  ui_trim_gold (288, slice 48)
 //              ui_frame_silver (96, slice 32)  ui_btn_red / ui_btn_stone (128x40, slice 14)  ui_editbox (64, slice 16)
 //   sprites:   ui_filigree (512x64)  ui_endcap (160x128)  ui_seal (96)  ui_ring (128)  ui_menu_bg (1280x720)
-//   icons 64:  ui_ico_<crown coin hourglass scroll hook key sun mic micoff speaker
+//   icons 64:  ui_ico_<crown coin hourglass scroll hook key door sun mic micoff speaker
 //              speakeroff walkie gear close ping skull bolt>  (cut-out objects: world markers, ornaments)
-//   slots 64:  ui_slot_<sun hourglass coin scroll hook key mic micoff speaker speakeroff gear
+//   slots 64:  ui_slot_<sun hourglass coin scroll hook key door mic micoff speaker speakeroff gear
 //              close walkie>  (full-bleed square icons for the HUD and the voice dock)
 //   title:     paintVista (backdrop stages, or the whole scene in 2D) + finishVista; labels.js
 //              renders the game's own 3D assets over the backdrop when it can
@@ -604,6 +604,43 @@ icon('key', 'room code', (g, s, rnd) => {
   }, { d: 1.6, bbox: [8, 10, 46, 46] });
 });
 
+// the room / invite chip: an arched oak door in a stone surround, iron straps, a brass ring
+// pull, left ajar so warm light spills down its edge ("the door's open, come join")
+icon('door', 'room invite: an arched oak door, ajar', (g, s, rnd) => {
+  const arch = (mg, x, y, w, h) => { mg.beginPath(); mg.moveTo(x, y + h); mg.lineTo(x, y + w / 2); mg.arc(x + w / 2, y + w / 2, w / 2, Math.PI, 0); mg.lineTo(x + w, y + h); mg.closePath(); mg.fill(); };
+  // the stone surround, then its joints: voussoirs round the top, coursed blocks down the jambs
+  obj(g, rnd, { ...PAL.slate, light: '#8a8f99', mid: '#646a74', low: '#454a53' }, mg => arch(mg, 9, 3, 46, 58), { d: 1.6, glints: 0, bbox: [9, 3, 46, 58] });
+  for (let i = 1; i < 6; i++) {
+    const a = Math.PI + i / 6 * Math.PI, c = Math.cos(a), sn = Math.sin(a);
+    stroke(g, [[32 + c * 16.5, 26 + sn * 16.5], [32 + c * 22.5, 26 + sn * 22.5]], 1.3, 1.1, '#1c1e24', 0.75);
+    stroke(g, [[32.8 + c * 16.5, 26.8 + sn * 16.5], [32.8 + c * 22.5, 26.8 + sn * 22.5]], 0.8, 0.6, '#c4c8d0', 0.35);
+  }
+  for (const [x0, x1, ys] of [[9.5, 16, [34, 43, 52]], [48, 54.5, [38, 47, 56]]]) for (const y of ys) {
+    stroke(g, [[x0, y], [x1, y]], 1.2, 1.2, '#1c1e24', 0.7);
+    stroke(g, [[x0, y + 1], [x1, y + 1]], 0.7, 0.7, '#c4c8d0', 0.3);
+  }
+  for (let i = 0; i < 5; i++) blob(g, range(rnd, 11, 53), range(rnd, 6, 58), range(rnd, 2, 4), range(rnd, 1.2, 2.4), rnd() * 3, '#5a7a3a', 0.35, 0.3);   // moss
+  // warm light through the gap on the latch side
+  const glow = g.createLinearGradient(44, 0, 50, 0);
+  glow.addColorStop(0, '#ffe7a0'); glow.addColorStop(1, '#c87a2a');
+  g.fillStyle = glow; g.fillRect(44, 18, 4.5, 42);
+  blob(g, 47, 40, 7, 16, 0, '#ffd27a', 0.35, 0.1);
+  // the door: oak planks, seams with a lit lip, iron straps and rivets, a brass ring pull
+  obj(g, rnd, PAL.wood, mg => arch(mg, 15.5, 9.5, 30, 51), { d: 1.4, glints: 0, bbox: [15.5, 9.5, 30, 51] });
+  for (const x of [23, 30.5, 38]) {
+    const top = 24.5 - Math.sqrt(Math.max(0, 225 - (x - 30.5) ** 2)) + 1.5;
+    stroke(g, [[x, top], [x + range(rnd, -0.3, 0.3), 59.5]], 1.3, 1.3, '#21130a', 0.75);
+    stroke(g, [[x + 1.1, top + 1], [x + 1.1, 59]], 0.7, 0.7, '#d9a86a', 0.4);
+  }
+  for (let i = 0; i < 7; i++) { const x = range(rnd, 18, 43), y = range(rnd, 14, 56); stroke(g, [[x, y], [x + range(rnd, -0.5, 0.5), y + range(rnd, 3, 7)]], 0.6, 0.4, '#3a2210', 0.45); }   // grain
+  obj(g, rnd, PAL.iron, mg => { mg.fillRect(15, 21, 26, 4.5); mg.fillRect(15, 46, 26, 4.5); mg.beginPath(); mg.arc(41, 23.25, 3.2, 0, Math.PI * 2); mg.arc(41, 48.25, 3.2, 0, Math.PI * 2); mg.fill(); }, { d: 1, outline: 0.8, shadow: 0.45, glints: 1, bbox: [15, 20, 30, 32] });
+  for (const y of [23.25, 48.25]) for (const x of [19, 27, 35]) rivet(g, x, y, 1.15, PAL.iron);
+  obj(g, rnd, PAL.brass, mg => { mg.lineWidth = 2.4; mg.beginPath(); mg.arc(38.5, 38, 3.8, 0, Math.PI * 2); mg.stroke(); }, { d: 0.9, outline: 0.8, shadow: 0.5, glints: 1, bbox: [34, 33, 9, 10] });
+  rivet(g, 38.5, 33.6, 1.3, PAL.brass);
+  // the threshold step
+  obj(g, rnd, PAL.slate, mg => { mg.beginPath(); mg.roundRect(7, 58, 50, 5, 1.5); mg.fill(); }, { d: 0.9, outline: 0.8, shadow: 0.3, glints: 0, bbox: [7, 58, 50, 5] });
+});
+
 icon('sun', 'day', (g, s, rnd) => {
   obj(g, rnd, PAL.gold, mg => {
     mg.beginPath();
@@ -755,6 +792,7 @@ const SLOT = {            // [center hue, corner hue, nudge x, nudge y, scale]
   hook: ['#2e3640', '#0c0e12', 2, -1, 1.1], key: ['#22383c', '#081012', 2, 1, 1.08], mic: ['#2c3a26', '#0a1008', 0, 2, 0.98],
   micoff: ['#3a2622', '#120808', 0, 2, 0.98], speaker: ['#3a2a44', '#110b16', 3, 0, 0.96], speakeroff: ['#3a2a44', '#110b16', 1, 0, 0.94],
   gear: ['#30353c', '#0c0e10', 0, 0, 1.06], close: ['#4a1610', '#150604', 0, 0, 0.92], walkie: ['#1e3a42', '#071416', 0, 2, 0.96],
+  door: ['#2a3442', '#0a0d12', 0, -1, 0.92],
 };
 function slotFrame(g, s) {
   // warm light from the upper left, a cool bounce from the lower right

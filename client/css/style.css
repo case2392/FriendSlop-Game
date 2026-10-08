@@ -168,9 +168,10 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 
 /* ---- HUD: one leather bar in a riveted gold trim, gryphon-wing end caps ----------------- */
 
-.hud { position: absolute; top: 14px; left: 50%; transform: translateX(-50%); display: flex; align-items: stretch; flex-wrap: nowrap;
-  max-width: min(900px, calc(100vw - 210px));
-  padding: 4px 10px; pointer-events: none; z-index: 5; border-radius: 6px;
+/* centered with margins rather than a transform, so the top-right column (position: fixed)
+   is laid out against the window; every readout is as wide as its text, never cut off */
+.hud { position: absolute; top: 14px; left: 0; right: 0; margin: 0 auto; width: max-content; display: flex; align-items: stretch; flex-wrap: nowrap;
+  padding: 4px 6px; pointer-events: none; z-index: 5; border-radius: 6px;
   background-color: #3a2618;
   background-image: linear-gradient(180deg, rgba(255, 230, 180, 0.17) 0%, rgba(255, 230, 180, 0.05) 28%, rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.4) 100%), var(--tx-leather, none);
   background-size: auto, 256px 256px;
@@ -180,24 +181,17 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
   background: var(--tx-endcap) center / contain no-repeat; filter: drop-shadow(0 3px 3px rgba(0, 0, 0, 0.5)); }
 #hDay::after { left: -84px; }
 #hStrikes::after { right: -84px; transform: scaleX(-1); }
-/* the room code hangs under the bar's right end like a little tab */
-#hCode { position: absolute; right: 30px; top: 100%; margin-top: 9px; padding: 2px 10px 2px 6px; font-size: 14px; gap: 5px; border-radius: 0 0 6px 6px;
-  background: var(--tip); box-shadow: 0 0 0 1px #8c6a2a, 0 0 0 2px #121316, 0 4px 8px rgba(0, 0, 0, 0.5); }
-#hCode::before { width: 18px; height: 18px; }
-.pill { display: flex; align-items: center; gap: 6px; padding: 3px 8px 3px 7px; font-size: clamp(12px, 1.15vw, 15px); white-space: nowrap; color: var(--white); text-shadow: var(--outline); letter-spacing: 0.3px; min-width: 0; }
+.pill { display: flex; flex: 0 0 auto; align-items: center; gap: 7px; padding: 3px 12px; font-size: clamp(12px, 1.15vw, 15px); white-space: nowrap; color: var(--white); text-shadow: var(--outline); letter-spacing: 0.3px; }
 .pill:empty { display: none; }
 /* a recessed groove between readouts: a dark cut with a lit lip on its right */
-.pill + .pill { box-shadow: inset 2px 0 0 #120a04, inset 3px 0 0 #6b4a1a; padding-left: 10px; }
+.hud > .pill + .pill { box-shadow: inset 2px 0 0 #120a04, inset 3px 0 0 #6b4a1a; padding-left: 15px; }
 /* each readout leads with a square slot icon, like an action-bar button */
 .pill::before { content: ''; flex: none; width: 24px; height: 24px; border-radius: 2px; background: center / cover no-repeat; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.7); }
-#hClock { display: block; flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; line-height: 22px; }
-#hClock::before { display: inline-block; vertical-align: -7px; margin-right: 6px; }
 #hDay::before { background-image: var(--tx-slot-sun, none); }
 #hClock::before { background-image: var(--tx-slot-hourglass, none); }
 #hBank::before { background-image: var(--tx-slot-coin, none); }
 #hDue::before { background-image: var(--tx-slot-scroll, none); }
 #hStrikes::before { background-image: var(--tx-slot-hook, none); }
-#hCode::before { background-image: var(--tx-slot-key, none); }
 #hDay { color: var(--gold); }
 .pill.gold { color: var(--gold); }
 .pill.gold.neg { color: var(--red); }
@@ -205,18 +199,38 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .pill.red.ok { color: var(--green); }
 #hStrikes.red { color: var(--red); }
 .pill.late { color: var(--red); animation: pulse 1s infinite; }
-.pill.code { pointer-events: auto; cursor: pointer; color: var(--blue); }
-.pill.code:hover { color: #fff; }
-@media (max-width: 1180px) { #hClock { max-width: 24vw; } }
 @media (max-width: 1100px) {
-  .hud { max-width: calc(100vw - 150px); padding: 4px 8px; }
-  .pill { padding: 3px 7px 3px 6px; gap: 4px; }
+  .pill { padding: 3px 9px; gap: 5px; }
+  .hud > .pill + .pill { padding-left: 12px; }
   .pill::before { width: 20px; height: 20px; }
   #hDay::after, #hStrikes::after { width: 66px; height: 53px; margin-top: -31px; }
   #hDay::after { left: -62px; }
   #hStrikes::after { right: -62px; }
 }
-@media (max-width: 820px) { #hDay::after, #hStrikes::after { display: none; } .hud { max-width: calc(100vw - 24px); } }
+@media (max-width: 820px) { #hDay::after, #hStrikes::after { display: none; } }
+
+/* top right: the room's invite code on a little dark plate (a door, not a key: the gate's
+   keypad wants a different code), and under it the quest tracker */
+.hud-side { position: fixed; top: 14px; right: 16px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; pointer-events: none; }
+#hCode { pointer-events: auto; cursor: pointer; gap: 7px; padding: 3px 12px 3px 4px; font-size: 14px; letter-spacing: 0.6px; color: #cfe4ff; border-radius: 4px;
+  background: var(--tip); box-shadow: 0 0 0 1px #8c6a2a, 0 0 0 2px #121316, inset 0 1px 0 rgba(255, 230, 180, 0.12), 0 4px 8px rgba(0, 0, 0, 0.5); }
+#hCode::before { width: 24px; height: 24px; background-image: var(--tx-slot-door, none); }
+#hCode .k { color: var(--gold); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+#hCode:hover { color: #fff; }
+
+/* the quest tracker, like WoW's quest watch: a gold title, objectives in light grey that turn
+   white when done (red when failed), a 1px dark outline, no backing; lines wrap, never cut */
+.tracker { width: max-content; max-width: min(300px, 26vw); text-align: left; padding-right: 2px; }
+.qt-title { font-size: 16px; line-height: 1.25; color: var(--gold); letter-spacing: 0.3px;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 3px rgba(0, 0, 0, 0.8); }
+.qt-line { margin-top: 3px; padding-left: 12px; text-indent: -12px; font-size: 14px; line-height: 1.25; color: #d4ccbc;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 3px rgba(0, 0, 0, 0.8); }
+.qt-line::before { content: '- '; }
+.qt-line.done { color: #ffffff; }
+.qt-line.fail { color: #ff5a3a; }
+.qt-line b { color: inherit; }
+/* a page open in the middle of the screen (help, receipt) covers the tracker's corner */
+#game:has(.panel:not(.hidden)) .tracker { visibility: hidden; }
 
 /* party frames (top left): a round portrait in a gold ring, the name over a health bar, on leather */
 .ico { display: inline-block; flex: none; width: 20px; height: 20px; vertical-align: -4px;

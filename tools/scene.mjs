@@ -52,6 +52,9 @@ await ready(steve);
 const SOLO = process.env.SOLO ? process.env.SOLO === '1' : !views.includes('crew');   // two clients only when someone has to pose
 let dave = steve;
 if (!SOLO) {
+  // stop the host rendering first: on software GL it otherwise starves the second page of frames and
+  // Dave's menu never answers
+  await quiet(steve);
   const code = await steve.evaluate(() => window.__nmd.code);
   dave = await open('Dave');
   await dave.fill('#codeInput', code);
