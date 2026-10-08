@@ -12,20 +12,23 @@
 //            steep red shingle roofs (the hall's as tall as its walls) with a front cross gable, a dormer,
 //            chimneys and a bell cupola, stone plinth, flower boxes
 //   farm     Westfall: weathered boards, thick thatch with a rolled eave and a straw fringe (houses), a
-//            faded oxblood gambrel barn on a stone plinth with its frame showing (casino, gas), hay
+//            faded oxblood gambrel barn on a stone plinth with its frame showing (casino, gas), its hay
+//            loft door open on a dim loft (a rafter, hay heaped to the sill), hay
 //   alpine   Kharanos: squat granite halls, heavy timber, roofs coming down low over the walls under
 //            thick lumpy snow, stone gable ends, round stone door arches, iron emblems, braziers
 //   frontier canyon outpost: log walls, ragged board false fronts, dark hide shed roofs on poles,
 //            porches on crooked posts lashed with rope, tusk gateways, hide banners on tall poles,
 //            spiked barricades; the casino is a two-storey hall with wings
-//   adobe    Gadgetzan: terracotta adobe with a mud splash band, lumpy parapets, stacked blocks, a
-//            turret with a riveted spiked cap, vigas with lit end grain, big awnings on poles, goblin
-//            tanks, pipes, riveted plates and gears
+//   adobe    Gadgetzan: terracotta adobe on a battered mud skirt with a splash band painted up it,
+//            fallen render showing mud brick and newer mud patches (mostly low and near the corners),
+//            rubbed paler corners, lumpy parapets, stacked blocks, a turret with a riveted spiked cap,
+//            vigas with lit end grain, big awnings on poles, goblin tanks, pipes, riveted plates and gears
 // Facades get per-style wall dressing within ~0.4 m (planters, benches, woodpiles, forks, fire baskets,
-// tool racks, ristras). Interiors are dressed per style too (floors laid board by board or stone by stone,
-// ceilings, hearths, big worn rugs, shelves of goods drawn from a per-style pool, wall trophies, bottle
-// shelves and kegs, the casino hall), then relit: soft dark corners and junctions, warm
-// pools round every lamp and fire, cooler light by the windows.
+// tool racks, ristras). Interiors are dressed per style too (floors laid board by board or flag by flag,
+// ceilings, Goldshire posts and wall plates, grime under the ceiling, hearths, big worn rugs, shelves of
+// goods drawn from a per-style pool, wall trophies, maps and racks, bottle shelves and kegs, the casino
+// hall), then relit: soft dark corners and junctions, warm pools round every lamp and fire, cooler light
+// by the windows.
 import { THREE } from './gfx.js';
 import { Kit, mat, matrix, rng, sstep, gridGeo } from './town_kit.js';
 import { LOG_ROWS, HOLE_CELLS, HOLE_COLS } from './paint/architecture.js';
@@ -39,7 +42,7 @@ export const STYLES = {
   timber: {
     wall: 'plaster_cream', wallTile: 3.2, base: 'stone_found', baseTile: 2.2, baseH: 0.62, beam: 'timber_dark',
     roof: 'shingles_red', roofTile: 2.6, layout: 'gable', pitch: 46, maxRise: 5, eave: 0.6, gableOH: 0.5, thick: 0.22, barge: true,
-    floor: 'floor_planks', inner: 'plaster_inner', wainscot: true, halfTimber: true, gableFill: 'plaster_cream', holes: 'plaster',
+    floor: 'floor_planks', inner: 'plaster_inner', wainscot: true, halfTimber: true, gableFill: 'plaster_cream', holes: 'plaster', innerFrame: true,
     chimney: 'stone_found', win: 'flower', winW: 0.95, winH: 1.3, winY: 1.05, lamp: 'lantern', ridge: 'tile', moss: true,
     upper: { h: 1.7, out: 0.34 }, dormer: true, banner: 'banner_red',
     hall: { maxRise: 9.5, thick: 0.3, chimneys: 2, cupola: true },
@@ -93,7 +96,7 @@ export const STYLES = {
     saloon: { kinds: ['casino', 'gas'], wall: 'planks_rough', inner: 'planks_rough', logEnds: false },
   },
   adobe: {
-    wall: 'adobe', wallTile: 3.0, base: null, beam: 'timber_dark', trim: 'brass', layout: 'flat', round: true, splash: [0.7, 0.6, 0.5], holes: 'adobe',
+    wall: 'adobe', wallTile: 3.0, base: null, beam: 'timber_dark', trim: 'brass', layout: 'flat', round: true, holes: 'adobe',
     floor: 'flagstone', inner: 'adobe_inner', wainscot: false, awnings: ['canvas_stripe', 'canvas_teal', 'canvas_mustard'],
     win: 'port', winW: 0.85, winH: 0.85, winY: 1.45, lamp: 'goblin', pipes: true, banner: 'banner_goblin',
     int: {
@@ -135,7 +138,8 @@ function shader(b, S, RH) {
       const k = 0.78 + 0.14 * sstep(0.1, H, y) - (ny < -0.5 ? 0.08 : 0);
       return [k, k * 0.95, k * 0.88];
     }
-    let k = 0.62 + 0.38 * sstep(-0.3, 1.6, y);
+    // (adobe keeps its foot lighter: the painted splash band decal darkens it, with a ragged edge)
+    let k = adobe ? 0.74 + 0.26 * sstep(-0.3, 1.6, y) : 0.62 + 0.38 * sstep(-0.3, 1.6, y);
     // a soft, uneven wash so long walls aren't one flat value
     k *= 0.95 + 0.05 * Math.sin(x * 0.83 + z * 0.61 + 1.3) * Math.sin(y * 0.9 + x * 0.27);
     let hue = 0;
@@ -150,7 +154,9 @@ function shader(b, S, RH) {
     if (timber && Math.abs(ny) < 0.5 && y > RH - 1.2 && y < RH + 0.05) { const t = sstep(RH - 1.2, RH, y); g *= 1 - 0.02 * t; bl *= 1 - 0.08 * t; }
     if (sp && y < 1.2) { const t = 1 - sstep(0.45, 0.95, y); r *= 1 - (1 - sp[0]) * t; g *= 1 - (1 - sp[1]) * t; bl *= 1 - (1 - sp[2]) * t; }
     // Gadgetzan: the top of every wall catches the sun (a warm lit band under the parapet)
-    if (adobe && Math.abs(ny) < 0.5 && y > H * 0.7 && y < H + 0.02) { const t = sstep(H * 0.7, H * 0.92, y); r *= 1 + 0.13 * t; g *= 1 + 0.09 * t; bl *= 1 + 0.02 * t; }
+    if (adobe && Math.abs(ny) < 0.5 && y > H * 0.7 && y < H + 0.02) { const t = sstep(H * 0.7, H * 0.92, y); r *= 1 + 0.24 * t; g *= 1 + 0.2 * t; bl *= 1 + 0.12 * t; }
+    // the rounded corners are rubbed and sun-bleached a shade paler
+    if (adobe && Math.abs(x) > ix + 0.05 && Math.abs(z) > iz + 0.05 && y < H + 0.02) { const t = 0.09 * sstep(0.2, 1.2, y); r *= 1 + t; g *= 1 + t * 1.1; bl *= 1 + t * 1.25; }
     return [r, g, bl];
   };
 }
@@ -222,8 +228,10 @@ function freeSpot(c, side, w, t0 = 0, taken = []) {
 function walls(c) {
   const { K, S, H, ix, iz, dw, D, W, R } = c;
   const m = mat(S.wall), ny = Math.max(2, Math.ceil(H / 0.6)), sg = L => Math.max(1, Math.ceil(L / 1.6));
-  // log walls keep v aligned so the 3D log ends match the painted courses
-  const o = { uvSpace: 'kit', tile: S.wallTile, uvOff: [R(), S.logEnds ? 0 : R()], tint: S.wallTint };
+  // log walls keep v aligned so the 3D log ends match the painted courses; adobe lays the top of its tile
+  // (the damp under the parapet) at the top of the wall
+  const u0 = R(), r1 = S.logEnds ? 0 : R(), vOff = S.round ? Math.ceil(H / S.wallTile) - H / S.wallTile : r1;
+  const o = { uvSpace: 'kit', tile: S.wallTile, uvOff: [u0, vOff], tint: S.wallTint };
   c.wallO = o;
   // plastered (half-timbered) walls get their outer face as a separate shaded grid (plasterFace), so the
   // body stops 8 mm short of the collider's outer face
@@ -250,15 +258,73 @@ function walls(c) {
       holes(c, plan.panels, Math.floor(R() * 3.2), S.holes);
     });
   } else if (S.holes) {
-    // adobe: holes anywhere clear of the windows and the door
+    // adobe: a dark mud splash band round the foot, then per wall 3-5 places where the render fell off
+    // (mostly low down and near the corners, where knocks and rain get at it) and 1-3 patches of newer mud
+    splashBand(c);
     for (const side of ['front', 'back', 'left', 'right']) onWall(c, side, f => {
-      const busy = c.wins.filter(w => w.side === side).map(w => [w.t - c.ww / 2 - 0.5, w.t + c.ww / 2 + 0.5]);
-      if (side === 'front') busy.push([-dw - 1.2, dw + 1.2]);
-      const panels = [];
-      for (let x = -f.len / 2 + 0.7; x < f.len / 2 - 1.6; x += 1.4) if (busy.every(([a, bb]) => x + 1.3 < a || x > bb)) panels.push({ x0: x, x1: x + 1.3, y0: 0.9, y1: Math.min(H - 0.8, 2.9) });
-      holes(c, panels, 1 + Math.floor(R() * (f.len > 12 ? 4 : 2.6)), S.holes);
+      const busy = c.wins.filter(w => w.side === side).map(w => [w.t - c.ww / 2 - 0.35, w.t + c.ww / 2 + 0.35]);
+      if (side === 'front') busy.push([-dw - 1.1, dw + 1.1]);
+      const lim = f.len / 2 - 0.72;   // clear of the corner piers
+      const placed = [];
+      const put = (cells, n, sz0, sz1, low) => {
+        for (let k = 0, tries = 0; k < n && tries < 40; tries++) {
+          const sz = sz0 + R() * (sz1 - sz0), hw = sz / 2;
+          const x = R() < 0.6 ? (R() < 0.5 ? -1 : 1) * (lim - hw - R() * 1.3) : (R() - 0.5) * 2 * (lim - hw);
+          const y = low && R() < 0.78 ? 0.45 + R() * Math.max(0.2, H * 0.5 - 0.6) : 0.6 + R() * (H - 1.3);
+          if (Math.abs(x) + hw > lim || y + sz * 0.31 > H - 0.25) continue;
+          if (busy.some(([a, bb]) => x + hw > a && x - hw < bb)) continue;
+          if (placed.some(p => Math.abs(p.x - x) < (p.s + sz) * 0.5 && Math.abs(p.y - y) < (p.s + sz) * 0.33)) continue;
+          placed.push({ x, y, s: sz });
+          decal(c, cells[Math.floor(R() * cells.length)], x, y, sz, (R() - 0.5) * 0.3, true);
+          k++;
+        }
+      };
+      const long = f.len > 8;
+      put(HOLE_CELLS.adobe, long ? 3 + Math.floor(R() * 3) : 1 + Math.floor(R() * 2), 0.6, 1.0, true);
+      put(HOLE_CELLS.adobePatch, long ? 1 + Math.floor(R() * 3) : Math.floor(R() * 2), 0.75, 1.2, false);
     });
   }
+}
+// The battered mud skirt along the foot of every adobe wall (framing builds it): how far its face stands
+// out from the wall face at height y (wall frame), 0.33 m at the ground, gone by 1.35 m.
+const skirtZ = y => 0.006 + 0.32 * Math.pow(1 - Math.min(1, Math.max(0, (y + 0.15) / 1.5)), 1.5);
+// The mud splash band round the foot of an adobe building: an alpha decal ribbon lying on the mud skirt of
+// each wall (between the corner piers, broken at the door), from just under the ground to ~0.85 m.
+function splashBand(c) {
+  const { K, dw } = c, R = c.R;
+  const ys = [-0.15, 0.05, 0.25, 0.45, 0.65, 0.86];
+  for (const side of ['front', 'back', 'left', 'right']) onWall(c, side, f => {
+    const e = f.len / 2 - 0.3;
+    const segs = side === 'front' ? [[-e, -dw - 0.3], [dw + 0.3, e]] : [[-e, e]];
+    for (const [a, bb] of segs) {
+      if (bb - a < 0.3) continue;
+      const pos = [], uv = [], idx = [], u0 = R() * 3, nx = Math.max(1, Math.ceil((bb - a) / 0.75)), ph = R() * 6;
+      for (let i = 0; i <= nx; i++) for (let j = 0; j < ys.length; j++) {
+        // the band's top wanders up and down along the wall (v bent by a power per column, kept in 0..1)
+        const x = a + (bb - a) * i / nx, y = ys[j], p = Math.exp(0.32 * Math.sin(x * 0.7 + ph) + 0.14 * Math.sin(x * 1.9 - ph));
+        pos.push(x, y, skirtZ(y) + 0.014); uv.push(u0 + x / 3, Math.pow((y + 0.15) / 1.01, p));
+        if (i && j) { const q = i * ys.length + j, p0 = q - ys.length; idx.push(p0 - 1, q - 1, p0, p0, q - 1, q); }
+      }
+      const g = new THREE.BufferGeometry();
+      g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      g.setIndex(idx);
+      g.computeVertexNormals();
+      const m = mat('arch_splash', { transparent: true });
+      m.depthWrite = false; m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -1;
+      K.add(m, g, { uv: 'keep', cast: false });
+    }
+  });
+}
+// one decal from the wall_holes atlas at (x, y) in the current wall frame, sz wide
+// (skirt: bent to lie on the adobe mud skirt where it reaches up under the decal; z0 > 0.01: on an inner
+// wall's lining, shaded like the room)
+function decal(c, cell, x, y, sz, rz = 0, skirt = false, z0 = 0.006) {
+  const low = skirt && y - sz * 0.4 < 1.35;
+  const g = new THREE.PlaneGeometry(sz, sz * 0.62, low ? 4 : 1, low ? 4 : 1);
+  holeUV(g, cell);
+  const cr = Math.cos(rz), sr = Math.sin(rz);
+  c.K.add(holeMat(), g, { uv: 'keep', at: matrix(x, y, 0, 0, 0, rz), warp: v => { v.z = (low ? skirtZ(y + v.y * cr + v.x * sr) : z0) + 0.01; }, shade: z0 > 0.01 ? true : () => 0.96, cast: false });
 }
 function quarter(c, m, sx, sz, y0, y1, r, o, cx = c.ix, cz = c.iz) {
   const th0 = sx > 0 ? (sz > 0 ? 0 : Math.PI / 2) : (sz > 0 ? 1.5 * Math.PI : Math.PI);
@@ -462,6 +528,14 @@ function interior(c) {
   const im = mat(S.inner), y0 = S.wainscot ? 1.1 : 0.1, hh = H - y0, cy = y0 + hh / 2;
   const sy = Math.max(3, Math.ceil(hh / 0.45)), sl = L => Math.max(1, Math.ceil(L / 0.6));
   const o = { uvSpace: 'kit', tile: S.wallTile, uvOff: [R(), R()], cast: false, tint: S.innerTint };
+  // plaster and indoor mud: warm grime gathered under the ceiling and along the wainscot cap (or the floor),
+  // uneven along the wall
+  if (S.inner === 'plaster_inner' || S.inner === 'adobe_inner') o.ao = (x, y, z) => {
+    const Y = cy + y, top = 1 - sstep(0, 0.75, H - Y), bot = 1 - sstep(0, 0.42, Y - y0);
+    const n = 0.68 + 0.32 * Math.sin((x + z) * 1.7 + 0.5) * Math.sin((x - z) * 0.53 + 1.1);
+    const k = 1 - (0.3 * top + 0.2 * bot) * n;
+    return [k, k * 0.95, k * 0.85];
+  };
   const t = 0.02, e = t / 2 + 0.002;
   K.box(im, 2 * ix, hh, t, 0, cy, -iz + e, { ...o, seg: [sl(2 * ix), sy, 1] });
   K.box(im, t, hh, 2 * iz, -ix + e, cy, 0, { ...o, seg: [1, sy, sl(2 * iz)] });
@@ -490,36 +564,109 @@ function interior(c) {
     else if (I.hearth) hearth(c);
     if (I.kiva) kiva(c);
   }
+  if (S.innerFrame) innerFrame(c);
+  // indoor mud walls: a few patches and a place or two where the mud brick shows
+  if (S.holes === 'adobe') for (const side of ['left', 'right', 'back']) {
+    const half = side === 'back' ? ix : iz;
+    for (let k = 0, tries = 0; k < 2 && tries < 12; tries++) {
+      const t = (R() - 0.5) * 2 * (half - 0.9), sz = 0.6 + R() * 0.4;
+      if (c.wins.some(w => w.side === side && Math.abs(t - w.t) < c.ww / 2 + sz / 2 + 0.2)) continue;
+      const cells = k ? HOLE_CELLS.adobe : HOLE_CELLS.adobePatch, y = 0.7 + R() * (H - 1.6);
+      onInner(c, side, t, () => decal(c, cells[Math.floor(R() * cells.length)], 0, y, sz, (R() - 0.5) * 0.3, false, 0.024));
+      k++;
+    }
+  }
+}
+
+// Goldshire framing inside a plastered room: square posts in the corners, posts flanking the door and
+// every window (and every ~2.8 m along a blank stretch), and a wall plate along the top of each wall
+// under the ceiling, all clear of the shelves, the hearth, the bar and the door jambs. In the shops the
+// posts are booked on the walls, so the trophies and racks hang between them.
+function innerFrame(c) {
+  const { K, S, b, ix, iz, H, dw, R } = c;
+  const bm = mat(S.beam), yp = H - 0.26, shop = b.kind === 'pawn' || b.kind === 'store';
+  // corner posts (square, standing in the corner of the lining)
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) K.box(bm, 0.24, yp - 0.1, 0.24, sx * (ix - 0.14), (yp + 0.1) / 2, sz * (iz - 0.14), { tile: 1.2, cast: false, seg: [1, 2, 1] });
+  for (const side of ['front', 'back', 'left', 'right']) {
+    const half = side === 'front' || side === 'back' ? ix : iz;
+    const taken = c.taken[side];
+    if (shop) taken.push([-half, -half + 0.3], [half - 0.3, half]);
+    // the wall plate (stopping short of the corner posts, so the plates never overlap)
+    onInner(c, side, 0, () => K.box(bm, 2 * half - 0.5, 0.2, 0.12, 0, H - 0.16, 0.08, { grain: 'x', tile: 1.2, cast: false, seg: [Math.ceil(half), 1, 1] }));
+    let ts = [];
+    for (const w of c.wins.filter(w => w.side === side)) ts.push(w.t - c.ww / 2 - 0.27, w.t + c.ww / 2 + 0.27);
+    if (side === 'front') ts.push(-dw - 0.34, dw + 0.34);
+    if (shop && side === 'back') ts = [];           // the shelves stand along the back wall
+    else {
+      // fill long blank stretches so no two posts stand more than ~2.8 m apart
+      const all = [-half + 0.14, ...ts, half - 0.14].sort((p, q) => p - q);
+      for (let i = 0; i < all.length - 1; i++) { const g = all[i + 1] - all[i], n = Math.ceil(g / 2.8); for (let k = 1; k < n; k++) ts.push(all[i] + g * k / n + (R() - 0.5) * 0.1); }
+    }
+    ts.sort((p, q) => p - q);
+    let last = -1e9;
+    for (const t of ts) {
+      if (Math.abs(t) > half - 0.45 || t - last < 0.5) continue;
+      if (taken.some(([a, bb]) => t > a - 0.14 && t < bb + 0.14)) continue;
+      if (c.wins.some(w => w.side === side && Math.abs(t - w.t) < c.ww / 2 + 0.22)) continue;
+      last = t;
+      const pw = 0.19 + R() * 0.05;
+      onInner(c, side, t, () => K.box(bm, pw, yp - 0.1, 0.1, 0, (yp + 0.1) / 2, 0.07, { tile: 1.2, cast: false, seg: [1, 2, 1] }));
+      if (shop) taken.push([t - 0.16, t + 0.16]);
+    }
+  }
 }
 
 // The floor, laid piece by piece so it never reads as one repeating tile: boards (timber, farm, frontier) in
-// staggered rows, granite flags (Kharanos) or fired clay tiles (Gadgetzan) with ragged joints, each piece
-// its own tint, paler and greyer where feet wear it (the path in from the door, round the counters), over a
-// dark base that shows in the joints. One geometry; per-piece colour comes through the kit's ao hook.
+// staggered rows, or big irregular flags (Kharanos granite, Gadgetzan sandstone), each flag a whole painted
+// stone from a 2×2 atlas with its edges bevelled down into the joints. Each piece has its own tint (within one
+// hue family), the traffic paths are worn (darker grime on boards, a paler polish on stone) and the corners
+// lie in soft shadow, over a dark base that shows in the joints. One geometry; per-vertex colour comes
+// through the kit's ao hook.
+// timber: honey boards, the tints pulled toward grey-blue so the floor sits ~20% less saturated and a little darker
+const tame = (hex, k = [0.83, 0.95, 1.16]) => { const c = new THREE.Color(hex); return [c.r * k[0], c.g * k[1], c.b * k[2]]; };
 const FLOORS = {
-  timber: { kind: 'planks', mat: 'wood_light', cols: ['#c89868', '#b8885a', '#d0a272', '#a87850', '#bc8c5e', '#c49064'] },
-  farm: { kind: 'planks', mat: 'wood_light', cols: ['#b8a084', '#a8907a', '#c0aa8a', '#9a8670', '#b09a7e'] },
-  frontier: { kind: 'planks', mat: 'wood_light', cols: ['#b07a54', '#9a6a48', '#a87650', '#8e6244', '#b8845c'], wide: true },
-  alpine: { kind: 'flags', mat: 'rock_granite', cols: ['#d8dce4', '#c8ccd4', '#e0e2e6', '#bcc2cc', '#d0ccc8'] },
-  adobe: { kind: 'flags', mat: 'clay', cols: ['#d8b88c', '#c8a47a', '#e0c49a', '#bc9670', '#d4ae84', '#ccaa80', '#c49064'], grout: '#8a6c52' },
+  timber: { kind: 'planks', mat: 'wood_light', cols: ['#c89868', '#b8885a', '#d0a272', '#a87850', '#bc8c5e', '#c49064'].map(h => tame(h)), wear: '#5e5048' },
+  farm: { kind: 'planks', mat: 'wood_light', cols: ['#b8a084', '#a8907a', '#c0aa8a', '#9a8670', '#b09a7e'], wear: '#6a6058' },
+  frontier: { kind: 'planks', mat: 'wood_light', cols: ['#b07a54', '#9a6a48', '#a87650', '#8e6244', '#b8845c'], wide: true, wear: '#5a4a40' },
+  alpine: { kind: 'flags', mat: 'floor_granite', cols: ['#f4f6fa', '#eef0f4', '#f8f6f2', '#e8ebf0'], grout: '#4a464c', wear: '#ffffff' },
+  adobe: { kind: 'flags', mat: 'floor_flags', cols: ['#fff4e8', '#f8ecdc', '#fcf0e0', '#f4e6d2'], grout: '#6a5040', wear: '#fffaf0' },
 };
-function floorPieces(c) {
-  const { K, S, ix, iz, b, R } = c;
-  const F = FLOORS[S.name] || FLOORS.timber;
-  hplane(c, mat(S.floor), 2 * ix, 2 * iz, 0, 0.086, 0, { tile: 3, grain: 'z', tint: F.grout || '#5a463a', cast: false });
-  const pos = [], uv = [], idx = [], pieces = [];
-  const quad = (pts, uvs, tint) => {
-    const i0 = pos.length / 3;
-    for (const [x, z] of pts) pos.push(x, 0.1, z);
-    uv.push(...uvs.flat());
-    idx.push(i0, i0 + 2, i0 + 1, i0, i0 + 3, i0 + 2);
-    pieces.push({ pts, tint });
+// where feet go (building frame): the walk in from the door, and on to the counter or the tables, the
+// slots, the machine and the bar
+function wearAt(c) {
+  const { b, iz } = c;
+  const segs = b.kind === 'casino' ? [[0, iz, 0, -1.2], [0, -0.9, -5.2, -1.6], [-5.2, -1.6, -6.6, -7.4], [0, -0.6, 5.4, -5.5], [0, 2.2, 8.6, 2.6], [-1, 3.5, -7.2, 0.8], [1, 3.5, -2.8, 0.8]]
+    : b.kind === 'gas' ? [[0, iz, 0, -iz * 0.4]] : [[0, iz, 0, -0.95], [-2.6, -1.0, 2.6, -1.0]];
+  return (x, z) => {
+    let w = 0;
+    for (const [ax, az, bx, bz] of segs) {
+      const vx = bx - ax, vz = bz - az, t = Math.max(0, Math.min(1, ((x - ax) * vx + (z - az) * vz) / (vx * vx + vz * vz)));
+      const dx = x - ax - vx * t, dz = z - az - vz * t;
+      w = Math.max(w, Math.exp(-(dx * dx + dz * dz) / 0.8));
+    }
+    return w;
   };
-  // wear: the walk in from the door and along the front of the room
-  const wear = (x, z) => Math.min(1, Math.exp(-x * x / 2.2) * sstep(-iz * 0.6, iz, z) + 0.5 * Math.exp(-Math.pow(z - (iz - 1.6), 2) / 1.5));
-  const tintAt = (x, z) => { const c0 = new THREE.Color(pick(R, F.cols)).multiplyScalar(0.94 + R() * 0.12); const w = wear(x, z) * (0.6 + R() * 0.4); c0.lerp(new THREE.Color('#e8e0d0'), 0.18 * w); return c0.toArray(); };
-  const gap = F.kind === 'planks' ? 0.012 : 0.03;
-  if (F.kind === 'planks') {
+}
+function floorPieces(c) {
+  const { K, S, ix, iz, R } = c;
+  const F = FLOORS[S.name] || FLOORS.timber;
+  const flags = F.kind === 'flags';
+  hplane(c, mat(S.floor), 2 * ix, 2 * iz, 0, flags ? 0.075 : 0.086, 0, { tile: 3, grain: 'z', tint: F.grout || '#5a463a', cast: false });
+  const pos = [], uv = [], idx = [], col = [];
+  const wear = wearAt(c), wc = new THREE.Color(F.wear);
+  // a piece's tint: one of the style's, ±6%, worn where the paths run
+  const tintAt = (x, z) => {
+    const c0 = new THREE.Color(); const p = pick(R, F.cols);
+    if (Array.isArray(p)) c0.setRGB(p[0], p[1], p[2]); else c0.set(p);
+    c0.multiplyScalar(0.94 + R() * 0.12);
+    c0.lerp(wc, (flags ? 0.12 : 0.3) * wear(x, z) * (0.7 + R() * 0.3));
+    return c0;
+  };
+  // soft shadow gathered in the corners of the room (the relight adds the wall junctions)
+  const corner = (x, z) => { const dx = ix - Math.abs(x), dz = iz - Math.abs(z); return 1 - 0.2 * Math.exp(-(dx * dx + dz * dz) / 2.2); };
+  const vtx = (x, y, z, u, v, t, k = 1) => { pos.push(x, y, z); uv.push(u, v); const kk = k * corner(x, z); col.push(t.r * kk, t.g * kk, t.b * kk); return pos.length / 3 - 1; };
+  if (!flags) {
+    const gap = 0.012;
     // rows across z, boards along x, ends staggered; each board cut into ~0.7 m segments for the relight
     const pw = F.wide ? 0.3 : 0.24;
     for (let z0 = -iz; z0 < iz - 0.01; z0 += pw) {
@@ -534,27 +681,41 @@ function floorPieces(c) {
             const xa = a + (x1 - a) * k / n + (k ? 0 : gap / 2), xb = a + (x1 - a) * (k + 1) / n - (k === n - 1 ? gap / 2 : 0);
             const za = z0 + gap / 2, zb = z1 - gap / 2;
             const v = x => vo + (x - a) / 1.2, u0 = uo, u1 = uo + 0.22;
-            quad([[xa, za], [xb, za], [xb, zb], [xa, zb]], [[u0, v(xa)], [u0, v(xb)], [u1, v(xb)], [u1, v(xa)]], tint);
+            // the boards' worn middles: a touch of the path grime fades toward each board's ends
+            const i0 = vtx(xa, 0.1, za, u0, v(xa), tint), i1 = vtx(xb, 0.1, za, u0, v(xb), tint), i2 = vtx(xb, 0.1, zb, u1, v(xb), tint), i3 = vtx(xa, 0.1, zb, u1, v(xa), tint);
+            idx.push(i0, i2, i1, i0, i3, i2);
           }
         }
         x0 = x1;
       }
     }
   } else {
-    // stones in rows, or square-ish clay tiles; joints a little ragged
-    const tiles = F.kind === 'tiles';
-    const T = tiles ? 0.9 : 2.4;
+    // big flags, 0.6-1.1 m, in rows 0.45-0.8 m deep with the joints staggered; now and then a short flag
+    // is split into two small ones across the row. Each is a whole stone from the atlas, its top inset
+    // from the joint by a bevel that drops 1.5 cm, the bevel darker.
+    const gap = 0.03, bev = 0.04, drop = 0.015;
+    const flag = (x0, x1, z0, z1) => {
+      if (x1 - x0 < 0.12 || z1 - z0 < 0.12) return;
+      const j = () => (R() - 0.5) * 0.024;
+      const P = [[x0 + gap / 2 + j(), z0 + gap / 2 + j()], [x1 - gap / 2 + j(), z0 + gap / 2 + j()], [x1 - gap / 2 + j(), z1 - gap / 2 + j()], [x0 + gap / 2 + j(), z1 - gap / 2 + j()]];
+      const cx = (x0 + x1) / 2, cz = (z0 + z1) / 2, tint = tintAt(cx, cz);
+      const cell = Math.floor(R() * 4), cu = (cell % 2) * 0.5, cv = cell < 2 ? 0.5 : 0, e = 0.006;
+      // atlas uv of a point (outer corners on the cell's edge; the stone's painted rim sits just inside)
+      const w = x1 - x0, d = z1 - z0;
+      const UV = (x, z) => [cu + e + (0.5 - 2 * e) * (x - x0) / w, cv + e + (0.5 - 2 * e) * (1 - (z - z0) / d)];
+      const inner = P.map(([x, z]) => [x + Math.sign(cx - x) * bev, z + Math.sign(cz - z) * bev]);
+      const o = P.map(([x, z]) => vtx(x, 0.1 - drop, z, ...UV(x, z), tint, 0.72));
+      const ii = inner.map(([x, z]) => vtx(x, 0.1, z, ...UV(x, z), tint, 1));
+      idx.push(ii[0], ii[2], ii[1], ii[0], ii[3], ii[2]);
+      for (let k = 0; k < 4; k++) { const k2 = (k + 1) % 4; idx.push(o[k], ii[k2], o[k2], o[k], ii[k], ii[k2]); }
+    };
     for (let z0 = -iz; z0 < iz - 0.01;) {
-      const rh = tiles ? 0.4 : 0.5 + R() * 0.25, z1 = Math.min(iz, z0 + rh);
-      let x0 = -ix - R() * (tiles ? 0.2 : 0.5);
+      const rh = 0.45 + R() * 0.35, z1 = iz - (z0 + rh) < 0.35 ? iz : Math.min(iz, z0 + rh);
+      let x0 = -ix - R() * 0.5;
       while (x0 < ix) {
-        const sw = tiles ? 0.4 : 0.5 + R() * 0.45, x1 = Math.min(ix, x0 + sw), a = Math.max(-ix, x0);
-        if (x1 - a > 0.08 && z1 - z0 > 0.08) {
-          const j = () => (R() - 0.5) * (tiles ? 0.012 : 0.05);
-          const pts = [[a + gap / 2 + j(), z0 + gap / 2 + j()], [x1 - gap / 2 + j(), z0 + gap / 2 + j()], [x1 - gap / 2 + j(), z1 - gap / 2 + j()], [a + gap / 2 + j(), z1 - gap / 2 + j()]];
-          const ou = R() * 4, ov = R() * 4;
-          quad(pts, pts.map(([x, z]) => [ou + x / T, ov + z / T]), tintAt((a + x1) / 2, (z0 + z1) / 2));
-        }
+        const sw = 0.6 + R() * 0.5, x1 = ix - (x0 + sw) < 0.3 ? ix : Math.min(ix, x0 + sw), a = Math.max(-ix, x0);
+        if (sw < 0.78 && z1 - z0 > 0.6 && R() < 0.3) { const zm = z0 + (z1 - z0) * (0.4 + R() * 0.2); flag(a, x1, z0, zm); flag(a, x1, zm, z1); }
+        else flag(a, x1, z0, z1);
         x0 = x1;
       }
       z0 = z1;
@@ -563,12 +724,11 @@ function floorPieces(c) {
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
-  g.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(pos.length).fill(0).map((_, k) => (k % 3 === 1 ? 1 : 0)), 3));
   g.setIndex(idx);
-  // per-piece tint, looked up from the vertex (each vertex belongs to exactly one piece, in order)
+  g.computeVertexNormals();
+  // per-vertex tint (each vertex belongs to exactly one piece)
   let vi = 0;
-  const tints = pieces.flatMap(p => [p.tint, p.tint, p.tint, p.tint]);
-  K.add(mat(F.mat), g, { uv: 'keep', cast: false, ao: () => tints[vi++] });
+  K.add(mat(F.mat), g, { uv: 'keep', cast: false, ao: () => { const k = vi++ * 3; return [col[k], col[k + 1], col[k + 2]]; } });
 }
 
 // ceilings: board ceiling + beams (timber), joists + tie beam (farm), massive beams on stone corbels
@@ -925,7 +1085,7 @@ function framing(c) {
       const e = f.len / 2 - 0.3;
       const segs = side === 'front' ? [[-e, -dw - 0.3], [dw + 0.3, e]] : [[-e, e]];
       for (const [a, bb] of segs) if (bb - a > 0.3) K.box(mat(S.wall), bb - a, 1.5, 0.3, (a + bb) / 2, 0.6, 0.15, { ...o, seg: [Math.ceil((bb - a) / 1.2), 4, 1],
-        warp: v => { if (v.z > 0) { const t = Math.min(1, Math.max(0, (v.y + 0.75) / 1.5)); v.z = -0.15 + 0.32 * Math.pow(1 - t, 1.5) + 0.006; } } });
+        warp: v => { if (v.z > 0) v.z = -0.15 + skirtZ(v.y + 0.6); } });
     });
     // a proud mud frieze band under the vigas, a shade darker, with a row of little dark niches
     for (const side of ['front', 'back', 'left', 'right']) onWall(c, side, f => {
@@ -936,7 +1096,10 @@ function framing(c) {
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const h = H * 0.58 + (R() - 0.3) * 1.2, x = sx * (ox + 0.3), z = sz * (oz + 0.3), ph = R() * 9, r0 = 0.72 + R() * 0.16, r1 = r0 / (1.35 + R() * 0.15);
       const lean = [(R() - 0.5) * 0.08, (R() - 0.5) * 0.08];
-      K.cyl(mat(S.wall), [x, -0.2, z], [x + lean[0], h, z + lean[1]], r0, r1, { sides: 12, hseg: 5, uvScale: [2, h / 3.2],
+      // (its foot splashed with mud like the walls' skirt, the band's top wavering round it)
+      const L = h + 0.2;
+      K.cyl(mat(S.wall), [x, -0.2, z], [x + lean[0], h, z + lean[1]], r0, r1, { sides: 12, hseg: 10, uvScale: [2, h / 3.2],
+        ao: (vx, vy, vz) => { const yw = vy + L / 2 - 0.2, a = Math.atan2(vz, vx), t = 1 - sstep(0.32 + 0.1 * Math.sin(a * 3 + ph), 0.68 + 0.1 * Math.sin(a * 2 - ph), yw); return [1 - 0.36 * t, 1 - 0.42 * t, 1 - 0.46 * t]; },
         warp: v => { const a = Math.atan2(v.z, v.x); const k = 1 + 0.09 * Math.sin(a * 3 + v.y * 2 + ph) + 0.06 * Math.sin(a * 5 - v.y * 3.1 + ph * 2); v.x *= k; v.z *= k; } });
       K.add(mat(S.wall), new THREE.SphereGeometry(r1 + 0.03, 10, 6, 0, TAU, 0, Math.PI / 2), { uv: 'keep', uvScale: [1, 0.4], at: matrix(x + lean[0], h - 0.03, z + lean[1], ph, 0, 0, new THREE.Vector3(1, 0.5 + R() * 0.3, 1)),
         warp: v => { v.y *= 1 + 0.25 * Math.sin(v.x * 9 + ph) * Math.sin(v.z * 7); } });
@@ -1186,7 +1349,11 @@ function gableFill(c, P, wf, sgn, { emblem = false } = {}) {
   if (S.gableStone) {
     K.prism(mat('granite_block'), [[-hs, H], [hs, H], [w2, y2], [-w2, y2]], z0, 0.3, { uvSpace: 'kit', tile: S.wallTile, tint: '#d8d2c8', uvOff: [R(), R()] });
     K.prism(mat(S.gableFill), [[-w2, y2], [w2, y2], [0, ap]], z0, 0.3, { uvSpace: 'kit', tile: S.wallTile, tint: S.gableTint, uvOff: [R(), R()] });
-  } else K.prism(mat(S.gableFill), P.under, z0, 0.3, { uvSpace: 'kit', tile: S.wallTile, tint: S.gableTint, uvOff: [R(), R()] });
+  } else {
+    // a barn's front gable has its hay loft door cut through it (barnFront builds the loft behind)
+    const L = sgn > 0 && S.layout === 'gambrel' ? c.loft : null;
+    K.prism(mat(S.gableFill), P.under, z0, 0.3, { uvSpace: 'kit', tile: S.wallTile, tint: S.gableTint, uvOff: [R(), R()], holes: L ? [[[L.x0, L.y0], [L.x1, L.y0], [L.x1, L.y1], [L.x0, L.y1]]] : [] });
+  }
   const bm = mat(S.beam), z = wf + sgn * 0.04;
   if (S.halfTimber || S.name === 'alpine' || S.layout === 'gambrel') {
     const tm = S.layout === 'gambrel' ? mat(S.trim || S.beam) : bm, tt = S.layout === 'gambrel' ? S.trimTint : null;
@@ -1239,6 +1406,7 @@ function pitchedRoof(c) {
     // one roof, ridge running front to back: the whole front is a gable
     const P = profileOf(c, ox, kind, kind === 'gambrel' ? S.pitch : Math.min(S.pitch, Math.atan(maxRise * 1.15 / ox) / D2R), eave, H);
     roofSlabs(c, P, -oz - gOH, oz + gOH, { roofMat: S.roof, thick: S.thick, barge: S.barge, hs: ox });
+    if (kind === 'gambrel') c.loft = loftRect(c, P);
     gableFill(c, P, oz, 1); gableFill(c, P, -oz, -1, { emblem: true });
     c.signZ = oz + 0.1;
     c.apex = P.apex;
@@ -1358,6 +1526,51 @@ function chimney(c, x, z, surf, apex) {
   c.smoke = c.world(x, y1 + 0.4, z);
 }
 
+// The hay loft door in a barn's front gable (front-gable frame, x across, y up): { x0, x1, y0, y1, top,
+// hh, lw2 }, over the sign (and the cartwheel of lanterns over it), or null when the gable has no room.
+function loftRect(c, P) {
+  const top = c.sign ? c.sign.top + 2.3 : c.RH + 1.6;
+  if (P.apex - top <= 1.8) return null;
+  const hh = Math.min(2.2, P.apex - top - 1.4), lw2 = Math.min(2.2, hh * 1.1);
+  // every corner (with the frame round it) must be inside the gable
+  const U = P.under, inside = (x, y) => {
+    let r = false;
+    for (let i = 0, j = U.length - 1; i < U.length; j = i++) {
+      const [xi, yi] = U[i], [xj, yj] = U[j];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) r = !r;
+    }
+    return r;
+  };
+  for (const [x, y] of [[-lw2 / 2 - 0.3, top - 0.1], [lw2 / 2 + 0.3, top - 0.1], [-lw2 / 2 - 0.3, top + hh + 0.3], [lw2 / 2 + 0.3, top + hh + 0.3]]) if (!inside(x, y)) return null;
+  return { x0: -lw2 / 2, x1: lw2 / 2, y0: top, y1: top + hh, top, hh, lw2 };
+}
+
+// The loft seen through its door (the hole cut in the gable, whose reveal is the gable's own boards): a
+// box of boards behind it going dark toward the back and up under the roof (warm brown, never black), a
+// rafter brace across it catching a little light, and hay heaped up to the sill, darker deeper in.
+function loft(c, L) {
+  const { K, oz, R } = c;
+  const { x0, x1, y0, y1 } = L, w = x1 - x0, h = y1 - y0;
+  const zb = oz - 0.3, D = 0.85, zk = zb - D;   // the gable's inner face, the loft's depth, its back wall
+  const pm = mat('planks_weathered');
+  // vertex colour: darkest (#2a1c12 on these boards) high up at the back, warmer where the light falls in
+  const dim = (up, deep) => { const k = 0.56 - 0.25 * up - 0.15 * deep; return [k, k * 0.74, k * 0.52]; };
+  K.quad(pm, w, h, 0, y0 + h / 2, zk, { uv: 'keep', uvScale: [w / 2.4, h / 2.4], sx: 2, sy: 3, shade: false, cast: false, ao: (x, y) => dim((y + h / 2) / h, 1) });
+  for (const s of [-1, 1]) K.quad(pm, D, h, s * w / 2, y0 + h / 2, zb - D / 2, { ry: -s * Math.PI / 2, uv: 'keep', uvScale: [D / 2.4, h / 2.4], sx: 2, sy: 3, shade: false, cast: false, ao: (x, y) => dim((y + h / 2) / h, 0.5 - s * x / D) });
+  K.quad(pm, w, D, 0, y1, zb - D / 2, { rx: Math.PI / 2, uv: 'keep', uvScale: [w / 2.4, D / 2.4], sx: 2, sy: 2, shade: false, cast: false, ao: () => dim(1.15, 0.6) });
+  K.quad(pm, w, D, 0, y0, zb - D / 2, { rx: -Math.PI / 2, uv: 'keep', uvScale: [w / 2.4, D / 2.4], shade: false, cast: false, ao: (x, y) => dim(0.1, 0.5 + y / D) });
+  // a rafter brace across the back, into the boards at both sides
+  K.beam(mat(c.S.beam), [x0 - 0.12, y1 - 0.15, zk + 0.16], [x1 + 0.12, y0 + h * 0.42, zk + 0.16], 0.2, 0.16, { shade: false, cast: false, tint: '#7a6658' });
+  K.box(mat(c.S.beam), w + 0.3, 0.2, 0.18, 0, y1 - 0.22, zk + 0.42, { grain: 'x', shade: false, cast: false, tint: '#4a3c34', seg: [1, 1, 1] });
+  // hay heaped from the back up to the sill
+  const hay = mat('thatch');
+  for (let k = 0; k < 7; k++) {
+    const t = k / 6, x = x0 + 0.15 + (w - 0.3) * ((k * 0.37 + R() * 0.3) % 1), z = zk + 0.25 + (D - 0.1) * (k % 3) / 2.4, r = 0.38 + R() * 0.16;
+    const deep = 1 - (z - zk) / D, kk = 0.66 - 0.36 * deep;
+    K.add(hay, new THREE.SphereGeometry(r, 9, 6), { uv: 'keep', uvScale: [1, 0.6], at: matrix(x, y0 + 0.05 + r * 0.3 + 0.1 * (1 - t), z, R() * 3, 0, 0, new THREE.Vector3(1.3, 0.62, 0.9)), shade: false, cast: false, tint: [0.85 * kk, 0.76 * kk, 0.52 * kk] });
+  }
+}
+
 // farm barns: big X-braced doors and trim in weathered grey-brown, a hay loft door with a hoist beam,
 // spilled hay, a round vent
 function barnFront(c, P) {
@@ -1378,11 +1591,12 @@ function barnFront(c, P) {
   const U = P.under;
   for (let i = 0; i < U.length - 1; i++) K.beam(tm, [U[i][0], U[i][1], oz + 0.07], [U[i + 1][0], U[i + 1][1], oz + 0.07], 0.2, 0.06, { tint: tr, ext: 0.2 });
   K.box(tm, 2 * c.ox + 0.1, 0.2, 0.06, 0, H + 0.02, oz + 0.07, { grain: 'x', tint: tr, seg: [3, 1, 1] });
-  const top = c.sign ? c.sign.top + 2.3 : H + 1.6;   // over the sign there's a cartwheel of lanterns first
-  if (P.apex - top > 1.8) {
-    const hh = Math.min(2.2, P.apex - top - 1.4), lw2 = Math.min(2.2, hh * 1.1);
-    // the loft door stands open: a dark opening, one leaf swung back against the boards
-    K.quad(mat('iron_wrought'), lw2, hh, 0, top + hh / 2, oz + 0.02, { tint: '#2a1e1a', shade: false });
+  const L = c.loft;
+  if (L) {
+    const { top, hh, lw2 } = L;
+    // the loft door stands open, one leaf swung back against the boards; through it the loft: a dim
+    // recess of boards going dark toward the back and the roof, a rafter across it, hay piled to the sill
+    loft(c, L);
     K.box(dm, lw2 * 0.5, hh, 0.08, -lw2 * 0.75 - 0.05, top + hh / 2, oz + 0.08, { tile: 2.4, seg: [1, 1, 1] });
     K.beam(tm, [-lw2 - 0.03, top + 0.05, oz + 0.13], [-lw2 / 2 - 0.08, top + hh - 0.05, oz + 0.13], 0.12, 0.05, { tint: tr });
     for (const [x0, y0, x1, y1] of [[-lw2 / 2, top, lw2 / 2, top], [-lw2 / 2, top + hh, lw2 / 2, top + hh], [-lw2 / 2, top, -lw2 / 2, top + hh], [lw2 / 2, top, lw2 / 2, top + hh]]) K.beam(tm, [x0, y0, oz + 0.13], [x1, y1, oz + 0.13], 0.16, 0.05, { tint: tr, ext: 0.16 });
@@ -2378,6 +2592,30 @@ function wallItem(c, kind) {
   } else if (kind === 'gearwall') {
     gear(c, -0.3, y + 0.2, 0.06, 0.4, 0, 10); gear(c, 0.32, y - 0.12, 0.08, 0.26, 0, 8);
     K.cyl(mat('brass'), [-0.8, y - 0.5, 0.1], [0.8, y - 0.5, 0.1], 0.05, 0.05, { sides: 6, cast: false });
+  } else if (kind === 'map') {
+    // a traveller's map nailed up a little askew
+    const g = new THREE.PlaneGeometry(0.96, 0.72);
+    holeUV(g, HOLE_CELLS.map[0]);
+    K.add(holeMat(), g, { uv: 'keep', at: matrix(0, y - 0.35, 0.035, 0, 0, (R() - 0.5) * 0.08), cast: false, shade: () => 0.95 });
+  } else if (kind === 'rack') {
+    // a weapon rack: two pegged rails on a backboard, a sword, a spear and a hand axe resting on them
+    const db = mat(S.beam);
+    K.box(db, 1.15, 0.14, 0.05, 0, y + 0.45, 0.03, { grain: 'x', tile: 1.2, cast: false });
+    K.box(db, 1.15, 0.12, 0.05, 0, y - 0.35, 0.03, { grain: 'x', tile: 1.2, cast: false });
+    for (const x of [-0.42, -0.05, 0.36]) for (const yy of [y + 0.45, y - 0.35]) K.cyl(wl, [x - 0.07, yy - 0.05, 0.05], [x - 0.07, yy - 0.02, 0.13], 0.018, 0.016, { sides: 5, tint: '#8a6a4a', cast: false });
+    // the sword: blade, a brass crossguard, a leather grip and a round pommel
+    K.box(iron, 0.06, 0.9, 0.014, -0.42, y - 0.08, 0.1, { tint: '#d0d0d8', cast: false });
+    K.add(iron, new THREE.ConeGeometry(0.03, 0.1, 4), { uv: 'keep', at: matrix(-0.42, y - 0.58, 0.1, 0, 0, Math.PI, new THREE.Vector3(1, 1, 0.25)), tint: '#d0d0d8', cast: false });
+    K.box(br, 0.26, 0.045, 0.05, -0.42, y + 0.38, 0.1, { cast: false });
+    K.cyl(mat('hide_patch'), [-0.42, y + 0.4, 0.1], [-0.42, y + 0.6, 0.1], 0.024, 0.024, { sides: 6, tint: '#7a5a40', cast: false });
+    K.add(br, new THREE.SphereGeometry(0.04, 8, 6), { uv: 'keep', at: matrix(-0.42, y + 0.64, 0.1), cast: false });
+    // the spear, leaning a little
+    K.cyl(wl, [-0.07, y - 0.85, 0.11], [0.0, y + 0.8, 0.11], 0.022, 0.02, { sides: 6, tint: '#a07a54', cast: false });
+    K.add(iron, new THREE.ConeGeometry(0.045, 0.24, 4), { uv: 'keep', at: matrix(0.005, y + 0.92, 0.11, 0, 0, -0.04, new THREE.Vector3(1, 1, 0.35)), tint: '#c8c8d0', cast: false });
+    K.add(mat('rope'), new THREE.TorusGeometry(0.03, 0.012, 4, 8), { uv: 'keep', at: matrix(-0.003, y + 0.76, 0.11, 0, Math.PI / 2), cast: false });
+    // the hand axe, hung head down off the top rail
+    K.cyl(wl, [0.36, y + 0.42, 0.11], [0.38, y - 0.12, 0.11], 0.022, 0.024, { sides: 6, tint: '#8a6448', cast: false });
+    K.add(iron, new THREE.CylinderGeometry(0.15, 0.15, 0.025, 10, 1, false, 0, Math.PI * 0.8), { uv: 'keep', at: matrix(0.4, y - 0.08, 0.11, 0, Math.PI / 2, Math.PI * 0.6), tint: '#b8b8c0', cast: false });
   } else if (kind === 'banner' || kind === 'tapestry') tapestry(c);
 }
 
@@ -2501,7 +2739,21 @@ function dress(c) {
         onInner(c, side, ti, () => wallItem(c, items[n++ % items.length]));
       }
     }
-    if (k === 'pawn') { hang(-ix * 0.5, 0.4); hang(ix * 0.45, 0.5); } else hang(0, 1.2);
+    if (k === 'pawn') {
+      // between the back windows and the shelves: a map with a deer skull over it on one wall, a weapon
+      // rack on the other
+      for (const [side, kinds] of [['right', ['map', 'antlers']], ['left', ['rack']]]) {
+        const tb = side === 'right' ? iz - 0.95 : -(iz - 0.95);
+        const t = freeSpot(c, side, kinds[0] === 'rack' ? 1.25 : 1.05, tb, c.taken[side]);
+        if (t === null) continue;
+        c.taken[side].push([t - 0.6, t + 0.6]);
+        onInner(c, side, t, () => {
+          if (kinds[0] === 'map') { K.push(0, 0.1, 0); wallItem(c, 'map'); K.pop(); K.push(0, 0.85, 0, 0, 0, 0, 0.78); wallItem(c, 'antlers'); K.pop(); }
+          else { K.push(0, -0.15, 0); wallItem(c, 'rack'); K.pop(); }
+        });
+      }
+      hang(-ix * 0.5, 0.4); hang(ix * 0.45, 0.5);
+    } else hang(0, 1.2);
   } else if (k === 'casino') casinoDress(c);
   else if (k === 'gas') { barrel(K, -ix + 0.45, -iz + 0.5); hang(0, -iz * 0.2); }
 }

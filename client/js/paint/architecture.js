@@ -9,7 +9,9 @@
 // Roofs (512, tile, ~2.6 m a tile; up in the texture = up the slope):
 //   shingles_red (timber)  thatch + shingles_wood (farm)  slate_roof + snow_roof (alpine)  hide_patch (frontier)
 // Trim, metal, cloth (256, tile): timber_dark  wood_light  wood_white  iron_wrought  brass  metal_green  metal_red  canvas_stripe
-// Interiors: floor_planks + carpet_casino (512, tile)  rug_red (256)  felt_table (512×256)
+// Wall decals (alpha): wall_holes (4×2 atlas: holes, patches, a map)  arch_splash (adobe foot, tiles across)  arch_streak
+// Interiors: floor_planks + carpet_casino (512, tile)  floor_flags + floor_granite (one flag per 2×2 cell)
+//   rug_red (256)  felt_table (512×256)  adobe_pier (a sign pier, wrapped once round)
 //   shelf_goods + store_goods (512×256, tile across)
 // Pieces (no tiling): door_plank  window_lead  lantern_glass  slot_face  flip_face  coin_face  pad_hit  pad_stand
 //   repo_plate  banner_red  barrel  crate  flowerbox  embers  glow_soft
@@ -484,33 +486,7 @@ register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: thre
 // Indoor plaster (Goldshire shops and the inn hall): a warmer, older cream than the outside. Big soft
 // clouds in three hues (cream, honey, a cool grey-beige where damp got in), trowel crescents with a
 // shaded lip, two re-plastered patches (fresher, paler, a lit upper-left edge and a shaded lower one),
-// a chip where the lath shows, soft smoke and damp stains running down, and hairline cracks with
-// branches. The grime along the ceiling beam and the wainscot cap is vertex colour (town_build).
-function lathHole(g, s, rnd, x, y, r, plaster) {
-  const seed = Math.floor(rnd() * 1e9);
-  wrap(s, x, y, r * 1.8, (X, Y) => {
-    const rr = rngFrom(seed), pts = [];
-    for (let k = 0; k < 12; k++) { const th = k / 12 * TAU; const rad = r * range(rr, 0.6, 1.15); pts.push([X + Math.cos(th) * rad * 1.5, Y + Math.sin(th) * rad * 0.75]); }
-    clipped(g, () => polyPath(g, pts), () => {
-      g.fillStyle = '#4a3828'; g.fillRect(X - r * 2, Y - r * 2, r * 4, r * 4);
-      // the laths: thin sawn strips with dark gaps, lit on top, a nail here and there
-      const lh = Math.max(6, r * 0.22);
-      for (let yy = Y - r * 1.2 + rr() * lh; yy < Y + r * 1.2; yy += lh * 1.45) {
-        const c = jitter(pick(rr, ['#9a7450', '#8a6644', '#a8805a']), rr, 0.08);
-        g.fillStyle = grad(g, 0, yy, 0, yy + lh, [[0, lightOf(c, 0.25)], [0.45, c], [1, shadowOf(c, 0.3)]]);
-        g.fillRect(X - r * 2, yy, r * 4, lh);
-        if (rr() < 0.5) nailHead(g, X + range(rr, -r, r), yy + lh / 2, 1.4, '#6a6266');
-      }
-      // the plaster keys squeezed between the laths
-      for (let k = 0; k < 6; k++) blob(g, X + range(rr, -r, r), Y + range(rr, -r * 0.6, r * 0.6), range(rr, 3, 6), range(rr, 2, 4), 0, shadowOf(plaster, 0.15), 0.7, 0.5);
-      g.save(); g.translate(3, 4); g.lineWidth = 10; g.strokeStyle = rgba(INK, 0.45); polyPath(g, pts); g.stroke(); g.restore();
-    });
-    g.save(); g.beginPath(); g.rect(X - r * 3, Y - r * 3, r * 6, r * 6); polyPath(g, pts); g.clip('evenodd');
-    g.save(); g.translate(1.4, 1.6); g.lineWidth = 2.6; g.strokeStyle = rgba(lightOf(plaster, 0.35), 0.65); polyPath(g, pts); g.stroke(); g.restore();
-    g.save(); g.translate(-1.2, -1.4); g.lineWidth = 2.2; g.strokeStyle = rgba(shadowOf(plaster, 0.35), 0.5); polyPath(g, pts); g.stroke(); g.restore();
-    g.restore();
-  });
-}
+// soft smoke and damp stains running down, and hairline cracks with branches. The grime along the ceiling beam and the wainscot cap is vertex colour (town_build).
 function innerPlasterPaint(g, s, rnd, cv) {
   const base = '#d6c49e';
   fill(g, s, s, base);
@@ -529,21 +505,21 @@ function innerPlasterPaint(g, s, rnd, cv) {
     });
   }
   // two re-plastered patches: fresher and paler, their edges lit upper left and shaded lower right
-  for (const [fx, fy, pw, ph] of [[0.26, 0.3, 120, 84], [0.72, 0.74, 90, 70]]) {
+  for (const [fx, fy, pw, ph] of [[0.26, 0.3, 130, 90], [0.72, 0.74, 96, 74]]) {
     const x = s * (fx + (rnd() - 0.5) * 0.08), y = s * (fy + (rnd() - 0.5) * 0.08), seed = Math.floor(rnd() * 1e9);
     wrap(s, x, y, Math.max(pw, ph), (X, Y) => {
       const rr = rngFrom(seed), pts = [];
-      for (let k = 0; k < 14; k++) { const th = k / 14 * TAU, c = Math.cos(th), sn = Math.sin(th); const sq = 1 / Math.pow(Math.pow(Math.abs(c), 3) + Math.pow(Math.abs(sn), 3), 1 / 3); pts.push([X + c * sq * pw / 2 * range(rr, 0.88, 1.08), Y + sn * sq * ph / 2 * range(rr, 0.88, 1.08)]); }
+      for (let k = 0; k < 20; k++) { const th = k / 20 * TAU, c = Math.cos(th), sn = Math.sin(th); const sq = 1 / Math.pow(Math.pow(Math.abs(c), 3) + Math.pow(Math.abs(sn), 3), 1 / 3); pts.push([X + c * sq * pw / 2 * range(rr, 0.78, 1.08), Y + sn * sq * ph / 2 * range(rr, 0.78, 1.08)]); }
       clipped(g, () => polyPath(g, pts), () => {
-        g.fillStyle = grad(g, X - pw / 2, Y - ph / 2, X + pw / 2, Y + ph / 2, [[0, '#efe2c2'], [0.6, '#e2d2ae'], [1, '#d4c29c']]);
-        g.fillRect(X - pw, Y - ph, pw * 2, ph * 2);
-        for (let k = 0; k < 7; k++) { const yy = Y - ph / 2 + rr() * ph, xx = X - pw / 2 + rr() * pw; line(g, [[xx - 20, yy], [xx, yy + 3], [xx + 22, yy - 1]], range(rr, 6, 12), rr() < 0.5 ? '#f8eed4' : '#c8b48e', 0.22); }
+        g.save(); g.globalAlpha = 0.55;
+        g.fillStyle = grad(g, X - pw / 2, Y - ph / 2, X + pw / 2, Y + ph / 2, [[0, '#e8dab6'], [0.6, '#ddcca4'], [1, '#d0bc94']]);
+        g.fillRect(X - pw, Y - ph, pw * 2, ph * 2); g.restore();
+        for (let k = 0; k < 7; k++) { const yy = Y - ph / 2 + rr() * ph, xx = X - pw / 2 + rr() * pw; line(g, [[xx - 20, yy], [xx, yy + 3], [xx + 22, yy - 1]], range(rr, 6, 12), rr() < 0.5 ? '#f4e8cc' : '#c0ac86', 0.16); }
       });
-      line(g, [...pts, pts[0]].map(([u, v]) => [u - 1, v - 1]), 2, '#fff4d8', 0.5);
-      line(g, [...pts, pts[0]].map(([u, v]) => [u + 1.4, v + 1.6]), 2.4, '#8a7656', 0.3);
+      line(g, [...pts, pts[0]].map(([u, v]) => [u - 1, v - 1]), 1.6, '#f8ecd0', 0.35);
+      line(g, [...pts, pts[0]].map(([u, v]) => [u + 1.2, v + 1.4]), 2, '#8a7656', 0.22);
     });
   }
-  lathHole(g, s, rnd, s * range(rnd, 0.55, 0.65), s * range(rnd, 0.18, 0.28), 24, base);
   // smoke and damp: soft stains running down from a few places
   for (let i = 0; i < 4; i++) {
     const x = rnd() * s, y = rnd() * s, L = range(rnd, 90, 200), w = range(rnd, 26, 60), c = i % 2 ? '#8a7a62' : '#9a8a70';
@@ -559,23 +535,24 @@ function innerPlasterPaint(g, s, rnd, cv) {
   glaze(g, s, s, '#ffdca8', 0.14, 'soft-light');
   blurTile(cv, 0.5);
 }
-register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: warm old cream in three hues, trowel crescents, two re-plastered patches, a lath chip, smoke and damp stains, branching hairline cracks (ceiling and wainscot grime are vertex colour)', paint(g, s, rnd, h, cv) { innerPlasterPaint(g, s, rnd, cv); } });
+register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: warm old cream in three hues, trowel crescents, two re-plastered patches, smoke and damp stains, branching hairline cracks (ceiling and wainscot grime are vertex colour)', paint(g, s, rnd, h, cv) { innerPlasterPaint(g, s, rnd, cv); } });
 
 // Holes and patches in the plaster as decals (4×2 atlas of 256 px cells, alpha): [0] bricks and [1]
 // fieldstone through cream plaster, [2] mud bricks and [3] a shallow scar through adobe, [4] a fresh
 // pale patch of mud render, [5] a big fallen piece showing courses of mud brick, [6] a darker, rougher
-// mud repair with straw in it, [7] a re-plastered patch on cream plaster. town_build scatters them per wall
-// (each decal maps the middle 84% × 62% of its cell).
-export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3, 5], adobePatch: [4, 6], plasterPatch: [7] };
+// mud repair with straw in it, [7] the traveller's map for the pawnbroker's wall. town_build scatters them
+// per wall (each decal maps the middle 84% × 62% of its cell).
+export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3, 5], adobePatch: [4, 6], map: [7] };
 export const HOLE_COLS = 4;
 // A repair patch (cell canvas, centred): a lumpy squarish outline, the patch's own trowel marks, a lit
 // upper-left edge and a shaded lower-right one, a faint darker halo where it was feathered in.
 function patchPaint(g, q, rnd, { col, lite, dark, straw = 0, w = 170, h = 104 }) {
   const X = q / 2, Y = q / 2, pts = [];
-  for (let k = 0; k < 16; k++) {
-    const th = k / 16 * TAU, c = Math.cos(th), sn = Math.sin(th);
-    const sq = 1 / Math.pow(Math.pow(Math.abs(c), 3) + Math.pow(Math.abs(sn), 3), 1 / 3);
-    pts.push([X + c * sq * w / 2 * range(rnd, 0.84, 1.06), Y + sn * sq * h / 2 * range(rnd, 0.82, 1.06)]);
+  for (let k = 0; k < 22; k++) {
+    const th = k / 22 * TAU, c = Math.cos(th), sn = Math.sin(th);
+    const sq = 1 / Math.pow(Math.pow(Math.abs(c), 4) + Math.pow(Math.abs(sn), 4), 1 / 4);
+    const j = k % 3 === 0 ? range(rnd, 0.68, 0.9) : range(rnd, 0.88, 1.04);   // a bite out of it here and there
+    pts.push([X + c * sq * w / 2 * j, Y + sn * sq * h / 2 * j]);
   }
   g.save(); g.globalAlpha = 0.16; g.lineWidth = 12; g.lineJoin = 'round'; g.strokeStyle = dark; polyPath(g, pts); g.stroke(); g.restore();
   clipped(g, () => polyPath(g, pts), () => {
@@ -595,7 +572,7 @@ function patchPaint(g, q, rnd, { col, lite, dark, straw = 0, w = 170, h = 104 })
   line(g, [...pts, pts[0]].map(([u, v]) => [u + 1.4, v + 1.8]), 2.8, shadowOf(dark, 0.2), 0.4);
 }
 register('wall_holes', {
-  family: F, w: 1024, h: 512, alpha: true, note: 'plaster decals (4×2 atlas, alpha): brick and fieldstone through plaster; mud brick, a scar, a big fallen piece through adobe; fresh and rough mud patches; a cream plaster patch',
+  family: F, w: 1024, h: 512, alpha: true, note: 'plaster decals (4×2 atlas, alpha): brick and fieldstone through plaster; mud brick, a scar, a big fallen piece through adobe; fresh and rough mud patches; a wall map',
   paint(g, w, rnd) {
     g.clearRect(0, 0, w, w / 2);
     const q = w / 4;
@@ -607,13 +584,14 @@ register('wall_holes', {
       { patch: { col: '#dcb88a', lite: '#f0d4a8', dark: '#a87650' } },
       { plaster: '#c89068', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52', '#a06e4a'], mortar: '#6a4830', r: 66, squash: 0.66 },
       { patch: { col: '#a87652', lite: '#c89a6e', dark: '#7a5234', straw: 40, w: 150, h: 96 } },
-      { patch: { col: '#e8dcbc', lite: '#fff4d8', dark: '#a89474', w: 160, h: 100 } },
+      { map: true },
     ];
     cells.forEach((o, i) => {
       const cx = (i % 4) * q + q / 2, cy = Math.floor(i / 4) * q + q / 2;
       // paint on a cell-sized canvas so nothing bleeds into the neighbours
       const cv = makeCanvas(q, q), gg = cv.getContext('2d');
-      if (o.patch) patchPaint(gg, q, rnd, o.patch);
+      if (o.map) { const mw = Math.round(q * 0.84), mh = Math.round(q * 0.62), mc = makeCanvas(mw, mh); mapPaint(mc.getContext('2d'), mw, mh, rnd); gg.drawImage(mc, Math.round(q * 0.08), Math.round(q * 0.19)); }
+      else if (o.patch) patchPaint(gg, q, rnd, o.patch);
       else plasterHole(gg, q * 4, rnd, q / 2, q / 2, o.r || (i === 3 ? 44 : 62), { ...o, squash: o.squash || (i === 1 ? 0.75 : 0.85) });
       g.drawImage(cv, cx - q / 2, cy - q / 2);
     });
@@ -962,6 +940,160 @@ register('arch_streak', {
     g.fillStyle = grad(g, 0, 0, 0, 30, [[0, '#4a2e1a', 0.5], [1, '#4a2e1a', 0]]); g.fillRect(6, 0, w - 12, 30);
   },
 });
+// A band of mud splashed up the foot of an adobe wall, painted into the w-wide region from y0 to y0 + h
+// (horizontally seamless): a ragged upper edge, the band darkening toward the ground, dried lighter and
+// wetter darker blotches in it, and splash dots and flicks thrown up above the edge.
+function splashBand(g, w, y0, h, rnd, { col = '#8e6040', deep = '#5e3c24', a0 = 0.5, a1 = 0.78 } = {}) {
+  const hw = (x, r, fn) => { fn(x); if (x - r < 0) fn(x + w); if (x + r > w) fn(x - w); };
+  const k1 = 2 + Math.floor(rnd() * 2), k2 = 5 + Math.floor(rnd() * 3), k3 = 11 + Math.floor(rnd() * 5), p1 = rnd() * TAU, p2 = rnd() * TAU, p3 = rnd() * TAU;
+  const top = y0 + h * 0.36;
+  const edgeY = x => top + h * (0.07 * Math.sin(TAU * k1 * x / w + p1) + 0.045 * Math.sin(TAU * k2 * x / w + p2) + 0.025 * Math.sin(TAU * k3 * x / w + p3));
+  const pts = []; for (let x = 0; x <= w; x += 4) pts.push([x, edgeY(x)]);
+  pts.push([w, y0 + h + 1], [0, y0 + h + 1]);
+  // a soft feather above the edge, then the band itself
+  g.save(); g.globalAlpha = 0.3; g.fillStyle = grad(g, 0, top - h * 0.2, 0, top + h * 0.05, [[0, col, 0], [1, col, 0.5]]); g.fillRect(0, top - h * 0.2, w, h * 0.25); g.restore();
+  g.fillStyle = grad(g, 0, top - h * 0.1, 0, y0 + h, [[0, col, a0], [0.55, mix(col, deep, 0.35), (a0 + a1) / 2], [1, deep, a1]]);
+  polyPath(g, pts); g.fill();
+  clipped(g, () => polyPath(g, pts), () => {
+    for (let i = 0; i < 26; i++) { const x = rnd() * w, y = range(rnd, top, y0 + h), rx = range(rnd, 10, 40), ry = range(rnd, 4, 12), c = rnd() < 0.55 ? lightOf(col, 0.3) : deep, a = range(rnd, 0.1, 0.22); hw(x, rx, X => blob(g, X, y, rx, ry, 0, c, a, 0.2)); }
+    // a darker damp lip right along the edge
+    line(g, pts.slice(0, -2).map(([x, y]) => [x, y + 2]), 3, deep, 0.22);
+  });
+  // splash dots and flicks thrown up out of the band
+  for (let i = 0; i < 90; i++) {
+    const x = rnd() * w, up = h * Math.pow(rnd(), 1.7) * 0.42, y = edgeY(x) - up + 2, r = range(rnd, 0.8, 2.6) * (1 - up / h * 0.8), a = range(rnd, 0.3, 0.65);
+    hw(x, r + 6, X => { if (rnd() < 0.3) line(g, [[X, y + r * 2.5], [X + range(rnd, -1.5, 1.5), y]], r * 0.8, col, a * 0.7); ellipse(g, X, y, r, r * range(rnd, 0.7, 1), 0, col, a); });
+  }
+}
+register('arch_splash', {
+  family: F, w: 512, h: 128, alpha: true, note: 'the mud splashed up the foot of an adobe wall (alpha decal, tiles across; the bottom ~55% is the band, a ragged edge, splash dots above)',
+  paint(g, w, rnd, h, cv) {
+    g.clearRect(0, 0, w, h);
+    splashBand(g, w, h * 0.06, h * 0.94, rnd, { a0: 0.62, a1: 0.86 });
+    blurTile(cv, 0.6);
+  },
+});
+// The sign piers of Gadgetzan: mud render wrapped round a square pier (u goes once round it, v from the
+// foot (bottom) to the cap (top)): damp and drips under the cap, three big places where the render fell
+// off and the mud brick courses show, vertical cracks, and the splash band at the foot.
+register('adobe_pier', {
+  family: F, size: 512, note: 'mud-brick sign pier, wrapped once round (u) and foot to cap (v): render with fallen patches showing mud brick, cracks, damp drips under the cap, a splash band at the foot',
+  paint(g, s, rnd, h, cv) {
+    adobePaint(g, s, rnd, cv, { lifts: 2 });
+    const brick = ['#a87650', '#b88458', '#9a6a46', '#b07a52', '#a06e4a'];
+    for (const [fx, fy, r] of [[0.13, 0.62, 52], [0.47, 0.38, 40], [0.8, 0.7, 58], [0.64, 0.18, 26]]) plasterHole(g, s, rnd, s * (fx + range(rnd, -0.03, 0.03)), s * fy, r, { plaster: '#c9976a', brick, mortar: '#6a4830', squash: range(rnd, 0.6, 0.8) });
+    // damp under the cap: a dark band fading down, long drips out of it
+    g.fillStyle = grad(g, 0, 0, 0, s * 0.16, [[0, '#6a4428', 0.55], [0.35, '#7a4e30', 0.3], [1, '#7a4e30', 0]]); g.fillRect(0, 0, s, s * 0.16);
+    for (let i = 0; i < 16; i++) {
+      const x = rnd() * s, L = range(rnd, 40, 170), ww = range(rnd, 4, 11), a = range(rnd, 0.16, 0.32);
+      for (const X of [x, x - s, x + s]) { g.save(); g.globalAlpha = a; g.fillStyle = grad(g, 0, 0, 0, L, [[0, '#6a4428', 1], [0.7, '#7a5030', 0.5], [1, '#7a5030', 0]]); g.beginPath(); g.moveTo(X - ww, 0); g.quadraticCurveTo(X - ww * 0.3, L * 0.6, X, L); g.quadraticCurveTo(X + ww * 0.3, L * 0.6, X + ww, 0); g.closePath(); g.fill(); g.restore(); }
+    }
+    cracks(g, s, rnd, { color: '#5a3420', count: 7, len: [40, 110], width: [0.9, 1.7], alpha: 0.45, branch: 0.4 });
+    splashBand(g, s, s * 0.8, s * 0.2, rnd, { a0: 0.42, a1: 0.7 });
+    glaze(g, s, s, '#ffe0b0', 0.08, 'soft-light');
+  },
+});
+
+// Floor flags, one stone per atlas cell (2×2), so the floor pieces each carry a whole painted stone: a
+// chipped outline over soft dark grout, a body lit from the upper left, bedding lines (sandstone) or
+// speckle (granite), worn smooth patches, pits and a hairline crack, a lit top-left bevel, a cool shaded
+// bottom-right one, and the chips' broken faces.
+function flagCell(g, X0, Y0, q, rnd, P) {
+  g.fillStyle = P.grout; g.fillRect(X0, Y0, q, q);
+  blob(g, X0 + q / 2, Y0 + q / 2, q * 0.62, q * 0.62, 0, shadowOf(P.grout, 0.25), 0.5, 0.6);
+  const m = 6, pts = [], L = q - 2 * m;
+  const corner = [[X0 + m, Y0 + m], [X0 + q - m, Y0 + m], [X0 + q - m, Y0 + q - m], [X0 + m, Y0 + q - m]];
+  const chips = new Set([Math.floor(rnd() * 32), Math.floor(rnd() * 32), rnd() < 0.6 ? Math.floor(rnd() * 32) : -1]);
+  let idx = 0;
+  for (let e = 0; e < 4; e++) {
+    const [ax, ay] = corner[e], [bx, by] = corner[(e + 1) % 4], nx = (by - ay) / L, ny = -(bx - ax) / L;
+    for (let k = 0; k < 8; k++, idx++) {
+      const t = k / 8 + (k ? range(rnd, -0.03, 0.03) : 0);
+      let inset = range(rnd, 0, 3.5) + (k === 0 ? range(rnd, 3, 7) : 0);   // the corners a little rounded off
+      if (chips.has(idx)) inset += range(rnd, 6, 13);
+      pts.push([ax + (bx - ax) * t - nx * inset, ay + (by - ay) * t - ny * inset]);
+    }
+  }
+  // a soft shadow cast into the grout on the lower right
+  g.save(); g.translate(2.5, 3); g.lineWidth = 5; g.lineJoin = 'round'; g.strokeStyle = rgba(INK, 0.35); polyPath(g, pts); g.stroke(); g.restore();
+  const c = jitter(pick(rnd, P.cols), rnd, 0.04);
+  clipped(g, () => polyPath(g, pts), () => {
+    g.fillStyle = grad(g, X0, Y0, X0 + q, Y0 + q, [[0, lightOf(c, 0.2)], [0.5, c], [1, shadowOf(c, 0.18)]]);
+    g.fillRect(X0, Y0, q, q);
+    for (let k = 0; k < 7; k++) blob(g, X0 + m + rnd() * L, Y0 + m + rnd() * L, range(rnd, 40, 90), range(rnd, 30, 60), rnd() * 3, pick(rnd, P.blot), range(rnd, 0.2, 0.34), 0.08);
+    for (let k = 0; k < 14; k++) blob(g, X0 + m + rnd() * L, Y0 + m + rnd() * L, range(rnd, 10, 30), range(rnd, 7, 20), rnd() * 3, pick(rnd, P.blot), range(rnd, 0.16, 0.3), 0.15);
+    if (P.bedding) for (let k = 0; k < 5; k++) {
+      const y = Y0 + m + rnd() * L, a = range(rnd, -0.08, 0.08), ph = rnd() * 6, pl = [];
+      for (let x = X0; x <= X0 + q; x += 8) pl.push([x, y + (x - X0) * a + 2.5 * Math.sin((x - X0) * 0.05 + ph)]);
+      line(g, pl, range(rnd, 1.5, 4), rnd() < 0.5 ? P.bedding[0] : P.bedding[1], range(rnd, 0.12, 0.24));
+    }
+    if (P.speck) for (let k = 0; k < 160; k++) ellipse(g, X0 + rnd() * q, Y0 + rnd() * q, range(rnd, 0.6, 1.8), range(rnd, 0.5, 1.4), rnd() * 3, pick(rnd, P.speck), range(rnd, 0.25, 0.6));
+    // worn smooth where feet go, a few pits with a lit lower lip
+    blob(g, X0 + q * range(rnd, 0.4, 0.6), Y0 + q * range(rnd, 0.4, 0.6), q * 0.3, q * 0.22, rnd() * 3, lightOf(c, 0.25), 0.18, 0.1);
+    for (let k = 0; k < 6; k++) { const x = X0 + m + rnd() * L, y = Y0 + m + rnd() * L, r = range(rnd, 1.5, 3.5); ellipse(g, x, y, r, r * 0.8, 0, shadowOf(c, 0.4), 0.5); ellipse(g, x + 0.6, y + 0.9, r * 0.7, r * 0.4, 0, lightOf(c, 0.3), 0.35); }
+    if (rnd() < 0.55) { const x = X0 + m + rnd() * L, y = Y0 + m + rnd() * L * 0.3, pl = [[x, y]]; let a = range(rnd, 1.1, 2.0); for (let k = 0; k < 6; k++) { a += range(rnd, -0.5, 0.5); const [px, py] = pl[pl.length - 1]; pl.push([px + Math.cos(a) * 14, py + Math.sin(a) * 14]); } line(g, pl.map(([u, v]) => [u + 0.8, v + 0.8]), 1.6, lightOf(c, 0.4), 0.3); line(g, pl, 1.1, shadowOf(c, 0.55), 0.55); }
+    // bevels: a lit band along the top and left, a cool shade along the bottom and right
+    g.lineJoin = 'round';
+    g.save(); g.translate(2.5, 2.5); g.lineWidth = 6; g.strokeStyle = rgba(lightOf(c, 0.5), 0.3); polyPath(g, pts); g.stroke(); g.restore();
+    g.save(); g.translate(-2.5, -2.5); g.lineWidth = 6; g.strokeStyle = rgba(shadowOf(c, 0.45), 0.38); polyPath(g, pts); g.stroke(); g.restore();
+    g.save(); g.translate(0.8, 0.8); g.lineWidth = 1.8; g.strokeStyle = rgba('#fff4d8', 0.35); polyPath(g, pts); g.stroke(); g.restore();
+  });
+}
+function flagAtlas(g, s, rnd, cv, P) {
+  const q = s / 2;
+  for (let i = 0; i < 4; i++) flagCell(g, (i % 2) * q, Math.floor(i / 2) * q, q, rnd, P);
+  glaze(g, s, s, P.glaze, 0.1, 'soft-light');
+  blurTile(cv, 0.5);
+}
+register('floor_flags', {
+  family: F, size: 512, note: 'indoor sandstone flags (Gadgetzan), one stone per 2×2 atlas cell: chipped outline, bedding lines, worn patches, pits, lit top-left and shaded bottom-right bevels, dark soft grout',
+  paint(g, s, rnd, h, cv) { flagAtlas(g, s, rnd, cv, { cols: ['#d4b486', '#cdab7e', '#d8ba8e', '#c9a77a'], blot: ['#e2c69c', '#bc9a6c', '#c4a07a', '#dcc29a'], bedding: ['#b08c62', '#ecd4a8'], grout: '#5a4232', glaze: '#ffe2b0' }); },
+});
+register('floor_granite', {
+  family: F, size: 512, note: 'indoor granite flags (Kharanos), one stone per 2×2 atlas cell: chipped outline, speckle, worn patches, pits, lit top-left and cool shaded bottom-right bevels, dark soft grout',
+  paint(g, s, rnd, h, cv) { flagAtlas(g, s, rnd, cv, { cols: ['#a4a6aa', '#9a9ea6', '#aaa8a4', '#9ea2a8'], blot: ['#b8b6b0', '#8a909a', '#a09a92', '#b4b8bc'], speck: ['#5e626c', '#70747c', '#d8dade', '#c8c4bc'], grout: '#3c3840', glaze: '#ffe8c0' }); },
+});
+
+// A traveller's map nailed to the pawnbroker's wall (w×h, alpha): torn, scorched parchment, a coast and a
+// sea, hills, forests, a dotted red road to an X, a compass rose and a cartouche of scribbled words.
+// (Painted into the last cell of the wall_holes atlas, so it costs no material of its own.)
+function mapPaint(g, w, h, rnd) {
+  {
+    const pts = [];
+    const edge = (ax, ay, bx, by, n) => { for (let k = 0; k < n; k++) { const t = k / n; pts.push([ax + (bx - ax) * t + range(rnd, -3, 3), ay + (by - ay) * t + range(rnd, -3, 3)]); } };
+    edge(8, 10, w - 8, 6, 14); edge(w - 8, 6, w - 6, h - 10, 10); edge(w - 6, h - 10, 10, h - 6, 14); edge(10, h - 6, 8, 10, 10);
+    clipped(g, () => polyPath(g, pts), () => {
+      g.fillStyle = '#e4cf9c'; g.fillRect(0, 0, w, h);
+      for (let k = 0; k < 14; k++) blob(g, rnd() * w, rnd() * h, range(rnd, 20, 60), range(rnd, 14, 40), rnd() * 3, rnd() < 0.5 ? '#f0e0b4' : '#c8a870', 0.3, 0.1);
+      // the sea along the left and bottom, a wobbly coast with a lighter shallows line
+      const coast = []; for (let y = -10; y <= h + 10; y += 8) coast.push([w * 0.3 + 18 * Math.sin(y * 0.05) + range(rnd, -4, 4) + (y > h * 0.7 ? (y - h * 0.7) * 0.9 : 0), y]);
+      const sea = [[-10, -10], ...coast, [-10, h + 10]];
+      g.fillStyle = rgba('#7a9a94', 0.55); polyPath(g, sea); g.fill();
+      line(g, coast.map(([x, y]) => [x + 4, y]), 3, '#a8c0b4', 0.6); line(g, coast, 1.6, '#4a5a50', 0.7);
+      for (let k = 0; k < 6; k++) { const y = 20 + rnd() * (h - 40), x = 14 + rnd() * w * 0.12; line(g, [[x, y], [x + 6, y - 2], [x + 12, y]], 1, '#4a6a68', 0.5); }
+      // hills and forests
+      for (let k = 0; k < 9; k++) { const x = w * range(rnd, 0.45, 0.9), y = h * range(rnd, 0.15, 0.55); line(g, [[x - 8, y + 4], [x, y - 5], [x + 8, y + 4]], 1.6, '#6a4a2a', 0.8); line(g, [[x - 1, y - 3], [x + 5, y + 3]], 1, '#9a7a4a', 0.5); }
+      for (let k = 0; k < 6; k++) { const x = w * range(rnd, 0.4, 0.88), y = h * range(rnd, 0.55, 0.85); for (let j = 0; j < 5; j++) { const xx = x + range(rnd, -10, 10), yy = y + range(rnd, -6, 6); ellipse(g, xx, yy, 3.4, 3, 0, '#5a7a3a', 0.85); ellipse(g, xx - 0.8, yy - 1, 1.6, 1.4, 0, '#8aa858', 0.7); } }
+      // the road (dotted red) wandering to an X
+      const road = []; let rx = w * 0.36, ry = h * 0.82; for (let k = 0; k < 12; k++) { road.push([rx, ry]); rx += range(rnd, 6, 16); ry -= range(rnd, 2, 10); }
+      g.save(); g.setLineDash([4, 4]); line(g, road, 2, '#9a2a1e', 0.85); g.restore();
+      const [ex, ey] = road[road.length - 1];
+      line(g, [[ex - 6, ey - 6], [ex + 6, ey + 6]], 3, '#8a1e14', 0.9); line(g, [[ex + 6, ey - 6], [ex - 6, ey + 6]], 3, '#8a1e14', 0.9);
+      // a compass rose and a cartouche of scribbles
+      const cx = w * 0.82, cy = h * 0.8;
+      for (const [a, L] of [[0, 14], [Math.PI / 2, 10], [Math.PI, 10], [-Math.PI / 2, 10]]) { g.fillStyle = rgba('#4a3420', 0.8); g.beginPath(); g.moveTo(cx + Math.cos(a - Math.PI / 2) * L, cy + Math.sin(a - Math.PI / 2) * L); g.lineTo(cx + Math.cos(a) * 3, cy + Math.sin(a) * 3); g.lineTo(cx - Math.cos(a) * 3, cy - Math.sin(a) * 3); g.closePath(); g.fill(); }
+      g.strokeStyle = rgba('#4a3420', 0.6); g.lineWidth = 1; g.beginPath(); g.arc(cx, cy, 8, 0, TAU); g.stroke();
+      g.strokeStyle = rgba('#5a3e24', 0.7); g.lineWidth = 1.5; g.strokeRect(w * 0.5, h * 0.06, w * 0.38, h * 0.14);
+      for (let k = 0; k < 2; k++) { let x = w * 0.53; const y = h * (0.105 + k * 0.05); while (x < w * 0.85) { const L = range(rnd, 4, 12); line(g, [[x, y], [x + L * 0.5, y - 1.5], [x + L, y]], 1.2, '#3a2818', 0.75); x += L + 3; } }
+      // age: scorched, darker toward the torn edge, a fold line
+      g.save(); g.globalAlpha = 0.55; g.lineWidth = 16; g.strokeStyle = '#8a6434'; polyPath(g, pts); g.stroke(); g.restore();
+      g.save(); g.globalAlpha = 0.6; g.lineWidth = 5; g.strokeStyle = '#4a3018'; polyPath(g, pts); g.stroke(); g.restore();
+      line(g, [[w / 2, 0], [w / 2 + 2, h]], 2, '#a88a5a', 0.4); line(g, [[w / 2 + 2, 0], [w / 2 + 4, h]], 1.2, '#f4e4c0', 0.4);
+    });
+    for (const [x, y] of [[16, 16], [w - 16, 13], [w - 14, h - 16], [17, h - 13]]) nailHead(g, x, y, 2.6, '#6a6266');
+  }
+}
+
 register('adobe_inner', {
   family: F, size: 512, note: 'adobe trim and indoor mud: a lighter limewashed tan (parapet caps, piers, upper blocks, interiors)',
   paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { base: '#d8b088', blot: ['#e4c49a', '#ccA07a', '#dcb890'], mid: ['#ecd0a6', '#bc906a', '#d6ac80', '#cea47a', '#f0d6ae', '#b48862'], lite: '#f4dcb4', dark: '#9a7050', chipsN: 0 }); },
@@ -2422,18 +2554,27 @@ function daub(g, text, w, h, rnd, { paint, primer = null, edge = null }) {
   const r0 = size * 0.085;
   const tw = size * (chars.length * cw + (chars.length - 1) * gap), x0 = (w - tw) / 2, y0 = (h - size) / 2 - size * 0.04;
   const lightPaint = hsl(paint).l > 0.55;
-  // 1. the primer: a few broad, patchy horizontal strokes over the code's box
+  // 1. the primer: a few broad, patchy horizontal strokes over the code's box, dry bristle streaks dragged
+  // out past the ends of each, the whole wash feathered soft (no crisp lobed outline: no cloud decal)
   if (primer) {
     const pc = makeCanvas(w, h), pg = pc.getContext('2d');
-    const rows = 3, pr = size * 0.3;
+    const rows = 3, pr = size * 0.3, mg = 22;
     for (let k = 0; k < rows; k++) {
       const y = y0 + size * (0.12 + 0.76 * k / (rows - 1)) + range(rnd, -0.05, 0.05) * size;
-      const a = Math.max(pr * 1.1, x0 - size * range(rnd, 0.2, 0.4)), b = Math.min(w - pr * 1.1, x0 + tw + size * range(rnd, 0.15, 0.4));
+      const a = Math.max(pr * 1.1 + mg, x0 - size * range(rnd, 0.2, 0.4)), b = Math.min(w - pr * 1.1 - mg, x0 + tw + size * range(rnd, 0.15, 0.4));
       const pts = []; for (let i = 0; i <= 5; i++) { const t = i / 5; pts.push([a + (b - a) * t, y + Math.sin(t * 3 + k) * size * 0.05]); }
-      brushMask(pg, k % 2 ? pts.reverse() : pts, pr, rnd, { dry: 0.75, bristles: 15, taper: 0.6 });
+      brushMask(pg, k % 2 ? pts.slice().reverse() : pts, pr, rnd, { dry: 0.75, bristles: 15, taper: 0.6 });
+      pg.save(); pg.strokeStyle = '#000'; pg.lineCap = 'round';
+      for (const [ex, ey, dir] of [[a, pts[0][1], -1], [b, pts[5][1], 1]]) for (let j = 0; j < 11; j++) {
+        const yy = ey + range(rnd, -0.9, 0.9) * pr, L = size * range(rnd, 0.12, 0.5), x1 = Math.max(mg, Math.min(w - mg, ex + dir * L)), xs = ex - dir * pr * range(rnd, 0.2, 0.6);
+        pg.globalAlpha = range(rnd, 0.25, 0.6); pg.lineWidth = range(rnd, 1.2, 4);
+        pg.beginPath(); pg.moveTo(xs, yy); pg.quadraticCurveTo((xs + x1) / 2, yy + range(rnd, -3, 3), x1, yy + range(rnd, -4, 4)); pg.stroke();
+      }
+      pg.restore();
     }
+    blurTile(pc, 6);
     pg.globalCompositeOperation = 'source-in'; pg.fillStyle = primer; pg.fillRect(0, 0, w, h);
-    g.save(); g.globalAlpha = 0.45; g.drawImage(pc, 0, 0); g.restore();
+    g.save(); g.globalAlpha = 0.42; g.drawImage(pc, 0, 0); g.restore();
   }
   // 2. the paint mask: digits, splatters, the drag
   const mc = makeCanvas(w, h), mg = mc.getContext('2d');

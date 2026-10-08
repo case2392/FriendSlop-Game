@@ -158,9 +158,21 @@ function bracketBrazier(K, x, y, z, glows) {
 // two mud pillars or stone cairns (kit frame), standing either side of a sign at ±px, up to top
 function pillar(K, x, g0, top, kind, R) {
   if (kind === 'mud') {
-    const m = mat('adobe');
-    K.cyl(m, [x, g0, 0], [x, top, 0], 0.62, 0.44, { sides: 11, hseg: 5, uvScale: [2, (top - g0) / 2], warp: v => { const a = Math.atan2(v.z, v.x); const k = 1 + 0.1 * Math.sin(a * 3 + v.y * 2.3 + x) + 0.05 * Math.sin(a * 5 - v.y * 3.1); v.x *= k; v.z *= k; } });
-    K.add(mat('adobe_inner'), new THREE.SphereGeometry(0.48, 10, 6, 0, TAU, 0, Math.PI / 2), { uv: 'keep', at: matrix(x, top - 0.02, 0, x, 0, 0, new THREE.Vector3(1, 0.55, 1)), warp: v => { v.y *= 1 + 0.2 * Math.sin(v.x * 8 + x); } });
+    // a square mud-brick pier, tapering, its corners rounded off by the render (a squircle section, a
+    // little lumpy), wrapped once round by the pier texture (fallen render, mud brick, drips under the
+    // cap, splash at the foot); a mud cap on a timber lintel block, viga ends poking out front and back
+    const h = top - g0, rb = 0.56, rt = 0.45;
+    const sq = (v, lump) => { const a = Math.atan2(v.z, v.x), ca = Math.abs(Math.cos(a)), sa = Math.abs(Math.sin(a)); const k = Math.pow(Math.pow(ca, 5) + Math.pow(sa, 5), -0.2) * (1 + lump * (0.03 * Math.sin(a * 3 + v.y * 2.1 + x) + 0.018 * Math.sin(v.y * 5.3 + a * 2))); v.x *= k; v.z *= k; };
+    K.add(mat('adobe_pier'), new THREE.CylinderGeometry(rt, rb, h, 24, 6, true), { uv: 'keep', uvScale: [1, 1], uvOff: [x > 0 ? 0.37 : 0.04, 0], at: matrix(x, (g0 + top) / 2, 0), warp: v => sq(v, 1), ao: (vx, vy) => { const k = 0.7 + 0.2 * sstep(-h / 2, h / 2 - 0.3, vy); return [k, k * 0.96, k * 0.9]; } });
+    const wl = mat('wood_light');
+    K.add(mat('timber_dark'), new THREE.CylinderGeometry(rt + 0.06, rt + 0.05, 0.2, 24, 1), { uv: 'keep', uvScale: [4, 0.3], at: matrix(x, top + 0.08, 0), warp: v => sq(v, 0) });
+    K.add(mat('adobe_inner'), new THREE.CylinderGeometry(rt + 0.02, rt + 0.08, 0.16, 24, 1), { uv: 'keep', uvScale: [2, 0.2], at: matrix(x, top + 0.26, 0), warp: v => sq(v, 1), tint: '#e8d4b8' });
+    K.add(mat('adobe_inner'), new THREE.SphereGeometry(rt + 0.02, 24, 6, 0, TAU, 0, Math.PI / 2), { uv: 'keep', uvScale: [2, 0.4], at: matrix(x, top + 0.33, 0, 0, 0, 0, new THREE.Vector3(1, 0.42, 1)), warp: v => { sq(v, 1); v.y *= 1 + 0.12 * Math.sin(v.x * 7 + x); }, tint: '#e8d4b8' });
+    for (const dx of [-0.17, 0.17]) {
+      const y = top - 0.28 + (dx > 0 ? 0.02 : -0.02), L = rb + 0.32;
+      K.cyl(wl, [x + dx, y, -L], [x + dx + 0.01, y + 0.01, L], 0.085, 0.085, { sides: 8, tint: '#8a6448' });
+      for (const s of [-1, 1]) K.add(mat('endgrain'), new THREE.CircleGeometry(0.083, 8), { uv: 'keep', at: matrix(x + dx + (s > 0 ? 0.01 : 0), y + (s > 0 ? 0.01 : 0), s * (L + 0.001), s > 0 ? 0 : Math.PI), tint: '#c8a888' });
+    }
     return;
   }
   // a dressed granite pillar, tapering a little, a broad cap stone with snow on it, a cairn of rubble
@@ -185,7 +197,7 @@ const RIM = {
   meadow: { paint: '#f2ead8', primer: '#2e2622', rock: 'rock_gray' },
   fields: { paint: '#7a2a1a', primer: '#efe4cc', rock: 'rock_warm' },
   snow: { paint: '#9a2a22', primer: '#ece4d6', edge: '#3a1a14', rock: 'rock_granite' },
-  badlands: { paint: '#f4ecdc', primer: '#2e2420', rock: 'rock_warm', tint: '#e8a078' },
+  badlands: { paint: '#f4ecdc', primer: '#6a4622', rock: 'rock_red', top: 'rock_warm', topTint: [1.34, 0.88, 0.62], step: true },
   desert: { paint: '#7a2a1a', primer: '#efe4cc', rock: 'rock_sand' },
 };
 
@@ -228,28 +240,52 @@ function rimCode(W, s, batch, group, near) {
   const C0 = vtx(0, top(0, 0) - 0.004, 0);
   const inner = ring.map(([x, z]) => vtx(x * 0.86, top(x * 0.86, z * 0.86) - R() * 0.008, z * 0.86));
   const lipY = ring.map(([x, z]) => top(x, z) - 0.08 - R() * 0.07);
-  const lip = ring.map(([x, z], k) => { const d = Math.hypot(x * 0.14, z * 0.14, 0.1), r = Math.hypot(x, z) || 1, e = (0.86 * r + d) / (0.86 * r); return vtx(x, lipY[k], z, x * 0.86 * e, z * 0.86 * e); });
-  const foot = ring.map(([x, z], k) => { const y = Math.min(gy(x * 1.12, z * 1.12), top(x, z) - 0.25) - 0.3, r = Math.hypot(x, z) || 1, d = Math.hypot(r * 0.14, 0.1) + Math.hypot(r * 0.12, lipY[k] - y), e = (0.86 * r + d) / (0.86 * r); return vtx(x * 1.12, y, z * 1.12, x * 0.86 * e, z * 0.86 * e); });
+  // the profile down from the lip, ring by ring ({ s: scale of the outline, y }), the sides' UVs unrolled
+  // outward along it. Most rims: one bed, its foot sunk 0.3 into the ground. The badlands: two beds, a
+  // ledge between them, the lower one flaring out into the ground (a stepped ledge of strata, not a loaf).
+  const prof = ring.map(([x, z], k) => {
+    const r = Math.hypot(x, z) || 1, out = [{ s: 1, y: lipY[k] }];
+    if (P.step) {
+      const y1 = lipY[k] - 0.26 - R() * 0.06;
+      out.push({ s: 1.03, y: y1 }, { s: 1.2 + R() * 0.04, y: y1 - 0.04 });
+      const s2 = 1.34 + 0.25 * Math.min(1, Math.max(0, (y1 - gy(x * 1.34, z * 1.34) - 0.35) / 0.6));
+      out.push({ s: s2, y: Math.min(gy(x * s2, z * s2), y1 - 0.2) - 0.35 });
+    } else out.push({ s: 1.12, y: Math.min(gy(x * 1.12, z * 1.12), top(x, z) - 0.25) - 0.3 });
+    let d = Math.hypot(x * 0.14, z * 0.14, 0.1);
+    return out.map((q, i) => {
+      if (i) d += Math.hypot(r * (q.s - out[i - 1].s), q.y - out[i - 1].y);
+      const e = (0.86 * r + d) / (0.86 * r);
+      return vtx(x * q.s, q.y, z * q.s, x * 0.86 * e, z * 0.86 * e);
+    });
+  });
+  // the top (and its lip) and the sides as two index lists: on the badlands the sides show the strata and
+  // the top is the plain sun-baked face of one bed
+  const side = P.step ? [] : idx;
   for (let k = 0; k < n; k++) {
     const k2 = (k + 1) % n;
     idx.push(C0, inner[k2], inner[k]);
-    idx.push(inner[k], lip[k2], lip[k], inner[k], inner[k2], lip[k2]);
-    idx.push(lip[k], foot[k2], foot[k], lip[k], lip[k2], foot[k2]);
+    idx.push(inner[k], prof[k2][0], prof[k][0], inner[k], inner[k2], prof[k2][0]);
+    for (let i = 0; i < prof[k].length - 1; i++) { const a = prof[k][i], b = prof[k2][i], c = prof[k][i + 1], d = prof[k2][i + 1]; side.push(a, d, c, a, b, d); }
   }
-  const geo = new THREE.BufferGeometry();
-  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
-  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
-  geo.setIndex(idx);
-  geo.computeVertexNormals();
+  const mk = ix => { const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2)); g.setIndex(ix); g.computeVertexNormals(); return g; };
   const K = new Kit(batch, matrix(s.x, 0, s.z, yaw), (x, y, z, nx, ny) => { const k = 0.6 + 0.4 * Math.max(0, ny); return [k * 0.94, k * 0.96, k]; });
   K.seed = 5 + (R() * 1000 | 0);
-  K.add(mat(P.rock), geo, { uv: 'keep', tint: P.tint || null });
+  if (P.step) { K.add(mat(P.top), mk(idx), { uv: 'keep', tint: P.topTint }); K.add(mat(P.rock), mk(side), { uv: 'keep' }); }
+  else K.add(mat(P.rock), mk(idx), { uv: 'keep', tint: P.tint || null });
   if (W.biome === 'snow') {
-    // snow drifted along the lip at both ends of the slab (clear of the paint): a lumpy roll
+    // snow drifted onto both ends of the slab (clear of the paint): soft overlapping heaps sunk into the
+    // rock, spilling over the lip
+    const sm = mat('snow_roof');
     for (const sgn of [-1, 1]) {
-      const pts = ring.filter(([x]) => sgn * x > s.w / 2 + 0.2).sort((p, q) => Math.atan2(p[1], sgn * p[0]) - Math.atan2(q[1], sgn * q[0]));
-      if (pts.length < 2) continue;
-      K.tube(mat('snow_roof'), pts.map(([x, z]) => [x * 0.95, top(x, z) - 0.05, z * 0.95]), (t, a, k) => 0.16 + 0.06 * Math.sin(k * 2.3 + a * 2 + sgn) * Math.sin(Math.PI * t), { sides: 7, tile: 1.5, shade: () => [0.9, 0.94, 1] });
+      // one long drift lying along the end, sunk ~45% into the rock and spilling over the lip, with two or
+      // three smaller lumps beside it along the lip (soft shading, so they melt into one heap)
+      const soft = (px, py, pz, nx, ny) => { const k = 0.92 + 0.08 * Math.max(0, ny); return [k * 0.93, k * 0.97, k]; };
+      const r0 = 0.3 + R() * 0.05, cx = sgn * hx * (0.84 + R() * 0.04), cz = (R() - 0.5) * hz * 0.2;
+      K.add(sm, new THREE.SphereGeometry(r0, 16, 10), { uv: 'keep', uvScale: [2, 0.8], at: matrix(cx, top(cx, cz) - r0 * 0.42 * 0.45, cz, (R() - 0.5) * 0.15, 0, 0, new THREE.Vector3(0.95, 0.42, hz * 0.68 / r0)), shade: soft, cast: false });
+      for (let i = 0, m = 2 + Math.floor(R() * 2); i < m; i++) {
+        const z = cz + (i % 2 ? 1 : -1) * hz * (0.15 + R() * 0.3), x = cx + sgn * r0 * (0.1 + R() * 0.3), r = 0.15 + R() * 0.06;
+        K.add(sm, new THREE.SphereGeometry(r, 16, 10), { uv: 'keep', uvScale: [1, 0.6], at: matrix(x, top(x, z) + r0 * 0.42 * 0.3 - r * 0.45 * 0.5, z, (R() - 0.5) * 0.6, 0, 0, new THREE.Vector3(1.2, 0.45, 1.8)), shade: soft, cast: false });
+      }
     }
   }
   // the stake: a crooked pole driven in by the slab's road-side corner (you can spot the rag from the
@@ -508,18 +544,23 @@ function buildSigns(W, batch, group, near, ctx) {
     }
     if (isEntry && style === 'plaque') {
       // two lumpy mud pillars with a brass plaque between them on a beam, a gear on each pillar
-      const px = hw + 0.62;
+      const px = hw + 0.74;
       K.box(wood, s.w + 0.25, s.h + 0.25, 0.12, 0, 0, 0, { tile: 1.6, grain: 'x', tint: '#c8a080' });
       for (const sx of [-1, 1]) K.box(wood, px - hw - 0.1, 0.16, 0.14, sx * (hw + (px - hw) / 2), hh * 0.5, 0, { grain: 'x', tint: '#c8a080' });
       face(K, 0.062); face(K, -0.062, true);
       for (const sx of [-1, 1]) {
-        pillar(K, sx * px, ground(sx * px) - 0.4, hh + 0.45, 'mud', R);
-        K.push(sx * px, hh * 0.2, 0.4);
+        const g0 = ground(sx * px) - 0.4;
+        pillar(K, sx * px, g0, hh + 0.75, 'mud', R);
+        const fz = 0.56 - 0.11 * (hh * 0.2 - g0) / (hh + 0.75 - g0) + 0.03;
+        K.push(sx * px, hh * 0.2, fz);
         K.add(br, new THREE.CylinderGeometry(0.22, 0.22, 0.06, 14), { uv: 'keep', at: matrix(0, 0, 0, 0, Math.PI / 2) });
         for (let k = 0; k < 8; k++) { const a = k / 8 * TAU; K.box(br, 0.08, 0.08, 0.06, Math.cos(a) * 0.24, Math.sin(a) * 0.24, 0, { rz: a, tile: 1 }); }
         K.pop();
       }
-      K.box(mat('wood_light'), s.w + 2 * px * 0.3 + 0.6, 0.18, 0.2, 0, hh + 0.28, 0, { grain: 'x', tint: '#e0c8a0' });
+      // a round viga lintel across both piers, its ends standing well proud of them, dark drips under it
+      const LL = px + 0.85;
+      K.cyl(mat('wood_light'), [-LL, hh + 0.3, 0], [LL, hh + 0.34, 0.02], 0.14, 0.13, { sides: 10, tint: '#9a7454', uvScale: [1, 4] });
+      for (const sx of [-1, 1]) K.add(mat('endgrain'), new THREE.CircleGeometry(0.135, 10), { uv: 'keep', at: matrix(sx * (LL + 0.002), hh + 0.32, 0.01, sx * Math.PI / 2), tint: '#d0b090' });
       continue;
     }
     if (isEntry && style === 'dwarf') {
@@ -1295,6 +1336,8 @@ export function buildStructures(W) {
 
   // all the merged statics (one group per cluster), the glow cloud
   const clusters = batch.build(group);
+  // the wall decals: the mud splash band first, the holes and patches over it
+  group.traverse(o => { if (o.isMesh && o.material.userData) { const p = o.material.userData.paint; if (p === 'arch_splash') o.renderOrder = 1; else if (p === 'wall_holes') o.renderOrder = 2; } });
   const townCluster = clusters.find(c => c.key === 'town');
   const gp = glows.length ? glowPoints(glows) : null;
   if (gp) group.add(gp);
@@ -1414,6 +1457,7 @@ export const PREVIEW = {
   bj_table: () => { const b = new Batch(), g = new THREE.Group(); furniture({ part: 'bj_table', x: 0, y: 0.45, z: 0, hx: 1.8, hy: 0.45, hz: 1.0, ry: 0 }, b, { glows: [], domes: [], styleName: 'timber' }); for (const [i, x] of [-1.6, -0.9, -0.2, 0.5, 1.5].entries()) button({ x, y: 1.0, z: 1.0 }, [BTN.bet, BTN.bet, BTN.all, BTN.clear, BTN.deal][i], null, b, 0.08); b.build(g); return g; },
   signs_farm: () => previewTown('farm', ['store'], true),
   signs_adobe: () => previewTown('adobe', ['store'], true),
+  entry_signs_adobe: () => previewTown('adobe', [], true),
   counters: () => { const g = new THREE.Group(); ['timber', 'alpine', 'frontier', 'adobe'].forEach((st, i) => { const b = new Batch(); furniture({ part: 'counter', x: i * 5, y: 0.5, z: 0, hx: 2.0, hy: 0.5, hz: 0.55, ry: 0 }, b, { glows: [], domes: [], styleName: st }); b.build(g); }); return g; },
   windmill: () => { const b = new Batch(), sb = new Batch(); const hub = windmill(b, 0, 0, 0, 0, sb); const g = new THREE.Group(); b.build(g); const sg = new THREE.Group(); sb.build(sg); sg.position.copy(hub); sg.rotation.z = 0.4; g.add(sg); return g; },
 };

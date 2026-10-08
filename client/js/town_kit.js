@@ -17,7 +17,7 @@ export function mat(name, o = {}) { const m = painted(name, { vertexColors: true
 // too small to read; walls, roofs, beams, posts, lamps, barrels, crates and the wagon do.
 const NO_CAST = new Set(['window_lead', 'lantern_glass', 'flowerbox', 'banner_red', 'banner_hide', 'banner_dwarf', 'banner_goblin', 'rug_red', 'rug_bear', 'rug_hide', 'rug_braid', 'rug_desert',
   'carpet_casino', 'carpet_border', 'tile_goblin', 'felt_table', 'latillas', 'embers', 'slot_face', 'flip_face', 'repo_plate', 'plaster_inner', 'granite_inner',
-  'wall_holes', 'arch_streak', 'arch_btn_glass', 'straw_fringe', 'clay', 'endgrain', 'floor_planks', 'flagstone', 'door_plank', 'rope', 'burlap', 'brass']);
+  'wall_holes', 'arch_streak', 'arch_splash', 'floor_flags', 'floor_granite', 'arch_btn_glass', 'straw_fringe', 'clay', 'endgrain', 'floor_planks', 'flagstone', 'door_plank', 'rope', 'burlap', 'brass']);
 
 export function matrix(x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1) {
   E.set(rx, ry, rz, 'YXZ'); Q.setFromEuler(E);
@@ -248,8 +248,10 @@ export class Kit {
     return this.add(material, g, { uv: 'keep', ...o });
   }
   // a prism: polygon pts [[x, y], ...] in the local xy plane, extruded depth d along +z from z0
+  // (o.holes: polygons cut through it, their reveals walled)
   prism(material, pts, z0, d, o = {}) {
     const shape = new THREE.Shape(pts.map(([x, y]) => new THREE.Vector2(x, y)));
+    for (const h of o.holes || []) shape.holes.push(new THREE.Path(h.map(([x, y]) => new THREE.Vector2(x, y))));
     const g = new THREE.ExtrudeGeometry(shape, { depth: d, bevelEnabled: false, steps: 1 });
     g.translate(0, 0, z0);
     return this.add(material, g, { tile: 3, ...o });
