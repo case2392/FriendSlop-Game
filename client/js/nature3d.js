@@ -19,9 +19,9 @@ import { THREE, tex } from './gfx.js';
 import { canvasFor } from './paint/index.js';
 import { mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { atmo } from './atmosphere.js';
-import { BIOME_BY_DAY } from '/shared/world.js';
+import { BIOME_BY_DAY, generateLeg } from '/shared/world.js';
 
-export const NATURE_KINDS = new Set(['oak', 'pine', 'palm', 'bush', 'flowers', 'stump', 'fence', 'haybale', 'wheat', 'scarecrow', 'cactus', 'deadtree', 'rock', 'bones', 'skull', 'fire']);
+export const NATURE_KINDS = new Set(['oak', 'pine', 'palm', 'bush', 'flowers', 'stump', 'fence', 'haybale', 'wheat', 'scarecrow', 'cactus', 'deadtree', 'rock', 'bones', 'skull', 'fire', 'cairn']);
 
 const V3 = THREE.Vector3;
 const TAU = Math.PI * 2;
@@ -731,103 +731,201 @@ function limb(P0, dir, L, rnd, { bends = 2, bendAmt = 0.35, rise = 0, segs = 6 }
   return pts;
 }
 
-// Elwynn oak: a pale twisting bole with buttress roots and two swollen rings, leaning in a slow S,
-// that forks at about 3 m into 3-4 heavy curving limbs which spread out and up; the crown rides on
-// top of them as 4-5 big clumps (sky showing between), so the forks read clearly underneath.
-// Westfall's is lower, wider and scruffier, gold with rust clumps.
-function oak(ctx, d) {
-  const rnd = rngOf(seedOf(d.x, d.z, 11)), s = d.s || 1, B = ctx.bio, west = !!B.west;
-  ctx.at(d, d.ry || 0);
+// Oak sizes. G scales the whole tree; the grove's hero (d.hero, else the grove's biggest) is 1.8-2.2x,
+// the rest of the grove 1.2-1.4x the old oak, Westfall's pairs 1.4x. Rc is the crown's radius.
+function oakSize(d, hero, west) {
+  const s = d.s || 1;
+  const G = west ? 1.4 * Math.min(1.2, s) : hero ? Math.max(1.8, Math.min(2.2, 1.5 + 0.5 * s)) : Math.max(1.0, Math.min(1.5, 1.25 * s));
+  return { G, Rc: (hero ? 3.5 : west ? 2.8 : 3.2) * G };
+}
+
+// Elwynn oak: a massive warm bole that keeps to its collider through the bumper band (≤ 0.1 m off
+// its axis below 2 m), with 5-6 flared roots, swelling above into a fork at 4-6 m on a hero; 3-4
+// heavy gnarled limbs spread out and up, each into one big lobe of the crown, smaller branches into
+// small edge lobes and a leader into the top lobe. The crown is a wide dome of 5-8 lobes (3:1 in
+// size), each a ball of leaf cards round a dense core, with a ragged skirt of hanging leaf cards
+// under its outer rim. Crowding: a tree leans its crown away from close neighbours and shrinks the
+// lobes that face them, so a grove reads as one canopy without walls of cards through each other.
+// Westfall's is lower, wider and scruffier: gold, olive and rust, an open crown.
+function oak(ctx, d, info = {}) {
+  const rnd = rngOf(seedOf(d.x, d.z, 11)), B = ctx.bio, west = !!B.west;
+  const hero = !west && !!info.hero;
+  const { G, Rc: Rc0 } = oakSize(d, hero, west);
+  ctx.at(d, 0);                                              // world axes: neighbours need no turning
   const bark = ctx.b('bark_oak'), leaves = ctx.b('leaves');
-  const rC = 0.42 * s, r0 = rC * 0.98;                      // r0 ≈ the collider through the bumper band
-  const H = (west ? range(rnd, 2.2, 2.6) : range(rnd, 2.7, 3.2)) * s + 0.3;     // the fork
-  const [gLo] = ctx.foot(r0 * 2.2);
+  const rC = Math.max(0.3, (info.rCol || 0.48 * (d.s || 1)) * 0.97);   // the bole through the bumper band = the collider
+  // crowding: away from the neighbours whose crowns reach into ours
+  const nb = (info.nb || []).map(n => {
+    const dx = n.x - d.x, dz = n.z - d.z, dist = Math.max(0.5, Math.hypot(dx, dz));
+    const w = clamp01((Rc0 + n.Rc * 0.85 - dist) / (Rc0 + n.Rc * 0.85)) * (n.hero && !hero ? 1.5 : hero && !n.hero ? 0.6 : 1);
+    return { ux: dx / dist, uz: dz / dist, w, dist };
+  }).filter(n => n.w > 0);
+  let shx = 0, shz = 0;
+  for (const n of nb) { shx -= n.ux * n.w; shz -= n.uz * n.w; }
+  const shl = Math.hypot(shx, shz), shk = Math.min(0.42, shl * 0.35) / Math.max(1e-6, shl);
+  const Rc = Rc0 * (1 - 0.12 * Math.min(1, shl));
+  const cO = { x: shx * shk * Rc, z: shz * shk * Rc };         // the crown's centre, off the trunk axis
+  const crowd = (ux, uz) => { let c = 0; for (const n of nb) c += n.w * Math.max(0, ux * n.ux + uz * n.uz); return Math.min(1, c); };
+
+  const F = (west ? range(rnd, 1.75, 2.05) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
+  const [gLo] = ctx.foot(rC * 2.4);
   const yBot = Math.min(-0.5, gLo - 0.35);
   const nR = 5 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
   const rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.3, 0.3));
-  const fl = flare(rootA);
-  // the S-lean: a slight lean one way low down, then a stronger one the other way above the bumper
-  // band (≤ 0.1 m off the collider axis below 2 m)
-  const la = rnd() * TAU, lc = Math.cos(la), lsn = Math.sin(la);
-  const lean = y => -0.1 * s * smooth(0, 1.6, y) + (west ? 0.45 : 0.6) * s * smooth(1.7, H + 0.4, y);
-  const NT = 13, ph0 = rnd() * TAU, b1 = range(rnd, 1.0, 1.35), b2 = range(rnd, 2.0, 2.4);
+  const fl = flare(rootA, 0.58);
+  // the lean: a touch one way low down, then toward the crown's centre above the bumper band
+  const la = rnd() * TAU, lean0 = 0.08;
+  const toC = Math.hypot(cO.x, cO.z), leanTop = Math.min(0.55 * G, toC * 0.6 + 0.25 * G);
+  const lx = toC > 0.05 ? cO.x / toC : Math.cos(la), lz = toC > 0.05 ? cO.z / toC : Math.sin(la);
+  const leanAt = y => smooth(1.9, F + 0.4, y);
+  const NT = hero ? 16 : 13, ph0 = rnd() * TAU;
+  const rTop = rC * (hero ? 1.45 : west ? 1.28 : 1.32);
+  const hF = 0.75 + 0.3 * G;                                   // the root flare's height
   const tp = [], tr = [];
-  const swell = y => smooth(Math.min(2.5, H - 0.6), H + 0.2, y);
   for (let i = 0; i <= NT; i++) {
-    const t = i / NT, y = yBot + t * (H + 0.35 - yBot), k = clamp01((y + 0.3) / (H + 0.6));
-    const L = lean(y);
-    tp.push(new V3(lc * L + Math.sin(k * 3 + a0) * 0.04 * s * k, y, lsn * L - Math.cos(k * 2.6 + a0) * 0.03 * s * k));
-    const f = Math.pow(clamp01(1 - (y + 0.15) / (1.0 * s)), 2);
-    const rings = 1 + 0.13 * Math.exp(-(((y - b1) / 0.28) ** 2)) + 0.12 * Math.exp(-(((y - b2) / 0.3) ** 2));
-    tr.push(r0 * (1 + 0.35 * f) * (1 + 0.55 * swell(y)) * rings);
+    const t = i / NT, y = yBot + t * (F + 0.35 * G - yBot), k = clamp01((y + 0.3) / (F + 0.6));
+    const Ln = leanTop * leanAt(y), lo = -lean0 * smooth(0, 1.6, y);
+    tp.push(new V3(lx * Ln - Math.cos(la) * lo + Math.sin(k * 3 + a0) * 0.04 * G * k, y, lz * Ln - Math.sin(la) * lo - Math.cos(k * 2.6 + a0) * 0.03 * G * k));
+    const swell = rC + (rTop - rC) * smooth(1.9, F, y);
+    const fork = 1 + 0.16 * Math.exp(-(((y - F) / (0.55 * G)) ** 2));
+    tr.push(swell * fork);
   }
   const tcol = lin(B.oakTrunk || '#ffffff');
   const lobes = (dir, t, i) => {
     const y = tp[i].y, ph = Math.atan2(dir.z, dir.x);
-    const f = Math.pow(clamp01(1 - (y + 0.15) / (1.0 * s)), 1.4);
-    const twist = 1 + 0.08 * Math.cos(4 * (ph - ph0 - clamp01((y + 0.3) / (H + 0.6)) * 1.1)) * (1 - f);   // lobes that twist up the bole
-    return (1 + f * 1.25 * fl(ph)) * twist;
+    const f = Math.pow(clamp01(1 - (y + 0.15) / hF), 2);
+    const twist = 1 + 0.09 * Math.cos(4 * (ph - ph0 - clamp01((y + 0.3) / (F + 0.6)) * 1.3)) * (1 - f);   // ridges that twist up the bole
+    return (1 + f * 1.35 * fl(ph)) * twist;
   };
-  // moss creeps up the foot of the trunk on its shady side
-  if (B.barkCover) bark.cf = (p, n) => smooth(1.3 * s, 0.1, p.y) * (0.7 + 0.3 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.3)) * 0.85;
-  tube(bark, tp, tr, { sides: 12, uRep: 2, vLen: 1.5, twist: 0.22, lobes, color: barkAO(-0.3, 1.8, 0.5, tcol) });
-  roots(ctx, bark, rootA, r0, s, rnd, { len: [0.9, 1.25], rad: 0.3, up: 0.5, color: barkAO(-0.3, 1.8, 0.5, tcol) });
+  if (B.barkCover) bark.cf = (p, n) => smooth(1.4 * G * 0.8, 0.1, p.y) * (0.7 + 0.3 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.3)) * 0.85;
+  tube(bark, tp, tr, { sides: hero ? 14 : 12, uRep: hero ? 3 : 2, vLen: 1.5 * Math.min(1.4, G * 0.75), twist: 0.2, lobes, color: barkAO(-0.3, 1.8, 0.5, tcol) });
+  roots(ctx, bark, rootA, rC, Math.max(1, G * 0.72), rnd, { len: [0.95, 1.35], rad: hero ? 0.36 : 0.32, up: 0.5, color: barkAO(-0.3, 1.8, 0.5, tcol) });
   if (B.barkCover) bark.cf = (p, n) => 0;
-  // limbs: 3-4 heavy ones spreading out and up (Westfall flatter and longer), each with a swollen
-  // collar, 1-2 bends and often a side branch; the crown clumps sit on and above their tips
-  const F = tp[NT - 1], rF = tr[NT - 1], clumps = [];
-  const nL = 3 + (rnd() < (west ? 0.7 : 0.55) ? 1 : 0), la0 = rnd() * TAU;
-  const bc = barkAO(0, 3, 0.72, tcol);
-  const tipR = [];
-  let tipY = 0;
-  for (let k = 0; k < nL; k++) {
-    const a = la0 + k * TAU / nL + range(rnd, -0.3, 0.3), el = (west ? range(rnd, 27, 38) : range(rnd, 30, 45)) * Math.PI / 180;
-    const dir = new V3(Math.cos(a) * Math.cos(el), Math.sin(el), Math.sin(a) * Math.cos(el));
-    const L = (west ? range(rnd, 2.8, 3.4) : range(rnd, 3.0, 3.7)) * s, rb = rF * range(rnd, 0.62, 0.72);
-    const start = new V3(F.x - dir.x * rF * 0.2, F.y - 0.35 * s + range(rnd, -0.15, 0.15) * s, F.z - dir.z * rF * 0.2);
-    const pts = limb(start, dir, L, rnd, { bends: 1 + (rnd() < 0.5 ? 1 : 0), bendAmt: 0.28, rise: west ? 0.06 : 0.14 });
-    const rad = pts.map((_, i) => i === 0 ? rF * 0.92 : rb * lerpArr([1.12, 0.96, 0.82, 0.7, 0.58, 0.46, 0.34], i / (pts.length - 1)));
-    tube(bark, pts, rad, { sides: 9, uRep: 1.5, vLen: 1.4, twist: 0.12, color: bc, cap: 0.6 });
-    const tip = pts[pts.length - 1], outD = new V3(tip.x - F.x, 0, tip.z - F.z).normalize();
-    tipR.push(Math.hypot(tip.x - F.x, tip.z - F.z)); tipY += tip.y / nL;
-    clumps.push([new V3(tip.x + outD.x * 0.25 * s, tip.y + range(rnd, 0.15, 0.45) * s, tip.z + outD.z * 0.25 * s), range(rnd, 2.2, 2.7) * s * (west ? 0.92 : 1)]);
-    // a side branch off the middle of the limb, with its own smaller clump
-    if (rnd() < (west ? 0.6 : 0.45)) {
-      const m0 = pts[3].clone(), b2 = a + (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.6, 1.0);
-      const d2 = new V3(Math.cos(b2), range(rnd, 0.6, 1.0), Math.sin(b2));
-      const p2 = limb(m0, d2, range(rnd, 1.4, 2.0) * s, rnd, { bends: 1, bendAmt: 0.3, segs: 4 });
-      tube(bark, p2, p2.map((_, i) => rb * 0.48 * (1 - i / p2.length * 0.6)), { sides: 7, uRep: 1, vLen: 1.4, color: bc, cap: 0.6 });
-      const e = p2[p2.length - 1];
-      clumps.push([new V3(e.x, Math.max(e.y, tip.y) + range(rnd, 0.3, 0.6) * s, e.z), range(rnd, 1.5, 1.85) * s, true]);
+
+  // ---- the crown's lobes
+  const Vc = Rc * (west ? 0.4 : 0.5), yB = F + 0.3 * G, Yc = yB + Vc;
+  const L = [];
+  const nRing = hero ? 5 + (rnd() < 0.5 ? 1 : 0) : west ? 3 + (rnd() < 0.6 ? 1 : 0) : 4 + (rnd() < 0.3 ? 1 : 0);
+  const ra0 = rnd() * TAU;
+  for (let k = 0; k < nRing; k++) {
+    const a = ra0 + (k + range(rnd, -0.2, 0.2)) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a), c = crowd(ux, uz);
+    const r = Rc * range(rnd, 0.42, 0.56) * (1 - 0.35 * c), rho = (Rc - r * 0.95) * (1 - 0.3 * c);
+    L.push({ c: new V3(cO.x + ux * rho, Yc + range(rnd, -0.38, 0.05) * Vc, cO.z + uz * rho), r, ux, uz, ring: true });
+  }
+  // the top lobe, a little off centre
+  L.push({ c: new V3(cO.x + range(rnd, -0.12, 0.12) * Rc, Yc + Vc * range(rnd, 0.32, 0.45), cO.z + range(rnd, -0.12, 0.12) * Rc), r: Rc * (west ? 0.48 : range(rnd, 0.5, 0.56)), top: true, ux: 0, uz: 0 });
+  // a second upper lobe on the big ones, so the dome isn't one ball
+  if (!west && (hero || rnd() < 0.5)) {
+    const a = ra0 + range(rnd, 0.3, 0.7) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a);
+    L.push({ c: new V3(cO.x + ux * Rc * 0.42, Yc + Vc * 0.12, cO.z + uz * Rc * 0.42), r: Rc * range(rnd, 0.36, 0.42) * (1 - 0.3 * crowd(ux, uz)), ux, uz, upper: true });
+  }
+  // small lobes that break the outline (between the ring lobes, a little lower)
+  const nSmall = hero ? 2 + (rnd() < 0.5 ? 1 : 0) : 1 + (rnd() < 0.4 ? 1 : 0);
+  for (let k = 0; k < nSmall; k++) {
+    const a = ra0 + (Math.floor(rnd() * nRing) + 0.5) * TAU / nRing + range(rnd, -0.2, 0.2), ux = Math.cos(a), uz = Math.sin(a), c = crowd(ux, uz);
+    if (c > 0.6) continue;
+    const r = Rc * range(rnd, 0.17, 0.25), rho = Rc * range(rnd, 0.8, 0.95) * (1 - 0.3 * c);
+    L.push({ c: new V3(cO.x + ux * rho, Yc - Vc * range(rnd, 0.2, 0.5), cO.z + uz * rho), r, ux, uz, small: true });
+  }
+
+  // ---- limbs: the fork into the ring lobes (the biggest 3-4 get heavy limbs), branches off them into
+  // the rest, a leader into the top
+  const Fp = tp[NT - 2].clone(), rF = tr[NT - 2];
+  const bc = barkAO(0, F + Vc, 0.7, tcol);
+  const ring = L.filter(l => l.ring).sort((p, q) => q.r - p.r);
+  const nHeavy = Math.min(ring.length, hero ? 4 : 3 + (rnd() < 0.4 ? 1 : 0));
+  const heavy = [];
+  const gnarl = (P0, P1, bend, n = 5) => {
+    const ctrl = [P0.clone()];
+    const dir = new V3().subVectors(P1, P0), Ld = dir.length(); dir.normalize();
+    const side = new V3(-dir.z, 0, dir.x).normalize();
+    for (let i = 1; i < n; i++) {
+      const t = i / n, p = P0.clone().lerp(P1, t);
+      // limbs rise steeply out of the fork, then level out toward their lobe; a wobble sideways
+      p.y += Math.sin(t * Math.PI) * Ld * 0.12 * bend - (1 - t) * t * Ld * 0.1;
+      p.addScaledVector(side, Math.sin(t * 5.3 + bend * 7) * Ld * 0.06 * bend);
+      ctrl.push(p);
+    }
+    ctrl.push(P1.clone());
+    return spline(ctrl, 3);
+  };
+  ring.forEach((l, k) => {
+    if (k < nHeavy) {
+      const a = Math.atan2(l.c.z - Fp.z, l.c.x - Fp.x);
+      const P0 = new V3(Fp.x + Math.cos(a) * rF * 0.15, Fp.y - 0.3 * G + range(rnd, -0.2, 0.25) * G * 0.5, Fp.z + Math.sin(a) * rF * 0.15);
+      const P1 = new V3(l.c.x - l.ux * l.r * 0.25, l.c.y - l.r * 0.3, l.c.z - l.uz * l.r * 0.25);
+      const pts = gnarl(P0, P1, range(rnd, 0.6, 1.1), 5);
+      const rb = rF * range(rnd, 0.58, 0.7);
+      tube(bark, pts, pts.map((_, i) => rb * lerpArr([1.12, 0.95, 0.8, 0.66, 0.52, 0.4, 0.3], i / (pts.length - 1))), { sides: hero ? 10 : 9, uRep: 1.5, vLen: 1.4, twist: 0.12, color: bc, cap: 0.6 });
+      heavy.push({ pts, rb, l });
+    }
+  });
+  // the other lobes hang off the nearest heavy limb
+  const branchTo = (l) => {
+    if (!heavy.length) return;
+    let best = heavy[0], bd = Infinity;
+    for (const h of heavy) { const e = h.pts[h.pts.length - 1], dd = Math.hypot(e.x - l.c.x, e.z - l.c.z); if (dd < bd) { bd = dd; best = h; } }
+    const P0 = best.pts[Math.floor(best.pts.length * range(rnd, 0.45, 0.6))].clone();
+    const P1 = new V3(l.c.x - l.ux * l.r * 0.2, l.c.y - l.r * 0.35, l.c.z - l.uz * l.r * 0.2);
+    const pts = gnarl(P0, P1, range(rnd, 0.4, 0.8), 3);
+    const rb = best.rb * (l.small ? 0.45 : 0.6);
+    tube(bark, pts, pts.map((_, i) => rb * (1 - 0.6 * i / (pts.length - 1))), { sides: 7, uRep: 1, vLen: 1.4, color: bc, cap: 0.5 });
+  };
+  ring.slice(nHeavy).forEach(branchTo);
+  L.filter(l => l.small || l.upper).forEach(branchTo);
+  const top = L.find(l => l.top);
+  {
+    const P1 = new V3(top.c.x, top.c.y - top.r * 0.45, top.c.z);
+    const pts = gnarl(new V3(Fp.x, Fp.y - 0.3 * G, Fp.z), P1, 0.5, 3);
+    tube(bark, pts, pts.map((_, i) => rF * lerpArr([0.62, 0.48, 0.34, 0.2], i / (pts.length - 1))), { sides: 9, uRep: 1.5, vLen: 1.4, color: bc, cap: 0.5 });
+  }
+
+  // ---- the leaves
+  let yLo = Infinity, yHi = -Infinity;
+  for (const l of L) { yLo = Math.min(yLo, l.c.y - l.r * 0.85); yHi = Math.max(yHi, l.c.y + l.r * 0.9); }
+  const tint = lin(pick(rnd, B.oakTints));
+  const ao = p => 0.58 + 0.42 * Math.pow(smooth(yLo, yHi, p.y), 1.05);
+  const wk = west ? [1.1, 1.06, 0.88] : [1.16, 1.12, 0.84];
+  const warm = p => { const t = smooth(yLo + (yHi - yLo) * 0.45, yHi, p.y); return [1 + (wk[0] - 1) * t, 1 + (wk[1] - 1) * t, 1 + (wk[2] - 1) * t]; };
+  const den = B.leafDensity;
+  for (const l of L) {
+    if (west && l.small && rnd() < 0.4) continue;          // a scruffy, open crown
+    const size = Math.min(l.r * range(rnd, 0.92, 1.02), 3.1);
+    const n = Math.max(6, Math.round(den * (6 + 13 * (l.r / size) ** 2)));
+    clump(leaves, l.c, l.r * 0.92, rnd, { cards: n, size, cells: [0], core: 2, coreK: 1.7, tint, ao, warm, squash: l.top ? 0.85 : 0.8, under: 0.8, sizeVar: [0.82, 1.18] });
+    // the skirt: leaf cards hanging off the lobe's outer, lower rim
+    if (l.top) continue;
+    const nS = Math.round((l.small ? 2 : 2 + l.r * 0.7) * (west ? 0.7 : 1));
+    const base = Math.atan2(l.uz, l.ux);
+    for (let k = 0; k < nS; k++) {
+      const a = base + (nS > 1 ? (k / (nS - 1) - 0.5) * 2.4 : 0) + range(rnd, -0.25, 0.25), ux = Math.cos(a), uz = Math.sin(a);
+      const rr = l.r * range(rnd, 0.6, 0.78), w = l.r * range(rnd, 0.85, 1.05), h = l.r * range(rnd, 0.7, 0.95);
+      const top = new V3(l.c.x + ux * rr, l.c.y - l.r * range(rnd, 0.05, 0.2), l.c.z + uz * rr);
+      hang(leaves, top, w, h, new V3(ux, 0, uz), inset(cellOf(1)), mulc(tint, ao(new V3(0, top.y - h * 0.5, 0)) * 0.95));
     }
   }
-  // a short leader into the crown and the top clump(s) that round off the dome above the limbs
-  const crownR = tipR.reduce((a, b) => a + b, 0) / tipR.length;
-  const leadTop = new V3(F.x + range(rnd, -0.3, 0.3) * s, F.y + (west ? 2.0 : 2.8) * s, F.z + range(rnd, -0.3, 0.3) * s);
-  tube(bark, [new V3(F.x, F.y - 0.3 * s, F.z), F.clone().lerp(leadTop, 0.5), leadTop], [rF * 0.6, rF * 0.42, rF * 0.22], { sides: 8, uRep: 1.5, vLen: 1.4, color: bc });
-  const topY = Math.max(tipY + (west ? 1.8 : 2.3) * s, F.y + (west ? 3.4 : 4.1) * s);
-  clumps.push([new V3(F.x + range(rnd, -0.4, 0.4) * s, topY, F.z + range(rnd, -0.4, 0.4) * s), range(rnd, 2.5, 3.0) * s * (west ? 0.9 : 1)]);
-  if (!west && rnd() < 0.85) {
-    const a = la0 + range(rnd, 0.5, 1.5), dd = crownR * range(rnd, 0.35, 0.5);
-    clumps.push([new V3(F.x + Math.cos(a) * dd, topY - range(rnd, 0.4, 0.8) * s, F.z + Math.sin(a) * dd), range(rnd, 1.8, 2.2) * s]);
-  }
-  let yLo = Infinity, yHi = -Infinity;
-  for (const [c, R] of clumps) { yLo = Math.min(yLo, c.y - R * 0.75); yHi = Math.max(yHi, c.y + R * 0.8); }
-  const tint = lin(pick(rnd, B.oakTints));
-  const ao = p => 0.55 + 0.45 * Math.pow(smooth(yLo, yHi, p.y), 1.1);
-  const wk = west ? [1.08, 1.05, 0.9] : [1.1, 1.08, 0.84];
-  const warm = p => { const t = smooth(yLo + (yHi - yLo) * 0.5, yHi, p.y); return [1 + (wk[0] - 1) * t, 1 + (wk[1] - 1) * t, 1 + (wk[2] - 1) * t]; };
-  const den = B.leafDensity;
-  clumps.forEach(([c, R, side]) => {
-    if (west && side && rnd() < 0.3) return;          // a scruffy, open crown
-    clump(leaves, c, R * 0.92, rnd, { cards: Math.max(5, Math.round((6 + 3.4 * (R / s) ** 2) * den)), size: range(rnd, 2.1, 2.5) * s, cells: [0, 0, 1], core: 2, coreK: 1.75, tint, ao, warm, squash: 0.92, under: 0.85, sizeVar: [0.8, 1.2] });
-  });
   // undergrowth: a bush at the foot (no collider, like any bush)
-  if (rnd() < (west ? 0.3 : 0.45)) {
-    const a = rnd() * TAU, dd = range(rnd, 1.4, 2.3) * s, R = range(rnd, 0.55, 0.8);
+  if (rnd() < (west ? 0.3 : 0.5)) {
+    const a = rnd() * TAU, dd = rC + range(rnd, 1.2, 2.2) * Math.min(1.5, G * 0.8), R = range(rnd, 0.6, 0.9);
     const C = new V3(Math.cos(a) * dd, 0, Math.sin(a) * dd); C.y = ctx.gh(C.x, C.z) + R * 0.5;
     clump(leaves, C, R, rnd, { cards: Math.round(10 + 10 * R * R), size: range(rnd, 1.1, 1.4), cells: [3], core: 3, coreK: 1.7, tint, ao: p => 0.66 + 0.34 * smooth(C.y - R, C.y + R, p.y), squash: 0.78, wind: 0.6, sizeVar: [0.7, 1.3] });
   }
+}
+
+// A hanging leaf card: top-centre at T, w wide, h tall, facing out along `out` (it turns about the
+// vertical toward the camera); its normal tips outward and down (it's lit from below and the side,
+// darker than the crown above), and it sways most at its bottom.
+function hang(b, T, w, h, out, cell, color) {
+  const f = new V3(out.x, 0, out.z).normalize(), r = new V3(f.z, 0, -f.x);
+  const C = new V3(T.x, T.y - h / 2, T.z);
+  const us = [cell[0], cell[2], cell[2], cell[0]], vs = [cell[1], cell[1], cell[3], cell[3]];
+  const base = b.n;
+  [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, c], k) => {
+    const off = new V3().addScaledVector(r, a * w / 2).add(new V3(0, c * h / 2, 0));
+    const n = new V3().copy(f).multiplyScalar(0.75).add(new V3(0, c > 0 ? 0.25 : -0.35, 0)).normalize();
+    b.v(new V3().copy(C).add(off), n, us[k], vs[k], mulc(color, c > 0 ? 0.9 : 1.05), c > 0 ? 0.6 : 1.3, [C, off, f]);
+  });
+  b.t(base, base + 1, base + 2); b.t(base, base + 2, base + 3);
 }
 
 // A pine: a straight trunk that stops inside the crown, stacked drooping tiers of bough cards round
@@ -1244,176 +1342,330 @@ const polyOf = (rnd, N, r, jit = 0.18, sx = 1, sz = 1) => { const a0 = rnd() * T
 // shrink a footprint by a step (varying per corner, so one side steps back further than another)
 const stepIn = (rnd, poly, st) => poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), Math.max(r * 0.35, r - st * range(rnd, 0.5, 1.5))]);
 
-// Badlands: stepped ledge stacks of strata slabs, each narrower than the one below, with a tilted
-// top slab and rubble at the foot; or a cluster of hoodoos: stacked eroded drums narrowing to a neck
-// under a darker, wider caprock.
-function badlandsRock(ctx, b, S, rnd, steep, tintOf, force = null) {
-  const LAYER = [lin('#ffffff'), lin('#f4e0cc'), lin('#ffe9d2'), lin('#ead2bc'), lin('#fff2e0')];
-  if (force === 'hoodoo' || (force !== 'ledge' && S > 1.3 && rnd() < 0.35 && !steep)) {
-    const n = 2 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
-    for (let k = 0; k < n; k++) {
-      const a = a0 + k * TAU / n + range(rnd, -0.4, 0.4), dd = k === 0 ? 0 : S * range(rnd, 1.0, 1.5);
-      const C = new V3(Math.cos(a) * dd, 0, Math.sin(a) * dd);
-      const Ht = range(rnd, 3.5, 5) * Math.max(0.7, Math.min(1.2, S / 1.8)) * (k === 0 ? 1 : range(rnd, 0.6, 0.85));
-      const rb = Math.max(0.55, Ht * range(rnd, 0.17, 0.21));
-      const [lo] = ctx.foot(rb * 1.2, C.x, C.z, 6);
-      let y = lo - 0.3, poly = polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), rb, 0.12);
-      // hard layers (thick, standing proud) alternating with soft ones (thin, eroded back into a
-      // waist), the column narrowing toward the neck; the wavy profile reads as eroded rock, not a
-      // stack of drums
-      const nD = 3 + (rnd() < 0.5 ? 1 : 0), hs = []; let tot = 0;
-      for (let i = 0; i < nD; i++) { const hh = range(rnd, 0.8, 1.25); hs.push(hh); tot += hh; }
-      const capH = Ht * 0.12, neck = rb * 0.6, soft = 0.3;
-      for (let i = 0; i < nD; i++) {
-        const H0 = hs[i] / tot * (Ht - capH) + (i === 0 ? 0.3 : 0), f = (i + 1) / nD;
-        const hHard = H0 * (i === nD - 1 ? 1 : 1 - soft), hSoft = H0 - hHard;
-        const C0 = new V3(C.x + range(rnd, -0.04, 0.04), 0, C.z + range(rnd, -0.04, 0.04)), tnt = mul3(tintOf(), LAYER[i % LAYER.length]);
-        y = prism(b, C0, y, hHard, poly, rnd, { tint: tnt, under: 0.97, bulge: 1.03, bevel: 0.1, foot: 0.03, aoLo: 0.62, lipK: 1.08 });
-        const target = rb + (neck - rb) * f;
-        const next = poly.map(([a, r]) => [a + range(rnd, -0.04, 0.04), Math.max(neck * 0.85, target * range(rnd, 0.9, 1.1))]);
-        if (hSoft > 0.05) {
-          // the soft band: pulled in to a waist under the next hard layer
-          const waist = next.map(([a, r]) => [a, r * 0.78]);
-          y = prism(b, C0, y - 0.02, hSoft + 0.02, waist, rnd, { tint: mul3(tnt, lin('#e8c4a8')), under: 1.0, bulge: 0.96, bevel: 0.02, foot: 0.02, aoLo: 0.55, lipK: 1 });
-        }
-        poly = next;
-      }
-      // the caprock: darker, wider than the neck, tilted
-      const cap = polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), neck * 1.6 * range(rnd, 0.95, 1.1), 0.2);
-      const ta = rnd() * TAU, tk = Math.tan(range(rnd, 3, 7) * Math.PI / 180);
-      prism(b, C, y - 0.04, capH, cap, rnd, { tint: mul3(tintOf(), lin('#c89070')), under: 0.7, bulge: 1.02, bevel: 0.07, foot: 0.02, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: 0.5, lipK: 1.08 });
-    }
-    return;
+// The collider world gen gave a rock (this mirrors shared/world.js rockCollide, steepness test
+// included, and prefers the real collider when one stands at the rock's centre). Only rocks with
+// s > 1.2 are solid; the visuals of those keep to their colliders: no invisible walls, and no rock
+// you can walk into (loose rubble round them stays under the 0.46 m step).
+function rockCol(ctx, d) {
+  const W = ctx.W, bm = ctx.biome, s = d.s || 1;
+  const S0 = s * (bm === 'badlands' ? 1.25 : 1), R = S0 * 1.1;
+  let lo = Infinity, hi = -Infinity;
+  for (const [dx, dz] of [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]]) { const h = W.heightAt ? W.heightAt(d.x + dx, d.z + dz) : 0; lo = Math.min(lo, h); hi = Math.max(hi, h); }
+  const steep = hi - lo > 0.8 * S0, S = steep ? S0 * 0.75 : S0;
+  const out = { S, steep, big: s > 1.2 };
+  if (!out.big) return out;
+  const c = (W.cyls || []).find(c => c.mat === 'rock' && Math.abs(c.x - d.x) < 0.02 && Math.abs(c.z - d.z) < 0.02);
+  if (bm === 'badlands' && d.variant === 'hoodoo') {
+    const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8));
+    out.hoodoo = c ? { Ht: c.hh * 2, r: c.r } : { Ht, r: Math.max(0.55, Ht * 0.19) * 0.9 };
+  } else if (bm === 'desert' && d.variant === 'arch') {
+    out.arch = { span: S * 1.9, r: S * 0.36 * 1.1, top: S * 1.6 };
+  } else {
+    const tall = bm === 'badlands' ? 0.75 : bm === 'desert' ? 0.45 : 0.6;
+    out.cyl = c ? { r: c.r, top: c.y + c.hh - d.y } : { r: S * (bm === 'desert' ? 0.95 : 0.8), top: S * tall * 1.8 };
   }
-  // a stepped ledge stack
-  const [lo] = ctx.foot(S * 1.1);
-  const nL = 3 + Math.floor(rnd() * 3);
-  let poly = polyOf(rnd, 6 + Math.floor(rnd() * 3), S * range(rnd, 0.95, 1.2), 0.2, range(rnd, 1, 1.3), range(rnd, 0.75, 1));
-  let y = lo - 0.3 * S, cx = 0, cz = 0;
-  const ta = rnd() * TAU, tk = Math.tan(5 * Math.PI / 180);
-  for (let i = 0; i < nL; i++) {
-    const h = S * range(rnd, 0.3, 0.55) + (i === 0 ? 0.3 * S : 0), last = i === nL - 1;
-    y = prism(b, new V3(cx, 0, cz), y, h, poly, rnd, { tint: mul3(tintOf(), LAYER[(i + Math.floor(rnd() * 2)) % LAYER.length]), under: 0.9, bevel: 0.07 * S, foot: 0.05 * S, tilt: last ? [Math.cos(ta) * tk, Math.sin(ta) * tk] : null });
-    poly = stepIn(rnd, poly, S * range(rnd, 0.12, 0.3));
-    cx += range(rnd, -0.08, 0.08) * S; cz += range(rnd, -0.08, 0.08) * S;
-    if (poly[0][1] < 0.3 * S) break;
+  return out;
+}
+
+// Squeeze or swell a rock shape (already scaled) in plan so the part of it at bumper height fills a
+// circle of radius `target`: per angle, the outline moves most of the way to the circle (a little of
+// its own shape kept, so it stays a chiselled rock and not a drum).
+function fitPlan(P, target, keep = 0.22) {
+  const NB = 16, ext = new Array(NB).fill(0);
+  let y0 = Infinity, y1 = -Infinity; for (const p of P) { y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
+  const ya = y0 + (y1 - y0) * 0.3, yb = y0 + (y1 - y0) * 0.75;   // the body, above the buried foot
+  for (const p of P) {
+    if (p.y > yb || p.y < ya) continue;
+    const a = Math.atan2(p.z, p.x), k = Math.round(((a + Math.PI) / TAU) * NB) % NB, r = Math.hypot(p.x, p.z);
+    ext[k] = Math.max(ext[k], r);
   }
-  // fallen blocks at the foot
-  if (!steep) for (let k = 0; k < 1 + Math.floor(rnd() * 3); k++) {
-    const a = rnd() * TAU, dd = S * range(rnd, 1.25, 1.7), r = S * range(rnd, 0.18, 0.32), x = Math.cos(a) * dd, z = Math.sin(a) * dd;
-    const [l2] = ctx.foot(r, x, z, 5);
-    const ta2 = rnd() * TAU, tk2 = Math.tan(range(rnd, 4, 14) * Math.PI / 180);
-    prism(b, new V3(x, 0, z), l2 - r * 0.3, r * range(rnd, 0.8, 1.3), polyOf(rnd, 5 + Math.floor(rnd() * 2), r, 0.25), rnd, { tint: tintOf(), under: 0.92, bevel: 0.04, foot: 0.02, tilt: [Math.cos(ta2) * tk2, Math.sin(ta2) * tk2] });
+  for (let k = 0; k < NB; k++) if (!ext[k]) ext[k] = Math.max(...ext);
+  const kOf = a => {
+    const f = ((a + Math.PI) / TAU) * NB, i = Math.floor(f), u = f - i;
+    const e = ext[((i % NB) + NB) % NB] * (1 - u) + ext[(((i + 1) % NB) + NB) % NB] * u;
+    return Math.max(0.75, Math.min(1.5, (target / Math.max(1e-3, e)) * (1 - keep) + keep));
+  };
+  for (const p of P) { const k = kOf(Math.atan2(p.z, p.x)); p.x *= k; p.z *= k; }
+  return P;
+}
+
+// Loose rubble round a big rock: small chunks (under the step height) that settle at its foot.
+function rubble(ctx, b, n, r0, r1, rnd, tint, { size = [0.12, 0.26], sy = 0.55 } = {}) {
+  for (let k = 0; k < n; k++) {
+    const a = rnd() * TAU, dd = range(rnd, r0, r1), R = range(rnd, size[0], size[1]), x = Math.cos(a) * dd, z = Math.sin(a) * dd;
+    const sh = rockShape(rnd, { sx: range(rnd, 1, 1.4), sy, sides: 3, oblique: 2, detail: R > 0.2 ? 1 : 0, noise: 0.14 });
+    const [lo] = ctx.foot(R, x, z, 5);
+    placeRock(b, sh, new V3(x, lo + R * sy * 0.15, z), R, { yaw: rnd() * TAU, tilt: range(rnd, 0, 0.3), tiltA: rnd() * TAU, tint });
   }
 }
 
-// Tanaris: wind-scoured sandstone mounds, the wide base buried, a rounded top; big ones sometimes a
-// low arch on two buried feet.
-function desertRock(ctx, b, S, rnd, steep, tintOf, piece, force = null) {
-  if (force === 'arch' || (force !== 'mound' && S > 1.2 && rnd() < 0.3 && !steep)) {
-    // a world-gen arch (force) spans along the rock's own x axis: world gen put its feet's colliders there
-    const a0 = rnd() * TAU, a = force === 'arch' ? 0 : a0, ca = Math.cos(a), sa = Math.sin(a), span = S * range(rnd, 1.7, 2.1), Hh = S * range(rnd, 1.4, 1.8), rr = S * range(rnd, 0.32, 0.4);
-    const ends = [-1, 1].map(sd => ctx.foot(rr * 1.2, ca * span * sd, sa * span * sd, 5)[0]);
-    const pts = [];
-    for (let i = 0; i <= 10; i++) {
-      const t = i / 10, th = Math.PI * (1 - t), x = Math.cos(th) * span, yb = ends[0] + (ends[1] - ends[0]) * t;
-      pts.push(new V3(ca * x, yb - 0.4 * S + Math.sin(th) * (Hh + 0.4 * S) * (1 - 0.15 * Math.sin(th * 2)), sa * x));
-    }
-    const ph = rnd() * 9, nrm = new V3(-sa, 0, ca);
-    const tint = tintOf();
-    tube(b, pts, pts.map((_, i) => rr * (1 + 1.1 * Math.pow(Math.abs(i / 10 - 0.5) * 2, 2.5)) * range(rnd, 0.92, 1.08)), {
-      sides: 9, uRep: 1, vLen: 2, cap: 0.5, cap0: 0.5,
-      lobes: (dir, t) => { const across = Math.abs(dir.dot(nrm)), mid = 1 - Math.abs(t - 0.5) * 2; return (1 + 0.45 * across) * (1 - 0.25 * mid * Math.max(0, dir.y)) * (1 + 0.16 * noise3(dir.x * 2.5 + t * 7, dir.y * 2.5, dir.z * 2.5, ph)); },
-      color: (p, n) => mulc(tint, (0.5 + 0.5 * smooth(Math.min(...ends) - 0.2, Math.min(...ends) + Hh * 0.8, p.y)) * (0.86 + 0.16 * n.y) * (n.y < -0.3 ? 0.82 : 1)),
+// A Badlands hoodoo: ONE continuous lofted column (12 sides, smooth normals) on a flared talus foot,
+// eroded into 2-4 waists at uneven heights between harder bands that stand proud, leaning a little
+// and wandering ring to ring, with vertical rain flutes, up to a narrow neck under an irregular,
+// tilted, overhanging caprock (the only creased edge is the cap's lip). The strata come from the
+// rock material's world-height bands, so the whole formation is one rock. The column through the
+// bumper band is the collider (centred, radius r).
+function hoodoo(ctx, b, rnd, col, tint) {
+  const Ht = col.Ht * range(rnd, 1.0, 1.14), rb = col.r * 0.97;
+  const [lo] = ctx.foot(rb * 1.5, 0, 0, 7);
+  const y0 = Math.min(-0.45, lo - 0.45), capH = Ht * range(rnd, 0.1, 0.13);
+  const yN = Ht - capH * 0.55;                                 // the neck's top, inside the cap
+  const nW = 2 + Math.floor(rnd() * 3), waists = [];
+  for (let k = 0; k < nW; k++) waists.push({ t: 0.2 + (k + range(rnd, 0.15, 0.85)) / nW * 0.62, d: range(rnd, 0.65, 0.9), w: range(rnd, 0.04, 0.085) });
+  const bands = []; for (let k = 0; k < 3; k++) bands.push({ t: range(rnd, 0.25, 0.85), w: range(rnd, 0.015, 0.03), a: range(rnd, 0.04, 0.08) });
+  const waistK = t => { let r = 1; for (const w of waists) r *= 1 - (1 - w.d) * Math.exp(-(((t - w.t) / w.w) ** 2)); return r; };
+  const prof = t => {
+    let r = (1 - 0.2 * t) * waistK(t);
+    r *= 1 + 0.5 * Math.pow(clamp01(1 - t / 0.17), 2);     // the talus foot, 1.5x
+    for (const bd of bands) r *= 1 + bd.a * Math.exp(-(((t - bd.t) / bd.w) ** 2));
+    r *= 1 - 0.32 * smooth(0.84, 1, t);                     // the neck under the cap
+    return r;
+  };
+  const la = rnd() * TAU, lean = range(rnd, 0.05, 0.1) * Ht;
+  const NR = 30, pts = [], rad = [], ts = [];
+  for (let i = 0; i <= NR; i++) {
+    const t = i / NR, y = y0 + t * (yN - y0), tt = clamp01(y / yN);
+    const L = lean * tt * tt, j = i > 0 && i < NR ? 0.025 * rb : 0;
+    pts.push(new V3(Math.cos(la) * L + range(rnd, -j, j), y, Math.sin(la) * L + range(rnd, -j, j)));
+    rad.push(rb * prof(tt)); ts.push(tt);
+  }
+  const p1 = rnd() * TAU, p2 = rnd() * TAU, p3 = rnd() * TAU;
+  const aoAt = (y, t) => (0.55 + 0.45 * smooth(lo - 0.2, lo + 1.3, y)) * (1 - 0.32 * smooth(0.8, 0.98, t)) * (0.82 + 0.18 * waistK(t));
+  tube(b, pts, rad, {
+    sides: 12, uRep: 1, vLen: 2,
+    lobes: (dir, t, i) => {
+      const a = Math.atan2(dir.z, dir.x), tt = ts[i];
+      return 1 + 0.08 * Math.cos(2 * a + p1 + tt * 1.6) + 0.05 * Math.cos(3 * a + p2 - tt * 2.2) - 0.045 * Math.max(0, Math.cos(7 * a + p3 + tt * 0.6)) * smooth(0.1, 0.25, tt);
+    },
+    color: (p, n) => mulc(tint, aoAt(p.y, clamp01(p.y / yN)) * (0.9 + 0.14 * Math.max(0, n.y))),
+  });
+  // the caprock: 1.5-1.8x the neck, irregular, tilted 4-10°, overhanging all round
+  const top = pts[NR], rNeck = rad[NR] / (1 - 0.32);
+  const capS = rockShape(rnd, { sx: range(rnd, 1.0, 1.15), sy: 0.42, sz: range(rnd, 0.82, 0.98), topCut: [0.45, 0.6], topTilt: 0.1, sides: 5, oblique: 3, sideCut: [0.72, 0.86], noise: 0.12, bottom: 0.5, detail: 1 });
+  const Rcap = rNeck * range(rnd, 1.5, 1.8) / 0.82;
+  placeRock(b, capS, new V3(top.x + range(rnd, -0.1, 0.1) * rb, top.y + capH * 0.12, top.z + range(rnd, -0.1, 0.1) * rb), Rcap,
+    { yaw: rnd() * TAU, tilt: range(rnd, 4, 10) * Math.PI / 180, tiltA: rnd() * TAU, tint: mul3(tint, lin('#c49274')), aoLo: 0.62 });
+  // talus: a few small chunks at the foot (under the step height: no collider needed)
+  rubble(ctx, b, 3 + Math.floor(rnd() * 4), rb * 1.45, rb * 2.1, rnd, tint);
+}
+
+// A Badlands ledge: 2-3 thick strata slabs (their thickness varying 2:1), each undercut so it
+// overhangs its own base, its top tilted 5-12°, stepping back unevenly up the stack, except on one
+// side where every slab stays flush: a continuous cliff face. The foot slab fills the collider.
+function ledge(ctx, b, S, rnd, tint, col, steep) {
+  const rFoot = col && col.cyl ? col.cyl.r * 0.98 : S * 0.85, Htot = col && col.cyl ? col.cyl.top * range(rnd, 0.95, 1.12) : S * range(rnd, 1.1, 1.45);
+  const [lo] = ctx.foot(rFoot, 0, 0, 8);
+  const nS = 2 + (rnd() < 0.55 ? 1 : 0), th = [];
+  for (let i = 0; i < nS; i++) th.push(i === 0 ? range(rnd, 1.4, 2) : range(rnd, 1, 2));
+  const bury = 0.3 * S;
+  if (col && col.cyl) {      // the foot slab rises at least 1.1 m (or 55% of the stack) out of the ground
+    const rest = th.slice(1).reduce((a, v) => a + v, 0), need = Math.max(1.1 - lo + bury, 0.55 * (Htot - lo + bury));
+    th[0] = Math.max(th[0], need / Math.max(0.05, Htot - lo + bury - need) * rest);
+  }
+  const sum = th.reduce((a, v) => a + v, 0);
+  const cliffA = rnd() * TAU;
+  let poly = polyOf(rnd, 8, rFoot, 0.08);
+  if (col && col.cyl) poly = poly.map(([a]) => [a, rFoot * range(rnd, 1.0, 1.1)]);   // its flat faces stay (nearly) on the collider
+  let y = lo - bury;
+  for (let i = 0; i < nS; i++) {
+    const h = th[i] / sum * (Htot - lo + bury) + (i === 0 ? 0 : 0.12 * S), last = i === nS - 1;
+    const ta = cliffA + Math.PI + range(rnd, -1.2, 1.2), tk = Math.tan(range(rnd, 5, 12) * Math.PI / 180);
+    const yTop = prism(b, new V3(range(rnd, -0.04, 0.04) * S, 0, range(rnd, -0.04, 0.04) * S), y, h, poly, rnd, { tint, under: i === 0 ? 0.95 : 0.84, bulge: 1.03, bevel: (last ? 0.09 : 0.06) * S, foot: 0.05 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.45 : 0.6, lipK: 1.1 });
+    const rMax = poly.reduce((m, [, r]) => Math.max(m, r), 0);
+    // the next slab steps back (not on the cliff side) and sinks below the tilted top
+    const low = col && col.cyl && yTop < 1.7;            // still at body height: step back only a little
+    poly = poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), angDiff(a, cliffA) < 0.85 ? r * range(rnd, 0.95, 1.01) : Math.max(r * 0.45, r - S * (low ? range(rnd, 0.04, 0.12) : range(rnd, 0.12, 0.4)))]);
+    y = yTop - tk * rMax * 0.9;
+  }
+  if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 3), rFoot * 1.25, rFoot * 1.7, rnd, tint, { size: [0.14, 0.28] });
+}
+
+function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d) {
+  if (col.hoodoo) return hoodoo(ctx, b, rnd, col.hoodoo, tintOf());
+  if (d.variant === 'hoodoo') {
+    // a small one (no collider: s ≤ 1.2 never gets the hoodoo variant from world gen, but previews may)
+    const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8));
+    return hoodoo(ctx, b, rnd, { Ht, r: Math.max(0.55, Ht * 0.19) * 0.9 }, tintOf());
+  }
+  ledge(ctx, b, S, rnd, tintOf(), col, steep);
+}
+
+// Tanaris: wind-scoured sandstone mounds, the wide base buried, a rounded top; or a low arch whose
+// two feet stand exactly on their colliders (±1.9 S along the rock's own x axis, legs no thicker
+// than the colliders through the bumper band, wider across only up where the span bends over).
+function desertRock(ctx, b, S, rnd, steep, tintOf, piece, col, d) {
+  if (col.arch || d.variant === 'arch') {
+    // the legs stand straight up through their colliders (to about head height), then the span bends
+    // over on an ellipse, its underside high enough to walk beneath
+    const A = col.arch || { span: S * 1.9, r: S * 0.396, top: S * 1.6 };
+    const span = A.span, rL = A.r * 0.97, archR = Math.min(span * 0.62, S * 1.0);
+    const Hh = Math.max(S * range(rnd, 1.7, 1.9), 2.35 + rL * 0.9), hLeg = Hh - archR;
+    const ends = [-1, 1].map(sd => ctx.foot(rL, span * sd, 0, 6)[0]);
+    const pts = [], arc = [];
+    const leg = (sd, up) => { const ys = [ends[sd < 0 ? 0 : 1] - 0.45 * S, hLeg * 0.4, hLeg * 0.75, hLeg]; for (const y of up ? ys : ys.slice().reverse()) { pts.push(new V3(span * sd, y, 0)); arc.push(0); } };
+    leg(-1, true);
+    for (let i = 1; i < 12; i++) { const th = Math.PI * (1 - i / 12); pts.push(new V3(Math.cos(th) * span, hLeg + Math.sin(th) * archR, 0)); arc.push(Math.sin(th)); }
+    leg(1, false);
+    const ph = rnd() * 9, tint = tintOf(), n = pts.length;
+    tube(b, pts, pts.map((p, i) => rL * (1 - 0.1 * arc[i]) * (i === 0 || i === n - 1 ? 1.08 : 1)), {
+      sides: 12, uRep: 1, vLen: 2, cap: 0.5, cap0: 0.5,
+      lobes: (dir, t, i) => {
+        // a slab, not a pipe: wider across (a little on the legs, a lot up in the span), flatter
+        // under the span, lumpy, with wind-cut horizontal grooves round the legs
+        const up = arc[i], y = pts[i].y, ac = Math.abs(dir.z);
+        const groove = up < 0.3 ? 1 - 0.07 * (0.5 + 0.5 * Math.sin(y * 9.5 + ph)) : 1;
+        return (1 + (0.22 + 0.6 * up) * ac * ac) * (1 - 0.22 * up * Math.max(0, -dir.y)) * (1 + (0.08 + 0.1 * up) * noise3(dir.x * 2.5 + t * 7, dir.y * 2.5, dir.z * 2.5, ph)) * groove;
+      },
+      color: (p, nn) => mulc(tint, (0.52 + 0.48 * smooth(Math.min(...ends) - 0.2, Math.min(...ends) + Hh * 0.8, p.y)) * (0.86 + 0.16 * nn.y) * (nn.y < -0.3 ? 0.84 : 1)),
     });
-    piece(ca * span * 1.25 + sa * S * 0.4, sa * span * 1.25 - ca * S * 0.4, S * range(rnd, 0.3, 0.45), { detail: 2, top: false, sy: 0.7, sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.14, bottom: 0.5 }, { cos: 0.8 });
+    rubble(ctx, b, 2 + Math.floor(rnd() * 3), span - rL * 2.5, span + rL * 2.5, rnd, tint, { size: [0.14, 0.26], sy: 0.6 });
     return;
   }
-  const n = 1 + (S > 1.0 && !steep ? 1 + (rnd() < 0.5 ? 1 : 0) : 0);
-  for (let k = 0; k < n; k++) {
-    const a = rnd() * TAU, dd = k === 0 ? 0 : S * range(rnd, 0.8, 1.3), R = k === 0 ? S * range(rnd, 0.95, 1.15) : S * range(rnd, 0.35, 0.6);
-    const sy = range(rnd, 0.6, 0.9);
-    piece(Math.cos(a) * dd, Math.sin(a) * dd, R, { detail: 2, top: false, sx: range(rnd, 1.1, 1.45), sy, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, sy * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
+  const big = !!col.cyl;
+  const R = big ? col.cyl.r : S * range(rnd, 0.95, 1.15);
+  const sy = big ? col.cyl.top / (R * 0.64) * 0.97 : range(rnd, 0.6, 0.9);
+  if (big) piece(0, 0, R, { detail: 2, top: true, topCut: [0.6, 0.7], topTilt: 0.14, sx: range(rnd, 1.05, 1.25), sy, sz: range(rnd, 0.9, 1.05), sides: 3, oblique: 0, sideCut: [0.82, 0.92], noise: 0.12, bottom: 0.45, under: 0.08, groove: [0.06, sy * range(rnd, 0.32, 0.45)] }, { sink: 0.22, cos: 0.8, fit: col.cyl.r * 0.98 });
+  else piece(0, 0, R, { detail: 2, top: false, sx: range(rnd, 1.1, 1.4), sy, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, sy * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
+  if (!steep) {
+    if (big) rubble(ctx, b, 2 + Math.floor(rnd() * 3), R * 1.1, R * 1.5, rnd, tintOf(), { size: [0.14, 0.28], sy: 0.6 });
+    else if (S > 1.0) for (let k = 0; k < 1 + (rnd() < 0.5 ? 1 : 0); k++) {
+      const a = rnd() * TAU, dd = S * range(rnd, 0.8, 1.3), r = S * range(rnd, 0.35, 0.6), s2 = range(rnd, 0.6, 0.9);
+      piece(Math.cos(a) * dd, Math.sin(a) * dd, r, { detail: 2, top: false, sx: range(rnd, 1.1, 1.45), sy: s2, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, s2 * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
+    }
   }
 }
 
 function rock(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 16)), B = ctx.bio, bm = ctx.biome;
-  let S = (d.s || 1) * (B.strata ? 1.25 : 1);    // the canyon lands get bigger formations
+  const col = rockCol(ctx, d);
+  const S = col.S, steep = col.steep;                       // the scale (and steepness) world gen used
   ctx.at(d, d.ry || 0);
   const b = ctx.b('rock'), cap = B.snowCaps ? ctx.b('snowcap') : null;
   const tint = () => lin(pick(rnd, B.rockTints));
-  // sit every piece on the lowest ground under it, sunk; skip satellites on steep ground
-  const [lo0, hi0] = ctx.foot(S * 1.1);
-  const steep = hi0 - lo0 > 0.8 * S;
-  if (steep) S *= 0.75;
+  // sit every piece on the lowest ground under it, sunk; `fit` makes it fill its collider in plan
   const piece = (x, z, R, shapeO, o = {}) => {
-    const [lo] = ctx.foot(R * (shapeO.sx ?? 1) * 0.9, x, z, 6);
+    let [lo] = ctx.foot(R * (shapeO.sx ?? 1) * 0.9, x, z, 6);
     const sy = shapeO.sy ?? 0.75, bot = shapeO.bottom ?? 0.5;
+    if (o.fit) lo = Math.max(lo, ctx.gh(x, z) - 0.12 * R * sy);     // a solid rock stands on the ground at its collider
     const sink = o.sink != null ? (bot - o.sink * (bot + 1)) : (bot - 0.32);
     const C = new V3(x, lo + R * sy * sink + (o.lift || 0), z);
     const sh = rockShape(rnd, { detail: R > 1.25 ? 2 : 1, ...shapeO });
+    if (o.fit) { sh.P = fitPlan(sh.P.map(p => p.clone().multiplyScalar(R)), o.fit).map(p => p.multiplyScalar(1 / R)); }
     const rk = placeRock(b, sh, C, R, { yaw: rnd() * TAU, tint: tint(), ...o });
     if (cap) snowCap(cap, rk, Math.min(0.16, 0.05 + 0.05 * R));
     return C;
   };
-  if (bm === 'badlands') badlandsRock(ctx, b, S, rnd, steep, tint, d.variant);
-  else if (bm === 'desert') desertRock(ctx, b, S, rnd, steep, tint, piece, d.variant);
+  const fit = col.cyl ? col.cyl.r * 0.98 : 0;
+  const tall = (sy0, R) => (fit ? col.cyl.top / (R * 0.66) * 0.96 : sy0);           // a solid rock's top-cut plane lands at its collider's top
+  const topC = c => (fit ? [0.6, 0.72] : c);
+  if (bm === 'badlands') badlandsRock(ctx, b, S, rnd, steep, tint, col, d);
+  else if (bm === 'desert') desertRock(ctx, b, S, rnd, steep, tint, piece, col, d);
   else if (bm === 'snow') {
-    piece(0, 0, S * 1.05, { sx: range(rnd, 1, 1.25), sy: range(rnd, 0.65, 0.85), sides: 3, oblique: 4, topCut: [0.55, 0.75], topTilt: 0.25, noise: 0.14 });
-    if (S > 1.0 && rnd() < 0.6 && !steep) {   // a tilted slab leaning beside it
-      const a = rnd() * TAU, dd = S * 0.95;
-      piece(Math.cos(a) * dd, Math.sin(a) * dd, S * 0.65, { sx: 0.5, sy: 1.25, sz: 1, sides: 2, oblique: 2, topCut: [0.65, 0.8], topTilt: 0.3 }, { tilt: range(rnd, 0.2, 0.4), tiltA: a + Math.PI / 2, lift: S * 0.15 });
+    piece(0, 0, S * 1.05, { sx: range(rnd, 1, 1.25), sy: tall(range(rnd, 0.65, 0.85), S * 1.05), sides: 3, oblique: fit ? 1 : 4, topCut: topC([0.55, 0.75]), topTilt: 0.25, noise: 0.14 }, { fit });
+    if (S > 1.0 && rnd() < 0.6 && !steep) {   // a tilted slab leaning on it (inside the collider when there is one)
+      const a = rnd() * TAU, dd = S * (fit ? 0.45 : 0.95);
+      piece(Math.cos(a) * dd, Math.sin(a) * dd, S * (fit ? 0.55 : 0.65), { sx: 0.5, sy: 1.25, sz: 1, sides: 2, oblique: 2, topCut: [0.65, 0.8], topTilt: 0.3 }, { tilt: range(rnd, 0.2, 0.4), tiltA: a + Math.PI / 2, lift: S * 0.15 });
     }
-    if (!steep && rnd() < 0.5) { const a = rnd() * TAU, dd = S * range(rnd, 1.1, 1.4); piece(Math.cos(a) * dd, Math.sin(a) * dd, S * range(rnd, 0.3, 0.5), { sy: 0.7, sides: 3, oblique: 2 }); }
+    if (!steep && rnd() < 0.5) {
+      const a = rnd() * TAU, dd = S * range(rnd, 1.1, 1.4);
+      if (fit) rubble(ctx, b, 2, fit * 1.15, fit * 1.5, rnd, tint());
+      else piece(Math.cos(a) * dd, Math.sin(a) * dd, S * range(rnd, 0.3, 0.5), { sy: 0.7, sides: 3, oblique: 2 });
+    }
   } else {                                  // Elwynn / Westfall: chunky boulders, outcrops of tilted slabs
     const fields = bm === 'fields';
-    piece(0, 0, S * 1.0, { sx: range(rnd, 1, 1.3), sy: fields ? range(rnd, 0.55, 0.7) : range(rnd, 0.68, 0.85), sz: range(rnd, 0.85, 1.05), sides: 3, oblique: 3, topCut: [0.55, 0.75] });
-    if (S > 1.2 && rnd() < 0.65 && !steep) {          // an outcrop: 2-3 tall slabs leaning together
+    piece(0, 0, S * 1.0, { sx: range(rnd, 1, 1.3), sy: tall(fields ? range(rnd, 0.55, 0.7) : range(rnd, 0.68, 0.85), S), sz: range(rnd, 0.85, 1.05), sides: 3, oblique: fit ? 1 : 3, topCut: topC([0.55, 0.75]), topTilt: fit ? 0.22 : 0.15 }, { fit });
+    if (S > 1.2 && rnd() < 0.65 && !steep) {          // an outcrop: 2-3 tall slabs leaning together (inside the collider)
       const a = rnd() * TAU, n = 2 + (rnd() < 0.5 ? 1 : 0);
       for (let k = 0; k < n; k++) {
-        const aa = a + (k - (n - 1) / 2) * 0.55, dd = S * range(rnd, 0.6, 0.9), x = Math.cos(aa) * dd, z = Math.sin(aa) * dd;
-        piece(x, z, S * range(rnd, 0.6, 0.8), { sx: range(rnd, 0.45, 0.6), sy: range(rnd, 1.2, 1.6), sz: 1, sides: 2, oblique: 2, topCut: [0.6, 0.78], topTilt: 0.35 }, { tilt: range(rnd, 0.12, 0.35), tiltA: aa + Math.PI / 2 + range(rnd, -0.4, 0.4), lift: S * 0.25 });
+        const aa = a + (k - (n - 1) / 2) * 0.55, dd = S * (fit ? range(rnd, 0.3, 0.45) : range(rnd, 0.6, 0.9)), x = Math.cos(aa) * dd, z = Math.sin(aa) * dd;
+        piece(x, z, S * range(rnd, 0.55, 0.72), { sx: range(rnd, 0.45, 0.6), sy: range(rnd, 1.2, 1.6), sz: 1, sides: 2, oblique: 2, topCut: [0.6, 0.78], topTilt: 0.35 }, { tilt: range(rnd, 0.12, 0.35), tiltA: aa + Math.PI / 2 + range(rnd, -0.4, 0.4), lift: S * 0.25 });
       }
     }
-    const extra = steep ? 0 : S > 1.2 ? 2 : (rnd() < 0.5 ? 1 : 0);
-    for (let k = 0; k < extra; k++) {
-      const a = rnd() * TAU, dd = S * range(rnd, 1.0, 1.35), r = S * range(rnd, 0.3, 0.5);
-      piece(Math.cos(a) * dd, Math.sin(a) * dd, r, { sx: range(rnd, 1, 1.3), sy: 0.65, sides: 3, oblique: 2 });
+    if (fit) { if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 2), fit * 1.15, fit * 1.5, rnd, tint()); }
+    else {
+      const extra = steep ? 0 : S > 1.2 ? 2 : (rnd() < 0.5 ? 1 : 0);
+      for (let k = 0; k < extra; k++) {
+        const a = rnd() * TAU, dd = S * range(rnd, 1.0, 1.35), r = S * range(rnd, 0.3, 0.5);
+        piece(Math.cos(a) * dd, Math.sin(a) * dd, r, { sx: range(rnd, 1, 1.3), sy: 0.65, sides: 3, oblique: 2 });
+      }
     }
+  }
+}
+
+// A desert road marker: 3-4 flat sandstone slabs stacked 0.6-0.9 m high, each a little askew, and
+// often a sun-bleached skull or horn on top. (No collider: it's knee height.)
+function cairn(ctx, d) {
+  const rnd = rngOf(seedOf(d.x, d.z, 27)), s = d.s || 1;
+  ctx.at(d, d.ry || 0);
+  const b = ctx.b('rock'), B = ctx.bio;
+  const tint = () => lin(pick(rnd, B.rockTints));
+  const n = 3 + (rnd() < 0.5 ? 1 : 0), Htot = range(rnd, 0.6, 0.9) * s;
+  const [lo] = ctx.foot(0.45 * s, 0, 0, 6);
+  let y = lo - 0.06, r = range(rnd, 0.36, 0.44) * s, cx = 0, cz = 0;
+  for (let i = 0; i < n; i++) {
+    const h = Htot / n * range(rnd, 0.8, 1.2), ta = rnd() * TAU, tk = Math.tan(range(rnd, 3, 9) * Math.PI / 180);
+    const yt = prism(b, new V3(cx, 0, cz), y, h, polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), r, 0.16, range(rnd, 1, 1.3), 1), rnd,
+      { tint: tint(), under: 0.88, bulge: 1.02, bevel: 0.03, foot: 0.015, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.5 : 0.7, lipK: 1.1 });
+    y = yt - 0.025; r *= range(rnd, 0.72, 0.86);
+    cx += range(rnd, -0.05, 0.05) * s; cz += range(rnd, -0.05, 0.05) * s;
+  }
+  const deco = d.variant ?? (rnd() < 0.45 ? 'skull' : rnd() < 0.5 ? 'horn' : 'none');
+  if (deco === 'skull') {
+    const k = 0.32 * s, pitch = range(rnd, 0.1, 0.25);
+    ctx.at(d, (d.ry || 0) + range(rnd, -1, 1), new THREE.Matrix4().makeTranslation(cx, 0, cz).multiply(new THREE.Matrix4().makeRotationFromEuler(new THREE.Euler(pitch, 0, 0))));
+    skullAt(ctx, new V3(0, y + 0.36 * k, 0), k);
+  } else if (deco === 'horn') {
+    const bb = ctx.b('bone'), hb = lin('#d8c8a0'), ht = lin('#5a4a36'), a = rnd() * TAU;
+    const hc = [new V3(cx, y + 0.03, cz), new V3(cx + Math.cos(a) * 0.14, y + 0.12, cz + Math.sin(a) * 0.14), new V3(cx + Math.cos(a) * 0.2, y + 0.3, cz + Math.sin(a) * 0.2 + 0.04), new V3(cx + Math.cos(a) * 0.14, y + 0.44, cz + Math.sin(a) * 0.14 + 0.08)];
+    const hp = spline(hc, 3);
+    tube(bb, hp, hp.map((_, i) => 0.055 * (1 - 0.8 * i / (hp.length - 1)) + 0.008), { sides: 8, uRep: 0.6, vLen: 0.4, cap: 0.8, cap0: 0.4, color: (p, nn, t) => mulc(mixc(hb, ht, Math.pow(t, 0.9)), 0.85 + 0.25 * clamp01(nn.y * 0.5 + 0.5)) });
   }
 }
 
 // ---- farm & field bits ------------------------------------------------------------------------------
 
 // Split-rail fence: thick weathered posts with chamfered tops, flat split rails that overhang the
-// posts and pass in front of or behind them (3 in Westfall, 2 elsewhere).
+// posts and pass in front of or behind them (3 in Westfall, 2 elsewhere). On a slope it steps: each
+// span's rails stay level at the height of its upper post's ground (the lower post runs longer), and
+// a span steeper than 0.4 (rise over run) is left out, so a run never climbs a hill like a ladder.
 function fence(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 17)), n = Math.max(2, d.len || 4), west = ctx.biome === 'fields';
   ctx.at(d, d.ry || 0);
   const b = ctx.b('wood');
-  const wood = (p, nn) => { const k = (0.62 + 0.4 * smooth(-0.3, 0.6, p.y)) * (0.8 + 0.26 * Math.max(0, nn.y)); return [k * 1.02, k, k * 0.96]; };
+  const wood = (y0) => (p, nn) => { const k = (0.62 + 0.4 * smooth(y0 - 0.3, y0 + 0.6, p.y)) * (0.8 + 0.26 * Math.max(0, nn.y)); return [k * 1.02, k, k * 0.96]; };
+  const hs = west ? [0.35, 0.7, 1.05] : [0.45, 0.92];
   const posts = [];
   for (let i = 0; i < n; i++) {
-    const z = (i - (n - 1) / 2) * 1.9 + range(rnd, -0.12, 0.12), x = range(rnd, -0.06, 0.06), y = ctx.gh(x, z);
-    const lx = range(rnd, -0.07, 0.07), lz = range(rnd, -0.07, 0.07), r = range(rnd, 0.13, 0.15), h = (west ? 1.25 : 1.15) + range(rnd, -0.06, 0.06);
-    tube(b, [new V3(x, y - 0.45, z), new V3(x + lx * 0.5, y + h * 0.5, z + lz * 0.5), new V3(x + lx, y + h - 0.1, z + lz), new V3(x + lx, y + h, z + lz), new V3(x + lx, y + h + 0.06, z + lz)],
-      [r, r * 0.97, r * 0.93, r * 0.62, 0.035], { sides: 8, uRep: 1, vLen: 1.2, color: wood, a0: rnd(), lobes: (dir, t, i, j) => 1 + 0.06 * Math.sin(j * 2.3 + i * 1.7) });
-    posts.push({ x, y, z, lx, lz, r, h });
+    const z = (i - (n - 1) / 2) * 1.9 + range(rnd, -0.12, 0.12), x = range(rnd, -0.06, 0.06);
+    posts.push({ x, z, g: ctx.gh(x, z), lx: range(rnd, -0.07, 0.07), lz: range(rnd, -0.07, 0.07), r: range(rnd, 0.13, 0.15), h: (west ? 1.25 : 1.15) + range(rnd, -0.06, 0.06), top: -Infinity });
   }
-  const hs = west ? [0.35, 0.7, 1.05] : [0.45, 0.92];
-  const flat = (dir) => { const hz = Math.hypot(dir.x, dir.z), v = dir.y; return 1 / Math.sqrt((hz / 0.75) ** 2 + (v / 1.15) ** 2); };   // split rails: taller than thick
+  const spans = [];
   for (let i = 0; i < n - 1; i++) {
-    const A = posts[i], Bp = posts[i + 1];
+    const A = posts[i], B = posts[i + 1], run = Math.hypot(B.x - A.x, B.z - A.z);
+    if (Math.abs(B.g - A.g) / run > 0.4) continue;
+    const base = Math.max(A.g, B.g);
+    spans.push({ A, B, base, i });
+    for (const P of [A, B]) P.top = Math.max(P.top, base + P.h);
+  }
+  for (const P of posts) {
+    if (P.top === -Infinity) continue;                    // no rails reach it: no post
+    const H = P.top - P.g, y = P.g, k = (P.top - P.g) / P.h;
+    tube(b, [new V3(P.x, y - 0.45, P.z), new V3(P.x + P.lx * 0.5, y + H * 0.5, P.z + P.lz * 0.5), new V3(P.x + P.lx, y + H - 0.1, P.z + P.lz), new V3(P.x + P.lx, y + H, P.z + P.lz), new V3(P.x + P.lx, y + H + 0.06, P.z + P.lz)],
+      [P.r, P.r * 0.97, P.r * 0.93, P.r * 0.62, 0.035], { sides: 8, uRep: 1, vLen: 1.2, color: wood(y), a0: rnd(), lobes: (dir, t, i, j) => 1 + 0.06 * Math.sin(j * 2.3 + i * 1.7) });
+    P.H = H; P.k = k;
+  }
+  const flat = (dir) => { const hz = Math.hypot(dir.x, dir.z), v = dir.y; return 1 / Math.sqrt((hz / 0.75) ** 2 + (v / 1.15) ** 2); };   // split rails: taller than thick
+  for (const { A, B, base, i } of spans) {
     hs.forEach((h, row) => {
       if (rnd() < 0.06) return;
       const side = ((i + row) % 2 ? 1 : -1), r = range(rnd, 0.072, 0.08);
       const ox = side * (A.r + r * 0.9);
-      const ha = h + range(rnd, -0.05, 0.05), hb = h + range(rnd, -0.05, 0.05);
+      const ya = base + h + range(rnd, -0.04, 0.04), yb = base + h + range(rnd, -0.04, 0.04);
+      const lean = (P, y) => (y - P.g) / P.H;              // how far up its post (it leans a little)
       const ov = range(rnd, 0.2, 0.3);
-      const pa = new V3(A.x + A.lx * ha / A.h + ox, A.y + ha, A.z - ov), pb = new V3(Bp.x + Bp.lx * hb / Bp.h + ox, Bp.y + hb, Bp.z + ov);
+      const pa = new V3(A.x + A.lx * lean(A, ya) + ox, ya, A.z - ov), pb = new V3(B.x + B.lx * lean(B, yb) + ox, yb, B.z + ov);
       const mid = pa.clone().lerp(pb, 0.5); mid.y -= 0.03; mid.x += range(rnd, -0.025, 0.025);
-      tube(b, [pa, pa.clone().lerp(mid, 0.5), mid, mid.clone().lerp(pb, 0.5), pb], [r, r * 1.04, r * 1.06, r, r * 0.92], { sides: 6, uRep: 1, vLen: 1.6, color: wood, cap: 0.3, lobes: (dir, t, ii, j) => flat(dir) * (1 + 0.05 * Math.sin(j * 3.1 + ii)) });
+      tube(b, [pa, pa.clone().lerp(mid, 0.5), mid, mid.clone().lerp(pb, 0.5), pb], [r, r * 1.04, r * 1.06, r, r * 0.92], { sides: 6, uRep: 1, vLen: 1.6, color: wood(base), cap: 0.3, lobes: (dir, t, ii, j) => flat(dir) * (1 + 0.05 * Math.sin(j * 3.1 + ii)) });
     });
   }
 }
@@ -1460,17 +1712,17 @@ function haybale(ctx, d) {
     }
   } else {
     const [lo] = ctx.foot(0.95);
-    const g0 = lo, ys = [-0.25, 0.12, 0.45, 0.8, 1.0, 1.3, 1.62, 1.9, 2.05, 2.1], rs = [0.92, 0.98, 1.02, 0.94, 0.9, 0.78, 0.55, 0.3, 0.12, 0.02];
+    const g0 = lo, ys = [-0.25, 0.12, 0.45, 0.8, 1.0, 1.3, 1.62, 1.9, 2.05, 2.1], rs = [0.92, 0.98, 1.02, 0.94, 0.9, 0.78, 0.55, 0.3, 0.12, 0.02].map(v => v * 0.8);   // its waist on the 0.75 m collider
     const sA = rnd() * 9;
     const dampC = [0.62, 0.5, 0.34], sunC = [1.12, 1.06, 0.92];
     const col = p => { const t = smooth(g0 + 0.05, g0 + 1.8, p.y); return mixc(dampC, sunC, t); };
     tube(hay, ys.map(y => new V3(0, g0 + y, 0)), rs, { sides: 16, uRep: 3, vLen: 0.7, color: col, lobes: (dir, t, i, j) => 1 + 0.09 * Math.sin(j * 1.3 + sA) * Math.sin(i * 1.1 + sA) + 0.04 * Math.sin(j * 3.7 + i * 2.1) });
-    strawRing(ctx, new V3(0, g0, 0), 0.96, 14, rnd, { h: [0.3, 0.45], up: -0.04, color: [0.8, 0.7, 0.5], outward: 0.6 });
-    strawRing(ctx, new V3(0, g0, 0), 0.9, 10, rnd, { h: [0.25, 0.35], up: 0.82, cells: [2], color: [0.95, 0.88, 0.7], outward: 0.9 });
+    strawRing(ctx, new V3(0, g0, 0), 0.78, 14, rnd, { h: [0.3, 0.45], up: -0.04, color: [0.8, 0.7, 0.5], outward: 0.6 });
+    strawRing(ctx, new V3(0, g0, 0), 0.74, 10, rnd, { h: [0.25, 0.35], up: 0.82, cells: [2], color: [0.95, 0.88, 0.7], outward: 0.9 });
     strawRing(ctx, new V3(0, g0, 0), 0.15, 5, rnd, { h: [0.3, 0.42], up: 1.95, color: [1.1, 1.05, 0.9], outward: 0.3 });
     if (rnd() < 0.35) {
       const wb = ctx.b('wood'), ib = ctx.b('iron'), a = rnd() * TAU, c = Math.cos(a), s = Math.sin(a);
-      const p0 = new V3(c * 0.5, g0 + 1.05, s * 0.5), p1 = new V3(c * 1.2, g0 + 2.45, s * 1.2);
+      const p0 = new V3(c * 0.42, g0 + 1.05, s * 0.42), p1 = new V3(c * 1.0, g0 + 2.45, s * 1.0);
       tube(wb, [p0, p1], [0.03, 0.026], { sides: 6, uRep: 1, vLen: 1.2 });
       for (const o of [-0.07, 0, 0.07]) tube(ib, [p0.clone().add(new V3(-s * o, 0, c * o)), new V3(c * 0.22 - s * o, g0 + 0.75, s * 0.22 + c * o)], [0.013, 0.008], { sides: 4, uRep: 1, vLen: 0.5 });
     }
@@ -1598,8 +1850,9 @@ function cactus(ctx, d) {
     for (let k = 0; k < nS; k++) cols.push({ hk: h * range(rnd, 0.22, 0.42), R: R0 * range(rnd, 0.6, 0.75), off: range(rnd, 0.32, 0.55), stub: true });
     const a0 = rnd() * TAU;
     cols.forEach((c0, k) => {
-      const a = a0 + k * 2.39996 + range(rnd, -0.3, 0.3), c = Math.cos(a), sn = Math.sin(a), { hk, R } = c0, off = c0.off * 0.85;
-      const lean = c0.main ? 0.04 : range(rnd, 0.05, 0.14);
+      // the outer columns stand with their outer faces on the 0.45 m collider (± a few cm)
+      const a = a0 + k * 2.39996 + range(rnd, -0.3, 0.3), c = Math.cos(a), sn = Math.sin(a), { hk, R } = c0, off = c0.main ? 0 : Math.max(0.12, 0.45 - R + range(rnd, -0.06, 0.02));
+      const lean = c0.main ? 0.04 : range(rnd, 0.02, 0.06);
       const pts = c0.main ? [new V3(0, g0 - 0.3, 0), new V3(0, g0 + 0.3, 0), new V3(0.02, g0 + hk * 0.5, 0), new V3(0.04, g0 + hk - R * 0.6, 0)]
         : [new V3(c * 0.05, g0 - 0.2, sn * 0.05), new V3(c * off * 0.6, g0 + 0.12, sn * off * 0.6), new V3(c * off, g0 + Math.min(0.45, hk * 0.4), sn * off), new V3(c * (off + lean * 0.6), g0 + hk * 0.7, sn * (off + lean * 0.6)), new V3(c * (off + lean), g0 + hk - R * 0.6, sn * (off + lean))];
       tube(cb, pts, pts.map((_, i) => (i === 0 ? R * 1.05 : R) * (i === pts.length - 1 ? 0.96 : 1)), { sides: 14, uRep: 1.75, vLen: 1.6, lobes: ribs(0.15), color: capCol, cap: 0.85 });
@@ -1870,6 +2123,40 @@ function fxMats() {
   sparkMat = new THREE.PointsMaterial({ map: tex('spark'), size: 0.09, color: 0xffc070, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
 }
 
+// Oak groves: world gen plants them as runs of consecutive oak entries (the grove's centre first);
+// the hero is the one flagged d.hero, or else the grove's biggest. Every oak also gets its collider
+// radius (its bole matches it) and the oaks whose crowns may reach into its own.
+function oakInfo(W, deco) {
+  const out = new Map(), west = W.biome === 'fields';
+  const cyl = new Map();
+  for (const c of W.cyls || []) if (c.mat === 'tree') cyl.set(Math.round(c.x * 10) + ',' + Math.round(c.z * 10), c.r);
+  const groves = []; let cur = null, prev = null;
+  for (const d of deco) {
+    if (d.k === 'oak') {
+      if (cur && prev && prev.k === 'oak' && Math.hypot(d.x - cur[0].x, d.z - cur[0].z) < 13.5) cur.push(d);
+      else { cur = [d]; groves.push(cur); }
+    }
+    prev = d;
+  }
+  const all = [];
+  for (const g of groves) {
+    const flagged = g.some(d => d.hero !== undefined);
+    let hero = null;
+    if (!west) hero = flagged ? null : g.reduce((m, d) => ((d.s || 1) > (m.s || 1) ? d : m), g[0]);
+    for (const d of g) {
+      const h = !west && (flagged ? !!d.hero : d === hero);
+      const o = { hero: h, rCol: cyl.get(Math.round(d.x * 10) + ',' + Math.round(d.z * 10)) || null, nb: [], d, Rc: oakSize(d, h, west).Rc };
+      out.set(d, o); all.push(o);
+    }
+  }
+  for (const o of all) for (const q of all) {
+    if (o === q) continue;
+    const dd = Math.hypot(o.d.x - q.d.x, o.d.z - q.d.z);
+    if (dd < o.Rc + q.Rc) o.nb.push({ x: q.d.x, z: q.d.z, Rc: q.Rc, hero: q.hero });
+  }
+  return out;
+}
+
 // tomorrow's nature textures, painted one at a time in idle slots while the night lasts
 const prewarmed = new Set();
 
@@ -1879,11 +2166,12 @@ export function buildNature(W) {
   const fires = [];
   const ctx = new Ctx(W);
   const deco = W.decor || [];
+  const oaks = oakInfo(W, deco);
   for (const d of deco) {
     if (!NATURE_KINDS.has(d.k)) continue;
     try {
       switch (d.k) {
-        case 'oak': oak(ctx, d); break;
+        case 'oak': oak(ctx, d, oaks.get(d)); break;
         case 'pine': pine(ctx, d); break;
         case 'palm': palm(ctx, d); break;
         case 'bush': bush(ctx, d); break;
@@ -1897,6 +2185,7 @@ export function buildNature(W) {
         case 'bones': bones(ctx, d); break;
         case 'skull': skull(ctx, d); break;
         case 'fire': campfire(ctx, d, fires); break;
+        case 'cairn': cairn(ctx, d); break;
         default: break;   // flowers & wheat are ground clutter (terrain3d)
       }
     } catch (e) { console.warn('nature: failed to build', d.k, e); }
@@ -1986,19 +2275,96 @@ export function buildNature(W) {
 // ---- previews (tools/preview.mjs) ---------------------------------------------------------------------
 
 const fakeW = (biome, decor, extra = {}) => ({ biome, decor, cyls: extra.cyls || [], anchors: extra.anchors || [], heightAt: () => 0 });
+// A collider audit (tools/preview.mjs audit ...): generate real legs, build every solid rock and
+// oak on its own, slice its mesh at a few heights above the ground and compare the cross-section
+// with its collider: "gap" = how far inside the collider the rock surface sits (an invisible wall),
+// "in" = how far rock pokes out past it (rock you could walk into). Logged as console errors.
+function sliceExtents(batches, keys, cx, cz, Y, rMax, NB = 16) {
+  const ext = new Array(NB).fill(-1);
+  for (const [k, b] of batches) {
+    if (!keys.some(q => k.startsWith(q + '#'))) continue;
+    const P = b.P, I = b.I;
+    for (let t = 0; t < I.length; t += 3) {
+      const v = [I[t], I[t + 1], I[t + 2]].map(i => [P[i * 3] - cx, P[i * 3 + 1], P[i * 3 + 2] - cz]);
+      const hit = [];
+      for (let e = 0; e < 3; e++) {
+        const A = v[e], B = v[(e + 1) % 3];
+        if ((A[1] - Y) * (B[1] - Y) > 0 || A[1] === B[1]) continue;
+        const u = (Y - A[1]) / (B[1] - A[1]); hit.push([A[0] + (B[0] - A[0]) * u, A[2] + (B[2] - A[2]) * u]);
+      }
+      if (hit.length < 2) continue;
+      for (let q = 0; q <= 12; q++) {
+        const x = hit[0][0] + (hit[1][0] - hit[0][0]) * q / 12, z = hit[0][1] + (hit[1][1] - hit[0][1]) * q / 12, rr = Math.hypot(x, z);
+        if (rr > rMax) continue;
+        const bin = Math.round(((Math.atan2(z, x) + Math.PI) / TAU) * NB) % NB;
+        ext[bin] = Math.max(ext[bin], rr);
+      }
+    }
+  }
+  return ext;
+}
+function auditColliders(biome) {
+  const day = BIOME_BY_DAY.indexOf(biome) + 1, rows = {};
+  const add = (k, gap, out) => { const R = rows[k] || (rows[k] = { n: 0, gap: 0, gapMax: 0, out: 0, outMax: 0 }); R.n++; R.gap += gap; R.gapMax = Math.max(R.gapMax, gap); R.out += out; R.outMax = Math.max(R.outMax, out); };
+  for (const seed of [777, 1234, 4242, 99]) {
+    const W = generateLeg(seed, day);
+    const oaks = oakInfo(W, W.decor);
+    for (const d of W.decor) {
+      if (!((d.k === 'rock' && d.s > 1.2) || d.k === 'oak')) continue;
+      const ctx = new Ctx(W);
+      if (d.k === 'oak') oak(ctx, d, oaks.get(d)); else rock(ctx, d);
+      const cs = W.cyls.filter(c => (c.mat === (d.k === 'oak' ? 'tree' : 'rock')) && Math.hypot(c.x - d.x, c.z - d.z) < (d.k === 'oak' ? 0.05 : 5 * d.s));
+      for (const c of cs) {
+        const g = W.heightAt(c.x, c.z), top = c.y + c.hh;
+        for (const h of [0.6, 1.0, 1.5]) {
+          if (g + h > top - 0.1) continue;
+          const ext = sliceExtents(ctx.batches, d.k === 'oak' ? ['bark_oak'] : ['rock'], c.x, c.z, g + h, c.r * 2 + 0.6);
+          const has = ext.filter(e => e >= 0);
+          if (has.length < 12) { add((d.k === 'oak' ? 'oak' : (d.variant || 'boulder')) + ' (open slice)', 0, 0); continue; }
+          const mn = Math.min(...has), mx = Math.max(...has);
+          add((d.k === 'oak' ? (oaks.get(d).hero ? 'oak hero' : 'oak') : (d.variant || 'boulder')) + ' @' + h, Math.max(0, c.r - mn), Math.max(0, mx - c.r));
+        }
+      }
+    }
+  }
+  for (const [k, R] of Object.entries(rows)) console.error(`AUDIT ${biome} ${k}: slices ${R.n} · gap avg ${(R.gap / R.n).toFixed(2)} max ${R.gapMax.toFixed(2)} m · out avg ${(R.out / R.n).toFixed(2)} max ${R.outMax.toFixed(2)} m`);
+  return new THREE.Group();
+}
+
+// the colliders world gen gives a rock, as wireframes (to check a shape against them)
+function colliderWires(W, d) {
+  const g = new THREE.Group(), m = new THREE.MeshBasicMaterial({ color: 0xff2060, wireframe: true });
+  const ctx = new Ctx(W), col = rockCol(ctx, d);
+  const add = (x, z, r, y0, y1) => { const c = new THREE.Mesh(new THREE.CylinderGeometry(r, r, y1 - y0, 16, 2, true), m); c.position.set(x, (y0 + y1) / 2, z); g.add(c); };
+  if (col.hoodoo) add(d.x, d.z, col.hoodoo.r, -0.3, col.hoodoo.Ht - 0.3);
+  if (col.cyl) add(d.x, d.z, col.cyl.r, 0, col.cyl.top);
+  if (col.arch) for (const sd of [-1, 1]) add(d.x + Math.cos(d.ry) * col.arch.span * sd, d.z - Math.sin(d.ry) * col.arch.span * sd, col.arch.r, -0.2 * col.S, 1.6 * col.S);
+  return g;
+}
 const pv = (k, extra = {}, w = {}) => ({ biome = 'meadow' } = {}) => {
-  const n = buildNature(fakeW(biome, [{ k, x: 0, y: 0, z: 0, ry: 0.4, s: 1, ...extra }], w));
+  const d = { k, x: 0, y: 0, z: 0, ry: 0.4, s: 1, ...extra }, W = fakeW(biome, [d], w);
+  const n = buildNature(W);
   n.update(0.016, 1.3);
+  if (w.wires) n.group.add(colliderWires(W, d));
   return n.group;
 };
 export const PREVIEW = {
-  oak: pv('oak'), oak_big: pv('oak', { s: 1.3, x: 3.1 }), pine: pv('pine'), pine_small: pv('pine', { s: 0.8, x: 1.7 }), palm: pv('palm'),
+  oak: pv('oak', { hero: false }), oak_big: pv('oak', { s: 1.3, x: 3.1, hero: false }), oak_hero: pv('oak', { s: 1.2, hero: true }),
+  grove: ({ biome = 'meadow' } = {}) => {
+    const decor = [[0, 0, 1.25], [7, 3.5, 0.95], [-6.5, 5, 1.05], [2, -8, 0.8], [-3, 11, 0.9]].map(([x, z, s]) => ({ k: 'oak', x, y: 0, z, s }));
+    const n = buildNature(fakeW(biome, decor)); n.update(0.016, 1.3); return n.group;
+  }, pine: pv('pine'), pine_small: pv('pine', { s: 0.8, x: 1.7 }), palm: pv('palm'),
   bush: pv('bush'), stump: pv('stump'), haybale: pv('haybale', { variant: 0 }), haystack: pv('haybale', { variant: 1 }),
   scarecrow: pv('scarecrow', { ry: 0.3 }), fence: pv('fence', { len: 5, ry: 1.2 }), bones: pv('bones'),
   cactus: pv('cactus', { h: 3.2 }), cactus_small: pv('cactus', { h: 2.0, variant: 'saguaro', x: 2.3 }), prickly: pv('cactus', { h: 1.9, variant: 'pear' }),
   rock: pv('rock', { s: 1.0 }), outcrop: pv('rock', { s: 1.8, x: 4.2 }), rock2: pv('rock', { s: 1.5, x: 7.7 }), rock3: pv('rock', { s: 1.9, x: 11.3 }), rock4: pv('rock', { s: 1.3, x: -5.1 }), skull: pv('skull', { ry: 0.6 }),
   deadtree: pv('deadtree', { s: 1.1 }),
   hoodoo: pv('rock', { s: 1.8, variant: 'hoodoo' }), ledge: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }), arch: pv('rock', { s: 1.6, variant: 'arch' }), mound: pv('rock', { s: 1.4, variant: 'mound', x: 6 }),
+  hoodoo2: pv('rock', { s: 1.3, variant: 'hoodoo', x: 1.7 }), ledge2: pv('rock', { s: 1.9, variant: 'ledge', x: 4.4 }), ledge_small: pv('rock', { s: 0.9, variant: 'ledge', x: 2.2 }),
+  hoodoo_col: pv('rock', { s: 1.8, variant: 'hoodoo' }, { wires: true }), ledge_col: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }, { wires: true }),
+  arch_col: pv('rock', { s: 1.6, variant: 'arch' }, { wires: true }), mound_col: pv('rock', { s: 1.4, variant: 'mound', x: 6 }, { wires: true }), boulder_col: pv('rock', { s: 1.7, x: 3 }, { wires: true }),
+  cairn: pv('cairn', { variant: 'skull' }), cairn2: pv('cairn', { variant: 'horn', x: 1.3 }), cairn3: pv('cairn', { variant: 'none', x: 2.9 }),
   anchor: ({ biome = 'meadow' } = {}) => buildNature(fakeW(biome, [], { cyls: [{ x: 0, y: 1.6, z: 0, r: 0.3, hh: 1.6, mat: 'deadtree' }], anchors: [{ id: 0, x: 0, y: 1.1, z: 0 }] })).group,
   campfire: pv('fire'),
+  audit: ({ biome = 'meadow' } = {}) => auditColliders(biome),
 };

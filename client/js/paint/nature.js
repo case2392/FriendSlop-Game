@@ -185,10 +185,14 @@ function mottle0(g, ox, oy, w, h, rnd, colors, count, rmin, rmax, alpha = 0.3, h
 }
 
 // ---- foliage painting --------------------------------------------------------------------------
+//
+// WoW canopies are big solid masses of leaf clusters: each clump is 3-6 round lobes, painted solid
+// (no holes, so the alpha test never speckles), a scalloped edge of large leaves, lit cream-green
+// on the upper left and a cool blue-violet underside, and a lime rim only where the light grazes.
 
-// One painted leaf, stem at (x, y), pointing along ang (0 = up). The half that faces the
-// upper-left light is lit, the other half shaded, with a soft vein.
-function leaf(g, x, y, L, W, ang, base, alpha = 1) {
+// One painted leaf, stem at (x, y), pointing along ang (0 = up): a soft lit half toward the
+// upper-left light, a shaded half, and a faint vein. `k` sets the contrast (low inside a mass).
+function leaf(g, x, y, L, W, ang, base, alpha = 1, k = 1) {
   const litLeft = Math.cos(ang) + Math.sin(ang) > 0;
   const sx = litLeft ? -1 : 1;
   g.save();
@@ -201,196 +205,236 @@ function leaf(g, x, y, L, W, ang, base, alpha = 1) {
   g.beginPath(); g.moveTo(0, 0);
   g.bezierCurveTo(sx * W * 0.95, -L * 0.18, sx * W * 0.75, -L * 0.78, 0, -L);
   g.quadraticCurveTo(sx * W * 0.12, -L * 0.5, 0, 0);
-  g.globalAlpha = alpha * 0.75; g.fillStyle = lightOf(base, 0.4); g.fill();
+  g.globalAlpha = alpha * 0.5 * k; g.fillStyle = lightOf(base, 0.35); g.fill();
   g.beginPath(); g.moveTo(0, 0);
   g.bezierCurveTo(-sx * W * 0.95, -L * 0.18, -sx * W * 0.75, -L * 0.78, 0, -L);
   g.quadraticCurveTo(-sx * W * 0.5, -L * 0.45, 0, 0);
-  g.globalAlpha = alpha * 0.55; g.fillStyle = shadowOf(base, 0.35); g.fill();
-  g.globalAlpha = alpha * 0.4; g.strokeStyle = shadowOf(base, 0.45); g.lineWidth = Math.max(0.7, W * 0.13);
-  g.beginPath(); g.moveTo(0, -L * 0.05); g.lineTo(0, -L * 0.82); g.stroke();
+  g.globalAlpha = alpha * 0.4 * k; g.fillStyle = shadowOf(base, 0.3); g.fill();
+  g.globalAlpha = alpha * 0.22 * k; g.strokeStyle = shadowOf(base, 0.4); g.lineWidth = Math.max(0.7, W * 0.12);
+  g.beginPath(); g.moveTo(0, -L * 0.08); g.lineTo(0, -L * 0.8); g.stroke();
   g.restore();
 }
 
-// A clump of leaves: a soft core under lumpy lobes, then big leaves back to front, dark to lit, the
-// lit ones gathered toward the upper left of each lobe, the edge leaves pointing outward; dark leaves
-// stay inside (the alpha edge is mid-green, never a dark outline). Then each lobe gets its form painted
-// over it (source-atop, so the cut-out shape is untouched): a cool blue-green underside on its lower
-// right, a warm cream rim on its upper left.
-function leafClump(g, cx, cy, R, rnd, P, { n = 220, lobes = 5, L = [24, 36], W = [11, 16], squash = 0.88, core = 0.92, form = 1, spread = [0.22, 0.44], lobeR = [0.36, 0.5], palettes = null, shares = [0.22, 0.36, 0.3, 0.12], coreA = 0.6 } = {}) {
-  const lob = [[cx, cy, R * 0.6, P]];
+// a cell-sized scratch canvas positioned at (ox, oy)
+function scratch(ox, oy, w, h) {
+  const cv = makeCanvas(w, h), g = cv.getContext('2d', { willReadFrequently: true });
+  g.translate(-ox, -oy);
+  return { cv, g };
+}
+// the alpha of `cv` filled with a flat colour
+function silhouetteOf(cv, color) {
+  const out = makeCanvas(cv.width, cv.height), g = out.getContext('2d');
+  g.drawImage(cv, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = color; g.fillRect(0, 0, cv.width, cv.height);
+  return out;
+}
+
+// One lobe of a canopy mass, painted on its own layer: a solid body, a scalloped rim of big leaves
+// pointing outward, then (inside the silhouette only) the form: a lit cream-green cap on the upper
+// left, a cool blue-violet underside, leaf clusters that follow the form, and a lime rim light.
+function lobe(g, ox, oy, w, h, x, y, r, rnd, P, { L: L0 = [24, 34], W: W0 = [13, 18], clusters = 9, rim = 1, sq = 0.92, droop = 0.5 } = {}) {
+  const ks = Math.max(0.7, Math.min(1.1, r / 50)), L = [L0[0] * ks, L0[1] * ks], W = [W0[0] * ks, W0[1] * ks];
+  const { cv, g: lg } = scratch(ox, oy, w, h);
+  const tone = (px, py) => clampT(((x - px) * 0.6 + (y - py) * 0.8) / r * 0.5 + 0.5);   // 1 = upper left (lit)
+  // the body
+  ellipse(lg, x, y, r * 0.86, r * 0.86 * sq, 0, P.mid[0]);
+  // the scalloped rim: big leaves round the outline pointing outward (drooping on the underside)
+  const nE = Math.max(8, Math.round(TAU * r / (W[1] * 1.05)));
+  for (let k = 0; k < nE; k++) {
+    const a = k / nE * TAU + range(rnd, -0.12, 0.12), ca = Math.cos(a), sa = Math.sin(a);
+    const bx = x + ca * r * 0.7, by = y + sa * r * 0.7 * sq;
+    let ang = Math.atan2(ca, -sa);                                   // pointing outward
+    if (droop && sa > 0) ang += droop * sa * (ca > 0 ? 0.6 : -0.6);
+    const t = tone(bx - ca * r, by - sa * r);
+    const cols = t > 0.72 ? P.lit : t > 0.42 ? P.mid : P.dark;
+    leaf(lg, bx, by, range(rnd, L[0], L[1]) * (sa > 0.3 ? 1.08 : 1), range(rnd, W[0], W[1]), ang + range(rnd, -0.35, 0.35), jitter(pick(rnd, cols), rnd, 0.04), 1, 0.7);
+  }
+  lg.save();
+  lg.globalCompositeOperation = 'source-atop';
+  // form: a broad warm lit cap on the upper left, a cool violet underside on the lower right
+  blob(lg, x - r * 0.3, y - r * 0.38, r * 0.95, r * 0.8, -0.5, P.lit[0], 0.55, 0.25);
+  blob(lg, x + r * 0.4, y + r * 0.55, r * 1.0, r * 0.7, 0.3, P.dark[0], 0.7, 0.3);
+  blob(lg, x + r * 0.35, y + r * 0.75, r * 0.85, r * 0.45, 0.2, P.deep, 0.65, 0.3);
+  // leaf clusters: fans of 4-6 overlapping leaves; each takes its tone from where it sits on the
+  // lobe, its own upper-left leaves a step lighter, a soft shadow under it
+  const pts = [];
+  for (let i = 0; i < clusters; i++) {
+    const a = rnd() * TAU, d = Math.sqrt(rnd()) * r * 0.78;
+    pts.push([x + Math.cos(a) * d, y + Math.sin(a) * d * sq]);
+  }
+  pts.sort((p, q) => (q[0] + q[1]) - (p[0] + p[1]));               // lower right first, lit ones on top
+  for (const [px, py] of pts) {
+    const t = tone(px, py), cr = range(rnd, 0.3, 0.42) * r;
+    const cols = t > 0.78 ? P.tip : t > 0.6 ? P.lit : t > 0.36 ? P.mid : P.dark;
+    blob(lg, px + cr * 0.25, py + cr * 0.4, cr * 1.05, cr * 0.75, 0, P.deep, 0.32, 0.35);
+    const n = 4 + Math.floor(rnd() * 3), out = Math.atan2(px - x, -(py - y)) + range(rnd, -0.4, 0.4);
+    for (let k = 0; k < n; k++) {
+      const ang = out + (k / (n - 1) - 0.5) * 1.9 + range(rnd, -0.2, 0.2);
+      const c = jitter(k < n / 2 && t > 0.45 ? pick(rnd, t > 0.6 ? P.tip : P.lit) : pick(rnd, cols), rnd, 0.04);
+      leaf(lg, px - Math.sin(ang) * cr * 0.15, py + Math.cos(ang) * cr * 0.15, range(rnd, L[0], L[1]) * 0.9, range(rnd, W[0], W[1]) * 0.95, ang, c, 0.95, 0.6);
+    }
+  }
+  // the lime rim light where the light grazes the upper-left edge
+  if (rim) {
+    blob(lg, x - r * 0.62, y - r * 0.6, r * 0.5, r * 0.32, -0.75, P.rim, 0.45 * rim, 0.3);
+    blob(lg, x - r * 0.78, y - r * 0.2, r * 0.22, r * 0.4, -0.2, P.rim, 0.3 * rim, 0.3);
+  }
+  lg.restore();
+  // lay it down: its shadow falls (only) on the lobes already painted, then the lobe itself
+  g.save();
+  g.globalCompositeOperation = 'source-atop'; g.globalAlpha = 0.45;
+  g.drawImage(silhouetteOf(cv, P.deep), ox + r * 0.08, oy + r * 0.16);
+  g.restore();
+  g.drawImage(cv, ox, oy);
+}
+const clampT = v => Math.max(0, Math.min(1, v));
+
+// A canopy mass: 3-6 lobes of varied size (one big one near the top), painted bottom first so the
+// lit upper lobes overlap the shaded ones under them.
+function canopy(g, ox, oy, w, h, cx, cy, R, rnd, P, { lobes = 5, squash = 0.8, spread = [0.38, 0.52], lobeR = [0.32, 0.5], top = 0.62, palettes = null, ...o } = {}) {
+  const lob = [[cx + range(rnd, -0.08, 0.08) * R, cy - R * 0.12, R * top, P]];
+  const a0 = rnd() * TAU;
   for (let i = 1; i < lobes; i++) {
-    const a = rnd() * TAU, d = R * range(rnd, spread[0], spread[1]);
-    lob.push([cx + Math.cos(a) * d, cy + Math.sin(a) * d * squash, R * range(rnd, lobeR[0], lobeR[1]), palettes ? pick(rnd, palettes) : P]);
+    const a = a0 + (i - 1) / (lobes - 1) * TAU + range(rnd, -0.35, 0.35), d = R * range(rnd, spread[0], spread[1]);
+    lob.push([cx + Math.cos(a) * d, cy + Math.sin(a) * d * squash + R * 0.08, R * range(rnd, lobeR[0], lobeR[1]), palettes ? pick(rnd, palettes) : P]);
   }
-  if (core) for (const [lx, ly, lr, LP] of lob) blob(g, lx + lr * 0.06, ly + lr * 0.08, lr * core, lr * core * 0.95, 0, LP.core, coreA, 0.75);
-  const passes = [['dark', 0.8, -0.2], ['mid', 0.98, 0.25], ['lit', 0.86, 0.6], ['hi', 0.66, 0.85]];
-  passes.forEach(([key, rK, bias], pi) => {
-    const cnt = Math.round(n * shares[pi]);
-    for (let i = 0; i < cnt; i++) {
-      const [lx, ly, lr, LP] = pick(rnd, lob);
-      const a = rnd() * TAU, t = Math.sqrt(rnd());
-      let px = Math.cos(a) * t, py = Math.sin(a) * t;
-      if (bias) { px -= bias * 0.45; py -= bias * 0.52; const l = Math.hypot(px, py); if (l > 1) { px /= l; py /= l; } }
-      const x = lx + px * lr * rK, y = ly + py * lr * rK;
-      const ang = Math.atan2(px, -py) + range(rnd, -0.7, 0.7);
-      leaf(g, x, y, range(rnd, L[0], L[1]) * (key === 'dark' ? 0.85 : 1), range(rnd, W[0], W[1]), ang, jitter(pick(rnd, LP[key]), rnd, 0.05));
-    }
-  });
-  if (form) {
-    g.save();
-    g.globalCompositeOperation = 'source-atop';
-    for (const [lx, ly, lr] of lob) {
-      blob(g, lx + lr * 0.42, ly + lr * 0.5, lr * 0.95, lr * 0.75, 0.5, '#2a4440', 0.35 * form, 0.2);
-      // the warm rim: a crescent on the upper left (a lit blob minus an offset dark-free one)
-      blob(g, lx - lr * 0.38, ly - lr * 0.42, lr * 0.62, lr * 0.42, -0.6, '#d8e08a', 0.32 * form, 0.25);
-      blob(g, lx - lr * 0.55, ly - lr * 0.62, lr * 0.4, lr * 0.25, -0.6, '#f0ecb0', 0.22 * form, 0.3);
-    }
-    g.beginPath(); g.ellipse(cx, cy, R * 1.35, R * 1.35, 0, 0, TAU); g.clip();
-    const gr = g.createLinearGradient(cx, cy - R, cx + R * 0.3, cy + R);
-    gr.addColorStop(0, 'rgba(255,240,180,0.10)'); gr.addColorStop(0.55, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(34,60,62,0.26)');
-    g.fillStyle = gr; g.fillRect(cx - R * 1.4, cy - R * 1.4, R * 2.8, R * 2.8);
-    g.restore();
-  }
+  lob.sort((p, q) => (q[1] - q[2] * 0.3) - (p[1] - p[2] * 0.3));
+  for (const [x, y, r, LP] of lob) lobe(g, ox, oy, w, h, x, y, r, rnd, LP, { clusters: Math.round(5 + 9 * (r / R) ** 2 * 2), ...o });
+  // a subtle unifying glaze: warm from the top, cool toward the bottom
+  g.save();
+  g.globalCompositeOperation = 'source-atop';
+  const gr = g.createLinearGradient(cx, cy - R, cx + R * 0.3, cy + R);
+  gr.addColorStop(0, 'rgba(255,236,170,0.10)'); gr.addColorStop(0.5, 'rgba(0,0,0,0)'); gr.addColorStop(1, 'rgba(40,44,78,0.22)');
+  g.fillStyle = gr; g.fillRect(ox, oy, w, h);
+  g.restore();
 }
 
-// A cell filled edge to edge with leaves (the solid mass inside a canopy).
-function leafMass(g, ox, oy, w, h, rnd, P, { n = 520, L = [16, 26], W = [7, 11] } = {}) {
-  g.fillStyle = P.core; g.fillRect(ox, oy, w, h);
-  mottle0(g, ox, oy, w, h, rnd, [P.core, P.dark[0], shadowOf(P.core, 0.2)], 16, 20, 60, 0.5);
-  const passes = [[P.dark, 0.5], [P.mid, 0.34], [P.lit, 0.14], [P.hi, 0.02]];
-  for (const [cols, share] of passes) {
-    for (let i = 0; i < n * share; i++) {
-      leaf(g, ox + rnd() * w, oy + rnd() * h, range(rnd, L[0], L[1]), range(rnd, W[0], W[1]), rnd() * TAU, jitter(pick(rnd, cols), rnd, 0.05));
-    }
-  }
+// A hanging skirt: the leaves that droop off a canopy's underside. A solid band at the top (it tucks
+// up into the clump), then strands of downward-pointing leaves of uneven length with ragged ends:
+// cool and dark up under the canopy, catching a little bounce light toward the tips.
+function skirt(g, ox, oy, w, h, rnd, P) {
+  // a shade palette: the fringe hangs in the crown's shadow, a step darker than the lobes above
+  const S = { deep: P.deep, dark: P.dark, mid: [...P.dark, ...P.mid], lit: P.mid, tip: P.lit, rim: P.lit[0] };
+  const hangs = [];
+  // the top: a lumpy row of lobes (it tucks up into the clump), then smaller ones hanging below at
+  // uneven depths; painted top first, so each hanging lobe overlaps the row above it
+  for (let x = ox + 46; x < ox + w - 40; x += range(rnd, 30, 42)) hangs.push([x + range(rnd, -6, 6), oy + h * range(rnd, 0.26, 0.34), range(rnd, 30, 38)]);
+  const nH = 5 + Math.floor(rnd() * 3);
+  for (let i = 0; i < nH; i++) hangs.push([ox + 50 + (i + range(rnd, -0.35, 0.35)) / (nH - 1) * (w - 100), oy + h * range(rnd, 0.42, 0.66), range(rnd, 20, 30)]);
+  for (const [x, y, r] of hangs) lobe(g, ox, oy, w, h, x, y, r, rnd, S, { clusters: 4, rim: 0.3, sq: 1.1, droop: 1.2, L: [20, 28], W: [11, 15] });
 }
 
-// Elwynn: a fresh, warm mid green with yellow-green lit tops (the canopy reads V 0.35-0.4 in game)
+// Elwynn oak: a deep mid green (#3f6a2a), cool blue-violet shadow (#263f2a), yellow-green lit tips
+// (#8fae3e); lime only as the rim light.
 const OAK = {
-  core: '#34542a',
-  dark: ['#3a5e26', '#41662a', '#3c6028'],
-  mid: ['#5a8a30', '#64923a', '#5e8c36', '#6a9638'],
-  lit: ['#8cb440', '#9cc04a', '#94b844'],
-  hi: ['#c4d870', '#d4e080', '#cadc78'],
+  deep: '#28383c',
+  dark: ['#2e4a2a', '#31502c', '#2c4628'],
+  mid: ['#3f6a2a', '#44702e', '#3b6328', '#48742f'],
+  lit: ['#5c8832', '#669236', '#5a8430'],
+  tip: ['#8fae3e', '#98b444', '#88a83c'],
+  rim: '#bcd468',
 };
 const BUSH = {
-  core: '#345428',
-  dark: ['#3a5c26', '#3e6228'],
-  mid: ['#56862e', '#5e8e34', '#52802c'],
-  lit: ['#86ae42', '#92b84a', '#80a83e'],
-  hi: ['#bed46a', '#cadc78'],
+  deep: '#26383a',
+  dark: ['#31502a', '#35562c'],
+  mid: ['#467a2e', '#4e8032', '#43742c'],
+  lit: ['#689838', '#72a23c'],
+  tip: ['#98ba46', '#a2c24e'],
+  rim: '#c4d870',
 };
-// Westfall: sun-baked gold, with rust-red autumn clumps and a little olive
+// Westfall: olive and sun-baked gold, with rust autumn clumps
 const GOLD = {
-  core: '#5a4c22',
-  dark: ['#6a5a24', '#74622a', '#6e5e26'],
-  mid: ['#a88a34', '#b8963a', '#ae8e36'],
-  lit: ['#d4b048', '#e0c058', '#d8b84e'],
-  hi: ['#f0d878', '#f4e090'],
+  deep: '#3c3630',
+  dark: ['#5a4c24', '#62522a'],
+  mid: ['#8c7a30', '#967f34', '#807430'],
+  lit: ['#b8983c', '#c2a244'],
+  tip: ['#d8bc5a', '#e2c664'],
+  rim: '#f0da86',
 };
 const RUST = {
-  core: '#5a3018',
-  dark: ['#6e3a1e', '#7a4222'],
-  mid: ['#b8642e', '#ac5c2a', '#c06c34'],
-  lit: ['#dc8a40', '#e49848', '#d68240'],
-  hi: ['#f0b860', '#f4c870'],
+  deep: '#3c2c2a',
+  dark: ['#5c3420', '#663a22'],
+  mid: ['#98522a', '#a45c2e'],
+  lit: ['#c47836', '#ce863e'],
+  tip: ['#e09c4e', '#e8aa5a'],
+  rim: '#f4c878',
 };
 const OLIVE = {
-  core: '#4a5224',
-  dark: ['#56602a', '#5c662c'],
-  mid: ['#808a3a', '#8a923e', '#7a8436'],
-  lit: ['#aeac4c', '#bab452', '#a8a648'],
-  hi: ['#d8c868', '#e0d070'],
+  deep: '#2e3430',
+  dark: ['#434a26', '#485028'],
+  mid: ['#687032', '#707836', '#626a30'],
+  lit: ['#929840', '#9ca246'],
+  tip: ['#bcb656', '#c6be5e'],
+  rim: '#dcd478',
 };
 const SAGE = {
-  core: '#55604a',
-  dark: ['#4c5844', '#48523f', '#55604a'],
-  mid: ['#6c7a5e', '#768466', '#687658'],
-  lit: ['#94a27c', '#9eac86', '#8c9a76'],
-  hi: ['#bcc8a2', '#c6d0ac'],
+  deep: '#3a3e40',
+  dark: ['#4a5444', '#465040'],
+  mid: ['#64725a', '#6c7a60', '#606e56'],
+  lit: ['#8a9a78', '#94a280'],
+  tip: ['#b0bc98', '#b8c4a0'],
+  rim: '#d4dcbc',
 };
 
-// a lobed bush clump: many smaller lobes spread wide, so the outline is bumpy, not a disc
-const bushClump = (P, palettes = null) => (g, ox, oy, w, h, rnd) => {
-  leafClump(g, ox + w / 2, oy + h / 2 + 8, 90, rnd, P, { n: 280, lobes: 9, L: [16, 24], W: [8, 11], spread: [0.3, 0.6], lobeR: [0.26, 0.4], squash: 0.78, palettes });
-  for (let i = 0; i < 9; i++) {   // stray sprigs past the outline
-    const a = range(rnd, -2.6, 0.6), d = range(rnd, 80, 96), x = ox + w / 2 + Math.cos(a) * d, y = oy + h / 2 + 8 + Math.sin(a) * d * 0.8;
-    for (let k = 0; k < 3; k++) leaf(g, x + range(rnd, -6, 6), y + range(rnd, -6, 6), range(rnd, 13, 19), range(rnd, 6, 9), a + Math.PI / 2 + range(rnd, -0.6, 0.6), jitter(pick(rnd, P.mid), rnd, 0.05));
-  }
-};
-// the big dense clump for the core of a canopy clump: wide, many lobes, a full interior, a leafy edge
-const coreClump = (P, palettes = null) => (g, ox, oy, w, h, rnd) =>
-  leafClump(g, ox + w / 2, oy + h / 2 + 2, 86, rnd, P, { n: 280, lobes: 9, L: [22, 32], W: [10, 14], spread: [0.25, 0.52], lobeR: [0.34, 0.46], squash: 0.84, core: 1.0, coreA: 0.85, palettes });
+// the atlas cells every broadleaf foliage texture shares: 0 canopy clump · 1 hanging skirt ·
+// 2 dense core mass · 3 bush clump
+const foliage = (P, B, pal = null, bpal = null) => atlas([
+  (g, ox, oy, w, h, rnd) => canopy(g, ox, oy, w, h, ox + w / 2, oy + h / 2 + 6, 88, rnd, P, { lobes: 5, palettes: pal }),
+  (g, ox, oy, w, h, rnd) => skirt(g, ox, oy, w, h, rnd, P),
+  (g, ox, oy, w, h, rnd) => canopy(g, ox, oy, w, h, ox + w / 2, oy + h / 2 + 2, 100, rnd, P, { lobes: 7, spread: [0.36, 0.5], lobeR: [0.36, 0.48], top: 0.66, palettes: pal, rim: 0.6 }),
+  (g, ox, oy, w, h, rnd) => canopy(g, ox, oy, w, h, ox + w / 2, oy + h / 2 + 10, 92, rnd, B, { lobes: 6, squash: 0.7, spread: [0.4, 0.56], lobeR: [0.3, 0.44], top: 0.5, L: [18, 26], W: [10, 14], palettes: bpal }),
+]);
 
 register('leaves_oak', {
-  family: F, size: 512, alpha: true, note: 'oak/bush foliage atlas: clump, lobed clump, dense core clump, lobed bush clump',
-  paint: atlas([
-    (g, ox, oy, w, h, rnd) => leafClump(g, ox + w / 2, oy + h / 2 + 4, 94, rnd, OAK, { n: 210, lobes: 6, L: [22, 32], W: [10, 15] }),
-    (g, ox, oy, w, h, rnd) => {
-      leafClump(g, ox + w * 0.4, oy + h * 0.6, 64, rnd, OAK, { n: 110, lobes: 4, L: [20, 28], W: [9, 13] });
-      leafClump(g, ox + w * 0.6, oy + h * 0.4, 66, rnd, OAK, { n: 120, lobes: 4, L: [20, 28], W: [9, 13] });
-    },
-    coreClump(OAK),
-    bushClump(BUSH),
-  ]),
+  family: F, size: 512, alpha: true, note: 'Elwynn foliage atlas: canopy clump, hanging skirt, dense core mass, bush clump (solid lobes, scalloped leaf edges)',
+  paint: foliage(OAK, BUSH),
 });
 
 register('leaves_autumn', {
-  family: F, size: 512, alpha: true, note: 'Westfall foliage: gold clump (some olive), rust/gold clump, dense gold core clump, olive-gold bush',
-  paint: atlas([
-    (g, ox, oy, w, h, rnd) => leafClump(g, ox + w / 2, oy + h / 2 + 4, 94, rnd, GOLD, { n: 200, lobes: 6, L: [22, 32], W: [10, 15], palettes: [GOLD, GOLD, GOLD, RUST, OLIVE] }),
-    (g, ox, oy, w, h, rnd) => {
-      leafClump(g, ox + w * 0.4, oy + h * 0.6, 64, rnd, RUST, { n: 110, lobes: 4, L: [20, 28], W: [9, 13], palettes: [RUST, RUST, GOLD] });
-      leafClump(g, ox + w * 0.6, oy + h * 0.4, 66, rnd, GOLD, { n: 120, lobes: 4, L: [20, 28], W: [9, 13], palettes: [GOLD, GOLD, OLIVE] });
-    },
-    coreClump(GOLD, [GOLD, GOLD, GOLD, RUST, OLIVE]),
-    bushClump(OLIVE, [OLIVE, GOLD, GOLD]),
-  ]),
+  family: F, size: 512, alpha: true, note: 'Westfall foliage: olive-gold clump (some rust), skirt, dense core, olive-gold bush',
+  paint: foliage(GOLD, OLIVE, [GOLD, GOLD, OLIVE, OLIVE, RUST], [OLIVE, OLIVE, GOLD]),
 });
 
-// sage / scrub leaves: small, narrow, gray-green, on visible brown twigs
+// sage / scrub: small narrow gray-green leaves in solid clumps on a few visible brown twigs
 function twigFan(g, cx, by, rnd, { n = 9, len = [70, 120], col = '#5e4636', lit = '#9a7e64', spread = 1.1, w = 4 } = {}) {
   const tips = [];
   for (let i = 0; i < n; i++) {
     const a = range(rnd, -spread, spread), L = range(rnd, len[0], len[1]);
     const x1 = cx + Math.sin(a) * L, y1 = by - Math.cos(a) * L;
     const mx = (cx + x1) / 2 + range(rnd, -8, 8), my = (by + y1) / 2;
-    stroke(g, [[cx + range(rnd, -6, 6), by], [mx, my], [x1, y1]], w, 1, col, 1);
+    stroke(g, [[cx + range(rnd, -6, 6), by], [mx, my], [x1, y1]], w, w * 0.4, col, 1);
     stroke(g, [[cx - 1, by], [mx - 1, my], [x1 - 1, y1]], w * 0.4, 0.5, lit, 0.6);
     tips.push([x1, y1, a]);
-    for (let k = 0; k < 2; k++) {
-      const t = range(rnd, 0.45, 0.8), fx = cx + (x1 - cx) * t, fy = by + (y1 - by) * t, fa = a + range(rnd, -0.9, 0.9), fl = L * range(rnd, 0.25, 0.45);
-      stroke(g, [[fx, fy], [fx + Math.sin(fa) * fl, fy - Math.cos(fa) * fl]], w * 0.55, 0.8, col, 1);
-      tips.push([fx + Math.sin(fa) * fl, fy - Math.cos(fa) * fl, fa]);
-    }
   }
   return tips;
 }
 
 register('leaves_scrub', {
-  family: F, size: 512, alpha: true, note: 'dry-land shrubs: sage brush, twig brush, dense sage, juniper spray',
+  family: F, size: 512, alpha: true, note: 'dry-land shrubs: sage brush, dry tangle, dense sage mass, juniper spray (solid clumps)',
   paint: atlas([
     (g, ox, oy, w, h, rnd) => {
-      const tips = twigFan(g, ox + w / 2, oy + h - 8, rnd, { n: 10, len: [80, 140] });
-      for (const [x, y] of tips) leafClump(g, x, y + 6, range(rnd, 26, 40), rnd, SAGE, { n: 50, lobes: 3, L: [8, 14], W: [3.5, 5.5], core: 0.75, form: 0.6 });
+      // sage brush: a woody base, then 4-6 solid gray-green clumps making one rounded bush
+      twigFan(g, ox + w / 2, oy + h - 10, rnd, { n: 6, len: [60, 100], spread: 0.9, w: 6 });
+      canopy(g, ox, oy, w, h, ox + w / 2, oy + h / 2 - 4, 88, rnd, SAGE, { lobes: 6, squash: 0.72, spread: [0.42, 0.58], lobeR: [0.28, 0.4], top: 0.46, L: [14, 20], W: [7, 10], rim: 0.7 });
     },
     (g, ox, oy, w, h, rnd) => {
-      // a dry tangle (tumbleweed-ish): many crooked twigs in a ball, a few dead leaves
+      // a dry tangle: a solid dark-brown core of packed twigs, thick crooked twigs round the edge
       const cx = ox + w / 2, cy = oy + h / 2 + 10;
-      for (let i = 0; i < 70; i++) {
-        let x = cx + range(rnd, -70, 70), y = cy + range(rnd, -60, 60);
-        if (Math.hypot(x - cx, (y - cy) * 1.15) > 84) continue;
+      ellipse(g, cx, cy, 64, 54, 0, '#4e3a2e');
+      blob(g, cx - 18, cy - 20, 44, 34, 0, '#7a6048', 0.7, 0.3);
+      blob(g, cx + 22, cy + 22, 46, 30, 0, '#34262a', 0.6, 0.3);
+      for (let i = 0; i < 46; i++) {
+        const a = rnd() * TAU, r0 = range(rnd, 20, 58);
+        let x = cx + Math.cos(a) * r0, y = cy + Math.sin(a) * r0 * 0.85;
         const pts = [[x, y]];
-        let a = rnd() * TAU;
-        for (let k = 0; k < 4; k++) { a += range(rnd, -0.9, 0.9); x += Math.cos(a) * range(rnd, 10, 20); y += Math.sin(a) * range(rnd, 10, 20); pts.push([x, y]); }
-        const c = pick(rnd, ['#6a503e', '#7a5e48', '#5a4232', '#8a6e54']);
-        stroke(g, pts.map(([u, v]) => [u + 1.2, v + 1.2]), 3, 1, '#2e2226', 0.5);
-        stroke(g, pts, 2.6, 0.9, c, 1);
-        stroke(g, pts.map(([u, v]) => [u - 0.6, v - 0.6]), 1, 0.4, '#c4a888', 0.5);
+        let b = a + range(rnd, -0.8, 0.8);
+        for (let k = 0; k < 3; k++) { b += range(rnd, -0.7, 0.7); x += Math.cos(b) * range(rnd, 10, 18); y += Math.sin(b) * range(rnd, 10, 18) * 0.85; pts.push([x, y]); }
+        const lit = Math.cos(a) * -0.6 + Math.sin(a) * -0.8 > 0.2;
+        stroke(g, pts, 5, 3, lit ? pick(rnd, ['#8a6e54', '#9a7e62']) : pick(rnd, ['#5a4232', '#6a503e']), 1);
+        if (lit) stroke(g, pts.map(([u, v]) => [u - 1, v - 1]), 1.6, 1, '#c4a888', 0.6);
       }
-      for (let i = 0; i < 40; i++) leaf(g, cx + range(rnd, -70, 70), cy + range(rnd, -55, 55), range(rnd, 8, 12), range(rnd, 3, 5), rnd() * TAU, pick(rnd, ['#9a8a5a', '#a8946a', '#8a7a4e']));
+      for (let i = 0; i < 26; i++) { const a = rnd() * TAU, d = range(rnd, 10, 60); leaf(g, cx + Math.cos(a) * d, cy + Math.sin(a) * d * 0.85, range(rnd, 12, 16), range(rnd, 6, 8), a + Math.PI / 2, pick(rnd, ['#9a8a5a', '#a8946a', '#8a7a4e']), 1, 0.6); }
     },
-    (g, ox, oy, w, h, rnd) => leafMass(g, ox, oy, w, h, rnd, SAGE, { n: 900, L: [9, 14], W: [3.5, 5.5] }),
+    (g, ox, oy, w, h, rnd) => canopy(g, ox, oy, w, h, ox + w / 2, oy + h / 2 + 2, 100, rnd, SAGE, { lobes: 7, top: 0.6, lobeR: [0.36, 0.48], L: [14, 20], W: [7, 10], rim: 0.5 }),
     (g, ox, oy, w, h, rnd) => {
       // juniper: dark blue-green scale-leaf sprays fanning out of a low woody base
       const cx = ox + w / 2, by = oy + h - 10;

@@ -25,15 +25,15 @@ export const atmo = { sparkle: 0, biome: 'meadow', night: 0 };   // night: 0 day
 // clouds (coverage: 0 = the full painted band, higher = only the dense cores), near/far fog,
 // and the night's own colors (snow nights are brighter: moonlight on snow).
 const DAY = {
-  meadow: { top: '#4686d4', hor: '#c6dfea', fog: '#a9c6d6', hSky: '#d6e8f2', hGnd: '#6a7a42', sun: '#fff0cc', near: 40, far: 560, light: 1, clouds: 0.04,
+  meadow: { top: '#4686d4', hor: '#c6dfea', fog: '#b8d2e0', hSky: '#d6e8f2', hGnd: '#6a7a42', sun: '#fff0cc', near: 40, far: 560, light: 1, clouds: 0.04,
     night: { top: '#0a1432', hor: '#22385e', fog: '#1c2c4c', hSky: '#5c74b0', hGnd: '#1e2638', hemiI: 1.45, sun: '#a6b8e8' } },
-  fields: { top: '#5a9ee2', hor: '#eae4cc', fog: '#d4cfb4', hSky: '#ece8dc', hGnd: '#a08c50', sun: '#fff0c4', near: 50, far: 680, light: 1, clouds: 0.04,
+  fields: { top: '#5a9ee2', hor: '#e6e8d8', fog: '#d2d4c4', hSky: '#ece8dc', hGnd: '#8c8458', sun: '#fff0c4', near: 50, far: 680, light: 1, clouds: 0.04,
     night: { top: '#0e1430', hor: '#2c3456', fog: '#242a44', hSky: '#6670a6', hGnd: '#2a2830', hemiI: 1.45, sun: '#b0b8e0' } },
-  snow: { top: '#4e94dc', hor: '#e2edf4', fog: '#d2e0ec', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 35, far: 520, light: 0.8, clouds: 0.0,
+  snow: { top: '#4e94dc', hor: '#e2edf4', fog: '#d9e6f0', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 35, far: 520, light: 0.8, clouds: 0.0,
     night: { top: '#0c1a3c', hor: '#2c4874', fog: '#24385c', hSky: '#7090cc', hGnd: '#3a4a6c', hemiI: 1.55, sun: '#b4caf4' } },
-  badlands: { top: '#5492d4', hor: '#f0cfb0', fog: '#dcb69c', hSky: '#ece4e0', hGnd: '#a8603a', sun: '#fff0d0', near: 50, far: 680, light: 1, clouds: 0.02,
+  badlands: { top: '#5492d4', hor: '#f0cfb0', fog: '#e4c4aa', hSky: '#ece4e0', hGnd: '#a8603a', sun: '#fff0d0', near: 50, far: 680, light: 1, clouds: 0.02,
     night: { top: '#120f2e', hor: '#3c2c50', fog: '#2c2236', hSky: '#7466a0', hGnd: '#2e2224', hemiI: 1.4, sun: '#b8b0e0' } },
-  desert: { top: '#5aa4e8', hor: '#f6e2ba', fog: '#ecd6ae', hSky: '#f0ece4', hGnd: '#c89c68', sun: '#fff4d8', near: 50, far: 650, light: 0.95, clouds: 0.0,
+  desert: { top: '#5aa4e8', hor: '#f6e2ba', fog: '#f0dcb4', hSky: '#f0ece4', hGnd: '#c89c68', sun: '#fff4d8', near: 50, far: 650, light: 0.95, clouds: 0.0,
     night: { top: '#0c1232', hor: '#30365c', fog: '#262a44', hSky: '#7078ac', hGnd: '#3a3230', hemiI: 1.45, sun: '#b0b8e4' } },
 };
 const MOTE = { meadow: '#fff6d0', fields: '#fff0b8', snow: '#ffffff', badlands: '#f4c89a', desert: '#f6e0b0' };
@@ -45,7 +45,7 @@ const mixHex = (a, b, t) => '#' + C(a).lerp(C(b), t).getHexString();
 function keysFor(b) {
   const D = DAY[b], N = D.night, K = D.light;
   const day = { top: D.top, hor: D.hor, fog: D.fog, sun: D.sun, sunI: 2.15 * K, hSky: D.hSky, hGnd: D.hGnd, hemiI: 2.05 * K, shadow: 0.62,
-    cLit: '#fffaf2', cShade: '#a4b0cc', cA: 1, cCov: D.clouds, mtn: 1, star: 0, mote: MOTE[b], moteA: 0.45, fire: 0, spark: 0.55, near: D.near, far: D.far };
+    cLit: '#fff8ec', cShade: '#bcbcd6', cA: 1, cCov: D.clouds, mtn: 1, star: 0, mote: MOTE[b], moteA: 0.45, fire: 0, spark: 0.55, near: D.near, far: D.far };
   const golden = { ...day, top: mixHex(D.top, '#5a78c0', 0.3), hor: mixHex(D.hor, '#f8d29a', 0.5), fog: mixHex(D.fog, '#e8c08c', 0.4),
     sun: '#ffd49a', sunI: 1.95 * K, hSky: mixHex(D.hSky, '#f0dcc0', 0.5), hemiI: 1.85 * K, cLit: '#fff0d0', cShade: '#b0a0b8', moteA: 0.6, spark: 1.3 };
   const sunset = { ...day, top: '#3e5aa6', hor: '#f7b583', fog: mixHex(D.fog, '#e89c7c', 0.55), sun: '#ff9c5c', sunI: 1.45 * K,
@@ -127,15 +127,23 @@ void main(){
   #include <colorspace_fragment>
 }`;
 
-const RING_VS = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`;
-const RING_FS = `uniform sampler2D map; uniform float row, fogK, light, reps, offs; uniform vec3 fogC, hemi;
-varying vec2 vUv;
+const RING_VS = `varying vec2 vUv; varying vec3 vW;
+void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
+const RING_FS = `uniform sampler2D map; uniform float row, fogK, light, reps, offs; uniform vec3 fogC, hemi, span;
+varying vec2 vUv; varying vec3 vW;
 void main(){
-  vec2 uv = vec2(vUv.x * reps + offs, (2.0 - row + clamp(vUv.y, 0.004, 0.996)) / 3.0);
+  // the cylinder reaches down to span.x (below the horizon, behind the apron's skyline); the painted
+  // row covers span.y..span.z and its bottom line (the body of the land) carries on below that
+  float ey = mix(span.x, span.z, vUv.y);
+  float ty = clamp((ey - span.y) / (span.z - span.y), 0.004, 0.996);
+  vec2 uv = vec2(vUv.x * reps + offs, (2.0 - row + ty) / 3.0);
   vec4 t = texture2D(map, uv);
   if (t.a < 0.01) discard;
   vec3 c = t.rgb * hemi * light;
-  float k = fogK + (1.0 - fogK) * 0.45 * (1.0 - smoothstep(0.0, 0.25, vUv.y));   // denser haze at the very foot (behind the hills), so nothing floats
+  // haze by view elevation, the same for every ring: equal elevations get equal haze, so a nearer
+  // row can never sit on a paler shelf than the row behind it, and every base melts into the fog
+  float el = normalize(vW - cameraPosition).y;
+  float k = max(fogK, 1.0 - smoothstep(-0.004, 0.022, el));
   c = mix(c, fogC, clamp(k, 0.0, 1.0));
   gl_FragColor = vec4(c, t.a);
   #include <colorspace_fragment>
@@ -224,9 +232,9 @@ export function initAtmosphere(_scene, _camera, _renderer) {
   // (never less hazed than the fogged hills in front of them; the near row's hero shapes sit at
   // u = 0.71, the mid row's at 0.37 / 0.87 and the far row's at 0 / 0.5: straight down the road)
   const LAYERS = [
-    { row: 0, R: 1050, lo: -0.07, hi: 0.23, fogK: 0.62, light: 0.95, reps: 1, offs: 0.0 },
-    { row: 1, R: 820, lo: -0.06, hi: 0.15, fogK: 0.52, light: 0.92, reps: 1, offs: 0.37 },
-    { row: 2, R: 620, lo: -0.05, hi: 0.1, fogK: 0.42, light: 0.9, reps: 2, offs: 0.71 },
+    { row: 0, R: 1050, lo: -0.12, lo0: -0.07, hi: 0.23, fogK: 0.72, light: 0.95, reps: 1, offs: 0.0 },
+    { row: 1, R: 820, lo: -0.12, lo0: -0.06, hi: 0.15, fogK: 0.55, light: 0.92, reps: 1, offs: 0.37 },
+    { row: 2, R: 620, lo: -0.12, lo0: -0.05, hi: 0.1, fogK: 0.40, light: 0.9, reps: 2, offs: 0.71 },
   ];
   rings = LAYERS.map((L, i) => {
     const h = (L.hi - L.lo) * L.R;
@@ -236,7 +244,8 @@ export function initAtmosphere(_scene, _camera, _renderer) {
       side: THREE.BackSide, depthWrite: false, fog: false, transparent: false,
       blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       uniforms: { map: { value: mountains(biome) }, row: { value: L.row }, fogK: { value: L.fogK }, light: { value: L.light }, reps: { value: L.reps }, offs: { value: L.offs },
-        fogC: { value: new THREE.Color() }, hemi: { value: new THREE.Color(1, 1, 1) } },
+        fogC: { value: new THREE.Color() }, hemi: { value: new THREE.Color(1, 1, 1) },
+        span: { value: new THREE.Vector3(L.lo, L.lo0, L.hi) } },
       vertexShader: RING_VS, fragmentShader: RING_FS,
     });
     const m = new THREE.Mesh(geo, mat);

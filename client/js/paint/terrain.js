@@ -816,6 +816,13 @@ function cellDirt(g, s, rnd, { cells = 16, warp = 12, grout, groutA = 0.35, grou
   g.putImageData(img, 0, 0);
 }
 
+// Packed earth as a soft relief: a smooth low-frequency height field (stretched along y when
+// aniso < 1, so a road's lumps run with it), lit from the upper left. Undulations, never cells.
+function softRelief(g, s, rnd, { g0 = 9, oct = 3, gain = 0.55, aniso = 1, k = 34, lit, dark, litA = 0.3, darkA = 0.3, mask = null }) {
+  const H = fbmLo(rnd, s, oct, g0, gain, aniso);
+  shadeHeight(g, s, H, { k, lit, dark, litA, darkA, mask });
+}
+
 // One stone seen from above: a flat slab or an angular chip (aspect 0.4-1), lit on its upper-left
 // edge, with only a thin dark contact line along its lower right (no cast-shadow ellipse).
 function stone(g, s, x, y, r, rnd, { color, contact = '#4a3424', contactA = 0.5, sides = 5, asp = [0.4, 1] }) {
@@ -1189,6 +1196,7 @@ const GRASS = {
   meadowDry: { root: '#4a4a24', body: ['#8a8a3a', '#968e40', '#7e823a'], tip: ['#d8cc78', '#e2d488'], shadow: '#2e3018' },
   fields: { root: '#6a5e2a', body: ['#c8a24a', '#b8963e', '#c4a450', '#ac8e3e'], tip: ['#f0d890', '#ecd486', '#f6e2a4'], shadow: '#4a3e1e' },
   fieldsGreen: { root: '#4a4c22', body: ['#8a8e3c', '#969440', '#7e8a38'], tip: ['#d8d07a', '#e0d488'], shadow: '#34341a' },
+  fieldsFringe: { root: '#3e4220', body: ['#7e8a44', '#8a9446', '#6f7e40', '#a08e48'], tip: ['#c8c070', '#d8cc78', '#b8b860'], shadow: '#2e3018' },
   badlands: { root: '#6a4a2c', body: ['#b0905a', '#a08050', '#bc9c62'], tip: ['#ecd29a', '#e4c88a'], shadow: '#6a3a22' },
   desert: { root: '#7a6440', body: ['#c4ae72', '#b8a468', '#ccb47c'], tip: ['#f2e2b4', '#ecdcaa'], shadow: '#8a6a44' },
   snow: { root: '#5a5040', body: ['#a8946a', '#b4a274', '#9a8a60'], tip: ['#e6d8aa', '#f0e4bc'], shadow: '#8c9cba' },
@@ -1295,6 +1303,32 @@ function driedPuddles(g, s, rnd, n, { silt, crack, rim, r = [34, 60] }) {
   }
 }
 
+// Hardpan cracked into plates, but only in two or three soft-edged patches per tile (at most a
+// quarter of it): plates of very different sizes (a power diagram, three to one), soft grout along
+// their borders and a thin lit lip on the upper-left side of each crack, faded out at the patch edge.
+function crackPatches(g, s, rnd, { n = [2, 3], r = [44, 72], cells = 9, grout, lit, groutA = 0.12, litA = 0.22, tone = 0.05 }) {
+  const cores = [], k = Math.round(range(rnd, n[0], n[1] + 0.99));
+  for (let i = 0; i < Math.min(n[1], k); i++) {
+    let x = rnd() * s, y = rnd() * s; const a = rnd() * TAU, m = 2 + Math.floor(rnd() * 2), R = range(rnd, r[0], r[1]);
+    for (let j = 0; j < m; j++) { cores.push([x, y, R * range(rnd, 0.6, 1)]); x += Math.cos(a + range(rnd, -0.7, 0.7)) * R * 0.7; y += Math.sin(a + range(rnd, -0.7, 0.7)) * R * 0.7; }
+  }
+  const M0 = coreMask(s, cores), WN = fbmLo(rnd, s, 3, 8, 0.6);
+  const C = powerCells(rnd, s, cells, cells, 0.9, 0.55, () => ({ t: range(rnd, -1, 1) }));
+  const G = hex(grout), L = hex(lit), out = [0, 0, 0, 0, 0];
+  const img = g.getImageData(0, 0, s, s), D = img.data;
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const i = y * s + x, m = sst(0.05, 0.45, M0(x, y) + WN[i] * 0.25);
+    if (m <= 0.01) continue;
+    powerAt(C, s, x, y, out);
+    const e = out[2], o = i * 4, tk = 1 + C.seeds[out[0]].t * tone * m;
+    D[o] *= tk; D[o + 1] *= tk; D[o + 2] *= tk;
+    const ga = sst(2.2, 0.3, e) * groutA * m;
+    if (ga > 0) { D[o] += (G.r - D[o]) * ga; D[o + 1] += (G.g - D[o + 1]) * ga; D[o + 2] += (G.b - D[o + 2]) * ga; }
+    else if (e < 4 && out[3] + out[4] < 0) { const la = sst(4, 2, e) * litA * m; D[o] += (L.r - D[o]) * la; D[o + 1] += (L.g - D[o + 1]) * la; D[o + 2] += (L.b - D[o + 2]) * la; }
+  }
+  g.putImageData(img, 0, 0);
+}
+
 // ---- ground: meadow (Elwynn) ----------------------------------------------------------------
 
 register('ground_meadow', {
@@ -1316,7 +1350,7 @@ register('ground_meadow', {
     grassTufts(g, s, rnd, 120, { ...GRASS.meadow, r: [9, 18], blades: [6, 10], len: [12, 24], wid: [3, 4.6], lean: [-0.35, 0.35], where: (x, y) => (0.15 + M(x, y) * 0.85) * (1 - isDry(x, y) * 0.9) });
     vTufts(g, s, rnd, 380, { root: '#4a6a28', body: ['#7aa040', '#86a844'], tip: ['#b8c850', '#d0c860', '#c2c866'], len: [8, 15], wid: [2, 2.8], alpha: 0.85, where: (x, y) => 0.15 + M(x, y) * M(x, y) * 0.85 });
     glaze(g, s, s, '#ffe7a0', 0.1, 'soft-light');
-    soften(cv, 0.4);
+    soften(cv, 0.25);
   },
 });
 
@@ -1326,7 +1360,8 @@ register('ground2_meadow', {
     fill(g, s, s, '#7a5438');
     mottle(g, s, rnd, { colors: ['#8a5e3c', '#6a4630', '#946844', '#70503a', '#865a38', '#9a6440'], count: 46, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
     blurWrap(cv, 2);
-    cellDirt(g, s, rnd, { cells: 13, warp: 14, grout: '#54382a', groutA: 0.3, lit: '#a87a52', litA: 0.38, shade: '#5e4030', shadeA: 0.26 });
+    softRelief(g, s, rnd, { g0: 9, k: 30, lit: '#a87a52', dark: '#54382a', litA: 0.3, darkA: 0.3 });
+    streaks(g, s, rnd, { colors: ['#9a6a44', '#6a4630', '#a87a52'], count: 60, len: [30, 90], width: [3, 8], angle: 0.3, wobble: 0.3, alpha: 0.16 });
     scuffs(g, s, rnd, 30, '#7a5438');
     const cracksAt = crackNet(g, s, rnd, 3, { color: '#4a3022', lit: '#b08458', alpha: 0.3, litA: 0.3, len: [60, 150], width: [1, 1.6] });
     stoneClusters(g, s, rnd, 8, { colors: ['#a89478', '#94826a', '#b4a488', '#7a6a5c'], at: cracksAt.filter(() => rnd() < 0.4) });
@@ -1338,12 +1373,13 @@ register('ground2_meadow', {
     }
     const DN = fbmLo(rnd, s, 3, 8, 0.6), dens0 = coreMask(s, cores), dens = (x, y) => Math.max(0, dens0(x, y) + DN[(((Math.floor(y) % s) + s) % s) * s + (((Math.floor(x) % s) + s) % s)] * 0.35 - 0.05);
     for (const [cx, cy, r] of cores) { const rot = rnd() * 3; wrap(s, cx, cy, r * 1.2, (X, Y) => blob(g, X, Y, r * 0.8, r * 0.65, rot, '#3e5222', 0.45, 0.3)); }
-    vTufts(g, s, rnd, 380, { root: '#22381a', body: ['#2c4a1c', '#32521f'], tip: ['#4a6e2a'], len: [8, 15], wid: [2.2, 3.2], alpha: 0.8, where: (x, y) => Math.min(1, dens(x, y) * 2.4) });
-    vTufts(g, s, rnd, 380, { root: '#3f5a22', body: ['#5e8a32', '#6a9238', '#58842e'], tip: ['#9cb447', '#b8c850', '#c8d060'], len: [7, 13], wid: [2, 3], alpha: 0.9, where: (x, y) => Math.min(1, dens(x, y) * 2) });
+    vTufts(g, s, rnd, 760, { root: '#22381a', body: ['#2c4a1c', '#32521f'], tip: ['#4a6e2a'], len: [8, 15], wid: [2.2, 3.2], alpha: 0.8, where: (x, y) => Math.min(1, dens(x, y) * 2.4) });
+    vTufts(g, s, rnd, 760, { root: '#3f5a22', body: ['#5e8a32', '#6a9238', '#58842e'], tip: ['#9cb447', '#b8c850', '#c8d060'], len: [7, 13], wid: [2, 3], alpha: 0.9, where: (x, y) => Math.min(1, dens(x, y) * 2) });
+    bladePass(g, s, rnd, 700, ['#6a4a30', '#8a6644', '#5e8a32', '#7a8a3a'], [5, 10], [1.2, 2], 0.5, [-0.6, 0.6], [-0.2, 0.3]);   // grain and stray blades over the dirt
     grassTufts(g, s, rnd, 110, { ...GRASS.meadow, r: [8, 16], blades: [5, 10], len: [12, 22], wid: [3, 4.4], lean: [-0.35, 0.35], where: (x, y) => Math.min(1, dens(x, y) * 2.2) });
     vTufts(g, s, rnd, 150, { root: '#4a4a24', body: ['#8a8a3a', '#7e823a'], tip: ['#d8cc78', '#c8c868'], len: [6, 12], wid: [1.8, 2.6], alpha: 0.85, where: (x, y) => (dens(x, y) > 0.0 && dens(x, y) < 0.3 ? 1 : 0.12) });
     glaze(g, s, s, '#ffe0a0', 0.08, 'soft-light');
-    soften(cv, 0.45);
+    soften(cv, 0.25);
   },
 });
 
@@ -1354,19 +1390,21 @@ register('ground_fields', {
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#b4944a');
     mottle(g, s, rnd, { colors: ['#c4a24e', '#a88a40', '#d2b05a', '#9e8642', '#b89848', '#c8a456'], count: 44, rmin: 60, rmax: 160, alpha: 0.45, hard: 0.1 });
-    const green = []; for (let i = 0; i < 4; i++) green.push([rnd() * s, rnd() * s, range(rnd, 40, 80)]);
-    for (const [x, y, r] of green) wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.8, 0.3, '#8a8a40', 0.35, 0.3));
-    for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 40, 80); wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.7, 0.4, '#8a6e3a', 0.35, 0.3)); }
+    // olive and green-gold patches (about a quarter of the ground, the rest stays gold), and darker
+    // straw in the hollows, so the fields are amber with olive, never one sepia wash
+    const green = []; for (let i = 0; i < 7; i++) green.push([rnd() * s, rnd() * s, range(rnd, 48, 86)]);
+    for (const [x, y, r] of green) wrap(s, x, y, r * 1.3, (X, Y) => { blob(g, X, Y, r, r * 0.8, 0.3, pick(rnd, ['#8a9446', '#6f7e40', '#7e8a44']), 0.55, 0.3); blob(g, X + r * 0.2, Y - r * 0.1, r * 0.55, r * 0.45, 0.3, '#6f7e40', 0.35, 0.3); });
+    for (let i = 0; i < 8; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 40, 80); wrap(s, x, y, r * 1.3, (X, Y) => blob(g, X, Y, r, r * 0.7, 0.4, pick(rnd, ['#7a6a34', '#8a6e3a']), 0.4, 0.3)); }
     blurWrap(cv, 3);
     const isGreen = coreMask(s, green), M = massField(rnd, s, 7, 0.9);
     toneBy(g, s, M.F, '#7a6230', '#e0c070', 0.4, 0.32);
     vTufts(g, s, rnd, 420, { root: '#4a3e1c', body: ['#6a5a28', '#5e5024', '#705e2c'], tip: ['#9a8442'], len: [10, 19], wid: [2.2, 3.2], alpha: 0.7, fan: 0.5, where: (x, y) => 1.1 - M(x, y) * 0.7 });
     vTufts(g, s, rnd, 560, { root: '#8a7a3a', body: ['#c8a24a', '#bc9a44', '#d0ac52'], tip: ['#f0d888', '#ecd486'], len: [9, 17], wid: [2, 3], alpha: 0.85, fan: 0.5, where: (x, y) => (0.25 + M(x, y) * 0.75) * (1 - isGreen(x, y)) });
     grassTufts(g, s, rnd, 150, { ...GRASS.fields, r: [10, 20], blades: [7, 12], len: [14, 28], wid: [2.6, 4.2], lean: [-0.3, 0.3], where: (x, y) => (0.2 + M(x, y) * 0.8) * (1 - isGreen(x, y)) });
-    vTufts(g, s, rnd, 90, { root: '#4a4c22', body: ['#8a8e3c', '#969440'], tip: ['#d8d07a'], len: [7, 13], wid: [2, 2.8], alpha: 0.85, where: (x, y) => Math.min(1, isGreen(x, y) * 3) });
+    vTufts(g, s, rnd, 260, { root: '#3e4220', body: ['#7e8a44', '#8a9446', '#6f7e40'], tip: ['#c8c070', '#d8d07a'], len: [7, 14], wid: [2, 2.8], alpha: 0.88, where: (x, y) => Math.min(1, isGreen(x, y) * 3) });
     vTufts(g, s, rnd, 300, { root: '#a08a44', body: ['#e2c56a', '#d8bc60'], tip: ['#f6e4a4', '#f0d888'], len: [6, 12], wid: [1.6, 2.4], alpha: 0.85, fan: 0.5, where: (x, y) => M(x, y) * M(x, y) });
     glaze(g, s, s, '#ffe6a0', 0.12, 'soft-light');
-    soften(cv, 0.4);
+    soften(cv, 0.25);
   },
 });
 
@@ -1376,7 +1414,7 @@ register('ground2_fields', {
     fill(g, s, s, '#a8895a');
     mottle(g, s, rnd, { colors: ['#b4966a', '#9c7e52', '#c0a274', '#94784e', '#a88a5c'], count: 44, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
     blurWrap(cv, 2);
-    cellDirt(g, s, rnd, { cells: 11, warp: 16, grout: '#7a5e3c', groutA: 0.12, lit: '#d0b488', litA: 0.3, shade: '#86683e', shadeA: 0.18 });
+    softRelief(g, s, rnd, { g0: 9, k: 30, lit: '#d0b488', dark: '#7a5e3c', litA: 0.28, darkA: 0.26 });
     scuffs(g, s, rnd, 24, '#a8895a');
     stoneClusters(g, s, rnd, 7, { colors: ['#c4ae88', '#ac9672', '#d4c09c', '#8c7a62'], contact: '#5a4430' });
     const cores = []; for (let i = 0; i < 16; i++) cores.push([rnd() * s, rnd() * s, range(rnd, 40, 90)]);
@@ -1386,7 +1424,7 @@ register('ground2_fields', {
     grassTufts(g, s, rnd, 70, { ...GRASS.fields, r: [8, 16], blades: [6, 10], len: [12, 22], wid: [2.4, 3.8], where: (x, y) => Math.min(1, dens(x, y) * 3) });
     bladePass(g, s, rnd, 220, ['#e2c56a', '#c9a64e', '#f0dc98'], [6, 14], [1.2, 1.8], 0.6, [-1.6, 1.6], [-0.1, 0.1]);   // loose straw
     glaze(g, s, s, '#ffe6a0', 0.1, 'soft-light');
-    soften(cv, 0.45);
+    soften(cv, 0.25);
   },
 });
 
@@ -1423,7 +1461,7 @@ register('ground_badlands', {
     stoneClusters(g, s, rnd, 10, { colors: ['#b8704a', '#9a5a3c', '#c88a5e', '#8a5a44'], at: along.filter(() => rnd() < 0.3), r: [1.6, 4], sides: [4, 5], contact: '#5a2a1a' });
     grassTufts(g, s, rnd, 8, { ...GRASS.badlands, r: [7, 12], blades: [5, 9], len: [10, 18], wid: [2, 3.2], lean: [-0.6, 0.6], where: (x, y) => 1 - M(x, y) });
     glaze(g, s, s, '#ffd29a', 0.08, 'soft-light');
-    soften(cv, 0.5);
+    soften(cv, 0.25);
   },
 });
 
@@ -1436,13 +1474,13 @@ register('ground2_badlands', {
     const M = massField(rnd, s, 8, 1.4);
     toneBy(g, s, M.F, '#cc9c6c', '#904e32', 0.3, 0.35);
     layered(g, s, 0.4, lg => { for (let i = 0; i < 220; i++) { const x = rnd() * s, y = rnd() * s; if (M(x, y) < 0.5) continue; const r = range(rnd, 12, 26); wrap(s, x, y, r * 1.3, (X, Y) => blob(lg, X, Y, r, r * 0.7, 0.3, '#8a4a30', 1, 0.45)); } });
-    cellDirt(g, s, rnd, { cells: 16, warp: 16, grout: '#6e3a24', groutA: 0.07, lit: '#c8885c', litA: 0.22, shade: '#7e4630', shadeA: 0.16 });
+    softRelief(g, s, rnd, { g0: 10, k: 30, lit: '#c8885c', dark: '#6e3a24', litA: 0.26, darkA: 0.26 });
     const scree = ['#8e3e22', '#b4552f', '#a24a2a', '#c4683e', '#9a6450'];
     stoneClusters(g, s, rnd, 46, { colors: scree, r: [2, 5.4], k: [4, 9], spread: [7, 18], sides: [4, 5], asp: [0.4, 0.9], contact: '#4a2216', where: (x, y) => 0.1 + M(x, y) * 0.9 });
     stoneClusters(g, s, rnd, 30, { colors: scree, r: [1, 2], k: [3, 7], spread: [5, 12], sides: [4, 5], contact: '#4a2216', contactA: 0.4, where: (x, y) => 0.2 + M(x, y) * 0.8 });
     stoneClusters(g, s, rnd, 4, { colors: ['#a86444', '#b8805c'], r: [7, 12], k: [1, 3], spread: [10, 20], sides: [5, 6], contact: '#4a2216' });
     glaze(g, s, s, '#ffcf98', 0.08, 'soft-light');
-    soften(cv, 0.5);
+    soften(cv, 0.25);
   },
 });
 
@@ -1460,7 +1498,7 @@ register('ground_desert', {
     mottle(g, s, rnd, { colors: ['#e8cc96', '#d8b47e'], count: 30, rmin: 30, rmax: 70, alpha: 0.18, hard: 0.2 });
     stoneClusters(g, s, rnd, 4, { colors: ['#c4a47c', '#a88a68', '#e0caa0', '#9a7e64'], r: [1.4, 3.2], contact: '#8a6440', contactA: 0.4 });
     glaze(g, s, s, '#ffe8b8', 0.1, 'soft-light');
-    soften(cv, 0.55);
+    soften(cv, 0.25);
   },
 });
 
@@ -1477,7 +1515,7 @@ register('ground2_desert', {
     stoneClusters(g, s, rnd, 10, { colors: ['#d8c09a', '#b89a74', '#e8d4ae', '#9c8268', '#a07a5a'], at: along.filter(() => rnd() < 0.3), r: [1.3, 3], contact: '#7a5636', contactA: 0.45 });
     grassTufts(g, s, rnd, 6, { ...GRASS.desert, r: [6, 10], blades: [5, 8], len: [8, 14], wid: [2, 3], lean: [-0.6, 0.6] });
     glaze(g, s, s, '#ffe8b8', 0.08, 'soft-light');
-    soften(cv, 0.55);
+    soften(cv, 0.25);
   },
 });
 
@@ -1536,7 +1574,7 @@ register('ground_snow', {
     cappedStones(g, s, rnd, 7, ['#6f7682', '#7e8694', '#5e6472'], [2.5, 5.5]);
     glints(g, s, rnd, 40);
     glaze(g, s, s, '#e8f0ff', 0.06, 'soft-light');
-    soften(cv, 0.45);
+    soften(cv, 0.25);
   },
 });
 
@@ -1566,7 +1604,7 @@ register('ground2_snow', {
     cappedStones(g, s, rnd, 6, ['#6f7682', '#7e8694'], [3, 6]);
     glints(g, s, rnd, 26);
     glaze(g, s, s, '#eaf0ff', 0.08, 'soft-light');
-    soften(cv, 0.55);
+    soften(cv, 0.25);
   },
 });
 
@@ -1577,7 +1615,7 @@ register('dirt_snow', {
     mottle(g, s, rnd, { colors: ['#c8ced6', '#a8acb2', '#d6dce2', '#9e9890', '#b4b6b6'], count: 50, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
     mottle(g, s, rnd, { colors: ['#7e7468', '#8a8070', '#6e665c'], count: 26, rmin: 16, rmax: 50, alpha: 0.32, hard: 0.2, stretch: 1.4 });
     blurWrap(cv, 3);
-    cellDirt(g, s, rnd, { cells: 8, warp: 20, grout: '#8a8e98', groutA: 0.06, lit: '#eef1f4', litA: 0.28, shade: '#9aa4b4', shadeA: 0.2 });
+    softRelief(g, s, rnd, { g0: 8, k: 30, lit: '#f2f4f6', dark: '#98a4b8', litA: 0.32, darkA: 0.3 });
     // trodden patches: soft cool hollows with a lit far rim
     for (let i = 0; i < 34; i++) {
       const x = rnd() * s, y = rnd() * s, r = range(rnd, 14, 34), rot = rnd() * TAU;
@@ -1615,11 +1653,18 @@ for (const b of ['meadow', 'fields', 'badlands', 'desert']) {
       blurWrap(cv, 2);
       const M = massField(rnd, s, 5, 0.8);
       toneBy(g, s, M.F, shadowOf(P.base, 0.3), lightOf(P.base, 0.25), 0.36, 0.28);
-      cellDirt(g, s, rnd, { cells: 13, warp: 18, grout: P.gap, groutA: 0.09, lit: lightOf(P.base, 0.4), litA: 0.24, shade: shadowOf(P.base, 0.25), shadeA: 0.16 });
-      cellDirt(g, s, rnd, { cells: 24, warp: 9, grout: P.gap, groutA: 0.1, lit: lightOf(P.base, 0.35), litA: 0.24, shade: shadowOf(P.base, 0.25), shadeA: 0.16, where: (x, y) => M(x, y) * 1.4 - 0.4 });
+      const hard = b === 'badlands' || b === 'desert';
+      // a faint lumpy grain only (no cobbles); the hardpan cracks into plates in a few patches
+      softRelief(g, s, rnd, { g0: 8, k: 24, lit: lightOf(P.base, 0.35), dark: shadowOf(P.base, 0.3), litA: 0.22, darkA: 0.2 });
+      if (hard) {
+        streaks(g, s, rnd, { colors: [lightOf(P.base, 0.25), shadowOf(P.base, 0.2), lightOf(P.base, 0.4)], count: 120, len: [40, 140], width: [3, 10], angle: 1.25, wobble: 0.12, alpha: 0.14 });   // wind-streaked dust
+        crackPatches(g, s, rnd, { n: [2, 3], cells: 9, grout: shadowOf(P.base, 0.6), lit: lightOf(P.base, 0.5), groutA: 0.12, litA: 0.3 });
+      } else {
+        streaks(g, s, rnd, { colors: [lightOf(P.base, 0.25), shadowOf(P.base, 0.2)], count: 70, len: [30, 90], width: [3, 8], angle: 0.4, wobble: 0.4, alpha: 0.14 });
+      }
       scuffs(g, s, rnd, 40, P.base);
-      const along = (b === 'badlands' || b === 'desert') ? crackNet(g, s, rnd, 3, { color: shadowOf(P.base, 0.5), lit: lightOf(P.base, 0.5), alpha: 0.35, litA: 0.35, len: [60, 150], width: [1, 1.6] }) : [];
-      stoneClusters(g, s, rnd, 9, { colors: P.peb, at: along.filter(() => rnd() < 0.4), contact: P.gap, contactA: 0.45 });
+      stoneClusters(g, s, rnd, hard ? 14 : 9, { colors: P.peb, r: [1.4, 3.6], contact: P.gap, contactA: 0.45 });
+      lumps(g, s, rnd, 220, { r: [0.9, 1.9], colors: P.peb, shadow: P.gap, shadowA: 0.45, sides: 6, litA: 0.8, shadeA: 0.5 });
       const G = GRASS[b];
       bladePass(g, s, rnd, b === 'desert' ? 16 : 60, [...G.body, G.root], [6, 12], [1.2, 1.9], 0.6, [-1.6, 1.6]);
       glaze(g, s, s, '#ffdca0', 0.06, 'soft-light');
@@ -1631,54 +1676,61 @@ for (const b of ['meadow', 'fields', 'badlands', 'desert']) {
 // ---- roads (road space) -----------------------------------------------------------------------
 
 register('road_meadow', {
-  family: 'terrain', size: 512, note: 'anchor: Elwynn red-brown packed dirt road: cobbly soft clods, lighter worn patches, broken shallow wheel tracks, soft dark cracks, a broken grassy crown, ragged grass at the edges',
+  family: 'terrain', size: 512, note: 'anchor: Elwynn red-brown packed dirt road: packed earth streaked along its length, lighter wheel-polished tracks, darker damp patches, broken shallow ruts, pebble clusters, a broken grassy crown, ragged grass at the edges',
   paint(g, s, rnd) {
     const c = s / 2, mpx = s / 10;
     fill(g, s, s, '#8a5a3a');
-    mottle(g, s, rnd, { colors: ['#a0603a', '#9a7650', '#7e5034', '#94643e', '#a86c44', '#8c6a48'], count: 50, rmin: 40, rmax: 150, alpha: 0.45, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
+    // big soft blotches stretched 3-4x along the road
+    mottle(g, s, rnd, { colors: ['#a0603a', '#9a7650', '#7e5034', '#94643e', '#a86c44', '#8c6a48'], count: 60, rmin: 26, rmax: 90, alpha: 0.45, hard: 0.1, stretch: 3.6, rot: Math.PI / 2 });
     roadProfile(g, s, '#6a4630', '#b08a64');
     blurWrap(g.canvas, 2);
-    cellDirt(g, s, rnd, { cells: 15, warp: 14, grout: '#5a3a26', groutA: 0.38, lit: '#bc8e62', litA: 0.42, shade: '#6a4228', shadeA: 0.3 });
-    const M = massField(rnd, s, 5, 1.2);
-    cellDirt(g, s, rnd, { cells: 26, warp: 9, grout: '#5a3a26', groutA: 0.28, lit: '#bc8e62', litA: 0.3, shade: '#6a4228', shadeA: 0.2, where: (x, y) => M(x, y) * 1.4 - 0.4 });
-    worn(g, s, rnd, 16, [c - 1.1 * mpx, c, c + 1.1 * mpx], '#b8906a', [0.14, 0.26]);
-    softRuts(g, s, rnd, [c - 1.1 * mpx, c + 1.15 * mpx], { w: 1.35 * mpx, color: '#6a4630', alpha: 0.26, presence: 0.6 });
-    const along = crackNet(g, s, rnd, 4, { color: '#4e3022', lit: '#c8986a', alpha: 0.32, litA: 0.32, len: [70, 180], width: [1.2, 2] });
-    stoneClusters(g, s, rnd, 12, { colors: ['#b09a7a', '#9a8468', '#c0aa8a', '#80705e'], at: along.filter(() => rnd() < 0.35), where: x => (Math.abs(x - c) < 2.8 * mpx ? 1 : 0.15) });
-    roadGrass(g, s, rnd, c, mpx, GRASS.meadow, { crown: true, edgeN: 130, crownN: 24, fineN: 300, crownOn: 0.4 });
+    // the packed surface: only a faint lumpy grain (no cobbles)
+    softRelief(g, s, rnd, { g0: 10, aniso: 0.4, k: 22, lit: '#bc8e62', dark: '#5e3c26', litA: 0.2, darkA: 0.17 });
+    // lengthwise character: long soft streaks, lighter polished tracks, darker damp patches
+    streaks(g, s, rnd, { colors: ['#a87a52', '#b48a62', '#6e4a30', '#7a5236', '#9a6a44'], count: 110, len: [70, 220], width: [3, 10], angle: 0, wobble: 0.06, alpha: 0.2 });
+    worn(g, s, rnd, 22, [c - 1.1 * mpx, c, c + 1.1 * mpx], '#bc946c', [0.3, 0.55], [10, 22], [50, 140]);
+    worn(g, s, rnd, 9, [c - 1.1 * mpx, c + 1.15 * mpx], '#5a3a26', [0.22, 0.36], [10, 20], [30, 90]);
+    softRuts(g, s, rnd, [c - 1.1 * mpx, c + 1.15 * mpx], { w: 1.2 * mpx, color: '#64422c', alpha: 0.4, presence: 0.62 });
+    streaks(g, s, rnd, { colors: ['#4e3022', '#c09068'], count: 40, len: [40, 120], width: [1.2, 2.4], angle: 0, wobble: 0.1, alpha: 0.22 });   // wheel scratches
+    const along = crackNet(g, s, rnd, 2, { color: '#4e3022', lit: '#c8986a', alpha: 0.22, litA: 0.24, len: [60, 140], width: [1, 1.6] });
+    stoneClusters(g, s, rnd, 16, { colors: ['#b09a7a', '#9a8468', '#c0aa8a', '#80705e'], r: [1.4, 3.6], at: along.filter(() => rnd() < 0.35), where: x => (Math.abs(x - c) < 2.8 * mpx ? (Math.abs(Math.abs(x - c) - 1.1 * mpx) < 0.4 * mpx ? 0.2 : 1) : 0.15) });
+    lumps(g, s, rnd, 160, { r: [1, 2.2], colors: ['#b09a7a', '#9a8468', '#c0aa8a'], where: x => (Math.abs(x - c) < 3 * mpx ? 0.7 : 0.2), shadow: '#3a2618', shadowA: 0.5, sides: 6, litA: 0.8, shadeA: 0.5 });
+    roadGrass(g, s, rnd, c, mpx, GRASS.meadow, { crown: true, edgeN: 150, crownN: 30, fineN: 360, crownOn: 0.4 });
     glaze(g, s, s, '#ffdca0', 0.08, 'soft-light');
-    soften(g.canvas, 0.5);
+    soften(g.canvas, 0.35);
   },
 });
 register('road_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: pale dusty road, no ruts: a hoof-churned middle, straw, dry gold grass creeping in at the edges',
+  family: 'terrain', size: 512, note: 'Westfall: a darker dusty cart road between the gold: hoof-churned middle, two soft ruts, straw, an olive grass fringe at the edges and a few tufts on the crown',
   paint(g, s, rnd) {
     const c = s / 2, mpx = s / 10;
-    fill(g, s, s, '#b4966a');
-    mottle(g, s, rnd, { colors: ['#a88a5e', '#c4a678', '#caae80', '#9c7e56', '#b89a6e'], count: 50, rmin: 40, rmax: 150, alpha: 0.42, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
-    roadProfile(g, s, '#8a7040', '#dcc69c');
+    fill(g, s, s, '#94704a');
+    mottle(g, s, rnd, { colors: ['#8a6844', '#a2805a', '#a88660', '#7e5e3e', '#9a7852'], count: 56, rmin: 26, rmax: 100, alpha: 0.42, hard: 0.1, stretch: 3.2, rot: Math.PI / 2 });
+    roadProfile(g, s, '#6e5034', '#c0a27a');
     blurWrap(g.canvas, 2);
-    cellDirt(g, s, rnd, { cells: 12, warp: 18, grout: '#7a5e3c', groutA: 0.12, lit: '#e0caa0', litA: 0.26, shade: '#8a6c48', shadeA: 0.16 });
-    worn(g, s, rnd, 14, [c - 1.4 * mpx, c + 1.4 * mpx], '#e0cca4', [0.14, 0.24]);
+    softRelief(g, s, rnd, { g0: 10, aniso: 0.4, k: 22, lit: '#c4a47c', dark: '#6a4c30', litA: 0.2, darkA: 0.17 });
+    streaks(g, s, rnd, { colors: ['#b49470', '#c2a47e', '#6e5034', '#7e6040'], count: 100, len: [60, 200], width: [3, 9], angle: 0, wobble: 0.06, alpha: 0.2 });
+    worn(g, s, rnd, 16, [c - 1.4 * mpx, c + 1.4 * mpx], '#c8aa80', [0.25, 0.42]);
+    softRuts(g, s, rnd, [c - 1.15 * mpx, c + 1.1 * mpx], { w: 1.1 * mpx, color: '#6e5034', alpha: 0.38, presence: 0.65 });
     // the middle, churned by hooves: scuffs and hoofprints, densest on the crown
     for (let i = 0; i < 110; i++) {
       const x = c + range(rnd, -1, 1) * range(rnd, 0, 0.8) * mpx, y = rnd() * s, r = range(rnd, 4, 7), rot = range(rnd, -0.5, 0.5) + Math.PI / 2;
-      wrap(s, x, y, r * 2, (X, Y) => { blob(g, X, Y, r, r * 0.55, rot, '#8a6c48', 0.3, 0.5); blob(g, X + 1.2, Y + 1.6, r * 0.8, r * 0.3, rot, '#e8d4ac', 0.3, 0.5); });
+      wrap(s, x, y, r * 2, (X, Y) => { blob(g, X, Y, r, r * 0.55, rot, '#6e5034', 0.3, 0.5); blob(g, X + 1.2, Y + 1.6, r * 0.8, r * 0.3, rot, '#c8aa80', 0.3, 0.5); });
     }
     for (let i = 0; i < 26; i++) {
       const x = c + range(rnd, -0.6, 0.6) * mpx, y = rnd() * s, r = range(rnd, 3.5, 5.5);
       wrap(s, x, y, r * 2, (X, Y) => {
         g.save(); g.lineCap = 'round';
-        g.strokeStyle = rgba('#7a5e3c', 0.32); g.lineWidth = 2.6; g.beginPath(); g.arc(X, Y, r, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
-        g.strokeStyle = rgba('#ecd8ae', 0.26); g.lineWidth = 1.2; g.beginPath(); g.arc(X + 1, Y + 1.2, r, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
+        g.strokeStyle = rgba('#5e4430', 0.36); g.lineWidth = 2.6; g.beginPath(); g.arc(X, Y, r, Math.PI * 0.85, Math.PI * 2.15); g.stroke();
+        g.strokeStyle = rgba('#d0b48a', 0.28); g.lineWidth = 1.2; g.beginPath(); g.arc(X + 1, Y + 1.2, r, Math.PI * 1.1, Math.PI * 1.9); g.stroke();
         g.restore();
       });
     }
-    stoneClusters(g, s, rnd, 6, { colors: ['#d4c0a0', '#bca888', '#e0d0b0', '#9c8a70'], where: x => (Math.abs(x - c) < 2.6 * mpx ? 1 : 0.1), contact: '#6a5034' });
-    bladePass(g, s, rnd, 240, ['#e2c56a', '#c9a64e', '#f0dc98', '#b8963e'], [7, 15], [1.3, 2], 0.75, [-1.6, 1.6], [-0.1, 0.1]);   // loose straw
-    roadGrass(g, s, rnd, c, mpx, GRASS.fields, { crown: false, edgeN: 150, fineN: 500 });
-    glaze(g, s, s, '#ffe2a8', 0.08, 'soft-light');
-    soften(g.canvas, 0.5);
+    stoneClusters(g, s, rnd, 8, { colors: ['#c4ae88', '#ac9672', '#d4c09c', '#8c7a62'], where: x => (Math.abs(x - c) < 2.6 * mpx ? 1 : 0.1), contact: '#5a4430' });
+    bladePass(g, s, rnd, 200, ['#e2c56a', '#c9a64e', '#f0dc98', '#b8963e'], [7, 15], [1.3, 2], 0.7, [-1.6, 1.6], [-0.1, 0.1]);   // loose straw
+    roadGrass(g, s, rnd, c, mpx, GRASS.fieldsFringe, { crown: true, edgeN: 170, crownN: 22, fineN: 520, crownOn: 0.35 });
+    glaze(g, s, s, '#ffe2a8', 0.07, 'soft-light');
+    soften(g.canvas, 0.35);
   },
 });
 register('road_snow', {
@@ -1726,7 +1778,8 @@ register('road_badlands', {
     mottle(g, s, rnd, { colors: ['#8a5034', '#a2623e', '#9c5c3c', '#7e4a32', '#a86a46'], count: 50, rmin: 40, rmax: 150, alpha: 0.42, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
     roadProfile(g, s, '#7a4430', '#b07a56');
     blurWrap(g.canvas, 2);
-    cellDirt(g, s, rnd, { cells: 20, warp: 16, grout: '#4a2418', groutA: 0.12, lit: '#c48460', litA: 0.26, shade: '#6e3a26', shadeA: 0.2 });
+    softRelief(g, s, rnd, { g0: 11, aniso: 0.4, k: 22, lit: '#c48460', dark: '#5e2e1e', litA: 0.2, darkA: 0.17 });
+    streaks(g, s, rnd, { colors: ['#a86a46', '#b47a54', '#6e3a26', '#7e4630'], count: 90, len: [60, 200], width: [3, 9], angle: 0, wobble: 0.06, alpha: 0.18 });
     softRuts(g, s, rnd, [c], { w: 1.6 * mpx, color: '#6a3a26', alpha: 0.3, presence: 0.8, wob: 34 });
     worn(g, s, rnd, 10, [c - 1.5 * mpx, c + 1.5 * mpx], '#b8805c', [0.12, 0.2]);
     const along = crackNet(g, s, rnd, 3, { color: '#4a2418', lit: '#d09068', alpha: 0.28, litA: 0.3, len: [60, 160], width: [1, 1.6] });
@@ -1743,32 +1796,33 @@ register('road_badlands', {
   },
 });
 register('road_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: loose sandy track, a thin wind-packed crust, soft filled ruts that vanish under rippled drift tongues',
+  family: 'terrain', size: 512, note: 'Tanaris: a packed caravan track, darker and warmer than the sand: two faint wheel ruts, a firm crown, flat stones kicked to the edges, a little sand blown across',
   paint(g, s, rnd) {
     const c = s / 2, mpx = s / 10;
-    fill(g, s, s, '#d0aa76');
-    mottle(g, s, rnd, { colors: ['#c49c6a', '#dab886', '#e0c08e', '#b89060', '#d4b080'], count: 46, rmin: 40, rmax: 150, alpha: 0.4, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
-    roadProfile(g, s, '#b89060', '#ead0a0');
+    fill(g, s, s, '#ae8858');
+    mottle(g, s, rnd, { colors: ['#a98457', '#b48c5c', '#a07a4e', '#bc9464', '#9c784c'], count: 56, rmin: 26, rmax: 100, alpha: 0.42, hard: 0.1, stretch: 3.4, rot: Math.PI / 2 });
+    // the shoulders fade back toward the loose sand
+    const sh = g.createLinearGradient(0, 0, s, 0);
+    sh.addColorStop(0, rgba('#d6b47e', 0.85)); sh.addColorStop(0.17, rgba('#d0ae78', 0.35)); sh.addColorStop(0.27, rgba('#c8a470', 0));
+    sh.addColorStop(0.73, rgba('#c8a470', 0)); sh.addColorStop(0.83, rgba('#d0ae78', 0.35)); sh.addColorStop(1, rgba('#d6b47e', 0.85));
+    g.fillStyle = sh; g.fillRect(0, 0, s, s);
+    const cr = g.createLinearGradient(0, 0, s, 0);
+    cr.addColorStop(0.38, rgba('#c69e6c', 0)); cr.addColorStop(0.5, rgba('#c69e6c', 0.35)); cr.addColorStop(0.62, rgba('#c69e6c', 0));
+    g.fillStyle = cr; g.fillRect(0, 0, s, s);
     blurWrap(g.canvas, 2);
-    cellDirt(g, s, rnd, { cells: 10, warp: 18, grout: '#a8845a', groutA: 0.14, lit: '#f0d8aa', litA: 0.22, shade: '#b08a5e', shadeA: 0.14 });
-    softRuts(g, s, rnd, [c - 1.1 * mpx, c + 1.1 * mpx], { w: 0.95 * mpx, color: '#a8845a', alpha: 0.2, presence: 0.55 });
-    stoneClusters(g, s, rnd, 5, { colors: ['#dccaa6', '#c0a682', '#e8d8b6', '#a89070'], r: [1.4, 3], contact: '#8a6a44', contactA: 0.4 });
-    // tongues of drifting sand crossing the track, rippled; they bury the ruts
-    const H = rippleHeight(rnd, s, { per: 20, warp: 18, warp2: 4, tilt: 2, lee: 0.28, fade: [0.0, 0.5], floor: 0 });
-    const Mk = new Float32Array(s * s);
-    const tongues = []; for (let i = 0; i < 5; i++) tongues.push([rnd() * s, rnd() * s, range(rnd, 50, 90)]);
-    const tm = coreMask(s, tongues, 0.6, 1.3);
-    const img = g.getImageData(0, 0, s, s), D = img.data, Sd = hex('#e2c492');
-    for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
-      const i = y * s + x, e = Math.min(x, s - x) / s;
-      const m = Math.min(1, tm(x, y) * 1.8 + sst(0.2, 0.0, e) * 0.9);
-      Mk[i] = m;
-      const a = m * 0.85; D[i * 4] += (Sd.r - D[i * 4]) * a; D[i * 4 + 1] += (Sd.g - D[i * 4 + 1]) * a; D[i * 4 + 2] += (Sd.b - D[i * 4 + 2]) * a;
-    }
-    g.putImageData(img, 0, 0);
-    shadeHeight(g, s, H, { k: 0.6, lit: '#f6e4ba', dark: '#b88a5a', litA: 0.55, darkA: 0.7, mask: Mk });
-    glaze(g, s, s, '#ffe6b8', 0.08, 'soft-light');
-    soften(g.canvas, 0.5);
+    softRelief(g, s, rnd, { g0: 10, aniso: 0.4, k: 22, lit: '#d0aa78', dark: '#86643e', litA: 0.2, darkA: 0.17 });
+    streaks(g, s, rnd, { colors: ['#c49c6a', '#cca676', '#8e6a44', '#9a7650'], count: 100, len: [60, 200], width: [3, 9], angle: 0, wobble: 0.06, alpha: 0.2 });
+    worn(g, s, rnd, 14, [c - 1.05 * mpx, c, c + 1.05 * mpx], '#c8a274', [0.22, 0.38]);
+    // two faint wheel ruts, like the snow road's
+    softRuts(g, s, rnd, [c - 1.05 * mpx, c + 1.05 * mpx], { w: 0.85 * mpx, color: '#86603c', alpha: 0.42, presence: 0.8, wob: 5 });
+    streaks(g, s, rnd, { colors: ['#7a5636'], count: 30, len: [50, 140], width: [1.2, 2.2], angle: 0, wobble: 0.08, alpha: 0.2 });
+    // flat stones kicked to the edges, grit on the crown
+    const edgeW = x => { const d = Math.abs(x - c) / mpx; return d > 2.2 && d < 3.4 ? 1 : d < 0.6 ? 0.25 : 0.06; };
+    stoneClusters(g, s, rnd, 16, { colors: ['#c8b08a', '#b09470', '#dccaa6', '#a08468', '#bca07c'], r: [2.4, 5.4], k: [2, 5], spread: [6, 14], sides: [5, 7], asp: [0.45, 0.8], where: edgeW, contact: '#6e4e30', contactA: 0.5 });
+    lumps(g, s, rnd, 140, { r: [1, 2], colors: ['#d4bc96', '#b89c78', '#a08462'], where: x => (Math.abs(x - c) < 3 * mpx ? 0.6 : 0.15), shadow: '#6e4e30', shadowA: 0.45, sides: 6, litA: 0.8, shadeA: 0.5 });
+    grassTufts(g, s, rnd, 8, { ...GRASS.desert, r: [6, 10], blades: [5, 8], len: [8, 14], wid: [2, 3], lean: [-0.6, 0.6], where: x => (x < 70 || x > s - 70 ? 1 : 0) });
+    glaze(g, s, s, '#ffe6b8', 0.07, 'soft-light');
+    soften(g.canvas, 0.4);
   },
 });
 
@@ -1798,14 +1852,14 @@ register('cliff_meadow', {
   },
 });
 register('cliff_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: warm sandstone in long rounded slabs and ledges, lit tops, cool undersides, vertical joints, dry grass on the lips',
+  family: 'terrain', size: 512, note: 'Westfall: gray-brown rock in long rounded slabs and ledges, cream-lit tops, cool blue-gray undersides, vertical joints, dry grass on the lips',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
       fill: [3, 7], big: 5, bigR: [80, 120], asp: [3, 6], ledgeN: 4, ledgeL: [90, 230], small: 0, sx: 1, sy: 1, rot: 0.08, warp: 12, tilt: 0.05,
       dome: 22, zs: 14, smooth: 0.12, exp: 4.5, bulge: 5, soft: 2, relief: 1.0, contrast: 2.5, planes: 0.35, shSlope: 0.5, castA: 0.5, tone: 0.07, hueMix: 0.4,
       crease: 0.36, creaseW: 5, creaseD: 4, creaseA: 0.45, creaseC: '#5a4636',
-      colors: ['#a8875a', '#b08f62', '#9c7c52', '#b4946a', '#a28258'], blot: ['#c4a274', '#8a6e50', '#b89870', '#94785a'],
-      light: '#e2be84', shadow: '#68544a', cast: '#6a5448', deep: '#54402f', glaze: '#ffe2a8',
+      colors: ['#8a8170', '#928876', '#827a6c', '#9a8e78', '#867c6a'], blot: ['#a49478', '#6e6a66', '#9a8a70', '#7a7466'],
+      light: '#e0cfa4', shadow: '#6a6878', cast: '#625e6c', deep: '#4e4a56', glaze: '#ffe8b8',
       cover: { p: 0.5, up: 0.3, shade: '#8a7438', mid: '#a68e46', lit: '#c8ae5c', max: 0.65 },
       stains: 18, stain: '#5a4636', stainA: 0.1, fringe: ['#c8a85a', '#b8963e', '#e2c56a', '#8a7a3a', '#d8bc6a'], fringeN: 22, lichen: ['#c8b070', '#d0a860'],
       chisel: 120, chiselA: 0.1, cracks: 4, joints: 5, undercut: '#3e2e26',
@@ -1819,9 +1873,9 @@ register('cliff_snow', {
       fill: [3, 4], big: 5, bigR: [85, 135], asp: [0.6, 1.8], small: 0, sx: 1, sy: 1, rot: 1.0, warp: 20, tilt: 0.1,
       dome: 38, zs: 20, smooth: 0.17, exp: 2.3, bulge: 10, soft: 2, relief: 0.8, contrast: 1.9, planes: 0.5, shSlope: 0.5, castA: 0.4, tone: 0.07, hueMix: 0.35,
       crease: 0.3, creaseW: 5, creaseD: 4, creaseA: 0.5, creaseC: '#444c62',
-      colors: ['#757c88', '#808894', '#9098a6', '#7a828e', '#8a92a0'], blot: ['#6a7282', '#9aa2b0', '#7a7a8a', '#848c9a'],
-      light: '#d0d8e4', shadow: '#4e566c', cast: '#56607a', deep: '#3e465c', glaze: '#e4ecff',
-      powder: { up: 0.22, a: 0.55 }, powderC: '#e8eef6', caps: { n: 4, T: [8, 16], up: 0.3 }, capShadow: '#9fb0c8', icicles: 3,
+      colors: ['#757c88', '#808894', '#9098a6', '#7a828e', '#8a92a0'], blot: ['#6f7682', '#9aa2b0', '#7a7a8a', '#848c9a'],
+      light: '#dce2ec', shadow: '#5a6480', cast: '#5e6a88', deep: '#4c5670', glaze: '#e4ecff',
+      powder: { up: 0.22, a: 0.55 }, powderC: '#e8eef6', caps: { n: 1, T: [8, 14], up: 0.3 }, capShadow: '#9fb0c8', icicles: 2,
       stains: 20, stain: '#3c4458', stainA: 0.12, lichen: ['#a8b0a0', '#c0c4b0'], chisel: 140, cracks: 8,
     }, cv);
   },
@@ -1905,7 +1959,7 @@ function churn(g, s, rnd, P) {
   fill(g, s, s, P.base);
   mottle(g, s, rnd, { colors: P.blot, count: 54, rmin: 30, rmax: 120, alpha: 0.42, hard: 0.12, stretch: 1.6, rot: Math.PI / 2 });
   blurWrap(g.canvas, 2);
-  cellDirt(g, s, rnd, { cells: 11, warp: 20, grout: P.gap, groutA: 0.1, lit: P.clodLit, litA: 0.32, shade: P.clodDark, shadeA: 0.3 });
+  cellDirt(g, s, rnd, { cells: 16, warp: 20, grout: P.gap, groutA: 0.08, lit: P.clodLit, litA: 0.22, shade: P.clodDark, shadeA: 0.2 });
   softRuts(g, s, rnd, [c - 1.05 * mpx, c + 1.05 * mpx], { w: 1.5 * mpx, color: P.rut, alpha: 0.32, presence: 0.9, wob: 8 });
   softRuts(g, s, rnd, [c - 1.05 * mpx, c + 1.05 * mpx], { w: 0.75 * mpx, color: P.wet, alpha: 0.4, presence: 0.75, wob: 9 });
   scuffs(g, s, rnd, 60, P.base, [5, 10]);
@@ -1961,6 +2015,35 @@ register('mud_desert', {
 });
 
 // ---- macro variation (data, not color: R = huge blotches, G = big, B = medium) ------------------
+
+// Near-field detail (data, 128 = no change), tiled every ~1.8 m and multiplied in only within ~20 m
+// of the camera so the ground at your feet stays crisp: R = grass blades (lit tips, dark roots),
+// G = grit and pebbles with a lit upper-left side and a soft shadow, B = fine wind ripples and crust.
+register('terrain_detail', {
+  family: 'terrain', size: 256, note: 'near-field detail, data: R grass blades, G grit and pebbles, B fine ripples and crust (128 = neutral)',
+  paint(g, s, rnd) {
+    const chan = fn => { const c = makeCanvas(s), cg = c.getContext('2d'); fill(cg, s, s, '#808080'); fn(cg); blurWrap(c, 1, 1, 0.35); return cg.getImageData(0, 0, s, s).data; };
+    const R = chan(cg => {
+      bladePass(cg, s, rnd, 520, ['#4a4a4a', '#545454', '#5e5e5e'], [14, 30], [3, 6], 0.75, [-0.5, 0.5], [-0.3, 0.4]);
+      bladePass(cg, s, rnd, 620, ['#b4b4b4', '#c6c6c6', '#a8a8a8'], [12, 26], [2.6, 5], 0.8, [-0.5, 0.5], [-0.3, 0.4]);
+      bladePass(cg, s, rnd, 240, ['#dadada', '#e6e6e6'], [8, 16], [2, 3.4], 0.75, [-0.4, 0.4], [-0.2, 0.3]);
+    });
+    const G = chan(cg => {
+      mottle(cg, s, rnd, { colors: ['#6a6a6a', '#989898'], count: 70, rmin: 10, rmax: 30, alpha: 0.35, hard: 0.15 });
+      lumps(cg, s, rnd, 90, { r: [3, 8], colors: ['#a0a0a0', '#8c8c8c', '#b0b0b0'], lit: '#d8d8d8', shade: '#4c4c4c', shadow: '#2c2c2c', shadowA: 0.5, sides: 6, jag: 0.3 });
+      lumps(cg, s, rnd, 380, { r: [1.2, 2.8], colors: ['#a8a8a8', '#787878'], lit: '#d0d0d0', shade: '#505050', shadow: '#383838', shadowA: 0.45, sides: 5, jag: 0.35 });
+      streaks(cg, s, rnd, { colors: ['#5a5a5a', '#a8a8a8'], count: 60, len: [10, 30], width: [1, 2], angle: 0.6, wobble: 0.8, alpha: 0.4 });
+    });
+    const B = chan(cg => {
+      const H = rippleHeight(rnd, s, { per: 16, warp: 14, warp2: 4, tilt: 1, lee: 0.3, fade: [-0.3, 0.4], floor: 0.1 });
+      shadeHeight(cg, s, H, { k: 0.5, lit: '#c8c8c8', dark: '#505050', litA: 0.6, darkA: 0.6 });
+      lumps(cg, s, rnd, 140, { r: [1.5, 3.5], colors: ['#b4b4b4', '#9a9a9a'], lit: '#e0e0e0', shade: '#606060', shadow: '#484848', shadowA: 0.35, sides: 7, jag: 0.25 });
+    });
+    const img = g.getImageData(0, 0, s, s), D = img.data;
+    for (let i = 0; i < D.length; i += 4) { D[i] = R[i]; D[i + 1] = G[i]; D[i + 2] = B[i]; D[i + 3] = 255; }
+    g.putImageData(img, 0, 0);
+  },
+});
 
 register('terrain_macro', {
   family: 'terrain', size: 256, note: 'R/G/B = low/mid/high-frequency soft noise (data)',
@@ -2339,7 +2422,7 @@ function cloudBand(spec) {
         puffs.push({ x: K.x + range(rnd, -0.28, 0.28) * K.w, y: K.yb - K.h + r * range(rnd, 0.9, 1.3), r });
       }
       const X0 = Math.floor((K.x - K.w * 0.8) / VX), X1 = Math.ceil((K.x + K.w * 0.8) / VX), Y0 = Math.max(0, Math.floor(K.yb - K.h * 1.4)), Y1 = Math.min(h - 1, Math.ceil(K.yb + 2));
-      const cx = K.x, cyc = K.yb - K.h * 0.45, gw = K.w * 0.55, gh = K.h * 0.6, fe = 5 * VX;
+      const cx = K.x, cyc = K.yb - K.h * 0.45, gw = K.w * 0.55, gh = K.h * 0.6, fe = (spec.fe ?? 5) * VX, planes = spec.planes ?? 0.35, Lf = spec.lFloor ?? 0;
       for (let y = Y0; y <= Y1; y++) for (let xx = X0; xx <= X1; xx++) {
         const vx = xx * VX + 0.5 * VX;
         let best = -1, bh = 0, nx = 0, ny = 0, cov = 0;
@@ -2357,7 +2440,8 @@ function cloudBand(spec) {
         const mz = Math.sqrt(Math.max(0.05, 1 - mx * mx - my * my)), ml = Math.hypot(mx, my, mz);
         let L = (mx * Lc[0] + my * Lc[1] + mz * Lc[2]) / (ml * Ln);
         L = Math.max(0, Math.min(1, (L - 0.15) / 0.8));
-        L = L * 0.65 + 0.35 * Math.round(L * 3) / 3;                               // a few painted planes
+        L = L * (1 - planes) + planes * Math.round(L * 3) / 3;                     // a few painted planes (none on the soft skies)
+        L = Lf + (1 - Lf) * L;                                                      // the soft skies keep their shade light
         const c = L > 0.55 ? mixRGB(MID, LIT, (L - 0.55) / 0.45) : mixRGB(SHD, MID, L / 0.55);
         const base = sst(K.yb - K.h * 0.3, K.yb, y) * 0.5;                      // the flat base, a little cooler
         const cr = c.r + (BASE.r - c.r) * base, cg = c.g + (BASE.g - c.g) * base, cb = c.b + (BASE.b - c.b) * base;
@@ -2380,7 +2464,7 @@ function cloudBand(spec) {
       cgx.putImageData(img, 0, 0);
       g.drawImage(cu, 0, 0);
     }
-    feather(g, w, h, 1.6);
+    feather(g, w, h, spec.feather ?? 1.6);
     // a haze band low along the horizon
     if (spec.haze) {
       const gr = g.createLinearGradient(0, h - spec.haze.h, 0, h);
@@ -2396,12 +2480,20 @@ function cloudBand(spec) {
 
 const CLOUDS = {
   meadow: {
-    note: 'Elwynn: big towering cumulus, a few small ones low on the horizon, faint cirrus',
-    cirrus: { n: 4, y: [40, 180], len: [600, 1300], th: [8, 18], d: [0.25, 0.4] },
+    note: 'Elwynn: soft, flattish painted cumulus, each two or three overlapping lobes with feathered edges, thin cirrus streaks between the banks',
+    cirrus: { n: 10, y: [50, 270], len: [600, 1400], th: [6, 14], d: [0.18, 0.32] },
+    fe: 9, planes: 0, lFloor: 0.25, feather: 3.6,
     clusters: (rnd, VW) => {
       const o = [];
-      for (let i = 0; i < 7; i++) { const W = range(rnd, 260, 440); o.push({ x: (i + rnd() * 0.6) / 7 * VW, yb: range(rnd, 270, 330), w: W, h: W * range(rnd, 0.42, 0.6), d: range(rnd, 0.75, 0.95), towers: 2 + Math.floor(rnd() * 3), puffs: range(rnd, 14, 22) }); }
-      for (let i = 0; i < 10; i++) { const W = range(rnd, 110, 220); o.push({ x: rnd() * VW, yb: range(rnd, 350, 395), w: W, h: W * range(rnd, 0.3, 0.42), d: range(rnd, 0.5, 0.8), towers: 1, puffs: range(rnd, 7, 11) }); }
+      for (let i = 0; i < 7; i++) {
+        // one bank = two or three lobes, each its own flattish cluster, overlapping
+        const W = range(rnd, 200, 330), x = (i + rnd() * 0.6) / 7 * VW, yb = range(rnd, 280, 335), n = 2 + Math.floor(rnd() * 2);
+        for (let k = 0; k < n; k++) {
+          const lw = W * range(rnd, 0.5, 0.7);
+          o.push({ x: x + (k - (n - 1) / 2) * W * 0.36 + range(rnd, -12, 12), yb: yb + range(rnd, -10, 6), w: lw, h: lw * range(rnd, 0.3, 0.4), d: range(rnd, 0.62, 0.82), towers: rnd() < 0.5 ? 1 : 0, puffs: range(rnd, 9, 14) });
+        }
+      }
+      for (let i = 0; i < 5; i++) { const W = range(rnd, 110, 200); o.push({ x: rnd() * VW, yb: range(rnd, 345, 380), w: W, h: W * range(rnd, 0.24, 0.32), d: range(rnd, 0.35, 0.55), towers: 0, puffs: range(rnd, 6, 9) }); }
       return o;
     },
   },
@@ -2479,7 +2571,7 @@ const MTN = {
 function mtnRow(rnd, L, w, rowH) {
   const out = [];
   const tree = L.kind === 'forest' || L.kind === 'pines';
-  const add = (x, wid, hgt, extra = {}) => out.push({ x: ((x % w) + w) % w, h: (L.lo + (L.hi - L.lo) * hgt) * rowH, wid, gam: range(rnd, 0.75, 1.1), skew: range(rnd, -0.35, 0.35), ph: rnd() * 6, strat: rnd(), notch: periodic(rnd, 5, 0.6, 3), z: rnd(), ...extra });
+  const add = (x, wid, hgt, extra = {}) => out.push({ x: ((x % w) + w) % w, h: (L.lo + (L.hi - L.lo) * hgt) * rowH, wid, gam: range(rnd, 0.75, 1.1), skew: range(rnd, -0.35, 0.35), ph: rnd() * 6, strat: rnd(), notch: periodic(rnd, 5, 0.6, 3), gul: periodic(rnd, 6, 0.75, 3), z: rnd(), ...extra });
   if (tree) {
     // clumps of trees with gaps between them; canopy sizes vary three to one
     const groups = L.n;
@@ -2575,9 +2667,12 @@ for (const b of Object.keys(MTN)) {
               else if (e < 0.6) f = bu < 0 ? 0.55 : -0.7;                                                // the tapered cliff
               else f = (bu < 0 ? 0.32 : -0.38) + 0.12;                                                   // the talus, paler
             } else {
-              // two or three broad planes per side, divided by the angle from the summit
+              // two or three broad planes per side, divided by the angle from the summit, the crest a
+              // soft turn (never a ruled bevel), and gullies fanning down from the summit
               const ang = Math.atan2(bu * best.wid, (best.h - hb) + 2);
-              f = (bu < best.skew ? 0.6 : -0.62) * (0.7 + 0.3 * (1 - depth)) + Math.tanh(Math.sin(ang * 1.3 + best.ph) * 3) * 0.2;
+              const side = Math.tanh((best.skew - bu) * (best === BASE ? 2 : 5));
+              f = side * 0.58 * (0.7 + 0.3 * (1 - depth)) + Math.tanh(Math.sin(ang * 1.3 + best.ph) * 2) * 0.16;
+              if (best.gul) f += best.gul(ang / Math.PI + 0.5) * 0.22 * Math.min(1, depth * 3) * (1 - depth * 0.6);
             }
             r = base.r; gg = base.g; bb = base.b;
             if (f > 0) mixTo(lit, Math.min(1, f) * 0.85); else mixTo(dark, Math.min(1, -f) * 0.85);
@@ -2592,7 +2687,7 @@ for (const b of Object.keys(MTN)) {
               }
             }
             mixTo(haze, Math.min(1, depth * 0.8));                           // valley haze toward the base
-            if (ptop - hb < 2.2) mixTo(lit, 0.3);                             // a lit rim along each ridge
+            if (row > 0 && ptop - hb < 2.2) mixTo(lit, 0.3 * (ptop - hb < 1.2 ? 1 : 0.5));   // a lit rim along each ridge (not on the far row)
             D[k] = r; D[k + 1] = gg; D[k + 2] = bb; D[k + 3] = Math.round(a * 255);
           }
         }
@@ -2612,9 +2707,23 @@ for (const b of Object.keys(MTN)) {
         }
         g.restore();
       });
-      blurWrapX(g, w, h, 0.8);
+      // soften every row (the far one most: it is the haziest), keeping the land solid down to the
+      // row's bottom so no base ever fades out over the sky
+      [1.9, 1.2, 0.8].forEach((px, row) => blurRowX(g, w, row * h / 3, h / 3, px));
     },
   });
+}
+// Blur one row of a band that wraps horizontally; the bottom line is carried on below the row
+// first, so the blur never eats into the base of the land.
+function blurRowX(g, w, y0, rh, px) {
+  const m = Math.ceil(px * 3) + 2, big = makeCanvas(w + 2 * m, rh + 2 * m), bg = big.getContext('2d'), src = g.canvas;
+  bg.drawImage(src, 0, y0, w, rh, m, m, w, rh);
+  bg.drawImage(src, w - m, y0, m, rh, 0, m, m, rh);
+  bg.drawImage(src, 0, y0, m, rh, w + m, m, m, rh);
+  bg.drawImage(big, 0, m + rh - 1, w + 2 * m, 1, 0, m + rh, w + 2 * m, m);
+  const out = makeCanvas(w + 2 * m, rh + 2 * m), og = out.getContext('2d');
+  og.filter = `blur(${px}px)`; og.drawImage(big, 0, 0);
+  g.clearRect(0, y0, w, rh); g.drawImage(out, m, m, w, rh, 0, y0, w, rh);
 }
 // Feather a band (alpha and colour) that wraps around the sky horizontally.
 function feather(g, w, h, px) { blurWrapX(g, w, h, px); }
