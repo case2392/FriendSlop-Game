@@ -134,29 +134,35 @@ export const KEY_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '5�
 
 export const TIRE_V = { treadLo: 0.38, treadHi: 0.62, wallLo: [0.16, 0.24], wallHi: [0.76, 0.84], textLo: [0.02, 0.15], textHi: [0.85, 0.98] };
 
-// The dino head (meters, before props3d fits it to the collider): the sauropod statue's head, a tall
-// domed skull and a short round muzzle. The head and neck share one hide cell: u round the
-// cross-section (0.5 = the spine, 0 / 1 = the underside), v along z from z0 (behind the neck's break)
-// to the snout (z1). In front of the hinge the underside is the roof of the mouth (pink, inside the lip
-// line at lipU). The lower jaw has its own cell: u round it (0.5 = the floor of the mouth, lip at
-// 0.5 ± jawLipU), v from its hinge end to the chin. head / jaw / neck are the lofts' sections
-// { z, w (half width), top, bot }; the neck leaves the skull at neckAt, tilted neckTilt down and back.
+// The dino head (meters, before props3d fits it to the collider): the sauropod statue's head, a
+// domed crown over the eyes and a long, blunt, rounded muzzle (everything in front of the crown is
+// stretched forward by SNOUT.k, so the profile reads as a long-necked grazer's head, not a round
+// blob). The head and neck share one hide cell: u round the cross-section (0.5 = the spine, 0 / 1 = the
+// underside), v along z from z0 (behind the neck's break) to the snout (z1). In front of the hinge the
+// underside is the roof of the mouth (pink, inside the lip line at lipU). The lower jaw has its own
+// cell: u round it (0.5 = the floor of the mouth, lip at 0.5 ± jawLipU), v from its hinge end to the
+// chin. head / jaw / neck are the lofts' sections { z, w (half width), top, bot }; the neck leaves the
+// skull at neckAt, tilted neckTilt down and back. sz(z) maps a z drawn on the unstretched head (the
+// teeth, say) onto the stretched one.
+const SNOUT = { from: 0.15, k: 1.15 };
+const snoutZ = z => z > SNOUT.from ? SNOUT.from + (z - SNOUT.from) * SNOUT.k : z;
+const stretched = st => st.map(s => ({ ...s, z: +snoutZ(s.z).toFixed(4) }));
 export const DINO = {
-  z0: -0.6, z1: 0.725, hinge: -0.14, hingeY: -0.11, open: 0, lipU: 0.07, jawLipU: 0.07,
-  eye: { z: 0.02, u: 0.2, r: 0.125 }, nostril: { z: 0.655, u: 0.06 }, pw: 2.15,
-  head: [
+  z0: -0.6, z1: snoutZ(0.725), hinge: -0.14, hingeY: -0.11, open: 0, lipU: 0.07, jawLipU: 0.07,
+  eye: { z: 0.02, u: 0.2, r: 0.125 }, nostril: { z: snoutZ(0.655), u: 0.06 }, pw: 2.15, sz: snoutZ,
+  head: stretched([
     { z: -0.34, w: 0.2, top: 0.18, bot: -0.07 }, { z: -0.28, w: 0.3, top: 0.27, bot: -0.15 }, { z: -0.18, w: 0.37, top: 0.33, bot: -0.2 },
     { z: -0.05, w: 0.4, top: 0.41, bot: -0.22 }, { z: 0.06, w: 0.395, top: 0.49, bot: -0.215 }, { z: 0.15, w: 0.37, top: 0.52, bot: -0.2 },
-    { z: 0.23, w: 0.34, top: 0.475, bot: -0.185 }, { z: 0.3, w: 0.31, top: 0.37, bot: -0.17 }, { z: 0.37, w: 0.295, top: 0.3, bot: -0.16 },
-    { z: 0.45, w: 0.29, top: 0.27, bot: -0.152 }, { z: 0.54, w: 0.28, top: 0.255, bot: -0.145 }, { z: 0.61, w: 0.255, top: 0.235, bot: -0.138 },
-    { z: 0.67, w: 0.2, top: 0.205, bot: -0.122 }, { z: 0.71, w: 0.12, top: 0.16, bot: -0.095 }, { z: 0.725, w: 0.03, top: 0.11, bot: -0.05 },
-  ],
-  jaw: [
+    { z: 0.23, w: 0.34, top: 0.475, bot: -0.185 }, { z: 0.3, w: 0.31, top: 0.37, bot: -0.17 }, { z: 0.37, w: 0.29, top: 0.3, bot: -0.16 },
+    { z: 0.45, w: 0.28, top: 0.27, bot: -0.152 }, { z: 0.54, w: 0.27, top: 0.255, bot: -0.145 }, { z: 0.61, w: 0.248, top: 0.235, bot: -0.138 },
+    { z: 0.67, w: 0.196, top: 0.205, bot: -0.122 }, { z: 0.71, w: 0.12, top: 0.16, bot: -0.095 }, { z: 0.725, w: 0.03, top: 0.11, bot: -0.05 },
+  ]),
+  jaw: stretched([
     { z: -0.18, w: 0.22, top: -0.085, bot: -0.21 }, { z: -0.08, w: 0.33, top: -0.085, bot: -0.3 }, { z: 0.06, w: 0.36, top: -0.09, bot: -0.36 },
-    { z: 0.2, w: 0.34, top: -0.095, bot: -0.38 }, { z: 0.35, w: 0.3, top: -0.1, bot: -0.355 }, { z: 0.47, w: 0.27, top: -0.1, bot: -0.315 },
-    { z: 0.56, w: 0.235, top: -0.102, bot: -0.27 }, { z: 0.62, w: 0.17, top: -0.105, bot: -0.22 }, { z: 0.655, w: 0.08, top: -0.11, bot: -0.18 },
+    { z: 0.2, w: 0.34, top: -0.095, bot: -0.38 }, { z: 0.35, w: 0.295, top: -0.1, bot: -0.355 }, { z: 0.47, w: 0.262, top: -0.1, bot: -0.315 },
+    { z: 0.56, w: 0.228, top: -0.102, bot: -0.27 }, { z: 0.62, w: 0.166, top: -0.105, bot: -0.22 }, { z: 0.655, w: 0.08, top: -0.11, bot: -0.18 },
     { z: 0.665, w: 0.02, top: -0.12, bot: -0.16 },
-  ],
+  ]),
   neck: [{ z: 0, w: 0.31, top: 0.29, bot: -0.29 }, { z: 0.2, w: 0.32, top: 0.3, bot: -0.3 }, { z: 0.38, w: 0.335, top: 0.31, bot: -0.31 }, { z: 0.5, w: 0.35, top: 0.325, bot: -0.325 }],
   neckAt: [0, 0.06, -0.18], neckTilt: 0.3,
 };
@@ -1765,10 +1771,10 @@ function dinoPlate(g, X, Y, rx, ry, side, base, k, pr) {
 }
 // Rows of plates either side of the spine line X = cx (rows run along Y): [dist, rx, ry, k] per row, the
 // spine row (dist 0) once; they wrap round the canvas's x edges.
-function dinoPlates(g, w, rnd, { cx, rows, y0, y1, fadeY = 0 }) {
+function dinoPlates(g, w, rnd, { cx, rows, y0, y1, fadeY = 0, from = 4 }) {
   for (const [dist, rx, ry, k] of rows) for (const side of dist ? [-1, 1] : [1]) {
     for (let Y = y0 + range(rnd, 0, ry); Y < y1 + ry; Y += 2 * ry * range(rnd, 0.95, 1.25)) {
-      const fy = fadeY ? Math.min(1, Math.max(0, (Y - 4) / fadeY)) : 1;
+      const fy = fadeY ? Math.min(1, Math.max(0, (Y - from) / fadeY)) : 1;
       if (fy <= 0.05 || rnd() < 0.07) continue;
       const X = cx + side * dist + range(rnd, -3, 3), sc = range(rnd, 0.85, 1.15), ps = Math.floor(rnd() * 1e9);
       const base = dist < 60 ? mix(DH.plateB, DH.plateB2, rnd()) : mix(DH.plateF, DH.plateF2, rnd());
@@ -1788,10 +1794,11 @@ function bellyEdge(g, rnd, x0, dir, xe, ya, yb, n) {
 }
 // peeled paint over pink plaster: a chip of plaster with a dark lower rim and a lit top edge
 function peel(g, rnd, x, y, r) {
-  const pts = []; for (let k = 0; k < 8; k++) { const a = k / 8 * TAU, rr = r * range(rnd, 0.55, 1.15); pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.8]); }
-  poly(g, pts.map(([u, v]) => [u + 0.8, v + 1])); g.fillStyle = rgba('#3a3028', 0.5); g.fill();
-  poly(g, pts); g.fillStyle = rgba(pick(rnd, [DH.plaster, '#ccaa98', '#e0c2b0']), 0.95); g.fill();
-  line(g, pts.slice(4, 8), 0.9, '#f8e8dc', 0.7);
+  const pts = []; for (let k = 0; k < 9; k++) { const a = k / 9 * TAU, rr = r * range(rnd, 0.5, 1.2); pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.7]); }
+  poly(g, pts.map(([u, v]) => [u + 0.8, v + 1])); g.fillStyle = rgba('#3a3028', 0.45); g.fill();
+  poly(g, pts); g.fillStyle = rgba(pick(rnd, ['#d8c8b4', '#ccbca6', '#c8b8a8']), 0.95); g.fill();
+  line(g, pts.slice(1, 5).map(([u, v]) => [u, v + 0.8]), 1.6, '#5a5048', 0.45);
+  line(g, pts.slice(5, 9), 1.2, '#e8f0c8', 0.6);
 }
 register('loot_dinohead', {
   family: F, w: 512, h: 256, note: "the dino head and neck (u round, 0.5 = the spine; v from behind the neck's break up to the snout at the top): the statue's painted plaster (teal back, olive flank, plates lit on their rims, a scalloped ochre throat), painted light, a smiling lip line round the pink roof of the mouth",
@@ -1805,8 +1812,21 @@ register('loot_dinohead', {
     blob(g, cx - 96, h * 0.5, 50, h * 0.62, 0, '#d8d49a', 0.2, 0.15);
     blob(g, cx - 40, h * 0.45, 26, h * 0.6, 0, '#e8e4b0', 0.12, 0.2);
     blob(g, cx + 150, h * 0.5, 54, h * 0.66, 0, '#3a4258', 0.22, 0.15);
-    // the plates, big down the spine and over the dome, smaller down the flanks
-    dinoPlates(g, w, rnd, { cx, y0: 4, y1: h, fadeY: 26, rows: [[0, 16, 21, 1], [38, 16, 19, 0.9], [76, 13, 16, 0.7], [110, 11, 13, 0.45]] });
+    // the dome and muzzle are smooth painted plaster: the paint laid on in broad soft patches, lighter
+    // on the lit (left) side, cooler on the right, and brushed along the head's length to show its form
+    for (let i = 0; i < 16; i++) {
+      const sd = rnd() < 0.5 ? -1 : 1, X = cx + sd * range(rnd, 8, 135), Y = range(rnd, 8, yH + 12), lit = rnd() < (sd < 0 ? 0.72 : 0.28);
+      const col = lit ? pick(rnd, ['#6e9476', '#7a9a6a', '#86a070', '#90a878']) : pick(rnd, ['#33584a', '#3a5a48', '#4a5a3a', '#2e5048']);
+      wrapX(w, X, 60, XX => blob(g, XX, Y, range(rnd, 22, 48), range(rnd, 16, 34), range(rnd, -0.5, 0.5), col, 0.24, 0.18));
+    }
+    for (let i = 0; i < 26; i++) {
+      const sd = i % 2 ? 1 : -1, X = cx + sd * range(rnd, 12, 125), Y = range(rnd, 10, yH), L = range(rnd, 26, 64);
+      line(g, [[X, Y], [X + range(rnd, -4, 4), Y + L * 0.5], [X + range(rnd, -6, 6), Y + L]], range(rnd, 3, 7), sd < 0 ? '#c0cc94' : '#2a443c', sd < 0 ? 0.13 : 0.15);
+    }
+    // plates only where the statue has them: one row down the spine from behind the nostrils, and the
+    // plated hide on the back of the skull and the neck
+    dinoPlates(g, w, rnd, { cx, y0: 26, y1: h, from: 22, fadeY: 24, rows: [[0, 14, 19, 0.95]] });
+    dinoPlates(g, w, rnd, { cx, y0: yH - 6, y1: h, from: yH - 8, fadeY: 30, rows: [[38, 15, 18, 0.85], [76, 13, 16, 0.65], [110, 11, 13, 0.45]] });
     // the darker spine band over it all
     g.fillStyle = lin(g, cx - 34, 0, cx + 34, 0, [[0, DH.spine, 0], [0.35, DH.spine, 0.45], [0.65, DH.spine, 0.45], [1, DH.spine, 0]]); g.fillRect(cx - 34, 0, 68, h);
     // eye sockets: a cool shadow under and behind each eye, a warm lit brow over it
@@ -1849,7 +1869,9 @@ register('loot_dinohead', {
       g.beginPath(); g.ellipse(edge - sd * 28, yH + 4, 10, 14, 0, sd < 0 ? Math.PI * 0.6 : -Math.PI * 0.4, sd < 0 ? Math.PI * 1.4 : Math.PI * 0.4); g.stroke(); g.restore();
     }
     // peeled paint over pink plaster, a web of hairline cracks, rain streaks running down the flanks
-    for (let i = 0; i < 16; i++) { const x = range(rnd, 0.18, 0.82) * w, y = range(rnd, 0.06, 0.95) * h; wrapX(w, x, 10, X => peel(g, rnd, X, y, range(rnd, 2.2, 5.5))); }
+    // (a few big chips, as on the statue, low on the flanks and back on the skull: never dotted over the
+    // dome, where they'd read as a frog's spots)
+    for (let i = 0; i < 4; i++) { const sd = i % 2 ? 1 : -1, x = cx + sd * range(rnd, 70, 130), y = range(rnd, 0.3, 0.9) * h; peel(g, rnd, x, y, range(rnd, 6, 10)); }
     cracks(g, h, rnd, { color: '#2e3430', count: 7, len: [16, 40], width: [0.7, 1.2], alpha: 0.38 });
     for (let i = 0; i < 18; i++) {
       const sd = rnd() < 0.5 ? -1 : 1, X = cx + sd * range(rnd, 20, 150), Y = range(rnd, 0, h), L = range(rnd, 20, 60);
@@ -1857,7 +1879,7 @@ register('loot_dinohead', {
     }
     // grime and chipped paint toward the broken neck
     g.fillStyle = lin(g, 0, h * 0.86, 0, h, [[0, '#4a4438', 0], [1, '#4a4438', 0.35]]); g.fillRect(0, h * 0.86, w, h * 0.14);
-    for (let i = 0; i < 9; i++) { const x = rnd() * w; wrapX(w, x, 10, X => peel(g, rnd, X, h - range(rnd, 4, 14), range(rnd, 2.5, 5))); }
+    for (let i = 0; i < 5; i++) { const x = rnd() * w; wrapX(w, x, 12, X => peel(g, rnd, X, h - range(rnd, 4, 14), range(rnd, 4, 7))); }
     glaze(g, w, h, '#ffe8b8', 0.1);
     blurTile(cv, 0.5);
   },
@@ -1898,7 +1920,7 @@ register('loot_dinojaw', {
       for (let Y = -4; Y <= h + 4; Y += 6) { const wob = Math.sin(Y * 0.11) * 1; lp.push([edge + wob, Y]); hp.push([edge + sd * 6 + wob, Y]); }
       stroke(g, hp, 6, 6, '#a8a46a', 0.5); stroke(g, lp, 3.6, 3.6, DH.lip, 0.9); line(g, hp.map(([a, b]) => [a + sd * 1.5, b]), 1.2, '#e0dca8', 0.5);
     }
-    for (let i = 0; i < 6; i++) peel(g, rnd, range(rnd, 0.2, 0.8) * w, range(rnd, 8, h - 8), range(rnd, 2, 4.5));
+    for (const sd of [-1, 1]) peel(g, rnd, cx + sd * range(rnd, 44, 84), range(rnd, 20, h - 20), range(rnd, 4.5, 7));
     cracks(g, w, rnd, { color: '#2e3430', count: 2, len: [12, 26], width: [0.7, 1], alpha: 0.3 });
     glaze(g, w, h, '#ffe8b8', 0.1);
     blurTile(cv, 0.5);
@@ -2276,35 +2298,74 @@ for (const b of Object.keys(BOULDER)) {
 
 // ---- the loot twinkle -----------------------------------------------------------------------------------
 
-// The glint over every loose piece of loot (props3d draws them all as one point cloud): a four-point
-// sparkle with pinched, concave sides, taller than it is wide; an amber rim (it covers what's behind it,
-// so the star still reads against snow and sand), a gold body, a cream-white heart, a fainter diagonal
-// cross and a soft warm halo (mostly added light). Alpha: transparent round the edge.
-function sparkle(g, c, Ly, Lx, k, color, alpha, rot = 0) {
-  g.save(); g.globalAlpha *= alpha; g.translate(c, c); g.rotate(rot); g.fillStyle = color;
-  g.beginPath(); g.moveTo(0, -Ly);
-  g.quadraticCurveTo(k, -k, Lx, 0); g.quadraticCurveTo(k, k, 0, Ly);
-  g.quadraticCurveTo(-k, k, -Lx, 0); g.quadraticCurveTo(-k, -k, 0, -Ly);
+// The glint over every loose piece of loot (props3d draws them all as one point cloud), painted like
+// the glitter that rises off a quest object in 2004: not a tidy star but a hand-flicked glint. Four of
+// them share the sprite, one per 128 px cell (TWINKLE_CELLS: props3d picks one per piece and may
+// mirror it), each with rays of different lengths (the vertical about 1.6× the horizontal, one short
+// diagonal, the other missing), its heart a little off the cell's middle, and two or three tiny motes
+// round it. Each ray is a thin needle with pinched, concave sides: a dark umber edge (it keeps the glint
+// readable on white snow and pale sand), an amber rim, gold, then cream toward the white-hot heart;
+// a soft warm halo, taller than wide, is mostly added light. Alpha: transparent round every cell's edge
+// (at least 10 px, so the mips don't bleed between cells).
+export const TWINKLE_CELLS = 2;    // the sprite is TWINKLE_CELLS × TWINKLE_CELLS glints
+// [angle (deg, 0 = up, clockwise), length (× cell)] per ray; motes: [angle, distance, radius (px)]
+const GLINTS = [
+  { rays: [[-3, 0.46], [178, 0.31], [266, 0.17], [91, 0.27], [44, 0.17]], motes: [[-52, 0.32, 7], [120, 0.31, 5.5], [212, 0.33, 4.5]] },
+  { rays: [[3, 0.44], [184, 0.34], [272, 0.27], [88, 0.16], [222, 0.165]], motes: [[38, 0.32, 6.5], [252, 0.33, 5]] },
+  { rays: [[-2, 0.47], [176, 0.29], [269, 0.24], [94, 0.2], [318, 0.165]], motes: [[62, 0.29, 5.5], [148, 0.29, 6.5], [-118, 0.3, 4.5]] },
+  { rays: [[5, 0.42], [181, 0.36], [264, 0.16], [87, 0.27], [134, 0.17]], motes: [[-34, 0.33, 6], [214, 0.29, 5.5]] },
+];
+// one needle from (x, y) out at angle a: tip at len, half-width wb at the heart, concave sides
+function needle(g, x, y, a, len, wb, color, alpha) {
+  const dx = Math.sin(a), dy = -Math.cos(a), nx = -dy, ny = dx;
+  const P = (t, s) => [x + dx * t + nx * s, y + dy * t + ny * s];
+  g.save(); g.globalAlpha *= alpha; g.fillStyle = color; g.beginPath();
+  g.moveTo(...P(0, wb));
+  g.quadraticCurveTo(...P(len * 0.3, wb * 0.5), ...P(len, 0));
+  g.quadraticCurveTo(...P(len * 0.3, -wb * 0.5), ...P(0, -wb));
+  g.quadraticCurveTo(...P(-wb * 1.3, 0), ...P(0, wb));
   g.fill(); g.restore();
 }
+// a whole glint, layer by layer across all its rays (each layer: [grow px, length ×, width ×, color, alpha])
+function glint(g, x, y, rays, S, wMain, layers) {
+  for (const [grow, kl, kw, color, alpha] of layers) for (const [deg, L] of rays) {
+    const short = L < 0.18, wb = (short ? 0.6 : L > 0.38 ? 1.12 : L < 0.25 ? 0.85 : 1) * wMain;
+    needle(g, x, y, deg * Math.PI / 180, L * S * kl + grow, wb * kw + grow * 0.8, color, alpha);
+  }
+}
+const GLINT_LAYERS = [[4, 1, 1, '#5a2e10', 0.6], [0, 1, 1, '#a8681a', 0.95], [0, 0.94, 0.74, '#f2b83c', 1], [0, 0.84, 0.54, '#ffe07a', 1], [0, 0.68, 0.36, '#fff8d8', 1]];
 register('loot_twinkle', {
-  family: F, size: 128, alpha: true, note: 'the glint over loose loot (alpha sprite, not tiled): a four-point gold sparkle with an amber rim and a white heart, a faint diagonal cross, a warm halo',
+  family: F, size: 256, alpha: true, note: 'the glint over loose loot (alpha sprite, not tiled): four uneven gold glints, one per 128 px cell: long vertical rays, short side rays, one stub diagonal, an umber edge, an amber rim, a white heart a little off-centre, two or three tiny motes, a warm halo',
   paint(g, s, rnd, h, cv) {
-    const c = s / 2, j = () => range(rnd, 0.97, 1.03);
-    // the halo: warm and soft, gone well inside the sprite's edge (most of it is added light)
-    g.fillStyle = radial(g, c, c, 0, s * 0.3, [[0, '#ffe6a8', 0.6], [0.15, '#ffd070', 0.38], [0.35, '#f8b048', 0.16], [0.6, '#f0a040', 0.05], [1, '#e08830', 0]]);
-    g.fillRect(0, 0, s, s);
-    // the diagonal cross, under the main star
-    sparkle(g, c, s * 0.25 * j(), s * 0.25 * j(), s * 0.022, '#c8701e', 0.75, Math.PI / 4);
-    sparkle(g, c, s * 0.21, s * 0.21, s * 0.012, '#ffd878', 0.9, Math.PI / 4);
-    // the main star, slim: amber rim → gold → cream → white
-    sparkle(g, c, s * 0.485 * j(), s * 0.36 * j(), s * 0.05, '#b05a18', 0.9);
-    sparkle(g, c, s * 0.45, s * 0.33, s * 0.036, '#f0a434', 1);
-    sparkle(g, c, s * 0.39, s * 0.28, s * 0.024, '#ffd468', 1);
-    sparkle(g, c, s * 0.3, s * 0.21, s * 0.013, '#fff4c8', 1);
-    // the white-hot heart
-    blob(g, c, c, s * 0.085, s * 0.085, 0, '#fffbe8', 1, 0.45);
-    blob(g, c, c, s * 0.04, s * 0.04, 0, '#ffffff', 1, 0.6);
+    const S = s / TWINKLE_CELLS;
+    GLINTS.forEach((G, k) => {
+      const ox = (k % TWINKLE_CELLS) * S, oy = Math.floor(k / TWINKLE_CELLS) * S, L = d => G.rays.find(r => Math.abs(((r[0] - d + 540) % 360) - 180) < 30)?.[1] || 0;
+      // the heart sits off the cell's middle, toward the shorter rays (so the long ones still fit)
+      const x = ox + S / 2 + (L(270) - L(90)) * S * 0.45 + range(rnd, -1.5, 1.5), y = oy + S / 2 + (L(0) - L(180)) * S * 0.5 + range(rnd, -1, 1);
+      // the halo: warm, soft, taller than wide, gone well inside the cell
+      g.save(); g.translate(x, y); g.scale(0.78, 1);
+      g.fillStyle = radial(g, 0, 0, 0, S * 0.3, [[0, '#ffe6a8', 0.7], [0.22, '#ffd070', 0.42], [0.5, '#f8b048', 0.14], [1, '#e08830', 0]]);
+      g.fillRect(-S / 2, -S / 2, S, S); g.restore();
+      // the rays' dark edges, then the heart's own round glow (most of the glint's mass is this soft
+      // ball of light), then the rays over it
+      glint(g, x, y, G.rays, S, S * 0.062, GLINT_LAYERS.slice(0, 1));
+      ellipse(g, x + 0.6, y + 0.9, S * 0.145, S * 0.158, 0, '#5a2e10', 0.45);
+      g.fillStyle = radial(g, x - 1.5, y - 2, 0, S * 0.14, [[0, '#fffbe0'], [0.35, '#ffe488'], [0.65, '#f6c048'], [0.88, '#d8962c'], [1, '#a06a1c', 0.95]]);
+      g.beginPath(); g.ellipse(x, y, S * 0.13, S * 0.142, 0, 0, TAU); g.fill();
+      glint(g, x, y, G.rays, S, S * 0.062, GLINT_LAYERS.slice(1));
+      // the white-hot heart, a touch up and left of the rays' meeting point
+      blob(g, x - 1.5, y - 2, S * 0.092, S * 0.1, 0, '#fff8e0', 1, 0.5);
+      blob(g, x - 2, y - 2.6, S * 0.045, S * 0.05, 0, '#ffffff', 1, 0.65);
+      // the motes: round specks of glitter (no rays: they're dust, not more stars)
+      for (const [deg, dist, r] of G.motes) {
+        const a = deg * Math.PI / 180, mx = x + Math.sin(a) * dist * S, my = y - Math.cos(a) * dist * S;
+        g.fillStyle = radial(g, mx, my, 0, r * 2.4, [[0, '#ffd890', 0.45], [1, '#f0a040', 0]]); g.fillRect(mx - r * 2.5, my - r * 2.5, r * 5, r * 5);
+        ellipse(g, mx + 0.4, my + 0.6, r + 1.5, r + 1.7, 0, '#5a2e10', 0.3);
+        ellipse(g, mx, my, r, r * 1.08, 0, '#c8902c', 0.95);
+        ellipse(g, mx - r * 0.12, my - r * 0.15, r * 0.66, r * 0.7, 0, '#ffe8a0', 1);
+        ellipse(g, mx - r * 0.2, my - r * 0.25, r * 0.32, r * 0.34, 0, '#fffbe8', 1);
+      }
+    });
     blurTile(cv, 0.6);
   },
 });

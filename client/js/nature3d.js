@@ -29,6 +29,8 @@ import { mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { atmo } from './atmosphere.js';
 import { fbm } from '/shared/rng.js';
 import { BIOME_BY_DAY, generateLeg } from '/shared/world.js';
+import * as TERRAIN from './terrain3d.js';
+import { STRATA_BEDS } from './paint/nature.js';
 
 export const NATURE_KINDS = new Set(['oak', 'pine', 'palm', 'bush', 'flowers', 'stump', 'fence', 'haybale', 'wheat', 'scarecrow', 'cactus', 'deadtree', 'rock', 'bones', 'skull', 'fire', 'cairn']);
 
@@ -454,6 +456,7 @@ const vertBody = o => `
     float th = (el - aTilt) * wP;
     vec3 ax = vec3(-toC.z / hz, 0.0, toC.x / hz);
     bo = bo * cos(th) + cross(ax, bo) * sin(th) + ax * dot(ax, bo) * (1.0 - cos(th));
+    if (aTilt < -0.8) bo *= 1.0 - smoothstep(-0.02, 0.15, el);     // a crown's underside: only seen from below
     transformed = aCtr + bo;
   }` : ''}
   ${o.wind ? `{
@@ -477,7 +480,10 @@ function natMat(texName, o = {}) {
     vertexColors: true,
     side: o.alpha || o.double ? THREE.DoubleSide : THREE.FrontSide,
     alphaTest: o.alpha ? ALPHA_CUT : 0,
+    // fade: the opacity comes from aCov (a bank of ground that melts into the terrain round it)
+    transparent: !!o.fade, depthWrite: !o.fade,
   });
+  if (o.fade) { m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -2; }
   if (o.alpha) m.alphaToCoverage = true;
   const C = o.cover ? COVER[o.cover] : null;
   m.onBeforeCompile = sh => {
@@ -506,6 +512,8 @@ function natMat(texName, o = {}) {
         vec4 tx = texture2D(map, vNatW.zy * uTri), ty = texture2D(map, vNatW.xz * uTri * ${o.topScale ?? '1.0'} + 0.37), tz = texture2D(map, vNatW.xy * uTri);
         diffuseColor *= tx * tw.x + ty * tw.y + tz * tw.z;
       }`);
+    else if (o.fade) fs = fs.replace('#include <map_fragment>', `#include <map_fragment>
+      diffuseColor.a *= clamp(vNatCov, 0.0, 1.0);`);
     else if (o.backShift) fs = fs.replace('#include <map_fragment>', `
       {
         // a bough's underside shows the bare needles, still frosted (about 40% of the snowy cell)
@@ -580,7 +588,7 @@ const BIO = {
     deadTint: '#bca896', cactusTints: ['#ffffff', '#f4f0f0', '#fff6ee'], deadCover: 'dust', cactusCover: 'dust',
   },
   desert: {
-    rock: 'rock_sand', rockCover: 'sand', rockTints: ['#ffffff', '#fbf4e8', '#f4ecdc'], strata: true,
+    rock: 'rock_sand', rockCover: 'sand', rockTints: ['#f6e4cc', '#f0d8bc', '#f8e8d4'], strata: true,
     leaves: 'leaves_oak', oakTints: ['#e8e0a8'], leafDensity: 0.6,
     pineTints: ['#d8d8c0'],
     bush: 'scrub', bushCells: [0, 1, 1], bushFill: 2, bushTints: ['#fff8e4', '#fff4dc', '#ffffff'],
@@ -604,7 +612,8 @@ function matFor(key, biome) {
     case 'needles': return snow ? natMat('needles_snow', { alpha: true, wind: true, backShift: 0.5 }) : natMat('needles_pine', { alpha: true, wind: true });
     case 'frond': return natMat('palm_frond', { alpha: true, wind: true });
     case 'straw': return natMat('straw_tuft', { alpha: true, wind: true });
-    case 'rock': return natMat(B.rock, { tri: true, cover: B.rockCover || null, triScale: biome === 'badlands' ? 6.2 : B.strata ? 4.2 : 2.6, topScale: B.strata ? '0.3' : '1.0' });   // strata seen from above: broad soft blotches, never contour lines
+    case 'rock': return natMat(B.rock, { tri: true, cover: B.rockCover || null, triScale: TRI_T[biome] || 2.6, topScale: B.strata ? '0.3' : '1.0' });   // strata seen from above: broad soft blotches, never contour lines
+    case 'apron': return natMat(biome === 'desert' ? 'ground_desert' : biome === 'badlands' ? 'ground_badlands' : 'ground_meadow', { fade: true });
     case 'firestone': return natMat('rock_gray', { tri: true, triScale: 0.9 });
     case 'snowcap': return natMat('snow_pack', { tri: true, triScale: 3.2 });
     case 'snowridge': return natMat('snow_pack', { tri: true, triScale: 3.2, wind: true });
@@ -626,7 +635,8 @@ function texturesFor(biome) {
   if (biome === 'fields') out.push(['hay'], ['hay_end'], ['straw_tuft', true], ['scarecrow'], ['cover_lichen']);
   if (biome === 'snow') out.push(['bark_pine'], ['needles_snow', true], ['snow_pack'], ['cover_snow']);
   if (biome === 'badlands' || biome === 'desert') out.push(['leaves_scrub', true], [biome === 'badlands' ? 'cactus_dusty' : 'cactus_skin'], ['bone_bleached'], ['cover_dust']);
-  if (biome === 'desert') out.push(['bark_palm'], ['palm_frond', true], ['cover_sand']);
+  if (biome === 'desert') out.push(['bark_palm'], ['palm_frond', true], ['cover_sand'], ['ground_desert']);
+  if (biome === 'badlands') out.push(['ground_badlands']);
   return out;
 }
 
@@ -644,7 +654,7 @@ class Ctx {
     if (extra) m.multiply(extra);
     m.setPosition(d.x, d.y, d.z);
     this.xf = m; this.nm = new THREE.Matrix3().getNormalMatrix(m); this.rm = new THREE.Matrix3().setFromMatrix4(m);
-    this.chunk = Math.floor((d.z + 3000) / CHUNK);
+    this.chunk = Math.floor((d.z + 3300) / CHUNK);      // (stretches break at 300, 900, 1500 m: the camp shares the first)
   }
   b(key) {
     const k = key + '#' + (this.rim ? 'rim' : this.chunk);
@@ -740,17 +750,19 @@ function ceiling(b, C, R, rnd, o) {
       const p = new V3().copy(P).addScaledVector(e1, x).addScaledVector(e2, y);
       // a little lighter toward the bowl's rim (it catches the sky)
       const rimK = clamp01(Math.hypot(p.x - C.x, p.z - C.z) / R);
-      b.v(p, sn, us[q], vs[q], mulc(tint, k * (0.92 + 0.12 * rimK)), (o.wind ?? 0.5) * (0.4 + 0.6 * rimK));
+      // (a card of the camera-facing kind whose own pitch, steeply down, marks it: the vertex hook
+      // folds it away whenever the camera is above it, so it never shows edge-on from a hilltop)
+      b.v(p, sn, us[q], vs[q], mulc(tint, k * (0.92 + 0.12 * rimK)), (o.wind ?? 0.5) * (0.4 + 0.6 * rimK), [P, new V3().subVectors(p, P), nrm.clone()]);
     });
     b.t(base, base + 1, base + 2); b.t(base, base + 2, base + 3);
   };
   const yC = C.y - R * sq * (o.depth ?? 0.5);
   const a0 = rnd() * TAU, n = o.n ?? 4;
   // (kept inside the lobe's own cards, so from the side they never stick out as flat slabs)
-  put(new V3(C.x, yC - R * 0.04, C.z), new V3(Math.cos(a0), 0, Math.sin(a0)), 0.2, R * 1.05, rnd() * TAU, lift * 0.96);
+  put(new V3(C.x, yC - R * 0.04, C.z), new V3(Math.cos(a0), 0, Math.sin(a0)), 0.2, R * 0.95, rnd() * TAU, lift * 0.96);
   for (let k = 0; k < n; k++) {
-    const a = a0 + (k + range(rnd, -0.2, 0.2)) * TAU / n, out = new V3(Math.cos(a), 0, Math.sin(a)), rr = R * range(rnd, 0.32, 0.42);
-    put(new V3(C.x + out.x * rr, yC + R * sq * range(rnd, 0.1, 0.2), C.z + out.z * rr), out, range(rnd, 0.6, 0.85), R * range(rnd, 0.8, 0.92), rnd() * TAU, lift);
+    const a = a0 + (k + range(rnd, -0.2, 0.2)) * TAU / n, out = new V3(Math.cos(a), 0, Math.sin(a)), rr = R * range(rnd, 0.26, 0.34);
+    put(new V3(C.x + out.x * rr, yC + R * sq * range(rnd, 0.12, 0.2), C.z + out.z * rr), out, range(rnd, 0.5, 0.7), R * range(rnd, 0.72, 0.82), rnd() * TAU, lift);
   }
 }
 
@@ -799,7 +811,7 @@ function limb(P0, dir, L, rnd, { bends = 2, bendAmt = 0.35, rise = 0, segs = 6 }
 function oakSize(d, hero, west) {
   const s = d.s || 1;
   const G = west ? Math.max(0.95, Math.min(1.25, 1.05 * s)) : hero ? Math.max(1.8, Math.min(2.2, 1.5 + 0.5 * s)) : Math.max(1.0, Math.min(1.5, 1.25 * s));
-  return { G, Rc: (hero ? 3.5 : west ? 2.9 : 3.2) * G };
+  return { G, Rc: (hero ? 3.5 : west ? 3.3 : 3.2) * G };
 }
 
 // Elwynn oak: a massive warm bole that keeps to its collider through the bumper band (≤ 0.1 m off
@@ -833,7 +845,7 @@ function oak(ctx, d, info = {}) {
   const cO = { x: shx * shk * Rc, z: shz * shk * Rc };         // the crown's centre, off the trunk axis
   const crowd = (ux, uz) => { let c = 0; for (const n of nb) c += n.w * Math.max(0, ux * n.ux + uz * n.uz); return Math.min(1, c); };
 
-  const F = (west ? range(rnd, 1.85, 2.15) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
+  const F = (west ? range(rnd, 1.6, 1.85) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
   const [gLo] = ctx.foot(rC * 2.4);
   const yBot = Math.min(-0.5, gLo - 0.35);
   const nR = 5 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
@@ -880,8 +892,8 @@ function oak(ctx, d, info = {}) {
   const ra0 = rnd() * TAU;
   for (let k = 0; k < nRing; k++) {
     const a = ra0 + (k + range(rnd, -0.2, 0.2)) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a), c = crowd(ux, uz);
-    const r = Rc * range(rnd, 0.42, 0.56) * (1 - 0.35 * c), rho = (Rc - r * 0.95) * (1 - 0.3 * c);
-    L.push({ c: new V3(cO.x + ux * rho * (west ? 0.9 : 1), Yc + (west ? range(rnd, -0.6, -0.1) : range(rnd, -0.5, 0.1)) * Vc, cO.z + uz * rho * (west ? 0.9 : 1)), r, ux, uz, ring: true });
+    const r = Rc * (west ? range(rnd, 0.5, 0.6) : range(rnd, 0.42, 0.56)) * (1 - 0.35 * c), rho = (Rc - r * 0.95) * (1 - 0.3 * c);
+    L.push({ c: new V3(cO.x + ux * rho * (west ? 0.8 : 1), Yc + (west ? range(rnd, -0.7, -0.3) : range(rnd, -0.5, 0.1)) * Vc, cO.z + uz * rho * (west ? 0.8 : 1)), r, ux, uz, ring: true });
   }
   // the top lobe, a little off centre
   L.push({ c: new V3(cO.x + range(rnd, -0.12, 0.12) * Rc, Yc + Vc * range(rnd, 0.32, 0.45), cO.z + range(rnd, -0.12, 0.12) * Rc), r: Rc * (west ? range(rnd, 0.54, 0.6) : range(rnd, 0.5, 0.56)), top: true, ux: 0, uz: 0 });
@@ -955,16 +967,16 @@ function oak(ctx, d, info = {}) {
   let yLo = Infinity, yHi = -Infinity;
   for (const l of L) { yLo = Math.min(yLo, l.c.y - l.r * 0.85); yHi = Math.max(yHi, l.c.y + l.r * 0.9); }
   const tint = lin(pick(rnd, B.oakTints));
-  const ao = p => 0.64 + 0.36 * Math.pow(smooth(yLo, yHi, p.y), 1.05);
+  const ao = p => (west ? 0.7 : 0.64) + (west ? 0.3 : 0.36) * Math.pow(smooth(yLo, yHi, p.y), 1.05);
   const wk = west ? [1.1, 1.06, 0.88] : [1.16, 1.12, 0.84];
   const warm = p => { const t = smooth(yLo + (yHi - yLo) * 0.45, yHi, p.y); return [1 + (wk[0] - 1) * t, 1 + (wk[1] - 1) * t, 1 + (wk[2] - 1) * t]; };
   const den = B.leafDensity;
   for (const l of L) {
     const size = Math.min(l.r * range(rnd, 0.92, 1.02), 3.1);
     const n = Math.max(6, Math.round(den * (6 + 13 * (l.r / size) ** 2)));
-    clump(leaves, l.c, l.r * 0.92, rnd, { cards: n, size, cells: [0], core: 2, coreK: 1.7, tint, ao, warm, squash: l.top ? 0.85 : 0.8, under: 0.8, sizeVar: [0.82, 1.18], down: 0.72 });
+    clump(leaves, l.c, l.r * 0.92, rnd, { cards: n, size, cells: [0], core: 2, coreK: 1.7, tint, ao, warm, squash: west ? 0.92 : l.top ? 0.85 : 0.8, under: west ? 1.0 : 0.8, sizeVar: [0.82, 1.18] });
     // the ceiling under it (the top lobe's is hidden inside the crown but for the gaps between lobes)
-    ceiling(leaves, l.c, l.r * 0.92, rnd, { tint, squash: 0.8, n: l.small ? 3 : l.top ? 3 : 4, light: 0.8, depth: l.top ? 0.62 : 0.5 });
+    ceiling(leaves, l.c, l.r * 0.92, rnd, { tint, squash: 0.8, n: l.small ? 3 : l.top ? 3 : 4, light: 0.8, depth: l.top ? 0.55 : 0.42 });
     // the skirt: leaf cards hanging off the lobe's outer, lower rim
     if (l.top) continue;
     const nS = Math.round((l.small ? 1 : 1.5 + l.r * 0.5) * (west ? 0.7 : 1));
@@ -1641,169 +1653,394 @@ function hoodoo(ctx, b, rnd, col, tint) {
   rubble(ctx, b, 3 + Math.floor(rnd() * 4), rb * 1.5, rb * 2.2, rnd, tint);
 }
 
-// The plan a solid ledge fills: its oriented box when world gen gives one (a rounded 2:1 rectangle),
-// else its collider's circle as an angular polygon of 6-7 faces at uneven angles whose middles lie on
-// it, corners chamfered a little proud. a -> radius at angle a (the ledge's own frame).
-function mesaPlan(rnd, col) {
-  if (col.box) {
-    const { hx, hz, rot } = col.box, n = 6;
-    return a => { const c = Math.abs(Math.cos(a - rot)) / hx, sn = Math.abs(Math.sin(a - rot)) / hz; return Math.pow(Math.pow(c, n) + Math.pow(sn, n), -1 / n); };
+// ---- layered rocks: Badlands ledges and Tanaris mounds ------------------------------------------------
+
+// World metres per texture repeat of the layered rock materials (matFor maps them at this scale); the
+// hard beds of the painted strata (paint/nature.js STRATA_BEDS) lie at fixed world heights from it.
+const TRI_T = { badlands: 6.2, desert: 3.6 };
+// The day's hard beds that cross local heights y0..y1 (local = above the rock's origin at world height
+// baseY), as { y0, y1 } in local metres.
+function bedsIn(biome, baseY, y0, y1) {
+  const T = TRI_T[biome], B = STRATA_BEDS[biome === 'desert' ? 'rock_sand' : 'rock_red'], out = [];
+  if (!T || !B) return out;
+  for (let k = Math.floor((baseY + y0) / T) - 1; k <= Math.floor((baseY + y1) / T) + 1; k++) {
+    for (const [v0, v1] of B) { const a = (k + v0) * T - baseY, c = (k + v1) * T - baseY; if (c > y0 && a < y1) out.push({ y0: a, y1: c }); }
   }
-  const r = col.cyl.r, N = 5 + (rnd() < 0.5 ? 1 : 0), gaps = [];
-  for (let k = 0; k < N; k++) gaps.push(range(rnd, 0.7, 1.3));
-  const tot = gaps.reduce((q, v) => q + v, 0), faces = [];
-  let a = rnd() * TAU;
-  for (let k = 0; k < N; k++) { faces.push(a); a += gaps[k] / tot * TAU; }
-  const ap = r * 0.985, cap = r * 1.07, kk = r * 0.025;
-  return q => {
-    let m = Infinity;
-    for (const f of faces) { const c = Math.cos(q - f); if (c > 0.08) m = Math.min(m, ap / c); }
-    return -kk * Math.log(Math.exp(-m / kk) + Math.exp(-cap / kk));      // a soft min: the chamfer
-  };
+  return out.sort((p, q) => p.y0 - q.y0);
 }
 
-// A solid Badlands ledge: one mesa block, its walls filling its collider through the bumper band (no
-// tiers, no separate cap). Long and low: a continuous cliff face runs along its long axis; above head
-// height its hard cap overhangs both ends of that axis (an anvil, never a drum), and its top tilts
-// 9-13° back from the cliff (a cuesta; the low side on the collider's top). Angular faces, a slight
-// batter, vertical rain flutes (deep on the cliff) and a few clefts break the beds; a soft groove under
-// a hard bed. Round its foot: fallen blocks and a debris apron under the cliff, a long low debris ramp
-// off the back (all under the step height).
-function mesa(ctx, b, S, rnd, tint, col, steep, piece) {
-  const plan = mesaPlan(rnd, col);
-  const top = col.box ? col.box.top : col.cyl.top, rRef = col.box ? Math.min(col.box.hx, col.box.hz) : col.cyl.r;
-  const NA = 64, la = col.box ? col.box.rot : rnd() * TAU;                // the long axis
-  const cliffA = la + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2 + range(rnd, -0.2, 0.2);
-  const cw = a => Math.max(smooth(1.3, 0.4, angDiff(a, cliffA)), 0.6 * smooth(1.2, 0.4, angDiff(a, cliffA + Math.PI)));   // the long sides are cliffs
-  const tk = Math.tan(range(rnd, 12, 16) * Math.PI / 180);
-  const ovK = (col.box ? 0.15 : range(rnd, 0.34, 0.44)) * smooth(2.0, 2.7, top);    // the prow's overhang
-  const yO0 = Math.max(1.95, top * 0.6);
-  const notches = []; for (let k = 0; k < 1 + (rnd() < 0.6 ? 1 : 0); k++) notches.push({ a: cliffA + Math.PI + range(rnd, -1.7, 1.7), w: range(rnd, 0.16, 0.28), d: range(rnd, 0.14, 0.26) });
-  const rp = [rnd() * TAU, rnd() * TAU];
-  const [gLo] = ctx.foot(rRef * 1.1, 0, 0, 9);
-  const yB = Math.min(-0.5, gLo - 0.45);
-  const nF = 10 + Math.floor(rnd() * 5), fph = rnd() * TAU, fph2 = rnd() * TAU;
-  // vertical joints: deep narrow clefts the whole height (they notch the rim too), splitting the
-  // cliffs into a few columns
-  const clefts = []; for (let k = 0; k < 2 + (rnd() < 0.6 ? 1 : 0); k++) clefts.push({ a: cliffA + (k % 2 ? Math.PI : 0) + range(rnd, -0.9, 0.9), w: range(rnd, 0.05, 0.075), d: range(rnd, 0.08, 0.12) });
-  const yG = Math.max(1.05, (top - 0.3) * range(rnd, 0.55, 0.72)), ph = rnd() * 9;
-  // a stepped skyline: a block has broken out of the rim near the tail (a flat-bottomed bite, sharp-edged)
-  const tailW = range(rnd, 0.3, 0.5), tailA = la + Math.PI + range(rnd, -1.0, 1.0), tailD = range(rnd, 0.3, 0.45) * smooth(1.9, 2.5, top);
-  const stepOff = a => -tailD * smooth(tailW + 0.06, tailW - 0.06, angDiff(a, tailA));
-  const skirt = [rnd() * TAU, rnd() * TAU];
-  // the radius of the wall at angle a, height y (ground gl, rim height yt there)
-  const wallF = (a, y, gl, yt, last) => {
-    const h = y - gl, cwa = cw(a);
-    let f = 1;
-    const sk = 0.15 + 0.13 * cwa + 0.07 * (Math.sin(3 * a + skirt[0]) + Math.sin(7 * a + skirt[1])) + 0.04 * Math.sin(13 * a + skirt[0] * 2);
-    f *= 1 + Math.max(0.06, sk) * Math.pow(1 - smooth(-0.15, 0.45, h), 1.6);                       // a lumpy talus cone (most under the cliffs), under the step height
-    const prow = Math.pow(Math.max(0, Math.cos(a - la)), 2), tail = Math.pow(Math.max(0, -Math.cos(a - la)), 2);
-    f *= 1 + ovK * prow * smooth(yO0, Math.max(yO0 + 0.25, yt - 0.1), y);                        // the prow juts out
-    f *= 1 - 0.16 * tail * smooth(Math.max(1.6, yt - 0.9), yt, y);                                // the tail is worn round
-    f *= 1 - 0.08 * (1 - prow) * smooth(1.9, Math.max(2.0, yt), y);                               // the upper walls lean in (a butte, not a barrel)
-    f *= 1 + 0.04 * cwa * smooth(yt - 0.6, yt - 0.12, y) * smooth(1.85, 2.2, y);                  // the cliffs' lips
-    f *= 1 - 0.03 * Math.exp(-(((y - yG) / 0.11) ** 2));                                         // a soft groove under a hard bed
-    const fl = Math.pow(0.5 + 0.5 * Math.cos(nF * a + fph + 0.3 * Math.sin(y * 1.1 + fph2)), 8);
-    f *= 1 - (0.035 + 0.075 * cwa) * fl * smooth(0.15, 0.7, h);                                  // rain flutes
-    for (const cl of clefts) f *= 1 - cl.d * Math.exp(-((angDiff(a, cl.a) / cl.w) ** 2)) * smooth(0.1, 0.6, h);
-    f *= 1 + 0.018 * noise3(Math.cos(a) * 2.2, y * 1.6, Math.sin(a) * 2.2, ph);
-    if (last) f *= 0.965;                                                                          // the lip's chamfer
-    return f;
-  };
-  // the top: a plane tilted up toward the prow, its low side (the tail) on the collider's top
-  const Rmax = rRef * 1.1;
-  const yP = (a, rr) => top + 0.02 + tk * (Math.cos(a - la) * rr + Rmax) * 0.5;
-  const yRim = (a, rr) => yP(a, rr) + stepOff(a) + 0.04 * Math.sin(3 * a + rp[0]) + 0.03 * Math.sin(7 * a + rp[1]) - notches.reduce((m, n) => m + n.d * Math.exp(-((angDiff(a, n.a) / n.w) ** 2)), 0)
-    - clefts.reduce((m, c) => m + 0.06 * Math.exp(-((angDiff(a, c.a) / (c.w * 1.4)) ** 2)), 0);
-  const cols = [];
-  for (let j = 0; j < NA; j++) {
-    const a = j / NA * TAU, R0 = plan(a), gl = ctx.gh(Math.cos(a) * R0, Math.sin(a) * R0);
-    const rTop = R0 * (1 + ovK * Math.pow(Math.max(0, Math.cos(a - la)), 2));
-    cols.push({ a, R0, gl, yt: yRim(a, rTop) });
+// Creased normals with shared vertices: round every vertex its faces fall into smoothing groups (a face
+// joins the first group whose first face lies within the crease angle of it), one output vertex per
+// group. The chiselled look of creased() at about a third of the vertices. color(p, n, vi).
+function creasedShared(b, P, idx, color, cosC) {
+  const { FN, FA, VF } = faceData(P, idx);
+  const out = new Int32Array(idx.length).fill(-1);
+  for (let vi = 0; vi < P.length; vi++) {
+    const groups = [];
+    for (const f of VF[vi]) {
+      if (FA[f] < 1e-9) continue;
+      let g = null;
+      for (const G of groups) if (FN[G.f0].dot(FN[f]) > cosC) { g = G; break; }
+      if (!g) { g = { f0: f, n: new V3(), faces: [] }; groups.push(g); }
+      g.n.addScaledVector(FN[f], FA[f]); g.faces.push(f);
+    }
+    for (const g of groups) {
+      if (g.n.lengthSq() < 1e-12) g.n.copy(FN[g.f0]);
+      g.n.normalize();
+      const o = b.v(P[vi], g.n, 0, 0, color(P[vi], g.n, vi), 0);
+      for (const f of g.faces) for (let k = 0; k < 3; k++) if (idx[f * 3 + k] === vi) out[f * 3 + k] = o;
+    }
   }
-  const rowYs = c => {
-    const ys = [yB, c.gl - 0.1, c.gl + 0.05, c.gl + 0.16, c.gl + 0.28, c.gl + 0.42];
-    const y1 = c.gl + 0.42, y2 = c.yt - 0.2;
-    for (let k = 1; k <= 8; k++) ys.push(y1 + (y2 - y1) * k / 9);
-    ys.push(c.yt - 0.2, c.yt - 0.07, c.yt);
-    return ys;
+  for (let f = 0; f < idx.length / 3; f++) if (FA[f] >= 1e-9) b.t(out[f * 3], out[f * 3 + 1], out[f * 3 + 2]);
+}
+
+// A plan as a polygon ([[x, z]...] round the point (cx, cz)) -> its radius by angle about that point.
+function polyRadius(poly, cx = 0, cz = 0) {
+  const Q = poly.map(([x, z]) => [x - cx, z - cz]);
+  return a => {
+    const dx = Math.cos(a), dz = Math.sin(a);
+    let best = Infinity;
+    for (let i = 0; i < Q.length; i++) {
+      const [x1, z1] = Q[i], [x2, z2] = Q[(i + 1) % Q.length], ex = x2 - x1, ez = z2 - z1, den = dx * ez - dz * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = (x1 * ez - z1 * ex) / den, u = (x1 * dz - z1 * dx) / den;
+      if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.min(best, t);
+    }
+    return best === Infinity ? 0.5 : best;
   };
-  const P = [], rows = [], NRow = rowYs(cols[0]).length;
-  for (let r = 0; r < NRow; r++) rows.push([]);
-  for (const c of cols) {
-    rowYs(c).forEach((y, r) => {
-      const R = c.R0 * wallF(c.a, y, c.gl, c.yt, r === NRow - 1);
-      rows[r].push(P.length); P.push(new V3(Math.cos(c.a) * R, y, Math.sin(c.a) * R));
+}
+// A periodic function of angle with values in about [-1, 1]: a few low harmonics.
+function periodicA(rnd, terms = 4) {
+  const T = []; for (let k = 1; k <= terms; k++) T.push([k + (k > 2 ? Math.floor(rnd() * 2) : 0), rnd() * TAU, (0.5 + rnd()) / k]);
+  const nrm = T.reduce((m, t) => m + t[2], 0) * 0.62;
+  return a => { let v = 0; for (const [k, p, w] of T) v += Math.sin(k * a + p) * w; return Math.max(-1, Math.min(1, v / nrm)); };
+}
+// A rectangle (half-sizes hx along the axis at angle rot, hz across it, centred at (ox, oz) in that
+// axis frame) as an angular polygon: every corner chamfered (one or two facets), every side broken
+// into two or three facets that wander a few centimetres in and out. Local frame points.
+function boxPoly(rnd, hx, hz, rot, { ox = 0, oz = 0, cham = [0.12, 0.3], wob = 0.04, two = 0.4 } = {}) {
+  const c = Math.cos(rot), s = Math.sin(rot), pts = [];
+  const put = (u, v) => pts.push([(ox + u) * c - (oz + v) * s, (ox + u) * s + (oz + v) * c]);
+  const corners = [[hx, -hz], [hx, hz], [-hx, hz], [-hx, -hz]];
+  for (let k = 0; k < 4; k++) {
+    const [u0, v0] = corners[k], [u1, v1] = corners[(k + 1) % 4];
+    const L = Math.hypot(u1 - u0, v1 - v0), du = (u1 - u0) / L, dv = (v1 - v0) / L, nu = dv, nv = -du;   // nu, nv: outward
+    const ca = Math.min(range(rnd, cham[0], cham[1]), L * 0.3), cb = Math.min(range(rnd, cham[0], cham[1]), L * 0.3);
+    put(u0 + du * ca, v0 + dv * ca);
+    const nMid = L > 1.6 ? 2 : 1;
+    for (let q = 1; q <= nMid; q++) { const t = q / (nMid + 1) + range(rnd, -0.08, 0.08), w = range(rnd, -wob, wob * 0.6); put(u0 + du * L * t + nu * w, v0 + dv * L * t + nv * w); }
+    put(u1 - du * cb, v1 - dv * cb);
+    // a two-facet chamfer now and then: a point a little out from the cut's middle
+    if (rnd() < two) { const [u2, v2] = corners[(k + 2) % 4], e = Math.hypot(u2 - u1, v2 - v1), eu = (u2 - u1) / e, ev = (v2 - v1) / e, cc = Math.min(cb, ca) * 0.5;
+      put(u1 - du * cc * 0.6 + eu * cc * 0.6, v1 - dv * cc * 0.6 + ev * cc * 0.6); }
+  }
+  return pts;
+}
+// A round footprint as an angular polygon of N facets whose middles lie at about radius r (corners a
+// little proud), radii jittered; stretched by sx along x.
+function roundPoly(rnd, N, r, { jit = 0.04, sx = 1, ox = 0, oz = 0, proud = 1 } = {}) {
+  const a0 = rnd() * TAU, out = [], k = Math.pow(1 / Math.cos(Math.PI / N), proud);
+  for (let i = 0; i < N; i++) { const a = a0 + (i + range(rnd, -0.18, 0.18)) * TAU / N, rr = r * k * range(rnd, 1 - jit, 1 + jit); out.push([ox + Math.cos(a) * rr * sx, oz + Math.sin(a) * rr]); }
+  return out;
+}
+
+// One layered rock: a wall swept round a plan from a buried foot to a rim, with the day's hard beds
+// standing proud as lips (crisp, lit, chamfered on top) over undercuts, vertical joints notched in
+// (some only part of the way up), a slight batter, an optional overhanging cap and a wind-cut foot, and
+// a top surface in rings to the middle. Rows sit on the bed heights so the lips stay crisp; normals are
+// creased at ~38 degrees (shared vertices). Polar about (cx, cz) in the ctx frame.
+//   o: plan(a); rimY(a); topAt(x, z) (ctx-frame x, z); yB; beds [{y0, y1}]; lip, uc, ucH; joints
+//      [{a, w, d, ya, yb, ph}] (w, d in metres); batter (m per m above 1 m); capOut(a) above capY0;
+//      foot {d, h}; chamfer; angles (extra columns: the plan's corners); NA; ground(x, z); tint, aoLo, lipK
+// Returns the columns { a, R0, gl, x, z } (for the dust bank round the foot).
+function strataRock(ctx, b, o) {
+  const cx = o.cx || 0, cz = o.cz || 0, gnd = o.ground || ((x, z) => ctx.gh(x, z));
+  const NA = o.NA || 40, raw = [];
+  for (let j = 0; j < NA; j++) raw.push(j / NA * TAU);
+  for (const a of o.angles || []) raw.push(a);
+  for (const J of o.joints || []) { const dA = J.w / Math.max(0.3, o.plan(J.a)); for (const k of [-1.4, -0.55, 0, 0.55, 1.4]) raw.push(J.a + k * dA); }
+  const ang = raw.map(a => ((a % TAU) + TAU) % TAU).sort((p, q) => p - q);
+  const A = ang.filter((a, i) => i === 0 || a - ang[i - 1] > 0.006);
+  if (A.length > 3 && TAU - A[A.length - 1] + A[0] < 0.006) A.pop();
+  const cols = A.map(a => { const R0 = o.plan(a), x = cx + Math.cos(a) * R0, z = cz + Math.sin(a) * R0; return { a, R0, x, z, gl: gnd(cx + Math.cos(a) * R0 * 0.96, cz + Math.sin(a) * R0 * 0.96), yt: o.rimY(a, x, z) }; });
+  let gMin = Infinity, tMax = -Infinity;
+  for (const c of cols) { gMin = Math.min(gMin, c.gl); tMax = Math.max(tMax, c.yt); }
+  // the shared rows: on and round every bed, filled in to <= 0.3 m apart
+  const ucH = o.ucH ?? 0.2, lip = o.lip ?? 0.1, uc = o.uc ?? 0.12, bat = o.batter ?? 0, ch = o.chamfer ?? 0.07, ph = rngOf(seedOf(ctx.base.x + cx, ctx.base.z + cz, 41))() * 20;
+  const lo = gMin + 0.06, hi = Math.max(lo + 0.05, tMax - 0.26);
+  let F = [lo, hi];
+  for (const bd of o.beds || []) { const c2 = Math.min(0.06, (bd.y1 - bd.y0) * 0.35); F.push(bd.y0 - ucH, bd.y0 - ucH * 0.45, bd.y0 - 0.025, bd.y0 + 0.015, bd.y1 - c2, bd.y1); }
+  F = F.filter(y => y >= lo && y <= hi).sort((p, q) => p - q);
+  const L = [];
+  for (let i = 0; i < F.length; i++) {
+    if (i > 0) { const gap = F[i] - F[i - 1], m = Math.floor(gap / 0.3); for (let k = 1; k <= m; k++) L.push(F[i - 1] + gap * k / (m + 1)); }
+    if (i === 0 || F[i] - F[i - 1] > 0.008) L.push(F[i]);
+  }
+  L.sort((p, q) => p - q);
+  const rowYs = c => {
+    const a = c.gl + 0.06, z = Math.max(a, c.yt - 0.26);
+    return [o.yB ?? Math.min(-0.5, gMin - 0.45), c.gl - 0.14, c.gl + 0.03, ...L.map(y => Math.max(a, Math.min(z, y))), c.yt - 0.2, c.yt - 0.08, c.yt];
+  };
+  // every stratum (between two hard beds) has its own outline, a few centimetres in or out of the
+  // plan here and there (the strata weather back unevenly: the walls step, never one sheer box), and
+  // every lip comes and goes along its length
+  const beds = o.beds || [], tierA = o.tierAmp ?? 0;
+  const tierF = [], lipF = [];
+  { const r2 = rngOf(seedOf(ctx.base.x + cx, ctx.base.z + cz, 43)); for (let t = 0; t <= beds.length; t++) tierF.push(periodicA(r2, 4)); for (let t = 0; t < beds.length; t++) lipF.push(periodicA(r2, 3)); }
+  const tierAt = (a, y) => { let t = 0; for (const bd of beds) if (y > (bd.y0 + bd.y1) / 2) t++; return tierF[t](a); };
+  const rAt = (c, y, kind) => {
+    const h = y - c.gl;
+    let dr = bat * ((o.batY ?? 1) - Math.max(0, h));
+    if (tierA) dr += tierA * tierAt(c.a, y);
+    beds.forEach((bd, t) => {
+      const lk = 0.75 + 0.6 * lipF[t](c.a);
+      dr += lip * Math.max(0.1, lk) * smooth(bd.y0 - 0.02, bd.y0 + 0.012, y) * (1 - 0.55 * smooth(bd.y1 - 0.05, bd.y1 + 0.004, y)) * (1 - smooth(bd.y1, bd.y1 + 0.02, y));
+      if (y < bd.y0) dr -= uc * Math.max(0.3, lk) * Math.exp(-(((bd.y0 - y) / ucH) ** 2) * 1.4);
     });
+    for (const J of o.joints || []) {
+      const fade = smooth(J.ya - 0.12, J.ya + 0.05, y) * (1 - smooth(J.yb - 0.05, J.yb + 0.12, y));
+      if (fade <= 0) continue;
+      const da = angDiff(c.a, J.a + 0.02 * Math.sin(y * 2.7 + J.ph)) * c.R0;
+      dr -= J.d * fade * Math.pow(Math.max(0, 1 - da / J.w), 1.5);
+      // the block on one side of the joint stands a little proud of the other (a stepped face)
+      if (J.off) { const sd = Math.sin(c.a - J.a) * c.R0; dr += J.off * fade * smooth(-J.w * 0.6, J.w * 0.6, sd) * smooth(J.w * 6, J.w * 2, Math.abs(sd)); }
+    }
+    if (o.capOut) dr += o.capOut(c.a) * smooth(o.capY0, o.capY0 + 0.25, y);
+    if (o.foot) dr -= o.foot.d * (1 - smooth(c.gl + 0.02, c.gl + o.foot.h, y));
+    if (kind === 2) dr -= ch; else if (kind === 1) dr -= ch * 0.3;
+    dr += (o.noise ?? 0.016) * noise3(Math.cos(c.a) * 2.3, y * 1.7, Math.sin(c.a) * 2.3, ph);
+    return Math.max(c.R0 * 0.3, c.R0 + dr);
+  };
+  const P = [], rows = [], colOf = [], NC = cols.length;
+  let NR = 0;
+  cols.forEach((c, j) => {
+    const ys = rowYs(c); NR = ys.length;
+    ys.forEach((y, r) => {
+      const kind = r === NR - 1 ? 2 : r === NR - 2 ? 1 : 0, R = rAt(c, y, kind);
+      (rows[r] = rows[r] || []).push(P.length); colOf.push(j);
+      P.push(new V3(cx + Math.cos(c.a) * R, y, cz + Math.sin(c.a) * R));
+    });
+  });
+  const idx = [];
+  for (let r = 0; r < NR - 1; r++) for (let j = 0; j < NC; j++) {
+    const a = rows[r][j], bb = rows[r][(j + 1) % NC], c = rows[r + 1][j], d = rows[r + 1][(j + 1) % NC];
+    idx.push(a, c, bb, bb, c, d);
+  }
+  // the top: the rim, rings in toward the middle on the top surface
+  const rim = rows[NR - 1], rings = [rim];
+  for (const fr of [0.82, 0.56, 0.28]) {
+    const ring = [];
+    for (let j = 0; j < NC; j++) {
+      const q = P[rim[j]], x = cx + (q.x - cx) * fr, z = cz + (q.z - cz) * fr;
+      ring.push(P.length); colOf.push(-1);
+      P.push(new V3(x, o.topAt(x, z) + (cols[j].yt - o.topAt(cols[j].x, cols[j].z)) * smooth(0.5, 1, fr) + 0.012 * noise3(x * 1.7, 0.3, z * 1.7, ph + 3), z));
+    }
+    rings.push(ring);
+  }
+  const mid = P.length; colOf.push(-1); P.push(new V3(cx, o.topAt(cx, cz) + 0.01, cz));
+  for (let q = 0; q < rings.length - 1; q++) for (let j = 0; j < NC; j++) {
+    const a = rings[q][j], bb = rings[q][(j + 1) % NC], c = rings[q + 1][j], d = rings[q + 1][(j + 1) % NC];
+    idx.push(a, c, bb, bb, c, d);
+  }
+  const last = rings[rings.length - 1];
+  for (let j = 0; j < NC; j++) idx.push(last[j], mid, last[(j + 1) % NC]);
+  const tint = o.tint || WHITE, aoLo = o.aoLo ?? 0.5, lipK = o.lipK ?? 1.08;
+  creasedShared(b, P, idx, (p, n, vi) => {
+    const j = colOf[vi], g = j >= 0 ? cols[j].gl : gMin;
+    let k = aoLo + (1 - aoLo) * smooth(-0.1, 1.2, p.y - g);
+    if (n.y < -0.2) k *= 0.74;                                        // under the lips
+    else if (n.y > 0.5 && p.y - g > 0.25) k *= lipK;                  // the lips' and the top's lit faces
+    return mulc(tint, k * (0.92 + 0.1 * Math.max(0, n.y)));
+  }, Math.cos(38 * Math.PI / 180));
+  return cols;
+}
+
+// A bank of the day's own dust or sand heaped round a rock's foot: the terrain's ground texture, mapped
+// like the terrain and carrying its tint and occlusion (terrainTintAt), from up the rock's wall out to
+// under the ground, so the rock stands in the ground with no line or sock at its foot. cols from
+// strataRock; hIn(a) the bank's height at the wall, wOut(a) its reach.
+function dustBank(ctx, cols, hIn, wOut, cx = 0, cz = 0) {
+  const b = ctx.b('apron'), W = ctx.W, S = ctx.biome === 'desert' ? 8 : 7, NC = cols.length;
+  const xf = ctx.xf, wp = new V3();
+  // the terrain's tint, sampled on 12 bearings at two radii and blended between them (cheap)
+  const tintOK = typeof TERRAIN.terrainTintAt === 'function' && W.heights && W.nx;
+  const T = [];
+  for (let k = 0; k < 12; k++) {
+    const a = k / 12 * TAU, row = [];
+    for (const f of [0.3, 1]) {
+      let c = [1, 1, 1];
+      if (tintOK) { const R = cols[Math.round(k / 12 * NC) % NC].R0 + f * wOut(a); wp.set(cx + Math.cos(a) * R, 0, cz + Math.sin(a) * R).applyMatrix4(xf); try { const t = TERRAIN.terrainTintAt(W, wp.x, wp.z); c = [t.r, t.g, t.b]; } catch { /* keep white */ } }
+      row.push(c);
+    }
+    T.push(row);
+  }
+  const tintAt = (a, f) => {
+    const u = (((a / TAU) % 1) + 1) % 1 * 12, k = Math.floor(u), t = u - k, A = T[k % 12], B = T[(k + 1) % 12], m = f < 0.6 ? 0 : 1;
+    return [0, 1, 2].map(i => A[m][i] * (1 - t) + B[m][i] * t);
+  };
+  // [reach, height, occlusion, opacity]: opaque against the wall, gone by the outer edge
+  const RINGS = [[-0.1, 1, 0.72, 1], [0.1, 0.8, 0.8, 1], [0.36, 0.42, 0.9, 0.8], [0.68, 0.13, 0.97, 0.3], [1, -0.04, 1, 0]];
+  const P = [], C = [], UV = [], OP = [];
+  for (const [f, hk, ao, op] of RINGS) {
+    for (const c of cols) {
+      const w = wOut(c.a), R = c.R0 + f * w, x = cx + Math.cos(c.a) * R, z = cz + Math.sin(c.a) * R;
+      const g = f <= 0 ? Math.max(c.gl, ctx.gh(x, z)) : ctx.gh(x, z);
+      const y = g + hk * hIn(c.a);
+      P.push(new V3(x, y, z)); OP.push(op);
+      wp.set(x, y, z).applyMatrix4(xf); UV.push([wp.x / S, wp.z / S]);
+      C.push(mulc(tintAt(c.a, f), ao));
+    }
   }
   const idx = [];
-  for (let r = 0; r < NRow - 1; r++) for (let j = 0; j < NA; j++) {
-    const A = rows[r][j], B = rows[r][(j + 1) % NA], C = rows[r + 1][j], D = rows[r + 1][(j + 1) % NA];
-    idx.push(A, C, B, B, C, D);
+  for (let r = 0; r < RINGS.length - 1; r++) for (let j = 0; j < NC; j++) {
+    const a = r * NC + j, bb = r * NC + (j + 1) % NC, c = (r + 1) * NC + j, d = (r + 1) * NC + (j + 1) % NC;
+    idx.push(a, bb, c, bb, d, c);
   }
-  // the top: the rim, two inner rings on the tilted plane (a few soft lumps), the middle
-  const rim = rows[NRow - 1], inner = [];
-  for (const fr of [0.8, 0.42]) {
-    const ring = [];
-    for (let j = 0; j < NA; j++) {
-      const q = P[rim[j]], x = q.x * fr, z = q.z * fr, a = cols[j].a;
-      ring.push(P.length); P.push(new V3(x, yP(a, Math.hypot(x, z)) + stepOff(a) * (fr > 0.6 ? 0.85 : 0) + 0.035 * noise3(x * 1.3, 0, z * 1.3, ph + 3) + (fr < 0.6 ? 0.02 : 0), z));
-    }
-    inner.push(ring);
-  }
-  const mid = P.length; P.push(new V3(0, yP(0, 0) + 0.03, 0));
-  const ringsT = [rim, ...inner];
-  for (let q = 0; q < ringsT.length - 1; q++) for (let j = 0; j < NA; j++) {
-    const A = ringsT[q][j], B = ringsT[q][(j + 1) % NA], C = ringsT[q + 1][j], D = ringsT[q + 1][(j + 1) % NA];
-    idx.push(A, C, B, B, C, D);
-  }
-  const last = inner[inner.length - 1];
-  for (let j = 0; j < NA; j++) idx.push(last[j], mid, last[(j + 1) % NA]);
-  creased(b, P, idx, (p, n) => {
-    const a = Math.atan2(p.z, p.x), j = Math.round(((a + TAU) % TAU) / TAU * NA) % NA, h = p.y - cols[j].gl;
-    let k = 0.5 + 0.5 * smooth(-0.1, 1.3, h);
-    if (n.y < -0.25) k *= 0.78;                                                       // under the overhangs
-    if (n.y > 0.7) k *= 1.06;
-    return mulc(tint, k * (0.92 + 0.1 * Math.max(0, n.y)));
-  }, faceData(P, idx), Math.cos(40 * Math.PI / 180));
-  if (steep) return;
-  // fallen blocks under the cliffs and the prow (under the step height)
-  const nB = 3 + Math.floor(rnd() * 3);
-  for (let k = 0; k < nB; k++) {
-    const a = (k % 3 === 2 ? la : cliffA + (k % 2 ? Math.PI : 0)) + range(rnd, -0.7, 0.7), dd = plan(a) * range(rnd, 1.25, 1.75), R = range(rnd, 0.22, 0.38);
-    const x = Math.cos(a) * dd, z = Math.sin(a) * dd, [lo] = ctx.foot(R, x, z, 5);
-    const sh = rockShape(rnd, { sx: range(rnd, 1.1, 1.5), sy: 0.6, sides: 4, oblique: 2, topCut: [0.5, 0.7], topTilt: 0.25, noise: 0.1, detail: 1 });
-    placeRock(b, sh, new V3(x, lo + R * 0.1, z), R, { yaw: rnd() * TAU, tilt: range(rnd, 0.1, 0.4), tiltA: rnd() * TAU, tint, cos: Math.cos(30 * Math.PI / 180) });
-  }
-  // a long low debris ramp off the tail, and a little rubble
-  if (piece) {
-    const a = la + Math.PI + range(rnd, -0.25, 0.25), Rr = rRef * range(rnd, 0.42, 0.52), dd = plan(a) * 0.92 + Rr * 0.9;
-    piece(Math.cos(a) * dd, Math.sin(a) * dd, Rr, { sx: range(rnd, 1.8, 2.2), sy: 0.26, sz: range(rnd, 0.85, 1.0), sides: 3, oblique: 2, topCut: [0.55, 0.7], topTilt: 0.16, noise: 0.12, bottom: 0.5 }, { yaw: -a, sink: 0.2, cos: Math.cos(32 * Math.PI / 180) });
-  }
-  rubble(ctx, b, 2 + Math.floor(rnd() * 3), rRef * 1.3, rRef * 1.8, rnd, tint, { size: [0.12, 0.24] });
+  let vi = 0;
+  b.cf = () => OP[vi++];
+  mesh(b, P, idx, { uv: (p, n, i) => UV[i], color: (p, n, i) => C[i] });
+  b.cf = null;
 }
 
-// A small Badlands ledge (no collider): a low tilted outcrop of one or two angular strata slabs.
-function ledge(ctx, b, S, rnd, tint, col, steep, piece) {
-  if (col && (col.cyl || col.box)) return mesa(ctx, b, S, rnd, tint, col, steep, piece);
-  const rFoot = S * range(rnd, 0.85, 1.0), Htot = S * range(rnd, 0.55, 0.85);
-  const [lo] = ctx.foot(rFoot, 0, 0, 8);
-  const nS = 1 + (rnd() < 0.6 ? 1 : 0), th = [];
-  for (let i = 0; i < nS; i++) th.push(i === 0 ? range(rnd, 1.4, 2) : range(rnd, 1, 2));
-  const bury = 0.3 * S;
-  const sum = th.reduce((a, v) => a + v, 0);
-  const cliffA = rnd() * TAU;
-  let poly = polyAng(rnd, 6 + (rnd() < 0.5 ? 1 : 0), rFoot, 0.12, range(rnd, 1.15, 1.5), 0);
-  let y = lo - bury;
-  for (let i = 0; i < nS; i++) {
-    const h = th[i] / sum * (Htot - lo + bury) + (i === 0 ? 0 : 0.12 * S), last = i === nS - 1;
-    const ta = cliffA + Math.PI + range(rnd, -1.2, 1.2), tk = Math.tan(range(rnd, 8, 18) * Math.PI / 180);
-    const yTop = prism(b, new V3(range(rnd, -0.04, 0.04) * S, 0, range(rnd, -0.04, 0.04) * S), y, h, poly, rnd, { tint, under: i === 0 ? 1.1 : 0.84, bulge: i === 0 ? 0.98 : 1.03, bevel: (last ? 0.09 : 0.06) * S, foot: 0.05 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.45 : 0.6, lipK: 1.1, wob: 0.07 });
-    const rMax = poly.reduce((m, [, r]) => Math.max(m, r), 0);
-    poly = poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), angDiff(a, cliffA) < 0.85 ? r * range(rnd, 0.95, 1.01) : Math.max(r * 0.45, r - S * range(rnd, 0.14, 0.38))]);
-    y = yTop - tk * rMax * 0.9;
+// A Badlands ledge: a block of the canyon's own strata broken off the walls. Its plan is its collider's
+// footprint as an angular polygon (chamfered corners, faceted sides); its walls stand straight through
+// the bumper band, battered a little, with the day's hard beds jutting as lit lips over cool undercuts
+// (the same world heights as the painted beds, so every ledge on the leg shares them) and 3-5 joints of
+// uneven length notched down it. Its top is the collider's top; the skyline steps twice: a higher block
+// at the prow end (its cap overhanging above head height) and a low broken shelf off the tail. Round the
+// foot: a bank of ochre dust in the ground's own texture, fallen blocks and scree.
+function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
+  const bm = ctx.biome, by = ctx.base.y;
+  let poly, rot, hx, hz, top;
+  if (col.box) ({ hx, hz, rot, top } = col.box);
+  else if (col.cyl) { hx = col.cyl.r * 1.12; hz = col.cyl.r * 0.88; rot = rnd() * TAU; top = col.cyl.top; }
+  else { hx = S * range(rnd, 0.95, 1.15); hz = hx * range(rnd, 0.5, 0.7); rot = rnd() * TAU; top = S * range(rnd, 0.6, 0.9); }
+  const solid = !!(col.box || col.cyl);
+  poly = boxPoly(rnd, hx, hz, rot, { cham: solid ? [0.3, 0.55] : [0.25, 0.5], wob: 0.07, two: 0.75 });
+  const plan = polyRadius(poly);
+  const angles = poly.map(([x, z]) => Math.atan2(z, x));
+  const prow = rnd() < 0.5 ? 1 : -1, la = rot + (prow < 0 ? Math.PI : 0);   // the prow's end of the long axis
+  const tilt = range(rnd, 0.05, 0.085), ta = rnd() * TAU;
+  // a corner or two knocked off the rim (a flat-bottomed bite)
+  const bites = []; for (let k = 0; k < 1 + (rnd() < 0.5 ? 1 : 0); k++) bites.push({ a: angles[Math.floor(rnd() * angles.length)] + range(rnd, -0.15, 0.15), w: range(rnd, 0.22, 0.4), d: range(rnd, 0.22, 0.42) * Math.min(1, top / 2.2) });
+  const bite = a => bites.reduce((m, q) => Math.max(m, q.d * smooth(q.w + 0.06, q.w - 0.06, angDiff(a, q.a))), 0);
+  const topAt = (x, z) => top + 0.01 + jStep(Math.atan2(z, x)) * smooth(0.05, 0.3, Math.hypot(x, z)) + tilt * (x * Math.cos(ta) + z * Math.sin(ta)) + 0.03 * noise3(x * 0.9, 1.3, z * 0.9, hx) - bite(Math.atan2(z, x)) * smooth(0.45, 0.85, Math.hypot(x, z) / Math.max(0.3, plan(Math.atan2(z, x))));
+  const sc = Math.min(1, Math.max(0.6, S / 2));
+  // joints: 3-5, at uneven places, of uneven depth and length
+  const joints = [], nJ = (solid ? 3 : 2) + Math.floor(rnd() * 3);
+  for (let k = 0; k < nJ; k++) {
+    const full = rnd() < 0.45, ya = full ? -0.2 : range(rnd, 0.1, top * 0.5), yb = full || rnd() < 0.5 ? top + 0.2 : range(rnd, ya + 0.5, top - 0.1);
+    joints.push({ a: rnd() * TAU, w: range(rnd, 0.07, 0.15) * sc, d: range(rnd, 0.1, 0.19) * sc, ya, yb, ph: rnd() * 6, off: range(rnd, -0.09, 0.09) * sc, dy: yb > top ? range(rnd, -0.2, 0.2) * sc : 0 });
   }
-  if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 3), rFoot * 1.25, rFoot * 1.7, rnd, tint, { size: [0.14, 0.28] });
+  // the top breaks along the joints that cut the rim: the block on one side sits higher or lower
+  const jStep = a => joints.reduce((m, J) => { if (!J.dy) return m; const d = Math.atan2(Math.sin(a - J.a), Math.cos(a - J.a)); return m + J.dy * smooth(-0.05, 0.05, d) * smooth(2.2, 1.6, Math.abs(d)); }, 0);
+  const notch = a => joints.reduce((m, J) => m + (J.yb > top ? J.d * 0.7 * Math.max(0, 1 - angDiff(a, J.a) * plan(J.a) / (J.w * 1.6)) : 0), 0);
+  const rimY = (a, x, z) => topAt(x, z) - notch(a);
+  const [gLo] = ctx.foot(Math.max(hx, hz), 0, 0, 9);
+  const beds = bedsIn(bm, by, gLo + 0.2, top - 0.22), capF = periodicA(rnd, 3);
+  const tall = top > 2.1;
+  const cols = strataRock(ctx, b, {
+    plan, rimY, topAt, beds, angles, joints, NA: solid ? 44 : 32,
+    lip: 0.11 * sc, uc: 0.13 * sc, ucH: 0.2 * sc, batter: 0.085, batY: 0.7, chamfer: 0.14 * sc, tierAmp: 0.11 * sc, noise: 0.03,
+    capOut: tall ? (a => Math.max(0, 0.05 + 0.07 * capF(a)) + 0.2 * Math.pow(Math.max(0, Math.cos(a - la)), 3)) : null, capY0: Math.max(1.95, top - 0.4),
+    tint, aoLo: 0.5, lipK: 1.1, yB: Math.min(-0.5, gLo - 0.45),
+  });
+  // the higher block at the prow end (above the collider's top: the skyline steps up once)
+  if (solid && top > 1.6 && rnd() < 0.85) {
+    // (an irregular remnant of the cap bed, longer than it is wide, set back from the walls)
+    const u0 = range(rnd, -0.05, 0.3) * hx, uw = (hx - u0) * 0.5, vh = hz * range(rnd, 0.55, 0.72), off = range(rnd, -0.15, 0.15) * hz;
+    const ox = prow * (u0 + uw) - prow * 0.12, cr = Math.cos(rot), sr = Math.sin(rot);
+    const c2x = ox * cr - off * sr, c2z = ox * sr + off * cr;
+    const poly2 = roundPoly(rnd, 7 + Math.floor(rnd() * 2), vh, { jit: 0.1, sx: uw / vh }).map(([x, z]) => [c2x + x * cr - z * sr, c2z + x * sr + z * cr]);
+    const stepH = range(rnd, 0.42, 0.75) * sc, top2 = top + stepH, tb = rnd() * TAU;
+    const topAt2 = (x, z) => top2 + 0.02 + 0.05 * ((x - c2x) * Math.cos(tb) + (z - c2z) * Math.sin(tb)) + 0.03 * noise3(x * 1.1, 2.1, z * 1.1, hz);
+    strataRock(ctx, b, {
+      cx: c2x, cz: c2z, plan: polyRadius(poly2, c2x, c2z), rimY: (a, x, z) => topAt2(x, z), topAt: topAt2, angles: poly2.map(([x, z]) => Math.atan2(z - c2z, x - c2x)),
+      beds: bedsIn(bm, by, top + 0.05, top2 - 0.12), ground: () => topAt(c2x, c2z), yB: top - 0.25, NA: 28,
+      lip: 0.08 * sc, uc: 0.09 * sc, ucH: 0.14, batter: 0.1, chamfer: 0.08 * sc, tierAmp: 0.05, noise: 0.025,
+      capOut: tall ? (a => 0.06 + 0.16 * Math.pow(Math.max(0, Math.cos(a - la)), 3)) : null, capY0: top2 - 0.3,
+      joints: rnd() < 0.6 ? [{ a: rnd() * TAU, w: 0.09 * sc, d: 0.12 * sc, ya: top - 0.1, yb: top2 + 0.2, ph: 1 }] : [],
+      tint: mulc(tint, 1.02), aoLo: 0.78, lipK: 1.1,
+    });
+  }
+  if (steep) return;
+  // the low broken shelf off the tail (under the step height: no collider)
+  if (rnd() < 0.8) {
+    const uw = range(rnd, 0.35, 0.6) * Math.min(1.4, hx * 0.4), vh = hz * range(rnd, 0.45, 0.7), off = range(rnd, -0.25, 0.25) * hz;
+    const ox = -prow * (hx + uw * 0.7), poly3 = boxPoly(rnd, uw, vh, rot, { ox, oz: off, cham: [0.08, 0.18], wob: 0.03 });
+    const c3x = ox * Math.cos(rot) - off * Math.sin(rot), c3z = ox * Math.sin(rot) + off * Math.cos(rot);
+    const g3 = ctx.foot(Math.max(uw, vh), c3x, c3z, 7)[1], h3 = range(rnd, 0.28, 0.4);
+    const topAt3 = (x, z) => g3 + h3 + 0.02 * noise3(x * 1.3, 0.7, z * 1.3, uw);
+    const cols3 = strataRock(ctx, b, { cx: c3x, cz: c3z, plan: polyRadius(poly3, c3x, c3z), rimY: (a, x, z) => topAt3(x, z), topAt: topAt3, angles: poly3.map(([x, z]) => Math.atan2(z - c3z, x - c3x)), beds: [], NA: 24, chamfer: 0.06, batter: 0.12, noise: 0.03, tint, aoLo: 0.55 });
+    dustBank(ctx, cols3, a => 0.07, a => 0.55, c3x, c3z);
+  }
+  // the dust bank round the foot: deeper under the long walls, with a drift or two
+  const dp = [rnd() * TAU, rnd() * TAU];
+  dustBank(ctx, cols, a => (0.1 + 0.05 * Math.sin(2 * a + dp[0]) + 0.035 * Math.sin(3 * a + dp[1])) * Math.max(0.8, sc), a => (1.0 + 0.3 * Math.sin(2 * a + dp[1]) + 0.15 * Math.sin(5 * a + dp[0])) * Math.max(0.8, sc));
+  // fallen blocks under the walls and the prow, and scree (under the step height)
+  const nB = 2 + Math.floor(rnd() * 3);
+  for (let k = 0; k < nB; k++) {
+    const a = rot + (k % 2 ? 1 : -1) * Math.PI / 2 + range(rnd, -0.8, 0.8), dd = plan(a) + range(rnd, 0.35, 0.9), R = range(rnd, 0.2, 0.34) * sc;
+    const x = Math.cos(a) * dd, z = Math.sin(a) * dd, [lo] = ctx.foot(R, x, z, 5);
+    const sh = rockShape(rnd, { sx: range(rnd, 1.1, 1.5), sy: 0.62, sides: 4, oblique: 2, topCut: [0.5, 0.7], topTilt: 0.25, noise: 0.1, detail: 1 });
+    placeRock(b, sh, new V3(x, lo + R * 0.05, z), R, { yaw: rnd() * TAU, tilt: range(rnd, 0.1, 0.4), tiltA: rnd() * TAU, tint, cos: Math.cos(30 * Math.PI / 180) });
+  }
+  rubble(ctx, b, 3 + Math.floor(rnd() * 4), Math.min(hx, hz) * 1.25, Math.max(hx, hz) * 1.25, rnd, tint, { size: [0.08, 0.2] });
+}
+
+// A Tanaris mound: a low outcrop of pale sandstone cut by the wind into the day's beds (thin lit lips
+// over soft undercuts), its foot scoured in and half buried in a drift of the desert's own sand, its top
+// rounded off, often a smaller tier sitting on it (the skyline steps), a joint or two, and blocks fallen
+// off it lying in the sand. A solid one fills its collider's circle through the bumper band.
+function moundRock(ctx, b, S, rnd, tint, col, steep, piece) {
+  const bm = ctx.biome, by = ctx.base.y, solid = !!col.cyl;
+  const r = solid ? col.cyl.r * 0.99 : S * range(rnd, 0.7, 0.95), top = solid ? col.cyl.top : S * range(rnd, 0.45, 0.72);
+  const sx = solid ? 1 : range(rnd, 1.15, 1.45);
+  const poly = roundPoly(rnd, solid ? 8 + Math.floor(rnd() * 3) : 6 + Math.floor(rnd() * 3), r, { jit: solid ? 0.045 : 0.1, sx, proud: solid ? 0.5 : 1 });
+  const plan = polyRadius(poly), angles = poly.map(([x, z]) => Math.atan2(z, x));
+  const dome = range(rnd, 0.06, 0.14) * Math.min(1.2, S), ta = rnd() * TAU;
+  const topAt = (x, z) => top - 0.03 + dome * Math.max(0, 1 - (x * x / (sx * sx) + z * z) / (r * r)) + 0.03 * Math.sin(x * 0.9 + ta) * Math.cos(z * 0.8 - ta);
+  const joints = [];
+  for (let k = 0; k < 1 + Math.floor(rnd() * 2.5); k++) joints.push({ a: rnd() * TAU, w: range(rnd, 0.08, 0.14), d: range(rnd, 0.06, 0.11), ya: range(rnd, 0, top * 0.4), yb: top + 0.3, ph: rnd() * 6 });
+  const [gLo] = ctx.foot(r * sx, 0, 0, 9);
+  const cols = strataRock(ctx, b, {
+    plan, angles, joints, topAt, rimY: (a, x, z) => topAt(x, z) - joints.reduce((m, J) => m + J.d * 0.6 * Math.max(0, 1 - angDiff(a, J.a) * r / (J.w * 1.6)), 0),
+    beds: bedsIn(bm, by, gLo + 0.18, top - 0.12), NA: solid ? 40 : 28,
+    lip: 0.07, uc: 0.1, ucH: 0.14, batter: 0.13, batY: 0.55, chamfer: 0.13, foot: { d: 0.13, h: 0.3 }, tierAmp: 0.05, noise: 0.025,
+    tint, aoLo: 0.6, lipK: 1.06, yB: Math.min(-0.5, gLo - 0.4),
+  });
+  // a taller block to one side, its outer wall rising over the main one (the skyline steps up there)
+  if (rnd() < (solid ? 0.75 : 0.35)) {
+    const r2 = r * range(rnd, 0.42, 0.56), a = rnd() * TAU, d0 = (r - r2) * range(rnd, 0.75, 0.95), cx2 = Math.cos(a) * d0 * sx, cz2 = Math.sin(a) * d0, h2 = range(rnd, 0.28, 0.48) * Math.min(1.2, S);
+    const poly2 = roundPoly(rnd, 7 + Math.floor(rnd() * 2), r2, { jit: 0.08, sx: range(rnd, 1, 1.3), ox: cx2, oz: cz2 });
+    const t2 = topAt(cx2, cz2) - 0.04 + h2;
+    const topAt2 = (x, z) => t2 + 0.07 * Math.max(0, 1 - ((x - cx2) ** 2 + (z - cz2) ** 2) / (r2 * r2)) + 0.02 * Math.sin(x * 1.7 + ta);
+    strataRock(ctx, b, {
+      cx: cx2, cz: cz2, plan: polyRadius(poly2, cx2, cz2), angles: poly2.map(([x, z]) => Math.atan2(z - cz2, x - cx2)), topAt: topAt2, rimY: (q, x, z) => topAt2(x, z),
+      ground: (x, z) => topAt(x, z) - 0.03, yB: topAt(cx2, cz2) - 0.2, beds: bedsIn(bm, by, topAt(cx2, cz2) + 0.06, t2 - 0.08), NA: 24,
+      lip: 0.05, uc: 0.06, ucH: 0.1, batter: 0.06, chamfer: 0.1, tierAmp: 0.04, noise: 0.02, tint: mulc(tint, 1.03), aoLo: 0.82,
+    });
+  }
+  // a low broken shelf off another side (under the step height: no collider)
+  if (!steep && rnd() < (solid ? 0.6 : 0.3)) {
+    const a = rnd() * TAU, r3 = r * range(rnd, 0.35, 0.5), d3 = plan(a) + r3 * 0.45, c3x = Math.cos(a) * d3, c3z = Math.sin(a) * d3;
+    const poly3 = roundPoly(rnd, 6 + Math.floor(rnd() * 2), r3, { jit: 0.1, sx: range(rnd, 1.1, 1.5), ox: c3x, oz: c3z });
+    const g3 = ctx.foot(r3, c3x, c3z, 6)[1], h3 = range(rnd, 0.2, 0.36);
+    const topAt3 = (x, z) => g3 + h3 + 0.02 * Math.sin(x * 2.1 + z);
+    const cols3 = strataRock(ctx, b, { cx: c3x, cz: c3z, plan: polyRadius(poly3, c3x, c3z), angles: poly3.map(([x, z]) => Math.atan2(z - c3z, x - c3x)), topAt: topAt3, rimY: (q, x, z) => topAt3(x, z), beds: [], NA: 20, chamfer: 0.08, batter: 0.1, noise: 0.02, tint, aoLo: 0.6 });
+    dustBank(ctx, cols3, () => 0.08, () => 0.5, c3x, c3z);
+  }
+  // the drift: sand heaped against the windward side, thin on the lee
+  const wa = rnd() * TAU, k = Math.min(1.2, S);
+  dustBank(ctx, cols, a => (0.16 + 0.18 * Math.max(0, Math.cos(a - wa)) + 0.04 * Math.sin(3 * a + wa)) * k, a => (0.85 + 0.55 * Math.max(0, Math.cos(a - wa)) + 0.15 * Math.sin(4 * a)) * k);
+  if (steep) return;
+  // blocks fallen off it, lying tipped in the sand, and a little rubble
+  const nB = solid ? 2 + Math.floor(rnd() * 2) : 1 + Math.floor(rnd() * 2);
+  for (let q = 0; q < nB; q++) {
+    const a = wa + Math.PI + range(rnd, -1.6, 1.6), dd = plan(a) + range(rnd, 0.3, 0.8), R = range(rnd, 0.18, 0.3) * Math.min(1.3, S);
+    piece(Math.cos(a) * dd, Math.sin(a) * dd, R, { sx: range(rnd, 1.2, 1.6), sy: range(rnd, 0.45, 0.65), sz: range(rnd, 0.8, 1), sides: 4, oblique: 2, topCut: [0.5, 0.68], topTilt: 0.2, sideCut: [0.6, 0.78], noise: 0.08, detail: 1 }, { tilt: range(rnd, 0.15, 0.45), tiltA: rnd() * TAU, sink: 0.38, cos: Math.cos(30 * Math.PI / 180) });
+  }
+  rubble(ctx, b, 1 + Math.floor(rnd() * 3), r * 1.2, r * 1.6, rnd, tint, { size: [0.08, 0.16], sy: 0.6 });
 }
 
 function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d, piece) {
@@ -1816,7 +2053,7 @@ function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d, piece) {
     if (!steep) rubble(ctx, b, 1 + Math.floor(rnd() * 3), S * 0.9, S * 1.4, rnd, tintOf());
     return;
   }
-  ledge(ctx, b, S, rnd, tintOf(), col, steep, piece);
+  ledgeRock(ctx, b, S, rnd, tintOf(), col, steep, piece);
 }
 
 // A Tanaris sandstone arch: a flat-topped slab bridge (a lintel at least twice as wide as it is thick,
@@ -1931,22 +2168,11 @@ function sandArch(ctx, b, S, rnd, tint, col) {
   rubble(ctx, b, 2 + Math.floor(rnd() * 3), span - rL * 2.6, span + rL * 2.6, rnd, tint, { size: [0.14, 0.26], sy: 0.6 });
 }
 
-// Tanaris: wind-scoured sandstone mounds, the wide base buried, a rounded top; or a slab arch whose
-// two feet stand exactly on their colliders.
+// Tanaris: a wind-cut sandstone mound (moundRock), or a slab arch whose two feet stand exactly on
+// their colliders.
 function desertRock(ctx, b, S, rnd, steep, tintOf, piece, col, d) {
   if (col.arch || d.variant === 'arch') return sandArch(ctx, b, S, rnd, tintOf(), col);
-  const big = !!col.cyl;
-  const R = big ? col.cyl.r : S * range(rnd, 0.95, 1.15);
-  const sy = big ? col.cyl.top / (R * 0.64) * 0.97 : range(rnd, 0.6, 0.9);
-  if (big) piece(0, 0, R, { detail: 2, top: true, topCut: [0.6, 0.7], topTilt: 0.14, sx: range(rnd, 1.05, 1.25), sy, sz: range(rnd, 0.9, 1.05), sides: 3, oblique: 0, sideCut: [0.82, 0.92], noise: 0.12, bottom: 0.45, under: 0.08, groove: [0.06, sy * range(rnd, 0.32, 0.45)] }, { sink: 0.22, cos: 0.8, fit: col.cyl.r * 0.98, topY: col.cyl.top, band: 0.62 });
-  else piece(0, 0, R, { detail: 2, top: false, sx: range(rnd, 1.1, 1.4), sy, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, sy * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
-  if (!steep) {
-    if (big) rubble(ctx, b, 2 + Math.floor(rnd() * 3), R * 1.1, R * 1.5, rnd, tintOf(), { size: [0.14, 0.28], sy: 0.6 });
-    else if (S > 1.0) for (let k = 0; k < 1 + (rnd() < 0.5 ? 1 : 0); k++) {
-      const a = rnd() * TAU, dd = S * range(rnd, 0.8, 1.3), r = S * range(rnd, 0.35, 0.6), s2 = range(rnd, 0.6, 0.9);
-      piece(Math.cos(a) * dd, Math.sin(a) * dd, r, { detail: 2, top: false, sx: range(rnd, 1.1, 1.45), sy: s2, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, s2 * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
-    }
-  }
+  moundRock(ctx, b, S, rnd, tintOf(), col, steep, piece);
 }
 
 function rock(ctx, d) {
@@ -2698,7 +2924,7 @@ export function buildNature(W) {
     else if (key === 'coals') { m = b.build(coalMat); m.receiveShadow = true; }
     else {
       const mat = matFor(key, ctx.biome);
-      m = b.build(mat); m.castShadow = !k.endsWith('#rim'); m.receiveShadow = true;
+      m = b.build(mat); m.castShadow = !k.endsWith('#rim') && key !== 'apron'; m.receiveShadow = true;
       if (mat.userData.depth) m.customDepthMaterial = mat.userData.depth;
       if (b.bill) m.onBeforeRender = camHook;
     }
@@ -2785,7 +3011,7 @@ function sliceExtents(batches, keys, cx, cz, Y, rMax, NB = 16) {
       if (hit.length < 2) continue;
       for (let q = 0; q <= 12; q++) {
         const x = hit[0][0] + (hit[1][0] - hit[0][0]) * q / 12, z = hit[0][1] + (hit[1][1] - hit[0][1]) * q / 12, rr = Math.hypot(x, z);
-        if (rr > rMax) continue;
+        if (rr > (typeof rMax === 'function' ? rMax(Math.atan2(z, x)) : rMax)) continue;     // (debris lying further out is not the wall)
         const bin = Math.round(((Math.atan2(z, x) + Math.PI) / TAU) * NB) % NB;
         ext[bin] = Math.max(ext[bin], rr);
       }
@@ -2821,11 +3047,35 @@ function auditColliders(biome) {
         const c = cs[0], t = topOver(ctx.batches, c.x, c.z, c.r);
         if (t != null) { const T = tops[kind] || (tops[kind] = { n: 0, sum: 0, max: 0 }); const e = c.y + c.hh - t; T.n++; T.sum += e; T.max = Math.max(T.max, Math.abs(e)); if (Math.abs(e) > 0.4) console.error(`AUDITX ${kind} s ${d.s.toFixed(2)} e ${e.toFixed(2)} r ${c.r.toFixed(2)} top ${(c.y + c.hh - d.y).toFixed(2)} slope ${(Math.max(...[0, 1, 2, 3].map(q => W.heightAt(d.x + Math.cos(q * 1.57) * c.r, d.z + Math.sin(q * 1.57) * c.r))) - Math.min(...[0, 1, 2, 3].map(q => W.heightAt(d.x + Math.cos(q * 1.57) * c.r, d.z + Math.sin(q * 1.57) * c.r)))).toFixed(2)}`); }
       }
+      // a Badlands ledge's oriented box: per bearing, the slice against the box's outline
+      const bx = d.k === 'rock' && biome === 'badlands' ? (W.statics || []).find(q => q.part === 'rock_ledge' && Math.abs(q.x - d.x) < 0.05 && Math.abs(q.z - d.z) < 0.05) : null;
+      if (bx) {
+        const g = W.heightAt(bx.x, bx.z), top = bx.y + bx.hy, cr = Math.cos(bx.ry || 0), sr = Math.sin(bx.ry || 0), NB = 32;
+        for (const h of [0.3, 0.6, 1.0, 1.5]) {
+          if (g + h > top - 0.1) continue;
+          const boxR = th => { const dx = Math.cos(th), dz = Math.sin(th), lx = dx * cr - dz * sr, lz = dx * sr + dz * cr; return Math.min(bx.hx / Math.max(1e-6, Math.abs(lx)), bx.hz / Math.max(1e-6, Math.abs(lz))); };
+          const ext = sliceExtents(ctx.batches, ['rock'], bx.x, bx.z, g + h, th => boxR(th) + 0.45, NB);
+          let gap = 0, out = 0, gm = 0, om = 0, n = 0;
+          ext.forEach((e, k) => {
+            if (e < 0) return;
+            const th = k / NB * TAU - Math.PI, dx = Math.cos(th), dz = Math.sin(th);
+            const lx = dx * cr - dz * sr, lz = dx * sr + dz * cr, R = Math.min(bx.hx / Math.max(1e-6, Math.abs(lx)), bx.hz / Math.max(1e-6, Math.abs(lz)));
+            const gp = Math.max(0, R - e), op = Math.max(0, e - R); gap += gp; out += op; gm = Math.max(gm, gp); om = Math.max(om, op); n++;
+          });
+          if (n < NB * 0.75) { add('ledge-box (open slice)', 0, 0); continue; }
+          const R = rows['ledge-box @' + h] || (rows['ledge-box @' + h] = { n: 0, gap: 0, gapMax: 0, out: 0, outMax: 0 });
+          R.n++; R.gap += gap / n; R.gapMax = Math.max(R.gapMax, gm); R.out += out / n; R.outMax = Math.max(R.outMax, om);
+        }
+        const tS = discSamples(bx.x, bx.z, Math.min(bx.hx, bx.hz) * 0.8), best = tS.map(() => null);
+        for (const [k, b] of ctx.batches) if (k.startsWith('rock#')) surfTop(i => [b.P[i * 3], b.P[i * 3 + 1], b.P[i * 3 + 2]], b.I, tS).forEach((hh, i) => { if (hh != null && (best[i] == null || hh > best[i])) best[i] = hh; });
+        const t = topOf(best);
+        if (t != null) { const T = tops['ledge-box'] || (tops['ledge-box'] = { n: 0, sum: 0, max: 0 }); const e = top - t; T.n++; T.sum += e; T.max = Math.max(T.max, Math.abs(e)); }
+      }
       for (const c of cs) {
         const g = W.heightAt(c.x, c.z), top = c.y + c.hh;
         for (const h of d.k === 'cairn' ? [0.15, 0.4] : [0.3, 0.6, 1.0, 1.5]) {
           if (g + h > top - 0.1) continue;
-          const ext = sliceExtents(ctx.batches, d.k === 'oak' ? ['bark_oak'] : ['rock'], c.x, c.z, g + h, c.r * 2 + 0.6);
+          const ext = sliceExtents(ctx.batches, d.k === 'oak' ? ['bark_oak'] : ['rock'], c.x, c.z, g + h, d.k === 'rock' ? c.r + 0.45 : c.r * 2 + 0.6);
           const has = ext.filter(e => e >= 0);
           if (has.length < 12) { add((d.k === 'oak' ? 'oak' : kind) + ' (open slice)', 0, 0); continue; }
           const mn = Math.min(...has), mx = Math.max(...has);

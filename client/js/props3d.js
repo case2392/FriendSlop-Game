@@ -5,7 +5,7 @@
 // (shared/loot.js LOOT[type].shape). Every face that can land facing the camera is painted:
 // loot tumbles, so backs and flanks matter as much as fronts.
 //
-// Loose loot also twinkles (see "the loot twinkle" below): one point cloud for every piece, so a
+// Loose loot also glints (see "the loot twinkle" below): one point cloud for every piece, so a
 // stop's grabbable things stand out from its crates and barrels.
 //
 // API: buildProp(type, W) → Object3D · mapCanvas(W) → the paper road map (canvas) · PREVIEW
@@ -14,7 +14,7 @@ import { THREE, tex, painted, canvasTex, shadowy } from './gfx.js';
 import { LOOT } from '/shared/loot.js';
 import { RV_DIM, toWorld, toLocal, qYaw } from '/shared/rv.js';
 import { FLAG, PLAYER, GRAB } from '/shared/constants.js';
-import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS, DINO, BOULDER_BANDS } from './paint/props.js';
+import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS, DINO, BOULDER_BANDS, TWINKLE_CELLS } from './paint/props.js';
 import { mergeGeometries, mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { rngFrom, rgba, blob, ellipse, range, pick, makeCanvas } from './paint/core.js';
 
@@ -686,7 +686,7 @@ const BUILDERS = {
     }
     // three small blunt teeth each side at the front of the upper jaw, resting over the lower lip
     for (const sd of [-1, 1]) {
-      for (const [k, z0] of [0.5, 0.585, 0.665].entries()) {
+      for (const [k, z0] of [0.5, 0.585, 0.665].map(D.sz).entries()) {
         const z = z0 + range(rnd, -0.008, 0.008), p = secPoint(secAt(head, z), sd < 0 ? D.lipU + 0.015 : 1 - D.lipU - 0.015, pw), L = range(rnd, 0.034, 0.04) * (k === 0 ? 0.85 : 1);
         B.add(peg([p[0] * 0.97, p[1] + 0.02, p[2]], [p[0] * 0.985, p[1] - L, p[2] + 0.006], range(rnd, 0.026, 0.03)), R.ivory, { crease: 70 });
       }
@@ -1338,46 +1338,61 @@ function demoWorld() {
 
 // ---- the loot twinkle --------------------------------------------------------------------------------
 
-// A golden glint hangs ~0.3 m over every loose piece of loot within ~30 m (full to 26 m, gone by
-// 40), each pulsing on its own phase (alpha 0.5 → 1 over 1.6 s), like the sparkle over a lootable
-// thing in WoW, so a stop's
-// grabbable things stand out from the crates, barrels and tyres dressing it. All of them are ONE
-// THREE.Points: one draw call, no shadow. Its onBeforeRender gathers the nearest pieces and hands their
-// positions, fades and phases to the shader as uniform arrays, so the stars sit on this frame's poses.
-// It hides (fading) what someone is holding, anything tumbling or flying, and what rides in or on
-// the RV; it fades out with distance. No hook in main.js: loot registers itself when it's added to the
-// scene, and the game state (window.__nmd) says who holds what and where the RV is.
-const TW = { N: 40, far: 40, fade: 14, near: 0.7, lift: 0.3, period: 1.6, minPx: 10, maxPx: 30 };
+// A small gold glint rises off every loose piece of loot, like the glitter over a lootable quest
+// object in WoW: it winks on just over the piece, drifts up ~15 cm with a little sideways sway and
+// fades out at the top, then starts again; every piece runs its own cycle (its own phase and speed,
+// one of the four glints painted in loot_twinkle, maybe mirrored), so the glints at a stop come and go
+// unevenly instead of standing in a row. They're small (12–20 px), at full strength to 20 m and gone by
+// 30, so a stop's grabbable things stand out from the crates, barrels and tyres dressing it without
+// turning it into a mobile game. All of them are ONE THREE.Points: one draw call, no shadow. Its
+// onBeforeRender gathers the nearest pieces and hands their positions, fades, phases and glints to the
+// shader as uniform arrays, so the glints sit on this frame's poses. It hides (fading) what someone is
+// holding, anything tumbling or flying, and what rides in or on the RV. No hook in main.js: loot
+// registers itself when it's added to the scene, and the game state (window.__nmd) says who holds
+// what and where the RV is.
+const TW = { N: 40, far: 30, fade: 10, near: 0.7, lift: 0.14, rise: 0.15, sway: 0.025, flicker: 1.15, minPx: 12, maxPx: 20 };
 const twLoose = new Set();
 let twCloud = null, twSeq = 0, twLast = 0, twDemo = false;
 const twC = new V3(), twE = [];
+// uP: xyz where the glint starts, w its strength · uQ: x phase (0..2π), y size (m), z which glint
+// (0..TWINKLE_CELLS²-1), w the cycle's rate (Hz), negative = mirrored
 const TW_VS = `
 uniform vec4 uP[${TW.N}];
 uniform vec4 uQ[${TW.N}];
 uniform float uTime, uViewH, uPx;
 varying float vA;
-varying float vRot;
+varying vec3 vRot;
 void main() {
   int i = int(position.x + 0.5);
   vec4 P = uP[i], Q = uQ[i];
-  vec4 mv = viewMatrix * vec4(P.xyz, 1.0);
-  float pulse = 0.5 + 0.5 * sin(uTime * ${(2 * Math.PI / TW.period).toFixed(5)} + Q.x);
-  vA = P.w * (0.5 + 0.5 * pulse);
-  vRot = 0.22 * sin(uTime * 0.9 + Q.x * 1.7);
+  float t = fract(uTime * abs(Q.w) + Q.x * 0.159155);
+  vec3 p = P.xyz;
+  p.y += ${TW.rise.toFixed(3)} * t;
+  p.x += ${TW.sway.toFixed(3)} * sin(uTime * 1.9 + Q.x * 3.1);
+  p.z += ${TW.sway.toFixed(3)} * cos(uTime * 1.55 + Q.x * 2.3);
+  vec4 mv = viewMatrix * vec4(p, 1.0);
+  // wink on at the bottom, fade out over the top of the rise; a quick flicker on top of that
+  float env = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.55, 1.0, t));
+  float fl = 0.5 + 0.5 * sin(uTime * ${(2 * Math.PI * TW.flicker).toFixed(5)} * (0.8 + 0.4 * fract(Q.x * 2.7)) + Q.x * 1.7);
+  vA = P.w * env * (0.7 + 0.3 * fl);
+  vRot = vec3(0.14 * sin(uTime * 0.8 + Q.x * 1.7) + 0.2 * (fract(Q.x * 3.7) - 0.5), Q.w < 0.0 ? -1.0 : 1.0, Q.z);
   float px = 0.5 * projectionMatrix[1][1] * uViewH * Q.y / max(0.1, -mv.z);
-  gl_PointSize = P.w > 0.0 ? clamp(px, ${TW.minPx.toFixed(1)} * uPx, ${TW.maxPx.toFixed(1)} * uPx) * (0.84 + 0.26 * pulse) : 0.0;
+  gl_PointSize = P.w > 0.0 ? clamp(px, ${TW.minPx.toFixed(1)} * uPx, ${TW.maxPx.toFixed(1)} * uPx) * (0.9 + 0.14 * fl) * (1.0 - 0.12 * t) : 0.0;
   gl_Position = projectionMatrix * mv;
 }`;
 const TW_FS = `
 uniform sampler2D map;
 varying float vA;
-varying float vRot;
+varying vec3 vRot;
 void main() {
-  vec2 c = gl_PointCoord - 0.5;
-  float s = sin(vRot), k = cos(vRot);
-  vec4 t = texture2D(map, vec2(k * c.x - s * c.y, s * c.x + k * c.y) + 0.5);
+  vec2 c = (gl_PointCoord - 0.5) * vec2(vRot.y, 1.0);
+  float s = sin(vRot.x), k = cos(vRot.x);
+  vec2 q = vec2(k * c.x - s * c.y, s * c.x + k * c.y) + 0.5;     // in the cell: x right, y down
+  if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) discard;
+  float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vRot.z + 0.5, n)), row = floor((vRot.z + 0.5) / n);
+  vec4 t = texture2D(map, vec2((col + q.x) / n, 1.0 - (row + q.y) / n));
   if (t.a * vA < 0.004) discard;
-  // premultiplied: the glow adds light, the star itself also covers what's behind it (snow, sand)
+  // premultiplied: the glow adds light, the glint itself (and its dark edge) covers what's behind it
   gl_FragColor = vec4(t.rgb * t.a * vA * 1.2, t.a * t.a * vA * 0.9);
   #include <colorspace_fragment>
 }`;
@@ -1414,7 +1429,13 @@ function twAdded(e) {
 function twRemoved(e) { twLoose.delete(e.target); }
 function twinkleOn(obj, type) {
   const sh = LOOT[type].shape, half = sh[0] === 'box' ? [sh[1], sh[2], sh[3]] : sh[0] === 'cyl' ? [sh[2], sh[1], sh[2]] : [sh[1], sh[1], sh[1]];
-  obj.userData.tw = { half, phase: (twSeq++ * 2.39996) % TAU, size: 0.36 + 0.25 * Math.max(...half), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0 };
+  // its own cycle: phase by the golden angle, a speed of 0.3–0.42 Hz, the next of the painted glints,
+  // mirrored every other run of them
+  const k = twSeq++, cells = TWINKLE_CELLS * TWINKLE_CELLS;
+  obj.userData.tw = {
+    half, phase: (k * 2.39996) % TAU, size: 0.22 + 0.16 * Math.max(...half), glint: k % cells,
+    rate: (0.3 + 0.12 * ((k * 0.618034) % 1)) * (Math.floor(k / cells) % 2 ? -1 : 1), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0,
+  };
   obj.addEventListener('added', twAdded);
   obj.addEventListener('removed', twRemoved);
   return obj;
@@ -1489,7 +1510,7 @@ function twUpdate(renderer, scene, camera) {
   for (let i = 0; i < n; i++) {
     const [, o, a] = twE[i], u = o.userData.tw, m = o.matrixWorld.elements;
     U.uP.value[i].set(m[12], u.top + TW.lift, m[14], a);
-    U.uQ.value[i].set(u.phase, u.size, 0, 0);
+    U.uQ.value[i].set(u.phase, u.size, u.glint, u.rate);
   }
   for (let i = n; i < TW.N; i++) U.uP.value[i].w = 0;
   this.geometry.setDrawRange(0, n);
@@ -1580,7 +1601,7 @@ export const PREVIEW = {
     const o = buildProp(k, null), bb = new THREE.Box3().setFromObject(o), s = bb.getSize(new V3());
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); o.rotation.y = Math.PI; return g;
   }])),
-  // the glint over loose loot, with a few pieces lying about (the pulse is frozen wherever it was)
+  // the glint over loose loot, with a few pieces lying about (each glint caught wherever its rise was)
   twinkle: () => {
     twDemo = true;
     const g = new THREE.Group();

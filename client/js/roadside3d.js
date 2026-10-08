@@ -1304,7 +1304,7 @@ function buildCrash(B, p, parts, ctx, decor) {
       // spread of the lip across the cloth, a nose bulging out in the middle, and the turn away from the road
       const zL = lips[3], nose = Math.max(0, zL - (lips[0] + lips[6]) / 2);
       let k = (Math.max(...lips) - Math.min(...lips)) * 0.6 + nose * 3 + Math.abs(da) * (da * side > 0 ? 5 : 1.5);   // (rather toward the oncoming RV)
-      for (const [lx, lz] of [[-3, lips[0] - 2], [3, lips[6] - 2], [0, zL - 2], [-4.8, zL - 0.6], [4.5, zL - 0.8]]) if (clash(lx, lz, 0.3)) k += 10;
+      for (const [lx, lz] of [[-3, lips[0] - 1.75], [3, lips[6] - 1.75], [0, zL - 1.75], [-4.8, zL - 0.6], [4.5, zL - 0.8]]) if (clash(lx, lz, 0.3)) k += 10;
       if (k < bestK) { bestK = k; best = da; }
     }
     B.frame(p.x, d.y, p.z, -side * Math.PI / 2 + best);
@@ -1327,11 +1327,11 @@ function buildCrash(B, p, parts, ctx, decor) {
       const sAtZ = z => { let i = 0; while (i < P.length - 2 && P[i + 1][0] < z) i++; return P[i][2]; };
       return { P, iL, fb, sL: P[iL][2], zL: P[iL][0], yL: P[iL][1], at, sAtZ };
     };
-    const hw = range(rnd, 2.7, 3.1), ph = rnd() * 6, ph2 = rnd() * 6, NU = 16, NV = 24, TR = 0.3, LH = 1.9;
+    const hw = range(rnd, 2.7, 3.1), ph = rnd() * 6, ph2 = rnd() * 6, NU = 20, NV = 32, TR = 0.26, LH = 3.3;
     const cols = [];
     for (let i = 0; i <= NU; i++) {
       const u = i / NU, x = (u - 0.5) * 2 * hw, pr = profile(x);
-      const sT = pr.sAtZ(pr.zL - (1.9 + 0.35 * Math.sin(u * 4.3 + ph)));
+      const sT = pr.sAtZ(pr.zL - (1.45 + 0.3 * Math.sin(u * 4.3 + ph)));
       cols.push({ x, pr, sT });
     }
     // creases running diagonally down the cloth (x at the top edge, x at the hem)
@@ -1345,7 +1345,8 @@ function buildCrash(B, p, parts, ctx, decor) {
       lift += (pr.fb ? 0.14 : 0.2) * Math.exp(-(((ds + 0.3) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(c.x * 2.3 + ph));
       for (const [xa, xb, A] of creases) lift += A * lerp(0.3, 1, hang) * Math.exp(-(((c.x - lerp(xa, xb, t)) / 0.5) ** 2)) * smooth(0, 0.25, t);
       lift += 0.07 * (0.5 + 0.5 * Math.sin(c.x * 3.1 + ph + t * 2.5)) * (1 - hang);                     // loose folds on top
-      lift += 0.13 * (0.5 + 0.5 * Math.sin(c.x * 2.2 + ph2)) * hang;                                     // hanging folds
+      // hanging folds: about a metre and a quarter apart, deepening toward the hem, a lit crest and a shadowed trough each
+      lift += (0.07 + 0.15 * smooth(TR, 1, t)) * Math.pow(0.5 + 0.5 * Math.sin(c.x * 4.9 + ph2 + 0.8 * Math.sin(c.x * 1.6 + ph)), 1.4) * hang;
       return V(c.x, q.y + q.ny * lift, q.z + q.nz * lift);
     };
     // (on the snow day the cloth takes no top cover, which would only wash its red stripes pink: the snow lies on
@@ -1429,7 +1430,7 @@ function buildCrash(B, p, parts, ctx, decor) {
     for (const u0 of [0.2, 0.5, 0.82]) {
       const a = V(range(rnd, -0.4, 0.4), 1.2, range(rnd, -0.3, 0.3)), b = drapeAt(Math.round(u0 * NU), 0.02, 0.02), m = a.clone().lerp(b, 0.5);
       m.y = Math.max(B.ground(m.x, m.z) + 0.05, m.y - 0.35);
-      B.tube('rs_rope', [a, m, b], 0.025, { seg: 6, lod0: true });
+      B.tube('rs_rope', [a, m, b], 0.032, { seg: 6, lod0: false });
     }
   }
   B.frame(d.x, d.y, d.z, d.ry);
@@ -1910,8 +1911,9 @@ function buildDino(B, p, parts, ctx) {
       const t = i / n, k = t * (DINO_NECK.length - 1), j = Math.min(DINO_NECK.length - 2, Math.floor(k));
       pts.push(curve.getPoint(t)); radii.push(lerp(DINO_NECK[j][2], DINO_NECK[j + 1][2], k - j));
     }
-    const F = framesOf(pts, V(0, 1, -0.9)), NL = F.len[n];
-    B.tube('rs_dino', pts, radii, { seg: 16, tint, uvFn: (pl, nl, v) => { const q = F.at(v.uv[1] * S); return [0.2 - v.uv[1], lerp(0.12, 0.84, vOf(nl, [q.d.x, q.d.y, q.d.z], 0.3))]; } });
+    // (u0 lands the texture's crack web on the neck's flank just short of the break)
+    const F = framesOf(pts, V(0, 1, -0.9)), NL = F.len[n], U0 = 0.55 + (NL - 0.45) / S;
+    B.tube('rs_dino', pts, radii, { seg: 16, tint, uvFn: (pl, nl, v) => { const q = F.at(v.uv[1] * S); return [U0 - v.uv[1], lerp(0.12, 0.84, vOf(nl, [q.d.x, q.d.y, q.d.z], 0.3))]; } });
     // skin folds across the throat where the neck bends up out of the shoulders
     for (const t of [0.12, 0.17, 0.22]) {
       const q = F.at(NL * t), r0 = lerp(radii[q.i], radii[q.i + 1], q.f) - 0.03;
@@ -1932,7 +1934,7 @@ function buildDino(B, p, parts, ctx) {
     const jag = []; for (let i = 0; i < NJ; i++) jag.push(0.03 + 0.05 * (0.5 + 0.5 * Math.sin(i / NJ * TAU * 2 + ph)) + (i % 3 === 1 ? range(rnd, 0.04, 0.1) : range(rnd, 0, 0.025)));
     const ring = (u, rr, h) => { const a = u * TAU, ii = Math.round(u * NJ) % NJ, hh = h === null ? 0 : h(jag[ii]); return E.clone().addScaledVector(Xn, Math.cos(a) * rr).addScaledVector(Yn, Math.sin(a) * rr).addScaledVector(Tn, hh); };
     const arr = q => [q.x, q.y, q.z];
-    B.grid('rs_dino', NJ, 1, (u, v) => arr(ring(u, rE * (1 - 0.04 * v), j => v * j)), { wrapU: true, tint, uvFn: (pl, nl) => [0.2 - NL / S, lerp(0.12, 0.84, vOf(nl, [Yn.x, Yn.y, Yn.z], 0.3))] });
+    B.grid('rs_dino', NJ, 1, (u, v) => arr(ring(u, rE * (1 - 0.04 * v), j => v * j)), { wrapU: true, tint, uvFn: (pl, nl) => [U0 - NL / S, lerp(0.12, 0.84, vOf(nl, [Yn.x, Yn.y, Yn.z], 0.3))] });
     const lipR = [rE * 0.96, rE * 0.88, rE * 0.8], lipH = [0, 0.012, -0.025];
     B.grid('rs_stone', NJ, 2, (u, v) => { const k = Math.round(v * 2); return arr(ring(u, lipR[k], j => j + lipH[k])); }, { wrapU: true, tint: [1.3, 1.24, 1.1], noAO: true });
     const inR = [rE * 0.8, rE * 0.78, rE * 0.55, 0.02], inH = [-0.025, -0.32, -0.6, -0.68];
@@ -1945,7 +1947,7 @@ function buildDino(B, p, parts, ctx) {
     }
     // two chunks of the neck lying on the plinth's front ledge under the break (painted skin on top, the pale
     // plaster showing at the broken sides)
-    for (const [cx, cz, w, ry2] of [[-0.75, 1.15, 0.42, 0.5], [0.95, 1.05, 0.3, -0.4]]) {
+    for (const [cx, cz, w, ry2] of [[-0.38, 1.2, 0.36, 0.5], [0.42, 1.28, 0.26, -0.4]]) {
       B.box('rs_dino', w, 0.13, w * 0.75, cx, ptop + 0.06, cz, { r: 0.04, jit: 0.07, ry: ry2, rz: 0.12, rx: -0.08, tint, uvFn: (pl, nl) => [pl.x / S, lerp(0.3, 0.8, 0.5 + 0.5 * nl.y)],
         faces: { px: { m: 'rs_stone', tint: [1.25, 1.2, 1.08] }, nx: { m: 'rs_stone', tint: [1.25, 1.2, 1.08] }, ny: { m: 'rs_stone', tint: [1.1, 1.05, 0.95] } } });
     }
@@ -1953,8 +1955,8 @@ function buildDino(B, p, parts, ctx) {
       // snow along the top of the arch (none on the climb), icicles hanging under it
       snowRidge(pts, radii, F, Math.round(n * 0.55), n - 3, 0.09);
       for (let k = 0; k < 9; k++) {
-        const q = F.at(NL * lerp(0.62, 0.92, k / 8) + range(rnd, -0.08, 0.08)), r = lerp(radii[q.i], radii[q.i + 1], q.f);
-        if (q.d.y < 0.55) continue;
+        const q = F.at(NL * lerp(0.6, 0.8, k / 8) + range(rnd, -0.06, 0.06)), r = lerp(radii[q.i], radii[q.i + 1], q.f);
+        if (q.d.y < 0.7) continue;
         const bot = q.p.clone().addScaledVector(q.d, -r * 0.96).add(V(range(rnd, -0.18, 0.18), 0, 0)), len = range(rnd, 0.12, 0.34) * (k % 3 === 1 ? 1.3 : 1);
         B.cyl('rs_ice!', range(rnd, 0.028, 0.04), 0, len, bot.x, bot.y - len / 2 + 0.03, bot.z, { seg: 5, caps: false, fit: true, noAO: true, lod0: true });
       }

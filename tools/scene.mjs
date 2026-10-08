@@ -128,8 +128,8 @@ for (const v of views) {
     } else if (v === 'crash') {
       const p = W.pois.find(p => p.type === 'crash');
       if (!p) { console.log('  (no crash site on this day)'); continue; }
-      // stand on the mesa top, a few metres from the wreck
-      await camAt(p.x - p.side * 5.5, p.z - 4.5, p.x, (await hy(p.x, p.z)) + 0.9, p.z);
+      // stand on the mesa top, a few metres from the wreck (the flat top reaches about 5.2 m out)
+      await camAt(p.x - p.side * 3.2, p.z - 3.0, p.x, (await hy(p.x, p.z)) + 0.9, p.z);
       await shot(dave, v);
     } else if (v === 'boulder') {
       const b = W.obstacles.find(o => o.type === 'boulder');

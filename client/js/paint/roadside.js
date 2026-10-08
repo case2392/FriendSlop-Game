@@ -932,7 +932,7 @@ register('rs_gasbag', {
   paint(g, s, rnd, h, cv) {
     const lerp = (a, b, t) => a + (b - a) * t, smooth01 = t => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
     // the outline: a gathered top edge, ragged sides narrowing a little, the hem torn into tongues
-    const body = 0.66 * s, out = [];
+    const body = 0.72 * s, out = [];
     out.push([2, 0], [s - 2, 0]);
     for (let k = 1; k <= 8; k++) { const y = body * k / 8; out.push([s - 2 - 10 * (k / 8) - range(rnd, 0, 5), y]); }
     // tongues from right to left: [valley x, tip x, tip y]
@@ -940,7 +940,7 @@ register('rs_gasbag', {
     for (let k = 1; k < nT; k++) edges.push(s - 14 - (s - 28) * (k / nT) + range(rnd, -14, 14));
     edges.push(14);
     for (let k = 0; k < nT; k++) {
-      const xr = edges[k], xl = edges[k + 1], tipY = s * [0.97, 0.86, 0.99, 0.9][k] - range(rnd, 0, 8), tipX = lerp(xl, xr, range(rnd, 0.3, 0.6));
+      const xr = edges[k], xl = edges[k + 1], tipY = s * [0.97, 0.89, 0.99, 0.92][k] - range(rnd, 0, 8), tipX = lerp(xl, xr, range(rnd, 0.3, 0.6));
       const valley = body + range(rnd, -6, 10);
       if (k > 0) out.push([xr, valley]);
       // the right flank of the tongue frays down to its tip, the left flank back up
