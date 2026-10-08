@@ -726,13 +726,14 @@ const BUILDERS = {
       const t = secPoint(secAt(head, z), 0.5, pw);
       B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(0, t[1] - 0.008, z, 0.15, 0, 0, [0.05 * s, 0.07 * s, 0.08 * s]), tint: 0.78 });
     }
-    // the neck: a thick stub flaring out to the break, angling down and back out of the skull
-    const neck = [{ z: 0, w: 0.33, top: 0.28, bot: -0.28 }, { z: 0.2, w: 0.355, top: 0.295, bot: -0.295 }, { z: 0.36, w: 0.39, top: 0.31, bot: -0.31 }, { z: 0.45, w: 0.42, top: 0.32, bot: -0.32 }];
-    const NL = 0.45, nS = new V3(0, 0.06, -0.3), nM = mat4(nS.x, nS.y, nS.z, 0.5, Math.PI, 0);
+    // the neck: a thick stub dropping steeply down and back out of the skull (it held the head up),
+    // flaring a little to the break, which faces the ground
+    const neck = [{ z: 0, w: 0.33, top: 0.28, bot: -0.28 }, { z: 0.14, w: 0.35, top: 0.29, bot: -0.29 }, { z: 0.26, w: 0.385, top: 0.305, bot: -0.305 }, { z: 0.34, w: 0.42, top: 0.32, bot: -0.32 }];
+    const NL = 0.34, nS = new V3(0, 0.07, -0.37), nM = mat4(nS.x, nS.y, nS.z, 0.92, Math.PI, 0);
     const nEnd = new V3(0, 0, NL).applyMatrix4(nM);
     const jag = v => { if (v.z > NL - 0.001) { const a = Math.atan2(v.y, v.x); v.z += 0.04 * Math.sin(a * 5 + 1.3) + 0.022 * Math.sin(a * 11 + 0.4) + 0.012 * Math.sin(a * 23) - 0.012; } };
     B.add(loftU(neck, { segs: 30, pw: 2.2, v: [vOf(nS.z), vOf(nEnd.z)], caps: [false, false] }), R.dinohead, { at: nM, flipU: true, crease: 80, warp: jag });
-    for (const [lz, s] of [[0.12, 0.95], [0.3, 0.85]]) {
+    for (const [lz, s] of [[0.08, 0.95], [0.22, 0.85]]) {
       const q = new V3(0, secAt(neck, lz).top - 0.01, lz).applyMatrix4(nM);
       B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(q.x, q.y, q.z, 0.6, 0, 0, [0.055 * s, 0.07 * s, 0.085 * s]), tint: 0.78 });
     }
@@ -856,7 +857,7 @@ function boulderGeo(biome) {
     };
     for (const L of LUMPS) lump(L, 12, [0.68, 0.84]);
     // broken chunks at the foot (unit space: the whole thing is fitted to the box after)
-    for (const [x, z, rx, rz, ht] of CHUNKS) lump({ c: [x * 0.82, -0.85 + ht * 0.6, z * 0.85], r: [rx * 0.7, ht * 0.75, rz * 0.7], rz: range(rnd, -0.3, 0.3), top: 0.55 }, 7, [0.55, 0.75], true);
+    for (const [x, z, rx, rz, ht] of CHUNKS) lump({ c: [x * 0.98, -0.85 + ht * 0.4, z * 1.12], r: [rx * 0.62, ht * 0.5, rz * 0.62], rz: range(rnd, -0.3, 0.3), top: 0.55 }, 7, [0.55, 0.75], true);
     out = mergeGeometries(parts, false);
     out.computeBoundingBox();
     const bb = out.boundingBox, c = bb.getCenter(new V3()), s = bb.getSize(new V3()), p = out.attributes.position;
