@@ -31,7 +31,7 @@ const GROUPS = {
 };
 
 // stuff people bump into but a 3-ton RV flattens
-const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor']);
+const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
 
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
 const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });

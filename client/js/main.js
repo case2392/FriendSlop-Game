@@ -190,6 +190,7 @@ function computeTarget() {
   const hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
   if (!hit) return doorNear() ? { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` } : null;
   if (hit.kind === 'prop') {
+    if (me.holding) return null;   // hands full: a grab would do nothing, so don't promise one
     const p = S.props.get(hit.id);
     if (!p) return null;
     const L = LOOT[p.type];
@@ -722,7 +723,7 @@ requestAnimationFrame(frame);
   // what am I looking at
   target = computeTarget();
   $('prompt').textContent = target?.label || '';
-  $('prompt').classList.toggle('hidden', !target?.label);
+  $('prompt').classList.toggle('hidden', !target?.label || (me.holding?.type === 'map' && mapRaised));   // the raised map covers the view
   if (target?.kind === 'revive' && keys.e && reviveT > 0) {
     reviveT += dt;
     if (reviveT >= C.PLAYER.REVIVE_HOLD) { net.send({ t: 'use', kind: 'revive', id: target.id }); reviveT = 0; }
