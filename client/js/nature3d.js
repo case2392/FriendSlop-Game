@@ -1311,7 +1311,8 @@ function badlandsRock(ctx, b, S, rnd, steep, tintOf, force = null) {
 // low arch on two buried feet.
 function desertRock(ctx, b, S, rnd, steep, tintOf, piece, force = null) {
   if (force === 'arch' || (force !== 'mound' && S > 1.2 && rnd() < 0.3 && !steep)) {
-    const a = rnd() * TAU, ca = Math.cos(a), sa = Math.sin(a), span = S * range(rnd, 1.7, 2.1), Hh = S * range(rnd, 1.4, 1.8), rr = S * range(rnd, 0.32, 0.4);
+    // a world-gen arch (force) spans along the rock's own x axis: world gen put its feet's colliders there
+    const a0 = rnd() * TAU, a = force === 'arch' ? 0 : a0, ca = Math.cos(a), sa = Math.sin(a), span = S * range(rnd, 1.7, 2.1), Hh = S * range(rnd, 1.4, 1.8), rr = S * range(rnd, 0.32, 0.4);
     const ends = [-1, 1].map(sd => ctx.foot(rr * 1.2, ca * span * sd, sa * span * sd, 5)[0]);
     const pts = [];
     for (let i = 0; i <= 10; i++) {

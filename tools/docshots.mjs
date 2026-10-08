@@ -16,13 +16,14 @@ const want = n => !ONLY || ONLY.has(n);
 async function open(name) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await ctx.newPage();
+  page.setDefaultTimeout(240000);   // software GL: the first world build can take ~30 s per client
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
-  await page.goto(`http://localhost:${PORT}`);
+  await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
   await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
   await page.fill('#nameInput', name);
   return page;
 }
-const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 90000 });
+const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 270000 });
 const quiet = p => p.evaluate(() => { const S = window.__nmd; S.noRender = true; S.forceLock = true; document.getElementById('clickToPlay').classList.add('hidden'); document.getElementById('toasts').style.display = 'none'; });
 const ev = (p, fn, arg) => p.evaluate(fn, arg);
 const wait = (p, ms) => p.waitForTimeout(ms);
@@ -45,7 +46,7 @@ await dave.fill('#codeInput', code);
 await dave.click('#joinBtn');
 await ready(dave);
 await quiet(steve); await quiet(dave);
-await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 20000 });
+await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
 const send = (m) => steve.evaluate(m => window.__nmd.send(m), m);
 const W = await steve.evaluate(() => { const W = window.__nmd.W; return { LEN: W.LEN, town: W.town, obstacles: W.obstacles, anchors: W.anchors, camp: W.camp }; });
 const roadX = z => steve.evaluate(z => window.__nmd.W.roadX(z), z);
@@ -62,7 +63,7 @@ await ev(steve, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(
 await ev(dave, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.3, r.y + 0.1, r.z - 1.2, 0); S.me.pitch = 0.1; });
 await wait(steve, 900);
 await ev(steve, () => window.__nmd.press('use'));
-await steve.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 8000 });
+await steve.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 24000 });
 await steve.keyboard.down('w');
 await wait(steve, 7000);
 await ev(dave, () => { const S = window.__nmd; const q = S.rv.q; S.me.yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.x * q.x + q.y * q.y)) - 0.12; S.me.pitch = 0.12; });
@@ -178,7 +179,7 @@ await send({ t: 'dbg', op: 'tpRV', x: 0, z: W.LEN + 6, yaw: 0 });
 await send({ t: 'dbg', op: 'phase', ph: 'road' });
 await send({ t: 'dbg', op: 'clock', h: 18.4 });
 await send({ t: 'dbg', op: 'bank', v: 3100 });
-await steve.waitForFunction(() => window.__nmd.g?.town === 1, null, { timeout: 15000 });
+await steve.waitForFunction(() => window.__nmd.g?.town === 1, null, { timeout: 45000 });
 const T = W.town;
 await ev(dave, T => { const S = window.__nmd; S.me.teleport(4.5, T.y + 0.05, T.z - 6, 0); S.aimAt(3, T.y + 2.6, T.z + 70); }, T);
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(3.5, T.y + 0.05, T.z + 26, Math.PI); }, T);
@@ -197,7 +198,7 @@ await send({ t: 'dbg', op: 'spawn', type: 'vase', x: T.pawn.x, y: T.pawn.y + 0.4
 await send({ t: 'dbg', op: 'spawn', type: 'neon', x: T.pawn.x, y: T.pawn.y + 0.4, z: T.pawn.z + 1.0, value: 380 });
 await send({ t: 'dbg', op: 'spawn', type: 'painting', x: T.pawn.x, y: T.pawn.y + 0.4, z: T.pawn.z - 0.2, value: 450 });
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(T.pawn.x + 3.6, T.y + 0.05, T.pawn.z + 0.4, -Math.PI / 2); S.aimAt(T.pawn.x - 1.2, T.pawn.y + 0.5, T.pawn.z - 0.2); }, T);
-await steve.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 8000 });
+await steve.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 24000 });
 await shot(steve, 'pawn');
 
 // 9. night at the RV lot
@@ -206,7 +207,7 @@ const pay = await steve.evaluate(() => window.__nmd.W.uses.find(u => u.kind === 
 await ev(steve, ([u, T]) => { window.__nmd.me.teleport(u.x + 1, T.y + 0.05, u.z, 0); }, [pay, T]);
 await wait(steve, 900);
 await send({ t: 'use', id: pay.id });
-await steve.waitForFunction(() => window.__nmd.g?.ph === 'night', null, { timeout: 8000 });
+await steve.waitForFunction(() => window.__nmd.g?.ph === 'night', null, { timeout: 24000 });
 await wait(steve, 1500);
 await ev(dave, T => { const S = window.__nmd; document.getElementById('receipt').classList.add('hidden'); S.me.teleport(T.fire.x - 4.5, T.y + 0.05, T.fire.z - 5.5, 0); S.aimAt(T.fire.x + 4, T.y + 1.0, T.fire.z + 3); }, T);
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(T.fire.x + 1.6, T.y + 0.05, T.fire.z - 1.2, -0.8); }, T);
@@ -218,7 +219,7 @@ await shot(steve, '_receipt');
 if (want('biomes')) { // 10. one road view per biome: days 2 (fields), 3 (badlands), 5 (desert)
   for (const [day, name] of [[2, 'fields'], [3, 'badlands'], [5, 'desert']]) {
     await send({ t: 'dbg', op: 'day', d: day });
-    for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, day, { timeout: 60000 });
+    for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, day, { timeout: 180000 });
     await send({ t: 'dbg', op: 'clock', h: 10.5 });
     await wait(dave, 1500);
     const z = 95, x = (await roadX(z)) - 1.4;

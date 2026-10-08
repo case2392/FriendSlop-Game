@@ -24,18 +24,25 @@ const errors = [];
 async function open(name) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await ctx.newPage();
+  page.setDefaultTimeout(240000);   // software GL: the first world build can take ~30 s per client
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error') errors.push(`[${name}] ${m.text()}`); });
-  await page.goto(`http://localhost:${PORT}`);
+  await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
   await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
   await page.fill('#nameInput', name);
   return page;
 }
-const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 90000 });
+const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 270000 });
 const quiet = p => p.evaluate(() => { const S = window.__nmd; S.noRender = true; S.forceLock = true; document.getElementById('clickToPlay').classList.add('hidden'); });
 const shot = async (p, name, settle = 900) => { await p.evaluate(() => { window.__nmd.noRender = false; }); await p.waitForTimeout(settle); await p.screenshot({ path: `${SHOTS}/${name}.png` }); await p.evaluate(() => { window.__nmd.noRender = true; }); console.log('  📸', name); };
 const me = p => p.evaluate(() => { const S = window.__nmd, m = S.me; return { mode: m.mode, par: m.par, seat: m.seat, pos: m.pos, lp: m.lp, rv: S.rv && { p: S.rv.p, q: S.rv.q }, g: S.g && { ph: S.g.ph, day: S.g.day, bank: S.g.bank } }; });
-const wait = (p, ms) => p.waitForTimeout(ms);
+// wait at least `ms` AND at least 3 rendered frames: the game reads aim and input once per frame, and
+// software GL renders the new art at about 1 fps with two clients, so wall-clock waits alone race it
+const wait = async (p, ms, n = 3) => {
+  const f0 = await p.evaluate(() => window.__nmd?.frames || 0);
+  await p.waitForTimeout(ms);
+  await p.waitForFunction(f => (window.__nmd?.frames || 0) >= f, f0 + n, { timeout: 180000 });
+};
 
 try {
   // ---- menu ----
@@ -53,8 +60,8 @@ try {
   await ready(joiner);
   ok('second player joined through the menu');
   await quiet(host); await quiet(joiner);
-  await host.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 20000 });
-  await joiner.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 20000 });
+  await host.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
+  await joiner.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
   ok('each client renders the other player');
 
   // ---- camp screenshot: Dave looks at Steve and the RV ----
@@ -67,8 +74,9 @@ try {
   await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); S.me.pitch = 0.05; });
   await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x + 0.25, r.y + 0.1, r.z + 2.0, 0); S.aimAt(r.x + 0.62, r.y + 0.4, r.z + 2.85); });
   await wait(host, 900);
+  await host.waitForFunction(() => window.__nmd.target()?.use === 'seat0', null, { timeout: 60000 });
   await host.evaluate(() => window.__nmd.press('use'));
-  await host.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 8000 });
+  await host.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 24000 });
   ok('Steve is in the driver seat');
   const before = await me(joiner);
   check(before.par === 1, 'Dave is standing inside the RV (parented to it)');
@@ -89,7 +97,7 @@ try {
   await host.keyboard.up('w');
   await host.keyboard.down(' '); await wait(host, 1200); await host.keyboard.up(' ');
   await host.evaluate(() => window.__nmd.press('use'));
-  await host.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 8000 });
+  await host.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 24000 });
   ok('Steve got up from the wheel');
 
   // ---- carry a TV in the open ----
@@ -149,7 +157,7 @@ try {
 
   // ---- town ----
   await host.evaluate(() => { const S = window.__nmd; S.send({ t: 'dbg', op: 'tpRV', x: 0, z: S.W.LEN + 6, yaw: 0 }); S.send({ t: 'dbg', op: 'clock', h: 18.6 }); S.send({ t: 'dbg', op: 'phase', ph: 'road' }); S.send({ t: 'dbg', op: 'bank', v: 2600 }); });
-  await host.waitForFunction(() => window.__nmd.g?.town === 1, null, { timeout: 15000 });
+  await host.waitForFunction(() => window.__nmd.g?.town === 1, null, { timeout: 45000 });
   ok('rolled into town');
   const T = await host.evaluate(() => window.__nmd.W.town);
   await joiner.evaluate(T => { const S = window.__nmd; S.me.teleport(-3, T.y + 0.05, T.z + 8, 0); S.aimAt(4, T.y + 2.2, T.z + 60); }, T);
@@ -164,19 +172,19 @@ try {
     await host.evaluate(arg => { const S = window.__nmd; const u = S.W.uses.find(u => u.kind === 'bj' && u.arg === arg); S.send({ t: 'use', id: u.id }); }, arg);
     await wait(host, 250);
   }
-  await host.waitForFunction(() => window.__nmd.g?.bj?.st === 'vote' || window.__nmd.g?.bj?.st === 'result', null, { timeout: 8000 });
+  await host.waitForFunction(() => window.__nmd.g?.bj?.st === 'vote' || window.__nmd.g?.bj?.st === 'result', null, { timeout: 24000 });
   ok('blackjack hand dealt for $1,000 of the shared bank');
   await host.evaluate(T => { const S = window.__nmd; const h = T.bj.hit; S.me.teleport(h.x, T.y + 0.05, h.z, 0); S.aimAt(T.bj.table.x, T.bj.table.y, T.bj.table.z); }, T);
   await joiner.evaluate(T => { const S = window.__nmd; const s = T.bj.stand; S.me.teleport(s.x + 0.4, T.y + 0.05, s.z + 0.5, 0); S.aimAt(T.bj.hit.x, T.bj.table.y, T.bj.hit.z); }, T);
   await wait(joiner, 700);
   await shot(joiner, 'casino');
-  await host.waitForFunction(() => (window.__nmd.bets || 0) > 0, null, { timeout: 45000 })
+  await host.waitForFunction(() => (window.__nmd.bets || 0) > 0, null, { timeout: 135000 })
     .catch(async e => { throw new Error(`hand never resolved: ${JSON.stringify(await host.evaluate(() => window.__nmd.g?.bj))}`); });
   const out = await host.evaluate(() => window.__nmd.lastBet);
   ok(`the hand resolved by body-vote: ${out.won > 0 ? 'won' : out.won < 0 ? 'lost' : 'push'} ${out.won}`);
   // pawn shop
   await host.evaluate(T => { const S = window.__nmd; S.send({ t: 'dbg', op: 'spawn', type: 'vase', x: T.pawn.x, y: T.pawn.y + 0.6, z: T.pawn.z - 1.2, value: 520 }); S.send({ t: 'dbg', op: 'spawn', type: 'neon', x: T.pawn.x, y: T.pawn.y + 0.6, z: T.pawn.z + 0.8, value: 380 }); S.me.teleport(T.pawn.x + 3.4, T.y + 0.05, T.pawn.z + 0.5, -Math.PI / 2); S.aimAt(T.pawn.x - 1.5, T.pawn.y + 0.3, T.pawn.z - 0.2); }, T);
-  await host.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 8000 });
+  await host.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 24000 });
   await wait(host, 800);
   await shot(host, 'pawn');
   // the Repo Man
@@ -187,7 +195,7 @@ try {
   // ---- voice: both join, the WebRTC mesh connects, panners exist ----
   await host.evaluate(() => document.getElementById('voiceJoinBtn').click());
   await joiner.evaluate(() => document.getElementById('voiceJoinBtn').click());
-  await host.waitForFunction(() => { const p = [...window.__nmd.voicePeers?.() || []]; return p.length === 1 && p[0].panner; }, null, { timeout: 20000 }).catch(() => {});
+  await host.waitForFunction(() => { const p = [...window.__nmd.voicePeers?.() || []]; return p.length === 1 && p[0].panner; }, null, { timeout: 60000 }).catch(() => {});
   const vstate = await host.evaluate(() => ({ on: window.__nmdVoice?.on, peers: window.__nmdVoice ? [...window.__nmdVoice.peers.values()].map(p => ({ state: p.pc.connectionState, spatial: !!p.panner })) : null }));
   check(vstate.on && vstate.peers?.length === 1 && vstate.peers[0].spatial, `proximity voice mesh up (${JSON.stringify(vstate.peers)})`);
 } catch (e) {

@@ -50,12 +50,17 @@ export const RV_PARTS = [
   ['showerF',   0.4, 1.1, 0.03,    -0.8, 1.1, -1.75,  { mass: 3 }],
   ['showerB',   0.4, 1.1, 0.03,    -0.8, 1.1, -2.75,  { mass: 3 }],
   ['showerLip', 0.03, 0.09, 0.5,   -0.4, 0.09, -2.25, { mass: 1 }],
+  ['icebox',    0.21, 0.35, 0.4,    0.94, 0.35, -1.0, { mass: 8 }],
   // the bunks
   ['bed',       1.2, 0.28, 0.48,    0, 0.28, -3.42,   { mass: 20, use: 'bunk' }],
   ['bunkUp',    1.2, 0.05, 0.48,    0, 1.45, -3.42,   { mass: 8, use: 'bunk' }],
   // getting in: two steps under the door
   ['step0',     0.2, 0.04, 0.46,   -1.42, -0.46, D.DOOR_Z, { mass: 2 }],
   ['step1',     0.2, 0.04, 0.46,   -1.64, -0.89, D.DOOR_Z, { mass: 2 }],
+  // up top: the cab-over brow and the roof cargo (they go with the roof when the Repo Man takes it)
+  ['brow',      1.15, 0.04, 0.27,   0, 2.43, 4.27,    { mass: 5, part: 'roof' }],
+  ['rackLoad',  0.5, 0.2, 0.7,      0.05, 2.6, 3.15,  { mass: 5, part: 'roof' }],
+  ['cooler',    0.36, 0.13, 0.36,  -0.38, 2.53, -1.0, { mass: 3, part: 'roof' }],
   // business end
   ['bumperF',   1.3, 0.18, 0.14,    0, -0.42, 4.08,   { mass: 30, use: 'winch' }],
   ['bumperR',   1.3, 0.16, 0.12,    0, -0.42, -4.06,  { mass: 25 }],

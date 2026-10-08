@@ -34,7 +34,7 @@ export const BIOMES = {
   meadow: {
     name: 'The Westmeadow Road', town: 'timber',
     wallSoft: 12, wallH: [10, 6], wallDist: [42, 14], bumps: 2.2,
-    decor: [['oak', 30], ['bush', 22], ['rock', 12], ['flowers', 22], ['stump', 5], ['fence', 4], ['pine', 5]],
+    decor: [['oak', 12], ['bush', 22], ['rock', 12], ['flowers', 22], ['stump', 5], ['fence', 4], ['pine', 5]],   // oaks come in groves of 3-6
     density: 1 / 4.5,
   },
   fields: {
@@ -462,7 +462,8 @@ export function generateLeg(seed, day) {
       const y0 = heightAt(px, p.z); p.y = y0;
       const F = frame(px, y0, p.z, ry);
       p.dino = { x: px, y: y0, z: p.z, ry };
-      lbox(F, ry, 0, 2.2, -1.5, 1.6, 2.2, 3.0, 'dino', '#5aa469', 'dino_body');
+      lbox(F, ry, 0, 0.55, -1.5, 1.6, 0.55, 3.0, 'dino', '#5aa469', 'dino_body');       // the stone plinth (the renderer sizes it from this)
+      lbox(F, ry, 0, 3.0, -1.5, 1.36, 1.2, 2.55, 'dino', '#5aa469', 'dino_torso');      // the pear-shaped body above it
       lbox(F, ry, 0, 3.6, -5.6, 0.5, 0.5, 2.2, 'dino', '#5aa469', 'dino_tail');
       for (const lx of [-1.1, 1.1]) for (const lz of [-3.4, 0.4]) lbox(F, ry, lx, 0.9, lz, 0.4, 0.9, 0.4, 'dino', '#4b8a58', 'dino_leg');
       lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469', 'dino_neck');     // headless neck. the head is loot.
@@ -506,9 +507,44 @@ export function generateLeg(seed, day) {
   const nDecor = Math.floor(LEN * B.density);
   const decorTotal = B.decor.reduce((a, [, w]) => a + w, 0);
   const pickDecor = () => { let r = rng() * decorTotal; for (const [k, w] of B.decor) if ((r -= w) < 0) return k; return B.decor[0][0]; };
+  // groves and rock shapes draw from their own stream, so the main decor layout stays as it was
+  const rngD = mulberry32((seed ^ Math.imul(day + 17, 0x85EBCA6B)) >>> 0);
+  const decorOk = (x, z, off) => {
+    const inCamp = z < 0, inTown = z > LEN - 5;
+    if (Math.abs(x) > HALF_W - 25 || off < 8.5) return false;
+    if (pois.some(p => Math.hypot(p.x - x, p.z - z) < 14)) return false;
+    if (obstacles.some(o => Math.abs(o.z - z) < 22 && off < 16)) return false;
+    if ((inCamp || inTown) && (Math.abs(x) < 26 || (inTown && x > 8 && x < 34))) return false;   // keep the camp, street and lots clear
+    return true;
+  };
+  const tree = (k, x, z, s, ry) => {
+    const y = heightAt(x, z), hh = k === 'palm' ? 2.6 : 1.8;
+    cyls.push({ x, y: y + hh, z, r: (k === 'oak' ? 0.48 : 0.3) * s, hh, mat: 'tree' });   // an oak's bole and root flare
+    decor.push({ k, x, y, z, s, ry });
+  };
+  // Big rocks: the renderer draws the shape world gen picks here (d.variant), so its collider can match.
+  // Badlands: a cluster of hoodoos (3.5-5 m) or a stepped ledge stack; desert: a sandstone arch on two
+  // feet (along d.ry) or a buried mound; elsewhere a boulder or outcrop.
+  const rockCollide = (d, steep) => {
+    const strata = biome === 'badlands', S0 = d.s * (strata ? 1.25 : 1), S = steep ? S0 * 0.75 : S0;
+    if (d.s <= 1.2) return;
+    if (biome === 'badlands' && d.variant === 'hoodoo') {
+      const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8)), r = Math.max(0.55, Ht * 0.19) * 0.9;
+      cyls.push({ x: d.x, y: d.y + Ht / 2 - 0.3, z: d.z, r, hh: Ht / 2, mat: 'rock' });
+    } else if (biome === 'desert' && d.variant === 'arch') {
+      const span = S * 1.9, r = S * 0.36 * 1.1, c = Math.cos(d.ry), sn = Math.sin(d.ry);
+      for (const sd of [-1, 1]) {
+        // local +x of the rock's frame (yaw d.ry) in world axes: (cos ry, -sin ry)
+        const fx = d.x + c * span * sd, fz = d.z - sn * span * sd;
+        cyls.push({ x: fx, y: heightAt(fx, fz) + S * 0.7, z: fz, r, hh: S * 0.9, mat: 'rock' });
+      }
+    } else {
+      const tall = biome === 'badlands' ? 0.75 : biome === 'desert' ? 0.45 : 0.6;
+      cyls.push({ x: d.x, y: d.y + S * tall * 0.8, z: d.z, r: S * (biome === 'desert' ? 0.95 : 0.8), hh: S * tall, mat: 'rock' });
+    }
+  };
   for (let i = 0; i < nDecor; i++) {
     const z = Z0 + 10 + rng() * (Z1 - Z0 - 20);
-    const inCamp = z < 0, inTown = z > LEN - 5;
     const side = rng() < 0.5 ? -1 : 1;
     const wd = wallDist(side > 0 ? 1 : 0, z);
     const k = pickDecor();
@@ -517,20 +553,26 @@ export function generateLeg(seed, day) {
     const reach = tall && rng() < 0.45 ? wd + 6 + rng() * 40 : Math.max(1, wd - 10);
     const off = 8.5 + rng() * reach;
     const x = roadX(z) + side * off;
-    if (Math.abs(x) > HALF_W - 25) continue;
-    if (pois.some(p => Math.hypot(p.x - x, p.z - z) < 14)) continue;
-    if (obstacles.some(o => Math.abs(o.z - z) < 22 && off < 16)) continue;
-    if ((inCamp || inTown) && (Math.abs(x) < 26 || (inTown && x > 8 && x < 34))) continue;   // keep the camp, street and lots clear
+    if (!decorOk(x, z, off)) continue;
     const y = heightAt(x, z);
     const ry = rng() * 6.283;
     const s = 0.75 + rng() * 0.6;
-    if (k === 'oak' || k === 'pine' || k === 'palm') {
-      const hh = k === 'palm' ? 2.6 : 1.8;
-      cyls.push({ x, y: y + hh, z, r: (k === 'oak' ? 0.42 : 0.3) * s, hh, mat: 'tree' });
-      decor.push({ k, x, y, z, s, ry });
+    if (k === 'oak' && (biome === 'meadow' || biome === 'fields')) {
+      // Elwynn oaks stand in groves (3-6 within ~12 m); Westfall's in pairs
+      const n = biome === 'meadow' ? 3 + Math.floor(rngD() * 4) : 2;
+      tree('oak', x, z, s, ry);
+      for (let j = 1; j < n; j++) {
+        const a = rngD() * 6.283, dd = 4.5 + rngD() * 7.5;
+        const gx = x + Math.cos(a) * dd, gz = z + Math.sin(a) * dd, goff = Math.abs(gx - roadX(gz));
+        if (!decorOk(gx, gz, goff)) continue;
+        if (cyls.some(c => c.mat === 'tree' && Math.hypot(c.x - gx, c.z - gz) < 3.2)) continue;   // room for the canopies
+        tree('oak', gx, gz, 0.75 + rngD() * 0.6, rngD() * 6.283);
+      }
+    } else if (k === 'oak' || k === 'pine' || k === 'palm') {
+      tree(k, x, z, s, ry);
     } else if (k === 'cactus') {
       const hh = 0.9 + rng() * 0.9;
-      cyls.push({ x, y: y + hh, z, r: 0.24, hh, mat: 'cactus' });
+      cyls.push({ x, y: y + hh, z, r: biome === 'badlands' ? 0.45 : 0.24, hh, mat: 'cactus' });   // badlands cacti are organ-pipe clumps
       decor.push({ k, x, y, z, h: hh * 2, s, ry });
     } else if (k === 'haybale') {
       cyls.push({ x, y: y + 0.6, z, r: 0.75, hh: 0.6, mat: 'haybale' });
@@ -540,8 +582,19 @@ export function generateLeg(seed, day) {
       decor.push({ k, x, y, z, s, ry });
     } else if (k === 'fence') {
       decor.push({ k, x, y, z, s, ry: Math.atan2(W_roadDx(z), 1) + (rng() - 0.5) * 0.2, len: 4 + Math.floor(rng() * 4) });
+    } else if (k === 'rock') {
+      const d = { k, x, y, z, s: 0.5 + rng() * 1.4, ry };
+      // the renderer's own steepness test: ground under the rock rising more than 0.8 x its size
+      const S = d.s * (biome === 'badlands' ? 1.25 : 1), R = S * 1.1;
+      let lo = Infinity, hi = -Infinity;
+      for (const [dx, dz] of [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]]) { const h = heightAt(x + dx, z + dz); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+      const steep = hi - lo > 0.8 * S;
+      if (biome === 'badlands') d.variant = S > 1.3 && !steep && rngD() < 0.35 ? 'hoodoo' : 'ledge';
+      else if (biome === 'desert') d.variant = S > 1.2 && !steep && rngD() < 0.3 ? 'arch' : 'mound';
+      decor.push(d);
+      rockCollide(d, steep);
     } else {
-      decor.push({ k, x, y, z, s: k === 'rock' ? 0.5 + rng() * 1.4 : s, ry });
+      decor.push({ k, x, y, z, s, ry });
     }
   }
   function W_roadDx(z) { return roadX(z + 0.5) - roadX(z - 0.5); }
@@ -572,11 +625,17 @@ export function generateLeg(seed, day) {
   signs.push({ x: 7.5, y: townY + 3, z: T + 6, ry: 0, w: 4.6, h: 1.8,
     lines: [['PAYDIRT', 'BUSTED FLATS', 'LAST CHANCE', 'SNAKE EYES', 'LOST WAGES'][day - 1], 'POP. 41 · EST. 1971'], bg: '#3a6b35', fg: '#fff', post: true });
 
+  // the back-wall shelves the renderer fills with goods: solid, so nobody walks into the stock
+  const shelfCollider = (bid, F, y0) => {
+    const b = buildings[bid], ix = b.w / 2 - 0.15, iz = b.dep / 2 - 0.15;
+    lbox(F, b.ry, 0, 1.25, -iz + 0.17, ix - 0.4, 1.1, 0.15, 'wood', null, 'shop_shelf');
+  };
   // pawn shop (left of the street, door facing the street)
   {
-    const { F, y0 } = building(-17, T + 42, Math.PI / 2, 12, 9, 3.6, 'stucco', '#c97b63', townY, 'pawn');
+    const { F, y0, id } = building(-17, T + 42, Math.PI / 2, 12, 9, 3.6, 'stucco', '#c97b63', townY, 'pawn');
     const counter = F(0, 0.5, -1.8);
     tagNow = { town: 'pawn' };
+    shelfCollider(id, F, y0);
     box(counter.x, y0 + 0.5, counter.z, 3.2, 0.5, 0.55, Math.PI / 2, 'wood', '#7b4b2a', 'counter');
     tagNow = null;
     town.pawn = { x: counter.x, y: y0 + 1.0, z: counter.z, hx: 0.6, hz: 3.2 };   // in world axes
@@ -588,7 +647,8 @@ export function generateLeg(seed, day) {
   }
   // general store
   {
-    const { F, y0 } = building(-17, T + 78, Math.PI / 2, 10, 8, 3.4, 'stucco', '#7fb7be', townY, 'store');
+    const { F, y0, id } = building(-17, T + 78, Math.PI / 2, 10, 8, 3.4, 'stucco', '#7fb7be', townY, 'store');
+    tagNow = { town: 'store' }; shelfCollider(id, F, y0); tagNow = null;
     const counter = F(0, 0.5, -1.6);
     tagNow = { town: 'store' };
     box(counter.x, y0 + 0.5, counter.z, 2.6, 0.5, 0.5, Math.PI / 2, 'wood', '#a0743c', 'counter');

@@ -953,6 +953,7 @@ export function buildStructures(W) {
   const fctx = { glows, domes, styleName: style, slotTint: () => new THREE.Color('#ffffff').lerp(new THREE.Color(muteColor(slotCols[slotI++ % 5], { sMax: 0.5, lMin: 0.35, lMax: 0.6 })), 0.55).toArray() };
   for (const s of W.statics) {
     if (s.mat === 'invisible' || isRoadside(s) || s.bld !== undefined) continue;
+    if (s.part === 'shop_shelf') continue;   // collider only: town_build's shopShelves draws the shelves
     furniture(s, batch, fctx);
   }
 
