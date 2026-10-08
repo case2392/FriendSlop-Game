@@ -2,15 +2,19 @@
 // lights, shadows and fog keep working) blends per biome: the main ground at two scales (picked
 // patch by patch, so the tile never shows), a second ground in big blobs of noise, bare dirt in
 // clearings (scorched and ashy round the fires), the dirt road by distance from its centerline
-// (sampled in road space so the ruts follow it, with a ragged painterly edge), mud in the mud
-// stretches (also in road space, its puddles lying in the ruts), and cliff rock by slope:
-// projected from the side on steep faces (x or z picked by a dithered, sharpened normal blend, so
-// a 45° slope never smears two projections together), from above on moderate slopes, with two
-// scales crossfaded so a long wall never repeats its ledges. Broad warm/cool and value fields
-// (40-80 m) and baked ambient occlusion sit on top. On the snow day the mud is slush and the
-// plain snow glints in low direct sun. Beyond the playable heightfield an apron of unreachable
-// hills carries the land out to the horizon; at both ends the road's valley bends away behind a
-// shoulder and closes over a saddle. Instanced ground clutter grows in patches around the camera.
+// (sampled in road space, a second sample at a 23 m period taking over in patches, with a ragged
+// painterly edge), mud in the mud stretches (also in road space, its puddles lying along the wheel
+// tracks), and rock by slope. The slope is SMOOTHED (averaged over 7 x 7 cells) and read from a
+// bilinear data texture over the grid (and another over the apron), never interpolated per
+// triangle, so no edge ever follows the heightfield's triangles. Rock is projected from the side
+// (x or z picked from the smoothed facing, dithered), crossfaded at two scales so a long wall never
+// repeats; ledges inside the rock hold the ground's grass or snow, and a thin scree collar rings it.
+// Ground on slopes is projected from the side too. Explicit texture gradients with a capped
+// anisotropy keep grazing facets from washing out. Broad warm/cool and value fields and baked
+// ambient occlusion sit on top; the snow glints in low direct sun. Beyond the playable heightfield
+// an apron of unreachable hills carries the land out to the horizon; at both ends the road's valley
+// bends away behind a shoulder and closes over a saddle. Instanced ground clutter grows in patches
+// around the camera, never on the bare dirt of a clearing.
 //
 // Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos), dispose() }
 // The visible grid is exactly the physics heightfield (same vertices, same diagonal split).
@@ -99,7 +103,7 @@ function splatMaterial(biome, cfg) {
   const U = {
     tG1: { value: T(`ground_${biome}`) }, tG2: { value: T(`ground2_${biome}`) }, tDirt: { value: T(`dirt_${biome}`) },
     tRoad: { value: T(`road_${biome}`) }, tCliff: { value: T(`cliff_${biome}`) }, tMud: { value: T(cfg.mudTex || 'mud') }, tMacro: { value: macroTex },
-    uSpark: { value: 0 }, uFire: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uRoadSpan: { value: 2 * (cfg.hw + SHOULDER) },
+    uSpark: { value: 0 }, tSlope: { value: null }, uGrid: { value: new THREE.Vector4(0, 0, 1, 0) }, uGridN: { value: new THREE.Vector2(2, 2) }, tSlopeA: { value: null }, uGridA: { value: new THREE.Vector4(0, 0, 1, 0) }, uGridAN: { value: new THREE.Vector2(2, 2) }, uFire: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uRoadSpan: { value: 2 * (cfg.hw + SHOULDER) },
     uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(MUD_TILE, 10, cfg.macro, cfg.macro2 ?? 0.12) },
     uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uCliffN: { value: new THREE.Vector2(...cfg.cliffN) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
     uAO: { value: new THREE.Vector3(...cfg.ao) }, uCollar: { value: new THREE.Vector3(...cfg.collar) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
@@ -110,7 +114,7 @@ function splatMaterial(biome, cfg) {
   if (cfg.sparkle) m.defines.TERRAIN_SPARKLE = 1;
   if (cfg.strata) m.defines.TERRAIN_STRATA = 1;
   if (cfg.dunes) m.defines.TERRAIN_DUNES = 1;
-  const key = 'terrain-splat-v9' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '');
+  const key = 'terrain-splat-v12' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
@@ -124,11 +128,19 @@ function splatMaterial(biome, cfg) {
         vTNrm = normalize(mat3(modelMatrix) * objectNormal);`);
     sh.fragmentShader = sh.fragmentShader
       .replace('#include <common>', `#include <common>
-        uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro;
+        uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro, tSlope, tSlopeA; uniform vec4 uGrid, uGridA; uniform vec2 uGridN, uGridAN;
         uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge; uniform float uSpark, uRoadSpan;
         varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv; varying vec2 vSlope;
         float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
         float tHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
+        // Cap the anisotropy of a pair of texture gradients at 3:1 by shortening the long one. On the
+        // grazing facets of a steep zigzag wall the long gradient would otherwise pick a far blurrier
+        // mip than the facets beside it, and the texture would wash out triangle by triangle.
+        void tCap(inout vec2 dx, inout vec2 dy) {
+          float lx = length(dx), ly = length(dy), lm = 3.0 * min(lx, ly) + 1e-6;
+          if (lx > lm) dx *= lm / lx;
+          if (ly > lm) dy *= lm / ly;
+        }
         `)
       .replace('#include <map_fragment>', `
         float tSpark = 0.0;
@@ -141,21 +153,32 @@ function splatMaterial(biome, cfg) {
           // large-scale noise comes per vertex (vRoad.zw, vSplat.w); one fetch gives the medium/fine noise
           vec4 mB = texture2D(tMacro, xr / 61.0 + vec2(0.31, 0.77));   // r: ~7-20 m, g: ~3-9 m, b: ~1-3 m
           float nE = mB.b;
+          // the smoothed slope (x: 7 x 7 cells, y: 3 x 3), bilinear over the grid from a data texture
+          // (a per-vertex value is linear within each triangle, so its threshold would follow the
+          // triangle diagonals in a sawtooth; the bilinear one curves smoothly); the apron's own
+          // (already smooth) value outside the grid
+          vec2 sl, hn;     // hn: which way the slope faces (for the side projections)
+          vec2 gq = (wp.xz - uGrid.xy) / uGrid.z;
+          vec4 st;
+          if (gq.x > 0.0 && gq.y > 0.0 && gq.x < uGridN.x - 1.0 && gq.y < uGridN.y - 1.0) st = textureLod(tSlope, (gq + 0.5) / uGridN, 0.0);
+          else st = textureLod(tSlopeA, ((wp.xz - uGridA.xy) / uGridA.z + 0.5) / uGridAN, 0.0);    // the apron, on its own 10 m lattice
+          sl = st.rg; hn = st.ba * 2.0 - 1.0;
           // ground: two scales of the main ground, picked patch by patch so neither tile shows. Flat
           // ground is projected from above; on slopes (by a smoothed slope, so the grid never shows)
           // from the side, x- or z-facing, the switch dithered by noise. Every fetch is given the
           // derivatives of its own projection, so a switch never drops to a tiny mip along the seam.
           float distK = smoothstep(80.0, 260.0, distance(cameraPosition, wp));
           float gB = exp2(distK * 1.5);
-          float sideW = smoothstep(0.17, 0.32, vSlope.y + (nE - 0.5) * 0.12 + (mB.r - 0.5) * 0.06);
+          float sideW = smoothstep(0.17, 0.32, sl.y + (nE - 0.5) * 0.12 + (mB.r - 0.5) * 0.06);
           vec2 sxz = vec2(wp.z, wp.y), szx = vec2(-wp.x, wp.y);
-          vec2 an0 = pow(abs(nr.xz) + 0.001, vec2(6.0));
+          vec2 an0 = pow(abs(hn) + 0.001, vec2(6.0));
           bool useX = an0.x / (an0.x + an0.y) + (nE - 0.5) * 0.6 > 0.5;
           vec2 sp = useX ? sxz : szx;
           vec2 dsx = useX ? dFdx(sxz) : dFdx(szx), dsy = useX ? dFdy(sxz) : dFdy(szx);
           bool side = sideW + (nE - 0.5) * 0.5 + (mB.g - 0.5) * 0.25 > 0.5;
           vec2 gp = side ? sp : xz, gpr = side ? vec2(sp.x * 0.8 - sp.y * 0.6, sp.x * 0.6 + sp.y * 0.8) : xr;
           vec2 gdx = side ? dsx : dFdx(xz), gdy = side ? dsy : dFdy(xz);
+          tCap(gdx, gdy);
           vec2 gdxr = ROT * gdx, gdyr = ROT * gdy;
           if (side) { gdxr = vec2(dsx.x * 0.8 - dsx.y * 0.6, dsx.x * 0.6 + dsx.y * 0.8); gdyr = vec2(dsy.x * 0.8 - dsy.y * 0.6, dsy.x * 0.6 + dsy.y * 0.8); }
           float sBias = side ? 1.0 : exp2(smoothstep(0.12, 0.45, 1.0 - nr.y) * 2.0);
@@ -203,45 +226,47 @@ function splatMaterial(biome, cfg) {
             col = mix(col, md, w * smoothstep(0.005, 0.1, vSplat.x));
             gW *= 1.0 - w;
           }
-          // rock, by the SMOOTHED slope (averaged per vertex over 5 x 5 cells, so the heightfield's
+          // rock, by the SMOOTHED slope (averaged per vertex over 7 x 7 cells, so the heightfield's
           // triangles never show) plus a 30 m noise; the edge dithered by 1-3 m noise into a ragged band
           float slope = 1.0 - nr.y;
-          float cB = vSlope.x + (vSplat.w - 0.5) * uCliffN.x + (mB.r - 0.5) * uCliffN.y + (nE - 0.5) * 0.12;
+          float cB = sl.x + (vSplat.w - 0.5) * uCliffN.x + (mB.r - 0.5) * uCliffN.y + (mB.g - 0.5) * 0.12 + (nE - 0.5) * 0.16;
           if (cB > uCliff.x - 0.01) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
             float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
             float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp));   // far walls: the rock at 2.5x, bigger masses
             // side projection: x- or z-facing, from a sharpened normal blend dithered by noise
-            vec2 an = pow(abs(nr.xz) + 0.001, vec2(8.0));
+            vec2 an = pow(abs(hn) + 0.001, vec2(8.0));
             float sx = smoothstep(0.32, 0.68, an.x / (an.x + an.y) + (nE - 0.5) * 0.5);
             vec3 cc = vec3(0.0);
             if (sx > 0.01) {
               vec2 p = vec2(wp.z, wp.y) / uScale.w + cw;
+              vec2 dx = dFdx(p), dy = dFdy(p); tCap(dx, dy);
               vec3 c1 = vec3(0.0);
-              if (farK < 0.999) c1 = mix(texture2D(tCliff, p).rgb, texture2D(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21)).rgb, xb);
-              if (farK > 0.001) c1 = mix(c1, texture2D(tCliff, p * 0.4 + vec2(0.13, 0.57)).rgb, farK);
+              if (farK < 0.999) c1 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21), dx * 0.77, dy * 0.77).rgb, xb);
+              if (farK > 0.001) c1 = mix(c1, textureGrad(tCliff, p * 0.4 + vec2(0.13, 0.57), dx * 0.4, dy * 0.4).rgb, farK);
               cc += sx * c1;
             }
             if (sx < 0.99) {
               vec2 p = vec2(-wp.x, wp.y) / uScale.w + vec2(0.5, 0.0) + cw;
+              vec2 dx = dFdx(p), dy = dFdy(p); tCap(dx, dy);
               vec3 c2 = vec3(0.0);
-              if (farK < 0.999) c2 = mix(texture2D(tCliff, p).rgb, texture2D(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47)).rgb, xb);
-              if (farK > 0.001) c2 = mix(c2, texture2D(tCliff, p * 0.4 + vec2(0.71, 0.29)).rgb, farK);
+              if (farK < 0.999) c2 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47), dx * 0.77, dy * 0.77).rgb, xb);
+              if (farK > 0.001) c2 = mix(c2, textureGrad(tCliff, p * 0.4 + vec2(0.71, 0.29), dx * 0.4, dy * 0.4).rgb, farK);
               cc += (1.0 - sx) * c2;
             }
             #ifdef TERRAIN_STRATA
               // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces
-              float topK = 1.0 - smoothstep(0.3, 0.5, slope);
-              if (topK > 0.01) cc = mix(cc, texture2D(tG2, xz / (uScale.y * 0.8) + 0.41).rgb * vec3(0.92, 0.9, 0.9), topK);
+              float topK = 1.0 - smoothstep(0.3, 0.5, max(slope, sl.y));
+              cc = mix(cc, col * vec3(0.94, 0.9, 0.88), topK);
             #else
               // ledges and shelves inside the rock hold what the ground holds (grass, golden grass,
               // snow), so the foot and the lip of a wall turn into soft drifts, never a row of teeth
-              float ledge = smoothstep(0.26, 0.12, vSlope.y + (nE - 0.5) * 0.16 + (mB.g - 0.5) * 0.1 + (vSplat.w - 0.5) * 0.08);
+              float ledge = 1.0 - smoothstep(0.12, 0.26, sl.y + (nE - 0.5) * 0.16 + (mB.g - 0.5) * 0.1 + (vSplat.w - 0.5) * 0.08);
               cc = mix(cc, col * uLedge, ledge);
             #endif
             float wk = smoothstep(uCliff.x, uCliff.y, cB);
             // the lit, protruding parts of the rock break through first (a soft height blend)
-            wk = smoothstep(0.3, 0.7, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.1);
+            wk = smoothstep(0.24, 0.76, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.1);
             #ifdef TERRAIN_DUNES
               wk *= 1.0 - smoothstep(-0.05, 0.35, vCv);                // dune crests stay sand
             #endif
@@ -299,7 +324,7 @@ function vertexData(W, cfg, clearings) {
   const NZ1 = nz + 1, NV = (nx + 1) * NZ1;
   const Hc = (ix, iz) => heights[(ix < 0 ? 0 : ix > nx ? nx : ix) * NZ1 + (iz < 0 ? 0 : iz > nz ? nz : iz)];
   const nrm = new Float32Array(NV * 3), road = new Float32Array(NV * 4), spl = new Float32Array(NV * 4), cvA = new Float32Array(NV), slp = new Float32Array(NV * 2);
-  // the slope, smoothed: |grad h| per vertex, then tent-averaged over 5 x 5 (rock) and 3 x 3 (ground projection)
+  // the slope, smoothed: |grad h| per vertex, then tent-averaged over 7 x 7 (rock) and 3 x 3 (ground projection)
   const G = new Float32Array(NV);
   for (let ix = 0; ix <= nx; ix++) for (let iz = 0; iz <= nz; iz++) {
     const dx = (Hc(ix + 1, iz) - Hc(ix - 1, iz)) / ((Math.min(ix + 1, nx) - Math.max(ix - 1, 0)) * cell);
@@ -309,10 +334,10 @@ function vertexData(W, cfg, clearings) {
   const toS = g => 1 - 1 / Math.sqrt(1 + g * g);
   for (let ix = 0; ix <= nx; ix++) for (let iz = 0; iz <= nz; iz++) {
     let a5 = 0, n5 = 0, a3 = 0, n3 = 0;
-    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+    for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) {
       const x = ix + i, z = iz + j;
       if (x < 0 || z < 0 || x > nx || z > nz) continue;
-      const g = G[x * NZ1 + z], w = (3 - Math.abs(i)) * (3 - Math.abs(j));
+      const g = G[x * NZ1 + z], w = (4 - Math.abs(i)) * (4 - Math.abs(j));
       a5 += g * w; n5 += w;
       if (Math.abs(i) < 2 && Math.abs(j) < 2) { const w3 = (2 - Math.abs(i)) * (2 - Math.abs(j)); a3 += g * w3; n3 += w3; }
     }
@@ -367,7 +392,30 @@ function vertexData(W, cfg, clearings) {
       spl[v * 4] = mud; spl[v * 4 + 1] = clr; spl[v * 4 + 2] = ao; spl[v * 4 + 3] = n2;
     }
   }
-  return { nrm, road, spl, cvA, slp };
+  // the same smoothed slopes as a texture over the grid (x along the width, z along the height)
+  // B, A: the direction the slope faces, averaged over 5 x 5 (weighted by steepness), so the side
+  // projection of the rock is chosen from a smooth field, not flipped triangle by triangle
+  const tx = new Uint8Array((nx + 1) * NZ1 * 4);
+  for (let ix = 0; ix <= nx; ix++) for (let iz = 0; iz <= nz; iz++) {
+    let ax = 0, az = 0;
+    for (let i = -2; i <= 2; i++) for (let j = -2; j <= 2; j++) {
+      const x = ix + i, z = iz + j;
+      if (x < 0 || z < 0 || x > nx || z > nz) continue;
+      const w = (3 - Math.abs(i)) * (3 - Math.abs(j)), q = (x * NZ1 + z) * 3;
+      ax += nrm[q] * w; az += nrm[q + 2] * w;
+    }
+    const l = Math.hypot(ax, az) || 1;
+    const v = ix * NZ1 + iz, o = (iz * (nx + 1) + ix) * 4;
+    tx[o] = Math.round(Math.min(1, slp[v * 2]) * 255); tx[o + 1] = Math.round(Math.min(1, slp[v * 2 + 1]) * 255);
+    tx[o + 2] = Math.round((0.5 + 0.5 * ax / l) * 255); tx[o + 3] = Math.round((0.5 + 0.5 * az / l) * 255);
+  }
+  const slopeTex = new THREE.DataTexture(tx, nx + 1, NZ1, THREE.RGBAFormat);
+  slopeTex.colorSpace = THREE.NoColorSpace;
+  slopeTex.magFilter = slopeTex.minFilter = THREE.LinearFilter;
+  slopeTex.generateMipmaps = false;
+  slopeTex.wrapS = slopeTex.wrapT = THREE.ClampToEdgeWrapping;
+  slopeTex.needsUpdate = true;
+  return { nrm, road, spl, cvA, slp, slopeTex };
 }
 
 function buildChunks(W, data, mat, group) {
@@ -440,6 +488,33 @@ function buildApron(W, cfg, data, mat, group) {
     const rise = dOut * (0.03 + 0.22 * f) + sstep(180, OUT, dOut) * 70 * (0.5 + 0.5 * f) + bumps;
     return base + rise;
   };
+  // the apron's slopes on a uniform 10 m lattice (from the same height function), tent-smoothed and
+  // stored as a texture the shader samples bilinearly, so no rock edge follows a 10 m triangle
+  const LX = Math.round((X1 - X0 + 2 * OUT) / STEP) + 1, LZ = Math.round((Zend - Z0 + 2 * OUT) / STEP) + 1;
+  const SG = new Float32Array(LX * LZ), SX = new Float32Array(LX * LZ), SZ = new Float32Array(LX * LZ);
+  for (let i = 0; i < LX; i++) for (let j = 0; j < LZ; j++) {
+    const x = X0 - OUT + i * STEP, z = Z0 - OUT + j * STEP, e = 2;
+    const hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
+    SG[i * LZ + j] = 1 - 1 / l; SX[i * LZ + j] = -hx / l; SZ[i * LZ + j] = -hz / l;
+  }
+  const atx = new Uint8Array(LX * LZ * 4);
+  for (let i = 0; i < LX; i++) for (let j = 0; j < LZ; j++) {
+    let a = 0, ax = 0, az = 0, n = 0;
+    for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+      const ii = Math.max(0, Math.min(LX - 1, i + di)), jj = Math.max(0, Math.min(LZ - 1, j + dj)), w = (2 - Math.abs(di)) * (2 - Math.abs(dj)), k = ii * LZ + jj;
+      a += SG[k] * w; ax += SX[k] * w; az += SZ[k] * w; n += w;
+    }
+    const l = Math.hypot(ax, az) || 1, o = (j * LX + i) * 4, sv = Math.round(Math.min(1, a / n) * 255);
+    atx[o] = sv; atx[o + 1] = sv; atx[o + 2] = Math.round((0.5 + 0.5 * ax / l) * 255); atx[o + 3] = Math.round((0.5 + 0.5 * az / l) * 255);
+  }
+  const apronTex = new THREE.DataTexture(atx, LX, LZ, THREE.RGBAFormat);
+  apronTex.colorSpace = THREE.NoColorSpace;
+  apronTex.magFilter = apronTex.minFilter = THREE.LinearFilter;
+  apronTex.generateMipmaps = false;
+  apronTex.wrapS = apronTex.wrapT = THREE.ClampToEdgeWrapping;
+  apronTex.needsUpdate = true;
+  const U = mat.userData.U;
+  U.tSlopeA.value = apronTex; U.uGridA.value.set(X0 - OUT, Z0 - OUT, STEP, 0); U.uGridAN.value.set(LX, LZ);
   const NX = xs.length, NZ = zs.length;
   const pos = [], nor = [], rd = [], sp = [], cvs = [], sls = [], idx = [];
   const vid = new Int32Array(NX * NZ).fill(-1);
@@ -495,6 +570,7 @@ function buildApron(W, cfg, data, mat, group) {
   const m = new THREE.Mesh(geo, mat);
   m.receiveShadow = true;
   group.add(m);
+  return apronTex;
 }
 
 // ---- ground clutter ----------------------------------------------------------------------------
@@ -795,8 +871,10 @@ export function buildTerrain(W) {
   const fires = W.decor.filter(d => d.k === 'fire');
   mat.userData.U.uFire.value.set(fires[0]?.x ?? 1e5, fires[0]?.z ?? 1e5, fires[1]?.x ?? 1e5, fires[1]?.z ?? 1e5);
   const data = vertexData(W, cfg, clearingsOf(W));
+  const U = mat.userData.U;
+  U.tSlope.value = data.slopeTex; U.uGrid.value.set(W.X0, W.Z0, W.cell, 0); U.uGridN.value.set(W.nx + 1, W.nz + 1);
   buildChunks(W, data, mat, group);
-  buildApron(W, cfg, data, mat, group);
+  const apronTex = buildApron(W, cfg, data, mat, group);
   const clutter = new Clutter(W, cfg, biome);
   group.add(clutter.mesh);
   for (const n of prewarmQueue(biome)) prewarmed.add(n);
@@ -814,6 +892,6 @@ export function buildTerrain(W) {
       if (!camPos) return;
       clutter.update(t, camPos);
     },
-    dispose() { clutter.dispose(); queue = []; },
+    dispose() { clutter.dispose(); data.slopeTex.dispose(); apronTex.dispose(); queue = []; },
   };
 }

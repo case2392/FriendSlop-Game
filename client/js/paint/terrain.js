@@ -4,18 +4,19 @@
 //   ground_<b>    the main ground (512, world-space, ~7 m a tile)
 //   ground2_<b>   a second ground, blended in by large-scale noise
 //   dirt_<b>      bare packed dirt (camp clearings, yards, the town square)
-//   road_<b>      the dirt road in ROAD SPACE: x runs across the road (edge to edge,
-//                 plus a grassy shoulder), y runs along it, so the wheel ruts follow the road
-//   cliff_<b>     steep faces, projected from the side (y = world height, so strata stay level)
-//   clutter_<b>   2×2 alpha atlas of ground-clutter cards (grass tufts, flowers, wheat, twigs)
+//   road_<b>      the dirt road in ROAD SPACE: x runs across the road (edge to edge, plus a
+//                 grassy shoulder), y runs along it; each biome's road is painted differently
+//   cliff_<b>     steep faces, projected from the side (y = world height, so strata stay level):
+//                 rounded granite or sandstone masses (meadow, fields, snow), strata (badlands, desert)
+//   clutter_<b>   4×2 alpha atlas of ground-clutter cards (tufts, flowers, wheat, twigs, drifts)
 //   sky_clouds_<b> the painted cloud band around the sky dome (alpha), its own sky per biome
-//   sky_mtn_<b>   3 rows of distant mountain silhouettes (far, mid, near) for the horizon ring
-// Shared: mud (slush on the snow day; both in road space, puddles stretched along the road),
+//   sky_mtn_<b>   3 rows of distant land silhouettes (far, mid, near) for the horizon rings
+// Shared: mud (slush, mud_badlands, mud_desert: road space, puddles along the wheel tracks),
 // terrain_macro (RGB low-frequency variation, not color).
 //
-// The readable unit of a ground is the CLUMP (20-40 cm: a tuft, a clod, a plate of hardpan, a
-// ripple, a drift), painted with strong value contrast so it survives the mipmaps at 10-40 m;
-// fine blades and grit sit on top for the close view.
+// The readable unit of a ground is the CLUMP (20-40 cm: a cluster of blades, a clod, a drift, a
+// ripple), painted with value contrast so it survives the mipmaps at 10-40 m. Stones come in
+// clusters, cracks as open networks, grass as V-shaped clusters of short blades.
 import {
   register, fill, mottle, blade, stroke, cracks, glaze, blurTile, range, pick, wrap, blob, ellipse,
   mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, worley, streaks,
@@ -45,19 +46,6 @@ function blade2(g, x, y, len, ang, w, color, bend = 0.25) {
   for (let i = 2; i < Lp.length; i += 2) g.lineTo(Lp[i], Lp[i + 1]);
   for (let i = Rp.length - 2; i >= 0; i -= 2) g.lineTo(Rp[i], Rp[i + 1]);
   g.closePath(); g.fill();
-}
-
-// Long combed strokes (the wind-combed lie of the grass): big tapered strokes in one direction,
-// painted at full strength into a layer and laid down once, so they read from far away.
-function combed(g, s, rnd, n, { cols, len, wid, ang, alpha, bend = [-0.15, 0.15], where = null }) {
-  layered(g, s, alpha, lg => {
-    for (let i = 0; i < n; i++) {
-      const x = rnd() * s, y = rnd() * s;
-      if (where && rnd() > where(x, y)) continue;
-      const L = range(rnd, len[0], len[1]), a = range(rnd, ang[0], ang[1]), w = range(rnd, wid[0], wid[1]), c = pick(rnd, cols), b = range(rnd, bend[0], bend[1]);
-      wrap(s, x, y, L + w, (X, Y) => blade2(lg, X, Y, L, a, w, c, b));
-    }
-  });
 }
 
 // Grass blades scattered everywhere: n blades, colors, length/width ranges.
@@ -196,18 +184,6 @@ function grassTufts(g, s, rnd, n, { r = [9, 20], blades = [6, 12], len = [12, 26
   }
 }
 
-// Tiny flowers in the grass: a dark stalk dot, the head, a lit dot.
-function speckFlowers(g, s, rnd, n, cols, r = [1.8, 2.8]) {
-  for (let i = 0; i < n; i++) {
-    const x = rnd() * s, y = rnd() * s, c = pick(rnd, cols), rr = range(rnd, r[0], r[1]);
-    wrap(s, x, y, rr * 3, (X, Y) => {
-      blob(g, X + 1.2, Y + 1.4, rr * 1.4, rr * 1.2, 0, '#1e2a14', 0.4, 0.4);
-      ellipse(g, X, Y, rr, rr * 0.85, 0, c);
-      ellipse(g, X - rr * 0.3, Y - rr * 0.3, rr * 0.45, rr * 0.4, 0, lightOf(c, 0.6), 0.9);
-    });
-  }
-}
-
 // A mid-scale mass field (0..1): where the clumps crowd together and catch the light (1), and the
 // dark hollows between them (0). Features of ~40-90 px, so they survive the mipmaps.
 function massField(rnd, s, g0 = 6, sharp = 2.2) {
@@ -318,8 +294,8 @@ function rut(g, s, rnd, x0, w, P) {
   layered(g, s, 0.32, lg => stroke(lg, pts(0), w * 1.9, w * 1.9, P.rut, 1));
   layered(g, s, 0.45, lg => stroke(lg, pts(0.1 * w), w * 0.95, w * 0.95, P.rut, 1));
   layered(g, s, 0.5, lg => stroke(lg, pts(0.05 * w), w * 0.42, w * 0.42, P.rutDark, 1));
-  layered(g, s, 0.38, lg => stroke(lg, pts(-w * 0.42), w * 0.22, w * 0.22, shadowOf(P.rutDark, 0.2), 1));
-  layered(g, s, 0.55, lg => stroke(lg, pts(w * 0.58), w * 0.24, w * 0.24, P.rutLit, 1));
+  layered(g, s, 0.38 * (P.rimA ?? 1), lg => stroke(lg, pts(-w * 0.42), w * 0.3, w * 0.3, shadowOf(P.rutDark, 0.2), 1));
+  layered(g, s, 0.55 * (P.rimA ?? 1), lg => stroke(lg, pts(w * 0.58), w * 0.34, w * 0.34, P.rutLit, 1));
   return y => x0 + wob(y / s) * 8 + wob2(y / s) * 3;
 }
 
@@ -430,29 +406,6 @@ function fbmField(rnd, s, oct, g0, gain = 0.5, aniso = 1) {
     a *= gain; gx *= 2;
   }
   return F;
-}
-
-// Nearest seed in a wrapped, jittered cx × cy grid. Returns [id, d1, d2, dx, dy].
-function voronoiAt(seeds, cx, cy, s, u, v, aniso, out) {
-  const cw = s / cx, ch = s / cy;
-  const ci = Math.floor(u / cw), cj = Math.floor(v / ch);
-  let b1 = 1e9, b2 = 1e9, bid = 0, bdx = 0, bdy = 0;
-  for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
-    let ii = ci + di, jj = cj + dj, ox = 0, oy = 0;
-    if (ii < 0) { ii += cx; ox = -s; } else if (ii >= cx) { ii -= cx; ox = s; }
-    if (jj < 0) { jj += cy; oy = -s; } else if (jj >= cy) { jj -= cy; oy = s; }
-    const sd = seeds[jj * cx + ii];
-    const dx = u - (sd.x + ox), dy = (v - (sd.y + oy)) * aniso;
-    const d = dx * dx + dy * dy;
-    if (d < b1) { b2 = b1; b1 = d; bid = jj * cx + ii; bdx = dx; bdy = dy / aniso; } else if (d < b2) b2 = d;
-  }
-  out[0] = bid; out[1] = Math.sqrt(b1); out[2] = Math.sqrt(b2); out[3] = bdx; out[4] = bdy;
-  return out;
-}
-function jitterSeeds(rnd, s, cx, cy, jx, jy, extra) {
-  const cw = s / cx, ch = s / cy, out = [];
-  for (let j = 0; j < cy; j++) for (let i = 0; i < cx; i++) out.push({ x: (i + 0.5 + (rnd() - 0.5) * jx) * cw, y: (j + 0.5 + (rnd() - 0.5) * jy) * ch, ...extra(rnd) });
-  return out;
 }
 
 const sst = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
@@ -1731,7 +1684,7 @@ register('road_fields', {
 register('road_snow', {
   family: 'terrain', size: 512, note: 'Dun Morogh: trampled packed snow, gravel and slush only in the ruts, snow berms along both edges (road space)',
   paint(g, s, rnd) {
-    paintRoad(g, s, rnd, { ...BIO.snow.road, clods: 180, clodR: [3, 7], pebN: 0, stoneN: 0, rutW: 0.6, glaze: '#e8f0ff',
+    paintRoad(g, s, rnd, { ...BIO.snow.road, clods: 180, clodR: [3, 7], pebN: 0, stoneN: 0, rutW: 0.6, rimA: 0.45, glaze: '#e8f0ff',
       extra(g, s, rnd, c, mpx, ruts) {
         // gravel and grit thrown into the ruts
         for (const rx of ruts) for (let i = 0; i < 170; i++) {
@@ -2556,12 +2509,13 @@ function peakAt(P, kind, x, w) {        // height of shape P at column x (wrappe
   if (kind === 'forest') return P.h * Math.sqrt(1 - u * u);
   if (kind === 'pines') return P.h * Math.pow(1 - e, 0.9) * (1 - 0.1 * (Math.floor((1 - e) * 4) % 2));
   if (kind === 'mesa') {
-    // a caprock with a jittered top and rounded shoulders, a cliff whose sides taper (never
-    // vertical), then a flared talus apron
-    const cap = P.h - 3 - P.notch(x / w) * 4 - P.notch(x / w * 3.7 + 0.3) * 2.5;
+    // a caprock with a jittered top and rounded shoulders, one side stepped down to a lower bench,
+    // a cliff whose sides taper (never vertical), then a flared talus apron
+    const cap = P.h - 4 - P.notch(x / w) * 6 - P.notch(x / w * 3.7 + 0.3) * 3;
+    const bench = (P.strat < 0.5 ? u > 0.12 : u < -0.12) ? P.h * (0.14 + 0.1 * P.strat) * sst(0.1, 0.16, e) : 0;
     const sh = sst(0.3, 0.4, e);
-    if (e < 0.4) return cap - sh * 4;
-    if (e < 0.6) { const f = (e - 0.4) / 0.2; return cap - 4 - (cap * 0.38) * (f * f * 0.4 + f * 0.6); }
+    if (e < 0.4) return cap - sh * 5 - bench;
+    if (e < 0.6) { const f = (e - 0.4) / 0.2; return cap - 5 - bench - ((cap - bench) * 0.38) * (f * f * 0.4 + f * 0.6); }
     return P.h * 0.6 * Math.pow(1 - (e - 0.6) / 0.4, 1.6);
   }
   const v = u < P.skew ? (u + 1) / (P.skew + 1) : (1 - u) / (1 - P.skew);
