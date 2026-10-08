@@ -114,8 +114,10 @@ if (want('climbing')) { // 5. climbing the canyon wall
 {
   const wall = await steve.evaluate(() => {
     const W = window.__nmd.W;
-    for (let z = 200; z < 520; z += 5) { const rx = W.roadX(z); for (let d = 10; d < 60; d += 0.5) { const x = rx + d; if (W.heightAt(x + 1, z) - W.heightAt(x, z) > 2.2 && W.heightAt(x + 12, z) - W.heightAt(x, z) > 10) return { x: x - 0.9, z, base: W.heightAt(x, z) }; } }
-    return null;
+    // the tallest steep face (over ~55 degrees) on the left of the road: every biome's walls differ
+    let best = null;
+    for (let z = 200; z < 520; z += 5) { const rx = W.roadX(z); for (let d = 10; d < 60; d += 0.5) { const x = rx + d, h = W.heightAt(x, z), rise = W.heightAt(x + 12, z) - h; if (W.heightAt(x + 1, z) - h > 1.4 && (!best || rise > best.rise)) best = { x: x - 0.9, z, base: h, rise }; } }
+    return best;
   });
   await ev(steve, w => { const S = window.__nmd; S.me.teleport(w.x, w.base + 0.2, w.z, Math.PI / 2); S.me.pitch = -0.25; S.me.stamina = 100; }, wall);
   await wait(steve, 600);

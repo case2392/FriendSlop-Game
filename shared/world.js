@@ -220,7 +220,7 @@ export function generateLeg(seed, day) {
     // the face, then a rounded shoulder easing over the lip (a crease sharper than the 2.5 m grid would
     // show as a sawtooth of triangle teeth along the rim)
     const ws = wallSoft(z), q = ad + jag;
-    const t = 0.85 * smoothstep(wd, wd + ws, q) + 0.15 * smoothstep(wd + 0.6 * ws, wd + ws + 5, q);
+    const t = 0.85 * smoothstep(wd, wd + 0.85 * ws, q) + 0.15 * smoothstep(wd + 0.6 * ws, wd + ws + 5, q);   // face as steep as ever
     h += t * (wallH(side, z) + fbm(x / 22, z / 22, S + 31, 2) * 3.2);
     // beyond the rim: rolling plateau, then the world's edge rises
     h += smoothstep(wd + 8, wd + 60, ad) * 6 * (fbm(x / 60, z / 60, S + 41, 2) + 0.6);
