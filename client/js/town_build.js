@@ -28,7 +28,7 @@
 // pools round every lamp and fire, cooler light by the windows.
 import { THREE } from './gfx.js';
 import { Kit, mat, matrix, rng, sstep, gridGeo } from './town_kit.js';
-import { LOG_ROWS, HOLE_CELLS } from './paint/architecture.js';
+import { LOG_ROWS, HOLE_CELLS, HOLE_COLS } from './paint/architecture.js';
 
 const D2R = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -397,6 +397,12 @@ function plasterFace(c, m, len, y0, y1, plan, hole, o) {
   c.K.add(m, g, { ...o, ao });
 }
 
+// map a decal quad onto one cell of the wall_holes atlas (HOLE_COLS × 2 cells, the middle 84% × 62% of it)
+function holeUV(g, cell) {
+  const cw = 1 / HOLE_COLS, u0 = (cell % HOLE_COLS) * cw, v0 = cell < HOLE_COLS ? 0.5 : 0;
+  const uv = g.attributes.uv;
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + (0.08 + uv.getX(i) * 0.84) * cw, v0 + (0.19 + uv.getY(i) * 0.62) * 0.5);
+}
 // 0-n plaster holes (decals from the wall_holes atlas) in random panels of the current wall frame
 function holes(c, panels, n, kind) {
   const cells = HOLE_CELLS[kind];
@@ -408,10 +414,8 @@ function holes(c, panels, n, kind) {
     const sz = Math.min(1.3, (p.x1 - p.x0) * 1.15, (p.y1 - p.y0) * 1.6) * (0.75 + c.R() * 0.3);
     const x = p.x0 + (p.x1 - p.x0) * (0.3 + 0.4 * c.R()), y = p.y0 + (p.y1 - p.y0) * (0.3 + 0.4 * c.R());
     const cell = cells[Math.floor(c.R() * cells.length)];
-    const u0 = (cell % 2) * 0.5, v0 = cell < 2 ? 0.5 : 0;
     const g = new THREE.PlaneGeometry(sz, sz * 0.62);
-    const uv = g.attributes.uv;
-    for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + (0.08 + uv.getX(i) * 0.84) * 0.5, v0 + (0.19 + uv.getY(i) * 0.62) * 0.5);
+    holeUV(g, cell);
     c.K.add(hm, g, { uv: 'keep', at: matrix(x, y, 0.014, 0, 0, (c.R() - 0.5) * 0.3), shade: () => 0.96, cast: false });
   }
 }

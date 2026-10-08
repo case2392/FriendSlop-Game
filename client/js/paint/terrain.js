@@ -1879,16 +1879,16 @@ register('cliff_fields', {
   },
 });
 register('cliff_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: big rounded blue-gray granite masses, powder on every top, a few thick lumpy snow caps with a blue shadow under them, small icicle groups',
+  family: 'terrain', size: 512, note: 'Dun Morogh: chunky blue-gray granite blocks (1-3 m), cream-lit tops, cool undersides, soft dark creases, a light powder; the terrain shader lays the snow shelves from its form map',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
-      fill: [3, 4], big: 5, bigR: [85, 135], asp: [0.6, 1.8], small: 0, sx: 1, sy: 1, rot: 1.0, warp: 20, tilt: 0.1,
-      dome: 38, zs: 20, smooth: 0.17, exp: 2.3, bulge: 10, soft: 2, relief: 0.8, contrast: 1.55, planes: 0.5, shSlope: 0.5, castA: 0.32, tone: 0.09, hueMix: 0.35,
-      crease: 0.3, creaseW: 5, creaseD: 4, creaseA: 0.5, creaseC: '#444c62',
-      colors: ['#7d8490', '#88909c', '#969eac', '#828a96', '#9098a6'], blot: ['#757c88', '#a0a8b6', '#808090', '#8a92a0'],
-      light: '#dce2ec', shadow: '#606a84', cast: '#646f8c', deep: '#525c74', glaze: '#e4ecff',
-      powder: { up: 0.22, a: 0.55 }, powderC: '#e8eef6', caps: { n: 1, T: [8, 14], up: 0.3 }, capShadow: '#9fb0c8', icicles: 2,
-      stains: 20, stain: '#3c4458', stainA: 0.12, lichen: ['#a8b0a0', '#c0c4b0'], chisel: 230, cracks: 14, upName: 'cliff_snow',
+      fill: [4, 6], big: 6, bigR: [66, 120], asp: [1.0, 2.6], small: 0, sx: 1, sy: 1, rot: 0.4, warp: 18, tilt: 0.14,
+      dome: 34, zs: 22, smooth: 0.2, exp: 3.4, bulge: 6, soft: 2, relief: 0.95, contrast: 2.4, planes: 0.55, shSlope: 0.45, castA: 0.5, tone: 0.11, hueMix: 0.4,
+      crease: 0.55, creaseW: 5, creaseD: 5, creaseA: 0.62, creaseC: '#353b52',
+      colors: ['#7a8292', '#848c9c', '#8e95a4', '#767e8e', '#8a90a2'], blot: ['#6e7686', '#9aa2b2', '#7c7a8c', '#88909e'],
+      light: '#e6e0d0', shadow: '#55607c', cast: '#5a6584', deep: '#3e465e', glaze: '#e8ecf8',
+      powder: { up: 0.45, a: 0.16 }, powderC: '#eef2f8',
+      stains: 24, stain: '#363e54', stainA: 0.14, lichen: ['#a8b0a0', '#c0c4b0', '#b8a88a'], chisel: 200, cracks: 18, upName: 'cliff_snow',
     }, cv);
   },
 });
@@ -2511,20 +2511,19 @@ function cloudBand(spec) {
 
 const CLOUDS = {
   meadow: {
-    note: 'Elwynn: soft, flattish painted cumulus, each two or three overlapping lobes with feathered edges, thin cirrus streaks between the banks',
-    cirrus: { n: 10, y: [50, 270], len: [600, 1400], th: [6, 14], d: [0.18, 0.32] },
-    fe: 9, planes: 0, lFloor: 0.25, feather: 3.6,
+    note: 'Elwynn: big soft towering cumulus all round the sky (one every ~45 degrees, so two or three are always in view), a few flat banks low on the horizon, faint cirrus',
+    cirrus: { n: 5, y: [40, 200], len: [600, 1300], th: [8, 16], d: [0.2, 0.34] },
+    fe: 6, planes: 0.18, lFloor: 0.12, feather: 2.4,
     clusters: (rnd, VW) => {
       const o = [];
-      for (let i = 0; i < 7; i++) {
-        // one bank = two or three lobes, each its own flattish cluster, overlapping
-        const W = range(rnd, 200, 330), x = (i + rnd() * 0.6) / 7 * VW, yb = range(rnd, 280, 335), n = 2 + Math.floor(rnd() * 2);
-        for (let k = 0; k < n; k++) {
-          const lw = W * range(rnd, 0.5, 0.7);
-          o.push({ x: x + (k - (n - 1) / 2) * W * 0.36 + range(rnd, -12, 12), yb: yb + range(rnd, -10, 6), w: lw, h: lw * range(rnd, 0.3, 0.4), d: range(rnd, 0.62, 0.82), towers: rnd() < 0.5 ? 1 : 0, puffs: range(rnd, 9, 14) });
-        }
+      // the big ones, evenly round the band (the band drifts, so any view always holds two or three)
+      for (let i = 0; i < 8; i++) {
+        const W = range(rnd, 290, 430);
+        o.push({ x: (i + 0.2 + rnd() * 0.6) / 8 * VW, yb: range(rnd, 285, 330), w: W, h: W * range(rnd, 0.44, 0.6), d: range(rnd, 0.8, 0.95), towers: 2 + Math.floor(rnd() * 3), puffs: range(rnd, 15, 22) });
       }
-      for (let i = 0; i < 5; i++) { const W = range(rnd, 110, 200); o.push({ x: rnd() * VW, yb: range(rnd, 345, 380), w: W, h: W * range(rnd, 0.24, 0.32), d: range(rnd, 0.35, 0.55), towers: 0, puffs: range(rnd, 6, 9) }); }
+      // a flat lobe or two trailing off some of them
+      for (let i = 0; i < 6; i++) { const W = range(rnd, 160, 260); o.push({ x: (i + rnd()) / 6 * VW, yb: range(rnd, 335, 360), w: W, h: W * range(rnd, 0.26, 0.34), d: range(rnd, 0.55, 0.75), towers: 0, puffs: range(rnd, 8, 12) }); }
+      for (let i = 0; i < 8; i++) { const W = range(rnd, 100, 200); o.push({ x: rnd() * VW, yb: range(rnd, 362, 395), w: W, h: W * range(rnd, 0.28, 0.38), d: range(rnd, 0.45, 0.7), towers: 1, puffs: range(rnd, 7, 10) }); }
       return o;
     },
   },
@@ -2582,10 +2581,11 @@ const MTN = {
     { col: '#a29a66', lo: 0.18, hi: 0.48, kind: 'hill', n: 18, hero: [[0.37, 0.08, 1], [0.87, 0.08, 1]], dots: 40, dotC: '#6a7040' },
     { col: '#6f7e40', lo: 0.14, hi: 0.36, kind: 'forest', n: 18, hero: [[0.71, 0.04, 1]] },
   ],
+  // (tiers: stepped flanks, flat benches and level strata bands, Thousand Needles style)
   badlands: [
-    { col: '#b07a5c', lo: 0.25, hi: 0.85, kind: 'mesa', n: 12, hero: [[0.0, 0.03, 1], [0.025, 0.022, 0.72], [-0.03, 0.026, 0.84], [0.5, 0.028, 0.92], [0.527, 0.02, 0.66], [0.47, 0.024, 0.78]] },
-    { col: '#a8603e', lo: 0.20, hi: 0.62, kind: 'mesa', n: 14, hero: [[0.37, 0.07, 1], [0.87, 0.06, 0.95]] },
-    { col: '#94523a', lo: 0.14, hi: 0.42, kind: 'peak', n: 18, hero: [[0.71, 0.05, 1]] },
+    { col: '#b07a5c', lo: 0.25, hi: 0.85, kind: 'mesa', tiers: true, n: 12, bands: ['#b4684a', '#c98a64', '#a05a40', '#d8a27a'], hero: [[0.0, 0.03, 1], [0.025, 0.022, 0.72], [-0.03, 0.026, 0.84], [0.5, 0.028, 0.92], [0.527, 0.02, 0.66], [0.47, 0.024, 0.78]] },
+    { col: '#a8603e', lo: 0.20, hi: 0.62, kind: 'mesa', tiers: true, n: 14, bands: ['#a4522f', '#c4703f', '#8e4428', '#d8945a'], hero: [[0.37, 0.07, 1], [0.87, 0.06, 0.95]] },
+    { col: '#94523a', lo: 0.14, hi: 0.42, kind: 'mesa', tiers: true, n: 15, bands: ['#984a2c', '#b8663a', '#7e3a24', '#cc8650'], hero: [[0.71, 0.05, 1], [0.74, 0.03, 0.7]] },
   ],
   snow: [
     { col: '#8494ae', lo: 0.38, hi: 1.0, kind: 'peak', n: 13, snow: 0.55, hero: [[0.0, 0.07, 1], [0.5, 0.06, 0.95]] },
@@ -2624,11 +2624,24 @@ function mtnRow(rnd, L, w, rowH) {
   return out;
 }
 const PU = [0];
-function peakAt(P, kind, x, w) {        // height of shape P at column x (wrapped); its u (-1..1) goes to PU[0]
+function peakAt(P, kind, x, w, tiers = false) {        // height of shape P at column x (wrapped); its u (-1..1) goes to PU[0]
   let d = x - P.x; if (d > w / 2) d -= w; if (d < -w / 2) d += w;
   const u = d / P.wid; PU[0] = u;
   if (u <= -1 || u >= 1) return -1;
   const e = Math.abs(u);
+  if (kind === 'mesa' && tiers) {
+    // a flat caprock, then the flank stepping down in one to three tiers (a steep riser, a flat
+    // bench), then a short talus; each side has its own number of tiers
+    const cap = P.h - 3 - P.notch(x / w) * 3 - P.notch(x / w * 3.7 + 0.3) * 1.5;
+    const nT = 1 + Math.floor(((u < 0 ? P.strat : P.z) * 2.99 + (P.hero ? 1 : 0)) % 3);
+    if (e < 0.38) return cap;
+    if (e < 0.8) {
+      const f = (e - 0.38) / 0.42, t = Math.min(nT - 1, Math.floor(f * nT)), ft = f * nT - t;
+      const hi = cap * (1 - t * 0.58 / nT), lo = cap * (1 - (t + 1) * 0.58 / nT);
+      return hi + (lo - hi) * sst(0, 0.28, ft);
+    }
+    return cap * 0.42 * Math.pow(1 - (e - 0.8) / 0.2, 1.5);
+  }
   if (kind === 'forest') return P.h * Math.sqrt(1 - u * u);
   if (kind === 'pines') return P.h * Math.pow(1 - e, 0.9) * (1 - 0.1 * (Math.floor((1 - e) * 4) % 2));
   if (kind === 'mesa') {
@@ -2674,7 +2687,7 @@ for (const b of Object.keys(MTN)) {
           // every shape covering this column, front first: a pixel belongs to the front-most shape
           // that reaches it, so overlapping shapes overlap along their slopes, never at a vertical cut
           const cov = [];
-          for (const P of cols[x]) { const ph = peakAt(P, L.kind, x, w); if (ph > 0) cov.push([P, ph, PU[0]]); }
+          for (const P of cols[x]) { const ph = peakAt(P, L.kind, x, w, L.tiers); if (ph > 0) cov.push([P, ph, PU[0]]); }
           const rgh = rough(x / w) * (tree ? 1.2 : 2.5), bh = baseH(x);
           let top = bh; for (const c of cov) top = Math.max(top, c[1]);
           top += rgh;
@@ -2692,6 +2705,11 @@ for (const b of Object.keys(MTN)) {
             if (tree) {
               const vy = Math.min(1, (ptop - hb) / Math.max(4, best.h));
               f = -bu * 0.9 + (1 - vy) * 0.5 - 0.15;
+            } else if (L.kind === 'mesa' && L.tiers) {
+              // faces lit on the left, shaded on the right; every flat top (the cap, each bench) lit
+              const e = Math.abs(bu), pa = best === BASE ? 1 : Math.abs(peakAt(best, 'mesa', x + 2, w, true) - peakAt(best, 'mesa', x - 2, w, true)) / 4;
+              f = e >= 0.8 ? (bu < 0 ? 0.42 : -0.26) : (bu < 0 ? 0.4 : -0.42) - depth * 0.1;
+              if (pa < 0.3 && ptop - hb < 2.4 && best !== BASE) f = 0.85;
             } else if (L.kind === 'mesa') {
               const e = Math.abs(bu);
               if (e < 0.4) f = hb > best.h - 9 ? 0.75 : (bu < 0 ? 0.42 : -0.38) - depth * 0.15;          // caprock: lit top, its two faces
@@ -2707,7 +2725,11 @@ for (const b of Object.keys(MTN)) {
             }
             r = base.r; gg = base.g; bb = base.b;
             if (f > 0) mixTo(lit, Math.min(1, f) * 0.85); else mixTo(dark, Math.min(1, -f) * 0.85);
-            if (L.kind === 'mesa' && Math.abs(bu) < 0.6 && best !== BASE) { mixTo(bandC[Math.floor((hb / Math.max(1, best.h)) * 3 + best.strat * 3) % 3], 0.3); const sp = (hb + best.strat * 40) / (5 + best.strat * 4); if (sp - Math.floor(sp) < 0.22) mixTo(dark, 0.2); }
+            if (L.tiers && best !== BASE && Math.abs(bu) < 0.8) {          // level strata bands, the same height across neighbours
+              const q = (hb + 3) / 11, bi = Math.floor(q), bc = hex(L.bands[((bi % L.bands.length) + L.bands.length) % L.bands.length]);
+              mixTo(bc, 0.5);
+              if (q - bi < 0.16) mixTo(dark, 0.32); else if (q - bi > 0.88) mixTo(lit, 0.18);
+            } else if (L.kind === 'mesa' && Math.abs(bu) < 0.6 && best !== BASE) { mixTo(bandC[Math.floor((hb / Math.max(1, best.h)) * 3 + best.strat * 3) % 3], 0.3); const sp = (hb + best.strat * 40) / (5 + best.strat * 4); if (sp - Math.floor(sp) < 0.22) mixTo(dark, 0.2); }
             if (L.snow && best !== BASE) {                                   // snow caps, lower on the lit planes
               const rel = hb / Math.max(1, best.h);
               const line = 1 - L.snow * (0.7 + 0.6 * best.strat) - (f > 0 ? 0.08 : 0) + sr * 0.08 - (tree ? 0.15 : 0);

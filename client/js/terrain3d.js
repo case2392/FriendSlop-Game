@@ -54,13 +54,13 @@ const CFG = {
       cards: [[0.85, 0.62, 0.36], [0.95, 0.95, 0.04], [0.85, 0.72, 0.04], [0.8, 0.58, 0.22], [0.65, 0.55, 0.05], [0.85, 0.72, 0.16], [0.8, 0.7, 0.08], [0.7, 0.32, 0.08]] },
   },
   snow: {
-    hw: 3.0, scale: [8, 9, 6, 10.5], cliff: [0.34, 0.5], cliffN: [0.14, 0.04], g2: [0.67, 0.42], collar: [0.62, 0.68, 0.8], ledge: [1.0, 1.0, 1.0], snowRock: true, local: 0.02, mesaK: 0.32,
+    hw: 3.0, scale: [8, 9, 6, 10.5], cliff: [0.27, 0.38], cliffN: [0.14, 0.04], g2: [0.67, 0.42], collar: [0.62, 0.68, 0.8], ledge: [1.0, 1.0, 1.0], snowRock: true, local: 0.02, mesaK: 0.32,
     ao: [0.6, 0.67, 0.86], tintA: [1.03, 1.01, 0.96], tintB: [0.9, 0.95, 1.06], macro: 0.2, macro2: 0.1, mudTex: 'slush', sparkle: true, detail: [0.0, 0.12, 0.3],
     clutter: { cell: 3.0, slots: 3, radius: 22, patch: 10, density: 0.5, spread: 1.0, flowers: 0,
       cards: [[0.8, 0.55, 0.38], [0.8, 0.6, 0.16], [0.7, 0.42, 0.04], [0.95, 0.75, 0.26], [1.1, 0.5, 0.14], [0.6, 0.38, 0.2], [0.85, 0.65, 0.08], [0.9, 0.4, 0.12]] },
   },
   badlands: {
-    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands', local: 0.06, mesaK: 0.05,
+    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands', local: 0.06, mesaK: 0.05, terrace: [12, 0.68, 0.94],
     ao: [0.52, 0.42, 0.55], tintA: [1.07, 1.0, 0.9], tintB: [0.92, 0.95, 1.03], macro: 0.32, detail: [0.08, 0.45, 0.1],
     clutter: { cell: 3.2, slots: 3, radius: 22, patch: 12, density: 0.42, spread: 1.0, flowers: 0,
       cards: [[0.75, 0.5, 0.3], [0.8, 0.55, 0.12], [0.75, 0.5, 0.12], [0.7, 0.5, 0.12], [0.75, 0.5, 0.16], [0.85, 0.6, 0.06], [0.7, 0.45, 0.06], [0.5, 0.3, 0.14]] },
@@ -118,7 +118,7 @@ function splatMaterial(biome, cfg) {
     uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(MUD_TILE, 10, cfg.macro, cfg.macro2 ?? 0.12) },
     uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uLocal: { value: cfg.local ?? -1 }, uCliffN: { value: new THREE.Vector2(...cfg.cliffN) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
     uAO: { value: new THREE.Vector3(...cfg.ao) }, uCollar: { value: new THREE.Vector3(...cfg.collar) }, uRev: { value: new THREE.Vector3(...(cfg.reveal || [0.24, 0.76, 0.5])) },
-    uMesa: { value: Array.from({ length: 8 }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaK: { value: cfg.mesaK ?? 0.12 }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
+    uMesa: { value: Array.from({ length: 8 }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaY: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uMesaK: { value: cfg.mesaK ?? 0.12 }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   if (cfg.snowRock) { const f = rawTex('cliff_snow_form', true); f.anisotropy = cheap ? 2 : 8; U.tForm = { value: f }; }
@@ -128,9 +128,10 @@ function splatMaterial(biome, cfg) {
   if (cfg.strata) m.defines.TERRAIN_STRATA = 1;
   if (cfg.dunes) m.defines.TERRAIN_DUNES = 1;
   if (cfg.snowRock) m.defines.TERRAIN_SNOWROCK = 1;
+  if (globalThis.__terrainDebug) m.defines.TERRAIN_DEBUG = 1;
   m.defines.TERRAIN_ANISO = cheap ? '2.0' : '3.0';
   m.defines.TERRAIN_NEARSHARP = cheap ? '0.62' : '0.82';
-  const key = 'terrain-splat-v17' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
+  const key = 'terrain-splat-v18' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
@@ -148,7 +149,7 @@ function splatMaterial(biome, cfg) {
         #ifdef TERRAIN_SNOWROCK
           uniform sampler2D tForm;
         #endif
-        uniform vec4 uMesa[8]; uniform float uMesaK;
+        uniform vec4 uMesa[8], uMesaY[8]; uniform float uMesaK;
         uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge, uRev; uniform float uSpark, uRoadSpan, uLocal;
         varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv; varying vec2 vSlope;
         float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
@@ -165,7 +166,7 @@ function splatMaterial(biome, cfg) {
         }
         `)
       .replace('#include <map_fragment>', `
-        float tSpark = 0.0;
+        float tSpark = 0.0; vec3 dbg = vec3(-1.0);
         {
           // Each optional layer is fetched only where it can show, and every blend weight is
           // faded to zero at its branch boundary, so the fetches can use implicit derivatives.
@@ -187,13 +188,29 @@ function splatMaterial(biome, cfg) {
           float dOut = length(gq - gqc) * uGrid.z;
           if (dOut > 0.0) st = mix(st, textureLod(tSlopeA, ((wp.xz - uGridA.xy) / uGridA.z + 0.5) / uGridAN, 0.0), smoothstep(0.0, 12.0, dOut));   // the apron, on its own 10 m lattice
           sl = st.rg; hn = st.ba * 2.0 - 1.0;
+          // the crash mesas: mY is the nearest one's foot, lip and bench heights and the bench's
+          // bearing, mC its centre
+          float mesaK = 0.0; vec4 mY = vec4(0.0); vec2 mC = vec2(0.0);
+          for (int i = 0; i < 8; i++) {
+            float w = 1.0 - smoothstep(uMesa[i].z, uMesa[i].z + 5.0, distance(wp.xz, uMesa[i].xy));
+            if (w > mesaK) { mesaK = w; mY = uMesaY[i]; mC = uMesa[i].xy; }
+          }
+          #ifdef TERRAIN_SNOWROCK
+            // round a crash mesa everything is projected square to its own radius (the smoothed facing
+            // averages over the whole small form and would project it edge-on, smeared into chevrons)
+            if (mesaK > 0.0) { vec2 rd = wp.xz - mC; hn = mix(hn, rd / max(length(rd), 0.01), mesaK); }
+          #endif
           // ground: two scales of the main ground, picked patch by patch so neither tile shows. Flat
           // ground is projected from above; on slopes (by a smoothed slope, so the grid never shows)
           // from the side, x- or z-facing, the switch dithered by noise. Every fetch is given the
           // derivatives of its own projection, so a switch never drops to a tiny mip along the seam.
           float distK = smoothstep(80.0, 260.0, distance(cameraPosition, wp));
           float gB = exp2(distK * 1.5);
-          float sideW = smoothstep(0.24, 0.34, sl.y + (nE - 0.5) * 0.08 + (mB.r - 0.5) * 0.05);   // switch near 45 degrees, where both projections stretch alike
+          float slG = sl.y;
+          #ifdef TERRAIN_SNOWROCK
+            slG = mix(sl.y, 1.0 - nr.y, mesaK);       // (a mesa's own slope: its foot is gentle, its flanks sheer)
+          #endif
+          float sideW = smoothstep(0.24, 0.34, slG + (nE - 0.5) * 0.08 + (mB.r - 0.5) * 0.05);   // switch near 45 degrees, where both projections stretch alike
           vec2 sxz = vec2(wp.z, wp.y), szx = vec2(-wp.x, wp.y);
           vec2 an0 = pow(abs(hn) + 0.001, vec2(6.0));
           bool useX = an0.x / (an0.x + an0.y) + (nE - 0.5) * 0.6 > 0.5;
@@ -264,17 +281,17 @@ function splatMaterial(biome, cfg) {
           if (uLocal >= 0.0) cB = max(cB, mix(cB, sl.y - uLocal + (nE - 0.5) * 0.1 + (mB.g - 0.5) * 0.06, locK));
           // (snow: far off the granite comes out on gentler slopes than near)
           // and the flanks of a crash mesa show their rock on gentler slopes than a valley wall
-          float mesaK = 0.0;
-          if (sl.y > 0.1) for (int i = 0; i < 8; i++) mesaK = max(mesaK, 1.0 - smoothstep(uMesa[i].z, uMesa[i].z + 5.0, distance(wp.xz, uMesa[i].xy)));
-          float farA = 0.0, cShift = uMesaK * mesaK;
+          float farA = 0.0, cShift = uMesaK * mesaK, mzk = 0.0;
           #ifdef TERRAIN_SNOWROCK
             farA = smoothstep(110.0, 300.0, distance(cameraPosition, wp));
             cShift += 0.2 * farA;
+            mzk = mesaK;
           #endif
           if (cB + cShift > uCliff.x - 0.01) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
             float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
-            float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp));   // far walls: the rock at 2.5x, bigger masses
+            float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp)) * (1.0 - mzk);   // far walls: the rock at 2.5x, bigger masses
+            float tS = 1.0 + 0.75 * mzk;      // (snow) a crash mesa's granite in smaller blocks, 1-2 m
             // side projection: x- or z-facing, from a sharpened normal blend dithered by noise. On a
             // steep face every field sampled by x and z (the slope, the macro noise) is constant up
             // the face, so its thresholds would run in straight vertical bands: there the dither is
@@ -284,6 +301,7 @@ function splatMaterial(biome, cfg) {
             float steepW = smoothstep(0.25, 0.5, sl.y);
             vec2 an = pow(abs(hn) + 0.001, vec2(8.0));
             float sx = smoothstep(0.32, 0.68, an.x / (an.x + an.y) + (mix(nE, wN.b, steepW) - 0.5) * 0.5 + (wN.g - 0.5) * 0.3 * steepW);
+            dbg = vec3(sx, 1.0 - nr.y, 0.0);
             vec3 cc = vec3(0.0);
             vec2 sN = vec2(0.5);      // (snow) a noise on the face, stretched along it: r ~5-13 m by 1-3 m, g ~2-6 m by 0.5-1.3 m
             vec2 fm = vec2(0.5);      // (snow) the painted rock's form under cc: x which way it faces (> 0.5 up), y its height
@@ -291,7 +309,7 @@ function splatMaterial(biome, cfg) {
               sN = vec2(0.0); fm = vec2(0.0);
             #endif
             if (sx > 0.01) {
-              vec2 p = vec2(wp.z, wp.y) / uScale.w + cw;
+              vec2 p = vec2(wp.z, wp.y) / uScale.w * tS + cw;
               vec2 dx = dFdx(p), dy = dFdy(p); tCap(dx, dy);
               vec3 c1 = vec3(0.0);
               if (farK < 0.999) c1 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21), dx * 0.77, dy * 0.77).rgb, xb);
@@ -306,7 +324,7 @@ function splatMaterial(biome, cfg) {
               #endif
             }
             if (sx < 0.99) {
-              vec2 p = vec2(-wp.x, wp.y) / uScale.w + vec2(0.5, 0.0) + cw;
+              vec2 p = vec2(-wp.x, wp.y) / uScale.w * tS + vec2(0.5, 0.0) + cw;
               vec2 dx = dFdx(p), dy = dFdy(p); tCap(dx, dy);
               vec3 c2 = vec3(0.0);
               if (farK < 0.999) c2 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47), dx * 0.77, dy * 0.77).rgb, xb);
@@ -320,53 +338,93 @@ function splatMaterial(biome, cfg) {
                 fm += (1.0 - sx) * f2;
               #endif
             }
+            #ifdef TERRAIN_SNOWROCK
+            {
+              // round a crash mesa, its gentler faces (the bench ramp, the foot, the lip) take the
+              // granite from above, so it never smears sideways across them
+              vec2 pT = xr / uScale.w * tS + cw, tdx = dFdx(pT), tdy = dFdy(pT);
+              tCap(tdx, tdy);
+              float wTop = mzk * smoothstep(0.5, 0.8, nr.y);
+              if (wTop > 0.01) {
+                cc = mix(cc, textureGrad(tCliff, pT, tdx, tdy).rgb, wTop);
+                fm = mix(fm, textureGrad(tForm, pT, tdx, tdy).rg, wTop);
+              }
+            }
+            #endif
             #ifdef TERRAIN_STRATA
-              // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces
-              float topK = 1.0 - smoothstep(0.3, 0.5, max(slope, sl.y));
+              // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces;
+              // where a wall turns over its lip the face's OWN slope decides (the smoothed one still sees
+              // the wall below), so the lip shows the dust on top, never side-projected strata smeared
+              // across it
+              float topK = 1.0 - smoothstep(0.3, 0.46, slope * 0.8 + sl.y * 0.2 + (wN.r - 0.5) * 0.08 + (nE - 0.5) * 0.05);
               cc = mix(cc, col * vec3(0.94, 0.9, 0.88), topK);
             #else
               // ledges and shelves inside the rock hold what the ground holds (grass, golden grass,
               // snow), so the foot and the lip of a wall turn into soft drifts, never a row of teeth
               // (the face noise wanders the edge up and down the face by more than the heightfield's
               // zigzag at a lip, so the edge never lines up with the triangles there)
+              // (the snow lays its own shelves, below)
+              #ifndef TERRAIN_SNOWROCK
               float ledge = 1.0 - smoothstep(0.12, 0.26, sl.y + (nE - 0.5) * 0.16 + (mB.g - 0.5) * 0.1 + (vSplat.w - 0.5) * 0.08 + ((wN.r - 0.5) * 0.22 + (wN.g - 0.5) * 0.1) * steepW);
               cc = mix(cc, col * uLedge, ledge);
+              #endif
             #endif
             float wk = smoothstep(uCliff.x, uCliff.y, cB + cShift), snowOn = 0.0;
             #ifdef TERRAIN_SNOWROCK
             {
-              // Dun Morogh: granite never darker than its own palette (cool blue-gray, #6f7682 at the
-              // darkest). Snow lies on it by a height blend: on the lit tops of the painted granite
-              // masses first (so it sits on every boss and ledge, and the rock keeps its shaded
-              // flanks), gathered into long lumpy shelves at no regular height by a noise on the face
-              // stretched along it. How much the face holds falls off with the smoothed slope (all
-              // of it where the rock zone begins, so the zone's own edge never shows; a sheer wall
-              // is mostly bare granite) and drifts in 10-20 m masses; far off (the big mountains)
-              // the rock comes out on gentler slopes too. Every edge is antialiased by its own width.
-              cc += max(vec3(0.0), vec3(0.159, 0.181, 0.223) - cc) * 0.7;
-              cc = cc * 1.24 + vec3(0.01, 0.013, 0.02);
-              float cq = cB + cShift;
-              // (its edge broken up by 1-4 m noise too: the smoothed slope is bilinear over a 2.5 m grid,
-              // and round a small steep form its threshold alone would cut teeth along the cells)
-              // (the zone's own edge comes in 10-25 m masses, so the granite shows as whole outcrops,
-              // never a scatter of spots)
+              // Dun Morogh: blue-gray granite on every face steeper than ~45 degrees, at its full painted
+              // value (lit cream tops, cool undersides, dark soft creases), with snow lying on whatever
+              // the PAINTED rock turns up to the sky (tForm), gathered into long lumpy shelves by a noise
+              // on the face. Gentle granite holds a lot of snow, a sheer face only its ledges. One field
+              // S decides snow (> 0.5) or rock, so every edge (the zone's too) follows the painted forms;
+              // the snow goes blue toward its edges and the rock darkens right under it.
+              float cq = cB + cShift - uMesaK * mesaK;           // (a mesa is handled on its own, below)
               float wZ = texture2D(tMacro, vec2((wp.x + wp.z) * 0.7071, wp.y) / 70.0 + vec2(0.63, 0.11)).r;
-              float zone = smoothstep(uCliff.y + 0.02, uCliff.y + 0.1, cq + (mB.r - 0.5) * 0.05 + (vSplat.w - 0.5) * 0.03 + (wZ - 0.5) * 0.12 + (wN.r - 0.5) * 0.04);
-              float cover = 1.45 - 1.17 * zone - 2.0 * max(0.0, cq - uCliff.y - 0.1) - farA * 0.12;
-              // (where the zone begins the face is a snowfield with the odd rock showing, not a
-              // scatter of holes: the shelf noise and the height blend both come in with the zone)
-              float F = cover + ((sN.x - 0.5) * 0.8 + (sN.y - 0.5) * 0.3) * mix(0.35, 1.0, zone) + ((fm.x - 0.54) * 2.0 + (fm.y - 0.5) * 0.3) * zone * zone;
-              float aa = clamp(fwidth(F) * 0.8, 0.012, 0.09);
-              float sn = smoothstep(0.5 - aa, 0.5 + aa, F);
-              // where the face is mostly snow, what rock shows is dusted with it (lighter, its painted
-              // light kept), never a dark hole in the snow
-              cc = mix(cc, col * vec3(0.84, 0.88, 0.95), smoothstep(0.6, 1.2, cover) * 0.55);
-              // light thrown back off the snow into the granite's shade, strongest right by the snow
-              float skirt = smoothstep(0.3, 0.5, F) * (1.0 - sn);
-              cc = mix(cc, col * vec3(0.66, 0.72, 0.86), 0.14 + 0.18 * skirt);
-              cc = mix(cc, col * (1.0 + 0.1 * (1.0 - smoothstep(0.5, 0.57, F))), sn);        // the snow's lip catches the light
+              float zq = cq + (wZ - 0.5) * 0.12 + (wN.r - 0.5) * 0.06 + (mB.r - 0.5) * 0.04;
+              float zone = smoothstep(uCliff.x + 0.01, uCliff.y, zq);
+              float steepK = smoothstep(uCliff.y, uCliff.y + 0.28, zq);
+              float shelf = (sN.x - 0.5) * 0.55 + (sN.y - 0.5) * 0.3;
+              float keep = mix(0.66, 0.33, steepK) - farA * 0.1;
+              // snow on what the painted granite turns up to the sky and in its hollows: the rock that
+              // shows is the vertical and overhanging faces of the masses
+              float form = (fm.x - 0.55) * 1.9 - (fm.y - 0.5) * 0.5;
+              float rockS = keep + form + shelf;
+              // a crash mesa: granite all round its flanks, from a lumpy drift at its foot to a snow cap
+              // hanging over the lip, snow on anything that lies flat (its top, the bench); the edges
+              // are set by HEIGHT (and a noise on the face), so they never follow the triangles
+              float S = mix(1.25, rockS, zone);
+              if (mzk > 0.0) {
+                float hb = wp.y - mY.x, ht = mY.y - wp.y;
+                float sk = 0.75 + (wN.g - 0.5) * 1.5 + (sN.y - 0.5) * 0.7;          // the drift's lumpy top, ~0.2-1.4 m up
+                float cp = 0.5 + (wN.b - 0.5) * 1.1 + (sN.x - 0.5) * 0.4;           // how far the cap hangs down
+                // (nothing here reads the face's own slope: the interpolated normal changes triangle
+                // by triangle, and any edge drawn from it comes out as a row of white teeth)
+                float mS = 0.42 + form + shelf * 0.6;
+                mS = max(mS, 1.25 * (1.0 - smoothstep(sk - 0.12, sk + 0.12, hb)));
+                mS = max(mS, 1.25 * (1.0 - smoothstep(cp - 0.1, cp + 0.1, ht)));
+                // the bench: a snow band at its level on its side of the mesa
+                vec2 rd = normalize(wp.xz - mC + 1e-4);
+                float bS = smoothstep(0.45, 0.8, dot(rd, vec2(cos(mY.w), sin(mY.w))));
+                dbg.z = bS;
+                float bh = wp.y - mY.z + (wN.g - 0.5) * 0.5;
+                mS = max(mS, 1.25 * bS * (1.0 - smoothstep(0.15, 0.4, abs(bh + 0.1))));
+                S = mix(S, mS, mzk);
+              }
+              float aa = clamp(fwidth(S) * 0.9, 0.025, 0.12);
+              float sn = smoothstep(0.5 - aa, 0.5 + aa, S);
+              // the granite: never darker than its own palette, a touch of cold light off the snow
+              cc += max(vec3(0.0), vec3(0.11, 0.125, 0.165) - cc) * 0.6;
+              cc *= vec3(1.06, 1.07, 1.1);
+              // (far off, the rock fades toward the snow's value so the mountains stay snowy)
+              cc = mix(cc, col * vec3(0.8, 0.85, 0.93), farA * 0.25);
+              // the rock right under the snow lies in its shadow
+              float under = smoothstep(0.18, 0.5, S) * (1.0 - sn);
+              cc *= mix(vec3(1.0), vec3(0.7, 0.75, 0.88), under * 0.5);
+              // the snow on the rock: blue toward its edge (a soft shadow falloff), its lit body the ground's own
+              vec3 snc = col * mix(vec3(0.76, 0.83, 0.97), vec3(1.0), smoothstep(0.5, 0.82, S));
+              cc = mix(cc, snc, sn);
               snowOn = sn;
-              wk = smoothstep(uCliff.x - 0.01, uCliff.x + 0.04, cq);      // (the snow covers the zone's edge)
+              wk = smoothstep(uCliff.x - 0.01, uCliff.x + 0.04, cB + cShift);      // (the zone's start is all snow anyway)
             }
             #else
             // the lit, protruding parts of the rock break through first (a soft height blend)
@@ -405,6 +463,9 @@ function splatMaterial(biome, cfg) {
           // baked occlusion, cool in the crevices
           col *= mix(uAO, vec3(1.0), vSplat.z);
           diffuseColor.rgb *= col;
+          #ifdef TERRAIN_DEBUG
+            if (dbg.x >= 0.0) diffuseColor.rgb = dbg * dbg;
+          #endif
           #ifdef TERRAIN_SPARKLE
           {
             // glints in the snow: a sparse lattice of tiny facets that catch the light as the view moves
@@ -621,7 +682,14 @@ function buildApron(W, cfg, data, mat, group) {
     let f = Math.abs(x) > X1 - 1 ? 1 : past > 0 ? sstep(12, 110, Math.abs(x - rxA(z))) : 1;   // the valley along the road...
     f = Math.max(f, sstep(110, 200, past));                                                      // ...closes over a saddle
     const bumps = fbm(x / 70, z / 70, W.seed + 901, 3) * 22 * sstep(0, 90, dOut);
-    const rise = dOut * (0.03 + 0.22 * f) + sstep(180, OUT, dOut) * 70 * (0.5 + 0.5 * f) + bumps;
+    let rise = dOut * (0.03 + 0.22 * f) + sstep(180, OUT, dOut) * 70 * (0.5 + 0.5 * f) + bumps;
+    if (cfg.terrace) {
+      // (Badlands) the far land steps up in flat-topped benches with steep risers, so it reads as
+      // stepped mesas under strata, never as rolling dunes; each bench's level wanders
+      const [S, a, b] = cfg.terrace, o = (fbm(x / 160, z / 160, W.seed + 913, 2) * 0.5 + 0.5) * S;
+      const q = (Math.max(0, rise) + o) / S, fl = Math.floor(q);
+      rise += (((fl + sstep(a, b, q - fl)) * S - o) - Math.max(0, rise)) * sstep(10, 45, dOut);
+    }
     return base + rise;
   };
   // the apron's slopes on a uniform 10 m lattice (from the same height function), tent-smoothed and
@@ -660,7 +728,7 @@ function buildApron(W, cfg, data, mat, group) {
     const k = i * NZ + j;
     if (vid[k] >= 0) return vid[k];
     const x = xs[i], z = zs[j], y = hA(x, z);
-    const e = 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
+    const e = cfg.terrace ? 3.5 : 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
     const cz = Math.max(Z0, Math.min(W.Z1, z)), hwz = roadHW(W, cfg, cz), d = x - rxA(z);
     vid[k] = pos.length / 3;
     pos.push(x, y, z); nor.push(-hx / l, 1 / l, -hz / l);
@@ -1112,6 +1180,15 @@ export function buildTerrain(W) {
   const fires = W.decor.filter(d => d.k === 'fire');
   mat.userData.U.uFire.value.set(fires[0]?.x ?? 1e5, fires[0]?.z ?? 1e5, fires[1]?.x ?? 1e5, fires[1]?.z ?? 1e5);
   mat.userData.U.uMesa.value.forEach((v, i) => { const p = (W.mesas || [])[i]; if (p?.mesa) v.set(p.x, p.z, p.mesa.r * 1.4 + 1, 0); else v.set(1e5, 1e5, 0, 0); });
+  // each mesa's foot (the median ground height round it) and lip (its flat top)
+  mat.userData.U.uMesaY.value.forEach((v, i) => {
+    const p = (W.mesas || [])[i];
+    if (!p?.mesa) { v.set(0, 0, 0, 0); return; }
+    const R = p.mesa.r * 1.4 + 2.5, hs = [];
+    for (let k = 0; k < 24; k++) { const a = k / 24 * Math.PI * 2; hs.push(W.heightAt(p.x + Math.cos(a) * R, p.z + Math.sin(a) * R)); }
+    hs.sort((a, b) => a - b);
+    v.set(hs[12], p.mesa.base + p.mesa.h, p.mesa.base + p.mesa.h * (p.mesa.benchK ?? 0.6), p.mesa.benchA ?? 0);
+  });
   const data = vertexData(W, cfg, clearingsOf(W));
   const U = mat.userData.U;
   U.tSlope.value = data.slopeTex; U.uGrid.value.set(W.X0, W.Z0, W.cell, 0); U.uGridN.value.set(W.nx + 1, W.nz + 1);

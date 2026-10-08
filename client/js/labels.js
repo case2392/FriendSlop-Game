@@ -8,7 +8,7 @@
 //                                  34..39:  a small outlined object name (casino buttons)
 //                                  <  34:   a small painted wooden placard (status lines)
 //                                  known NPC names get a WoW "<Title>" line under the name.
-//                                  Names keep a fixed size on screen (fading out past 35 m);
+//                                  Names keep a fixed size on screen (gone by 40 m);
 //                                  everything else is capped, so a close one never covers a
 //                                  wall; buttons name only the one nearest the crosshair.
 //   zoneText(title, sub)           the big gold WoW zone text that fades in when a day starts
@@ -17,9 +17,10 @@
 //   portraitAttrs(color, id)       attributes for a roster portrait: the player's character, rendered
 //
 // Names and townsfolk titles are drawn over the world (like WoW's): a sign post, a cart or a
-// tree between you and the Repo Man never slices his plate. Building walls, the RV's walls (not
-// its windows) and hills do hide townsfolk (a friend's name fades to 35% instead), and so does
-// anything in your hands (the plate is pulled to just past them, at the same size on screen).
+// tree between you and the Repo Man never slices his plate. Buildings, big solids (semis, rocks,
+// junk heaps), the RV's walls (not its windows) and hills hide every name, and so does the wall
+// between an interior and the street; anything in your hands covers it too (the plate is pulled
+// to just past them, at the same size on screen). See "what hides a name" below.
 //
 // On import this module also (1) waits for the vendored fonts and redraws any
 // sprite drawn before they arrived, (2) paints the UI textures in paint/ui.js
@@ -761,13 +762,16 @@ function drawNameplate(g, W, H, text, color, size) {
   g.textAlign = 'center'; g.textBaseline = 'middle';
   size = fitFont(g, text, size, W - 24);
   outlined(g, text, W / 2, H / 2 + 2, color, size);
+  return (g.measureText(text).width + size * 0.25) / W;     // the lettering's share of the width (with its outline)
 }
 function drawNpcPlate(g, W, H, name, title, color) {
   g.textAlign = 'center'; g.textBaseline = 'middle';
   const s1 = fitFont(g, name, 58, W - 24);
   outlined(g, name, W / 2, H * 0.32, color, s1);
+  const w1 = g.measureText(name).width + s1 * 0.25;
   const s2 = fitFont(g, title, Math.round(s1 * 0.82), W - 24);
   outlined(g, title, W / 2, H * 0.76, lighter(color, 0.1), s2);
+  return Math.max(w1, g.measureText(title).width + s2 * 0.25) / W;
 }
 
 function drawIcon(g, W, H, name) {
@@ -780,54 +784,158 @@ function drawIcon(g, W, H, name) {
 }
 
 // Names (players and townsfolk) keep a fixed size on screen like WoW's: the sprite's
-// height in px at 720p (scaled with the window), fading out between 35 and 45 m.
+// height in px at 720p (scaled with the window), fading out between 32 and 40 m.
 // Everything else scales with distance but is capped (CSS px) so a close one never
 // covers a wall. Clickable buttons show one name at a time: the one nearest the
 // crosshair within reach (the [E] prompt names the rest).
 const FIXED = { name: 30, npc: 44 };     // a friend's name at 16 px, a townsman's at 15 px over his title
 const CAP = { icon: 64, combat: 64, button: 34, placard: 50 };
-const NAME_FADE = [35, 45], BTN_REACH = 2.6;
+const NAME_FADE = [32, 40], BTN_REACH = 2.6;
 const BTN = { frame: -1, best: null, ang: Infinity, prev: null };
-const _p = new THREE.Vector3(), _c = new THREE.Vector3(), _f = new THREE.Vector3(), _sz = new THREE.Vector2();
+const _p = new THREE.Vector3(), _c = new THREE.Vector3(), _f = new THREE.Vector3(), _q = new THREE.Vector3(), _sz = new THREE.Vector2();
 // Names (players, townsfolk) draw over the world like WoW's: each frame the plate is moved to
 // PULL m from the eye along its own sight line and shrunk to match, so it covers the same
 // pixels but sits in front of every post, sign, cart and tree; the first-person hands and the
-// held map (nearer than that) still cover it. Across a building's walls (you outside, he in
-// the shop; you in the casino, he out front) or behind a hill, a townsfolk plate fades out
-// and a friend's name fades to OCCLUDED[kind], like WoW Classic's occluded nameplates.
-const PULL = 0.7, PLATE_ORDER = 10, OCCLUDED = { name: 0.35, npc: 0 };
-const terrainHides = (W, c, p) => {
-  for (let i = 1; i < 7; i++) {
-    const t = i / 7, y = c.y + (p.y - c.y) * t;
+// held map (nearer than that) still cover it. What the plate can't see through is tested below.
+const PULL = 0.7, PLATE_ORDER = 10;
+
+// ---- what hides a name ----------------------------------------------------------------------
+//
+// Each plate re-tests the line from the eye to it every SIGHT_MS (staggered across plates; the
+// first test of a plate coming into range is immediate) and fades out over ~0.2 s when it crosses:
+//   an interior   you and he aren't in the same walk-in building: you in the casino, he out front;
+//                 you on the street, Ed behind his counter. In the same room a name always shows.
+//   a building    its walls (and timber's jettied upper storey) to the eaves, then a hipped roof
+//                 volume per town style (steep gables, low shed roofs and false fronts, flat adobe)
+//   a big solid   semis, parked RVs, junk heaps, the dino, rock ledges, hoodoos, desert mounds,
+//                 the arch's lintel and the lookout tower (world.js statics and rocks over 1.2 m)
+//   the RV        its walls, but not its windows, an open or missing door or a missing roof: the
+//                 Repo Man's plate shows through the windshield as you drive into town
+//   a hill        the heightfield
+// Trees, posts, signs, carts, fences and lamps never hide a name (WoW draws over them). Nothing
+// past NAME_FADE shows, and a name sliding off the edge of the screen fades instead of being cut.
+const SIGHT_MS = 180;
+let plateSeq = 0;
+const terrainHides = (W, c, p, d) => {
+  const n = Math.min(24, Math.max(7, Math.ceil(d / 2)));
+  for (let i = 1; i < n; i++) {
+    const t = i / n, y = c.y + (p.y - c.y) * t;
     if (W.heightAt(c.x + (p.x - c.x) * t, c.z + (p.z - c.z) * t) > y + 0.35) return true;
   }
   return false;
 };
-// The RV's walls hide a plate the same way, but not through its windows, an open or missing door,
-// or a missing roof: where the sight line leaves the hull is tested against the openings (the
-// layout rv3d.js builds from). Driving into town, the Repo Man's plate shows through the windshield.
+// segment a + t d (t in 0..1) against an axis-aligned box: on a hit, T0..T1 is the part inside and
+// A0 / A1 the axes (0 x, 1 y, 2 z) it enters and leaves by (-1: that end is already inside)
+let T0 = 0, T1 = 1, A0 = -1, A1 = -1;
+function axisClip(a, p, d, lo, hi) {
+  if (Math.abs(d) < 1e-9) return p >= lo && p <= hi;
+  let u = (lo - p) / d, v = (hi - p) / d;
+  if (u > v) { const w = u; u = v; v = w; }
+  if (u > T0) { T0 = u; A0 = a; }
+  if (v < T1) { T1 = v; A1 = a; }
+  return T0 <= T1;
+}
+function slab(ax, ay, az, dx, dy, dz, x0, x1, y0, y1, z0, z1) {
+  T0 = 0; T1 = 1; A0 = -1; A1 = -1;
+  return axisClip(0, ax, dx, x0, x1) && axisClip(1, ay, dy, y0, y1) && axisClip(2, az, dz, z0, z1);
+}
+// squared distance (xz) from a point to the segment
+function seg2(px, pz, ax, az, dx, dz) {
+  const L = dx * dx + dz * dz;
+  let t = L > 1e-9 ? ((px - ax) * dx + (pz - az) * dz) / L : 0;
+  t = t < 0 ? 0 : t > 1 ? 1 : t;
+  const ex = ax + dx * t - px, ez = az + dz * t - pz;
+  return ex * ex + ez * ez;
+}
+// a rock: an upright cylinder
+function cylHit(o, ax, ay, az, dx, dy, dz) {
+  const fx = ax - o.x, fz = az - o.z, A = dx * dx + dz * dz, B = fx * dx + fz * dz, C = fx * fx + fz * fz - o.r * o.r;
+  let ta = 0, tb = 1;
+  if (A < 1e-9) { if (C > 0) return false; } else {
+    const disc = B * B - A * C;
+    if (disc <= 0) return false;
+    const sq = Math.sqrt(disc);
+    ta = Math.max(0, (-B - sq) / A); tb = Math.min(1, (-B + sq) / A);
+    if (ta > tb) return false;
+  }
+  const ya = ay + dy * ta, yb = ay + dy * tb;
+  return Math.min(ya, yb) < o.y1 && Math.max(ya, yb) > o.y0;
+}
+
+// What stands over a building's walls, per town style (town_build.js STYLES): timber's jettied upper
+// storey (1.7 m, 0.34 m out), what rises straight over the eaves (frontier false fronts, adobe
+// parapets) and the ridge (its rise capped at tp x the half span, as the pitch does).
+const ROOF = {
+  timber: { up: 1.7, out: 0.34, top: 0, rise: 5, tp: 1.03 },
+  farm: { up: 0, out: 0, top: 0, rise: 5.2, tp: 1.19 },
+  alpine: { up: 0, out: 0, top: 0, rise: 5.2, tp: 1.03 },
+  frontier: { up: 0, out: 0, top: 1.2, rise: 1.6, tp: 0.34 },
+  adobe: { up: 0, out: 0, top: 0.6, rise: 0, tp: 0 },
+};
+// the leg's occluders, built once per world: k 1 a building, 0 a box, 2 a rock; br bounds them in xz
+const OCC = new WeakMap();
+function occluders(W) {
+  let L = OCC.get(W);
+  if (L) return L;
+  L = [];
+  const B = W.buildings || [];
+  for (const b of B) {
+    const R = ROOF[b.style] || ROOF.timber;
+    const hx = b.w / 2 + 0.15 + R.out, hz = b.dep / 2 + 0.15 + R.out;
+    const y1 = b.y + b.h + R.up * (b.h > 4.5 ? 1.12 : 1) + R.top, rise = Math.min(R.rise, R.tp * Math.min(hx, hz));
+    L.push({ k: 1, x: b.x, z: b.z, c: Math.cos(b.ry), s: Math.sin(b.ry), hx, hz, y0: b.y - 0.6, y1, rise, ex: hx + 0.5, ez: hz + 0.5, br: Math.hypot(hx, hz) + 0.8 });
+  }
+  const inside = (x, z) => B.some(b => {
+    const dx = x - b.x, dz = z - b.z, c = Math.cos(b.ry), s = Math.sin(b.ry);
+    return Math.abs(dx * c - dz * s) < b.w / 2 + 0.3 && Math.abs(dx * s + dz * c) < b.dep / 2 + 0.3;
+  });
+  for (const s of W.statics || []) {
+    const lintel = s.part === 'arch_span';
+    if (s.bld != null || s.mat === 'floor' || s.mat === 'roof' || (s.mat === 'invisible' && !lintel)) continue;
+    if (!lintel && (2 * s.hy < 1.2 || 2 * Math.max(s.hx, s.hz) < 1.2)) continue;   // crates, pumps, posts, benches
+    if (inside(s.x, s.z)) continue;                                                     // a room's own furniture
+    L.push({ k: 0, x: s.x, y: s.y, z: s.z, c: Math.cos(s.ry || 0), s: Math.sin(s.ry || 0), hx: s.hx, hy: s.hy, hz: s.hz, br: Math.hypot(s.hx, s.hz) });
+  }
+  for (const r of W.cyls || []) {
+    if (r.mat !== 'rock' || 2 * r.hh < 1.2 || r.r < 0.5) continue;
+    L.push({ k: 2, x: r.x, z: r.z, y0: r.y - r.hh, y1: r.y + r.hh, r: r.r * 0.85, br: r.r });
+  }
+  OCC.set(W, L);
+  return L;
+}
+
+// The RV's hull (rv3d.js's layout): a face point is an opening if it's a window, the door while it's
+// open or gone, or the top while the roof is gone. a: the face's axis (0 sides, 1 top/bottom, 2 ends).
 const RV_OPEN = 0.04;
 const inRect = (u, v, u0, u1, v0, v1) => u > u0 - RV_OPEN && u < u1 + RV_OPEN && v > v0 - RV_OPEN && v < v1 + RV_OPEN;
+function rvOpen(S, a, sg, hx, hy, hz) {
+  if (a === 1) return sg > 0 && S.parts?.roof === false;
+  if (a === 2) { const w = sg > 0 ? RV_ART.shield : RV_ART.rearWin; return inRect(hx, hy, -w.x, w.x, w.y0, w.y1); }
+  const D = RV_ART.door;
+  if (sg < 0 && (S.door || S.parts?.doors === false) && inRect(hz, hy, D.z0, D.z1, D.y0, D.y1)) return true;
+  for (const w of sg > 0 ? RV_ART.winL : RV_ART.winR) {
+    if (w.r ? !w.frost && Math.hypot(hz - w.z, hy - w.y) < w.r + RV_OPEN : inRect(hz, hy, w.z0, w.z1, w.y0, w.y1)) return true;
+  }
+  return false;
+}
+// One end inside: the hull from floor to ceiling, where the line leaves it. Both outside: the body
+// from its skirts to the roof, where the line goes in and where it comes out (both must be glass).
 function rvHides(S, c, p) {
   const rv = S?.rv;
   if (!rv?.p || !rv.q) return false;
   const a = toLocal(rv.p, rv.q, c), b = toLocal(rv.p, rv.q, p);
   const ia = insideRV(a.x, a.y, a.z), ib = insideRV(b.x, b.y, b.z);
-  if (ia === ib) return false;                        // both in, or both out (then it's a cart: draw over it)
-  const i = ia ? a : b, o = ia ? b : a;
-  const dx = o.x - i.x, dy = o.y - i.y, dz = o.z - i.z, XW = RV_DIM.HALF_W - 0.05, ZL = RV_DIM.HALF_L;
-  const tx = dx > 0 ? (XW - i.x) / dx : dx < 0 ? (-XW - i.x) / dx : Infinity;
-  const tz = dz > 0 ? (ZL - i.z) / dz : dz < 0 ? (-ZL - i.z) / dz : Infinity;
-  const ty = dy > 0 ? (RV_DIM.WALL_H - i.y) / dy : dy < 0 ? -i.y / dy : Infinity;
-  const t = Math.max(0, Math.min(tx, ty, tz)), hx = i.x + dx * t, hy = i.y + dy * t, hz = i.z + dz * t;
-  if (t === ty) return dy < 0 || S.parts?.roof !== false;          // the floor, or the roof unless it's gone
-  if (t === tz) { const w = dz > 0 ? RV_ART.shield : RV_ART.rearWin; return !inRect(hx, hy, -w.x, w.x, w.y0, w.y1); }
-  const side = dx > 0 ? 1 : -1, D = RV_ART.door;
-  if (side < 0 && (S.door || S.parts?.doors === false) && inRect(hz, hy, D.z0, D.z1, D.y0, D.y1)) return false;
-  for (const w of side > 0 ? RV_ART.winL : RV_ART.winR) {
-    if (w.r ? !w.frost && Math.hypot(hz - w.z, hy - w.y) < w.r + RV_OPEN : inRect(hz, hy, w.z0, w.z1, w.y0, w.y1)) return false;
-  }
-  return true;
+  if (ia && ib) return false;
+  const dx = b.x - a.x, dy = b.y - a.y, dz = b.z - a.z, XW = RV_DIM.HALF_W - 0.05, ZL = RV_DIM.HALF_L;
+  const y0 = ia || ib ? 0 : RV_ART.y0, y1 = ia || ib ? RV_DIM.WALL_H : RV_ART.y1;
+  if (!slab(a.x, a.y, a.z, dx, dy, dz, -XW, XW, y0, y1, -ZL, ZL)) return false;
+  const t0 = T0, t1 = T1, a0 = A0, a1 = A1;
+  const open = (t, ax) => {
+    if (ax < 0) return true;
+    const hx = a.x + dx * t, hy = a.y + dy * t, hz = a.z + dz * t;
+    return rvOpen(S, ax, ax === 0 ? Math.sign(hx) : ax === 1 ? Math.sign(hy - (y0 + y1) / 2) : Math.sign(hz), hx, hy, hz);
+  };
+  return !open(t0, a0) || !open(t1, a1);
 }
 // the walk-in building (world.js buildings: centered frames, w across, dep deep) a point is in, or -1
 function buildingAt(W, p) {
@@ -837,6 +945,30 @@ function buildingAt(W, p) {
     if (Math.abs(dx * c - dz * s) < b.w / 2 && Math.abs(dx * s + dz * c) < b.dep / 2 && p.y > b.y - 1 && p.y < b.y + b.h + 3) return i;
   }
   return -1;
+}
+// Is the line from the eye c to the plate at p (d apart) blocked?
+function sightBlocked(S, W, c, p, d) {
+  const bc = buildingAt(W, c);
+  if (bc !== buildingAt(W, p)) return true;           // an interior and the world outside it
+  if (bc >= 0) return false;                           // the same room
+  if (rvHides(S, c, p)) return true;
+  const ax = c.x, ay = c.y, az = c.z, dx = p.x - ax, dy = p.y - ay, dz = p.z - az;
+  for (const o of occluders(W)) {
+    if (seg2(o.x, o.z, ax, az, dx, dz) > o.br * o.br) continue;
+    if (o.k === 2) { if (cylHit(o, ax, ay, az, dx, dy, dz)) return true; continue; }
+    const rx = ax - o.x, rz = az - o.z;
+    const lx = rx * o.c - rz * o.s, lz = rx * o.s + rz * o.c, ldx = dx * o.c - dz * o.s, ldz = dx * o.s + dz * o.c;
+    if (o.k === 0) { if (slab(lx, ay - o.y, lz, ldx, dy, ldz, -o.hx, o.hx, -o.hy, o.hy, -o.hz, o.hz)) return true; continue; }
+    if (slab(lx, ay, lz, ldx, dy, ldz, -o.hx, o.hx, o.y0, o.y1, -o.hz, o.hz)) return true;                // the walls
+    if (o.rise > 0 && slab(lx, ay, lz, ldx, dy, ldz, -o.ex, o.ex, o.y1, o.y1 + o.rise, -o.ez, o.ez)) {     // the roof
+      const ta = T0, tb = T1;
+      for (let i = 0; i <= 8; i++) {
+        const t = ta + (tb - ta) * i / 8, x = Math.abs(lx + ldx * t), z = Math.abs(lz + ldz * t);
+        if (ay + dy * t < o.y1 + o.rise * Math.min(1 - x / o.ex, 1 - z / o.ez)) return true;
+      }
+    }
+  }
+  return d > 6 && terrainHides(W, c, p, d);
 }
 
 export function labelSprite(text, color = '#fff', px = 40) {
@@ -860,15 +992,17 @@ export function labelSprite(text, color = '#fff', px = 40) {
     g.clearRect(0, 0, W, H);
     const raw = String(t ?? '').trim();
     const npc = px < 40 ? NPCS[raw] : null;
+    let tw = 0;
     if (px >= 60 && ICONS[raw]) drawIcon(g, W, H, ICONS[raw]);
-    else if (npc && H > 96) drawNpcPlate(g, W, H, npc[0], npc[1], npc[2]);
+    else if (npc && H > 96) tw = drawNpcPlate(g, W, H, npc[0], npc[1], npc[2]);
     else {
       const str = keepText(raw);
       if (!str) { /* blank */ } else if (kind === 'placard') drawPlacard(g, W, H, str, placardColor(c));
       else if (kind === 'button') drawNameplate(g, W, H, str, soft(c) === '#f3e3b5' ? '#ffd100' : soft(c), 50);
       else if (kind === 'combat') drawNameplate(g, W, H, str, soft(c), 60);
-      else drawNameplate(g, W, H, str, kind === 'name' ? classColor(c) : soft(c), 52);
+      else tw = drawNameplate(g, W, H, str, kind === 'name' ? classColor(c) : soft(c), 52);
     }
+    sp.userData.tw = tw;
     tex.needsUpdate = true;
   };
   sp.userData.set = (t, c = color) => {
@@ -879,7 +1013,9 @@ export function labelSprite(text, color = '#fff', px = 40) {
   };
   sp.userData.set(text, color);
   const ud = sp.userData;
-  ud.vis = 1;
+  ud.vis = 1; ud.hid = false; ud.sightAt = 0; ud.jit = (plateSeq++ % 6) * 11;
+  // where the lettering sits on the sprite, as fractions of its height above / below the anchor
+  const UP = npc0 ? 0.76 : 0.3, DOWN = npc0 ? 0.02 : 0.3;
   sp.onBeforeRender = (renderer, scene, camera) => {
     if (plate) sp.updateMatrixWorld(true);           // the pull below only ever touches matrixWorld: start from the real spot
     if (!ud.base || sp.scale.x !== ud.lx || sp.scale.y !== ud.ly) ud.base = sp.scale.clone();
@@ -893,12 +1029,27 @@ export function labelSprite(text, color = '#fff', px = 40) {
         sy = FIXED[kind] / 720 * view; sx = sy * W / H;
         alpha = 1 - THREE.MathUtils.smoothstep(d, NAME_FADE[0], NAME_FADE[1]);
         const S = typeof window !== 'undefined' ? window.__nmd : null, world = S?.W;
-        const hidden = alpha > 0 && typeof world?.heightAt === 'function' &&
-          (buildingAt(world, _c) !== buildingAt(world, _p) || rvHides(S, _c, _p) || (d > 6 && terrainHides(world, _c, _p)));
-        const now = performance.now(), dt = ud.tVis ? Math.min(1, (now - ud.tVis) / 1000) : 1;
+        const now = performance.now();
+        if (alpha <= 0 || typeof world?.heightAt !== 'function') ud.sightAt = 0;   // out of range: test again the moment it's back
+        else if (now >= ud.sightAt) {
+          const first = ud.sightAt === 0;
+          ud.hid = sightBlocked(S, world, _c, _p, d);
+          ud.sightAt = now + SIGHT_MS + ud.jit;
+          if (first) ud.vis = ud.hid ? 0 : 1;        // coming into range behind a wall: never flash up first
+        }
+        const dt = ud.tVis ? Math.min(1, (now - ud.tVis) / 1000) : 1;
         ud.tVis = now;
-        ud.vis += ((hidden ? OCCLUDED[kind] : 1) - ud.vis) * (1 - Math.exp(-dt * 12));   // ~0.2 s fades
+        ud.vis += ((ud.hid ? 0 : 1) - ud.vis) * (1 - Math.exp(-dt * 12));   // ~0.2 s fades
         alpha *= ud.vis;
+        if (alpha > 0.002) {
+          // at the edge of the screen: fade out as the lettering reaches it instead of being cut in half
+          renderer.getSize(_sz);
+          _q.copy(_p).project(camera);
+          const ph = FIXED[kind] / 720 * _sz.y, hw = (ud.tw || 0.3) * ph * W / H / 2;
+          const x = (_q.x + 1) / 2 * _sz.x, y = (1 - _q.y) / 2 * _sz.y;
+          const m = Math.min(x - hw, _sz.x - x - hw, y - ph * UP, _sz.y - y - ph * DOWN);
+          alpha *= THREE.MathUtils.smoothstep(m, -8, 8);
+        }
       } else {
         renderer.getSize(_sz);
         const onScreen = sy / view * _sz.y;

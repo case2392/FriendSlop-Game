@@ -481,28 +481,140 @@ function plasterPaint(g, s, rnd, cv, holes) {
   blurTile(cv, 0.5);
 }
 register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: three creams, soft trowel strokes, rain streaks (the holes are separate decals: wall_holes)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
-register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: the same cream, a little warmer', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); glaze(g, s, s, '#ffd8a0', 0.08, 'soft-light'); } });
+// Indoor plaster (Goldshire shops and the inn hall): a warmer, older cream than the outside. Big soft
+// clouds in three hues (cream, honey, a cool grey-beige where damp got in), trowel crescents with a
+// shaded lip, two re-plastered patches (fresher, paler, a lit upper-left edge and a shaded lower one),
+// a chip where the lath shows, soft smoke and damp stains running down, and hairline cracks with
+// branches. The grime along the ceiling beam and the wainscot cap is vertex colour (town_build).
+function lathHole(g, s, rnd, x, y, r, plaster) {
+  const seed = Math.floor(rnd() * 1e9);
+  wrap(s, x, y, r * 1.8, (X, Y) => {
+    const rr = rngFrom(seed), pts = [];
+    for (let k = 0; k < 12; k++) { const th = k / 12 * TAU; const rad = r * range(rr, 0.6, 1.15); pts.push([X + Math.cos(th) * rad * 1.5, Y + Math.sin(th) * rad * 0.75]); }
+    clipped(g, () => polyPath(g, pts), () => {
+      g.fillStyle = '#4a3828'; g.fillRect(X - r * 2, Y - r * 2, r * 4, r * 4);
+      // the laths: thin sawn strips with dark gaps, lit on top, a nail here and there
+      const lh = Math.max(6, r * 0.22);
+      for (let yy = Y - r * 1.2 + rr() * lh; yy < Y + r * 1.2; yy += lh * 1.45) {
+        const c = jitter(pick(rr, ['#9a7450', '#8a6644', '#a8805a']), rr, 0.08);
+        g.fillStyle = grad(g, 0, yy, 0, yy + lh, [[0, lightOf(c, 0.25)], [0.45, c], [1, shadowOf(c, 0.3)]]);
+        g.fillRect(X - r * 2, yy, r * 4, lh);
+        if (rr() < 0.5) nailHead(g, X + range(rr, -r, r), yy + lh / 2, 1.4, '#6a6266');
+      }
+      // the plaster keys squeezed between the laths
+      for (let k = 0; k < 6; k++) blob(g, X + range(rr, -r, r), Y + range(rr, -r * 0.6, r * 0.6), range(rr, 3, 6), range(rr, 2, 4), 0, shadowOf(plaster, 0.15), 0.7, 0.5);
+      g.save(); g.translate(3, 4); g.lineWidth = 10; g.strokeStyle = rgba(INK, 0.45); polyPath(g, pts); g.stroke(); g.restore();
+    });
+    g.save(); g.beginPath(); g.rect(X - r * 3, Y - r * 3, r * 6, r * 6); polyPath(g, pts); g.clip('evenodd');
+    g.save(); g.translate(1.4, 1.6); g.lineWidth = 2.6; g.strokeStyle = rgba(lightOf(plaster, 0.35), 0.65); polyPath(g, pts); g.stroke(); g.restore();
+    g.save(); g.translate(-1.2, -1.4); g.lineWidth = 2.2; g.strokeStyle = rgba(shadowOf(plaster, 0.35), 0.5); polyPath(g, pts); g.stroke(); g.restore();
+    g.restore();
+  });
+}
+function innerPlasterPaint(g, s, rnd, cv) {
+  const base = '#d6c49e';
+  fill(g, s, s, base);
+  mottle(g, s, rnd, { colors: ['#e8d8b0', '#cbb282', '#bcb09a', '#e2cfa4'], count: 22, rmin: 110, rmax: 250, alpha: 0.62, hard: 0.04 });
+  mottle(g, s, rnd, { colors: ['#ecdeb8', '#c4aa7e', '#d6c296', '#b0a28a', '#e4d2aa', '#c8b08a'], count: 56, rmin: 30, rmax: 120, alpha: 0.44, hard: 0.08 });
+  mottle(g, s, rnd, { colors: ['#a8987c', '#9c9282'], count: 10, rmin: 40, rmax: 110, alpha: 0.18, hard: 0.05 });
+  blurTile(cv, 5);
+  // trowel crescents: a lighter sweep with a shaded lower lip, in loose clusters
+  for (let i = 0; i < 60; i++) {
+    const x = rnd() * s, y = rnd() * s, R = range(rnd, 18, 52), a0 = rnd() * TAU, sweep = range(rnd, 0.8, 1.8), w = range(rnd, 8, 18);
+    const pts = []; for (let k = 0; k <= 9; k++) { const a = a0 + sweep * k / 9; pts.push([x + Math.cos(a) * R, y + Math.sin(a) * R * 0.55]); }
+    wrap(s, x, y, R + w, (X, Y) => {
+      const sh = pts.map(([u, v]) => [u - x + X, v - y + Y]);
+      line(g, sh.map(([u, v]) => [u + 1.2, v + 2]), w, '#9a8466', 0.09);
+      line(g, sh, w * 0.8, '#f4e8c8', 0.14);
+    });
+  }
+  // two re-plastered patches: fresher and paler, their edges lit upper left and shaded lower right
+  for (const [fx, fy, pw, ph] of [[0.26, 0.3, 120, 84], [0.72, 0.74, 90, 70]]) {
+    const x = s * (fx + (rnd() - 0.5) * 0.08), y = s * (fy + (rnd() - 0.5) * 0.08), seed = Math.floor(rnd() * 1e9);
+    wrap(s, x, y, Math.max(pw, ph), (X, Y) => {
+      const rr = rngFrom(seed), pts = [];
+      for (let k = 0; k < 14; k++) { const th = k / 14 * TAU, c = Math.cos(th), sn = Math.sin(th); const sq = 1 / Math.pow(Math.pow(Math.abs(c), 3) + Math.pow(Math.abs(sn), 3), 1 / 3); pts.push([X + c * sq * pw / 2 * range(rr, 0.88, 1.08), Y + sn * sq * ph / 2 * range(rr, 0.88, 1.08)]); }
+      clipped(g, () => polyPath(g, pts), () => {
+        g.fillStyle = grad(g, X - pw / 2, Y - ph / 2, X + pw / 2, Y + ph / 2, [[0, '#efe2c2'], [0.6, '#e2d2ae'], [1, '#d4c29c']]);
+        g.fillRect(X - pw, Y - ph, pw * 2, ph * 2);
+        for (let k = 0; k < 7; k++) { const yy = Y - ph / 2 + rr() * ph, xx = X - pw / 2 + rr() * pw; line(g, [[xx - 20, yy], [xx, yy + 3], [xx + 22, yy - 1]], range(rr, 6, 12), rr() < 0.5 ? '#f8eed4' : '#c8b48e', 0.22); }
+      });
+      line(g, [...pts, pts[0]].map(([u, v]) => [u - 1, v - 1]), 2, '#fff4d8', 0.5);
+      line(g, [...pts, pts[0]].map(([u, v]) => [u + 1.4, v + 1.6]), 2.4, '#8a7656', 0.3);
+    });
+  }
+  lathHole(g, s, rnd, s * range(rnd, 0.55, 0.65), s * range(rnd, 0.18, 0.28), 24, base);
+  // smoke and damp: soft stains running down from a few places
+  for (let i = 0; i < 4; i++) {
+    const x = rnd() * s, y = rnd() * s, L = range(rnd, 90, 200), w = range(rnd, 26, 60), c = i % 2 ? '#8a7a62' : '#9a8a70';
+    wrap(s, x, y + L / 2, L, (X, Y) => {
+      g.save(); g.globalAlpha = 0.14;
+      g.fillStyle = grad(g, 0, Y - L / 2, 0, Y + L / 2, [[0, c, 1], [0.5, c, 0.7], [1, c, 0]]);
+      g.beginPath(); g.ellipse(X, Y, w / 2, L / 2, 0, 0, TAU); g.fill(); g.restore();
+    });
+  }
+  rainStreaks(g, s, rnd, 0, s, s * 0.05, '#a8987a', 8, 0.12);
+  mottle(g, s, rnd, { colors: ['#a8987a', '#9a8a6e', '#f4e8cc'], count: 260, rmin: 1.4, rmax: 3.8, alpha: 0.22, hard: 0.6 });
+  cracks(g, s, rnd, { color: '#6a5844', count: 13, len: [24, 96], width: [0.6, 1.2], alpha: 0.42, branch: 0.55 });
+  glaze(g, s, s, '#ffdca8', 0.14, 'soft-light');
+  blurTile(cv, 0.5);
+}
+register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: warm old cream in three hues, trowel crescents, two re-plastered patches, a lath chip, smoke and damp stains, branching hairline cracks (ceiling and wainscot grime are vertex colour)', paint(g, s, rnd, h, cv) { innerPlasterPaint(g, s, rnd, cv); } });
 
-// Holes in the plaster as decals (2×2 atlas, alpha): [0] bricks and [1] fieldstone through cream plaster,
-// [2] mud bricks and [3] a shallow scar through adobe. town_build scatters 0-3 per wall at seeded spots.
-export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3] };
+// Holes and patches in the plaster as decals (4×2 atlas of 256 px cells, alpha): [0] bricks and [1]
+// fieldstone through cream plaster, [2] mud bricks and [3] a shallow scar through adobe, [4] a fresh
+// pale patch of mud render, [5] a big fallen piece showing courses of mud brick, [6] a darker, rougher
+// mud repair with straw in it, [7] a re-plastered patch on cream plaster. town_build scatters them per wall
+// (each decal maps the middle 84% × 62% of its cell).
+export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3, 5], adobePatch: [4, 6], plasterPatch: [7] };
+export const HOLE_COLS = 4;
+// A repair patch (cell canvas, centred): a lumpy squarish outline, the patch's own trowel marks, a lit
+// upper-left edge and a shaded lower-right one, a faint darker halo where it was feathered in.
+function patchPaint(g, q, rnd, { col, lite, dark, straw = 0, w = 170, h = 104 }) {
+  const X = q / 2, Y = q / 2, pts = [];
+  for (let k = 0; k < 16; k++) {
+    const th = k / 16 * TAU, c = Math.cos(th), sn = Math.sin(th);
+    const sq = 1 / Math.pow(Math.pow(Math.abs(c), 3) + Math.pow(Math.abs(sn), 3), 1 / 3);
+    pts.push([X + c * sq * w / 2 * range(rnd, 0.84, 1.06), Y + sn * sq * h / 2 * range(rnd, 0.82, 1.06)]);
+  }
+  g.save(); g.globalAlpha = 0.16; g.lineWidth = 12; g.lineJoin = 'round'; g.strokeStyle = dark; polyPath(g, pts); g.stroke(); g.restore();
+  clipped(g, () => polyPath(g, pts), () => {
+    g.fillStyle = grad(g, X - w / 2, Y - h / 2, X + w / 2, Y + h / 2, [[0, lightOf(col, 0.12)], [0.55, col], [1, shadowOf(col, 0.12)]]);
+    g.fillRect(0, 0, q, q);
+    for (let k = 0; k < 10; k++) blob(g, X + range(rnd, -w, w) * 0.45, Y + range(rnd, -h, h) * 0.45, range(rnd, 14, 40), range(rnd, 8, 22), rnd() * 3, rnd() < 0.5 ? lite : dark, 0.16, 0.1);
+    for (let k = 0; k < 9; k++) {
+      const x = X + range(rnd, -w, w) * 0.42, y = Y + range(rnd, -h, h) * 0.42, R = range(rnd, 14, 34), a0 = rnd() * TAU;
+      const arc = []; for (let j = 0; j <= 8; j++) { const a = a0 + 1.4 * j / 8; arc.push([x + Math.cos(a) * R, y + Math.sin(a) * R * 0.55]); }
+      line(g, arc.map(([u, v]) => [u + 1, v + 1.6]), range(rnd, 6, 12), dark, 0.12);
+      line(g, arc, range(rnd, 5, 10), lite, 0.18);
+    }
+    for (let k = 0; k < straw; k++) { const x = X + range(rnd, -w, w) * 0.48, y = Y + range(rnd, -h, h) * 0.48, L = range(rnd, 3, 8), a = rnd() * Math.PI; line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], range(rnd, 0.8, 1.4), rnd() < 0.6 ? '#f0d49a' : '#6a4630', 0.5); }
+    mottle(g, q, rnd, { colors: [lite, dark], count: 60, rmin: 1.2, rmax: 3, alpha: 0.22, hard: 0.6 });
+  });
+  line(g, [...pts, pts[0]].map(([u, v]) => [u - 1.2, v - 1.2]), 2.4, lightOf(col, 0.4), 0.55);
+  line(g, [...pts, pts[0]].map(([u, v]) => [u + 1.4, v + 1.8]), 2.8, shadowOf(dark, 0.2), 0.4);
+}
 register('wall_holes', {
-  family: F, size: 512, alpha: true, note: 'plaster-hole decals (2×2 atlas, alpha): brick and fieldstone through plaster, mud brick and a scar through adobe',
-  paint(g, s, rnd) {
-    g.clearRect(0, 0, s, s);
-    const q = s / 2;
+  family: F, w: 1024, h: 512, alpha: true, note: 'plaster decals (4×2 atlas, alpha): brick and fieldstone through plaster; mud brick, a scar, a big fallen piece through adobe; fresh and rough mud patches; a cream plaster patch',
+  paint(g, w, rnd) {
+    g.clearRect(0, 0, w, w / 2);
+    const q = w / 4;
     const cells = [
       { plaster: '#ddcfae' },
       { plaster: '#ddcfae', brick: ['#8e8a80', '#9e988a', '#7e7a72'], mortar: '#5a5048' },
       { plaster: '#c89068', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52'], mortar: '#6a4830' },
       { plaster: '#c89068', brick: ['#9a6a48', '#a87452', '#8e6040'], mortar: '#5e4028' },
+      { patch: { col: '#dcb88a', lite: '#f0d4a8', dark: '#a87650' } },
+      { plaster: '#c89068', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52', '#a06e4a'], mortar: '#6a4830', r: 66, squash: 0.66 },
+      { patch: { col: '#a87652', lite: '#c89a6e', dark: '#7a5234', straw: 40, w: 150, h: 96 } },
+      { patch: { col: '#e8dcbc', lite: '#fff4d8', dark: '#a89474', w: 160, h: 100 } },
     ];
     cells.forEach((o, i) => {
-      const cx = (i % 2) * q + q / 2, cy = Math.floor(i / 2) * q + q / 2;
-      // paint on a cell-sized canvas so nothing bleeds into the neighbours, then fade its edge
+      const cx = (i % 4) * q + q / 2, cy = Math.floor(i / 4) * q + q / 2;
+      // paint on a cell-sized canvas so nothing bleeds into the neighbours
       const cv = makeCanvas(q, q), gg = cv.getContext('2d');
-      gg.fillStyle = rgba(o.plaster, 0); gg.fillRect(0, 0, q, q);
-      plasterHole(gg, q * 4, rnd, q / 2, q / 2, i === 3 ? 44 : 62, { ...o, squash: i === 1 ? 0.75 : 0.85, cell: q });
+      if (o.patch) patchPaint(gg, q, rnd, o.patch);
+      else plasterHole(gg, q * 4, rnd, q / 2, q / 2, o.r || (i === 3 ? 44 : 62), { ...o, squash: o.squash || (i === 1 ? 0.75 : 0.85) });
       g.drawImage(cv, cx - q / 2, cy - q / 2);
     });
   },
@@ -781,10 +893,10 @@ register('planks_rough', {
 
 // Gadgetzan mud plaster: a warm terracotta-tan (well off the pale sand), big soft ochre and rose
 // blotches, trowel swirls, straw flecks, rain runs and hairline cracks. (Holes are wall_holes decals.)
-function adobePaint(g, s, rnd, cv, { base = '#c9976a', blot = ['#d8b083', '#bf8a5e', '#d2a476'], mid = ['#e0bc8e', '#b4825a', '#cc9a6a', '#c4925f', '#e6c496', '#a87650'], lite = '#ecca9a', dark = '#8e6040', chipsN = 0, brick = ['#a87650', '#b88458', '#9a6a46', '#b07a52'] } = {}) {
+function adobePaint(g, s, rnd, cv, { base = '#c9976a', blot = ['#d8b083', '#b48058', '#c9976a', '#e2be90', '#a87450'], mid = ['#e0bc8e', '#b4825a', '#cc9a6a', '#c4925f', '#e6c496', '#a87650'], lite = '#ecca9a', dark = '#8e6040', chipsN = 0, brick = ['#a87650', '#b88458', '#9a6a46', '#b07a52'], lifts = 0, damp = false } = {}) {
   fill(g, s, s, base);
-  // big soft blotches of three related tans, then a couple of faint ochre clouds
-  mottle(g, s, rnd, { colors: blot, count: 18, rmin: 100, rmax: 230, alpha: 0.55, hard: 0.05 });
+  // big soft blotches of three related tans (about ±12% in value), then a couple of faint ochre clouds
+  mottle(g, s, rnd, { colors: blot, count: 22, rmin: 100, rmax: 230, alpha: 0.62, hard: 0.05 });
   mottle(g, s, rnd, { colors: ['#c89050', '#d4aa70', '#b88050'], count: 6, rmin: 120, rmax: 220, alpha: 0.24, hard: 0.04 });
   mottle(g, s, rnd, { colors: mid, count: 50, rmin: 30, rmax: 120, alpha: 0.36, hard: 0.08 });
   blurTile(cv, 4);
@@ -804,6 +916,28 @@ function adobePaint(g, s, rnd, cv, { base = '#c9976a', blot = ['#d8b083', '#bf8a
     wrap(s, x, y, 10, (X, Y) => line(g, [[X, Y], [X + Math.cos(a) * L, Y + Math.sin(a) * L]], lw, lc, 0.45));
   }
   mottle(g, s, rnd, { colors: [dark, '#f2d2a2', '#a87650'], count: 220, rmin: 1.5, rmax: 4, alpha: 0.2, hard: 0.6 });
+  // trowel lifts: each day's coat of mud ends in a faint wavy horizontal seam, a lighter lip over a
+  // shaded line, the band under it a shade apart from the one above
+  for (let i = 0; i < lifts; i++) {
+    const y = s * (i + range(rnd, 0.25, 0.75)) / lifts, hg = range(rnd, 26, 52);
+    const k1 = 1 + Math.floor(rnd() * 2), k2 = 3 + Math.floor(rnd() * 3), p1 = rnd() * TAU, p2 = rnd() * TAU;
+    const edge = (x, o) => y + o + 5 * Math.sin(TAU * k1 * x / s + p1) + 2.5 * Math.sin(TAU * k2 * x / s + p2);
+    const top = [], bot = [];
+    for (let x = -8; x <= s + 8; x += 8) { top.push([x, edge(x, 0)]); bot.push([x, edge(x, hg)]); }
+    const tone = i % 2 ? lite : dark, ta = i % 2 ? 0.09 : 0.07;
+    for (const dy of [0, -s, s]) {
+      const T = top.map(([x, yy]) => [x, yy + dy]), B = bot.map(([x, yy]) => [x, yy + dy]);
+      g.save(); g.globalAlpha = ta; g.fillStyle = grad(g, 0, y + dy, 0, y + dy + hg, [[0, tone, 1], [1, tone, 0]]); polyPath(g, [...T, ...B.slice().reverse()]); g.fill(); g.restore();
+      line(g, T.map(([x, yy]) => [x, yy + 1.8]), 2.6, shadowOf(dark, 0.2), 0.16);
+      line(g, T.map(([x, yy]) => [x, yy - 0.6]), 1.6, lite, 0.22);
+    }
+  }
+  // damp under the parapet (the top of the tile is laid at the top of the wall): darker soft stains
+  // with drips running down out of them
+  if (damp) {
+    for (let i = 0; i < 9; i++) { const x = rnd() * s, y = range(rnd, -4, 22), rx = range(rnd, 26, 70), ry = range(rnd, 10, 26), a = range(rnd, 0.12, 0.26); wrap(s, x, y, rx, (X, Y) => blob(g, X, Y, rx, ry, 0, '#7a4e30', a, 0.15)); }
+    rainStreaks(g, s, rnd, 0, s, s * 0.03, '#7a4e30', 9, 0.2);
+  }
   // chipped places where the render has fallen away and the mud bricks show
   for (let i = 0; i < chipsN; i++) plasterHole(g, s, rnd, (i + range(rnd, 0.1, 0.9)) / chipsN * s, range(rnd, 0.15, 0.9) * s, range(rnd, 26, 44) * (i ? 1 : 1.25), { plaster: base, brick, mortar: '#6a4830', squash: range(rnd, 0.6, 0.9) });
   // long vertical rain runs (darker, soft) and a few pale salt bloom streaks
@@ -813,7 +947,7 @@ function adobePaint(g, s, rnd, cv, { base = '#c9976a', blot = ['#d8b083', '#bf8a
   glaze(g, s, s, '#ffe0b0', 0.12, 'soft-light');
   blurTile(cv, 0.6);
 }
-register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud render in three related tans, troweled swirls, straw flecks, rain runs (~3 m a tile; the chips showing mud brick are wall_holes decals, placed per wall)', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv); } });
+register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud render in three related tans (±12%), troweled swirls, straw flecks, three wavy trowel-lift seams, damp stains and drips along the top (laid at the parapet), rain runs (~3 m a tile; chips, patches and the base splash are decals placed per wall)', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { lifts: 3, damp: true }); } });
 register('arch_streak', {
   family: F, w: 64, h: 256, alpha: true, note: 'a rain run down an adobe wall from under a viga: dark wet mud fading downward, a couple of drips (alpha decal)',
   paint(g, w, rnd, h) {
