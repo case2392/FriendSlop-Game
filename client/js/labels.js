@@ -308,6 +308,8 @@ function dustTexture() {
 
 // Builds and renders the diorama at W x H; resolves to a canvas with a transparent sky.
 async function renderDiorama(W, H) {
+  const dbg = s => { (window.__dio ||= []).push(s + ' ' + Math.round(performance.now())); };
+  dbg('start');
   const [nat, rvm] = await Promise.all([import('./nature3d.js'), import('./rv3d.js')]);
   if (!menuShown()) return null;
   dbg('imported');
