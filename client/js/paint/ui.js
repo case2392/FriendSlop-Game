@@ -1037,7 +1037,7 @@ register('ui_vista_dirt', { size: 256, family: F, note: 'tiles; title-screen roa
 // the bend under a big oak, kicking up dust.
 // Painted in stages (a generator) so labels.js can spread the work over several
 // frames at startup; the registered texture runs every stage in one go.
-export function* paintVista(g, W, H, rnd) {
+export function* paintVista(g, W, H, rnd, { full = true } = {}) {
   const HZ = Math.round(H * 0.6);               // horizon
   const SX = W * 0.315, SY = HZ - 60;            // the sun, low on the left
   // sky
@@ -1148,6 +1148,9 @@ export function* paintVista(g, W, H, rnd) {
   g.fillStyle = vlin(g, 0, H - 150, 0, H, [[0, 'rgba(30,44,18,0)'], [1, 'rgba(30,44,18,0.38)']]); g.fillRect(0, H - 150, W, 150);
   g.restore();
   stroke(g, h2.filter((_, i) => i % 2 === 0), 3, 3, '#a8bd5a', 0.35);
+  // the backdrop ends here: labels.js renders the real game assets over it (the RV on the
+  // dirt road, the oak, pines, rocks, fence and signpost), then runs finishVista
+  if (!full) return;
 
   // the road: a ground plane seen from a little hill, curving in from the lower left
   const RX = [[0.9, -1.0], [1.3, -1.7], [1.7, -2.35], [2.2, -2.85], [3, -3.0], [4.4, -2.65], [7, -2.2], [12, -1.95], [25, -1.5], [60, -1.0], [300, -0.4]];
@@ -1309,7 +1312,13 @@ export function* paintVista(g, W, H, rnd) {
     for (let i = 0; i < 12; i++) { const x = cx + range(rnd, -22, 22), y = cy + range(rnd, -7, 7); ellipse(g, x + 0.8, y + 0.8, 3, 2.4, 0, '#2a3a1a', 0.4); ellipse(g, x, y, 2.9, 2.4, 0, jitter(col, rnd, 0.1), 0.95); ellipse(g, x - 0.7, y - 0.7, 1.1, 0.9, 0, '#fffbe0', 0.8); }
   }
 
-  // atmosphere: soft sun shafts, a warm unifying glaze, a vignette
+  finishVista(g, W, H, rnd);
+}
+
+// The last stage, over everything: soft sun shafts from the low sun on the left,
+// a warm unifying glaze, the greens pulled back from candy, a vignette.
+export function finishVista(g, W, H, rnd) {
+  const SX = W * 0.315, SY = Math.round(H * 0.6) - 60;
   g.save(); g.globalCompositeOperation = 'screen';
   for (let i = 0; i < 6; i++) { const a = range(rnd, -0.5, 1.2); stroke(g, [[SX, SY], [SX + Math.sin(a) * 1100, SY + Math.cos(a) * 900]], 10, range(rnd, 90, 170), '#ffe8b8', 0.045); }
   g.restore();

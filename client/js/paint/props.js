@@ -8,13 +8,15 @@
 // (lamp glass, lantern panes, the CRT, the slot machine's bulbs), a quarter the size.
 //
 // Pieces (props3d.js maps geometry onto these through REGIONS):
-//   wood turned iron safe safeback porcelain leather sign slot slotback slotside bulbs dino
+//   wood turned iron safe safeback porcelain leather sign slot slotback slotside bulbs
+//   dinohead dinojaw dinomouth eye plaster (the dino head: hide, jaw, mouth / tongue / plain bumps)
 //   gnomehat gnomecoat gnomebeard gnomeface gnomefur portrait gold rosette glass brass bronze gilt
-//   tire rim screen steel red regdeck crest till plaque keys tvfront tvback strap fret guitar honey
-//   ball eye ivory rubber parchment lantern skin boot plaster toast bulb tag
+//   tire rim screen steel bakelite toastplate red regdeck crest till plaque keys tvfront tvback
+//   strap fret guitar honey ball ivory rubber parchment lantern skin boot toast bulb tag
 // Boulders (not in the atlas, they're 4 m wide): loot_boulder_<biome> (512×256, u wraps round
-// the rock, v runs ground → top) is the stone; loot_cover_<biome> (alpha, seamless) is the moss /
-// dry grass / snow / dust / sand that sits on its upward faces (a shell mesh, alpha-tested).
+// the rock, v runs ground → top; badlands and desert carry the strata of BOULDER_BANDS, whose
+// edges the slab geometry ledges on) is the stone; loot_cover_<biome> (alpha, seamless) is the
+// broad cap of moss / lichen / snow / dust / sand on its upward faces (a shell mesh, alpha-tested).
 //
 // Light comes from the upper left: lit cream edges, cool violet-brown shadows, never pure black.
 // Lettering is painted, not typeset: jittered glyphs, a mottled fill, chipped gilt, an umber
@@ -2112,9 +2114,9 @@ const BOULDER = {
   fields: { rock: 'rock_warm', base: '#8a8170', cols: ['#9a9080', '#766e60', '#a49a86'], ground: '#7a6040' },
   snow: { rock: 'rock_granite', base: '#6f7682', cols: ['#8e96a3', '#5e6470', '#7a828e'], ground: '#5a5e6a' },
   badlands: { rock: 'rock_red', base: '#a04a2a', cols: ['#b4552f', '#8e3e22', '#cf7a45'], ground: '#8a5a38',
-    bands: ['#b4552f', '#8e3e22', '#cf7a45', '#a8482a', '#e3a066'], lit: '#f0b880', under: '#6a2e22' },
+    bands: ['#a8482a', '#7e3420', '#e8b886', '#b4552f', '#cf7a45'], lit: '#f4c898', under: '#5e2a1e' },
   desert: { rock: 'rock_sand', base: '#b7895e', cols: ['#d4ab7c', '#a87a50', '#c89a6a'], ground: '#b89060',
-    bands: ['#c8986a', '#e0bc8c', '#b7895e', '#d4ab7c'], lit: '#f8e0b4', under: '#8a6040' },
+    bands: ['#c8986a', '#a87a50', '#ecd0a0', '#c89a6a'], lit: '#f8e0b4', under: '#7a5434' },
 };
 function boulderPaint(g, w, rnd, h, biome) {
   const B = BOULDER[biome];
@@ -2131,12 +2133,17 @@ function boulderPaint(g, w, rnd, h, biome) {
       for (let k = 0; k < 10; k++) { const x = rnd() * w, r = range(rnd, 14, 40); wrapX(w, x, r, X => blob(g, X, range(rnd, y0, y1), r, range(rnd, 4, 10), 0, pick(rnd, [lightOf(c, 0.25), shadowOf(c, 0.25)]), 0.25, 0.2)); }
     }
     // at every edge: the lit top of the bed below (a ledge's rounded lip) and the cool dark of the one above
+    // (the slabs ledge at the even edges; the odd ones are undercut grooves in the rock)
     for (let i = 1; i < E.length; i++) {
-      const y = Y(E[i]), ph = rnd() * TAU, wob = x => Math.sin(x / w * TAU * 2 + ph) * 1.5, ledge = i % 2 === 0 || i === E.length - 1;
-      const top = []; for (let x = 0; x <= w; x += 8) top.push([x, y + wob(x)]);
-      g.fillStyle = lin(g, 0, y, 0, y + 11, [[0, B.lit, ledge ? 0.75 : 0.45], [1, B.lit, 0]]); g.fillRect(0, y, w, 11);
-      line(g, top.map(([a, b]) => [a, b + 1.5]), ledge ? 2.6 : 1.6, '#fff4dc', ledge ? 0.5 : 0.3);
-      if (i < E.length - 1) { g.fillStyle = lin(g, 0, y, 0, y - 12, [[0, B.under, ledge ? 0.8 : 0.45], [1, B.under, 0]]); g.fillRect(0, y - 12, w, 12); }
+      const y = Y(E[i]), ledge = i % 2 === 0 || i === E.length - 1;
+      if (!ledge && i > 1) { g.fillStyle = lin(g, 0, y - 6, 0, y + 6, [[0, B.under, 0], [0.5, B.under, 0.3], [1, B.under, 0]]); g.fillRect(0, y - 6, w, 12); continue; }
+      if (ledge) {
+        g.fillStyle = lin(g, 0, y, 0, y + 12, [[0, B.lit, 0.7], [1, B.lit, 0]]); g.fillRect(0, y, w, 12);
+        for (let k = 0; k < 14; k++) { const x = rnd() * w, L = range(rnd, 20, 70); wrapX(w, x, L, X => stroke(g, [[X, y + 2], [X + L * 0.5, y + 2.5 + range(rnd, -1, 1)], [X + L, y + 2]], 2.2, 0.6, '#fff4dc', 0.45)); }
+        if (i < E.length - 1) { g.fillStyle = lin(g, 0, y, 0, y - 14, [[0, B.under, 0.75], [1, B.under, 0]]); g.fillRect(0, y - 14, w, 14); }
+      } else {
+        g.fillStyle = lin(g, 0, y - 10, 0, y + 10, [[0, B.under, 0], [0.45, B.under, 0.55], [0.6, B.under, 0.35], [1, B.lit, 0.3]]); g.fillRect(0, y - 10, w, 20);
+      }
     }
     // weathering: vertical streaks and soft vertical fracture shadows
     for (let i = 0; i < 18; i++) { const x = rnd() * w, y0 = rnd() * h * 0.7, L = range(rnd, 30, 110); wrapX(w, x, 6, X => line(g, [[X, y0], [X + range(rnd, -2, 2), y0 + L]], range(rnd, 1.5, 4), pick(rnd, [B.under, shadowOf(B.base, 0.4)]), 0.2)); }

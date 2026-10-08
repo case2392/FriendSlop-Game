@@ -7,22 +7,26 @@
 // The look is WoW Classic goblin/human junk: chunky shapes with smooth shading
 // (bulged, bowed, dented, tapered: nothing is a perfect box), every surface
 // painted (paint/roadside.js), AO and ground grime baked into vertex colours.
-// Each biome has its own construction kit (timber and red shingles in Elwynn,
-// gray barn wood and hay in Westfall, granite piers, slate and braziers in Dun
-// Morogh, lashed logs, hides and bones in the Badlands, brass, canvas and adobe
-// in Tanaris) plus its weather: snow caps, clustered icicles and drifts in the
-// pass, red dust in the badlands, sand in the desert. A world-space top-cover
-// shader lays that weather on up-facing surfaces, broken up by noise, and never
-// on sheltered ones (inside the trailer, under the counter's roof).
+// Each biome has its own construction kit (half-timber, red shingles and log
+// palisades in Elwynn; barn boards and stepped thatch in Westfall; granite,
+// slate, iron-banded beams and braziers in Dun Morogh; bleached stakes, rope,
+// hides and bones in the Badlands; brass, striped canvas and adobe in Tanaris)
+// plus its weather: snow caps, clustered icicles and drifts in the pass, red
+// dust in the badlands, sand in the desert. A world-space top-cover shader lays
+// that weather on up-facing surfaces, broken up by noise, tuned per material
+// class (curved things only along the top, cloth keeps its pattern), and never
+// on sheltered ones (inside the trailer, under the counter's roof). Mounds and
+// drifts are draped on the ground in the terrain's own textures.
 //
 // Geometry is generated into per-material buckets and merged: one mesh per
 // (cluster, material), where a cluster is one stop / gate / anchor pair / camp /
-// RV lot. Each cluster also has a one-draw-call far LOD (vertex colours = the
-// painted texture's average, small trim left out). The crash smoke is one
-// billboarded, GPU-animated draw call per wreck.
+// RV lot. Label textures share atlases so they cost no extra draw calls. Each
+// cluster also has a one-draw-call far LOD (vertex colours = the painted
+// texture's average, small trim left out). The crash smoke is one billboarded,
+// GPU-animated draw call per wreck.
 // API: buildRoadside(W) -> { group, gates, update(dt, t, camPos) }, isRoadside(s), PREVIEW.
 import { THREE, tex } from './gfx.js';
-import { canvasFor } from './paint/index.js';
+import { canvasFor, has } from './paint/index.js';
 import { generateLeg } from '/shared/world.js';
 
 const ROADSIDE_PARTS = new Set(['log_seat', 'parked_rv', 'keypad_post']);
@@ -72,17 +76,17 @@ const DENS = {
   rs_wing: 1.6, rs_gingham: 0.6, rs_bark: 1.2, rs_rv: 3, rs_snow: 2, rs_dust: 2, rs_sand: 2, rs_dirt: 2, rs_tire: 0.6,
   rs_fascia: 4, rs_shingles: 1.2, rs_slats: 2, rs_dino: 6, rs_canvas: 3, rs_canvas_blue: 3, rs_slate: 1.4, rs_hide: 1.6,
   rs_adobe: 2, rs_burlap: 0.9, rs_plaid: 0.9, rs_rope: 0.4, rs_rock: 1.4, rs_hay: 1, rs_bone: 0.6,
-  rs_bleach: 1.5, rs_plaster: 1.8, rs_shingles_red: 1.2, rs_thatch: 1.3, rs_rv_teal: 3, rs_rv_rust: 3, rs_rv_mustard: 3,
+  rs_bleach: 1.5, rs_plaster: 1.8, rs_shingles_red: 1.2, rs_thatch: 1.3, rs_rv_teal: 3, rs_rv_rust: 3, rs_rv_mustard: 3, rs_rv_skins: 3,
   ground_meadow: 7, ground_fields: 7, ground_snow: 8, ground_badlands: 7, ground_desert: 7, dirt_meadow: 6, dirt_fields: 6, dirt_snow: 6, dirt_badlands: 6, dirt_desert: 6,
 };
 const FIT = new Set(['rs_blanket', 'rs_hub', 'rs_hub_cream', 'rs_glass', 'rs_grille', 'rs_crate_a', 'rs_crate_b', 'rs_crate_c', 'rs_barrel', 'rs_barrel_lid', 'rs_drum',
   'rs_drum_red', 'rs_drum_lid', 'rs_pump_face', 'rs_keypad', 'rs_logend', 'rs_rv_window', 'rs_boards', 'rs_headlamp', 'rs_ice', 'rs_decal_freight', 'rs_ranger_board',
-  'rs_plaque', 'rs_roundel', 'rs_warn', 'rs_stop', 'rs_chevband', 'rs_pennant', 'rs_gasboard', 'rs_bunting', 'rs_tuft', 'rs_tuft_dry', 'rs_scorch', 'rs_shield', 'rs_rune', 'rs_glow']);
+  'rs_plaque', 'rs_roundel', 'rs_warn', 'rs_stop', 'rs_chevband', 'rs_pennant', 'rs_gasboard', 'rs_bunting', 'rs_tuft', 'rs_tuft_dry', 'rs_scorch', 'rs_shield', 'rs_rune', 'rs_glow', 'rs_gatelabels']);
 // flags on a material name: ! no top cover, * glows, ~ double-sided, # alpha-tested decal (no shadow, no LOD),
 // % soft transparent decal lying on the ground (no shadow, no LOD)
 const baseName = m => m.replace(/[!*~#%]+$/, '');
 const densOf = m => { const b = baseName(m); return b.startsWith('rs_steel_') ? 2 : (DENS[b] || 1); };
-const NO_SHADOW = /^(ground_\w+|dirt_\w+|rs_glow|rs_tuft|rs_tuft_dry|rs_scorch|rs_bunting|rs_shield|rs_gasboard|rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid|rs_drum_lid|rs_chevband|rs_rope|rs_bone|rs_pennant|rs_stop)$/;
+const NO_SHADOW = /^(ground_\w+|dirt_\w+|rs_gatelabels|rs_glow|rs_tuft|rs_tuft_dry|rs_scorch|rs_bunting|rs_shield|rs_gasboard|rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid|rs_drum_lid|rs_chevband|rs_rope|rs_bone|rs_pennant|rs_stop)$/;
 // the most weather any one material takes (glass and wing fabric stay readable under the dust)
 const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6 };
 // Material classes for the cover: curved things (logs, barrels, the dino) only take it right along the top;
@@ -128,6 +132,8 @@ const KIT = {
   goblin: { wood: [1.08, 0.98, 0.88], woodMat: 'rs_timber', wall: 'rs_steel_mustard', band: 'rs_brass', post: 'brass', bars: 'plates', roof: 'rs_canvas', roofTint: null, ridge: 'rs_brass', light: 'lantern', foot: 'rs_adobe', extra: null },
 };
 const STONE_TINT = { dwarf: [0.8, 0.88, 1.02] };
+// where each label sits in the rs_gatelabels atlas (uv rects)
+const LBL = { ranger: [0, 2 / 3, 1, 1], warn0: [0, 0.5, 0.5, 2 / 3], warn1: [0, 1 / 3, 0.5, 0.5], stop: [0.5, 5 / 12, 1, 2 / 3], keypad: [0.5, 0, 0.75, 5 / 12] };
 
 const MATS = new Map();
 function rsMat(name, ctx) {
@@ -602,7 +608,11 @@ function finish(B, ctx, parent, clusters, track = null) {
   // to the shadow's shape but would cost a shadow-pass draw call each
   const ranked = [...B.buckets.values()].filter(b => !NO_SHADOW.test(baseName(b.mat)) && !/[#!%]/.test(b.mat.slice(baseName(b.mat).length))).map(b => [b, areas.get(b)]).sort((a, b) => b[1] - a[1]);
   const cTotal = ranked.reduce((s, [, a]) => s + a, 0);
-  const casters = new Set(ranked.filter(([, a], i) => i < 3 || a > cTotal * 0.2).map(([b]) => b));
+  for (const b of B.buckets.values()) for (let i = 0; i < b.p.length; i += 3) box.expandByPoint(tmp.set(b.p[i], b.p[i + 1], b.p[i + 2]));
+  // small clusters (an anchor post, a keypad) cast with their one main material; bigger ones with up to three,
+  // as long as each carries a real share of the surface
+  const nCast = box.getBoundingSphere(new THREE.Sphere()).radius < 3 ? 1 : 3;
+  const casters = new Set(ranked.filter(([, a], i) => (i < nCast && a > cTotal * 0.08) || a > cTotal * 0.25).map(([b]) => b));
   for (const b of B.buckets.values()) {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.Float32BufferAttribute(b.p, 3));
@@ -618,7 +628,6 @@ function finish(B, ctx, parent, clusters, track = null) {
     if (flags.includes('%')) m.renderOrder = 1;
     m.name = 'rs:' + b.mat;
     near.add(m);
-    for (let i = 0; i < b.p.length; i += 3) box.expandByPoint(tmp.set(b.p[i], b.p[i + 1], b.p[i + 2]));
     // the far LOD leaves out decals, near-only trim and materials that cover almost nothing
     if (flags.includes('#') || flags.includes('%') || areas.get(b) < total * 0.015) continue;
     const a = avgLin(base), glow = flags.includes('*') ? 1.6 : 1;
@@ -872,7 +881,7 @@ function buildSemi(B, p, parts, ctx) {
       B.shelter = true;
       for (const zz of kept) B.box('rs_iron', roof.hx * 2 - 0.16, 0.1, 0.08, roof.x, roof.y - roof.hy - 0.05 + bow(zz), zz, { r: 0.02 });
       const hz0 = zr + 1.1, hx0 = roof.x + 0.35, hy0 = roof.y - roof.hy + bow(hz0) - 0.006;
-      B.cyl('rs_ice*', 0.15, 0.15, 0.01, hx0, hy0, hz0, { seg: 9, caps: 'rs_ice*', jit: 0.02, lod0: true });
+      B.cyl('rs_headlamp*', 0.15, 0.15, 0.01, hx0, hy0, hz0, { seg: 9, caps: 'rs_headlamp*', capFit: false, jit: 0.02, lod0: true, tint: [0.85, 0.95, 1.1] });
       B.torus('rs_iron', 0.16, 0.035, hx0, hy0 - 0.005, hz0, { rx: Math.PI / 2, seg: 9, tseg: 4, tint: [1.25, 0.8, 0.55], lod0: true });
       if (fl) B.quad('rs_glow*%', 0.9, 0.7, hx0 + 0.1, fl.y + fl.hy + 0.012, hz0 + 0.15, { rx: -Math.PI / 2, rz: 0.4, tint: [0.7, 0.66, 0.6] });
       B.shelter = false;
@@ -988,7 +997,7 @@ function buildYard(B, p, parts, ctx, decor) {
     }
     B.box('rs_timber', hx * 2 - 0.6, 0.1, 0.08, 0, 0.36, 0, { r: 0.02 });
     // something for sale under the table
-    B.box(pick(rnd, ['rs_crate_a', 'rs_crate_b']), 0.5, 0.42, 0.42, (rnd() < 0.5 ? -1 : 1) * 0.42, 0.21, 0.1, { r: 0.03, ry: range(rnd, -0.2, 0.2) });
+    B.box('rs_crate_a', 0.5, 0.42, 0.42, (rnd() < 0.5 ? -1 : 1) * 0.42, 0.21, 0.1, { r: 0.03, ry: range(rnd, -0.2, 0.2) + (rnd() < 0.5 ? Math.PI / 2 : 0) });
     B.pop();
   }
   // a blanket spread out in front of the tables (the cheap stuff goes on the ground), one corner folded back
@@ -1007,7 +1016,7 @@ function buildYard(B, p, parts, ctx, decor) {
   // a hand-painted YARD SALE bunting strung between two poles behind the tables
   {
     const A = V(-4.5, 0, -1.15), Bp = V(3.7, 0, -1.35), hy = 2.6, sag = 0.4;
-    for (const P of [A, Bp]) { const gy = B.ground(P.x, P.z); B.cyl('rs_timber', 0.045, 0.055, hy + 0.25 - gy, P.x, (hy + 0.25 + gy) / 2, P.z, { seg: 6, caps: 'rs_logend', rz: range(rnd, -0.04, 0.04) }); B.tube('rs_rope', [V(P.x, hy + 0.1, P.z), V(P.x + (P.x < 0 ? -0.7 : 0.7), B.ground(P.x + (P.x < 0 ? -0.7 : 0.7), P.z), P.z)], 0.012, { seg: 4, lod0: true }); }
+    for (const P of [A, Bp]) { const gy = B.ground(P.x, P.z); B.cyl('rs_timber', 0.045, 0.055, hy + 0.25 - gy, P.x, (hy + 0.25 + gy) / 2, P.z, { seg: 6, rz: range(rnd, -0.04, 0.04) }); B.tube('rs_rope', [V(P.x, hy + 0.1, P.z), V(P.x + (P.x < 0 ? -0.7 : 0.7), B.ground(P.x + (P.x < 0 ? -0.7 : 0.7), P.z), P.z)], 0.012, { seg: 4, lod0: true }); }
     const at = t => V(lerp(A.x, Bp.x, t), hy - sag * Math.sin(Math.PI * t), lerp(A.z, Bp.z, t));
     const line = []; for (let k = 0; k <= 16; k++) line.push(at(k / 16));
     B.tube('rs_rope', line, 0.012, { seg: 4, lod0: false });
@@ -1027,7 +1036,8 @@ function buildYard(B, p, parts, ctx, decor) {
       B.box('rs_timber', 0.06, 0.06, 0.6, x, 0.25, rz0, { r: 0.015, rot: true });
     }
     B.cyl('rs_iron', 0.022, 0.022, rw + 0.16, rx0, rh, rz0, { rz: Math.PI / 2, seg: 6, caps: false });
-    const cloths = [['rs_plaid', [0.8, 0.75, 0.75]], ['rs_burlap', [0.9, 0.85, 0.8]], ['rs_canvas_blue', [0.85, 0.85, 0.9]], ['rs_gingham', [0.85, 0.8, 0.8]], ['rs_canvas', [0.8, 0.75, 0.72]], ['rs_hide', [1, 1, 1]]];
+    // (in the cloths already on the stop, so the rack costs no extra draw calls)
+    const cloths = [[cloth, [0.9, 0.85, 0.82]], [cloth, [0.7, 0.78, 0.9]], [ctx.bio.umbrella, [0.85, 0.82, 0.78]], [cloth, [0.95, 0.85, 0.6]], [ctx.bio.umbrella, [0.75, 0.85, 0.75]]];
     const n = 4 + Math.floor(rnd() * 3);
     for (let k = 0; k < n; k++) {
       const x = rx0 - rw / 2 + 0.25 + (rw - 0.5) * (k + range(rnd, -0.2, 0.2)) / (n - 1), [m, tn] = pick(rnd, cloths), long = rnd() < 0.4;
@@ -1057,10 +1067,10 @@ function buildYard(B, p, parts, ctx, decor) {
     const sxp = -3.7, szp = range(rnd, 0.4, 0.8), gy2 = B.ground(sxp, szp);
     const chair = (y, ry2, flip) => {
       B.push(M4(sxp, gy2 + y, szp, flip ? Math.PI : 0, ry2, 0));
-      B.box('rs_planks_gray', 0.44, 0.05, 0.42, 0, 0.45, 0, { r: 0.012 });
+      B.box('rs_planks', 0.44, 0.05, 0.42, 0, 0.45, 0, { r: 0.012, tint: [0.85, 0.82, 0.8] });
       for (const sx of [-0.18, 0.18]) for (const sz of [-0.17, 0.17]) B.box('rs_timber', 0.045, 0.45, 0.045, sx, 0.22, sz, { r: 0.01, lod0: true });
       for (const sx of [-0.18, 0.18]) B.box('rs_timber', 0.045, 0.5, 0.045, sx, 0.72, -0.19, { r: 0.01, lod0: true });
-      B.box('rs_planks_gray', 0.42, 0.14, 0.03, 0, 0.88, -0.19, { r: 0.01 });
+      B.box('rs_planks', 0.42, 0.14, 0.03, 0, 0.88, -0.19, { r: 0.01, tint: [0.85, 0.82, 0.8] });
       B.pop();
     };
     chair(0, range(rnd, -0.3, 0.3), false);
@@ -1079,7 +1089,7 @@ function buildYard(B, p, parts, ctx, decor) {
     const prof = [[0, 2.25], [0.28, 2.2], [0.75, 2.08], [1.25, 1.9], [1.6, 1.72]];
     const profAt = rr => { for (let i = 0; i < prof.length - 1; i++) if (rr <= prof[i + 1][0]) return lerp(prof[i][1], prof[i + 1][1], (rr - prof[i][0]) / (prof[i + 1][0] - prof[i][0])); return prof[prof.length - 1][1]; };
     B.grid(canvas, 32, 5, (u, v) => { const th = u * TAU, rr = 1.6 * (1 - v), sag = 0.05 * (rr / 1.6) * Math.abs(Math.sin(th * 4)); return [Math.sin(th) * rr, profAt(rr) - sag, Math.cos(th) * rr]; }, { wrapU: true, flip: true, uv: (u, v) => [u * 8, 1 - v] });
-    B.quad('rs_canvas_blue', 0.42, 0.34, Math.sin(0.4) * 0.95, profAt(0.95) + 0.03, Math.cos(0.4) * 0.95, { ry: 0.4, rx: -Math.PI / 2 + 0.3, lod0: true, noAO: true });
+    B.quad(ctx.bio.cloth, 0.42, 0.34, Math.sin(0.4) * 0.95, profAt(0.95) + 0.03, Math.cos(0.4) * 0.95, { ry: 0.4, rx: -Math.PI / 2 + 0.3, lod0: true, noAO: true, uvRect: [0, 0, 0.7, 0.55] });
     B.cyl(canvas, 1.6, 1.62, 0.2, 0, 1.63, 0, { seg: 8, caps: false, fit: true });
     for (let k = 0; k < 8; k++) {
       const a = TAU * k / 8;
@@ -1223,10 +1233,10 @@ function buildCrash(B, p, parts, ctx, decor) {
   if (p.mesa) {
     const side = p.side || 1, r0 = p.mesa.r;
     B.frame(p.x, d.y, p.z, -side * Math.PI / 2);
-    const hw = range(rnd, 2.2, 2.8), z0 = r0 - 2.2, z1 = r0 + 3.6, ph = rnd() * 6;
+    const hw = range(rnd, 2.9, 3.4), z0 = r0 - 2.2, z1 = r0 + 3.6, ph = rnd() * 6;
     const hem = []; for (let i = 0; i <= 10; i++) hem.push(range(rnd, -0.9, 0.2));
-    B.grid('rs_canvas~', 10, 14, (u, v) => {
-      const x = (u - 0.5) * 2 * hw * (1 - 0.15 * v), z = lerp(z0, z1 + hem[Math.round(u * 10)], v);
+    B.grid('rs_canvas~', 12, 14, (u, v) => {
+      const x = (u - 0.5) * 2 * hw * (1 - 0.22 * v), z = lerp(z0, z1 + hem[Math.round(u * 10)], v);
       const bunch = 0.35 * Math.exp(-(((z - (r0 - 1.3)) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(x * 2.3 + ph));
       const fold = 0.09 * Math.sin(x * 3.1 + ph) * smooth(r0 - 0.5, r0 + 1, z);
       return [x, B.ground(x, z) + 0.1 + bunch + fold, z];
@@ -1318,7 +1328,8 @@ function buildJunk(B, p, parts, ctx) {
       };
       const perim = 2 * (s.hx + s.hz) * 2.1;
       B.grid('rs_scrap', 18, 4, shapeAt, { wrapU: true, tint: [1.12, 1.06, 1.0], uv: (u, v, P) => { const w = B.world(P[0], P[1], P[2]); return v >= 0.5 ? [w.x, w.z] : [u * perim, P[1]]; } });
-      const steel = ['rs_steel_red', 'rs_steel_teal', 'rs_steel_mustard', 'rs_tin', 'rs_steel_cream', 'rs_wing', 'rs_tin_red', 'rs_steel_blue'];
+      // four plate materials (the crash and the crates share most of them), varied by tint
+      const steel = [['rs_steel_red', null], ['rs_steel_red', [1.2, 0.95, 0.6]], ['rs_steel_teal', null], ['rs_steel_teal', [0.85, 0.9, 1.15]], ['rs_tin', null], ['rs_tin', [1.1, 0.8, 0.65]], ['rs_wing', [0.9, 0.82, 0.72]]];
       // plates shingled in rows up the flanks and across the plateau, each row's lapping over the one below
       const rowsP = [[0.1, 0.62, 0.85], [0.3, 0.75, 0.75], [0.5, 0.95, 0.55], [0.74, 0.4, 0.3]];
       for (const [v0, aMin, aMax] of rowsP) {
@@ -1328,9 +1339,9 @@ function buildJunk(B, p, parts, ctx) {
           if (rnd() < 0.12) continue;
           const onTop = v0 > 0.6, u = u0 + (k + range(rnd, -0.25, 0.25)) / n, v = v0 + range(rnd, -0.06, 0.06);
           const P = shapeAt(((u % 1) + 1) % 1, v), th = u * TAU, a = range(rnd, aMin, aMax);
-          const w = range(rnd, 0.5, 0.95), dd = range(rnd, 0.34, 0.66), bend = range(rnd, -0.12, 0.12), m = pick(rnd, steel);
+          const w = range(rnd, 0.5, 0.95), dd = range(rnd, 0.34, 0.66), bend = range(rnd, -0.12, 0.12), [m, mt] = pick(rnd, steel);
           B.push(M4(P[0] + Math.sin(th) * 0.06, P[1] + 0.03, P[2] + Math.cos(th) * 0.06, a, onTop ? rnd() * TAU : th + range(rnd, -0.45, 0.45), range(rnd, -0.3, 0.3)));
-          B.box(m, w, 0.035, dd, 0, 0, 0, { r: 0.012, div: [3, 1, 2], smoothN: true, jit: 0.02, off: [rnd() * 3, rnd() * 3], tint: m === 'rs_wing' ? [0.9, 0.82, 0.72] : null, deform: q => { q[1] += bend * (q[0] / w * 2) ** 2 - 0.04 * (q[2] / dd * 2) ** 2; } });
+          B.box(m, w, 0.035, dd, 0, 0, 0, { r: 0.012, div: [3, 1, 2], smoothN: true, jit: 0.02, off: [rnd() * 3, rnd() * 3], tint: mt, deform: q => { q[1] += bend * (q[0] / w * 2) ** 2 - 0.04 * (q[2] / dd * 2) ** 2; } });
           B.pop();
         }
       }
@@ -1354,7 +1365,7 @@ function buildJunk(B, p, parts, ctx) {
           B.pop(); B.pop();
         } else if (it === 'fin') {
           B.push(M4(ox, top + 0.2, oz, range(rnd, -0.4, 0.4), a, range(rnd, 0.3, 0.6)));
-          B.box('rs_steel_cream', 0.06, 1.0, 0.7, 0, 0.3, 0, { r: 0.02, taper: 0.35, fit: 'v', deform: q => { q[2] -= (q[1] + 0.5) * 0.35; } });
+          B.box('rs_wing', 0.06, 1.0, 0.7, 0, 0.3, 0, { r: 0.02, taper: 0.35, tint: [1.0, 0.95, 0.85], deform: q => { q[2] -= (q[1] + 0.5) * 0.35; } });
           B.box('rs_steel_red', 0.07, 0.18, 0.62, 0, 0.0, 0.03, { r: 0.02, taper: 0.9 });
           B.pop();
         } else if (it === 'ladder') {
@@ -1490,7 +1501,7 @@ function buildDino(B, p, parts, ctx) {
   const uvBody = (pl, nl) => [(pl.z + pl.x * 0.15) / S, vOf(nl, [0, 1, 0])];
   // (v0, v1 squeeze a tube's v into part of the band so it does not wrap the whole belly-to-spine stripe)
   const uvTube = (u0, du, up, bias = 0, v0 = 0, v1 = 1) => (pl, nl, v) => [u0 + du * v.uv[1], lerp(v0, v1, vOf(nl, up, bias))];
-  const uvLeg = (u0, up) => (pl, nl, v) => [u0 + v.uv[0], lerp(0.36, 0.66, vOf(nl, up, 0.1))];
+  const uvLeg = (u0, up) => (pl, nl, v) => [u0 + v.uv[0], lerp(0.42, 0.62, vOf(nl, up, 0.1))];
   const rnd = rngOf(seedOf(p.x, p.z, 13));
   const stoneT = STONE_TINT[ctx.bio.kit];
   const bz = body.z, bx = body.x, phx = body.hx - 0.02, phz = body.hz - 0.02, ptop = 1.1;
@@ -1502,7 +1513,7 @@ function buildDino(B, p, parts, ctx) {
   // painted rockwork under the belly
   B.box('rs_rock', 2.2, 0.8, 3.6, bx, ptop + 0.3, bz - 0.15, { r: 0.35, jit: 0.16, div: [3, 1, 4], smoothN: true, S: 1.4, tint: [0.66, 0.7, 0.56] });
   // the body
-  const ax = body.hx - 0.06, az = body.hz - 0.08, yc = 2.92, ay = 1.12, e = 2.4, ev = 2.0, evLow = 2.6;
+  const ax = body.hx - 0.06, az = body.hz - 0.08, yc = 2.92, ay = 1.12, e = 2.2, ev = 2.0, evLow = 2.3;
   const shape = (zn, yN) => {
     const narrow = 1 - 0.2 * smooth(0.15, 0.95, zn);                                     // narrow shoulders
     const hump = yN > 0 ? yN * yN * 0.35 * Math.exp(-(((zn + 0.5) / 0.45) ** 2)) : 0;   // over the hips
@@ -1526,9 +1537,10 @@ function buildDino(B, p, parts, ctx) {
   // the front legs set a few degrees forward
   for (const l of legs) {
     const sx = Math.sign(l.x - bx) || 1, fx = bx + sx * Math.min(Math.abs(l.x - bx), ax - 0.62), fz = l.z, front = fz > bz;
-    const lean = front ? 0.09 : -0.02, thigh = front ? 0.72 : 0.8;
-    const pts = [V(fx, ptop + 0.02, fz + lean), V(fx, ptop + 0.3, fz + lean * 0.9), V(fx, ptop + 0.75, fz + lean * 0.6), V(fx * 0.98, ptop + 1.3, fz + lean * 0.2), V(fx * 0.92, 2.55, fz), V(fx * 0.86, 3.15, fz)];
-    B.tube('rs_dino', pts, [0.64, 0.6, 0.5, 0.6, thigh, 0.7], { seg: 12, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint });
+    // the thigh swells just above the knee and runs back into the body (it only bulges the flank a little)
+    const lean = front ? 0.09 : -0.02, thigh = front ? 0.62 : 0.7;
+    const pts = [V(fx, ptop + 0.02, fz + lean), V(fx, ptop + 0.3, fz + lean * 0.9), V(fx * 0.99, ptop + 0.72, fz + lean * 0.6), V(fx * 0.93, ptop + 1.2, fz + lean * 0.2), V(fx * 0.82, 2.75, fz), V(fx * 0.6, 3.25, fz)];
+    B.tube('rs_dino', pts, [0.64, 0.58, 0.5, thigh, thigh * 0.85, 0.5], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint });
     for (const k of [-1, 0, 1]) B.ell('rs_dino', 0.13, 0.1, 0.13, fx + k * 0.3, ptop + 0.09, fz + lean + 0.56 - Math.abs(k) * 0.13, { seg: 8, rings: 4, uvFn: () => [0.3 + k * 0.1, 0.06], tint: tint.map(c => c * 1.12) });
   }
   if (neck) {
@@ -1619,7 +1631,7 @@ function gatehouse(B, ctx, K, side, xc, rnd) {
   }
   // the cabin: floor, walls, sill and top plate, the frame on its faces, a lit watch window
   const wallH = wallTop - floor - 0.22, wy = floor + 0.22 + wallH / 2, wallMat = K.wall;
-  B.box(W, hx * 2 + 0.24, 0.24, hz * 2 + 0.24, xc, floor + 0.1, 0, { r: 0.04, rot: true, tint: wood, faces: { ny: { m: 'rs_planks', tint: [0.75, 0.7, 0.68] } } });
+  B.box(W, hx * 2 + 0.24, 0.24, hz * 2 + 0.24, xc, floor + 0.1, 0, { r: 0.04, rot: true, tint: wood.map(c => c * 0.9) });
   B.box(wallMat, hx * 2 - 0.06, wallH, hz * 2 - 0.06, xc, wy, 0, { r: 0.03, rot: !!K.wallRot, tint: K.wallTint || STONE_TINT[kit] && wallMat === 'rs_stone' ? STONE_TINT[kit] : null, S: wallMat === 'rs_stone' ? 1.3 : undefined });
   B.box(W, hx * 2 + 0.18, 0.18, hz * 2 + 0.18, xc, wallTop + 0.07, 0, { r: 0.04, rot: true, tint: wood });
   if (K.post === 'pier') for (const lx of [-1, 1]) for (const lz of [-1, 1]) B.box('rs_stone', 0.3, wallH + 0.1, 0.3, xc + lx * hx, wy, lz * hz, { r: 0.05, jit: 0.02, tint: stoneT });
@@ -1645,7 +1657,7 @@ function gatehouse(B, ctx, K, side, xc, rnd) {
     for (const sx2 of [-1, 1]) B.box(W, 0.07, 0.5, 0.08, sx2 * 0.29, 0, 0.02, { r: 0.015, tint: wood });
     B.box(W, 0.04, 0.46, 0.05, 0, 0, 0.03, { tint: wood, lod0: true });
     B.box(W, 0.52, 0.04, 0.05, 0, 0.02, 0.03, { tint: wood, lod0: true });
-    B.box('rs_planks', 0.3, 0.5, 0.04, -0.5, 0, 0.12, { ry: -0.5, r: 0.01, rot: true, tint: kit === 'goblin' ? [0.8, 1.05, 1.0] : [0.95, 0.75, 0.6], lod0: true });
+    B.box(W, 0.3, 0.5, 0.04, -0.5, 0, 0.12, { ry: -0.5, r: 0.01, tint: kit === 'goblin' ? [0.85, 1.1, 1.05] : wood.map(c => c * 1.15), lod0: true });
     B.pop();
   };
   win(xc + side * 0.15, -hz - 0.02, Math.PI);
@@ -1741,7 +1753,7 @@ function buildGateStatic(B, g, ctx) {
     for (let k = 0; k < 2; k++) B.torus('rs_iron', 0.035, 0.01, cx + sx * 1.35, lintel - 0.33 - k * 0.07 - (sx > 0 ? 0.03 : 0), -0.57, { ry: k % 2 ? Math.PI / 2 : 0, seg: 6, tseg: 3 });
     B.lod0 = false;
   }
-  B.box(W, 3.4, 0.9, 0.1, cx, by, -0.57, { r: 0.03, rz: 0.03, tint: wood, faces: { nz: { m: 'rs_ranger_board', fit: true, tint: [1, 1, 1] }, pz: { m: 'rs_ranger_board', fit: true, tint: [1, 1, 1] } } });
+  B.box(W, 3.4, 0.9, 0.1, cx, by, -0.57, { r: 0.03, rz: 0.03, tint: wood, faces: { nz: { m: 'rs_gatelabels', fit: true, uvRect: LBL.ranger, tint: [1, 1, 1] }, pz: { m: 'rs_gatelabels', fit: true, uvRect: LBL.ranger, tint: [1, 1, 1] } } });
 }
 
 // The barrier. The warning boom is its face: a run of red-and-cream chevron planks the whole width at
@@ -1858,11 +1870,11 @@ function buildGateBars(B, g, ctx) {
       while (dir > 0 ? x < hx - 0.05 : x > -hx + 0.05) {
         const len = Math.min(range(rnd, 2.3, 2.9), dir > 0 ? hx - x : x + hx), xc = x + dir * len / 2, ph = range(rnd, 0.62, 0.7);
         if (len > 0.3) {
-          const layout = rnd() < 0.5 ? 0 : 1, v0 = layout ? 0 : 0.5, v1 = layout ? 0.5 : 1;
+          const [, v0, , v1] = rnd() < 0.5 ? LBL.warn0 : LBL.warn1;
           const flip = (sz < 0) === (xc < 0);   // the texture's chevrons point to +u; u runs -x on the near face
-          const cut = len / 2.6;               // a short plank shows only part of a board
-          const rect = flip ? [Math.min(1, cut), v0, 0, v1] : [0, v0, Math.min(1, cut), v1];
-          B.box(W, len - 0.02, ph, 0.07, xc, BY + range(rnd, -0.04, 0.04), sz * bz, { r: 0.014, rz: range(rnd, -0.02, 0.02), tint: wood, faces: { [face]: { m: 'rs_warn', fit: true, uvRect: rect, tint: [1, 1, 1] } } });
+          const cu = Math.min(1, len / 2.6) * 0.5;   // a short plank shows only part of a board
+          const rect = flip ? [cu, v0, 0, v1] : [0, v0, cu, v1];
+          B.box(W, len - 0.02, ph, 0.07, xc, BY + range(rnd, -0.04, 0.04), sz * bz, { r: 0.014, rz: range(rnd, -0.02, 0.02), tint: wood, faces: { [face]: { m: 'rs_gatelabels', fit: true, uvRect: rect, tint: [1, 1, 1] } } });
         }
         x += dir * len;
       }
@@ -1873,7 +1885,7 @@ function buildGateBars(B, g, ctx) {
       for (const oy of [-0.22, 0.22]) B.cyl(K.band, 0.035, 0.035, 0.03, u, BY + oy, sz * (bz + 0.07), { rx: Math.PI / 2, seg: 6, lod0: true });
     }
     // the STOP board, hung a little crooked over the boom, iron-cornered
-    B.box(W, 1.9, 0.95, 0.08, range(rnd, -0.1, 0.1), BY + 0.04, sz * (bz + 0.1), { r: 0.02, rz: range(rnd, -0.05, 0.05), tint: wood, faces: { [face]: { m: 'rs_stop', fit: true, tint: [1, 1, 1] } } });
+    B.box(W, 1.9, 0.95, 0.08, range(rnd, -0.1, 0.1), BY + 0.04, sz * (bz + 0.1), { r: 0.02, rz: range(rnd, -0.05, 0.05), tint: wood, faces: { [face]: { m: 'rs_gatelabels', fit: true, uvRect: LBL.stop, tint: [1, 1, 1] } } });
     if (ctx.snow) {
       snowCap(B, hx * 2 - 0.2, 0.08, 0, BY + BH / 2, sz * bz, { t: 0.06, lip: 0.02, ext: 0.02, lod0: true });
       icicles(B, -hx + 0.3, sz * (bz + 0.04), hx - 0.3, sz * (bz + 0.04), BY - BH / 2, rnd, { max: 0.2 });
@@ -1899,7 +1911,7 @@ function buildKeypad(B, s, u, ctx) {
   else for (const yy of [0.5, top - 0.1]) B.box(K.band, s.hx * 2 + 0.04, 0.07, s.hz * 2 + 0.04, 0, yy, 0, { r: 0.01 });
   if (u) {
     const kx = u.x - s.x, ky = u.y - gy, kz = u.z - s.z;
-    B.box('rs_brass', 0.38, 0.48, 0.1, kx, ky, kz + 0.03, { r: 0.02, faces: { nz: { m: 'rs_keypad', fit: true } } });
+    B.box('rs_brass', 0.38, 0.48, 0.1, kx, ky, kz + 0.03, { r: 0.02, faces: { nz: { m: 'rs_gatelabels', fit: true, uvRect: LBL.keypad } } });
     B.box('rs_brass', 0.46, 0.04, 0.22, kx, ky + 0.29, kz - 0.01, { rx: -0.35, r: 0.01 });
     B.cyl('rs_brass', 0.022, 0.022, ky - 0.1, s.hx + 0.03, (ky - 0.1) / 2, 0, { seg: 5, caps: false });
     B.box('rs_brass', 0.06, 0.06, 0.06, s.hx + 0.03, ky - 0.1, 0);
@@ -2017,25 +2029,26 @@ function buildLog(B, s, ctx) {
 // wheel-arch flares, a rack on the roof with lashed crates and a rolled tarp, a brass stovepipe, a sagging
 // awning on two poles by the door, one window boarded up crooked; each sits a few degrees off level on its
 // flat tyre.
-const RV_SKINS = ['rs_rv_teal', 'rs_rv_rust', 'rs_rv_mustard'];
+// the three skins live in one atlas (rs_rv_skins), a third of v each
+const RV_SKIN_V = [[2 / 3, 1], [1 / 3, 2 / 3], [0, 1 / 3]];
 function buildParkedRV(B, s, ctx, idx = 0) {
   const base = s.y - s.hy;
   B.frame(s.x, base, s.z, s.ry || 0);
   const rnd = rngOf(seedOf(s.x, s.z, 51));
-  const skin = RV_SKINS[idx % RV_SKINS.length];
+  const skin = 'rs_rv_skins', [sv0, sv1] = RV_SKIN_V[idx % 3], SV = (a, b) => [0, lerp(sv0, sv1, a), 1, lerp(sv0, sv1, b)];
   const hx = s.hx, hz = s.hz, H = s.hy * 2, by = 0.55, top = H - 0.08;
   const flatSide = rnd() < 0.5 ? -1 : 1, roll = flatSide * range(rnd, 0.05, 0.09), pitch = range(rnd, -0.02, 0.02);
   B.push(M4(0, 0, 0, pitch, 0, -roll));
   // the body: tapering a little to the roof and to the rear
   const zf = hz - 0.5, zr = -hz + 0.05, bl = zf - zr, bcz = (zf + zr) / 2, bh = top - by, bcy = by + bh / 2;
   const taper = q => { const yN = (q[1] + bh / 2) / bh, zN = (q[2] + bl / 2) / bl; const k = 1 - 0.04 * yN - 0.04 * (1 - zN); q[0] *= k; q[1] -= 0.06 * (1 - zN) * yN; };
-  B.box(skin, hx * 2 - 0.04, bh, bl, 0, bcy, bcz, { r: 0.28, div: [2, 3, 6], smoothN: true, fit: 'v', S: 3, off: [rnd(), 0], deform: taper, faces: { py: { m: 'rs_tin', rot: true, fit: false, S: 2 }, ny: { m: 'rs_iron', fit: false } } });
+  B.box(skin, hx * 2 - 0.04, bh, bl, 0, bcy, bcz, { r: 0.28, div: [2, 3, 6], smoothN: true, fit: 'v', uvRect: SV(0.004, 0.996), S: 3, off: [rnd(), 0], deform: taper, faces: { py: { m: 'rs_tin', rot: true, fit: false, S: 2 }, ny: { m: 'rs_iron', fit: false } } });
   // the cab-over bunk, bulging forward over the windshield
-  B.box(skin, hx * 2 - 0.16, 0.9, 0.95, 0, top - 0.48, zf + 0.04, { r: 0.38, div: [2, 2, 2], smoothN: true, fit: 'v', uvRect: [0, 0.56, 1, 0.97], deform: q => { if (q[2] > 0) q[1] -= 0.12 * (q[2] / 0.47) ** 2 * (q[1] < 0 ? 1 : 0.3); } });
+  B.box(skin, hx * 2 - 0.16, 0.9, 0.95, 0, top - 0.48, zf + 0.04, { r: 0.38, div: [2, 2, 2], smoothN: true, fit: 'v', uvRect: SV(0.56, 0.97), deform: q => { if (q[2] > 0) q[1] -= 0.12 * (q[2] / 0.47) ** 2 * (q[1] < 0 ? 1 : 0.3); } });
   B.box('rs_rv_window', 1.1, 0.3, 0.03, 0, top - 0.5, zf + 0.53, { r: 0.01, rx: 0.25 });
   // the raked windshield and the nose under it: grille, brass headlamps
   B.box('rs_glass', hx * 2 - 0.5, 0.66, 0.05, 0, 1.62, zf + 0.06, { r: 0.012, rx: -0.26, uvRect: [0, 0, 0.5, 1] });
-  B.box(skin, hx * 2 - 0.1, 0.72, 0.36, 0, 0.92, zf + 0.12, { r: 0.18, fit: 'v', uvRect: [0, 0.04, 1, 0.46], div: [2, 1, 1], smoothN: true, deform: q => { q[2] -= 0.04 * (q[0] / hx) ** 2; } });
+  B.box(skin, hx * 2 - 0.1, 0.72, 0.36, 0, 0.92, zf + 0.12, { r: 0.18, fit: 'v', uvRect: SV(0.04, 0.46), div: [2, 1, 1], smoothN: true, deform: q => { q[2] -= 0.04 * (q[0] / hx) ** 2; } });
   B.box('rs_grille', 1.0, 0.44, 0.06, 0, 0.92, zf + 0.31, { r: 0.015 });
   for (const sx of [-1, 1]) B.cyl('rs_brass', 0.15, 0.15, 0.1, sx * 0.82, 0.98, zf + 0.29, { rx: Math.PI / 2, caps: 'rs_headlamp*', seg: 12, bevel: 0.025 });
   // bumpers, tucked in
@@ -2056,10 +2069,10 @@ function buildParkedRV(B, s, ctx, idx = 0) {
     }
   }
   const dx = hx - 0.02;
-  B.box(skin, 0.05, 1.9, 0.78, dx + 0.02, by + 1.0, 0.55, { fit: 'v', uvRect: [0.1, 0.05, 0.9, 0.92], r: 0.015, tint: [0.9, 0.9, 0.9] });
+  B.box(skin, 0.05, 1.9, 0.78, dx + 0.02, by + 1.0, 0.55, { fit: 'v', uvRect: SV(0.05, 0.92), r: 0.015, tint: [0.9, 0.9, 0.9] });
   B.box('rs_rv_window', 0.03, 0.4, 0.44, dx + 0.06, 2.1, 0.55, { r: 0.01 });
   B.box('rs_brass', 0.05, 0.05, 0.14, dx + 0.07, 1.45, 0.28);
-  B.box('rs_planks', 0.42, 0.07, 0.66, dx + 0.24, 0.32, 0.55, { r: 0.015 });
+  B.box('rs_planks_gray', 0.42, 0.07, 0.66, dx + 0.24, 0.32, 0.55, { r: 0.015 });
   // the awning: canvas off the roof edge, sagging between two poles
   {
     const z0 = -0.75, z1 = 1.85, out = 1.7, y0 = top - 0.2, y1 = 2.15, sag = 0.18;
@@ -2075,14 +2088,14 @@ function buildParkedRV(B, s, ctx, idx = 0) {
   for (let k = 0; k < 4; k++) B.box('rs_iron', hx * 2 - 0.55, 0.04, 0.05, 0, ry0 + 0.02, -2.5 + k * 1.05, { r: 0.01 });
   for (const sx of [-1, 1]) for (let k = 0; k < 3; k++) B.cyl('rs_iron', 0.02, 0.02, 0.14, sx * (hx - 0.3), ry0 - 0.07, -2.5 + k * 1.6, { seg: 4, caps: false, lod0: true });
   B.box('rs_crate_a', 0.62, 0.48, 0.55, -0.32, ry0 + 0.26, -1.9, { r: 0.03, ry: range(rnd, -0.15, 0.15) });
-  B.box('rs_crate_b', 0.5, 0.4, 0.5, 0.36, ry0 + 0.22, -1.3, { r: 0.03, ry: range(rnd, -0.2, 0.2) });
+  B.box('rs_crate_a', 0.5, 0.4, 0.5, 0.36, ry0 + 0.22, -1.3, { r: 0.03, ry: range(rnd, -0.2, 0.2) + 1.6 });
   B.box('rs_rope', 0.03, 0.03, 1.4, 0, ry0 + 0.49, -1.6, { r: 0, lod0: true });
-  B.cyl('rs_canvas', 0.2, 0.2, hx * 2 - 0.5, 0, ry0 + 0.2, -0.3, { rz: Math.PI / 2, seg: 10, caps: 'rs_canvas', fit: false });
+  B.cyl('rs_canvas~', 0.2, 0.2, hx * 2 - 0.5, 0, ry0 + 0.2, -0.3, { rz: Math.PI / 2, seg: 10, caps: 'rs_canvas~', fit: false });
   for (const sx of [-0.6, 0.6]) B.torus('rs_rope', 0.205, 0.02, sx, ry0 + 0.2, -0.3, { ry: Math.PI / 2, seg: 10, tseg: 4, uRep: 6, lod0: true });
   B.cyl('rs_brass', 0.07, 0.08, 0.95, hx - 0.55, top + 0.4, -2.9, { seg: 8, caps: false });
   B.cyl('rs_brass', 0.02, 0.22, 0.16, hx - 0.55, top + 1.02, -2.9, { seg: 8, caps: 'rs_iron' });
   for (const a of [0, 2.1, 4.2]) B.cyl('rs_iron', 0.012, 0.012, 0.12, hx - 0.55 + Math.sin(a) * 0.06, top + 0.9, -2.9 + Math.cos(a) * 0.06, { seg: 4, caps: false, lod0: true });
-  B.box('rs_steel_cream', 0.7, 0.26, 0.62, -0.35, top + 0.1, 1.2, { r: 0.06 });
+  B.box('rs_tin', 0.7, 0.26, 0.62, -0.35, top + 0.1, 1.2, { r: 0.06, rot: true });
   // rear: window, tail lamps, a ladder, the spare
   B.box('rs_rv_window', 1.0, 0.55, 0.03, 0, 2.15, zr - 0.02, { r: 0.01 });
   for (const sx of [-1, 1]) B.box('rs_headlamp*', 0.13, 0.22, 0.04, sx * 0.95, 1.05, zr - 0.03, { tint: [1, 0.38, 0.3] });
@@ -2109,9 +2122,12 @@ function buildParkedRV(B, s, ctx, idx = 0) {
 
 // ---- assembly ----------------------------------------------------------------------------------------------
 
+// mounds and drifts borrow the terrain's own ground textures; fall back to ours if one is ever renamed
+const groundMat = (m, fb) => (m && has(baseName(m)) ? m : fb);
 function makeCtx(W) {
   const biome = BIO[W.biome] ? W.biome : 'meadow';
-  const bio = BIO[biome];
+  const b0 = BIO[biome];
+  const bio = { ...b0, ground: groundMat(b0.ground, 'rs_dirt!'), drift: b0.drift && groundMat(b0.drift, biome === 'snow' ? 'rs_snow!' : biome === 'desert' ? 'rs_sand!' : 'rs_dust!') };
   return {
     W, biome, bio, H: (x, z) => W.heightAt(x, z), ao: bio.ao, aoH: 0.9,
     snow: biome === 'snow', driftMat: bio.drift, cover: bio.cover, smokes: [],

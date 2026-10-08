@@ -18,9 +18,9 @@
 // and exposes them to style.css as --tx-* custom properties (the title painting
 // in stages, so the menu stays responsive), and (3) keeps emoji out of the prompt.
 import * as THREE from '/vendor/three.module.js';
-import { canvasTex } from './gfx.js';
+import { canvasTex, tex, painted } from './gfx.js';
 import { canvasFor, hashStr, rngFrom } from './paint/index.js';
-import { paintVista } from './paint/ui.js';
+import { paintVista, finishVista } from './paint/ui.js';
 
 export const UI_FONT = "'NMD UI', 'Marcellus', 'Friz Quadrata TT', 'Friz Quadrata', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif";
 export const TITLE_FONT = "'Cinzel', 'Trajan Pro', 'Marcellus', 'Palatino Linotype', Georgia, serif";
@@ -88,9 +88,16 @@ const SKIN_REST = [
   ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'key', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt', 'ping']
     .map(n => [`ico-${n}`, `ui_ico_${n}`]),
 ];
-function publish(key, cv, type = 'image/png') {
+// as a blob URL, decoded before the custom property is set, so first use never paints empty
+function publish(key, cv, type = 'image/png', done = null) {
   const root = document.documentElement;
-  cv.toBlob(b => { if (b) root.style.setProperty(`--tx-${key}`, `url("${URL.createObjectURL(b)}")`); }, type, 0.9);
+  cv.toBlob(b => {
+    if (!b) return;
+    const url = URL.createObjectURL(b), im = new Image();
+    im.src = url;
+    const set = () => { root.style.setProperty(`--tx-${key}`, `url("${url}")`); done?.(); };
+    (im.decode ? im.decode() : Promise.resolve()).then(set, set);
+  }, type, 0.9);
 }
 // paint a list of registered textures, a few per task, then call next()
 function paintList(list, next) {
@@ -105,32 +112,373 @@ function paintList(list, next) {
   };
   setTimeout(step, 0);
 }
-// the title painting is a generator: one stage per task, published when done
-function paintMenu(next) {
-  let it;
-  const cv = document.createElement('canvas');
-  try {
-    cv.width = 1280; cv.height = 720;
-    const g = cv.getContext('2d');
-    g.fillStyle = '#7f7f7f'; g.fillRect(0, 0, cv.width, cv.height);
-    it = paintVista(g, cv.width, cv.height, rngFrom('ui_menu_bg'));
-  } catch (e) { console.warn('ui skin: menu', e.message); next?.(); return; }
-  const step = () => {
-    const t0 = performance.now();
-    try {
-      let r;
-      do { r = it.next(); } while (!r.done && performance.now() - t0 < 12);
-      if (!r.done) { setTimeout(step, 0); return; }
-      publish('menu', cv, 'image/jpeg');
-    } catch (e) { console.warn('ui skin: menu', e.message); }
-    next?.();
+// ---- the title screen --------------------------------------------------------------------
+//
+// A painted sky and mountains (paint/ui.js paintVista, backdrop stages only), the real game
+// assets in front of them as a lit 3D diorama (the RV coming down the dirt road, the big oak,
+// pines, rocks, a rail fence and a signpost, grass tufts; rendered once in an offscreen WebGL
+// canvas that is thrown away after), then the painted atmosphere over the lot (finishVista).
+// If the 3D modules can't load, the whole scene is painted in 2D instead.
+
+// The layout, in meters: the camera at the origin looking down -Z, level, the horizon lens-
+// shifted to 60% down the frame (verticals stay vertical, like a painting). Golden hour on
+// the meadow (atmosphere.js keys), the sun low on the left.
+const DIO = {
+  fov: 36, eye: 2.4, hz: 0.6,
+  sun: [-0.62, 0.42, 0.36], sunC: '#ffd49a', sunI: 2.05, sky: '#e6e0cf', gnd: '#6a7a42', hemiI: 1.7,
+  fog: '#b2b994', fogNear: 45, fogFar: 430, fade: [70, 200],
+  road: [[1.4, 10], [0.8, -2], [-0.4, -9], [-2.4, -16], [-5.4, -22], [-8.6, -28], [-10.6, -36], [-10.4, -46], [-7.6, -58], [-3.4, -74], [0.8, -98], [2.2, -136], [0.8, -190], [-0.4, -300], [0, -700]],
+  rvZ: -27.5,
+};
+const tick = () => new Promise(r => setTimeout(r, 0));
+const menuShown = () => { const m = document.getElementById('menu'); return !!m && !m.classList.contains('hidden'); };
+
+// Lambert with the map laid in world space at two scales (no visible tiling), a broad warm/
+// cool drift, and alpha falling off with view distance so the painted fields show through.
+function groundMat(map, tileA, tileB, fade) {
+  const m = new THREE.MeshLambertMaterial({ map, transparent: true });
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uFade = { value: new THREE.Vector2(fade[0], fade[1]) };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vWp; varying float vFd;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvWp = (modelMatrix * vec4(transformed, 1.0)).xyz; vFd = -mvPosition.z;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vWp; varying float vFd; uniform vec2 uFade;')
+      .replace('#include <map_fragment>', `
+        vec2 gp = vWp.xz;
+        vec4 tA = texture2D(map, gp / ${tileA.toFixed(2)});
+        vec4 tB = texture2D(map, mat2(0.8, -0.6, 0.6, 0.8) * gp / ${tileB.toFixed(2)} + vec2(0.31, 0.77));
+        float gn = 0.5 + 0.25 * sin(gp.x * 0.071 + sin(gp.y * 0.043) * 2.0) + 0.25 * sin(gp.y * 0.063 + 1.7 + sin(gp.x * 0.037) * 1.6);
+        vec4 gt = mix(tA, tB, smoothstep(0.3, 0.7, gn));
+        float gm = 0.5 + 0.5 * sin(gp.x * 0.029 + 0.6) * sin(gp.y * 0.023 + 1.3);
+        gt.rgb *= mix(vec3(0.86, 0.95, 1.0), vec3(1.1, 1.03, 0.8), gm);
+        diffuseColor *= gt;`)
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.a *= 1.0 - smoothstep(uFade.x, uFade.y, vFd);');
   };
-  setTimeout(step, 0);
+  return m;
+}
+function fadeMat(opts, fade) {
+  const m = new THREE.MeshLambertMaterial(opts);
+  m.onBeforeCompile = sh => {
+    sh.uniforms.uFade = { value: new THREE.Vector2(fade[0], fade[1]) };
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying float vFd;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvFd = -mvPosition.z;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying float vFd; uniform vec2 uFade;')
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.a *= 1.0 - smoothstep(uFade.x, uFade.y, vFd);');
+  };
+  return m;
 }
 
-if (typeof document !== 'undefined' && document.getElementById('game')) {
-  paintList(SKIN_FIRST, () => paintMenu(() => paintList(SKIN_REST)));
-  watchText();
+// The dirt road: a ribbon along the curve, the road texture across it (grassy ragged edges
+// painted in), its outer edge feathered into the grass with a little jitter.
+function roadMesh(curve, hw, fade) {
+  const L = curve.getLength(), N = Math.ceil(L / 0.7), P = curve.getSpacedPoints(N);
+  const U = [0, 0.06, 0.13, 0.87, 0.94, 1], A = [0, 0.7, 1, 1, 0.7, 0];
+  const rnd = rngFrom('title-road');
+  const pos = [], uv = [], col = [], nor = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const p = P[i], a = P[Math.max(0, i - 1)], b = P[Math.min(N, i + 1)];
+    const tx = b.x - a.x, tz = b.z - a.z, tl = Math.hypot(tx, tz) || 1, nx = tz / tl, nz = -tx / tl;
+    for (let k = 0; k < U.length; k++) {
+      const u = U[k] + (k === 1 ? 1 : k === 4 ? -1 : 0) * (rnd() - 0.3) * 0.05;
+      const off = (u - 0.5) * 2 * hw;
+      pos.push(p.x + nx * off, 0.015, p.z + nz * off);
+      uv.push(u, i * (L / N) / (2 * hw));
+      nor.push(0, 1, 0);
+      col.push(1, 1, 1, A[k] * (k === 1 || k === 4 ? 0.5 + rnd() * 0.5 : 1));
+    }
+  }
+  for (let i = 0; i < N; i++) for (let k = 0; k < U.length - 1; k++) {
+    const a = i * U.length + k, b = a + U.length;
+    idx.push(a, a + 1, b, a + 1, b + 1, b);
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
+  geo.setIndex(idx);
+  const m = fadeMat({ map: tex('road_meadow'), vertexColors: true, transparent: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }, fade);
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.receiveShadow = true; mesh.renderOrder = 1;
+  return { mesh, P };
+}
+
+// Grass tufts and flowers from the terrain's clutter atlas (4 x 2 cells of 256 px): three
+// crossed quads each, normals up so they light like the ground. Transparent texels take
+// their cell's average color so the mipmaps don't grow dark fringes.
+function clutterTexture() {
+  const cv = canvasFor('clutter_meadow'), w = cv.width, h = cv.height;
+  const src = cv.getContext('2d').getImageData(0, 0, w, h).data, out = new Uint8Array(w * h * 4);
+  const CX = Math.round(w / 256), CY = Math.round(h / 256), avg = [];
+  for (let cy = 0; cy < CY; cy++) for (let cx = 0; cx < CX; cx++) {
+    let r = 0, gg = 0, b = 0, n = 0;
+    for (let y = cy * 256; y < (cy + 1) * 256; y += 2) for (let x = cx * 256; x < (cx + 1) * 256; x += 2) { const k = (y * w + x) * 4; if (src[k + 3] > 200) { r += src[k]; gg += src[k + 1]; b += src[k + 2]; n++; } }
+    avg.push(n ? [r / n, gg / n, b / n] : [90, 110, 60]);
+  }
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const k = (y * w + x) * 4, o = ((h - 1 - y) * w + x) * 4, a = src[k + 3];
+    const c = a < 24 ? avg[Math.floor(y / 256) * CX + Math.floor(x / 256)] : [src[k], src[k + 1], src[k + 2]];
+    out[o] = c[0]; out[o + 1] = c[1]; out[o + 2] = c[2]; out[o + 3] = a;
+  }
+  const t = new THREE.DataTexture(out, w, h, THREE.RGBAFormat);
+  t.colorSpace = THREE.SRGBColorSpace; t.generateMipmaps = true; t.minFilter = THREE.LinearMipmapLinearFilter; t.magFilter = THREE.LinearFilter; t.anisotropy = 4;
+  t.needsUpdate = true;
+  return t;
+}
+function clutterMesh(spots, map) {
+  const pos = [], uv = [], nor = [], idx = [];
+  for (const { x, z, s, cell, rot } of spots) {
+    const cx = cell % 4, cy = Math.floor(cell / 4), u0 = cx / 4, u1 = (cx + 1) / 4, vb = 1 - (cy + 1) / 2, vt = 1 - cy / 2;
+    for (let q = 0; q < 3; q++) {
+      const a = rot + q * Math.PI / 3, c = Math.cos(a) * 0.5 * s, sn = Math.sin(a) * 0.5 * s, b = pos.length / 3;
+      pos.push(x - c, 0, z - sn, x + c, 0, z + sn, x + c, s, z + sn, x - c, s, z - sn);
+      uv.push(u0, vb, u1, vb, u1, vt, u0, vt);
+      for (let k = 0; k < 4; k++) nor.push(0, 1, 0);
+      idx.push(b, b + 1, b + 2, b, b + 2, b + 3, b, b + 2, b + 1, b, b + 3, b + 2);
+    }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geo.setIndex(idx);
+  const m = new THREE.MeshLambertMaterial({ map, alphaTest: 0.42 });
+  m.alphaToCoverage = true;
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+// A crossroads signpost: an oak post, two arrow boards with the names cut into the wood.
+function signBoard(text, dir) {
+  const W = 512, H = 112, cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d'), rnd = rngFrom('sign' + text);
+  const tip = dir > 0 ? [[W - 70, 6], [W - 4, H / 2], [W - 70, H - 6]] : [[70, H - 6], [4, H / 2], [70, 6]];
+  const p = new Path2D();
+  if (dir > 0) { p.moveTo(4, 8); p.lineTo(...tip[0]); p.lineTo(...tip[1]); p.lineTo(...tip[2]); p.lineTo(4, H - 8); }
+  else { p.moveTo(W - 4, 8); p.lineTo(W - 4, H - 8); p.lineTo(...tip[0]); p.lineTo(...tip[1]); p.lineTo(...tip[2]); }
+  p.closePath();
+  g.save(); g.clip(p);
+  try { g.fillStyle = g.createPattern(canvasFor('board_rough'), 'repeat'); } catch { g.fillStyle = '#8a5f36'; }
+  g.fillRect(0, 0, W, H);
+  g.fillStyle = 'rgba(150,96,48,0.35)'; g.fillRect(0, 0, W, H);
+  const sh = g.createLinearGradient(0, 0, 0, H);
+  sh.addColorStop(0, 'rgba(255,226,170,0.3)'); sh.addColorStop(0.5, 'rgba(0,0,0,0)'); sh.addColorStop(1, 'rgba(30,14,4,0.45)');
+  g.fillStyle = sh; g.fillRect(0, 0, W, H);
+  g.restore();
+  g.lineWidth = 6; g.strokeStyle = 'rgba(40,22,10,0.85)'; g.stroke(p);
+  g.lineWidth = 2; g.strokeStyle = 'rgba(255,214,150,0.35)'; g.save(); g.translate(0, 2); g.stroke(p); g.restore();
+  g.font = `bold 58px ${TITLE_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+  let size = 58; while (g.measureText(text).width > W - 150 && size > 30) { size -= 2; g.font = `bold ${size}px ${TITLE_FONT}`; }
+  const tx = dir > 0 ? (W - 66) / 2 : W / 2 + 33, ty = H / 2 + 3;
+  g.fillStyle = 'rgba(20,10,4,0.8)'; g.fillText(text, tx - 2, ty - 2);
+  g.fillStyle = 'rgba(255,226,170,0.45)'; g.fillText(text, tx + 1.5, ty + 1.5);
+  g.fillStyle = '#f0d9a8'; g.fillText(text, tx, ty);
+  for (const nx of dir > 0 ? [26] : [W - 26]) { g.fillStyle = '#2a2420'; g.beginPath(); g.arc(nx, H / 2, 6, 0, Math.PI * 2); g.fill(); g.fillStyle = '#9a9aa0'; g.beginPath(); g.arc(nx - 1.5, H / 2 - 1.5, 2.2, 0, Math.PI * 2); g.fill(); }
+  for (let i = 0; i < 6; i++) { g.fillStyle = `rgba(60,90,40,${0.2 + rnd() * 0.2})`; g.beginPath(); g.ellipse(rnd() * W, H - 8 - rnd() * 10, 6 + rnd() * 16, 3 + rnd() * 4, 0, 0, Math.PI * 2); g.fill(); }
+  const t = canvasTex(cv);
+  const shape = new THREE.Shape();
+  const pts = dir > 0 ? [[0, 0.07], [0.86, 0.05], [1, 0.5], [0.86, 0.95], [0, 0.93]] : [[1, 0.07], [1, 0.93], [0.14, 0.95], [0, 0.5], [0.14, 0.05]];
+  pts.forEach(([x, y], i) => (i ? shape.lineTo(x, y) : shape.moveTo(x, y)));
+  const geo = new THREE.ExtrudeGeometry(shape, { depth: 0.05, bevelEnabled: false });
+  geo.scale(1.55, 0.34, 1);
+  return new THREE.Mesh(geo, [new THREE.MeshLambertMaterial({ map: t }), painted('timber_dark')]);
+}
+function signpost(x, z, ry) {
+  const g = new THREE.Group();
+  const post = new THREE.Mesh(new THREE.CylinderGeometry(0.075, 0.1, 2.7, 8), painted('bark_oak', { repeat: [1, 2] }));
+  post.position.y = 1.35;
+  const cap = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.16, 8), painted('timber_dark'));
+  cap.position.y = 2.78;
+  const a = signBoard('GOLDSHIRE', -1); a.position.set(-1.62, 2.2, 0.08);
+  const b = signBoard('LOST WAGES', 1); b.position.set(0.04, 1.72, 0.08); b.rotation.y = 0.28;
+  g.add(post, cap, a, b);
+  g.position.set(x, 0, z); g.rotation.y = ry;
+  g.traverse(o => { if (o.isMesh) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
+}
+
+function dustTexture() {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+  const g = cv.getContext('2d'), gr = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  gr.addColorStop(0, 'rgba(255,255,255,1)'); gr.addColorStop(0.5, 'rgba(255,255,255,0.45)'); gr.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = gr; g.fillRect(0, 0, 64, 64);
+  return canvasTex(cv);
+}
+
+// Builds and renders the diorama at W x H; resolves to a canvas with a transparent sky.
+async function renderDiorama(W, H) {
+  const [nat, rvm] = await Promise.all([import('./nature3d.js'), import('./rv3d.js')]);
+  if (!menuShown()) return null;
+  dbg('imported');
+  const scene = new THREE.Scene();
+  scene.fog = new THREE.Fog(DIO.fog, DIO.fogNear, DIO.fogFar);
+  scene.add(new THREE.HemisphereLight(DIO.sky, DIO.gnd, DIO.hemiI));
+  const sunDir = new THREE.Vector3(...DIO.sun).normalize();
+  const sun = new THREE.DirectionalLight(DIO.sunC, DIO.sunI);
+  sun.castShadow = true; sun.shadow.mapSize.set(2048, 2048);
+  Object.assign(sun.shadow.camera, { left: -30, right: 30, top: 30, bottom: -30, near: 1, far: 220 });
+  sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.04;
+  if ('intensity' in sun.shadow) sun.shadow.intensity = 0.62;
+  const focus = new THREE.Vector3(-3, 0, -24);
+  sun.position.copy(focus).addScaledVector(sunDir, 100); sun.target.position.copy(focus);
+  scene.add(sun, sun.target);
+
+  const curve = new THREE.CatmullRomCurve3(DIO.road.map(([x, z]) => new THREE.Vector3(x, 0, z)), false, 'centripetal');
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(1600, 1600).rotateX(-Math.PI / 2), groundMat(tex('ground_meadow'), 7, 11.3, DIO.fade));
+  ground.position.z = -600; ground.receiveShadow = true;
+  scene.add(ground);
+  const { mesh: road, P } = roadMesh(curve, 4.7, DIO.fade);
+  scene.add(road);
+  dbg('ground');
+  await tick();
+
+  // the road's x at a given z, and the distance off it
+  const rx = z => { for (let i = 1; i < P.length; i++) if (P[i].z <= z) { const t = (z - P[i - 1].z) / ((P[i].z - P[i - 1].z) || 1); return P[i - 1].x + (P[i].x - P[i - 1].x) * t; } return 0; };
+  const rnd = rngFrom('title-diorama');
+  const R = (a, b) => a + (b - a) * rnd();
+
+  // the nature: the framing oak, pines on the right, oaks and pines further off, rocks, bushes, a fence
+  const decor = [
+    { k: 'oak', x: -6.2, z: -14.5, s: 1.45, ry: 2.2 },
+    { k: 'pine', x: 5.6, z: -10.5, s: 1.55, ry: 0.4 },
+    { k: 'pine', x: 8.6, z: -21, s: 1.25, ry: 1.9 },
+    { k: 'pine', x: 13.5, z: -33, s: 1.1, ry: 3.1 },
+    { k: 'pine', x: 4.6, z: -46, s: 1.0, ry: 0.8 },
+    { k: 'oak', x: 16, z: -62, s: 1.2, ry: 0.5 },
+    { k: 'oak', x: -24, z: -70, s: 1.3, ry: 4.1 },
+    { k: 'pine', x: -19, z: -54, s: 1.05, ry: 2.6 },
+    { k: 'pine', x: -30, z: -96, s: 1.2, ry: 1.1 },
+    { k: 'oak', x: 26, z: -110, s: 1.4, ry: 5.2 },
+    { k: 'rock', x: 4.4, z: -17.5, s: 1.5, ry: 0.6 },
+    { k: 'rock', x: -3.6, z: -10.6, s: 0.8, ry: 2.2 },
+    { k: 'rock', x: -15, z: -34, s: 1.8, ry: 1.4 },
+    { k: 'rock', x: 9.5, z: -40, s: 1.3, ry: 4.4 },
+    { k: 'bush', x: -4.4, z: -18, s: 1.0, ry: 0.3 },
+    { k: 'bush', x: 3.2, z: -13, s: 0.9, ry: 1.3 },
+    { k: 'bush', x: -14, z: -26, s: 1.1, ry: 2.2 },
+    { k: 'bush', x: 2.6, z: -30, s: 1.0, ry: 0.9 },
+    { k: 'stump', x: -8.4, z: -21.5, s: 1.0, ry: 0.7 },
+    { k: 'fence', x: 4.3, z: -24, len: 6, ry: 1.25 },
+    { k: 'fence', x: 2.4, z: -33, len: 6, ry: 1.0 },
+  ];
+  const nature = nat.buildNature({ biome: 'meadow', decor: decor.map(d => ({ y: 0, ...d })), cyls: [], anchors: [], heightAt: () => 0 });
+  nature.update?.(0.016, 1.3, new THREE.Vector3(0, DIO.eye, 0));
+  scene.add(nature.group);
+  dbg('nature');
+  await tick();
+  if (!menuShown()) return null;
+
+  // the RV, coming down the road toward us
+  const rv = rvm.PREVIEW.rv();
+  const u = (() => { let best = 0, bd = 1e9; for (let i = 0; i <= 200; i++) { const p = curve.getPointAt(i / 200); const d = Math.abs(p.z - DIO.rvZ); if (d < bd) { bd = d; best = i / 200; } } return best; })();
+  const at = curve.getPointAt(u), tg = curve.getTangentAt(u);
+  rv.position.set(at.x, 0, at.z);
+  rv.rotation.y = Math.atan2(-tg.x, -tg.z);       // the curve runs away from us; the RV faces back down it
+  scene.add(rv);
+  // dust kicked up behind it, back along the road
+  const dmap = dustTexture();
+  for (let i = 0; i < 9; i++) {
+    const p = curve.getPointAt(Math.max(0, u - 0.004 - i * 0.0035));
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dmap, color: i % 2 ? '#e8d2a6' : '#d9bf94', transparent: true, opacity: 0.32 - i * 0.022, depthWrite: false, fog: true }));
+    const s = 2.4 + i * 0.7;
+    sp.position.set(p.x + R(-0.8, 0.8), s * 0.32, p.z);
+    sp.scale.set(s * 1.5, s, 1);
+    sp.renderOrder = 3;
+    scene.add(sp);
+  }
+  scene.add(signpost(4.6, -14.2, -0.35));
+  dbg('rv');
+  await tick();
+  if (!menuShown()) return null;
+
+  // tufts: thick along the road's ragged edges, scattered over the fields, denser near us
+  const spots = [];
+  for (let i = 0; i < 1500; i++) {
+    const z = -Math.exp(R(Math.log(6), Math.log(90)));
+    const x = R(-1, 1) * (0.6 * -z + 3);
+    const d = Math.abs(x - rx(z));
+    if (d < 3.4) continue;
+    const verge = d < 5.6;
+    if (!verge && rnd() < 0.45) continue;
+    const r = rnd(), cell = verge ? (r < 0.4 ? 0 : r < 0.7 ? 6 : r < 0.85 ? 1 : 4) : (r < 0.3 ? 0 : r < 0.5 ? 1 : r < 0.62 ? 4 : r < 0.72 ? 6 : r < 0.8 ? 5 : r < 0.88 ? 7 : r < 0.95 ? 2 : 3);
+    spots.push({ x, z, s: R(0.5, 0.95) * (cell === 4 ? 1.25 : 1), cell, rot: R(0, Math.PI) });
+  }
+  scene.add(clutterMesh(spots, clutterTexture()));
+
+  scene.traverse(o => { if (o.isMesh && o !== ground && o !== road) { o.castShadow = true; o.receiveShadow = true; } });
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: true });
+  try {
+    r.setPixelRatio(1); r.setSize(W, H, false);
+    r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.NoToneMapping;
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.setClearColor(0x000000, 0);
+    const fullH = H * 2 * DIO.hz;
+    const cam = new THREE.PerspectiveCamera(DIO.fov, W / fullH, 0.1, 1500);
+    cam.setViewOffset(W, fullH, 0, 0, W, H);
+    cam.position.set(0, DIO.eye, 0); cam.lookAt(0, DIO.eye, -10);
+    cam.updateMatrixWorld();
+    dbg('compile');
+    await r.compileAsync?.(scene, cam).catch(() => {});
+    dbg('compiled');
+    if (!menuShown()) return null;
+    r.render(scene, cam);
+    dbg('rendered');
+    const out = document.createElement('canvas');
+    out.width = W; out.height = H;
+    out.getContext('2d').drawImage(cv, 0, 0);
+    // where the RV sits on screen, for the painted dust and light around it
+    const v = new THREE.Vector3(at.x, 1.6, at.z).project(cam);
+    out.rv = [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H];
+    return out;
+  } finally {
+    r.dispose(); r.forceContextLoss();
+  }
+}
+
+// The title, in stages so the menu stays responsive: the painted backdrop (a stage per
+// task), the diorama, the finishing glaze; published once. 1280 x 720, or 1600 x 900 on
+// big screens (the backdrop is painted at 1280 and scaled; the diorama renders at size).
+async function paintMenu() {
+  const big = (window.devicePixelRatio || 1) * window.innerWidth > 1400;
+  const W = big ? 1600 : 1280, H = big ? 900 : 720;
+  const bw = 1280, bh = 720;
+  const back = document.createElement('canvas');
+  back.width = bw; back.height = bh;
+  const bg = back.getContext('2d');
+  bg.fillStyle = '#7f7f7f'; bg.fillRect(0, 0, bw, bh);
+  const rnd = rngFrom('ui_menu_bg');
+  let full = false;
+  const run = async it => {
+    for (;;) {
+      const t0 = performance.now();
+      let r;
+      do { r = it.next(); } while (!r.done && performance.now() - t0 < 12);
+      if (r.done) return;
+      await tick();
+    }
+  };
+  await run(paintVista(bg, bw, bh, rnd, { full: false }));
+  let dio = null;
+  try { dio = await renderDiorama(W, H); }
+  catch (e) { console.warn('ui skin: title diorama unavailable, painting it instead:', e.message); }
+  if (!dio) {
+    if (!menuShown()) return;
+    full = true;
+    const it = paintVista(bg, bw, bh, rngFrom('ui_menu_bg'), { full: true });
+    await run(it);
+  }
+  const cv = document.createElement('canvas');
+  cv.width = W; cv.height = H;
+  const g = cv.getContext('2d');
+  g.drawImage(back, 0, 0, W, H);
+  if (dio) {
+    g.drawImage(dio, 0, 0);
+    g.save(); g.scale(W / bw, H / bh); finishVista(g, bw, bh, rngFrom('ui_menu_finish')); g.restore();
+  }
+  publish('menu', cv, 'image/jpeg', () => { document.documentElement.dataset.menuArt = full ? 'painted' : 'diorama'; });
 }
 
 // ---- zone text ----------------------------------------------------------------------------

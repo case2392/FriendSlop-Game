@@ -728,7 +728,7 @@ const BUILDERS = {
     }
     // the neck: a thick stub dropping steeply down and back out of the skull (it held the head up),
     // flaring a little to the break, which faces the ground
-    const neck = [{ z: 0, w: 0.33, top: 0.28, bot: -0.28 }, { z: 0.14, w: 0.35, top: 0.29, bot: -0.29 }, { z: 0.26, w: 0.385, top: 0.305, bot: -0.305 }, { z: 0.34, w: 0.42, top: 0.32, bot: -0.32 }];
+    const neck = [{ z: 0, w: 0.3, top: 0.27, bot: -0.27 }, { z: 0.14, w: 0.305, top: 0.275, bot: -0.275 }, { z: 0.26, w: 0.32, top: 0.285, bot: -0.285 }, { z: 0.34, w: 0.34, top: 0.295, bot: -0.295 }];
     const NL = 0.34, nS = new V3(0, 0.07, -0.37), nM = mat4(nS.x, nS.y, nS.z, 0.92, Math.PI, 0);
     const nEnd = new V3(0, 0, NL).applyMatrix4(nM);
     const jag = v => { if (v.z > NL - 0.001) { const a = Math.atan2(v.y, v.x); v.z += 0.04 * Math.sin(a * 5 + 1.3) + 0.022 * Math.sin(a * 11 + 0.4) + 0.012 * Math.sin(a * 23) - 0.012; } };
@@ -773,8 +773,8 @@ const LUMPS = [
 // The mesa block: one angular outline, stepping back at some of the strata edges toward `dir`
 // (k = 1 − setback × max(0, cos(angle − dir))), flush on the far side where only a joint shows.
 const SLABS = {
-  badlands: { n: 9, jit: 0.38, rx: 1.95, rz: 1.45, ch: 0.07, notch: 2, levels: [{ b: [0, 2], sb: 0, dir: 0 }, { b: [2, 4], sb: 0.34, dir: 0.6 }, { b: [4, 5], sb: 0.5, dir: 2.4 }] },
-  desert: { n: 11, jit: 0.22, rx: 1.95, rz: 1.45, ch: 0.14, notch: 1, levels: [{ b: [0, 2], sb: 0, dir: 0 }, { b: [2, 3], sb: 0.3, dir: 3.6 }, { b: [3, 4], sb: 0.46, dir: 0.9 }] },
+  badlands: { n: 10, jit: 0.38, rx: 1.95, rz: 1.45, ch: 0.09, taper: 0.13, flare: 1.14, notch: 3, levels: [{ b: [0, 2], sb: 0, dir: 0, groove: true }, { b: [2, 4], sb: 0.42, dir: 0.6 }, { b: [4, 5], sb: 0.6, dir: 2.4 }] },
+  desert: { n: 12, jit: 0.25, rx: 1.95, rz: 1.45, ch: 0.2, taper: 0.14, flare: 1.12, notch: 1, levels: [{ b: [0, 2], sb: 0, dir: 0, groove: true }, { b: [2, 3], sb: 0.36, dir: 3.6 }, { b: [3, 4], sb: 0.56, dir: 0.9 }] },
 };
 const CHUNKS = [[-1.55, 1.05, 0.4, 0.34, 0.36, 0.5], [1.6, -0.9, 0.36, 0.3, 0.3, 2.2], [0.35, -1.25, 0.3, 0.26, 0.26, 4.1]];   // x, z, rx, rz, height, rot
 
@@ -782,24 +782,41 @@ const CHUNKS = [[-1.55, 1.05, 0.4, 0.34, 0.36, 0.5], [1.6, -0.9, 0.36, 0.3, 0.3,
 // the one below): a wall per level, bulging a little and leaning, then a rounded lip and a flat ledge in
 // to the next level's outline. Where the next level is flush there's no lip, so the cliff runs on
 // unbroken. Pushes triangles into pos and a "v override" per vertex (null = by height).
-function mesaInto(pos, vo, levels, ch, taper = 0.03, rnd = Math.random) {
+function mesaInto(pos, vo, levels, ch, taper = 0.03, rnd = rngFrom('mesa')) {
   const R = [], cen = P => [P.reduce((a, p) => a + p[0], 0) / P.length, P.reduce((a, p) => a + p[1], 0) / P.length];
+  // insets pull a ring in toward its own level's centre; the taper (k) scales toward the rock's axis,
+  // carried on from level to level, so the block narrows steadily upward and never overhangs
+  const [ax, az] = cen(levels[0].P);
   const ring = (P, y, insets, v, k = 1, jit = null) => {
     const [cx, cz] = cen(P);
-    return P.map(([x, z], i) => { const L = Math.hypot(x - cx, z - cz) || 1, f = Math.max(0.2, (L - insets[i]) / L) * k * (jit ? jit[i] : 1); return [cx + (x - cx) * f, y, cz + (z - cz) * f, v]; });
+    return P.map(([x, z], i) => {
+      const L = Math.hypot(x - cx, z - cz) || 1, f = Math.max(0.2, (L - insets[i]) / L), px = cx + (x - cx) * f, pz = cz + (z - cz) * f, kk = k * (jit ? jit[i] : 1);
+      return [ax + (px - ax) * kk, y, az + (pz - az) * kk, v];
+    });
   };
+  let sc = 1;
   levels.forEach((L, i) => {
-    const H = L.y1 - L.y0, n = L.P.length, tp = y => 1 - taper * (y - L.y0) / H, zero = new Array(n).fill(0);
+    const H = L.y1 - L.y0, n = L.P.length, tp = y => sc * (1 - taper * (y - L.y0) / H), zero = new Array(n).fill(0);
     const next = levels[i + 1], depth = L.P.map(([x, z], k) => next ? Math.max(0, Math.hypot(x, z) - Math.hypot(...next.P[k])) : 1);
     const lip = depth.map(d => ch * Math.min(1, d / (ch * 3)));
-    if (i === 0) { R.push(ring(L.P, L.y0, zero.map(() => ch * 0.5), null)); R.push(ring(L.P, L.y0 + ch * 0.4, zero, null)); }
-    else R.push(ring(L.P, L.y0 + 0.02, zero, null));
-    const jit = L.P.map(() => range(rnd, 0.97, 1.05)), jit2 = L.P.map(() => range(rnd, 0.96, 1.03));
-    R.push(ring(L.P, L.y0 + H * 0.45, zero, null, tp(L.y0 + H * 0.45), jit));
+    if (i === 0 && H > 0.6) { R.push(ring(L.P, L.y0, zero, null, L.flare || 1)); R.push(ring(L.P, L.y0 + 0.12, zero, null, 1 + ((L.flare || 1) - 1) * 0.4)); }
+    else if (i === 0) R.push(ring(L.P, L.y0, zero, null, 1.04));
+    else R.push(ring(L.P, L.y0 + 0.02, zero, null, sc));
+    const jit = L.P.map(() => range(rnd, 0.95, 1.04)), jit2 = L.P.map(() => range(rnd, 0.96, 1.02));
+    if (i === 0 && H > 0.6) R.push(ring(L.P, L.y0 + 0.3, zero, null, 1, L.P.map(() => range(rnd, 0.97, 1.02))));
+    // the soft beds between ledges weather back into undercut grooves
+    for (const ge of (L.grooves || [])) {
+      R.push(ring(L.P, ge - 0.1, zero, null, tp(ge - 0.1), jit));
+      R.push(ring(L.P, ge, zero.map(() => range(rnd, 0.06, 0.11)), null, tp(ge), jit));
+      R.push(ring(L.P, ge + 0.1, zero, null, tp(ge + 0.1), jit2));
+    }
+    if (!(L.grooves || []).length && H > 0.6) R.push(ring(L.P, L.y0 + H * 0.45, zero, null, tp(L.y0 + H * 0.45), jit));
     R.push(ring(L.P, L.y1 - ch * 1.1, zero, null, tp(L.y1 - ch * 1.1), jit2));
     R.push(ring(L.P, L.y1 - ch * 0.35, lip.map(d => d * 0.45), L.vTop, tp(L.y1), jit2));
     R.push(ring(L.P, L.y1, lip.map(d => d * 1.1), L.vTop, tp(L.y1), jit2));
-    if (next) R.push(ring(next.P, L.y1, new Array(next.P.length).fill(0), L.vTop, 1 - taper * 0.02));
+    const scN = sc * (1 - taper);
+    if (next) R.push(ring(next.P, L.y1, new Array(next.P.length).fill(0), L.vTop, scN));
+    sc = scN;
   });
   const n = R[0].length;
   const tri = (a, b, c) => { for (const p of [a, b, c]) { pos.push(p[0], p[1], p[2]); vo.push(p[3]); } };
@@ -829,7 +846,11 @@ function boulderGeo(biome) {
     const SB = SLABS[biome], BV = BOULDER_BANDS[biome], E = BV.map(v => -hy + v * 2 * hy), pos = [];
     const P0 = outline(SB.n, SB.rx, SB.rz, 0, 0, rnd, SB.notch, rnd() * TAU, SB.jit);
     let K = P0.map(() => 1);     // the setbacks accumulate, so each level sits inside the one below
-    mesaInto(pos, vo, SB.levels.map(L => { K = K.map((k, i) => k * (1 - L.sb * Math.max(0, Math.cos(P0[i][2] - L.dir)))); return { P: P0.map(([x, z], i) => [x * K[i], z * K[i]]), y0: E[L.b[0]], y1: E[L.b[1]], vTop: BV[L.b[1]] - 0.014 }; }), SB.ch, 0.03, rnd);
+    mesaInto(pos, vo, SB.levels.map((L, li) => {
+      K = K.map((k, i) => k * (1 - L.sb * Math.max(0, Math.cos(P0[i][2] - L.dir))));
+      const grooves = []; if (L.groove) for (let e = L.b[0] + 1; e < L.b[1]; e++) grooves.push(E[e]);
+      return { P: P0.map(([x, z], i) => [x * K[i], z * K[i]]), y0: E[L.b[0]], y1: E[L.b[1]], vTop: BV[L.b[1]] - 0.014, grooves, flare: li === 0 ? SB.flare : 1 };
+    }), SB.ch, SB.taper, rnd);
     for (const [x, z, rx, rz, ht, rot] of CHUNKS) mesaInto(pos, vo, [{ P: outline(5, rx, rz, x, z, rnd, 0, rot, 0.35), y0: -hy, y1: -hy + ht * range(rnd, 0.8, 1.3), vTop: null }], SB.ch * 0.8, 0.25, rnd);
     out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
     out.computeBoundingBox();
@@ -1299,7 +1320,8 @@ export function mapCanvas(W) {
   g.save(); g.filter = 'blur(6px)'; g.strokeStyle = 'rgba(168,128,72,0.4)'; g.lineWidth = 18; edgePath(); g.stroke(); g.restore();
   g.save(); g.beginPath(); g.rect(0, 0, CW, CH); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fillStyle = '#6a5034'; g.fill('evenodd'); g.restore();
   g.save(); g.strokeStyle = 'rgba(120,88,52,0.7)'; g.lineWidth = 1; edgePath(); g.stroke(); g.restore();
-  const nB = 3 + Math.floor(rnd() * 3), sides = [0, 1, 2, 3].sort(() => rnd() - 0.5);
+  const nB = 3 + Math.floor(rnd() * 3), sides = [0, 1, 2, 3];
+  for (let i = 3; i > 0; i--) { const j = Math.floor(rnd() * (i + 1)); [sides[i], sides[j]] = [sides[j], sides[i]]; }
   for (let i = 0; i < nB; i++) {
     const side = sides[i % 4], t = range(rnd, 0.15, 0.85), R = range(rnd, 14, 34);
     const [ex, ey] = side === 0 ? [t * CW, -4] : side === 1 ? [CW + 4, t * CH] : side === 2 ? [t * CW, CH + 4] : [-4, t * CH];

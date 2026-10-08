@@ -2,27 +2,32 @@
 //
 // Everything along the road that isn't nature or a building, painted the way Blizzard's 2004
 // artists painted goblin and human junk: riveted painted steel with chipped paint and rust runs,
-// corrugated tin, honey and gray planks, dark timber, wrought iron, goblin brass, canvas, cloth.
+// corrugated tin, honey and gray planks, banded timber, bleached driftwood, wrought iron, goblin
+// brass, lime plaster, shingles, slate and thatch, canvas, hides and cloth.
 //
 // Tiling (world-space UVs; "tile" = meters per repeat as roadside3d.js maps them):
 //   rs_steel_<cream|red|blue|green|teal|mustard>  riveted painted steel: full-height panels, 2-3 per tile
 //                             (trailer sides: 4 m per tile, v fitted to the wall's height)
 //   rs_tin, rs_tin_red        corrugated sheet roofing, ribs along v (2 m)
-//   rs_planks, rs_planks_gray boards along u (1 m)   rs_slats  long narrow boards (2 m)   rs_timber  dark beam, grain along v (1.5 m)
-//   rs_shingles (1.2 m)  rs_slate (1.4 m)  rs_hide (1.6 m)  rs_adobe (2 m)  rs_dirt (2 m)  rs_rock (1.4 m)  rs_hay (1 m)
+//   rs_planks, rs_planks_gray boards along u (1 m)   rs_slats  long narrow boards (2 m)
+//   rs_timber, rs_bleach      banded beams / bleached driftwood, grain along v (1.5 m)   rs_plaster (1.8 m)
+//   rs_shingles, rs_shingles_red (1.2 m)  rs_slate (1.4 m)  rs_thatch (1.3 m; up the roof = up the texture)
+//   rs_hide (1.6 m)  rs_adobe (2 m)  rs_dirt (2 m)  rs_rock (1.4 m, faceted)  rs_hay (1 m)
 //   rs_iron (0.5 m)  rs_brass (1 m)  rs_tire (tread, u around)  rs_gingham (0.6 m)  rs_burlap  rs_plaid  rs_canvas (stripes along u)
-//   rs_wing (doped canvas, ribs along v, 1.6 m)  rs_scrap (1.5 m)  rs_stone (1.6 m)  rs_rope (u around, v along)  rs_bone
-//   rs_bark (u around, v along)  rs_dino (u along the body; v = 0 belly .. 1 back, from the normal)
-//   rs_rv (u 3 m, v fitted to the body height)  rs_fascia (u 2 m, v fitted)
-//   rs_snow, rs_dust, rs_sand (drifts and caps)   rs_cover_snow|dust|sand (alpha = breakup noise, for the
-//   world-space top-cover shader)   rs_ice (icicles)
+//   rs_wing (doped canvas, ribs along v, 1.6 m)  rs_scrap (junk soil, world-planar 1 m)  rs_stone (1.6 m)  rs_rope  rs_bone
+//   rs_bark (u around, v along)  rs_dino (u along the body, one tile per 6 m; v = 0 belly .. 1 back, from the normal)
+//   rs_rv_teal|rust|mustard (u 3 m, v fitted; atlas rs_rv_skins stacks all three)  rs_fascia (u 4 m, v fitted)
+//   rs_snow, rs_dust, rs_sand (caps)   rs_cover_snow|dust|sand (alpha = breakup noise, for the world-space
+//   top-cover shader)   rs_ice (icicles)
 // Fitted (one image per face): rs_hub, rs_glass (two panes side by side), rs_grille, rs_crate_a|b|c, rs_barrel,
-//   rs_barrel_lid, rs_drum, rs_drum_red, rs_drum_lid, rs_pump_face, rs_keypad, rs_logend, rs_rv_window, rs_boards,
-//   rs_headlamp, rs_blanket, rs_ranger_board, rs_plaque, rs_warn (two boards stacked), rs_stop, rs_chevband;
-//   alpha: rs_decal_freight, rs_roundel, rs_pennant, rs_puff (smoke billboard)
+//   rs_barrel_lid, rs_drum, rs_drum_red, rs_drum_lid, rs_pump_face, rs_logend, rs_rv_window, rs_boards, rs_headlamp,
+//   rs_blanket, rs_plaque, rs_chevband, rs_gasboard, rs_shield (dwarven boss), rs_rune (band);
+//   rs_gatelabels: atlas of rs_ranger_board, rs_warn (two boards), rs_stop and rs_keypad, picked by uv rect;
+//   alpha: rs_decal_freight, rs_roundel, rs_pennant, rs_puff (smoke billboard), rs_bunting (eight pennants),
+//   rs_tuft, rs_tuft_dry (grass cards), rs_scorch, rs_glow (soft decals)
 import {
   register, fill, mottle, stroke, pebbles, cracks, glaze, blurTile, range, pick, wrap, blob, ellipse,
-  mix, lightOf, shadowOf, jitter, rgba, rngFrom, rowLayout, paintRects, streaks, hex, blade,
+  mix, lightOf, shadowOf, jitter, rgba, rngFrom, rowLayout, paintRects, streaks, hex, blade, meta,
 } from './core.js';
 
 const F = 'roadside';
@@ -1922,3 +1927,32 @@ register('rs_slats', {
     blurTile(cv, 0.4);
   },
 });
+
+// ---- atlases: textures that share one draw call per cluster -----------------------------------------------
+// Each part is painted exactly as its own texture would be (same paint function, same seed), then placed.
+function part(name) {
+  const t = meta(name), cv = document.createElement('canvas');
+  cv.width = t.w; cv.height = t.h;
+  const g = cv.getContext('2d', { willReadFrequently: true });
+  if (!t.alpha) { g.fillStyle = '#7f7f7f'; g.fillRect(0, 0, t.w, t.h); }
+  t.paint(g, t.w, rngFrom(name), t.h, cv);
+  return cv;
+}
+// the ranger gate's labels: station board (u 0-1, v .667-1), warning boards (u 0-.5; board 0 v .5-.667,
+// board 1 v .333-.5), STOP (u .5-1, v .417-.667), keypad face (u .5-.75, v 0-.417)
+register('rs_gatelabels', {
+  family: F, w: 512, h: 384, note: 'atlas of the ranger gate labels: station board, two warning boards, STOP, keypad face (fitted by uv rect)',
+  paint(g) {
+    g.fillStyle = '#2a2024'; g.fillRect(0, 0, 512, 384);
+    g.drawImage(part('rs_ranger_board'), 0, 0);
+    g.drawImage(part('rs_warn'), 0, 128);
+    g.drawImage(part('rs_stop'), 256, 128);
+    g.drawImage(part('rs_keypad'), 256, 224);
+  },
+});
+// the three parked-RV skins stacked (v fitted into a third each: teal .667-1, rust .333-.667, mustard 0-.333)
+register('rs_rv_skins', {
+  family: F, w: 256, h: 768, note: 'atlas of the three junked motorhome skins, stacked (u along the body, 3 m; v fitted into a third each)',
+  paint(g) { ['rs_rv_teal', 'rs_rv_rust', 'rs_rv_mustard'].forEach((n, i) => g.drawImage(part(n), 0, i * 256)); },
+});
+
