@@ -24,7 +24,7 @@ async function open(name) {
   await page.fill('#nameInput', name);
   return page;
 }
-const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 270000 });
+const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 30, null, { timeout: 400000 });
 const quiet = p => p.evaluate(() => { const S = window.__nmd; S.noRender = true; S.forceLock = true; document.getElementById('clickToPlay').classList.add('hidden'); document.getElementById('toasts').style.display = 'none'; });
 const ev = (p, fn, arg) => p.evaluate(fn, arg);
 const wait = (p, ms) => p.waitForTimeout(ms);
@@ -41,6 +41,8 @@ const steve = await open('Steve');
 await steve.fill('#seedInput', '777');
 await steve.click('#hostBtn');
 await ready(steve);
+// stop the host rendering first: on software GL it otherwise starves Dave's page of frames
+await quiet(steve);
 const code = await steve.evaluate(() => window.__nmd.code);
 const dave = await open('Dave');
 await dave.fill('#codeInput', code);
