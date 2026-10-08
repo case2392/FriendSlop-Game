@@ -297,6 +297,8 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .toast .tmsg[data-c="#f2c14e"] { color: #ffc42e; }
 .toast .tmsg[data-c="#ff5252"] { color: var(--red); font-size: 23px; }
 
+/* while a page is open (receipt, help, game over) the zone text stays out of sight */
+#game:has(.panel:not(.hidden)) .zone-text { visibility: hidden; }
 #game:has(.zone-text.show) .toasts { top: 62px; gap: 0; }
 #game:has(.zone-text.show) .toast { font-size: 15px; padding: 0 16px; }
 #game:has(.zone-text.show) .toast:nth-child(n+2) { display: none; }
