@@ -211,7 +211,7 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 
 /* top right: the room's invite code on a little dark plate (a door, not a key: the gate's
    keypad wants a different code), and under it the quest tracker */
-.hud-side { position: fixed; top: 14px; right: 16px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 14px; pointer-events: none; }
+.hud-side { position: fixed; top: 14px; right: 16px; z-index: 5; display: flex; flex-direction: column; align-items: flex-end; gap: 20px; pointer-events: none; }
 #hCode { pointer-events: auto; cursor: pointer; gap: 7px; padding: 3px 12px 3px 4px; font-size: 14px; letter-spacing: 0.6px; color: #cfe4ff; border-radius: 4px;
   background: var(--tip); box-shadow: 0 0 0 1px #8c6a2a, 0 0 0 2px #121316, inset 0 1px 0 rgba(255, 230, 180, 0.12), 0 4px 8px rgba(0, 0, 0, 0.5); }
 #hCode::before { width: 24px; height: 24px; background-image: var(--tx-slot-door, none); }
@@ -219,12 +219,12 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 #hCode:hover { color: #fff; }
 
 /* the quest tracker, like WoW's quest watch: a gold title, objectives in light grey that turn
-   white when done (red when failed), a 1px dark outline, no backing; lines wrap, never cut */
-.tracker { width: max-content; max-width: min(300px, 26vw); text-align: left; padding-right: 2px; }
-.qt-title { font-size: 16px; line-height: 1.25; color: var(--gold); letter-spacing: 0.3px;
-  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 3px rgba(0, 0, 0, 0.8); }
-.qt-line { margin-top: 3px; padding-left: 12px; text-indent: -12px; font-size: 14px; line-height: 1.25; color: #d4ccbc;
-  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 1px 3px rgba(0, 0, 0, 0.8); }
+   white when done (red when failed), no backing; lines wrap, never cut. A 1px dark outline,
+   then a soft dark halo so the letters hold up on snow and bright sky too */
+.tracker { width: max-content; max-width: min(300px, 26vw); text-align: left; padding-right: 2px;
+  --qt-shadow: 1px 1px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000, 0 0 3px rgba(0, 0, 0, 0.85), 0 0 8px rgba(0, 0, 0, 0.5); }
+.qt-title { font-size: 16px; line-height: 1.25; color: var(--gold); letter-spacing: 0.3px; text-shadow: var(--qt-shadow); }
+.qt-line { margin-top: 3px; padding-left: 12px; text-indent: -12px; font-size: 14px; line-height: 1.25; color: #ddd5c4; text-shadow: var(--qt-shadow); }
 .qt-line::before { content: '- '; }
 .qt-line.done { color: #ffffff; }
 .qt-line.fail { color: #ff5a3a; }
@@ -232,7 +232,7 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 /* a page open in the middle of the screen (help, receipt) covers the tracker's corner */
 #game:has(.panel:not(.hidden)) .tracker { visibility: hidden; }
 
-/* party frames (top left): a round portrait in a gold ring, the name over a health bar, on leather */
+/* party frames (top left): a round portrait in a gold ring, the name over a status bar, on leather */
 .ico { display: inline-block; flex: none; width: 20px; height: 20px; vertical-align: -4px;
   background: var(--ico, none) center / 88% no-repeat, radial-gradient(circle, rgba(14, 9, 6, 0.85) 0 54%, rgba(14, 9, 6, 0) 68%);
   filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.7)); }
@@ -259,10 +259,24 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .roster .pf .ico-speaker { right: -6px; bottom: -3px; }
 .roster .pf .ico-walkie { left: -5px; bottom: -3px; }
 .roster .pn { color: color-mix(in srgb, var(--c, #fff) 72%, #fff2d0); text-shadow: var(--outline); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; line-height: 1.2; }
-.roster .pb { display: block; height: 9px; margin-top: 3px; border-radius: 2px; background: #0b0807; box-shadow: 0 0 0 1px #000, 0 0 0 2px rgba(140, 106, 42, 0.7); overflow: hidden; }
-.roster .pb i { display: block; height: 100%; width: 100%; background-color: #2fa31e;
+/* the bar under each name is real: your own shows your stamina (WoW's yellow energy), the
+   others' show green while they're up; a knocked-out player's bar runs red and drains with the
+   seconds left before they wake up alone (and the bank pays the doctor), pulsing, with the
+   time on it; it fills back up green while you hold E on them */
+.roster .pb { position: relative; display: block; height: 12px; margin-top: 3px; border-radius: 2px; background: #0b0807;
+  box-shadow: 0 0 0 1px #000, 0 0 0 2px rgba(140, 106, 42, 0.7), inset 0 2px 3px rgba(0, 0, 0, 0.8); }
+.roster .pb i, .roster .pb em, .roster .pb s { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 2px;
   background-image: linear-gradient(180deg, rgba(255, 255, 230, 0.4) 0%, rgba(255, 255, 230, 0.12) 20%, rgba(0, 0, 0, 0) 40%, rgba(0, 0, 0, 0) 70%, rgba(0, 0, 0, 0.38) 100%), var(--tx-bar, linear-gradient(#fff, #888));
   background-size: auto, 256px 100%; background-blend-mode: normal, multiply; }
+.roster .pb i { width: calc(var(--f, 1) * 100%); background-color: #2fa31e; transition: width 0.12s linear; }
+.roster .pb em { width: calc(var(--r, 0) * 100%); background-color: #5fd840; box-shadow: 0 0 6px rgba(150, 255, 110, 0.65); }
+.roster .pb s { left: auto; right: 0; width: calc(var(--cap, 0) * 100%); border-radius: 0 2px 2px 0; background: repeating-linear-gradient(135deg, #3a0f0a 0 4px, #220806 4px 8px); box-shadow: inset 1px 0 0 #000; }
+.roster .pb::after { content: attr(data-t); position: absolute; left: 0; right: 0; top: -1px; text-align: center; font-size: 11px; line-height: 14px; color: #fff; letter-spacing: 0.5px; text-shadow: var(--outline-thin); }
+.roster .pm[data-st=stam] .pb i { background-color: #f0cc2c; }
+.roster .pm[data-st=low] .pb i { background-color: #d8331e; }
+.roster .pm[data-st=ko] .pb i { background-color: #c0261a; animation: pulse 1.1s ease-in-out infinite; }
+.roster .pm[data-st=ko] .pf b { filter: grayscale(1) brightness(0.7); }
+.roster .pm[data-st=ko] .pn { color: #a8a094; }
 
 /* crosshair, prompts, hold bar */
 #crosshair, .prompt, .holdbar, .held, .drive, .stamina, .walkie { z-index: 5; }
@@ -292,7 +306,8 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .walkie.tx { background: rgba(120, 18, 10, 0.88); color: #fff; }
 
 /* toasts: WoW system / raid-warning text, no boxes; three at most; out of the way of open dialogs */
-.toasts { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 3px; align-items: center; pointer-events: none; width: min(720px, 90vw); z-index: 6; }
+.toasts { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 3px; align-items: center; pointer-events: none; z-index: 6;
+  width: min(640px, calc(100vw - 2 * (28px + min(300px, 26vw)))); }   /* clear of the quest tracker on the right */
 #game:has(.panel:not(.hidden)) .toasts { top: auto; bottom: 8px; flex-direction: column-reverse; width: min(780px, 80vw); z-index: 11; gap: 0; }
 #game:has(.panel:not(.hidden)) .toast { font-size: 17px; padding: 1px 16px; }
 #game:has(.panel:not(.hidden)) .toast .tmsg[data-c="#ff5252"] { font-size: 19px; }

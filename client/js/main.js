@@ -65,7 +65,7 @@ $('joinBtn').onclick = async () => {
   if (await ensureConnected()) net.send({ t: 'join', name: myName(), room: code });
 };
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn').click(); });
-$('hCode').onclick = () => { navigator.clipboard?.writeText(S.code || ''); toast('Room code copied. Send it to the boys. 📋'); };
+$('hCode').onclick = () => { navigator.clipboard?.writeText(S.code || ''); toast(`Room code ${S.code || ''} copied. Send it to the boys.`); };
 
 // ---- toasts & ui ---------------------------------------------------------------------
 
@@ -374,7 +374,7 @@ net.on('welcome', m => {
   $('clickToPlay').classList.remove('hidden');
   voice.initVoice(m.id, renderVoiceUI);
   renderVoiceUI();
-  $('hCode').textContent = `CODE ${m.code}`;
+  $('hCode').innerHTML = `<span class="k">Room</span>${escapeHtml(m.code)}`;   // the invite code (the gate's keypad wants a different one)
   if (!localStorage.getItem('nmdHelpSeen')) { $('help').classList.remove('hidden'); localStorage.setItem('nmdHelpSeen', '1'); }
 });
 net.on('error', m => { if (S.phase === 'menu') $('menuError').textContent = m.msg; else toast(m.msg, '#ff8a80'); });
@@ -410,7 +410,7 @@ net.on('meta', m => {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<div class="pm" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i></span></div>`).join('');
+  $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
 });
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
@@ -852,7 +852,7 @@ function hud(rv) {
   const g = S.g;
   if (g) {
     $('hDay').textContent = `DAY ${Math.min(g.day, C.DAYS)}/${C.DAYS}`;
-    $('hClock').textContent = g.ph === 'night' ? 'NIGHT' : g.ph === 'camp' ? `${fmtClock(g.clk)} · leave camp to start the clock` : fmtClock(g.clk);
+    $('hClock').textContent = g.ph === 'night' ? 'NIGHT' : fmtClock(g.clk);   // what to do next is in the quest tracker
     $('hClock').classList.toggle('late', g.ph === 'road' && g.clk >= 21);
     $('hBank').textContent = `BANK ${fmt$(g.bank)}`;
     $('hBank').classList.toggle('neg', g.bank < 0);
@@ -881,6 +881,79 @@ function hud(rv) {
   if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (R)` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
+  questTracker(g);
+  rosterBars();
+}
+
+// The quest tracker (top right, WoW's quest watch): the day's town as the title, then what to
+// do next. Objectives turn white when done, red when failed. Rewritten only when it changes.
+let townOf = null, townNm = '', questKey = '';
+function townName(W) {
+  if (townOf !== W) {
+    townOf = W;
+    const sign = W.signs?.find(x => /^POP\./.test(String(x.lines?.[1] || '')));
+    townNm = sign ? String(sign.lines[0]).toLowerCase().replace(/(^|\s)\S/g, c => c.toUpperCase()) : 'Town';
+  }
+  return townNm;
+}
+function questTracker(g) {
+  if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
+  const town = townName(S.W), L = [];
+  if (g.ph === 'camp') L.push(['Drive out of camp to start the clock', '']);
+  else if (g.ph === 'road') {
+    if (!g.town) {
+      const left = S.rv ? Math.max(0, S.W.LEN - 8 - S.rv.p.z) : 0;
+      L.push([`Drive the RV to ${town}${left > 40 ? `: ${(Math.round(left / 50) * 50).toLocaleString('en-US')} m` : ''}`, '']);
+    }
+    L.push([`Money for the Repo Man: ${fmt$(Math.max(0, g.bank))}/${fmt$(g.due)}`, g.bank >= g.due ? 'done' : '']);
+    L.push(['Pay the Repo Man before midnight', '']);
+  } else if (g.ph === 'night') {
+    L.push([g.paid ? `Paid the Repo Man ${fmt$(g.due)}` : 'Missed the payment', g.paid ? 'done' : 'fail']);
+    const n = S.meta?.players.length || 1, b = Math.min(n, g.beds?.length || 0);
+    L.push([`Asleep in the RV's bunks: ${b}/${n}`, b >= n ? 'done' : '']);
+  }
+  const title = `Day ${Math.min(g.day, C.DAYS)}: ${town}`;
+  const key = title + JSON.stringify(L);
+  if (key === questKey) return;
+  questKey = key;
+  $('qtTitle').textContent = title;
+  $('qtLines').innerHTML = L.map(([t, c]) => `<div class="qt-line${c ? ' ' + c : ''}">${escapeHtml(t)}</div>`).join('');
+  $('tracker').classList.remove('hidden');
+}
+
+// The roster's bars show real state: your own is your stamina; the others' are green while
+// they're up, and red while knocked out, draining with the seconds before they wake up alone
+// (and pay the doctor), refilling green while you hold E on them.
+const koSince = new Map();
+function rosterBars() {
+  const now = performance.now();
+  for (const el of $('roster').children) {
+    const id = Number(el.dataset.id);
+    let st = 'up', f = 1, r = 0, cap = 0, t = '';
+    if (id === S.selfId) {
+      if (me.mode === 'ko') { st = 'ko'; f = me.koT / C.PLAYER.KO_TIME; t = `Knocked out ${Math.max(0, Math.ceil(me.koT))}s`; }
+      else { st = me.stamina < 25 ? 'low' : 'stam'; f = me.stamina / C.STAMINA.MAX; cap = (C.STAMINA.MAX - me.stamMax) / C.STAMINA.MAX; }
+    } else {
+      const s = S.renderT != null ? S.interp.samplePlayer(id, S.renderT) : null;
+      if (s?.mode === C.MODE.KO) {
+        if (!koSince.has(id)) koSince.set(id, now);
+        const left = Math.max(0, C.PLAYER.KO_TIME - (now - koSince.get(id)) / 1000);
+        st = 'ko'; f = left / C.PLAYER.KO_TIME; t = `Knocked out ${Math.ceil(left)}s`;
+        if (target?.kind === 'revive' && target.id === id && reviveT > 0) { r = Math.min(1, reviveT / C.PLAYER.REVIVE_HOLD); t = 'Picking up...'; }
+      } else if (s) koSince.delete(id);
+    }
+    f = Math.max(0, Math.min(1, f)); cap = Math.max(0, Math.min(1, cap));
+    const key = `${st}|${Math.round(f * 300)}|${Math.round(r * 100)}|${Math.round(cap * 100)}|${t}`;
+    if (el._bar === key) continue;
+    el._bar = key;
+    el.dataset.st = st;
+    const pb = el.querySelector('.pb');
+    if (!pb) continue;
+    pb.style.setProperty('--f', f.toFixed(3));
+    pb.style.setProperty('--r', r.toFixed(3));
+    pb.style.setProperty('--cap', cap.toFixed(3));
+    pb.dataset.t = t;
+  }
 }
 
 requestAnimationFrame(frame);

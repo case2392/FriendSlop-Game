@@ -142,23 +142,23 @@ export const TIRE_V = { treadLo: 0.38, treadHi: 0.62, wallLo: [0.16, 0.24], wall
 // 0.5 ± jawLipU), v from its hinge end to the chin. head / jaw / neck are the lofts' sections
 // { z, w (half width), top, bot }; the neck leaves the skull at neckAt, tilted neckTilt down and back.
 export const DINO = {
-  z0: -0.62, z1: 0.75, hinge: -0.18, hingeY: -0.12, open: 0.1, lipU: 0.1, jawLipU: 0.12,
-  eye: { z: 0.12, u: 0.18 }, nostril: { z: 0.64, u: 0.075 }, pw: 2.4,
+  z0: -0.6, z1: 0.725, hinge: -0.14, hingeY: -0.11, open: 0, lipU: 0.07, jawLipU: 0.07,
+  eye: { z: 0.02, u: 0.2, r: 0.125 }, nostril: { z: 0.655, u: 0.06 }, pw: 2.15,
   head: [
-    { z: -0.36, w: 0.22, top: 0.22, bot: -0.08 }, { z: -0.3, w: 0.34, top: 0.35, bot: -0.17 }, { z: -0.2, w: 0.43, top: 0.43, bot: -0.23 },
-    { z: -0.06, w: 0.47, top: 0.46, bot: -0.25 }, { z: 0.08, w: 0.46, top: 0.445, bot: -0.24 }, { z: 0.2, w: 0.42, top: 0.38, bot: -0.21 },
-    { z: 0.3, w: 0.385, top: 0.3, bot: -0.18 }, { z: 0.4, w: 0.365, top: 0.27, bot: -0.165 }, { z: 0.5, w: 0.35, top: 0.255, bot: -0.155 },
-    { z: 0.59, w: 0.32, top: 0.24, bot: -0.145 }, { z: 0.66, w: 0.265, top: 0.215, bot: -0.13 }, { z: 0.71, w: 0.185, top: 0.18, bot: -0.105 },
-    { z: 0.74, w: 0.095, top: 0.135, bot: -0.07 }, { z: 0.75, w: 0.02, top: 0.09, bot: -0.035 },
+    { z: -0.34, w: 0.2, top: 0.18, bot: -0.07 }, { z: -0.28, w: 0.3, top: 0.27, bot: -0.15 }, { z: -0.18, w: 0.37, top: 0.33, bot: -0.2 },
+    { z: -0.05, w: 0.4, top: 0.41, bot: -0.22 }, { z: 0.06, w: 0.395, top: 0.49, bot: -0.215 }, { z: 0.15, w: 0.37, top: 0.52, bot: -0.2 },
+    { z: 0.23, w: 0.34, top: 0.475, bot: -0.185 }, { z: 0.3, w: 0.31, top: 0.37, bot: -0.17 }, { z: 0.37, w: 0.295, top: 0.3, bot: -0.16 },
+    { z: 0.45, w: 0.29, top: 0.27, bot: -0.152 }, { z: 0.54, w: 0.28, top: 0.255, bot: -0.145 }, { z: 0.61, w: 0.255, top: 0.235, bot: -0.138 },
+    { z: 0.67, w: 0.2, top: 0.205, bot: -0.122 }, { z: 0.71, w: 0.12, top: 0.16, bot: -0.095 }, { z: 0.725, w: 0.03, top: 0.11, bot: -0.05 },
   ],
   jaw: [
-    { z: -0.22, w: 0.26, top: -0.1, bot: -0.24 }, { z: -0.12, w: 0.38, top: -0.1, bot: -0.33 }, { z: 0.02, w: 0.43, top: -0.11, bot: -0.4 },
-    { z: 0.18, w: 0.41, top: -0.115, bot: -0.42 }, { z: 0.34, w: 0.37, top: -0.12, bot: -0.39 }, { z: 0.48, w: 0.33, top: -0.125, bot: -0.34 },
-    { z: 0.58, w: 0.27, top: -0.13, bot: -0.28 }, { z: 0.64, w: 0.18, top: -0.135, bot: -0.225 }, { z: 0.67, w: 0.08, top: -0.14, bot: -0.18 },
-    { z: 0.675, w: 0.02, top: -0.15, bot: -0.165 },
+    { z: -0.18, w: 0.22, top: -0.085, bot: -0.21 }, { z: -0.08, w: 0.33, top: -0.085, bot: -0.3 }, { z: 0.06, w: 0.36, top: -0.09, bot: -0.36 },
+    { z: 0.2, w: 0.34, top: -0.095, bot: -0.38 }, { z: 0.35, w: 0.3, top: -0.1, bot: -0.355 }, { z: 0.47, w: 0.27, top: -0.1, bot: -0.315 },
+    { z: 0.56, w: 0.235, top: -0.102, bot: -0.27 }, { z: 0.62, w: 0.17, top: -0.105, bot: -0.22 }, { z: 0.655, w: 0.08, top: -0.11, bot: -0.18 },
+    { z: 0.665, w: 0.02, top: -0.12, bot: -0.16 },
   ],
-  neck: [{ z: 0, w: 0.33, top: 0.3, bot: -0.3 }, { z: 0.2, w: 0.34, top: 0.31, bot: -0.31 }, { z: 0.38, w: 0.36, top: 0.325, bot: -0.325 }, { z: 0.5, w: 0.38, top: 0.34, bot: -0.34 }],
-  neckAt: [0, 0.02, -0.2], neckTilt: 0.42,
+  neck: [{ z: 0, w: 0.31, top: 0.29, bot: -0.29 }, { z: 0.2, w: 0.32, top: 0.3, bot: -0.3 }, { z: 0.38, w: 0.335, top: 0.31, bot: -0.31 }, { z: 0.5, w: 0.35, top: 0.325, bot: -0.325 }],
+  neckAt: [0, 0.06, -0.18], neckTilt: 0.3,
 };
 
 // ---- small painting helpers ---------------------------------------------------------------------------
@@ -1743,96 +1743,127 @@ register('loot_rim', {
 
 // ---- the dinosaur's head -------------------------------------------------------------------------------
 
-// The statue's palette (rs_dino): a muted teal back, an olive flank, an ochre-cream belly, big
-// scales with a lit upper rim. On the head they're smaller (about 10 cm) and the light is painted
-// in: the head's left side (u < 0.5) is warmer and lighter, its lower right cooler.
+// The statue's palette (rs_dino): a muted teal back under a darker spine band, an olive flank, an
+// ochre-cream belly behind a scalloped painted edge, big irregular plates lit along their rims, peeled
+// paint over pink plaster, a crack web. On the head the plates are smaller (15–25 cm) and the light is
+// painted in: the head's left side (u < 0.5) is warmer and lighter, its lower right cooler.
 const DH = { back: '#3e6455', back2: '#4b7360', flank: '#6f7a48', flank2: '#8c8a52', belly: '#c4a86e', belly2: '#d6c08a', saddle: '#2f4c3e',
-  scale: '#577e64', scaleF: '#7a8450', lit: '#b8cc94', shade: '#24362e', pink: '#a84858', pink2: '#c86476', pinkD: '#5a1e2c', lip: '#3a2422' };
-// Scales in rows either side of the spine line X = cx (rows run along Y), lit on the rim toward the
-// spine, a cool shadow on the other side; they fade out by dmax (fraction of the half width).
-function dinoScales(g, w, rnd, { cx, half, dmax, y0, y1, sx = 20, sy = 16, rx = 6.5, ry = 7.5, alpha = 1 }) {
-  for (const side of [-1, 1]) for (let k = 0; ; k++) {
-    const dist = (k + 0.5) * sx, d = dist / half;
-    if (d > dmax) break;
-    const fade = alpha * Math.min(1, 1.25 * (1 - d / dmax)), up = -side;
-    for (let Y = y0 + (k % 2 ? sy / 2 : 0) + range(rnd, -2, 2); Y < y1 + sy; Y += sy * range(rnd, 0.85, 1.2)) {
-      if (rnd() < 0.06) continue;
-      const big = k < 2 && rnd() < 0.18 ? 1.45 : 1, X = cx + side * dist + range(rnd, -2.5, 2.5), YY = Y + range(rnd, -2.5, 2.5), sc = range(rnd, 0.78, 1.2) * big;
-      const body = mix(DH.scale, DH.scaleF, Math.min(1, d * 1.2));
-      wrapX(w, X, rx * 2, XX => {
-        blob(g, XX - up * rx * 0.55, YY + 1.5, rx * 1.1 * sc, ry * 0.95 * sc, 0, DH.shade, 0.42 * fade, 0.4);
-        ellipse(g, XX, YY, rx * sc, ry * sc, 0, body, 0.6 * fade);
-        g.save(); g.globalAlpha = 0.7 * fade; g.strokeStyle = DH.lit; g.lineWidth = 2; g.lineCap = 'round';
-        const a = up > 0 ? 0 : Math.PI;
-        g.beginPath(); g.ellipse(XX, YY - 0.5, rx * sc * 0.82, ry * sc * 0.8, 0, a - 1.15, a + 0.9); g.stroke(); g.restore();
-      });
+  spine: '#3c5646', plateB: '#4e7562', plateB2: '#5a806a', plateF: '#6e7a4a', plateF2: '#7e8a56', lit: '#b8cc94', shade: '#2e4038',
+  pink: '#a84858', pink2: '#c86476', pinkD: '#5a1e2c', lip: '#3a2422', plaster: '#d8b4a2' };
+// One plate: a lumpy oval (rx across, ry along), its shadow thrown away from the spine, a fill lit on
+// the spine side, a brushed rim of light along that side.
+function dinoPlate(g, X, Y, rx, ry, side, base, k, pr) {
+  const pts = [];
+  for (let q = 0; q < 10; q++) { const a = q / 10 * TAU, rr = range(pr, 0.82, 1.1); pts.push([X + Math.cos(a) * rx * rr, Y + Math.sin(a) * ry * rr]); }
+  poly(g, pts.map(([u, v]) => [u + side * 2.4, v + 2])); g.fillStyle = rgba(DH.shade, 0.32 * k); g.fill();
+  g.save(); poly(g, pts); g.globalAlpha = 0.5 * k;
+  g.fillStyle = lin(g, X - side * rx, 0, X + side * rx, 0, [[0, lightOf(base, 0.28)], [0.45, base], [1, shadowOf(base, 0.28)]]); g.fill(); g.restore();
+  // the lit rim on the spine side (the outline's points facing -side)
+  const rim = side > 0 ? [pts[4], pts[5], pts[6], pts[7]] : [pts[9], pts[0], pts[1], pts[2]].map(([u, v]) => [u, v]);
+  stroke(g, rim.map(([u, v]) => [u - side * 0.8, v]), 2.4 * k + 0.6, 0.8, DH.lit, 0.5 * k);
+  if (pr() < 0.45) stroke(g, (side > 0 ? [pts[9], pts[0], pts[1]] : [pts[4], pts[5], pts[6]]).map(([u, v]) => [u + side, v]), 1.8, 0.6, DH.shade, 0.35 * k);
+}
+// Rows of plates either side of the spine line X = cx (rows run along Y): [dist, rx, ry, k] per row, the
+// spine row (dist 0) once; they wrap round the canvas's x edges.
+function dinoPlates(g, w, rnd, { cx, rows, y0, y1, fadeY = 0 }) {
+  for (const [dist, rx, ry, k] of rows) for (const side of dist ? [-1, 1] : [1]) {
+    for (let Y = y0 + range(rnd, 0, ry); Y < y1 + ry; Y += 2 * ry * range(rnd, 0.95, 1.25)) {
+      const fy = fadeY ? Math.min(1, Math.max(0, (Y - 4) / fadeY)) : 1;
+      if (fy <= 0.05 || rnd() < 0.07) continue;
+      const X = cx + side * dist + range(rnd, -3, 3), sc = range(rnd, 0.85, 1.15), ps = Math.floor(rnd() * 1e9);
+      const base = dist < 60 ? mix(DH.plateB, DH.plateB2, rnd()) : mix(DH.plateF, DH.plateF2, rnd());
+      wrapX(w, X, rx * 2, XX => dinoPlate(g, XX, Y, rx * sc, ry * sc, side, base, k * fy, rngFrom(ps)));
     }
   }
 }
+// The painted belly edge: the ochre rises into the olive in scallops along Y (x0 = the belly side's
+// canvas edge, dir = +1 / -1 into the flank), a cool line above it, a lit lip below.
+function bellyEdge(g, rnd, x0, dir, xe, ya, yb, n) {
+  const edge = [], W = (yb - ya) / n;
+  for (let i = 0; i < n; i++) { const sc = range(rnd, 0.75, 1.2); for (let q = 0; q <= 8; q++) { const t = q / 8, y = ya + (i + t) * W; edge.push([xe + dir * (Math.sin(Math.PI * t) * 7 * sc + Math.sin(y * 0.3) * 0.6), y]); } }
+  const shape = [...edge, [x0 - dir * 2, yb], [x0 - dir * 2, ya]];
+  poly(g, shape.map(([u, v]) => [u + dir * 2.5, v])); g.fillStyle = rgba(DH.shade, 0.3); g.fill();
+  poly(g, shape); g.fillStyle = lin(g, xe, 0, x0, 0, [[0, '#c8a86a'], [0.5, DH.belly], [1, DH.belly2]]); g.fill();
+  line(g, edge.map(([u, v]) => [u - dir * 1.8, v]), 1.8, '#f0dca8', 0.55);
+}
+// peeled paint over pink plaster: a chip of plaster with a dark lower rim and a lit top edge
+function peel(g, rnd, x, y, r) {
+  const pts = []; for (let k = 0; k < 8; k++) { const a = k / 8 * TAU, rr = r * range(rnd, 0.55, 1.15); pts.push([x + Math.cos(a) * rr, y + Math.sin(a) * rr * 0.8]); }
+  poly(g, pts.map(([u, v]) => [u + 0.8, v + 1])); g.fillStyle = rgba('#3a3028', 0.5); g.fill();
+  poly(g, pts); g.fillStyle = rgba(pick(rnd, [DH.plaster, '#ccaa98', '#e0c2b0']), 0.95); g.fill();
+  line(g, pts.slice(4, 8), 0.9, '#f8e8dc', 0.7);
+}
 register('loot_dinohead', {
-  family: F, w: 512, h: 256, note: "the dino head and neck (u round, 0.5 = the spine; v from the neck's break up to the snout at the top): the statue's hide, smaller scales, painted light, the pink roof of the open mouth inside the lip line",
+  family: F, w: 512, h: 256, note: "the dino head and neck (u round, 0.5 = the spine; v from behind the neck's break up to the snout at the top): the statue's painted plaster (teal back, olive flank, plates lit on their rims, a scalloped ochre throat), painted light, a smiling lip line round the pink roof of the mouth",
   paint(g, w, rnd, h, cv) {
     const D = DINO, Yz = z => (D.z1 - z) / (D.z1 - D.z0) * h, yH = Yz(D.hinge), cx = w / 2;
     // the hide across the head: belly (edges) → flank → back (middle), the left side a touch warmer
-    g.fillStyle = lin(g, 0, 0, w, 0, [[0, DH.belly2], [0.09, DH.belly], [0.17, DH.flank2], [0.27, DH.flank], [0.38, DH.back2], [0.5, DH.back], [0.62, DH.back2], [0.73, '#66724a'], [0.83, '#7e7c4c'], [0.91, '#b09a64'], [1, DH.belly2]]);
+    g.fillStyle = lin(g, 0, 0, w, 0, [[0, DH.belly2], [0.09, DH.belly], [0.15, DH.flank2], [0.26, DH.flank], [0.38, DH.back2], [0.5, DH.back], [0.62, DH.back2], [0.74, '#66724a'], [0.85, '#7e7c4c'], [0.91, '#b09a64'], [1, DH.belly2]]);
     g.fillRect(0, 0, w, h);
-    mottle(g, w, rnd, { colors: ['#557c64', '#62784a', '#4a6a56', '#7a8450'], count: 30, rmin: 14, rmax: 40, alpha: 0.22, hard: 0.1 });
-    // dark saddles down the spine: one over the dome, one on the neck
-    for (const [z, ry] of [[-0.14, 34], [-0.66, 40], [0.36, 22]]) blob(g, cx + range(rnd, -6, 6), Yz(z), range(rnd, 54, 70), ry, 0, DH.saddle, 0.42, 0.2);
+    mottle(g, w, rnd, { colors: ['#557c64', '#62784a', '#4a6a56', '#7a8450'], count: 26, rmin: 16, rmax: 44, alpha: 0.2, hard: 0.1 });
     // painted light: warm and lit on the upper left, cool on the lower right
-    blob(g, cx - 92, h * 0.5, 46, h * 0.62, 0, '#d8d49a', 0.2, 0.15);
+    blob(g, cx - 96, h * 0.5, 50, h * 0.62, 0, '#d8d49a', 0.2, 0.15);
     blob(g, cx - 40, h * 0.45, 26, h * 0.6, 0, '#e8e4b0', 0.12, 0.2);
-    blob(g, cx + 150, h * 0.5, 50, h * 0.66, 0, '#3a4258', 0.22, 0.15);
-    dinoScales(g, w, rnd, { cx, half: w / 2, dmax: 0.7, y0: 6, y1: h });
-    // eye sockets: a cool shadow under each eye, a warm lit brow over it
+    blob(g, cx + 150, h * 0.5, 54, h * 0.66, 0, '#3a4258', 0.22, 0.15);
+    // the plates, big down the spine and over the dome, smaller down the flanks
+    dinoPlates(g, w, rnd, { cx, y0: 4, y1: h, fadeY: 26, rows: [[0, 16, 21, 1], [38, 16, 19, 0.9], [76, 13, 16, 0.7], [110, 11, 13, 0.45]] });
+    // the darker spine band over it all
+    g.fillStyle = lin(g, cx - 34, 0, cx + 34, 0, [[0, DH.spine, 0], [0.35, DH.spine, 0.45], [0.65, DH.spine, 0.45], [1, DH.spine, 0]]); g.fillRect(cx - 34, 0, 68, h);
+    // eye sockets: a cool shadow under and behind each eye, a warm lit brow over it
     for (const sd of [-1, 1]) {
       const ex = cx + sd * D.eye.u * w, ey = Yz(D.eye.z);
-      blob(g, ex + sd * 20, ey + 4, 30, 34, 0, '#2e3a40', 0.45, 0.25);
-      blob(g, ex - sd * 22, ey - 2, 22, 30, 0, '#d8dca0', sd < 0 ? 0.35 : 0.2, 0.25);
+      blob(g, ex + sd * 18, ey + 10, 34, 30, 0, '#2a3a3e', 0.42, 0.25);
+      blob(g, ex - sd * 24, ey - 4, 22, 34, 0, '#dcdca4', sd < 0 ? 0.32 : 0.18, 0.25);
     }
     // nostrils: dark rims, lit on the spine side
     for (const sd of [-1, 1]) { const nx = cx + sd * D.nostril.u * w, ny = Yz(D.nostril.z); blob(g, nx + sd * 5, ny + 2, 14, 11, 0, '#2a3a30', 0.5, 0.35); blob(g, nx - sd * 6, ny - 2, 8, 7, 0, DH.lit, 0.35, 0.4); }
-    // under the head behind the hinge: the cream throat, long soft folds
-    for (const x0 of [0, w]) for (let k = 0; k < 6; k++) {
-      const X = x0 + (x0 ? -1 : 1) * (6 + k * 7) + range(rnd, -2, 2);
-      line(g, [[X, yH + 6], [X + range(rnd, -3, 3), (yH + h) / 2], [X + range(rnd, -3, 3), h]], range(rnd, 1.4, 2.4), '#8a7448', 0.3);
-      line(g, [[X - 1.5, yH + 6], [X - 1.5 + range(rnd, -3, 3), h]], 1, '#f0e0b0', 0.3);
+    // under the head behind the hinge: the scalloped ochre throat with long soft folds
+    bellyEdge(g, rnd, 0, 1, 0.12 * w, yH - 4, h + 4, 6);
+    bellyEdge(g, rnd, w, -1, 0.88 * w, yH - 4, h + 4, 6);
+    for (const x0 of [0, w]) for (let k = 0; k < 5; k++) {
+      const X = x0 + (x0 ? -1 : 1) * (6 + k * 9) + range(rnd, -2, 2);
+      line(g, [[X, yH + 10], [X + range(rnd, -3, 3), (yH + h) / 2], [X + range(rnd, -3, 3), h]], range(rnd, 1.4, 2.4), '#8a7448', 0.28);
+      line(g, [[X - 1.5, yH + 10], [X - 1.5 + range(rnd, -3, 3), h]], 1, '#f0e0b0', 0.3);
     }
-    // the roof of the open mouth: pink inside the lip line, palate ridges, darker toward the throat
-    const lipX = D.lipU * w;
+    // the roof of the mouth: pink inside the lip line from just behind the chin back to the hinge (the
+    // overhanging tip of the snout stays hide), palate ridges, darker toward the throat
+    const lipX = D.lipU * w, yC = Yz(D.jaw[D.jaw.length - 2].z);
     for (const sd of [-1, 1]) {
       const edge = sd < 0 ? lipX : w - lipX, x0 = sd < 0 ? -8 : edge, x1 = sd < 0 ? edge : w + 8;
-      clip(g, () => { g.beginPath(); g.rect(x0, -2, x1 - x0, yH + 2); }, () => {
-        g.fillStyle = lin(g, 0, 0, 0, yH, [[0, DH.pink2], [0.45, DH.pink], [1, DH.pinkD]]); g.fillRect(x0, 0, x1 - x0, yH);
-        for (let Y = 8; Y < yH - 6; Y += range(rnd, 10, 14)) {
+      clip(g, () => { g.beginPath(); g.rect(x0, yC, x1 - x0, yH - yC); }, () => {
+        g.fillStyle = lin(g, 0, yC, 0, yH, [[0, DH.pink2], [0.45, DH.pink], [1, DH.pinkD]]); g.fillRect(x0, yC, x1 - x0, yH - yC);
+        for (let Y = yC + 6; Y < yH - 6; Y += range(rnd, 10, 14)) {
           const pts = []; for (let X = x0; X <= x1; X += 6) pts.push([X, Y + Math.sin(X * 0.15) * 1.5]);
           line(g, pts.map(([a, b]) => [a, b + 2]), 2.4, DH.pinkD, 0.45); line(g, pts, 1.6, '#e08c98', 0.4);
         }
       });
-      // the lip: a dark line, a lit olive roll above it, curling up into the corner crease at the hinge
+      // the lip: a dark line, a lit olive roll above it, turning up toward the spine into a smile at the hinge
       const lp = [], hp = [];
-      for (let Y = -4; Y <= yH; Y += 6) { const wob = Math.sin(Y * 0.09) * 1.2; lp.push([edge + wob, Y]); hp.push([edge - sd * 7 + wob, Y]); }
-      const curl = [[edge, yH], [edge - sd * 6, yH + 9], [edge - sd * 16, yH + 13]];
-      stroke(g, hp, 7, 7, '#a8a46a', 0.55);
-      stroke(g, [...lp, ...curl], 4.2, 2, DH.lip, 0.9);
+      for (let Y = -4; Y <= yH - 6; Y += 6) { const wob = Math.sin(Y * 0.09) * 1.2; lp.push([edge + wob, Y]); hp.push([edge - sd * 7 + wob, Y]); }
+      const curl = [[edge, yH - 2], [edge - sd * 8, yH + 8], [edge - sd * 20, yH + 13], [edge - sd * 30, yH + 12]];
+      stroke(g, [...hp, ...curl.slice(1).map(([a, b]) => [a - sd * 5, b - 5])], 7, 4, '#a8a46a', 0.5);
+      stroke(g, [...lp, ...curl], 4.2, 1.6, DH.lip, 0.9);
       line(g, hp.map(([a, b]) => [a - sd * 2, b]), 1.4, '#e0dca8', 0.55);
+      // the cheek's round fold above the corner of the smile
+      g.save(); g.globalAlpha = 0.4; g.strokeStyle = DH.shade; g.lineWidth = 2; g.lineCap = 'round';
+      g.beginPath(); g.ellipse(edge - sd * 28, yH + 4, 10, 14, 0, sd < 0 ? Math.PI * 0.6 : -Math.PI * 0.4, sd < 0 ? Math.PI * 1.4 : Math.PI * 0.4); g.stroke(); g.restore();
     }
-    // a few chips of pale plaster, hairline cracks, rain streaks running down the flanks
-    for (let i = 0; i < 9; i++) { const x = range(rnd, 0.22, 0.78) * w, y = range(rnd, 0.05, 0.95) * h; wrapX(w, x, 10, X => chips(g, rnd, 1, X - 2, y - 2, 4, 4, '#c8bea8', 3, 6, 0.85)); }
-    cracks(g, h, rnd, { color: '#2e3430', count: 5, len: [14, 34], width: [0.7, 1.2], alpha: 0.35 });
+    // peeled paint over pink plaster, a web of hairline cracks, rain streaks running down the flanks
+    for (let i = 0; i < 16; i++) { const x = range(rnd, 0.18, 0.82) * w, y = range(rnd, 0.06, 0.95) * h; wrapX(w, x, 10, X => peel(g, rnd, X, y, range(rnd, 2.2, 5.5))); }
+    cracks(g, h, rnd, { color: '#2e3430', count: 7, len: [16, 40], width: [0.7, 1.2], alpha: 0.38 });
     for (let i = 0; i < 18; i++) {
       const sd = rnd() < 0.5 ? -1 : 1, X = cx + sd * range(rnd, 20, 150), Y = range(rnd, 0, h), L = range(rnd, 20, 60);
-      line(g, [[X, Y], [X + sd * L * 0.5, Y + range(rnd, -3, 3)], [X + sd * L, Y + range(rnd, -4, 4)]], range(rnd, 1.2, 2.4), pick(rnd, ['#3a4a3a', '#6a6044']), 0.14);
+      line(g, [[X, Y], [X + sd * L * 0.5, Y + range(rnd, -3, 3)], [X + sd * L, Y + range(rnd, -4, 4)]], range(rnd, 1.2, 2.4), pick(rnd, ['#3a4a3a', '#6a6044']), 0.13);
     }
     // grime and chipped paint toward the broken neck
     g.fillStyle = lin(g, 0, h * 0.86, 0, h, [[0, '#4a4438', 0], [1, '#4a4438', 0.35]]); g.fillRect(0, h * 0.86, w, h * 0.14);
-    for (let i = 0; i < 8; i++) { const x = rnd() * w; wrapX(w, x, 10, X => chips(g, rnd, 1, X - 3, h - 14, 6, 10, '#bdb4a2', 3, 7, 0.8)); }
+    for (let i = 0; i < 9; i++) { const x = rnd() * w; wrapX(w, x, 10, X => peel(g, rnd, X, h - range(rnd, 4, 14), range(rnd, 2.5, 5))); }
     glaze(g, w, h, '#ffe8b8', 0.1);
     blurTile(cv, 0.5);
   },
 });
 register('loot_dinojaw', {
-  family: F, w: 256, h: 128, note: "the dino's lower jaw (u round, 0.5 = the floor of the mouth; v hinge → chin at the top): pink floor, the lower lip, scaled flanks, the cream chin",
+  family: F, w: 256, h: 128, note: "the dino's lower jaw (u round, 0.5 = the floor of the mouth; v hinge → chin at the top): pink floor, the lower lip, the statue's plated olive flanks, a scalloped ochre chin",
   paint(g, w, rnd, h, cv) {
     const cx = w / 2, lipX = DINO.jawLipU * w;
     g.fillStyle = lin(g, 0, 0, w, 0, [[0, DH.belly2], [0.12, DH.belly], [0.2, DH.flank2], [0.3, DH.flank], [0.36, '#5e7656'], [0.5, '#5e7656'], [0.64, '#5e7656'], [0.7, '#66724a'], [0.8, '#7e7c4c'], [0.88, '#b09a64'], [1, DH.belly2]]);
@@ -1840,18 +1871,19 @@ register('loot_dinojaw', {
     mottle(g, w, rnd, { colors: ['#62784a', '#7a8450', '#8c8a52'], count: 14, rmin: 10, rmax: 26, alpha: 0.22, hard: 0.1 });
     blob(g, cx - 64, h * 0.5, 26, h * 0.7, 0, '#d8d49a', 0.2, 0.2);
     blob(g, cx + 70, h * 0.5, 30, h * 0.7, 0, '#3a4258', 0.22, 0.2);
-    // scales on the flanks: "up" is toward the lip
+    // plates on the flanks below the lip: "up" (the lit side) is toward the lip
     for (const sd of [-1, 1]) {
-      const sp = cx + sd * (lipX + 10);
-      for (let k = 0; k < 3; k++) for (let Y = 4 + (k % 2 ? 7 : 0); Y < h + 8; Y += 14) {
-        const X = sp + sd * k * 16 + range(rnd, -1.5, 1.5), fade = 1 - k * 0.28;
-        blob(g, X + sd * 3.5, Y + 1.5, 6.5, 7, 0, DH.shade, 0.42 * fade, 0.4);
-        ellipse(g, X, Y, 5.5, 6.5, 0, mix(DH.scale, DH.scaleF, k * 0.4), 0.6 * fade);
-        g.save(); g.globalAlpha = 0.7 * fade; g.strokeStyle = DH.lit; g.lineWidth = 1.8; g.lineCap = 'round';
-        const a = sd > 0 ? Math.PI : 0; g.beginPath(); g.ellipse(X, Y - 0.5, 4.6, 5.2, 0, a - 1.15, a + 0.9); g.stroke(); g.restore();
+      const prs = rngFrom(sd > 0 ? 'jaw-r' : 'jaw-l');
+      for (const [k, [d, rx, ry, a]] of [[lipX + 16, 9, 12, 0.9], [lipX + 38, 8, 10, 0.6]].entries()) {
+        for (let Y = 6 + k * 7; Y < h + 10; Y += 2 * ry * range(prs, 0.95, 1.2)) {
+          const X = cx + sd * d + range(prs, -2, 2), base = mix(DH.plateF, DH.plateF2, prs());
+          dinoPlate(g, X, Y, rx, ry, sd, base, a, rngFrom(Math.floor(prs() * 1e9)));
+        }
       }
     }
-    // the cream chin and throat: soft folds across
+    // the ochre chin and throat behind its scalloped edge, soft folds across it
+    bellyEdge(g, rnd, 0, 1, 0.17 * w, -4, h + 4, 4);
+    bellyEdge(g, rnd, w, -1, 0.83 * w, -4, h + 4, 4);
     for (const x0 of [0, w]) for (let Y = 6; Y < h; Y += range(rnd, 9, 13)) {
       const sd = x0 ? -1 : 1, pts = [[x0, Y], [x0 + sd * 14, Y + range(rnd, -2, 2)], [x0 + sd * 26, Y + range(rnd, -3, 1)]];
       line(g, pts.map(([a, b]) => [a, b + 1.5]), 2, '#8a7448', 0.3); line(g, pts, 1, '#f4e6b8', 0.35);
@@ -1866,7 +1898,8 @@ register('loot_dinojaw', {
       for (let Y = -4; Y <= h + 4; Y += 6) { const wob = Math.sin(Y * 0.11) * 1; lp.push([edge + wob, Y]); hp.push([edge + sd * 6 + wob, Y]); }
       stroke(g, hp, 6, 6, '#a8a46a', 0.5); stroke(g, lp, 3.6, 3.6, DH.lip, 0.9); line(g, hp.map(([a, b]) => [a + sd * 1.5, b]), 1.2, '#e0dca8', 0.5);
     }
-    for (let i = 0; i < 4; i++) { const x = range(rnd, 0.2, 0.8) * w; chips(g, rnd, 1, x - 2, range(rnd, 10, h - 10), 4, 4, '#c8bea8', 2.5, 5, 0.8); }
+    for (let i = 0; i < 6; i++) peel(g, rnd, range(rnd, 0.2, 0.8) * w, range(rnd, 8, h - 8), range(rnd, 2, 4.5));
+    cracks(g, w, rnd, { color: '#2e3430', count: 2, len: [12, 26], width: [0.7, 1], alpha: 0.3 });
     glaze(g, w, h, '#ffe8b8', 0.1);
     blurTile(cv, 0.5);
   },
@@ -1894,19 +1927,17 @@ register('loot_dinomouth', {
   },
 });
 register('loot_eye', {
-  family: F, w: 128, h: 64, note: "the dino's eye (a sphere: u wraps, front in the middle): ivory, a big amber iris with a slit pupil, a catchlight, the lid's shadow over the top",
+  family: F, w: 128, h: 64, note: "the dino's eye (a sphere: u wraps, front in the middle): ivory, a big warm amber-brown iris, a big round friendly pupil, two catchlights, the lid's shadow over the top",
   paint(g, w, rnd, h, cv) {
     g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#a89c80'], [0.35, '#f0e6cc'], [0.6, '#f4ecd4'], [1, '#a89c80']]); g.fillRect(0, 0, w, h);
     g.fillStyle = lin(g, 0, 0, w, 0, [[0, '#8a7e68', 0.5], [0.3, '#8a7e68', 0], [0.7, '#8a7e68', 0], [1, '#8a7e68', 0.5]]); g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 5; i++) { const y = range(rnd, 12, 52), x0 = range(rnd, 10, 40); line(g, [[x0, y], [x0 + 12, y + range(rnd, -3, 3)], [x0 + 20, y + range(rnd, -4, 4)]], 0.8, '#c86a5a', 0.4); line(g, [[w - x0, y], [w - x0 - 14, y + range(rnd, -3, 3)]], 0.8, '#c86a5a', 0.4); }
-    const x = w / 2, y = h / 2 + 1;
-    ellipse(g, x + 1, y + 1, 13.5, 13, 0, '#4a2a10', 0.7);
-    g.fillStyle = radial(g, x - 3, y - 3, 1, 13, [[0, '#f8d070'], [0.45, '#d89a2a'], [0.85, '#a86414'], [1, '#5a3410']]); g.beginPath(); g.arc(x, y, 12.5, 0, TAU); g.fill();
-    for (let k = 0; k < 18; k++) { const a = k / 18 * TAU; line(g, [[x + Math.cos(a) * 5, y + Math.sin(a) * 5], [x + Math.cos(a) * 11, y + Math.sin(a) * 11]], 0.8, k % 2 ? '#f8d888' : '#8a5418', 0.45); }
-    stroke(g, [[x, y - 11], [x + 0.6, y], [x, y + 11]], 2, 2, '#3a2410', 0.6);
-    g.save(); g.fillStyle = '#2a1a0c'; g.beginPath(); g.ellipse(x, y, 2.6, 10.5, 0, 0, TAU); g.fill(); g.restore();
-    blob(g, x - 5, y - 5, 3.4, 2.8, 0, '#fffbe8', 1, 0.6);
-    ellipse(g, x + 4, y + 5, 1.2, 1, 0, '#fffbe8', 0.7);
+    const x = w / 2, y = h / 2 + 2;
+    ellipse(g, x + 1, y + 1, 15, 14.5, 0, '#4a2a10', 0.6);
+    g.fillStyle = radial(g, x - 3, y - 3, 1, 14.5, [[0, '#e8b860'], [0.5, '#b87a2a'], [0.85, '#7a4a1a'], [1, '#4a2a10']]); g.beginPath(); g.arc(x, y, 14, 0, TAU); g.fill();
+    for (let k = 0; k < 18; k++) { const a = k / 18 * TAU; line(g, [[x + Math.cos(a) * 8, y + Math.sin(a) * 8], [x + Math.cos(a) * 12.5, y + Math.sin(a) * 12.5]], 0.8, k % 2 ? '#f0c878' : '#6a4014', 0.4); }
+    g.fillStyle = radial(g, x, y, 0, 8.5, [[0, '#1a1008'], [0.85, '#2a1a0c'], [1, '#4a2a10']]); g.beginPath(); g.arc(x, y + 0.5, 8.2, 0, TAU); g.fill();
+    blob(g, x - 4.5, y - 4.5, 3.8, 3.2, 0, '#fffbe8', 1, 0.6);
+    ellipse(g, x + 3.5, y + 3.5, 1.4, 1.2, 0, '#fffbe8', 0.75);
     g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#3a2818', 0.55], [0.32, '#3a2818', 0], [1, '#3a2818', 0]]); g.fillRect(0, 0, w, h);
     blurTile(cv, 0.35);
   },

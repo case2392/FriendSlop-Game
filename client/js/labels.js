@@ -13,13 +13,19 @@
 //                                  wall; buttons name only the one nearest the crosshair.
 //   zoneText(title, sub)           the big gold WoW zone text that fades in when a day starts
 //   uiText(s)                      strips emoji (the WoW UI has none) and turns emote toasts into "You laugh."
+//                                  main.js's toast template and the signboards run their text through it
 //   portraitAttrs(color, id)       attributes for a roster portrait: the player's character, rendered
+//
+// Names and townsfolk titles are drawn over the world (like WoW's): a sign post, a cart or a
+// tree between you and the Repo Man never slices his plate. Building walls and hills do hide
+// townsfolk (a friend's name fades to 35% instead), and so does anything in your hands (the
+// plate is pulled to just past them, at the same size on screen).
 //
 // On import this module also (1) waits for the vendored fonts and redraws any
 // sprite drawn before they arrived, (2) paints the UI textures in paint/ui.js
-// and exposes them to style.css as --tx-* custom properties, (3) builds the title
+// and exposes them to style.css as --tx-* custom properties, and (3) builds the title
 // screen (a painted backdrop, then a lit diorama of the game's own RV, trees and
-// road rendered once offscreen over it), and (4) keeps emoji out of the prompt.
+// road rendered once offscreen over it).
 import * as THREE from '/vendor/three.module.js';
 import { canvasTex, tex, painted } from './gfx.js';
 import { canvasFor, hashStr, rngFrom } from './paint/index.js';
@@ -55,29 +61,6 @@ export function uiText(s) {
 // a name or label made only of emoji keeps them rather than going blank
 const keepText = s => { const t = uiText(s).trim(); return t || String(s ?? '').trim(); };
 
-function sanitize(node) {
-  if (node.nodeType === 3) { if (EMOJI_1.test(node.data)) node.data = uiText(node.data); return; }
-  if (node.nodeType !== 1) return;
-  const walk = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
-  for (let n = walk.nextNode(); n; n = walk.nextNode()) if (EMOJI_1.test(n.data)) n.data = uiText(n.data);
-}
-// Toasts are cleaned in main.js's toast template; the interaction prompt (main.js
-// writes it from the targets' labels) is the only other place emoji still arrive.
-function watchText() {
-  if (typeof MutationObserver === 'undefined') return;
-  for (const id of ['prompt']) {
-    const el = document.getElementById(id);
-    if (!el) continue;
-    sanitize(el);
-    new MutationObserver(recs => {
-      for (const r of recs) {
-        if (r.type === 'characterData') sanitize(r.target);
-        else for (const n of r.addedNodes) sanitize(n);
-      }
-    }).observe(el, { subtree: true, childList: true, characterData: true });
-  }
-}
-
 // ---- the CSS skin -----------------------------------------------------------------------
 
 // what the menu card needs first, then the title painting (in stages), then the rest
@@ -88,9 +71,9 @@ const SKIN_REST = [
   ['parchment', 'ui_parchment'], ['wood', 'ui_wood'], ['leather', 'ui_leather'], ['bar', 'ui_bar'],
   ['trim-gold', 'ui_trim_gold'], ['frame-silver', 'ui_frame_silver'], ['btn-stone', 'ui_btn_stone'],
   ['endcap', 'ui_endcap'], ['seal', 'ui_seal'], ['ring', 'ui_ring'],
-  ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'key', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt', 'ping']
+  ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'door', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt', 'ping']
     .map(n => [`ico-${n}`, `ui_ico_${n}`]),
-  ...['sun', 'hourglass', 'coin', 'scroll', 'hook', 'key', 'mic', 'micoff', 'speaker', 'speakeroff', 'gear', 'close', 'walkie']
+  ...['sun', 'hourglass', 'coin', 'scroll', 'hook', 'door', 'mic', 'micoff', 'speaker', 'speakeroff', 'gear', 'close', 'walkie']
     .map(n => [`slot-${n}`, `ui_slot_${n}`]),
 ];
 // as a blob URL, decoded before the custom property is set, so first use never paints empty
@@ -511,7 +494,6 @@ if (typeof document !== 'undefined' && document.getElementById('game')) {
   let rest = false;
   const paintRest = () => { if (!rest) { rest = true; paintList(SKIN_REST); } };
   paintList(SKIN_FIRST, () => paintMenu(paintRest).catch(e => console.warn('ui skin: menu', e.message)).finally(paintRest));
-  watchText();
 }
 
 // ---- party portraits ------------------------------------------------------------------------
@@ -804,6 +786,29 @@ const CAP = { icon: 64, combat: 64, button: 34, placard: 50 };
 const NAME_FADE = [35, 45], BTN_REACH = 2.6;
 const BTN = { frame: -1, best: null, ang: Infinity, prev: null };
 const _p = new THREE.Vector3(), _c = new THREE.Vector3(), _f = new THREE.Vector3(), _sz = new THREE.Vector2();
+// Names (players, townsfolk) draw over the world like WoW's: each frame the plate is moved to
+// PULL m from the eye along its own sight line and shrunk to match, so it covers the same
+// pixels but sits in front of every post, sign, cart and tree; the first-person hands and the
+// held map (nearer than that) still cover it. Across a building's walls (you outside, he in
+// the shop; you in the casino, he out front) or behind a hill, a townsfolk plate fades out
+// and a friend's name fades to OCCLUDED[kind], like WoW Classic's occluded nameplates.
+const PULL = 0.7, PLATE_ORDER = 10, OCCLUDED = { name: 0.35, npc: 0 };
+const terrainHides = (W, c, p) => {
+  for (let i = 1; i < 7; i++) {
+    const t = i / 7, y = c.y + (p.y - c.y) * t;
+    if (W.heightAt(c.x + (p.x - c.x) * t, c.z + (p.z - c.z) * t) > y + 0.35) return true;
+  }
+  return false;
+};
+// the walk-in building (world.js buildings: centered frames, w across, dep deep) a point is in, or -1
+function buildingAt(W, p) {
+  const B = W.buildings || [];
+  for (let i = 0; i < B.length; i++) {
+    const b = B[i], dx = p.x - b.x, dz = p.z - b.z, c = Math.cos(b.ry), s = Math.sin(b.ry);
+    if (Math.abs(dx * c - dz * s) < b.w / 2 && Math.abs(dx * s + dz * c) < b.dep / 2 && p.y > b.y - 1 && p.y < b.y + b.h + 3) return i;
+  }
+  return -1;
+}
 
 export function labelSprite(text, color = '#fff', px = 40) {
   const raw0 = String(text ?? '').trim();
@@ -812,12 +817,14 @@ export function labelSprite(text, color = '#fff', px = 40) {
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const tex = canvasTex(cv);
-  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, fog: false });
+  const kind = px >= 60 ? 'icon' : px >= 42 ? 'combat' : px >= 40 ? 'name' : npc0 ? 'npc' : px >= 34 ? 'button' : 'placard';
+  const plate = kind === 'name' || kind === 'npc';
+  const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, depthWrite: !plate, fog: false });
   if (px >= 34 && px < 40 && !npc0) mat.opacity = 0;      // buttons fade in when picked
   const sp = new THREE.Sprite(mat);
   sp.scale.set(2.4, 0.45, 1);
   if (npc0) sp.center.set(0.5, 0.1);                 // two-line plates grow upward, clear of the head
-  const kind = px >= 60 ? 'icon' : px >= 42 ? 'combat' : px >= 40 ? 'name' : npc0 ? 'npc' : px >= 34 ? 'button' : 'placard';
+  if (plate) sp.renderOrder = PLATE_ORDER;           // after the world's other see-through things
   const draw = () => {
     const t = sp.userData.t, c = sp.userData.c;
     const g = cv.getContext('2d');
@@ -843,17 +850,26 @@ export function labelSprite(text, color = '#fff', px = 40) {
   };
   sp.userData.set(text, color);
   const ud = sp.userData;
+  ud.vis = 1;
   sp.onBeforeRender = (renderer, scene, camera) => {
+    if (plate) sp.updateMatrixWorld(true);           // the pull below only ever touches matrixWorld: start from the real spot
     if (!ud.base || sp.scale.x !== ud.lx || sp.scale.y !== ud.ly) ud.base = sp.scale.clone();
-    let sx = ud.base.x, sy = kind === 'icon' ? ud.base.y : ud.base.x * H / W, alpha = 1;
+    let sx = ud.base.x, sy = kind === 'icon' ? ud.base.y : ud.base.x * H / W, alpha = 1, d = 0;
     if (camera.isPerspectiveCamera) {
       _p.setFromMatrixPosition(sp.matrixWorld);
       _c.setFromMatrixPosition(camera.matrixWorld);
-      const d = Math.max(0.05, _p.distanceTo(_c));
+      d = Math.max(0.05, _p.distanceTo(_c));
       const view = 2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / (camera.zoom || 1);   // world height of the screen at d
       if (FIXED[kind]) {
         sy = FIXED[kind] / 720 * view; sx = sy * W / H;
         alpha = 1 - THREE.MathUtils.smoothstep(d, NAME_FADE[0], NAME_FADE[1]);
+        const world = typeof window !== 'undefined' ? window.__nmd?.W : null;
+        const hidden = alpha > 0 && typeof world?.heightAt === 'function' &&
+          (buildingAt(world, _c) !== buildingAt(world, _p) || (d > 6 && terrainHides(world, _c, _p)));
+        const now = performance.now(), dt = ud.tVis ? Math.min(1, (now - ud.tVis) / 1000) : 1;
+        ud.tVis = now;
+        ud.vis += ((hidden ? OCCLUDED[kind] : 1) - ud.vis) * (1 - Math.exp(-dt * 12));   // ~0.2 s fades
+        alpha *= ud.vis;
       } else {
         renderer.getSize(_sz);
         const onScreen = sy / view * _sz.y;
@@ -872,6 +888,11 @@ export function labelSprite(text, color = '#fff', px = 40) {
     if (Math.abs(mat.opacity - alpha) > 0.002) mat.opacity = alpha;
     if (sx !== sp.scale.x || sy !== sp.scale.y) { sp.scale.set(sx, sy, 1); sp.updateMatrixWorld(); }
     ud.lx = sp.scale.x; ud.ly = sp.scale.y;
+    if (plate && d > PULL) {
+      const k = PULL / d, m = sp.matrixWorld.elements;
+      m[12] = _c.x + (m[12] - _c.x) * k; m[13] = _c.y + (m[13] - _c.y) * k; m[14] = _c.z + (m[14] - _c.z) * k;
+      for (const i of [0, 1, 2, 4, 5, 6, 8, 9, 10]) m[i] *= k;
+    }
   };
   // free the GPU texture when the sprite leaves the scene (three re-uploads it if it comes back)
   sp.addEventListener('removed', () => { tex.dispose(); mat.dispose(); redrawWhenFonts.delete(draw); });
