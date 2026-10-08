@@ -16,11 +16,41 @@
 // Signs: signCanvas(lines, opts) paints a sign face (wooden board, gilded board, billboard or a
 // paint daub) for town3d.js; sign_demo_* are registered so the gallery shows them.
 import {
-  register, fill, rowLayout, paintRects, mottle, cracks, glaze, blurTile, blob, range, pick, wrap, streaks, ellipse,
-  mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, rngFrom, hashStr, worley, paintCells,
+  register, fill, rowLayout, paintRects, cracks, glaze, blurTile, blob, range, pick, wrap, ellipse, stroke,
+  mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, rngFrom, hashStr,
 } from './core.js';
 
 const F = 'architecture';
+
+// mottle() and streaks() as in core.js, but every mark's alpha and width are drawn once, before it is
+// wrapped, so a mark crossing a tile edge is the same mark on both sides (no seam)
+function mottle(g, size, rnd, { colors, count = 60, rmin = 20, rmax = 90, alpha = 0.25, hard = 0.2, stretch = 1, rot = null } = {}) {
+  for (let i = 0; i < count; i++) {
+    const x = rnd() * size, y = rnd() * size;
+    const r = range(rnd, rmin, rmax);
+    const c = pick(rnd, colors);
+    const a = rot == null ? rnd() * Math.PI : rot + (rnd() - 0.5) * 0.4;
+    const st = stretch * range(rnd, 0.7, 1.3), al = alpha * range(rnd, 0.6, 1);
+    wrap(size, x, y, r * Math.max(1, st), (xx, yy) => blob(g, xx, yy, r * st, r, a, c, al, hard));
+  }
+}
+function streaks(g, size, rnd, { colors, count = 80, len = [30, 120], width = [1, 4], angle = 0, wobble = 0.15, alpha = 0.35 } = {}) {
+  for (let i = 0; i < count; i++) {
+    const x = rnd() * size, y = rnd() * size;
+    const L = range(rnd, len[0], len[1]), W = range(rnd, width[0], width[1]);
+    const a = angle + (rnd() - 0.5) * wobble;
+    const c = pick(rnd, colors);
+    const pts = [];
+    let px = x, py = y;
+    for (let k = 0; k <= 6; k++) {
+      pts.push([px, py]);
+      const aa = a + Math.sin(k * 1.3 + i) * wobble;
+      px += Math.sin(aa) * L / 6; py -= Math.cos(aa) * L / 6;
+    }
+    const w1 = W * range(rnd, 0.3, 1), al = alpha * range(rnd, 0.5, 1);
+    wrap(size, x, y, L + W, (xx, yy) => stroke(g, pts.map(([u, v]) => [u - x + xx, v - y + yy]), W, w1, c, al));
+  }
+}
 const TAU = Math.PI * 2;
 const INK = '#2a2030';      // the darkest thing we paint: a soft violet-brown
 
@@ -169,7 +199,7 @@ function grainTile(g, s, rnd, { base, dark, lite, lines = 46, splits = 4, knots 
   }
   for (let i = 0; i < knots; i++) {
     const x = rnd() * s, y = rnd() * s, r = range(rnd, s * 0.015, s * 0.03);
-    wrap(s, x, y, r * 3, (X, Y) => {
+    wrap(s, x, y, r * 4, (X, Y) => {
       ellipse(g, X, Y, r * 2, r * 3.4, 0, shadowOf(base, 0.15), 0.4);
       ellipse(g, X, Y, r, r * 1.6, 0, shadowOf(base, 0.4), 0.8);
       blob(g, X + r * 0.5, Y + r * 0.7, r * 0.6, r, 0, lightOf(base, 0.4), 0.45, 0.4);
@@ -190,17 +220,29 @@ function grainTile(g, s, rnd, { base, dark, lite, lines = 46, splits = 4, knots 
 
 // Rows of shingles, drawn from the eave up so each row overlaps the one below and drops a soft
 // shadow on it. Up in the texture = up the roof. Tiles both ways.
-function shingles(g0, s, rnd, { rows, minW, maxW, colors, gapColor, round = 0.45, light = 0.4, overhang = 0.4, moss = 0, mossCols = ['#6d7a4a', '#5d6b3c'], grain = 0, chips = 0.25, speck = 0 }) {
+function shingles(g0, s, rnd, { rows, minW, maxW, colors, gapColor, round = 0.45, light = 0.4, overhang = 0.4, moss = 0, mossCols = ['#6d7a4a', '#5d6b3c'], grain = 0, chips = 0.25, speck = 0, missing = 0, patched = 0, butt = 0 }) {
   // painted twice, stacked, on a 2s-tall canvas; the middle band is a seamless tile
   const off = makeCanvas(s, s * 2), g = off.getContext('2d');
   fill(g, s, s * 2, gapColor);
   const rects = rowLayout(s, rnd, { rows, minW, maxW, rowJitter: 0.12 });
   const byRow = [];
-  for (const r of rects) (byRow[r.row] ||= []).push({ ...r, c: jitter(pick(rnd, colors), rnd, 0.09), seed: Math.floor(rnd() * 1e9), drop: range(rnd, -1.5, 3.5), skew: (rnd() - 0.5) * 3 });
+  for (const r of rects) {
+    const kind = rnd() < missing ? 'gone' : rnd() < patched ? 'patch' : 'ok';
+    const c = jitter(pick(rnd, colors), rnd, 0.09);
+    (byRow[r.row] ||= []).push({ ...r, kind, c: kind === 'patch' ? mix(shade(c, 0.78), '#6a4a34', 0.4) : c, seed: Math.floor(rnd() * 1e9), drop: range(rnd, -2.5, 5), skew: (rnd() - 0.5) * 5, rk: range(rnd, 0.55, 1.45) });
+  }
   const one = (r, dy) => {
-    const rr = rngFrom(r.seed);
+    let rr = rngFrom(r.seed);
     const x = r.x + 1.6, w = r.w - 3.2, y = r.y + dy - r.h * overhang, h = r.h * (1 + overhang) + r.drop;
-    const rad = Math.min(w * round, r.h * 0.6);
+    if (r.kind === 'gone') {
+      // a missing shingle: the dark sheathing boards and the butts of the row above's nails
+      for (const ox of (x < 0 ? [0, s] : x + w > s ? [0, -s] : [0])) {
+        g.fillStyle = grad(g, 0, y, 0, y + h, [[0, '#3a2620'], [0.7, '#5a4030'], [1, '#4a3428']]); g.fillRect(x + ox, y + h * 0.35, w, h * 0.65);
+        line(g, [[x + ox + 2, y + h * 0.7], [x + ox + w - 2, y + h * 0.72]], 1.2, '#5a4434', 0.6);
+      }
+      return;
+    }
+    const rad = Math.min(w * round * r.rk, r.h * 0.6);
     const path = (ox) => {
       g.beginPath();
       g.moveTo(x + ox, y); g.lineTo(x + ox + w, y);
@@ -211,6 +253,7 @@ function shingles(g0, s, rnd, { rows, minW, maxW, colors, gapColor, round = 0.45
       g.closePath();
     };
     for (const ox of (x < 0 ? [0, s] : x + w > s ? [0, -s] : [0])) {
+      rr = rngFrom(r.seed + 1);
       // the soft shadow this shingle drops on the row below
       g.fillStyle = grad(g, 0, y + h - 3, 0, y + h + 7, [[0, INK, 0.38], [0.45, INK, 0.2], [1, INK, 0]]);
       g.fillRect(x + ox + 1, y + h - 3, w + 2, 10);
@@ -229,6 +272,8 @@ function shingles(g0, s, rnd, { rows, minW, maxW, colors, gapColor, round = 0.45
         g.globalAlpha = 0.45; g.fillStyle = shadowOf(c, 0.6); g.fillRect(x + ox + w - 2.6, y, 2.6, h);
         g.globalAlpha = 1;
         line(g, [[x + ox + r.skew + rad * 0.6, y + h - 1.2], [x + ox + w - rad * 0.6, y + h - 1.2]], 2.4, shadowOf(c, 0.65), 0.6);
+        // the butt's worn front edge catches the light just above the dark line
+        if (butt) line(g, [[x + ox + r.skew + rad * 0.7, y + h - 4], [x + ox + w - rad * 0.7, y + h - 4.4]], 1.6, lightOf(c, 0.55), butt);
         if (rr() < chips) { const cx = x + ox + range(rr, 0.2, 0.8) * w; ellipse(g, cx, y + h, range(rr, 2, 5), range(rr, 2, 4), 0, gapColor, 0.9); }
         if (moss && rr() < moss) {
           for (let i = 0; i < 3; i++) blob(g, x + ox + range(rr, 0.1, 0.9) * w, y + h * range(rr, 0.75, 1.0), range(rr, 3, 9), range(rr, 2, 5), 0, pick(rr, mossCols), 0.55, 0.4);
@@ -240,38 +285,51 @@ function shingles(g0, s, rnd, { rows, minW, maxW, colors, gapColor, round = 0.45
   g0.drawImage(off, 0, s / 2, s, s, 0, 0, s, s);
 }
 
-// Straw thatch: courses of straw bundles, each hanging over the one below with a ragged edge.
-function thatch(g0, s, rnd, { rows = 5, base = '#5e4628', cols, tips, shadow = 0.45 }) {
+// Straw thatch: courses of straw bundles laid from the eave up, each course's ragged butt overlapping
+// the one below. Every bundle has its own width, tint, offset and length, a lit bulge near its top and
+// a dark ragged under-lip, so the courses read as bundles of straw, not as stacked tubes. Up = up the roof.
+function thatch(g0, s, rnd, { courses = 9, base = '#3e3020', straw, tips, lip = '#5a4628', lit = '#dcc070', moss = 0.12, mossCols = ['#6d7a4a', '#5e6a3e'] }) {
   const off = makeCanvas(s, s * 2), g = off.getContext('2d');
   fill(g, s, s * 2, base);
-  const H = s / rows;
+  const H = s / courses;
   const data = [];
-  for (let i = 0; i < rows; i++) data.push({ y: i * H, seed: Math.floor(rnd() * 1e9) });
-  const course = (d, dy) => {
-    const rr = rngFrom(d.seed);
-    const y0 = d.y + dy;
-    // the course's shadow on the one below
-    g.save(); g.globalAlpha = shadow; g.fillStyle = INK; g.filter = 'blur(4px)';
-    g.beginPath(); g.moveTo(-8, y0 + H * 1.02);
-    for (let x = 0; x <= s + 8; x += 8) g.lineTo(x, y0 + H * (1.02 + 0.06 * Math.sin(x / s * TAU * 5 + d.seed)) + 8);
-    g.lineTo(s + 8, y0 + H * 0.7); g.lineTo(-8, y0 + H * 0.7); g.closePath(); g.fill(); g.restore();
-    const n = Math.round(s * 2.2);
-    const comb = range(rr, -0.14, 0.14);
-    for (const [layer, list, a] of [[0, cols.slice(0, 2), 1], [1, cols, 1], [2, tips, 1]]) {
-      for (let k = 0; k < n * (layer === 2 ? 0.3 : 0.7); k++) {
-        const x = rr() * s, start = layer === 2 ? y0 - H * 0.32 + rr() * H * 0.18 : y0 - H * 0.35 + rr() * H * 0.45 + layer * H * 0.12;
-        const len = layer === 2 ? H * range(rr, 0.3, 0.55) : H * range(rr, 0.9, 1.35) - layer * H * 0.12, ang = Math.PI + comb + range(rr, -0.07, 0.07), w = range(rr, 1.8, 3.6);
-        const c = pick(rr, list), bend = range(rr, -0.12, 0.12);
-        const pts = [];
-        for (let t = 0; t <= 4; t++) { const u = t / 4, aa = ang + bend * u * u; pts.push([x + Math.sin(aa) * len * u, start - Math.cos(aa) * len * u]); }
-        for (const dx of (x < 12 ? [0, s] : x > s - 12 ? [0, -s] : [0])) line(g, pts.map(([u, v]) => [u + dx, v]), w, c, a);
-      }
+  for (let i = 0; i < courses; i++) {
+    const bundles = [];
+    let x = rnd() * s, end = x + s;
+    while (x < end - 10) { const w = Math.min(end - x, range(rnd, 26, 58)); bundles.push({ x, w, dy: range(rnd, -5, 6), len: range(rnd, 1.05, 1.32), c: jitter(pick(rnd, straw), rnd, 0.08), seed: Math.floor(rnd() * 1e9), mossy: rnd() < moss, bulge: range(rnd, 0.7, 1.3) }); x += w * range(rnd, 0.8, 0.95); }
+    data.push({ y: i * H, bundles });
+  }
+  const bundle = (b, y0, dx) => {
+    const rr = rngFrom(b.seed);
+    const X = b.x + dx, top = y0 - H * 0.45 + b.dy, bot = y0 + H * b.len + b.dy;
+    // the soft shadow this bundle's butt throws on the course below
+    blob(g, X + b.w / 2 + 3, bot + 3, b.w * 0.62, H * 0.3, 0, INK, 0.38, 0.25);
+    // body: a vertical gradient (lit bulge up top, dark under the butt)
+    g.save();
+    g.beginPath(); g.moveTo(X, top);
+    for (let k = 0; k <= 8; k++) g.lineTo(X + b.w * k / 8 + (rr() - 0.5) * 3, bot - Math.abs(Math.sin(k * 1.7 + b.seed)) * 7 - rr() * 5);
+    g.lineTo(X + b.w, top); g.closePath(); g.clip();
+    g.fillStyle = grad(g, 0, top, 0, bot, [[0, shadowOf(b.c, 0.3)], [0.35, mix(b.c, lit, 0.35 * b.bulge)], [0.6, b.c], [0.86, shadowOf(b.c, 0.25)], [1, lip]]);
+    g.fillRect(X - 2, top, b.w + 4, bot - top + 2);
+    // straws: near-vertical strokes, a few slanted, light and dark
+    for (let k = 0; k < b.w * 1.6; k++) {
+      const sx = X + rr() * b.w, sy = top + rr() * (bot - top) * 0.5, L = range(rr, 0.4, 0.75) * (bot - top), a = range(rr, -0.12, 0.12);
+      const col = rr() < 0.55 ? pick(rr, straw) : rr() < 0.6 ? pick(rr, tips) : shadowOf(b.c, 0.45);
+      line(g, [[sx, sy], [sx + Math.sin(a) * L, sy + Math.cos(a) * L]], range(rr, 1, 2.2), col, range(rr, 0.35, 0.75));
     }
-    // the course's lower third goes dark (it is in the shade of the one above), its top catches the light
-    // (only just above its ragged butt edge: thatch is not a stack of logs)
-    g.save(); g.fillStyle = grad(g, 0, y0 - H * 0.35, 0, y0 + H, [[0, '#6e5a32', 0], [0.72, '#6e5a32', 0], [0.92, '#4a3a22', 0.3], [1, '#4a3a22', 0.12]]); g.fillRect(0, y0 - H * 0.35, s, H * 1.35); g.restore();
+    g.restore();
+    // ragged straw tips hanging past the butt, and the dark under-lip
+    for (let k = 0; k < b.w / 3; k++) {
+      const sx = X + rr() * b.w, sy = bot - range(rr, 6, 12), L = range(rr, 4, 13);
+      line(g, [[sx, sy], [sx + (rr() - 0.5) * 3, sy + L]], range(rr, 1, 1.8), rr() < 0.5 ? lip : pick(rr, tips), 0.7);
+    }
+    line(g, [[X + 2, bot - 4], [X + b.w - 2, bot - 5]], 2.6, lip, 0.45);
+    if (b.mossy) for (let k = 0; k < 3; k++) blob(g, X + rr() * b.w, bot - range(rr, 4, H * 0.5), range(rr, 5, 13), range(rr, 3, 7), 0, pick(rr, mossCols), 0.5, 0.35);
   };
-  for (const dy of [s, 0]) for (let i = rows - 1; i >= 0; i--) course(data[i], dy);
+  for (const dy of [s, 0]) for (let i = courses - 1; i >= 0; i--) {
+    const d = data[i];
+    for (const b of d.bundles) for (const dx of [0, -s]) bundle(b, d.y + dy, dx);
+  }
   g0.drawImage(off, 0, s / 2, s, s, 0, 0, s, s);
 }
 
@@ -422,16 +480,110 @@ function plasterPaint(g, s, rnd, cv, holes) {
   glaze(g, s, s, '#fff0d0', 0.12, 'soft-light');
   blurTile(cv, 0.5);
 }
-register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: three creams, trowel strokes, rain streaks, six holes of brick and stone with lit lower lips', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, true); } });
-register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: the same cream, no holes (they would repeat every tile)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
+register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: three creams, soft trowel strokes, rain streaks (the holes are separate decals: wall_holes)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
+register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: the same cream, a little warmer', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); glaze(g, s, s, '#ffd8a0', 0.08, 'soft-light'); } });
 
+// Holes in the plaster as decals (2×2 atlas, alpha): [0] bricks and [1] fieldstone through cream plaster,
+// [2] mud bricks and [3] a shallow scar through adobe. town_build scatters 0-3 per wall at seeded spots.
+export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3] };
+register('wall_holes', {
+  family: F, size: 512, alpha: true, note: 'plaster-hole decals (2×2 atlas, alpha): brick and fieldstone through plaster, mud brick and a scar through adobe',
+  paint(g, s, rnd) {
+    g.clearRect(0, 0, s, s);
+    const q = s / 2;
+    const cells = [
+      { plaster: '#ddcfae' },
+      { plaster: '#ddcfae', brick: ['#8e8a80', '#9e988a', '#7e7a72'], mortar: '#5a5048' },
+      { plaster: '#c89068', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52'], mortar: '#6a4830' },
+      { plaster: '#c89068', brick: ['#9a6a48', '#a87452', '#8e6040'], mortar: '#5e4028' },
+    ];
+    cells.forEach((o, i) => {
+      const cx = (i % 2) * q + q / 2, cy = Math.floor(i / 2) * q + q / 2;
+      // paint on a cell-sized canvas so nothing bleeds into the neighbours, then fade its edge
+      const cv = makeCanvas(q, q), gg = cv.getContext('2d');
+      gg.fillStyle = rgba(o.plaster, 0); gg.fillRect(0, 0, q, q);
+      plasterHole(gg, q * 4, rnd, q / 2, q / 2, i === 3 ? 44 : 62, { ...o, squash: i === 1 ? 0.75 : 0.85, cell: q });
+      g.drawImage(cv, cx - q / 2, cy - q / 2);
+    });
+  },
+});
+
+// Fieldstone: a tileable power diagram (Voronoi with a weight per stone) so stones come in three
+// sizes, squashed so they sit wider than tall with flattish tops; lumpy edges, a domed body lit from
+// the upper left, a lit top-left rim and a cool shaded lower rim, soft warm-dark mortar, moss
+// collecting in the crevices under the stones.
+function fieldstone(g, s, rnd, cv, { colors, mortar = '#4a4038', moss = 0.5, sizes = [64, 42, 24], squash = 1.45, mossCols = ['#6d7a4a', '#5d6b3c', '#7a8a50'] }) {
+  // dart-throwing: big stones first, then medium and small ones in the gaps
+  const seeds = [];
+  const dist = (ax, ay, bx, by) => { let dx = Math.abs(ax - bx), dy = Math.abs(ay - by); dx = Math.min(dx, s - dx); dy = Math.min(dy, s - dy) * squash; return Math.hypot(dx, dy); };
+  for (const r of sizes) for (let t = 0; t < 900; t++) {
+    const x = rnd() * s, y = rnd() * s, rr = r * range(rnd, 0.85, 1.15);
+    if (seeds.every(q => dist(x, y, q.x, q.y) > (q.r + rr) * 0.92)) seeds.push({ x, y, r: rr, c: hex(jitter(pick(rnd, colors), rnd, 0.08)), ph: rnd() * TAU, ph2: rnd() * TAU, tone: range(rnd, 0.92, 1.08) });
+  }
+  const N = seeds.length, img = g.createImageData(s, s), D = img.data, M = hex(mortar);
+  const pd = new Float32Array(N);
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    // lumpy edges: a few tileable waves added to the weighted distance
+    const lump = 380 * (Math.sin(TAU * 7 * x / s + Math.sin(TAU * 3 * y / s) * 1.3) + Math.sin(TAU * 9 * y / s + Math.sin(TAU * 4 * x / s)) * 0.8) + 160 * Math.sin(TAU * 17 * x / s + TAU * 13 * y / s);
+    let b1 = 1e12, b2 = 1e12, b3 = 1e12, i1 = 0, i2 = 0, i3 = 0;
+    for (let i = 0; i < N; i++) {
+      const q = seeds[i];
+      let dx = x - q.x, dy = y - q.y;
+      if (dx > s / 2) dx -= s; else if (dx < -s / 2) dx += s;
+      if (dy > s / 2) dy -= s; else if (dy < -s / 2) dy += s;
+      dy *= squash;
+      const d = dx * dx + dy * dy - q.r * q.r + lump;
+      pd[i] = d;
+      if (d < b1) { b3 = b2; i3 = i2; b2 = b1; i2 = i1; b1 = d; i1 = i; } else if (d < b2) { b3 = b2; i3 = i2; b2 = d; i2 = i; } else if (d < b3) { b3 = d; i3 = i; }
+    }
+    const A = seeds[i1];
+    const edgeTo = (Bq, bd) => {
+      let sx = Bq.x - A.x, sy = Bq.y - A.y;
+      if (sx > s / 2) sx -= s; else if (sx < -s / 2) sx += s;
+      if (sy > s / 2) sy -= s; else if (sy < -s / 2) sy += s;
+      return (bd - b1) / (2 * Math.hypot(sx, sy * squash) + 1e-6);
+    };
+    // distance to the joint, with the corners rounded off (a soft min of the two nearest joints)
+    const e12 = edgeTo(seeds[i2], b2), e13 = edgeTo(seeds[i3], b3), kk = 4;
+    const e = -kk * Math.log(Math.exp(-e12 / kk) + Math.exp(-e13 / kk)) + kk * 0.45;
+    let dx = x - A.x, dy = y - A.y;
+    if (dx > s / 2) dx -= s; else if (dx < -s / 2) dx += s;
+    if (dy > s / 2) dy -= s; else if (dy < -s / 2) dy += s;
+    const rn = Math.min(1, Math.hypot(dx, dy * squash) / A.r);
+    const l = Math.hypot(dx, dy) || 1, ux = dx / l, uy = dy / l;
+    const k = (y * s + x) * 4;
+    const c = A.c;
+    // dome, then a wide lit rim facing the upper left and a shaded rim facing the lower right
+    const facing = -(ux * 0.6 + uy * 0.8);            // > 0 on the upper-left side
+    const rim = Math.max(0, 1 - (e - 3) / 9);
+    let m = A.tone * (1.08 - 0.22 * rn * rn) * (1 + 0.32 * rim * facing);
+    // the flat top of a stone catches more light
+    if (uy < -0.55) m *= 1 + 0.12 * Math.max(0, 1 - e / 14);
+    // soft painterly blotches inside each stone
+    m *= 1 + 0.07 * Math.sin(dx * 0.09 + A.ph) * Math.sin(dy * 0.11 + A.ph2);
+    let r = c.r * m, gg = c.g * m, bb = c.b * m;
+    if (facing < 0) { r -= 10 * rim * -facing; bb += 8 * rim * -facing; }   // cool shadow side
+    // moss: in the crevice under a stone's bottom and the joints round it, broken up
+    const mossy = moss * Math.max(0, uy) * Math.max(0, 1 - e / 7) * (0.5 + 0.5 * Math.sin(x * 0.07 + y * 0.05) * Math.sin(x * 0.031 - y * 0.06 + A.ph));
+    if (mossy > 0.05) { const mc = hex(mossCols[(i1 + i2) % mossCols.length]); const t = Math.min(0.75, mossy * 1.6); r = r * (1 - t) + mc.r * t; gg = gg * (1 - t) + mc.g * t; bb = bb * (1 - t) + mc.b * t; }
+    // mortar: soft-edged, a touch lighter where it is thick
+    const gt = Math.max(0, Math.min(1, (4.2 - e) / 2.6));
+    const mw = 1 + 0.12 * Math.max(0, 1 - Math.abs(e) / 3);
+    r = r * (1 - gt) + M.r * mw * gt; gg = gg * (1 - gt) + M.g * mw * gt; bb = bb * (1 - gt) + M.b * mw * gt;
+    D[k] = Math.max(0, Math.min(255, r)); D[k + 1] = Math.max(0, Math.min(255, gg)); D[k + 2] = Math.max(0, Math.min(255, bb)); D[k + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  // a few pits, chips and cracks, and the odd moss tuft on a top
+  for (let i = 0; i < 90; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 5, (X, Y) => { ellipse(g, X, Y, range(rnd, 1, 2.6), range(rnd, 0.8, 2), 0, INK, 0.3); ellipse(g, X + 1, Y + 1.2, 1.2, 0.9, 0, '#fff0d0', 0.18); }); }
+  cracks(g, s, rnd, { color: '#3a3030', count: 6, len: [14, 40], width: [0.7, 1.3], alpha: 0.45 });
+  mottle(g, s, rnd, { colors: mossCols, count: 14, rmin: 5, rmax: 16, alpha: 0.18, hard: 0.3 });
+}
 register('stone_found', {
-  family: F, size: 512, note: 'fieldstone foundation: lumpy coursed stones, warm gray, a little moss',
+  family: F, size: 512, note: 'fieldstone foundation: stones of three sizes sitting wider than tall, lit top-left rims, soft warm mortar, moss in the crevices',
   paint(g, s, rnd, h, cv) {
-    rubble(g, s, rnd, { rows: 6, minW: 60, maxW: 170, colors: ['#8e877a', '#9c9484', '#7f796f', '#a39a88', '#8a8577', '#958b7a', '#8c8a86', '#a08a72', '#7a7468'], grout: '#3e3532', light: 0.5, moss: 0.35, rowJitter: 0.45 });
-    mottle(g, s, rnd, { colors: ['#6d7a4a', '#5d6b3c', '#4e5a34'], count: 18, rmin: 10, rmax: 30, alpha: 0.14, hard: 0.2 });
+    fieldstone(g, s, rnd, cv, { colors: ['#8e877a', '#9c9484', '#7f796f', '#a39a88', '#8a8577', '#958b7a', '#8c8a86', '#a08a72', '#7a7468', '#9a8e7e'], mortar: '#4a4038', moss: 0.55 });
     glaze(g, s, s, '#ffe2b0', 0.1, 'soft-light');
-    blurTile(cv, 0.5);
+    blurTile(cv, 0.7);
   },
 });
 
@@ -446,11 +598,11 @@ register('planks_weathered', {
 });
 
 register('planks_barnred', {
-  family: F, size: 512, note: 'barn boards: faded red paint over gray wood, chipped and streaked',
+  family: F, size: 512, note: 'barn boards: faded oxblood paint worn to grey wood, rain runs and sun-faded streaks',
   paint(g, s, rnd, h, cv) {
-    const rects = planks(g, s, rnd, { rows: 8, minL: 180, maxL: 380, vertical: true, colors: ['#8e3a2c', '#9a4432', '#843428', '#a24c38'], gap: 4, gapColor: '#2a1a1c', grain: 9, galpha: 0.3, weather: 0.4, splits: 0.4, nails: 2, knots: 0.2 });
-    // paint worn through to the wood along the grain
-    for (let i = 0; i < 26; i++) {
+    const rects = planks(g, s, rnd, { rows: 8, minL: 180, maxL: 380, vertical: true, colors: ['#8a3a2a', '#7e3426', '#94442e', '#86382a', '#8e4232'], gap: 4, gapColor: '#2a1a1c', grain: 9, galpha: 0.3, weather: 0.65, splits: 0.45, nails: 2, knots: 0.2 });
+    // paint worn through to the grey wood along the grain
+    for (let i = 0; i < 40; i++) {
       const x = rnd() * s, y = rnd() * s, L = range(rnd, 16, 60), w = range(rnd, 5, 14);
       wrap(s, x, y, L, (X, Y) => {
         blob(g, X + 1.5, Y + 2, w * 0.6, L * 0.5, 0, INK, 0.25, 0.4);
@@ -458,7 +610,9 @@ register('planks_barnred', {
         blob(g, X - w * 0.15, Y - L * 0.1, w * 0.3, L * 0.35, 0, '#b4a890', 0.5, 0.4);
       });
     }
-    streaks(g, s, rnd, { colors: ['#5a2a24', '#c86a50'], count: 30, len: [40, 160], width: [2, 6], angle: Math.PI, wobble: 0.03, alpha: 0.12 });
+    // rain runs and sun-faded streaks down the boards
+    streaks(g, s, rnd, { colors: ['#4a2420', '#5a2a24', '#b07a68', '#a89080'], count: 60, len: [50, 220], width: [2, 7], angle: Math.PI, wobble: 0.02, alpha: 0.16 });
+    mottle(g, s, rnd, { colors: ['#a08a7a', '#6a3428'], count: 16, rmin: 40, rmax: 110, alpha: 0.12, hard: 0.05, stretch: 2.5, rot: Math.PI / 2 });
     glaze(g, s, s, '#ffd8b0', 0.12, 'soft-light');
     blurTile(cv, 0.4);
   },
@@ -556,17 +710,18 @@ register('log_wall', {
       line(g, Array.from({ length: 34 }, (_, k) => [k * s / 32 - 8, yT(k * s / 32 - 8) - 2.5]), 1.6, '#8a7058', 0.35);
       g.save(); g.globalAlpha = 0.5; g.fillStyle = INK; g.filter = 'blur(3px)';
       g.beginPath(); g.moveTo(-32, yB(-32)); for (let x = -32; x <= s + 32; x += 16) g.lineTo(x, yB(x) + 5); g.lineTo(s + 32, yB(s + 32) - 6); g.lineTo(-32, yB(-32) - 6); g.closePath(); g.fill(); g.restore();
-      const body = () => { g.beginPath(); g.moveTo(0, yT(0)); for (let x = 0; x <= s; x += 16) g.lineTo(x, yT(x)); for (let x = s; x >= 0; x -= 16) g.lineTo(x, yB(x)); g.closePath(); };
+      const body = () => { g.beginPath(); g.moveTo(-32, yT(-32)); for (let x = -32; x <= s + 32; x += 16) g.lineTo(x, yT(x)); for (let x = s + 32; x >= -32; x -= 16) g.lineTo(x, yB(x)); g.closePath(); };
       clipped(g, body, () => {
         g.fillStyle = grad(g, 0, y0, 0, y0 + H, [[0, lightOf(c, 0.55)], [0.25, lightOf(c, 0.2)], [0.55, c], [0.85, shadowOf(c, 0.45)], [1, shadowOf(c, 0.65)]]);
-        g.fillRect(0, y0, s, H);
+        g.fillRect(-32, y0, s + 64, H);
         for (let k = 0; k < 16; k++) {
           const x = rnd() * s, y = y0 + range(rnd, 0.2, 0.85) * H, L = range(rnd, 30, 140);
-          wrap(s, x, y, L, (X, Y) => blob(g, X, Y, L, range(rnd, 2, 7), 0, rnd() < 0.5 ? '#5a3c26' : lightOf(c, 0.3), 0.3, 0.2));
+          const bh = range(rnd, 2, 7), bc = rnd() < 0.5 ? '#5a3c26' : lightOf(c, 0.3);
+          wrap(s, x, y, L, (X, Y) => blob(g, X, Y, L, bh, 0, bc, 0.3, 0.2));
         }
         for (let k = 0; k < 9; k++) {
           const y = y0 + range(rnd, 0.25, 0.8) * H, k1 = 2 + Math.floor(rnd() * 4), ph = rnd() * TAU, a = range(rnd, 0.5, 2);
-          const pts = []; for (let x = 0; x <= s; x += 8) pts.push([x, y + Math.sin(TAU * k1 * x / s + ph) * a]);
+          const pts = []; for (let x = -16; x <= s + 16; x += 8) pts.push([x, y + Math.sin(TAU * k1 * x / s + ph) * a]);
           line(g, pts, range(rnd, 0.7, 1.6), rnd() < 0.7 ? shadowOf(c, 0.5) : lightOf(c, 0.4), 0.35);
         }
         // checks (cracks) along the log
@@ -587,67 +742,85 @@ register('log_wall', {
 });
 
 register('planks_rough', {
-  family: F, size: 512, note: 'frontier clapboards: long horizontal boards of uneven width, sun-bleached tops, rare butt joints, dark gaps',
+  family: F, size: 512, note: 'frontier clapboards: 8-10 wide horizontal boards a tile in three tones, dark gaps, nail heads at the studs, sun-bleached tops, rare butt joints',
   paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#3a2418');
+    fill(g, s, s, '#24160e');
     const hs = []; let tot = 0;
-    while (tot < s - 18) { const hh = range(rnd, 18, 34); hs.push(hh); tot += hh; }
+    while (tot < s - 40) { const hh = range(rnd, 44, 60); hs.push(hh); tot += hh; }
     const k = s / tot;
+    const tones = [['#8a5a36', '#94643c', '#86583a'], ['#6e4a30', '#785234', '#664428'], ['#9c7a58', '#a08262', '#94765a']];
+    const studs = [0.12, 0.45, 0.78].map(f => f * s + range(rnd, -6, 6));
     let y = 0;
     for (const h0 of hs) {
-      const hh = h0 * k, x0 = rnd() * s;
+      const hh = h0 * k, x0 = rnd() * s, tone = pick(rnd, tones);
       let x = x0;
       while (x < x0 + s - 12) {
-        let L = range(rnd, 300, 500); if (x + L > x0 + s - 40) L = x0 + s - x;
-        const c = jitter(pick(rnd, ['#8a5a36', '#94643c', '#7e5232', '#9a6a40', '#86583a', '#8e6040']), rnd, 0.06), seed = Math.floor(rnd() * 1e9);
-        wrapRect(s, x, y, L, hh, (dx, dy) => plank(g, x + dx + 1.2, y + dy + 1, L - 2.4, hh - 2.6, c, rngFrom(seed), { grain: 5, galpha: 0.35, knots: 0.25, bevel: 2, light: 0.55, splits: 0.35, weather: 0.7, nails: 2, endShade: 0.25 }));
+        let L = range(rnd, 260, 520); if (x + L > x0 + s - 60) L = x0 + s - x;
+        const c = jitter(pick(rnd, tone), rnd, 0.06), seed = Math.floor(rnd() * 1e9);
+        wrapRect(s, x, y, L, hh, (dx, dy) => plank(g, x + dx + 1.5, y + dy + 1.5, L - 3, hh - 3, c, rngFrom(seed), { grain: 7, galpha: 0.4, knots: 0.35, bevel: 3, light: 0.55, splits: 0.45, weather: 0.75, endShade: 0.3 }));
         x += L;
       }
-      // the board's sun-bleached top edge, and the soft shadow it throws on the board below
       wrapRect(s, 0, y, s, hh, (dx, dy) => {
-        g.save(); g.fillStyle = grad(g, 0, y + dy, 0, y + dy + hh * 0.45, [[0, '#c09a6a', 0.38], [1, '#c09a6a', 0]]); g.fillRect(0, y + dy + 1, s, hh * 0.45); g.restore();
-        g.save(); g.fillStyle = grad(g, 0, y + dy + hh, 0, y + dy + hh + 6, [[0, INK, 0.45], [1, INK, 0]]); g.fillRect(0, y + dy + hh, s, 6); g.restore();
+        // the board's sun-bleached top edge, and the soft shadow it throws on the board below
+        g.save(); g.fillStyle = grad(g, 0, y + dy, 0, y + dy + hh * 0.4, [[0, '#d0ae80', 0.42], [1, '#d0ae80', 0]]); g.fillRect(0, y + dy + 1.5, s, hh * 0.4); g.restore();
+        g.save(); g.fillStyle = grad(g, 0, y + dy + hh - 1, 0, y + dy + hh + 7, [[0, INK, 0.6], [1, INK, 0]]); g.fillRect(0, y + dy + hh - 1, s, 8); g.restore();
+        // nails at the studs, a rust run under some
+        for (const sx of studs) {
+          const nx = sx + range(rnd, -3, 3), ny = y + dy + hh * range(rnd, 0.35, 0.6);
+          wrap(s, nx, ny, 6, (X, Y) => { nailHead(g, X, Y, 2.4, '#4e4a4e'); if (rnd() < 0.3) line(g, [[X, Y + 2.5], [X + range(rnd, -1, 1), Y + range(rnd, 8, 20)]], 1.8, '#6a3a22', 0.3); });
+        }
       });
       y += hh;
     }
-    mottle(g, s, rnd, { colors: ['#a49c8c', '#6a5640'], count: 24, rmin: 30, rmax: 90, alpha: 0.12, hard: 0.1, stretch: 3, rot: 0 });
+    mottle(g, s, rnd, { colors: ['#a49c8c', '#6a5640', '#b09878'], count: 24, rmin: 30, rmax: 100, alpha: 0.12, hard: 0.1, stretch: 3, rot: 0 });
     glaze(g, s, s, '#ffd8a0', 0.12, 'soft-light');
     blurTile(cv, 0.4);
   },
 });
 
-function adobePaint(g, s, rnd, cv, holes) {
-  fill(g, s, s, '#dbb48c');
-  mottle(g, s, rnd, { colors: ['#e6c49e', '#d0a47c', '#e2bc94'], count: 20, rmin: 90, rmax: 220, alpha: 0.55, hard: 0.05 });
-  mottle(g, s, rnd, { colors: ['#f2d8ae', '#c4946c', '#dcb088', '#ccA078', '#ecd0a6', '#b88a66'], count: 50, rmin: 30, rmax: 130, alpha: 0.45, hard: 0.08 });
+// Gadgetzan mud plaster: a warm terracotta-tan (well off the pale sand), big soft ochre and rose
+// blotches, trowel swirls, straw flecks, rain runs and hairline cracks. (Holes are wall_holes decals.)
+function adobePaint(g, s, rnd, cv, { base = '#c08660', blot = ['#cc9268', '#b47a56', '#c88a5e'], mid = ['#d8a074', '#a8704e', '#c4865c', '#b98060', '#e2ac7e', '#9e6a4a'], lite = '#e2ac7e', dark = '#8e5e42' } = {}) {
+  fill(g, s, s, base);
+  mottle(g, s, rnd, { colors: blot, count: 18, rmin: 100, rmax: 230, alpha: 0.55, hard: 0.05 });
+  // a few large ochre and rose clouds (two related hues, so walls are never one flat value)
+  mottle(g, s, rnd, { colors: ['#c89050', '#c07468', '#d09a5c'], count: 6, rmin: 120, rmax: 220, alpha: 0.28, hard: 0.04 });
+  mottle(g, s, rnd, { colors: mid, count: 50, rmin: 30, rmax: 120, alpha: 0.38, hard: 0.08 });
   blurTile(cv, 4);
-  for (let i = 0; i < 70; i++) {
-    const x = rnd() * s, y = rnd() * s, L = range(rnd, 30, 80), a = range(rnd, -0.4, 0.4), w = range(rnd, 10, 24);
-    const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([x + Math.cos(a) * L * t, y + Math.sin(a) * L * t + Math.sin(t * 3) * 5]); }
-    const c = rnd() < 0.5 ? '#f2d8ae' : '#a87c5c';
-    wrap(s, x, y, L + w, (X, Y) => line(g, pts.map(([u, v]) => [u - x + X, v - y + Y]), w, c, 0.09));
+  // trowel swirls: arcs, lit on their upper edge
+  for (let i = 0; i < 60; i++) {
+    const x = rnd() * s, y = rnd() * s, R = range(rnd, 24, 70), a0 = rnd() * TAU, sweep = range(rnd, 0.8, 1.8), w = range(rnd, 8, 20);
+    const pts = []; for (let k = 0; k <= 8; k++) { const a = a0 + sweep * k / 8; pts.push([x + Math.cos(a) * R, y + Math.sin(a) * R * 0.55]); }
+    wrap(s, x, y, R + w, (X, Y) => {
+      const sh = pts.map(([u, v]) => [u - x + X, v - y + Y]);
+      line(g, sh.map(([u, v]) => [u + 1.5, v + 2]), w, dark, 0.07);
+      line(g, sh, w * 0.8, lite, 0.1);
+    });
   }
-  mottle(g, s, rnd, { colors: ['#a87c5c', '#f6e0bc', '#b8885c'], count: 280, rmin: 1.5, rmax: 4, alpha: 0.22, hard: 0.6 });
-  for (const y0 of [s * 0.05, s * 0.5]) rainStreaks(g, s, rnd, 0, s, y0, '#a07858', 8, 0.14);
-  if (holes) {
-    const o = { plaster: '#dbb48c', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52'], mortar: '#7a5838' };
-    const spots = [[0.3, 0.68, 38], [0.8, 0.22, 22], [0.12, 0.2, 15]];
-    for (const [fx, fy, r] of spots) plasterHole(g, s, rnd, s * (fx + (rnd() - 0.5) * 0.06), s * (fy + (rnd() - 0.5) * 0.06), r * range(rnd, 0.85, 1.15), { ...o, squash: range(rnd, 0.6, 0.95) });
+  // straw flecks in the mud
+  for (let i = 0; i < 110; i++) {
+    const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 8), a = rnd() * Math.PI;
+    wrap(s, x, y, 10, (X, Y) => line(g, [[X, Y], [X + Math.cos(a) * L, Y + Math.sin(a) * L]], range(rnd, 0.8, 1.4), rnd() < 0.6 ? '#e8c890' : '#7a5034', 0.45));
   }
-  cracks(g, s, rnd, { color: '#6a4628', count: 9, len: [20, 70], width: [0.8, 1.6], alpha: 0.42 });
-  glaze(g, s, s, '#ffe4c0', 0.14, 'soft-light');
+  mottle(g, s, rnd, { colors: [dark, '#eec094', '#a87050'], count: 220, rmin: 1.5, rmax: 4, alpha: 0.2, hard: 0.6 });
+  for (const y0 of [s * 0.05, s * 0.5]) rainStreaks(g, s, rnd, 0, s, y0, dark, 7, 0.14);
+  cracks(g, s, rnd, { color: '#5a3420', count: 9, len: [20, 70], width: [0.8, 1.6], alpha: 0.42 });
+  glaze(g, s, s, '#ffd8b0', 0.12, 'soft-light');
   blurTile(cv, 0.6);
 }
-register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm pinkish mud plaster, cool shadows, rain streaks, mud bricks showing', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, true); } });
-register('adobe_inner', { family: F, size: 512, note: 'indoor adobe: no exposed bricks', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, false); } });
+register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm terracotta-tan mud plaster, ochre and rose clouds, trowel swirls, straw flecks, rain runs', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv); } });
+register('adobe_inner', {
+  family: F, size: 512, note: 'adobe trim and indoor mud: a lighter limewashed tan (parapet caps, piers, upper blocks, interiors)',
+  paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { base: '#d09a76', blot: ['#d8a882', '#c48c68', '#d4a07a'], mid: ['#e2b48c', '#b47c5c', '#cc946e', '#c48e6c', '#e8bc94', '#aa7656'], lite: '#eec29a', dark: '#946446' }); },
+});
 
 // ---- roofs ----------------------------------------------------------------------------------
 
 register('shingles_red', {
   family: F, size: 512, note: 'Goldshire roof: red-brown wooden shingles, staggered, rounded butts, a little moss',
   paint(g, s, rnd, h, cv) {
-    shingles(g, s, rnd, { rows: 8, minW: 46, maxW: 92, colors: ['#9a3a2a', '#b0472f', '#8a3326', '#a8503a', '#963e2c', '#b85a3e'], gapColor: '#2e1a1e', round: 0.42, grain: 3, moss: 0.12 });
-    mottle(g, s, rnd, { colors: ['#c8704c', '#6e2a22', '#a0603c'], count: 30, rmin: 30, rmax: 90, alpha: 0.12, hard: 0.1 });
+    shingles(g, s, rnd, { rows: 8, minW: 34, maxW: 104, colors: ['#9e3e2c', '#b44a30', '#883428', '#9e3e2c', '#a84434'], gapColor: '#2a181c', round: 0.4, grain: 3, moss: 0.14, missing: 0.012, patched: 0.06, butt: 0.45, chips: 0.35 });
+    mottle(g, s, rnd, { colors: ['#b85a3c', '#6e2a22', '#8a4a34', '#7a3a2e'], count: 34, rmin: 30, rmax: 100, alpha: 0.14, hard: 0.08 });
     glaze(g, s, s, '#ffd8b0', 0.12, 'soft-light');
     blurTile(cv, 0.45);
   },
@@ -672,13 +845,14 @@ register('slate_roof', {
 });
 
 register('thatch', {
-  family: F, size: 512, note: 'Westfall thatch: muted straw courses combed at a slant, dark undersides, lit tips, gray weathering and moss',
+  family: F, size: 512, note: 'Westfall thatch: golden-brown straw bundles in ragged overlapping courses, lit bulges, dark under-lips, moss and grey weathering',
   paint(g, s, rnd, h, cv) {
-    thatch(g, s, rnd, { rows: 5, base: '#3e3020', cols: ['#a88a4a', '#9a7e44', '#8e7440', '#a4884e'], tips: ['#d8bc78', '#cbb070', '#c4a86a'] });
-    mottle(g, s, rnd, { colors: ['#8a8070', '#7e7666', '#948a78'], count: 26, rmin: 30, rmax: 90, alpha: 0.22, hard: 0.08, stretch: 1.6, rot: 0 });
-    mottle(g, s, rnd, { colors: ['#6a7040', '#5e6638'], count: 14, rmin: 12, rmax: 34, alpha: 0.2, hard: 0.2 });
+    thatch(g, s, rnd, { courses: 9, base: '#3a2c1c', straw: ['#b09048', '#a08040', '#c0a058', '#a68a46', '#987a3e'], tips: ['#dcc070', '#d0b468', '#e2c87a'], lip: '#5a4628', lit: '#dcc070', moss: 0.13 });
+    // grey weathering and sun-bleached patches, big and soft
+    mottle(g, s, rnd, { colors: ['#9a9080', '#8e8676', '#a89a80'], count: 18, rmin: 40, rmax: 110, alpha: 0.16, hard: 0.06 });
+    mottle(g, s, rnd, { colors: ['#6d7a4a', '#5e6a3e'], count: 10, rmin: 10, rmax: 28, alpha: 0.18, hard: 0.25 });
     glaze(g, s, s, '#f0d8a8', 0.08, 'soft-light');
-    blurTile(cv, 0.6);
+    blurTile(cv, 0.5);
   },
 });
 
@@ -709,13 +883,13 @@ register('snow_roof', {
 });
 
 register('hide_patch', {
-  family: F, size: 512, note: 'frontier roofing: stretched hides sewn edge to edge, pale where they stretch thin, stitched seams, lacing holes',
+  family: F, size: 512, note: 'frontier roofing: dark stretched hides sewn edge to edge, paler where they stretch thin, stitched seams, lacing holes',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#5a3e28');
     const rects = rowLayout(s, rnd, { rows: 3, minW: 150, maxW: 280, rowJitter: 0.35 });
     for (const r of rects) {
       const seed = Math.floor(rnd() * 1e9);
-      const c = pick(rnd, ['#9a7450', '#a8845c', '#8a6442', '#b8966c', '#94704c', '#c4a47a']);
+      const c = pick(rnd, ['#8a5a38', '#6e4428', '#7c5030', '#946440', '#82563a', '#9a6a44']);
       wrapRect(s, r.x - 10, r.y - 10, r.w + 20, r.h + 20, (dx, dy) => {
         const rr = rngFrom(seed);
         const x0 = r.x + dx + 3, y0 = r.y + dy + 3, x1 = r.x + dx + r.w - 3, y1 = r.y + dy + r.h - 3, cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
@@ -738,7 +912,8 @@ register('hide_patch', {
         });
         // lacing holes at the corners, a stitched seam just inside the edge, dark edge
         g.save(); g.translate(cx, cy); g.scale(0.92, 0.9); g.translate(-cx, -cy);
-        g.setLineDash([6, 5]); g.lineWidth = 2.2; g.strokeStyle = rgba('#ead8b0', 0.7); polyPath(g, pts); g.stroke();
+        g.setLineDash([7, 5]); g.lineWidth = 2.6; g.strokeStyle = rgba('#3a2214', 0.6); g.translate(1, 1.4); polyPath(g, pts); g.stroke(); g.translate(-1, -1.4);
+        g.lineWidth = 2.2; g.strokeStyle = rgba('#d8bc8c', 0.75); polyPath(g, pts); g.stroke();
         g.restore();
         g.lineWidth = 2.5; g.strokeStyle = rgba(shadowOf(c, 0.65), 0.75); polyPath(g, pts); g.stroke();
         for (const [px, py] of [pts[0], pts[2], pts[4], pts[6]]) { ellipse(g, px + (cx - px) * 0.08, py + (cy - py) * 0.08, 3, 3, 0, '#2a1a14'); line(g, [[px + (cx - px) * 0.08, py + (cy - py) * 0.08], [px - (cx - px) * 0.05, py - (cy - py) * 0.05]], 2, '#c8b088', 0.8); }
@@ -928,6 +1103,51 @@ register('carpet_border', {
   },
 });
 
+register('tile_goblin', {
+  family: F, size: 512, note: 'Gadgetzan gambling-hall floor: glazed ochre and terracotta tiles, teal diamond insets, brass inlay strips with rivets at the joints',
+  paint(g, s, rnd, h, cv) {
+    const n = 4, T = s / n, gap = 7;
+    fill(g, s, s, '#6a4c22');
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+      const x = i * T + gap / 2, y = j * T + gap / 2, w = T - gap, c = jitter(pick(rnd, ['#b8783c', '#c48a48', '#ac6c36', '#c07e44']), rnd, 0.06);
+      g.save(); g.beginPath(); g.roundRect(x, y, w, w, 5); g.clip();
+      g.fillStyle = grad(g, x, y, x + w * 0.6, y + w, [[0, lightOf(c, 0.3)], [0.5, c], [1, shadowOf(c, 0.3)]]); g.fillRect(x, y, w, w);
+      for (let k = 0; k < 5; k++) blob(g, x + rnd() * w, y + rnd() * w, range(rnd, 10, 34), range(rnd, 8, 24), rnd() * 3, rnd() < 0.5 ? lightOf(c, 0.2) : shadowOf(c, 0.25), 0.3, 0.15);
+      if ((i + j) % 2 === 0) {
+        // a teal glazed diamond, a cream keyline round it
+        const cx = x + w / 2, cy = y + w / 2, r = w * 0.36, tc = jitter('#3a7a72', rnd, 0.06);
+        const dia = (rr) => { g.beginPath(); g.moveTo(cx, cy - rr); g.lineTo(cx + rr, cy); g.lineTo(cx, cy + rr); g.lineTo(cx - rr, cy); g.closePath(); };
+        dia(r + 6); g.fillStyle = '#e6d2a0'; g.fill();
+        dia(r); g.fillStyle = grad(g, cx - r, cy - r, cx + r, cy + r, [[0, lightOf(tc, 0.35)], [0.5, tc], [1, shadowOf(tc, 0.35)]]); g.fill();
+        dia(r * 0.45); g.fillStyle = '#d8b060'; g.fill();
+        blob(g, cx - r * 0.35, cy - r * 0.35, r * 0.3, r * 0.18, -0.8, '#e8fff8', 0.3, 0.3);
+      } else {
+        // a little brass coin stamp in the corner
+        ellipse(g, x + w * 0.5, y + w * 0.5, 9, 9, 0, '#8a6424', 0.8); ellipse(g, x + w * 0.5 - 1, y + w * 0.5 - 1, 7, 7, 0, '#d8b060', 0.8);
+      }
+      // glaze sheen and worn traffic in the middle of the tile
+      blob(g, x + w * 0.3, y + w * 0.25, w * 0.3, w * 0.12, -0.6, '#fff4dc', 0.18, 0.2);
+      g.restore();
+      // lit top-left bevel, shaded lower-right
+      g.save(); g.globalAlpha = 0.45; g.fillStyle = lightOf(c, 0.6); g.fillRect(x, y, w, 3); g.fillRect(x, y, 3, w);
+      g.globalAlpha = 0.5; g.fillStyle = shadowOf(c, 0.5); g.fillRect(x, y + w - 3, w, 3); g.fillRect(x + w - 3, y, 3, w); g.restore();
+    }
+    // brass inlay strips in the joints: lit upper edge, rivets where they cross
+    for (let k = 0; k < n; k++) for (const v of [false, true]) {
+      const p0 = k * T;
+      for (const q of k === 0 ? [p0, p0 + s] : [p0]) {
+        if (v) { g.fillStyle = grad(g, q - 3, 0, q + 3, 0, [[0, '#f0d080'], [0.5, '#b88a3c'], [1, '#6a4a1e']]); g.fillRect(q - 3, 0, 6, s); }
+        else { g.fillStyle = grad(g, 0, q - 3, 0, q + 3, [[0, '#f0d080'], [0.5, '#b88a3c'], [1, '#6a4a1e']]); g.fillRect(0, q - 3, s, 6); }
+      }
+    }
+    for (let j = 0; j <= n; j++) for (let i = 0; i <= n; i++) rivet(g, i * T, j * T, 5, '#d8b060');
+    cracks(g, s, rnd, { color: '#3a2418', count: 6, len: [16, 50], width: [0.8, 1.4], alpha: 0.45 });
+    mottle(g, s, rnd, { colors: ['#4a3018', '#e8c890'], count: 20, rmin: 30, rmax: 90, alpha: 0.1, hard: 0.05 });
+    glaze(g, s, s, '#ffd8a8', 0.1, 'soft-light');
+    blurTile(cv, 0.5);
+  },
+});
+
 register('rug_red', {
   family: F, size: 256, alpha: true, note: 'woven rug: bordered red field with a gold medallion, fringed ends (alpha)',
   paint(g, s, rnd, h, cv) {
@@ -975,152 +1195,6 @@ register('felt_table', {
     for (let k = 0; k < 2; k++) { ellipse(g, cx + (k ? 150 : -150), H * 0.8, 24, 24, 0, '#e8d8a0', 0.18); ellipse(g, cx + (k ? 150 : -150), H * 0.8, 20, 20, 0, '#2c6a40', 1); }
     for (let i = 0; i < 1800; i++) ellipse(g, rnd() * W, rnd() * H, 0.8, 0.8, 0, rnd() < 0.5 ? '#3a8052' : '#1e4e30', 0.35);
     glaze(g, W, H, '#fff0c0', 0.08, 'soft-light');
-  },
-});
-
-// Shelves full of goods: one wide strip (W×H, not tiling) with three shelf boards at SHELF_LEVELS
-// (fractions of H from the top). town_build puts 3D shelf boards and uprights at the same heights.
-export const SHELF_LEVELS = [0.3, 0.63, 0.97];
-function shelfStrip(g, W, H, rnd, items) {
-  fill(g, W, H, '#1e1418');
-  for (let i = 0; i < 4; i++) plank(g, 0, i * H / 4 + 1, W, H / 4 - 2, jitter(pick(rnd, ['#4e3424', '#563a28', '#48301f']), rnd, 0.05), rnd, { grain: 8, galpha: 0.25, knots: 0.3, bevel: 2, light: 0.25 });
-  g.fillStyle = grad(g, 0, 0, 0, H, [[0, '#120c14', 0.5], [0.3, '#120c14', 0.05], [0.33, '#120c14', 0.5], [0.63, '#120c14', 0.05], [0.66, '#120c14', 0.5], [0.97, '#120c14', 0.05]]); g.fillRect(0, 0, W, H);
-  let prev = 0;
-  for (const f of SHELF_LEVELS) {
-    const sy = H * f, room = sy - prev - 10;
-    let x = rnd() * 16, last = -1;
-    while (x < W - 12) {
-      let k = Math.floor(rnd() * items.length); if (k === last) k = (k + 1) % items.length; last = k;
-      const it = items[k], sc = Math.min(1, room * 0.86 / it.h), w = it.w * sc * range(rnd, 0.85, 1.15), hh = it.h * sc * range(rnd, 0.85, 1.12);
-      if (x + w > W - 6) break;
-      const cx = x + w / 2, by = sy - 6;
-      blob(g, cx + w * 0.25, by, w * 0.7, 5, 0, '#120c14', 0.6, 0.3);
-      it.draw(g, cx, by, w, hh, rnd);
-      x += w + range(rnd, 2, 16) + (rnd() < 0.1 ? 30 : 0);
-    }
-    g.fillStyle = grad(g, 0, sy - 6, 0, sy + 6, [[0, '#a07048'], [0.4, '#7a5234'], [1, '#3e2a20']]);
-    g.fillRect(0, sy - 6, W, 12);
-    line(g, [[0, sy - 5.5], [W, sy - 5.5]], 1.4, '#d8a870', 0.7);
-    g.fillStyle = grad(g, 0, sy + 6, 0, sy + 18, [[0, '#120c14', 0.55], [1, '#120c14', 0]]); g.fillRect(0, sy + 6, W, Math.min(12, H - sy - 6));
-    prev = sy;
-  }
-}
-// goods painters: (g, cx, bottomY, w, h, rnd), lit from the upper left
-function vessel(col, neck = 0.35, shoulder = 0.6) {
-  return (g, x, y, w, h, rnd) => {
-    const c = jitter(col, rnd, 0.1), pts = [];
-    const prof = [[0, 0.32], [0.08, 0.45], [shoulder * 0.6, 0.5], [shoulder, 0.42], [0.82, neck * 0.5], [0.92, neck * 0.45], [1, neck * 0.6]];
-    for (const [t, r] of prof) pts.push([x - r * w, y - t * h]);
-    for (const [t, r] of prof.slice().reverse()) pts.push([x + r * w, y - t * h]);
-    clipped(g, () => polyPath(g, pts), () => {
-      g.fillStyle = grad(g, x - w / 2, 0, x + w / 2, 0, [[0, lightOf(c, 0.3)], [0.35, lightOf(c, 0.15)], [0.7, c], [1, shadowOf(c, 0.55)]]);
-      g.fillRect(x - w, y - h - 2, w * 2, h + 4);
-      blob(g, x - w * 0.18, y - h * 0.45, w * 0.12, h * 0.2, 0, '#fff4d8', 0.55, 0.3);
-      if (rnd() < 0.6) { g.fillStyle = rgba(shadowOf(c, 0.4), 0.6); g.fillRect(x - w, y - h * 0.6, w * 2, h * 0.07); }
-    });
-  };
-}
-const book = (g, x, y, w, h, rnd) => {
-  let bx = x - w / 2;
-  for (let i = 0; i < 4; i++) {
-    const bw = w / 4 - 1, bh = h * range(rnd, 0.75, 1), c = pick(rnd, ['#6a2a2a', '#2e4a6a', '#4a5a2a', '#7a5a2a', '#5a2a4a']);
-    g.fillStyle = grad(g, bx, 0, bx + bw, 0, [[0, lightOf(c, 0.3)], [0.5, c], [1, shadowOf(c, 0.4)]]); g.fillRect(bx, y - bh, bw, bh);
-    g.fillStyle = '#d8b868'; g.fillRect(bx, y - bh * 0.8, bw, 2); g.fillRect(bx, y - bh * 0.25, bw, 2);
-    bx += bw + 1;
-  }
-};
-const crtBox = (g, x, y, w, h) => {
-  g.fillStyle = grad(g, x - w / 2, 0, x + w / 2, 0, [[0, '#8a7a64'], [1, '#4e4438']]); g.beginPath(); g.roundRect(x - w / 2, y - h, w, h, 4); g.fill();
-  g.fillStyle = grad(g, 0, y - h, 0, y, [[0, '#4a6a6a'], [1, '#1a2a2e']]); g.beginPath(); g.roundRect(x - w * 0.4, y - h * 0.85, w * 0.6, h * 0.62, 6); g.fill();
-  blob(g, x - w * 0.22, y - h * 0.7, w * 0.12, h * 0.1, -0.4, '#d8f0e8', 0.5, 0.3);
-  ellipse(g, x + w * 0.32, y - h * 0.6, 2.5, 2.5, 0, '#c8a050'); ellipse(g, x + w * 0.32, y - h * 0.4, 2.5, 2.5, 0, '#c8a050');
-};
-const lute = (g, x, y, w, h) => {
-  ellipse(g, x + 1.5, y - h * 0.28 + 2, w * 0.5, h * 0.3, 0, '#120c14', 0.4);
-  ellipse(g, x, y - h * 0.28, w * 0.5, h * 0.3, 0, '#a8703c');
-  blob(g, x - w * 0.15, y - h * 0.36, w * 0.25, h * 0.14, 0, '#e8b878', 0.6, 0.3);
-  ellipse(g, x, y - h * 0.3, w * 0.12, w * 0.12, 0, '#2a1a14');
-  g.fillStyle = '#5a3a24'; g.fillRect(x - w * 0.07, y - h, w * 0.14, h * 0.48);
-  g.fillStyle = '#3a2418'; g.fillRect(x - w * 0.12, y - h, w * 0.24, h * 0.1);
-};
-const goblet = (g, x, y, w, h) => {
-  const c = '#c8a048';
-  g.fillStyle = grad(g, x - w / 2, 0, x + w / 2, 0, [[0, '#f0d080'], [0.5, c], [1, '#6a4e1e']]);
-  g.beginPath(); g.moveTo(x - w * 0.5, y - h); g.lineTo(x + w * 0.5, y - h); g.quadraticCurveTo(x + w * 0.45, y - h * 0.45, x + w * 0.08, y - h * 0.4);
-  g.lineTo(x + w * 0.08, y - h * 0.1); g.lineTo(x + w * 0.35, y); g.lineTo(x - w * 0.35, y); g.lineTo(x - w * 0.08, y - h * 0.1); g.lineTo(x - w * 0.08, y - h * 0.4);
-  g.quadraticCurveTo(x - w * 0.45, y - h * 0.45, x - w * 0.5, y - h); g.fill();
-  blob(g, x - w * 0.22, y - h * 0.8, w * 0.1, h * 0.12, 0, '#fff8d8', 0.8, 0.4);
-};
-const skull = (g, x, y, w, h) => {
-  ellipse(g, x, y - h * 0.58, w * 0.5, h * 0.42, 0, '#d8ccb0');
-  g.fillStyle = '#c8bc9c'; g.fillRect(x - w * 0.3, y - h * 0.3, w * 0.6, h * 0.3);
-  blob(g, x - w * 0.18, y - h * 0.75, w * 0.2, h * 0.15, 0, '#fff8e8', 0.7, 0.3);
-  ellipse(g, x - w * 0.18, y - h * 0.5, w * 0.12, h * 0.1, 0, '#2a2030'); ellipse(g, x + w * 0.18, y - h * 0.5, w * 0.12, h * 0.1, 0, '#2a2030');
-  blob(g, x + w * 0.25, y - h * 0.4, w * 0.25, h * 0.35, 0, '#6a6070', 0.35, 0.3);
-};
-const helm = (g, x, y, w, h) => {
-  g.fillStyle = grad(g, x - w / 2, 0, x + w / 2, 0, [[0, '#c8ccd4'], [0.5, '#8a8e98'], [1, '#3e4048']]);
-  g.beginPath(); g.moveTo(x - w * 0.5, y); g.lineTo(x - w * 0.5, y - h * 0.5); g.quadraticCurveTo(x, y - h * 1.15, x + w * 0.5, y - h * 0.5); g.lineTo(x + w * 0.5, y); g.closePath(); g.fill();
-  g.fillStyle = '#2a2030'; g.fillRect(x - w * 0.35, y - h * 0.45, w * 0.7, h * 0.08);
-  g.fillStyle = '#c8a050'; g.fillRect(x - w * 0.04, y - h * 0.95, w * 0.08, h * 0.9);
-};
-const chest = (g, x, y, w, h) => {
-  g.fillStyle = grad(g, 0, y - h, 0, y, [[0, '#9a6a3a'], [1, '#4e3220']]); g.fillRect(x - w / 2, y - h * 0.7, w, h * 0.7);
-  g.fillStyle = grad(g, 0, y - h, 0, y - h * 0.7, [[0, '#b07a44'], [1, '#6a4428']]); g.beginPath(); g.ellipse(x, y - h * 0.7, w / 2, h * 0.3, 0, Math.PI, 0); g.fill();
-  g.fillStyle = '#c8a050'; g.fillRect(x - w / 2, y - h * 0.72, w, 3); g.fillRect(x - 3, y - h * 0.8, 6, 9);
-};
-const sack = col => (g, x, y, w, h, rnd) => {
-  const c = jitter(col, rnd, 0.08);
-  g.fillStyle = grad(g, x - w / 2, 0, x + w / 2, 0, [[0, lightOf(c, 0.25)], [0.6, c], [1, shadowOf(c, 0.5)]]);
-  g.beginPath(); g.moveTo(x - w * 0.45, y); g.quadraticCurveTo(x - w * 0.6, y - h * 0.6, x - w * 0.2, y - h * 0.85); g.lineTo(x - w * 0.12, y - h);
-  g.lineTo(x + w * 0.14, y - h); g.lineTo(x + w * 0.22, y - h * 0.85); g.quadraticCurveTo(x + w * 0.6, y - h * 0.6, x + w * 0.45, y); g.closePath(); g.fill();
-  line(g, [[x - w * 0.22, y - h * 0.82], [x + w * 0.24, y - h * 0.82]], 2.5, '#5a3a24', 0.8);
-  line(g, [[x - w * 0.2, y - h * 0.5], [x + w * 0.1, y - h * 0.3]], 1, shadowOf(c, 0.4), 0.5);
-};
-const loaf = (g, x, y, w, h) => {
-  ellipse(g, x, y - h * 0.45, w * 0.5, h * 0.45, 0, '#a8682c');
-  blob(g, x - w * 0.12, y - h * 0.62, w * 0.3, h * 0.2, 0, '#e8b064', 0.8, 0.3);
-  for (let k = -1; k <= 1; k++) line(g, [[x + k * w * 0.18 - 3, y - h * 0.75], [x + k * w * 0.18 + 3, y - h * 0.5]], 2, '#6a3a1c', 0.7);
-};
-const potion = col => (g, x, y, w, h) => {
-  ellipse(g, x, y - h * 0.32, w * 0.5, h * 0.32, 0, shadowOf(col, 0.3));
-  ellipse(g, x - w * 0.04, y - h * 0.34, w * 0.42, h * 0.27, 0, col);
-  blob(g, x - w * 0.18, y - h * 0.44, w * 0.12, h * 0.1, 0, '#ffffff', 0.8, 0.4);
-  g.fillStyle = '#a8c8c8'; g.fillRect(x - w * 0.1, y - h * 0.85, w * 0.2, h * 0.25);
-  g.fillStyle = '#8a5a34'; g.fillRect(x - w * 0.13, y - h, w * 0.26, h * 0.16);
-};
-const cheese = (g, x, y, w, h) => {
-  g.fillStyle = grad(g, 0, y - h, 0, y, [[0, '#f0c860'], [1, '#b08a30']]); g.beginPath(); g.ellipse(x, y - h * 0.5, w / 2, h / 2, 0, 0, TAU); g.fill();
-  g.fillStyle = '#e8d080'; g.beginPath(); g.moveTo(x, y - h * 0.5); g.lineTo(x + w / 2, y - h * 0.62); g.lineTo(x + w / 2, y - h * 0.38); g.closePath(); g.fill();
-};
-const coil = (g, x, y, w, h) => {
-  for (let k = 0; k < 4; k++) { g.save(); g.lineWidth = 3.5; g.strokeStyle = k % 2 ? '#b89a68' : '#c8aa78'; g.beginPath(); g.ellipse(x, y - h * 0.5 + k * 1.2, w * 0.45 - k * 2, h * 0.42 - k, 0, 0, TAU); g.stroke(); g.restore(); }
-  line(g, [[x - w * 0.3, y - h * 0.7], [x + w * 0.2, y - h * 0.25]], 1.2, '#5a4426', 0.5);
-};
-
-register('shelf_goods', {
-  family: F, w: 1024, h: 256, note: 'pawn shop shelves (one long strip): vases, books, a lute, goblets, skulls, helms, CRTs, chests',
-  paint(g, s, rnd, H, cv) {
-    shelfStrip(g, 1024, H, rnd, [
-      { w: 34, h: 70, draw: vessel('#4a6a8a') }, { w: 40, h: 62, draw: vessel('#a8603a', 0.45, 0.5) }, { w: 50, h: 60, draw: book },
-      { w: 44, h: 96, draw: lute }, { w: 26, h: 44, draw: goblet }, { w: 34, h: 34, draw: skull }, { w: 44, h: 52, draw: helm },
-      { w: 66, h: 56, draw: crtBox }, { w: 58, h: 46, draw: chest }, { w: 30, h: 58, draw: vessel('#6a8a5a', 0.3, 0.7) },
-      { w: 30, h: 50, draw: vessel('#c8b8a0', 0.6, 0.5) }, { w: 40, h: 40, draw: vessel('#7a3a5a', 0.4, 0.6) },
-    ]);
-    glaze(g, 1024, H, '#ffd8a8', 0.12, 'soft-light');
-  },
-});
-
-register('store_goods', {
-  family: F, w: 1024, h: 256, note: 'general store shelves (one long strip): jars, sacks, bread, potions, cheese, rope',
-  paint(g, s, rnd, H, cv) {
-    shelfStrip(g, 1024, H, rnd, [
-      { w: 30, h: 48, draw: vessel('#c8b8a0', 0.7, 0.6) }, { w: 46, h: 64, draw: sack('#b09a6e') }, { w: 54, h: 30, draw: loaf },
-      { w: 26, h: 46, draw: potion('#b83a2c') }, { w: 26, h: 46, draw: potion('#3a6ab0') }, { w: 26, h: 46, draw: potion('#4a9a3a') },
-      { w: 52, h: 34, draw: cheese }, { w: 50, h: 44, draw: coil }, { w: 34, h: 54, draw: vessel('#7a5a3a', 0.4, 0.55) }, { w: 44, h: 58, draw: sack('#9a8458') },
-      { w: 28, h: 40, draw: vessel('#5a7a8a', 0.6, 0.5) }, { w: 26, h: 46, draw: potion('#c8a030') },
-    ]);
-    glaze(g, 1024, H, '#ffd8a8', 0.12, 'soft-light');
   },
 });
 
@@ -1284,17 +1358,28 @@ register('flip_face', {
 });
 
 register('coin_face', {
-  family: F, size: 128, note: 'the big gold coin: rim, a goblin grin and a $',
+  family: F, size: 128, note: 'the big gold coin: a beaded rim, a laurel ring, a struck $ in relief, worn high spots, grime in the recesses',
   paint(g, s, rnd) {
     const c = s / 2;
-    const rg = g.createRadialGradient(c - 20, c - 20, 4, c, c, c); rg.addColorStop(0, '#fff0a8'); rg.addColorStop(0.55, '#d8a840'); rg.addColorStop(1, '#7a5418');
+    const rg = g.createRadialGradient(c - 20, c - 22, 4, c, c, c); rg.addColorStop(0, '#f0d488'); rg.addColorStop(0.5, '#c89838'); rg.addColorStop(1, '#7a5418');
     g.fillStyle = rg; g.fillRect(0, 0, s, s);
-    g.save(); g.lineWidth = 5; g.strokeStyle = '#8a6420'; g.beginPath(); g.arc(c, c, c - 9, 0, TAU); g.stroke(); g.restore();
-    for (let k = 0; k < 28; k++) { const a = k / 28 * TAU; ellipse(g, c + Math.cos(a) * (c - 4), c + Math.sin(a) * (c - 4), 2, 2, 0, '#fff0b0', 0.8); }
-    g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 64px Georgia, 'Liberation Serif', serif`;
-    g.fillStyle = '#6a4818'; g.fillText('$', c + 2, c + 4); g.fillStyle = '#ffe890'; g.fillText('$', c, c + 1); g.restore();
-    for (let i = 0; i < 14; i++) { const x = rnd() * s, y = rnd() * s, a = rnd() * 3; line(g, [[x, y], [x + Math.cos(a) * 9, y + Math.sin(a) * 9]], 0.8, rnd() < 0.5 ? '#fff4c0' : '#7a5418', 0.4); }
-    const vg = g.createRadialGradient(c - 18, c - 18, 8, c, c, c); vg.addColorStop(0, 'rgba(255,248,210,0.15)'); vg.addColorStop(0.6, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(60,36,10,0.4)');
+    g.save(); g.lineWidth = 7; g.strokeStyle = '#a8782c'; g.beginPath(); g.arc(c, c, c - 6, 0, TAU); g.stroke();
+    g.lineWidth = 2; g.strokeStyle = '#ffe8a0'; g.beginPath(); g.arc(c - 0.8, c - 0.8, c - 8, Math.PI * 0.9, Math.PI * 1.7); g.stroke();
+    g.strokeStyle = '#5a3c10'; g.beginPath(); g.arc(c + 0.8, c + 0.8, c - 11, -0.2, Math.PI * 0.75); g.stroke(); g.restore();
+    for (let k = 0; k < 32; k++) { const a = k / 32 * TAU; ellipse(g, c + Math.cos(a) * (c - 15), c + Math.sin(a) * (c - 15), 1.6, 1.6, 0, '#7a5418', 0.6); ellipse(g, c + Math.cos(a) * (c - 15) - 0.6, c + Math.sin(a) * (c - 15) - 0.6, 1.1, 1.1, 0, '#fff0b0', 0.7); }
+    // a laurel ring: little leaves either side, struck (shadow down-right, light up-left)
+    for (let k = 0; k < 22; k++) {
+      if (k === 0 || k === 11) continue;
+      const a = Math.PI / 2 + k / 22 * TAU, x = c + Math.cos(a) * (c - 26), y = c + Math.sin(a) * (c - 26), rot = a + Math.PI / 2 + 0.5;
+      ellipse(g, x + 1, y + 1.2, 4.2, 1.9, rot, '#5a3c10', 0.7); ellipse(g, x - 0.4, y - 0.4, 4.2, 1.9, rot, '#fff0b0', 0.7); ellipse(g, x, y, 4, 1.7, rot, '#c8962c');
+    }
+    // the $ struck in relief
+    g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 56px ${SIGN_FONT}`;
+    g.fillStyle = '#5a3c10'; g.fillText('$', c + 2.5, c + 4); g.fillStyle = '#fff0b0'; g.fillText('$', c - 1.2, c + 0.2); g.fillStyle = '#c8962c'; g.fillText('$', c, c + 1.5); g.restore();
+    blob(g, c - 10, c - 10, 14, 9, -0.6, '#fff4c8', 0.3, 0.2);
+    for (let i = 0; i < 16; i++) { const x = rnd() * s, y = rnd() * s, a = rnd() * 3; line(g, [[x, y], [x + Math.cos(a) * 8, y + Math.sin(a) * 8]], 0.8, rnd() < 0.5 ? '#fff4c0' : '#6a4818', 0.35); }
+    for (let i = 0; i < 10; i++) blob(g, c + (rnd() - 0.5) * s * 0.6, c + (rnd() - 0.5) * s * 0.6, range(rnd, 3, 8), range(rnd, 2, 6), 0, '#5a4018', 0.18, 0.3);
+    const vg = g.createRadialGradient(c - 18, c - 18, 8, c, c, c); vg.addColorStop(0, 'rgba(255,248,210,0.12)'); vg.addColorStop(0.65, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(60,36,10,0.45)');
     g.fillStyle = vg; g.fillRect(0, 0, s, s);
   },
 });
@@ -1323,19 +1408,89 @@ function padRug(g, s, rnd, { field, border, text, fg }) {
 register('pad_hit', { family: F, size: 256, alpha: true, note: 'round woven rug: HIT, worn and fringed', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#8a3428', border: '#3a2430', text: 'HIT', fg: '#f0dcb0' }); } });
 register('pad_stand', { family: F, size: 256, alpha: true, note: 'round woven rug: STAND, faded blue, worn and fringed', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#34507a', border: '#2a2438', text: 'STAND', fg: '#ecdcb4' }); } });
 
+// A hanging cloth banner (alpha): soft vertical folds, an embroidered border with a darker outline
+// and stitching, an emblem, wear and stains, and a frayed bottom (swallowtail or straight).
+function bannerCloth(g, W, H, rnd, { field, field2, border, edge, emblem, tail = 'swallow' }) {
+  g.clearRect(0, 0, W, H);
+  const bot = [];
+  const n = 14;
+  for (let k = 0; k <= n; k++) {
+    const t = k / n, x = 3 + (W - 6) * t;
+    const y = tail === 'swallow' ? H * (0.985 - 0.16 * (1 - Math.abs(t - 0.5) * 2)) : H * (0.96 - 0.02 * Math.sin(t * 9));
+    bot.push([x, y + (rnd() - 0.5) * 5]);
+  }
+  const pts = [[3, 0], [W - 3, 0], [W - 2 + (rnd() - 0.5) * 3, H * 0.5], ...bot.slice().reverse(), [2 + (rnd() - 0.5) * 3, H * 0.5]];
+  clipped(g, () => polyPath(g, pts), () => {
+    g.fillStyle = grad(g, 0, 0, W, 0, [[0, field2 || field], [0.5, field], [1, shadowOf(field, 0.2)]]); g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 18; i++) blob(g, rnd() * W, rnd() * H, range(rnd, 8, 26), range(rnd, 10, 40), 0, rnd() < 0.5 ? lightOf(field, 0.15) : shadowOf(field, 0.2), 0.3, 0.15);
+    // the embroidered border: dark outline, the band, a stitched line inside it
+    const bw = W * 0.085;
+    const band = (inset, col, w) => { g.save(); g.strokeStyle = col; g.lineWidth = w; g.beginPath(); g.moveTo(inset, -4); g.lineTo(inset, H); g.moveTo(W - inset, -4); g.lineTo(W - inset, H); g.moveTo(-4, inset + 6); g.lineTo(W + 4, inset + 6); g.stroke(); g.restore(); };
+    band(bw * 0.9, edge, bw * 1.25); band(bw * 0.9, border, bw * 0.8);
+    g.save(); g.setLineDash([3, 3]); band(bw * 0.9, lightOf(border, 0.4), 1.2); g.restore();
+    line(g, bot.map(([x, y]) => [x, y - 6]), bw * 0.9, edge, 0.9); line(g, bot.map(([x, y]) => [x, y - 6]), bw * 0.5, border, 0.95);
+    emblem(g, W / 2, H * 0.42);
+    // wear: faded patches and a few stains
+    for (let i = 0; i < 6; i++) blob(g, rnd() * W, rnd() * H, range(rnd, 6, 18), range(rnd, 5, 14), 0, '#2a1a14', 0.16, 0.3);
+    for (let i = 0; i < 4; i++) blob(g, rnd() * W, rnd() * H, range(rnd, 10, 24), range(rnd, 10, 30), 0, '#f0e0c0', 0.1, 0.1);
+    // folds over everything: soft dark valleys, lit ridges (light from the left)
+    for (let k = 0; k < 4; k++) {
+      const x = (k + 0.3 + rnd() * 0.4) * W / 4, w = range(rnd, 12, 20);
+      g.fillStyle = grad(g, x - w, 0, x + w, 0, [[0, '#ffe8c8', 0], [0.35, '#ffe8c8', 0.16], [0.55, '#1a0a14', 0.05], [0.8, '#1a0a14', 0.3], [1, '#1a0a14', 0]]);
+      g.fillRect(x - w, 0, w * 2, H);
+    }
+    g.fillStyle = grad(g, 0, 0, 0, H, [[0, '#1a0a14', 0.3], [0.08, '#1a0a14', 0], [0.85, '#1a0a14', 0], [1, '#1a0a14', 0.25]]); g.fillRect(0, 0, W, H);
+  });
+  // a frayed bottom: loose threads
+  for (const [x, y] of bot) for (let k = 0; k < 3; k++) { const xx = x + range(rnd, -4, 4); line(g, [[xx, y - 3], [xx + range(rnd, -1.5, 1.5), y + range(rnd, 2, 7)]], 1.2, rnd() < 0.5 ? border : field, 0.85); }
+  // the sleeve the rod goes through
+  g.fillStyle = grad(g, 0, 0, 0, 12, [[0, shadowOf(field, 0.5)], [1, field]]); g.fillRect(3, 0, W - 6, 10);
+  for (let x = 12; x < W - 8; x += 18) { ellipse(g, x, 5, 2.4, 2.4, 0, '#2a1a14', 0.8); }
+}
+const coinEmblem = (g, x, y) => {
+  ellipse(g, x + 2, y + 3, 33, 33, 0, '#1a0a0e', 0.4);
+  ellipse(g, x, y, 33, 33, 0, '#5a3c14'); ellipse(g, x, y, 30, 30, 0, '#c89a40');
+  ellipse(g, x, y, 23, 23, 0, '#a8782c'); blob(g, x - 9, y - 10, 12, 9, -0.5, '#ffe8a0', 0.7, 0.3);
+  g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 38px ${SIGN_FONT}`; g.fillStyle = '#5a3c14'; g.fillText('$', x + 1, y + 3); g.fillStyle = '#f0cc68'; g.fillText('$', x, y + 1); g.restore();
+  for (let k = 0; k < 16; k++) { const a = k / 16 * TAU; ellipse(g, x + Math.cos(a) * 31.5, y + Math.sin(a) * 31.5, 1.6, 1.6, 0, '#fff0b0', 0.7); }
+};
 register('banner_red', {
-  family: F, w: 128, h: 256, alpha: true, note: 'hanging banner: red cloth, gold border, coin emblem, swallowtail',
+  family: F, w: 128, h: 256, alpha: true, note: 'Goldshire hall banner: red cloth in soft folds, embroidered gold border, a gold coin, frayed swallowtail',
+  paint(g, s, rnd, H) { bannerCloth(g, 128, H, rnd, { field: '#8a2224', field2: '#9a2a28', border: '#c8a048', edge: '#4a1a10', emblem: coinEmblem }); },
+});
+register('banner_dwarf', {
+  family: F, w: 128, h: 256, alpha: true, note: 'Kharanos banner: deep blue wool, a gold knotwork border, a silver hammer over an anvil, straight frayed hem',
   paint(g, s, rnd, H) {
-    const W = 128;
-    const shape = () => { g.beginPath(); g.moveTo(0, 0); g.lineTo(W, 0); g.lineTo(W, H); g.lineTo(W / 2, H * 0.84); g.lineTo(0, H); g.closePath(); };
-    clipped(g, shape, () => {
-      g.fillStyle = '#8a2224'; g.fillRect(0, 0, W, H);
-      for (let k = 0; k < 4; k++) { const x = (k + 0.5) * W / 4; g.fillStyle = grad(g, x - 16, 0, x + 16, 0, [[0, '#2a1020', 0], [0.5, '#2a1020', 0.25], [0.7, '#ffd8b0', 0.12], [1, '#ffd8b0', 0]]); g.fillRect(x - 16, 0, 32, H); }
-      g.fillStyle = '#c8a048'; g.fillRect(0, 0, 9, H); g.fillRect(W - 9, 0, 9, H); g.fillRect(0, 0, W, 12);
-      ellipse(g, W / 2, H * 0.42, 34, 34, 0, '#6a4818'); ellipse(g, W / 2, H * 0.42, 30, 30, 0, '#d8a840');
-      g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = 'bold 40px Georgia, serif'; g.fillStyle = '#7a5418'; g.fillText('$', W / 2, H * 0.42 + 2); g.restore();
-    });
-    g.save(); g.lineWidth = 5; g.strokeStyle = '#c8a048'; g.beginPath(); g.moveTo(W, H); g.lineTo(W / 2, H * 0.84); g.lineTo(0, H); g.stroke(); g.restore();
+    bannerCloth(g, 128, H, rnd, { field: '#2e3e6a', field2: '#36487a', border: '#c8a048', edge: '#1a1a30', tail: 'straight', emblem: (g, x, y) => {
+      // anvil
+      g.fillStyle = '#1a1a28'; g.globalAlpha = 0.4; g.fillRect(x - 28, y + 14, 60, 14); g.globalAlpha = 1;
+      g.fillStyle = grad(g, 0, y + 6, 0, y + 30, [[0, '#d8dce4'], [1, '#6a7080']]);
+      g.beginPath(); g.moveTo(x - 32, y + 8); g.lineTo(x + 26, y + 8); g.quadraticCurveTo(x + 36, y + 10, x + 34, y + 16); g.lineTo(x + 12, y + 18); g.lineTo(x + 10, y + 30); g.lineTo(x + 18, y + 36); g.lineTo(x - 18, y + 36); g.lineTo(x - 10, y + 30); g.lineTo(x - 12, y + 18); g.lineTo(x - 30, y + 14); g.closePath(); g.fill();
+      // hammer, leaning over it
+      g.save(); g.translate(x - 2, y - 8); g.rotate(-0.5);
+      g.fillStyle = '#5a3a24'; g.fillRect(-3.5, -6, 7, 46);
+      g.fillStyle = grad(g, -16, 0, 16, 0, [[0, '#e8ecf0'], [1, '#70788a']]); g.fillRect(-17, -22, 34, 18);
+      g.fillStyle = '#c8a048'; g.fillRect(-17, -9, 34, 3);
+      g.restore();
+      // knot dots in the field
+      for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; ellipse(g, x + Math.cos(a) * 44, y + 10 + Math.sin(a) * 52, 3, 3, 0, '#c8a048', 0.85); }
+    } });
+    // a knotwork chain on the border: little interlaced loops
+    for (let yy = 22; yy < H * 0.9; yy += 14) for (const x of [11, 117]) { g.save(); g.strokeStyle = '#7a5a20'; g.lineWidth = 1.6; g.beginPath(); g.ellipse(x, yy, 3.5, 6, 0, 0, TAU); g.stroke(); g.restore(); }
+  },
+});
+register('banner_goblin', {
+  family: F, w: 128, h: 256, alpha: true, note: 'Gadgetzan cartel banner: faded teal cloth, brass-thread border, a brass gear round a gold coin, swallowtail',
+  paint(g, s, rnd, H) {
+    bannerCloth(g, 128, H, rnd, { field: '#2e6a64', field2: '#367a72', border: '#d0a040', edge: '#163430', emblem: (g, x, y) => {
+      g.save(); g.translate(x + 2, y + 3); g.fillStyle = rgba('#0a1a18', 0.4); for (let k = 0; k < 10; k++) { g.rotate(TAU / 10); g.fillRect(-6, -44, 12, 12); } g.beginPath(); g.arc(0, 0, 36, 0, TAU); g.fill(); g.restore();
+      g.save(); g.translate(x, y); for (let k = 0; k < 10; k++) { g.rotate(TAU / 10); g.fillStyle = grad(g, -6, 0, 6, 0, [[0, '#f0d080'], [1, '#8a6424']]); g.fillRect(-6, -44, 12, 12); } g.restore();
+      const rg = g.createRadialGradient(x - 12, y - 12, 4, x, y, 36); rg.addColorStop(0, '#f8e098'); rg.addColorStop(0.6, '#c09040'); rg.addColorStop(1, '#6a4a1e');
+      g.fillStyle = rg; g.beginPath(); g.arc(x, y, 34, 0, TAU); g.fill();
+      ellipse(g, x, y, 24, 24, 0, '#1e4a44');
+      g.save(); g.translate(x, y); g.scale(0.64, 0.64); coinEmblem(g, 0, 0); g.restore();
+      for (let k = 0; k < 8; k++) { const a = k / 8 * TAU + 0.2; rivet(g, x + Math.cos(a) * 29, y + Math.sin(a) * 29, 2.4, '#e0b860'); }
+    } });
   },
 });
 
@@ -1371,16 +1526,27 @@ register('barrel', {
 });
 
 register('crate', {
-  family: F, size: 256, note: 'crate face: framed planks, a diagonal brace, nails',
+  family: F, size: 256, note: 'crate face: framed planks with grain, a diagonal brace, nicks and dents, nails, grime in the corners',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#1e1418');
-    for (let i = 0; i < 4; i++) plank(g, 0, i * s / 4 + 1, s, s / 4 - 2, jitter(pick(rnd, ['#9a7448', '#8a663e', '#a47e50']), rnd, 0.06), rnd, { grain: 6, bevel: 3 });
+    for (let i = 0; i < 4; i++) plank(g, 0, i * s / 4 + 1.5, s, s / 4 - 3, jitter(pick(rnd, ['#9a7448', '#8a663e', '#a47e50', '#7e5c38']), rnd, 0.07), rnd, { grain: 12, galpha: 0.45, knots: 0.5, splits: 0.5, bevel: 3, weather: 0.35 });
     g.save(); g.translate(s / 2, s / 2); g.rotate(-Math.PI / 4);
-    g.fillStyle = rgba(INK, 0.45); g.fillRect(-s * 0.7, -14, s * 1.4, 34); g.restore();
-    g.save(); g.translate(s / 2, s / 2); g.rotate(-Math.PI / 4); plank(g, -s * 0.7, -18, s * 1.4, 32, '#a8845a', rnd, { grain: 5, bevel: 3 }); g.restore();
+    g.fillStyle = rgba(INK, 0.45); g.fillRect(-s * 0.7, -12, s * 1.4, 34); g.restore();
+    g.save(); g.translate(s / 2, s / 2); g.rotate(-Math.PI / 4); plank(g, -s * 0.7, -18, s * 1.4, 32, '#a8845a', rnd, { grain: 9, galpha: 0.45, bevel: 3, splits: 0.6, knots: 0.4 }); g.restore();
     const fr = 26;
-    for (const [x, y, w, hh, v] of [[0, 0, s, fr, false], [0, s - fr, s, fr, false], [0, 0, fr, s, true], [s - fr, 0, fr, s, true]]) plank(g, x, y, w, hh, '#b08a5e', rnd, { vertical: v, grain: 5, bevel: 3 });
-    for (const [x, y] of [[13, 13], [s - 13, 13], [13, s - 13], [s - 13, s - 13]]) nailHead(g, x, y, 3);
+    for (const [x, y, w, hh, v] of [[0, 0, s, fr, false], [0, s - fr, s, fr, false], [0, 0, fr, s, true], [s - fr, 0, fr, s, true]]) plank(g, x, y, w, hh, jitter('#a8845a', rnd, 0.06), rnd, { vertical: v, grain: 7, galpha: 0.45, bevel: 3, splits: 0.4 });
+    // nicks and dents: a dark gouge with a lit lower lip
+    for (let i = 0; i < 16; i++) {
+      const x = rnd() * s, y = rnd() * s, L = range(rnd, 4, 14), a = rnd() * Math.PI;
+      line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], range(rnd, 1.5, 3), '#3a2418', 0.6);
+      line(g, [[x + 1, y + 1.5], [x + 1 + Math.cos(a) * L, y + 1.5 + Math.sin(a) * L]], 1, '#e8c890', 0.35);
+    }
+    for (const [x, y] of [[13, 13], [s - 13, 13], [13, s - 13], [s - 13, s - 13], [s / 2, 13], [s / 2, s - 13]]) nailHead(g, x, y, 3);
+    // grime toward the edges and in the corners
+    const vg = g.createRadialGradient(s * 0.42, s * 0.4, s * 0.2, s / 2, s / 2, s * 0.72);
+    vg.addColorStop(0, rgba('#ffe8c0', 0.08)); vg.addColorStop(0.6, rgba(INK, 0)); vg.addColorStop(1, rgba(INK, 0.45));
+    g.fillStyle = vg; g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 6; i++) blob(g, rnd() * s, rnd() * s, range(rnd, 10, 30), range(rnd, 8, 20), 0, '#3a2818', 0.14, 0.2);
     glaze(g, s, s, '#ffd8b0', 0.1, 'soft-light');
   },
 });
@@ -1405,14 +1571,34 @@ register('flowerbox', {
 });
 
 register('embers', {
-  family: F, size: 128, note: 'brazier coals: dark lumps packed together, ash on their tops, glowing orange in the cracks between (emissive; tiles)',
-  paint(g, s, rnd) {
-    fill(g, s, s, '#ff8a30');
-    paintCells(g, worley(s, 5, rnd, 0.9), { colors: ['#2a1a14', '#3a241a', '#22160f', '#30201a'], grout: '#ff8a30', groutW: 0.9, bevel: 5, dome: 0.3, light: 0.5, varAmt: 0.1, rnd });
-    // ash greying the tops of some coals, hot spots glowing through others
-    for (let i = 0; i < 14; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 12, (X, Y) => blob(g, X, Y, range(rnd, 4, 8), range(rnd, 2, 5), 0, '#6a6058', 0.5, 0.3)); }
-    for (let i = 0; i < 10; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 10, (X, Y) => blob(g, X, Y, range(rnd, 2, 5), range(rnd, 1.5, 4), 0, '#ff6a20', 0.55, 0.3)); }
-    for (let i = 0; i < 8; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 8, (X, Y) => blob(g, X, Y, range(rnd, 1.5, 3), range(rnd, 1, 2.5), 0, '#fff0b0', 0.7, 0.4)); }
+  family: F, size: 128, note: 'brazier coals: round lumps of three sizes, ash-grey tops, a soft orange glow showing in only a few gaps (emissive; tiles)',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#24160f');
+    // the glow under the coals, only in a few soft pools
+    for (let i = 0; i < 7; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 8, 18); wrap(s, x, y, r * 1.5, (X, Y) => { blob(g, X, Y, r, r * 0.8, 0, '#e8641c', 0.85, 0.2); blob(g, X, Y, r * 0.5, r * 0.4, 0, '#ffc060', 0.8, 0.3); }); }
+    // lumps: big ones first, then the gaps filled with smaller ones
+    const lumps = [];
+    for (const r of [16, 11, 7]) for (let t = 0; t < 400; t++) {
+      const x = rnd() * s, y = rnd() * s, rr = r * range(rnd, 0.85, 1.15);
+      const near = q => { let dx = Math.abs(x - q.x), dy = Math.abs(y - q.y); dx = Math.min(dx, s - dx); dy = Math.min(dy, s - dy); return Math.hypot(dx, dy) < (q.r + rr) * 0.82; };
+      if (!lumps.some(near)) lumps.push({ x, y, r: rr, ash: rnd() < 0.55, hot: rnd() < 0.18 });
+    }
+    for (const L of lumps) {
+      const n = 9, pts = [], ph = rnd() * TAU, c = pick(rnd, ['#2e2018', '#3a281e', '#261a14', '#34261c']);
+      for (let k = 0; k < n; k++) { const t = k / n * TAU; pts.push([Math.cos(t) * L.r * (0.8 + 0.25 * Math.sin(t * 3 + ph)), Math.sin(t) * L.r * 0.85 * (0.8 + 0.25 * Math.cos(t * 2 + ph))]); }
+      wrap(s, L.x, L.y, L.r * 1.4, (X, Y) => {
+        const P = pts.map(([u, v]) => [X + u, Y + v]);
+        g.save(); g.translate(L.r * 0.22, L.r * 0.3); polyPath(g, P); g.fillStyle = rgba('#0e0806', 0.6); g.fill(); g.restore();
+        clipped(g, () => polyPath(g, P), () => {
+          g.fillStyle = grad(g, X - L.r, Y - L.r, X + L.r * 0.6, Y + L.r, [[0, L.ash ? '#6a625c' : '#4a3a30'], [0.45, c], [1, '#140c08']]);
+          g.fillRect(X - L.r * 1.3, Y - L.r * 1.3, L.r * 2.6, L.r * 2.6);
+          if (L.ash) blob(g, X - L.r * 0.25, Y - L.r * 0.35, L.r * 0.65, L.r * 0.4, -0.3, '#a8a098', 0.5, 0.25);
+          if (L.hot) blob(g, X + L.r * 0.1, Y + L.r * 0.65, L.r * 0.7, L.r * 0.28, 0, '#e8641c', 0.55, 0.2);
+          line(g, [[X - L.r * 0.4, Y - L.r * 0.1], [X + L.r * 0.1, Y + L.r * 0.05], [X + L.r * 0.4, Y + L.r * 0.3]], 1, '#0e0806', 0.5);
+        });
+      });
+    }
+    blurTile(cv, 0.6);
   },
 });
 
@@ -1438,12 +1624,57 @@ register('board_rough', {
 });
 
 register('bone', {
-  family: F, size: 128, note: 'ivory bone and tusk: cream with soft growth rings and a dirty base',
+  family: F, size: 128, note: 'ivory bone and tusk: cream with soft growth rings (they wrap) and a dirty base',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#e8dcc0');
-    for (let y = 0; y < s; y += range(rnd, 6, 14)) { line(g, [[0, y], [s, y + range(rnd, -2, 2)]], range(rnd, 1, 3), '#c8b898', 0.35); }
+    const n = 11;
+    for (let i = 0; i < n; i++) {
+      const y0 = (i + range(rnd, -0.25, 0.25)) * s / n, a = range(rnd, 0.5, 2), ph = rnd() * TAU;
+      const pts = []; for (let x = -4; x <= s + 4; x += 4) pts.push([x, y0 + a * Math.sin(TAU * x / s + ph)]);
+      for (const dy of [-s, 0, s]) line(g, pts.map(([x, y]) => [x, y + dy]), range(rnd, 1, 3), '#c8b898', 0.35);
+    }
     mottle(g, s, rnd, { colors: ['#f6eedc', '#d0c0a0', '#bca888'], count: 18, rmin: 6, rmax: 24, alpha: 0.35, hard: 0.15 });
     blurTile(cv, 0.6);
+  },
+});
+
+register('clay', {
+  family: F, size: 128, note: 'glazed pottery and painted goods: a light neutral glaze with throwing rings and drips (tinted per item with vertex colours)',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#d8d0c2');
+    mottle(g, s, rnd, { colors: ['#e8e2d6', '#c4baa8', '#d0c6b4'], count: 20, rmin: 10, rmax: 36, alpha: 0.4, hard: 0.1 });
+    for (let y = 4; y < s; y += range(rnd, 7, 13)) { const pts = []; for (let x = -4; x <= s + 4; x += 8) pts.push([x, y + Math.sin(TAU * x / s + y) * 1.2]); line(g, pts, range(rnd, 1, 2), rnd() < 0.5 ? '#b0a690' : '#f0ebe0', 0.3); }
+    for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s * 0.5, L = range(rnd, 10, 40); wrap(s, x, y + L / 2, L, (X, Y) => line(g, [[X, Y - L / 2], [X + (rnd() - 0.5) * 2, Y + L / 2]], range(rnd, 2, 4), '#a89c86', 0.3)); }
+    blurTile(cv, 0.8);
+  },
+});
+
+register('endgrain', {
+  family: F, size: 128, note: 'sawn log end: growth rings from a pale centre to a dark rim, radial checks, lit upper left (for vigas, log ends, firewood)',
+  paint(g, s, rnd) {
+    const c = s / 2;
+    const rg = g.createRadialGradient(c - 6, c - 6, 2, c, c, c);
+    rg.addColorStop(0, '#d8a870'); rg.addColorStop(0.55, '#c49460'); rg.addColorStop(0.88, '#9a6a40'); rg.addColorStop(1, '#6a4428');
+    g.fillStyle = rg; g.fillRect(0, 0, s, s);
+    for (let r = 5; r < c; r += range(rnd, 3.5, 7)) { g.save(); g.strokeStyle = rgba('#7a5232', 0.4); g.lineWidth = range(rnd, 0.8, 1.8); g.beginPath(); g.ellipse(c + (rnd() - 0.5) * 2, c + (rnd() - 0.5) * 2, r, r * range(rnd, 0.94, 1.04), 0, 0, TAU); g.stroke(); g.restore(); }
+    for (let k = 0; k < 4; k++) { const a = rnd() * TAU, r0 = range(rnd, 4, 14), r1 = range(rnd, 24, c * 0.95); line(g, [[c + Math.cos(a) * r0, c + Math.sin(a) * r0], [c + Math.cos(a) * r1, c + Math.sin(a) * r1]], range(rnd, 1.2, 2.4), '#3a2416', 0.7); }
+    g.save(); g.strokeStyle = '#4a2e1c'; g.lineWidth = 6; g.beginPath(); g.arc(c, c, c - 3, 0, TAU); g.stroke(); g.restore();
+    blob(g, c - c * 0.35, c - c * 0.4, c * 0.4, c * 0.3, -0.6, '#fff0c8', 0.22, 0.2);
+  },
+});
+
+register('straw_fringe', {
+  family: F, w: 256, h: 64, alpha: true, note: 'the ragged straw fringe hanging under a thatch eave (alpha card, tiles along u)',
+  paint(g, s, rnd, H) {
+    const W = 256;
+    g.clearRect(0, 0, W, H);
+    for (let k = 0; k < 420; k++) {
+      const x = rnd() * W, L = H * range(rnd, 0.35, 1) * (0.7 + 0.3 * Math.sin(x / W * TAU * 3 + 1)), a = range(rnd, -0.15, 0.15);
+      const col = pick(rnd, ['#a08040', '#b09048', '#8a6e38', '#c4a45c', '#6e5630']);
+      for (const dx of [0, -W, W]) line(g, [[x + dx, 0], [x + dx + Math.sin(a) * L, Math.cos(a) * L]], range(rnd, 1.2, 2.6), col, 1);
+    }
+    g.fillStyle = grad(g, 0, 0, 0, H, [[0, '#2a1e10', 0.55], [0.5, '#2a1e10', 0.1], [1, '#2a1e10', 0]]);
+    g.globalCompositeOperation = 'source-atop'; g.fillRect(0, 0, W, H); g.globalCompositeOperation = 'source-over';
   },
 });
 
@@ -1475,15 +1706,24 @@ register('burlap', {
 });
 
 register('latillas', {
-  family: F, size: 256, note: 'adobe ceiling: thin peeled sticks laid side by side across the vigas (along u)',
+  family: F, size: 256, note: 'adobe ceiling: thin peeled sticks laid side by side across the vigas (along u); each row breaks at its own place',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#3a2a1e');
     let y = 0;
-    while (y < s - 4) {
-      const hh = Math.min(s - y, range(rnd, 9, 15)), c = jitter(pick(rnd, ['#b89470', '#a8845e', '#c4a07a', '#9a7856']), rnd, 0.06);
+    const hs = []; let tot = 0;
+    while (tot < s - 10) { const hh = range(rnd, 9, 15); hs.push(hh); tot += hh; }
+    const k = s / tot;
+    for (const h0 of hs) {
+      const hh = h0 * k, c = jitter(pick(rnd, ['#b89470', '#a8845e', '#c4a07a', '#9a7856']), rnd, 0.06);
       g.fillStyle = grad(g, 0, y, 0, y + hh, [[0, lightOf(c, 0.35)], [0.4, c], [1, shadowOf(c, 0.5)]]);
-      g.beginPath(); g.roundRect(0, y + 0.8, s, hh - 1.6, hh / 2); g.fill();
-      for (let k = 0; k < 3; k++) { const x = rnd() * s; wrap(s, x, y + hh / 2, 40, (X, Y) => blob(g, X, Y, range(rnd, 10, 40), hh * 0.25, 0, '#6a4a30', 0.3, 0.3)); }
+      g.fillRect(0, y + 0.8, s, hh - 1.6);
+      // where one stick ends and the next begins: a dark gap between two rounded ends (wraps)
+      const bx = rnd() * s, gap = range(rnd, 2, 5);
+      wrap(s, bx, y + hh / 2, hh + gap, (X) => {
+        g.fillStyle = '#3a2a1e'; g.fillRect(X - gap / 2, y, gap, hh);
+        for (const sd of [-1, 1]) { g.fillStyle = grad(g, X + sd * gap / 2, 0, X + sd * (gap / 2 + hh * 0.6), 0, [[0, '#3a2a1e', 0.85], [1, '#3a2a1e', 0]]); g.fillRect(Math.min(X + sd * gap / 2, X + sd * (gap / 2 + hh * 0.6)), y + 0.8, hh * 0.6, hh - 1.6); }
+      });
+      for (let j = 0; j < 3; j++) { const x = rnd() * s; wrap(s, x, y + hh / 2, 40, (X, Y) => blob(g, X, Y, range(rnd, 10, 40), hh * 0.25, 0, '#6a4a30', 0.3, 0.3)); }
       y += hh;
     }
     glaze(g, s, s, '#ffd8a8', 0.1, 'soft-light');
@@ -1628,67 +1868,114 @@ register('sail_canvas', {
 
 export const SIGN_FONT = `Georgia, 'Palatino Linotype', 'Book Antiqua', Palatino, 'Liberation Serif', 'DejaVu Serif', serif`;
 
-// Lines of text fitted into a box (x, y, w, h), first line bigger. Each line is painted with a
-// soft dark drop shadow (lower right) and a warm lit edge (upper left), so it reads as painted or
-// carved into the board rather than printed.
-function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#fff4d0', carved = false, gold = false, track = 0.04 } = {}) {
-  const n = lines.length;
+// Lay a line out glyph by glyph with a hand-cut wobble: every letter turned a few degrees, nudged off
+// the baseline and scaled a little (deterministic per line). Returns { glyphs, width }.
+function layoutGlyphs(g, ln, size, track, rnd, wob = 1) {
+  g.letterSpacing = '0px';
+  const chars = [...ln], sp = size * track;
+  const ws = chars.map(ch => g.measureText(ch).width);
+  const width = ws.reduce((a, b) => a + b, 0) + sp * Math.max(0, chars.length - 1);
+  let x = -width / 2;
+  const glyphs = chars.map((ch, i) => {
+    const q = { ch, x: x + ws[i] / 2, dy: (rnd() - 0.5) * 0.08 * size * wob, rot: (rnd() - 0.5) * 0.105 * wob, sc: 1 + (rnd() - 0.5) * 0.1 * wob };
+    x += ws[i] + sp;
+    return q;
+  });
+  return { glyphs, width };
+}
+// draw a laid-out line centred at (cx, cy); kx squeezes it sideways; op 'fill' | 'stroke'
+function drawGlyphs(gg, L, cx, cy, op = 'fill', kx = 1) {
+  gg.save(); gg.textAlign = 'center'; gg.textBaseline = 'middle';
+  for (const q of L.glyphs) {
+    if (q.ch === ' ') continue;
+    gg.save(); gg.translate(cx + q.x * kx, cy + q.dy); gg.rotate(q.rot); gg.scale(q.sc * kx, q.sc);
+    if (op === 'stroke') gg.strokeText(q.ch, 0, 0); else gg.fillText(q.ch, 0, 0);
+    gg.restore();
+  }
+  gg.restore();
+}
+
+// Lines of text fitted into a box (x, y, w, h), first line bigger (the second stays at least 55% of it,
+// squeezed sideways if it must). mode:
+//   'paint'   brushed paint: a soft drop shadow, a warm lit edge, the fill (opt. a dark outline under it, drips)
+//   'carved'  cut into the wood and filled with paint (gold: gilded), paint chipped out of the cuts
+//   'burnt'   branded into hide: a scorched halo, charred strokes
+//   'engraved' cut into brass: dark letters with a lit lower lip
+function signText(g, lines, x, y, w, h, { fg = '#f2e2b8', shadow = INK, lit = '#fff4d0', mode = 'paint', gold = false, track = 0.04, wob = 1, outline = null, drips = 0, chipN = 12 } = {}) {
   const weights = lines.map((_, i) => (i === 0 ? 1 : 0.62));
   const tot = weights.reduce((a, b) => a + b, 0);
-  let yy = y;
-  g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
-  let size0 = 0;
+  let yy = y, size0 = 0;
+  g.save();
   lines.forEach((ln, i) => {
     const lh = h * weights[i] / tot;
+    const seed = hashStr(ln + '#' + i);
     let size = Math.floor(lh * 0.86);
     const font = () => `bold ${size}px ${SIGN_FONT}`;
     g.font = font();
-    g.letterSpacing = `${Math.round(size * track)}px`;
-    while (g.measureText(ln).width > w * 0.93 && size > 8) { size -= 1; g.font = font(); g.letterSpacing = `${Math.round(size * track)}px`; }
+    let L = layoutGlyphs(g, ln, size, track, rngFrom(seed), wob);
+    while (L.width > w * 0.93 && size > 8) { size -= 1; g.font = font(); L = layoutGlyphs(g, ln, size, track, rngFrom(seed), wob); }
+    let kx = 1;
     if (i === 0) size0 = size;
     else if (size < size0 * 0.55) {
-      // keep the second line at least 55% of the first: squeeze it sideways instead of shrinking it
-      const want = Math.floor(size0 * 0.55), wNow = g.measureText(ln).width;
-      size = want; g.font = font(); g.letterSpacing = `${Math.round(size * track * 0.5)}px`;
-      const k = Math.min(1, w * 0.95 / g.measureText(ln).width);
-      if (k < 1) { g.save(); g.translate(x + w / 2, 0); g.scale(k, 1); g.translate(-(x + w / 2), 0); g.__sq = true; }
+      size = Math.floor(size0 * 0.55); g.font = font();
+      L = layoutGlyphs(g, ln, size, track * 0.5, rngFrom(seed), wob);
+      kx = Math.min(1, w * 0.95 / L.width);
     }
-    const cy = yy + lh / 2 + size * 0.04, cx = x + w / 2, o = Math.max(1.5, size * 0.05);
-    if (carved) {
-      // cut into the wood, then filled with paint: a lit lower-right lip, the dark cut, the paint
-      // inside it, and the cut's shadow left along the upper-left inner edge
-      g.lineJoin = 'round';
-      if (i > 0) { g.lineWidth = Math.max(1, size * 0.05); }
-      g.fillStyle = rgba('#f0d8a8', 0.45); g.fillText(ln, cx + o * 0.55, cy + o * 0.7);
-      g.fillStyle = '#2a1a12'; g.fillText(ln, cx, cy);
-      if (i > 0) { g.strokeStyle = '#2a1a12'; g.strokeText(ln, cx, cy); }
-      const tw = Math.ceil(g.measureText(ln).width + size), th = Math.ceil(size * 1.5);
-      const setup = gg => { gg.font = g.font; gg.letterSpacing = g.letterSpacing; gg.textAlign = 'center'; gg.textBaseline = 'middle'; gg.lineJoin = 'round'; gg.lineWidth = g.lineWidth; };
+    const rnd = rngFrom(seed ^ 0x5bd1e995);
+    const cy = yy + lh / 2 + size * 0.04, cx = x + w / 2, o = Math.max(1.5, size * 0.05), lw = Math.max(1, size * 0.045);
+    g.lineJoin = 'round';
+    if (mode === 'carved') {
+      // a lit lower-right lip, the dark cut, then the paint inside it nudged down-right so the cut's
+      // wall shows along the upper-left inner edge; a dozen flakes of paint chipped out of the cuts
+      g.fillStyle = rgba('#f0d8a8', 0.45); drawGlyphs(g, L, cx + o * 0.55, cy + o * 0.7, 'fill', kx);
+      g.fillStyle = '#2a1a12'; drawGlyphs(g, L, cx, cy, 'fill', kx);
+      if (i > 0) { g.lineWidth = lw; g.strokeStyle = '#2a1a12'; drawGlyphs(g, L, cx, cy, 'stroke', kx); }
+      const tw = Math.ceil(L.width * kx + size * 1.4), th = Math.ceil(size * 1.6);
+      const setup = gg => { gg.font = g.font; gg.lineJoin = 'round'; gg.lineWidth = lw; };
       const cv2 = makeCanvas(tw, th), g2 = cv2.getContext('2d'), cv3 = makeCanvas(tw, th), g3 = cv3.getContext('2d');
       setup(g2); setup(g3);
-      g2.fillStyle = '#000'; g2.fillText(ln, tw / 2, th / 2);
-      if (i > 0) { g2.strokeStyle = '#000'; g2.strokeText(ln, tw / 2, th / 2); }
-      // the paint: the same glyphs nudged down-right, kept only inside the cut, so the cut's
-      // dark wall shows along the upper-left inner edge
-      g3.fillStyle = gold ? grad(g3, 0, th * 0.2, 0, th * 0.8, [[0, '#fff0b0'], [0.5, '#e8c060'], [1, '#b88a30']]) : fg;
-      g3.fillText(ln, tw / 2 + o * 0.45, th / 2 + o * 0.55);
-      if (i > 0) { g3.strokeStyle = g3.fillStyle; g3.strokeText(ln, tw / 2 + o * 0.45, th / 2 + o * 0.55); }
+      g2.fillStyle = '#000'; drawGlyphs(g2, L, tw / 2, th / 2, 'fill', kx);
+      if (i > 0) { g2.strokeStyle = '#000'; drawGlyphs(g2, L, tw / 2, th / 2, 'stroke', kx); }
+      g3.fillStyle = gold ? grad(g3, 0, th * 0.2, 0, th * 0.8, [[0, '#fff0b0'], [0.45, '#e8c060'], [0.6, '#c8962c'], [1, '#b88a30']]) : fg;
+      drawGlyphs(g3, L, tw / 2 + o * 0.45, th / 2 + o * 0.55, 'fill', kx);
+      if (i > 0) { g3.strokeStyle = g3.fillStyle; drawGlyphs(g3, L, tw / 2 + o * 0.45, th / 2 + o * 0.55, 'stroke', kx); }
+      g3.save(); g3.globalCompositeOperation = 'destination-out';
+      for (let k = 0; k < chipN; k++) { const px = tw / 2 + (rnd() - 0.5) * L.width * kx, py = th / 2 + (rnd() - 0.5) * size * 0.8, r = range(rnd, 1, 2.6) * size / 40; ellipse(g3, px, py, r * range(rnd, 1, 2), r, rnd() * 3, '#000', 1); }
+      g3.restore();
       g2.globalCompositeOperation = 'source-in';
       g2.drawImage(cv3, 0, 0);
       g.drawImage(cv2, cx - tw / 2, cy - th / 2);
+    } else if (mode === 'burnt') {
+      g.save(); g.filter = `blur(${Math.max(1.5, o * 1.5)}px)`; g.fillStyle = rgba('#6a3010', 0.6); drawGlyphs(g, L, cx, cy, 'fill', kx); g.restore();
+      g.lineWidth = size * 0.07; g.strokeStyle = rgba('#4a2010', 0.75); drawGlyphs(g, L, cx, cy, 'stroke', kx);
+      g.fillStyle = '#22100a'; drawGlyphs(g, L, cx, cy, 'fill', kx);
+      g.fillStyle = rgba('#a85a28', 0.35); drawGlyphs(g, L, cx - o * 0.3, cy - o * 0.3, 'fill', kx * 0.98);
+      g.fillStyle = '#22100a'; drawGlyphs(g, L, cx + o * 0.15, cy + o * 0.15, 'fill', kx);
+    } else if (mode === 'engraved') {
+      g.fillStyle = rgba('#fff4c0', 0.7); drawGlyphs(g, L, cx + o * 0.45, cy + o * 0.55, 'fill', kx);
+      g.fillStyle = '#3a2810'; drawGlyphs(g, L, cx, cy, 'fill', kx);
+      g.fillStyle = rgba('#6a8a5a', 0.35); drawGlyphs(g, L, cx - o * 0.25, cy - o * 0.25, 'fill', kx);
+      g.fillStyle = '#2e2008'; drawGlyphs(g, L, cx + o * 0.1, cy + o * 0.1, 'fill', kx);
     } else {
-      g.save(); g.filter = `blur(${Math.max(1, o * 0.6)}px)`; g.fillStyle = rgba(shadow, 0.6); g.fillText(ln, cx + o, cy + o * 1.3); g.restore();
+      if (outline) { g.lineWidth = size * 0.11; g.strokeStyle = outline; drawGlyphs(g, L, cx + o * 0.3, cy + o * 0.4, 'stroke', kx * 1.0); }
+      g.save(); g.filter = `blur(${Math.max(1, o * 0.6)}px)`; g.fillStyle = rgba(shadow, 0.6); drawGlyphs(g, L, cx + o, cy + o * 1.3, 'fill', kx); g.restore();
       if (gold) {
-        g.fillStyle = '#5a3a14'; g.fillText(ln, cx + o * 0.5, cy + o * 0.6);
+        g.fillStyle = '#5a3a14'; drawGlyphs(g, L, cx + o * 0.5, cy + o * 0.6, 'fill', kx);
         g.fillStyle = grad(g, 0, cy - size / 2, 0, cy + size / 2, [[0, '#fff0b0'], [0.45, '#e8c060'], [0.55, '#c8962c'], [1, '#f0c860']]);
-        g.fillText(ln, cx, cy);
+        drawGlyphs(g, L, cx, cy, 'fill', kx);
       } else {
-        g.fillStyle = rgba(lit, 0.45); g.fillText(ln, cx - o * 0.4, cy - o * 0.4);
-        g.fillStyle = fg; g.fillText(ln, cx, cy);
-        if (i > 0) { g.lineWidth = Math.max(1, size * 0.045); g.strokeStyle = fg; g.lineJoin = 'round'; g.strokeText(ln, cx, cy); }
+        g.fillStyle = rgba(lit, 0.45); drawGlyphs(g, L, cx - o * 0.4, cy - o * 0.4, 'fill', kx);
+        g.fillStyle = fg; drawGlyphs(g, L, cx, cy, 'fill', kx);
+        if (i > 0) { g.lineWidth = lw; g.strokeStyle = fg; drawGlyphs(g, L, cx, cy, 'stroke', kx); }
+      }
+      // runs of paint from the bottoms of a few letters
+      for (let k = 0; k < drips; k++) {
+        const q = L.glyphs[Math.floor(rnd() * L.glyphs.length)]; if (!q || q.ch === ' ') continue;
+        const px = cx + q.x * kx + (rnd() - 0.5) * size * 0.3, py = cy + size * 0.36, len = range(rnd, 0.15, 0.5) * size;
+        line(g, [[px, py], [px + (rnd() - 0.5) * 1.5, py + len]], range(rnd, 1.2, 2.6) * size / 50, fg, 0.85);
+        ellipse(g, px, py + len, 1.6 * size / 50, 2 * size / 50, 0, fg, 0.85);
       }
     }
-    if (g.__sq) { g.restore(); g.__sq = false; }
     yy += lh;
   });
   g.restore();
@@ -1716,9 +2003,42 @@ function billboardPaint(bg) {
   return '#3f6e6a';
 }
 
-// Paint a sign face. style: 'board' (painted panel on a planked board), 'carved' (letters cut into
-// bare wood), 'gilded' (the casino: gold frame, red panel, gold letters), 'billboard' (big painted
-// roadside boards), 'daub' (paint on rock, transparent). Returns a canvas of w×h.
+// a carved C-scroll (gilded) curling out of a corner at (x, y); sx, sy point into the panel
+function scrollOrnament(g, x, y, sx, sy, r) {
+  const pts = [];
+  for (let k = 0; k <= 24; k++) { const t = k / 24, a = t * TAU * 1.15, rr = r * (1 - t * 0.75); pts.push([x + sx * (Math.cos(a) * rr * 0.9 + r * 0.4), y + sy * (Math.sin(a) * rr * 0.6 + r * 0.2)]); }
+  line(g, pts.map(([px, py]) => [px + 1.5, py + 2]), r * 0.16, '#2a1808', 0.6);
+  line(g, pts, r * 0.12, '#c8962c', 0.95);
+  line(g, pts.map(([px, py]) => [px - 0.8, py - 0.8]), r * 0.04, '#fff0b0', 0.8);
+  const leaf = [[x + sx * r * 0.2, y + sy * r * 0.9], [x + sx * r * 1.4, y + sy * r * 0.35], [x + sx * r * 2.2, y + sy * r * 0.15]];
+  line(g, leaf.map(([px, py]) => [px + 1.5, py + 2]), r * 0.12, '#2a1808', 0.5);
+  line(g, leaf, r * 0.09, '#c8962c', 0.9);
+}
+
+// an interlaced knot band (dwarven): a chain of loops, each going over the last and under the next
+function knotBand(g, x0, y0, x1, y1, r, rnd) {
+  const L = Math.hypot(x1 - x0, y1 - y0), n = Math.max(2, Math.round(L / (r * 1.6))), ux = (x1 - x0) / L, uy = (y1 - y0) / L;
+  for (let pass = 0; pass < 2; pass++) for (let k = 0; k < n; k++) {
+    if ((k % 2) !== pass) continue;
+    const cx = x0 + ux * (k + 0.5) * L / n, cy = y0 + uy * (k + 0.5) * L / n;
+    g.save(); g.translate(cx, cy); g.rotate(Math.atan2(uy, ux));
+    g.lineWidth = r * 0.42; g.strokeStyle = '#2a1a10'; g.beginPath(); g.ellipse(1, 1.5, r * 0.95, r * 0.6, 0, 0, TAU); g.stroke();
+    g.lineWidth = r * 0.3; g.strokeStyle = '#c8a050'; g.beginPath(); g.ellipse(0, 0, r * 0.95, r * 0.6, 0, 0, TAU); g.stroke();
+    g.lineWidth = r * 0.08; g.strokeStyle = '#fff0b8'; g.beginPath(); g.ellipse(-0.6, -0.8, r * 0.95, r * 0.6, 0, Math.PI, TAU * 0.85); g.stroke();
+    g.restore();
+  }
+}
+
+// Paint a sign face. style:
+//   'board'   a painted panel on a planked board        'carved'  letters cut into bare wood
+//   'oakgold' carved oak, a moulded frame, gilded letters and scrolls (the Goldshire casino)
+//   'barn'    letters painted straight onto faded barn boards (the Westfall casino)
+//   'dwarf'   dark oak in a bronze rune-knot border, gilded carved letters (Kharanos)
+//   'hide'    a stretched hide with branded letters, ragged edges and lacing holes (alpha) (the canyon outpost)
+//   'goblin'  a riveted brass marquee frame, a teal panel, gold letters, gears (Gadgetzan)
+//   'plaque'  an engraved brass plaque          'billboard'  big painted roadside boards
+//   'daub'    paint on rock (transparent)
+// Returns a canvas of w×h.
 export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e2b8', style = 'board', seed = '' } = {}) {
   const cv = makeCanvas(w, h), g = cv.getContext('2d');
   const rnd = rngFrom(hashStr(lines.join('|') + style + seed));
@@ -1734,26 +2054,115 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
     g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
     let size = Math.floor(h * 0.62); g.font = `bold ${size}px ${SIGN_FONT}`;
     while (g.measureText(lines[0]).width > w * 0.86) { size -= 2; g.font = `bold ${size}px ${SIGN_FONT}`; }
-    for (let k = 0; k < 9; k++) { g.globalAlpha = 0.22; g.fillStyle = col; g.fillText(lines[0], w / 2 + (rnd() - 0.5) * size * 0.06, h / 2 + (rnd() - 0.5) * size * 0.06); }
-    g.globalAlpha = 0.8; g.fillText(lines[0], w / 2, h / 2);
+    const L = layoutGlyphs(g, lines[0], size, 0.02, rngFrom(hashStr(lines[0])), 1.6);
+    for (let k = 0; k < 9; k++) { g.globalAlpha = 0.22; g.fillStyle = col; drawGlyphs(g, L, w / 2 + (rnd() - 0.5) * size * 0.06, h / 2 + (rnd() - 0.5) * size * 0.06); }
+    g.globalAlpha = 0.8; drawGlyphs(g, L, w / 2, h / 2);
     g.restore();
-    const tw = g.measureText(lines[0]).width;
-    for (let k = 0; k < 9; k++) { const x = w / 2 + (rnd() - 0.5) * tw * 0.9, y0 = h / 2 + size * 0.3, L = range(rnd, 8, h * 0.28); line(g, [[x, y0], [x + (rnd() - 0.5) * 2, y0 + L]], range(rnd, 2, 5), col, 0.7); ellipse(g, x, y0 + L, 3.5, 4, 0, col, 0.7); }
+    const tw = L.width;
+    for (let k = 0; k < 9; k++) { const x = w / 2 + (rnd() - 0.5) * tw * 0.9, y0 = h / 2 + size * 0.3, Ln = range(rnd, 8, h * 0.28); line(g, [[x, y0], [x + (rnd() - 0.5) * 2, y0 + Ln]], range(rnd, 2, 5), col, 0.7); ellipse(g, x, y0 + Ln, 3.5, 4, 0, col, 0.7); }
     return cv;
   }
-  if (style === 'gilded') {
-    boards(Math.max(2, Math.round(h / 90)), ['#5a3a24', '#4e3220']);
-    const fr = m * 0.12;
-    // gilded frame
-    g.fillStyle = grad(g, 0, 0, w, h, [[0, '#f8e098'], [0.3, '#c8963c'], [0.55, '#f0d080'], [1, '#6a4818']]);
-    g.beginPath(); g.roundRect(fr * 0.25, fr * 0.25, w - fr * 0.5, h - fr * 0.5, fr * 0.5); g.fill();
-    for (let x = fr; x < w - fr; x += fr * 0.7) { ellipse(g, x, fr * 0.6, fr * 0.16, fr * 0.16, 0, '#fff4c0', 0.7); ellipse(g, x, h - fr * 0.6, fr * 0.16, fr * 0.16, 0, '#7a5418', 0.7); }
-    g.fillStyle = '#4a1418'; g.beginPath(); g.roundRect(fr, fr, w - 2 * fr, h - 2 * fr, fr * 0.3); g.fill();
-    for (let i = 0; i < 30; i++) blob(g, fr + rnd() * (w - 2 * fr), fr + rnd() * (h - 2 * fr), range(rnd, 10, 40), range(rnd, 8, 30), 0, pick(rnd, ['#6a1c22', '#3a0e14', '#7a2a2a']), 0.4, 0.15);
-    g.save(); g.globalAlpha = 0.18; for (let y = fr + 12; y < h - fr; y += 22) for (let x = fr + 12 + ((y / 22) & 1) * 11; x < w - fr; x += 22) ellipse(g, x, y, 3, 3, 0, '#d8a050'); g.restore();
+  if (style === 'gilded' || style === 'oakgold') {
+    boards(Math.max(2, Math.round(h / 80)), ['#5e3c24', '#6a4428', '#563620'], 0.12);
+    const fr = m * 0.13;
+    for (const [x, y, ww, hh, v] of [[0, 0, w, fr, false], [0, h - fr, w, fr, false], [0, 0, fr, h, true], [w - fr, 0, fr, h, true]]) plank(g, x, y, ww, hh, '#8a5e36', rnd, { vertical: v, grain: 6, bevel: 4, light: 0.6, splits: 0.2 });
+    for (const [x0, y0, sx, sy] of [[0, 0, 1, 1], [w, 0, -1, 1], [0, h, 1, -1], [w, h, -1, -1]]) line(g, [[x0, y0], [x0 + sx * fr, y0 + sy * fr]], 1.6, INK, 0.6);
+    g.save(); g.strokeStyle = rgba('#2a1a10', 0.6); g.lineWidth = 3; g.strokeRect(fr * 0.5 + 1.5, fr * 0.5 + 2, w - fr, h - fr);
+    g.strokeStyle = rgba('#e8c090', 0.45); g.lineWidth = 1.5; g.strokeRect(fr * 0.5, fr * 0.5, w - fr, h - fr); g.restore();
     g.fillStyle = grad(g, 0, fr, 0, fr + 16, [[0, INK, 0.6], [1, INK, 0]]); g.fillRect(fr, fr, w - 2 * fr, 16);
-    signText(g, lines, fr * 1.4, fr * 1.05, w - fr * 2.8, h - fr * 2.1, { gold: true, track: 0.06 });
+    g.fillStyle = grad(g, fr, 0, fr + 12, 0, [[0, INK, 0.45], [1, INK, 0]]); g.fillRect(fr, fr, 12, h - 2 * fr);
+    for (const [sx, sy] of [[1, 1], [-1, 1], [1, -1], [-1, -1]]) scrollOrnament(g, sx > 0 ? fr * 1.25 : w - fr * 1.25, sy > 0 ? fr * 1.3 : h - fr * 1.3, sx, sy, fr * 0.75);
+    for (const [x, y] of [[fr / 2, fr / 2], [w - fr / 2, fr / 2], [fr / 2, h - fr / 2], [w - fr / 2, h - fr / 2], [w / 2, fr / 2], [w / 2, h - fr / 2]]) rivet(g, x, y, Math.max(3, fr * 0.16), '#c8a050');
+    signText(g, lines, fr * 2.3, fr * 1.1, w - fr * 4.6, h - fr * 2.2, { mode: 'carved', gold: true, track: 0.06, chipN: 8 });
     glaze(g, w, h, '#ffe0b0', 0.08, 'soft-light');
+    return cv;
+  }
+  if (style === 'barn') {
+    fill(g, w, h, '#2a1a1c');
+    const nb = Math.max(6, Math.round(w / 34)), bw = w / nb;
+    for (let i = 0; i < nb; i++) plank(g, i * bw + 1.5, 0, bw - 3, h, jitter(pick(rnd, ['#8a3a2a', '#7e3426', '#94442e', '#86382a']), rnd, 0.07), rnd, { vertical: true, grain: 6, galpha: 0.3, weather: 0.6, splits: 0.4, nails: 2, bevel: 2, knots: 0.2 });
+    for (let i = 0; i < Math.round(w * h / 9000); i++) { const x = rnd() * w, y = rnd() * h, L = range(rnd, 10, 40), ww = range(rnd, 4, 10); blob(g, x, y, ww * 0.55, L * 0.5, 0, '#9a8e7c', 0.6, 0.6); }
+    // two painted rules and the letters, cream, brushed on with a few runs
+    for (const y of [h * 0.1, h * 0.9]) { line(g, [[w * 0.06, y], [w * 0.94, y + (rnd() - 0.5) * 3]], h * 0.03, '#2a1010', 0.35); line(g, [[w * 0.06, y - 1], [w * 0.94, y - 1 + (rnd() - 0.5) * 3]], h * 0.022, '#e8dcc0', 0.9); }
+    signText(g, lines, w * 0.04, h * 0.12, w * 0.92, h * 0.78, { mode: 'paint', fg: '#f0e2c0', shadow: '#1a0808', wob: 1.4, drips: 7, track: 0.04, outline: '#3a1410' });
+    chips(g, 0, 0, w, h, rnd, Math.round(w * h / 5000), '#8a7a68');
+    streaks(g, Math.max(w, h), rnd, { colors: ['#4a2420', '#b07a68'], count: 16, len: [30, 120], width: [2, 6], angle: Math.PI, wobble: 0.02, alpha: 0.14 });
+    glaze(g, w, h, '#ffd8b0', 0.1, 'soft-light');
+    return cv;
+  }
+  if (style === 'dwarf') {
+    boards(Math.max(2, Math.round(h / 80)), ['#4a3222', '#52382a', '#3e2a1c'], 0.1);
+    const fr = m * 0.15;
+    g.save(); g.beginPath(); g.rect(0, 0, w, h); g.rect(fr, h - fr, w - 2 * fr, -(h - 2 * fr)); g.clip('evenodd');
+    g.fillStyle = grad(g, 0, 0, 0, h, [[0, '#8a6a3a'], [0.5, '#6a4e28'], [1, '#4a3418']]); g.fillRect(0, 0, w, h);
+    g.restore();
+    knotBand(g, fr * 0.5, fr * 0.5, w - fr * 0.5, fr * 0.5, fr * 0.32, rnd); knotBand(g, fr * 0.5, h - fr * 0.5, w - fr * 0.5, h - fr * 0.5, fr * 0.32, rnd);
+    knotBand(g, fr * 0.5, fr * 0.5, fr * 0.5, h - fr * 0.5, fr * 0.32, rnd); knotBand(g, w - fr * 0.5, fr * 0.5, w - fr * 0.5, h - fr * 0.5, fr * 0.32, rnd);
+    // iron corner plates with rivets
+    for (const [x, y] of [[0, 0], [w - fr * 1.4, 0], [0, h - fr * 1.4], [w - fr * 1.4, h - fr * 1.4]]) {
+      g.fillStyle = grad(g, x, y, x + fr * 1.4, y + fr * 1.4, [[0, '#7a7882'], [1, '#2e2c34']]); g.fillRect(x, y, fr * 1.4, fr * 1.4);
+      for (const [dx, dy] of [[0.3, 0.3], [1.1, 0.3], [0.3, 1.1], [1.1, 1.1]]) rivet(g, x + dx * fr, y + dy * fr, Math.max(2.5, fr * 0.12), '#8a8890');
+    }
+    g.fillStyle = grad(g, 0, fr, 0, fr + 14, [[0, INK, 0.6], [1, INK, 0]]); g.fillRect(fr, fr, w - 2 * fr, 14);
+    signText(g, lines, fr * 1.3, fr * 1.1, w - fr * 2.6, h - fr * 2.2, { mode: 'carved', gold: true, track: 0.08, chipN: 10, wob: 0.8 });
+    glaze(g, w, h, '#ffe0b0', 0.08, 'soft-light');
+    return cv;
+  }
+  if (style === 'hide') {
+    g.clearRect(0, 0, w, h);
+    const pts = [], jag = () => (rnd() - 0.5) * m * 0.04;
+    const ins = m * 0.06;
+    const edge = (x0, y0, x1, y1, nx, ny, n) => { for (let k = 0; k < n; k++) { const t = k / n, sag = Math.sin(Math.PI * t) * m * 0.07; pts.push([x0 + (x1 - x0) * t + nx * sag + jag(), y0 + (y1 - y0) * t + ny * sag + jag()]); } };
+    const nx = Math.max(6, Math.round(w / 40)), ny = Math.max(4, Math.round(h / 40));
+    edge(ins * 0.3, ins * 0.3, w - ins * 0.3, ins * 0.3, 0, 1, nx); edge(w - ins * 0.3, ins * 0.3, w - ins * 0.3, h - ins * 0.3, -1, 0, ny);
+    edge(w - ins * 0.3, h - ins * 0.3, ins * 0.3, h - ins * 0.3, 0, -1, nx); edge(ins * 0.3, h - ins * 0.3, ins * 0.3, ins * 0.3, 1, 0, ny);
+    clipped(g, () => polyPath(g, pts), () => {
+      const rg = g.createRadialGradient(w * 0.42, h * 0.4, m * 0.1, w / 2, h / 2, Math.max(w, h) * 0.6);
+      rg.addColorStop(0, '#d8b688'); rg.addColorStop(0.6, '#b48c5c'); rg.addColorStop(1, '#7a5634');
+      g.fillStyle = rg; g.fillRect(0, 0, w, h);
+      mottle(g, Math.max(w, h), rnd, { colors: ['#c8a478', '#8a6644', '#e0c49c', '#9a7450'], count: 40, rmin: m * 0.05, rmax: m * 0.25, alpha: 0.3, hard: 0.15 });
+      for (const [px, py] of [[0, 0], [w, 0], [0, h], [w, h]]) for (let k = 0; k < 4; k++) line(g, [[px, py], [px + (w / 2 - px) * range(rnd, 0.3, 0.5) + (rnd() - 0.5) * m * 0.3, py + (h / 2 - py) * range(rnd, 0.3, 0.5)]], range(rnd, 2, 4), '#7a5634', 0.25);
+      signText(g, lines, ins * 2.2, ins * 1.8, w - ins * 4.4, h - ins * 3.6, { mode: 'burnt', track: 0.05, wob: 1.6 });
+      for (let i = 0; i < 8; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 8, 30), range(rnd, 6, 18), 0, '#4a2a14', 0.15, 0.3);
+    });
+    g.save(); g.lineWidth = 4; g.strokeStyle = rgba('#3a2010', 0.85); polyPath(g, pts); g.stroke(); g.restore();
+    for (let k = 0; k < pts.length; k += 2) { const [px, py] = pts[k], dx = w / 2 - px, dy = h / 2 - py, l = Math.hypot(dx, dy); ellipse(g, px + dx / l * ins * 0.6, py + dy / l * ins * 0.6, 3.5, 3.5, 0, '#1e1008'); line(g, [[px + dx / l * ins * 0.6, py + dy / l * ins * 0.6], [px - dx / l * 3, py - dy / l * 3]], 2.2, '#c8b088', 0.9); }
+    return cv;
+  }
+  if (style === 'goblin') {
+    fill(g, w, h, '#2a2018');
+    const fr = m * 0.14;
+    g.fillStyle = grad(g, 0, 0, 0, h, [[0, '#f8e098'], [0.25, '#c8963c'], [0.6, '#e8c870'], [1, '#6a4818']]); g.beginPath(); g.roundRect(0, 0, w, h, fr * 0.5); g.fill();
+    for (let i = 0; i < 20; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 6, 20), range(rnd, 3, 8), 0, '#6a8a5a', 0.3, 0.3);
+    const panel = () => { g.beginPath(); g.roundRect(fr, fr, w - 2 * fr, h - 2 * fr, fr * 0.3); };
+    clipped(g, panel, () => {
+      g.fillStyle = grad(g, 0, fr, 0, h - fr, [[0, '#1a3e3a'], [0.5, '#1e4a46'], [1, '#143430']]); g.fillRect(0, 0, w, h);
+      for (let i = 0; i < 26; i++) blob(g, fr + rnd() * (w - 2 * fr), fr + rnd() * (h - 2 * fr), range(rnd, 10, 40), range(rnd, 8, 24), 0, pick(rnd, ['#24564f', '#123430', '#2a5e56']), 0.4, 0.15);
+      // half-gears peeking in from the ends of the panel
+      for (const gx of [fr, w - fr]) {
+        g.save(); g.translate(gx, h / 2); const R = (h - 2 * fr) * 0.42;
+        for (let k = 0; k < 12; k++) { g.rotate(TAU / 12); g.fillStyle = '#8a6a2c'; g.fillRect(-R * 0.12, -R * 1.2, R * 0.24, R * 0.3); }
+        g.fillStyle = grad(g, -R, -R, R, R, [[0, '#d8b060'], [1, '#6a4a1e']]); g.beginPath(); g.arc(0, 0, R * 0.95, 0, TAU); g.fill();
+        g.fillStyle = '#1e4a46'; g.beginPath(); g.arc(0, 0, R * 0.4, 0, TAU); g.fill();
+        g.restore();
+      }
+      g.fillStyle = grad(g, 0, fr, 0, fr + 14, [[0, INK, 0.6], [1, INK, 0]]); g.fillRect(fr, fr, w - 2 * fr, 14);
+    });
+    g.save(); g.strokeStyle = '#d8b060'; g.lineWidth = Math.max(2, m * 0.012); g.beginPath(); g.roundRect(fr * 1.2, fr * 1.2, w - fr * 2.4, h - fr * 2.4, fr * 0.2); g.stroke(); g.restore();
+    for (let x = fr * 0.5; x < w; x += fr * 0.9) { rivet(g, x, fr * 0.5, Math.max(2.5, fr * 0.13), '#e0b860'); rivet(g, x, h - fr * 0.5, Math.max(2.5, fr * 0.13), '#e0b860'); }
+    signText(g, lines, fr * 2.4 + h * 0.2, fr * 1.15, w - fr * 4.8 - h * 0.4, h - fr * 2.3, { mode: 'paint', gold: true, shadow: '#3a0e08', track: 0.06, wob: 0.8 });
+    glaze(g, w, h, '#ffe0b0', 0.08, 'soft-light');
+    return cv;
+  }
+  if (style === 'plaque') {
+    fill(g, w, h, '#3a2a14');
+    g.fillStyle = grad(g, 0, 0, w, h, [[0, '#f0d080'], [0.35, '#c8963c'], [0.7, '#b08030'], [1, '#6a4818']]); g.beginPath(); g.roundRect(0, 0, w, h, m * 0.08); g.fill();
+    for (let i = 0; i < 30; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 6, 26), range(rnd, 4, 12), 0, rnd() < 0.6 ? '#6a8a5a' : '#fff0b8', 0.25, 0.25);
+    const fr = m * 0.1;
+    g.save(); g.strokeStyle = '#4a3410'; g.lineWidth = 3; g.beginPath(); g.roundRect(fr, fr, w - 2 * fr, h - 2 * fr, fr * 0.5); g.stroke();
+    g.strokeStyle = rgba('#fff0b0', 0.7); g.lineWidth = 1.5; g.beginPath(); g.roundRect(fr + 2, fr + 2.5, w - 2 * fr, h - 2 * fr, fr * 0.5); g.stroke(); g.restore();
+    for (const [x, y] of [[fr * 0.5, fr * 0.5], [w - fr * 0.5, fr * 0.5], [fr * 0.5, h - fr * 0.5], [w - fr * 0.5, h - fr * 0.5]]) { rivet(g, x, y, Math.max(3, fr * 0.22), '#a88848'); line(g, [[x - fr * 0.15, y], [x + fr * 0.15, y]], 1.5, '#3a2810', 0.8); }
+    signText(g, lines, fr * 1.4, fr * 1.2, w - fr * 2.8, h - fr * 2.4, { mode: 'engraved', track: 0.08, wob: 0.5 });
     return cv;
   }
   if (style === 'billboard') {
@@ -1768,7 +2177,8 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
     for (let i = 0; i < 40; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 20, 70), range(rnd, 10, 40), 0, rnd() < 0.5 ? lightOf(paint, 0.25) : shadowOf(paint, 0.25), 0.18, 0.15);
     for (let i = 0; i < n; i++) { const y = i * h / n; line(g, [[0, y], [w, y]], 2.4, '#1e1418', 0.7); line(g, [[0, y + 2.5], [w, y + 2.5]], 1.4, '#fff0d0', 0.18); }
     chips(g, 0, 0, w, h, rnd, Math.round(w * h / 4000));
-    signText(g, lines, bd * 2.2, bd * 1.6, w - bd * 4.4, h - bd * 3.2, { fg: paint === '#e6d6b0' ? '#5a2a20' : '#f2e2b8', track: 0.05 });
+    const light = paint === '#e6d6b0';
+    signText(g, lines, bd * 2.2, bd * 1.6, w - bd * 4.4, h - bd * 3.2, { fg: light ? '#5a2a20' : '#f2e2b8', track: 0.05, wob: 1.2, outline: light ? '#c8b088' : shadowOf(paint, 0.55) });
     chips(g, bd, bd, w - 2 * bd, h - 2 * bd, rnd, Math.round(w * h / 9000), '#8a6a4a');
     streaks(g, Math.max(w, h), rnd, { colors: ['#5a4030'], count: 12, len: [20, 80], width: [2, 6], angle: Math.PI, alpha: 0.12 });
     glaze(g, w, h, '#ffe0b0', 0.1, 'soft-light');
@@ -1782,7 +2192,7 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
   g.fillStyle = grad(g, fr, 0, fr + 8, 0, [[0, INK, 0.4], [1, INK, 0]]); g.fillRect(fr, fr, 8, h - 2 * fr);
   for (const [x, y] of [[fr / 2, fr / 2], [w - fr / 2, fr / 2], [fr / 2, h - fr / 2], [w - fr / 2, h - fr / 2]]) nailHead(g, x, y, Math.max(2.5, fr * 0.16), '#4a4448');
   if (style === 'carved') {
-    signText(g, lines, fr * 1.3, fr * 1.1, w - fr * 2.6, h - fr * 2.2, { fg: '#f6e8bc', carved: true, track: 0.06 });
+    signText(g, lines, fr * 1.3, fr * 1.1, w - fr * 2.6, h - fr * 2.2, { fg: '#f6e8bc', mode: 'carved', track: 0.06 });
   } else {
     const paint = muteColor(bg, { sMax: 0.5, lMin: 0.28, lMax: 0.7 });
     const px = fr * 1.25, py = fr * 1.2, pw = w - px * 2, ph = h - py * 2;
@@ -1796,7 +2206,7 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
     g.restore();
     // a thin painted keyline just inside the panel
     g.save(); g.strokeStyle = rgba(fgCol(fg), 0.55); g.lineWidth = Math.max(2, m * 0.012); g.beginPath(); g.roundRect(px + fr * 0.25, py + fr * 0.25, pw - fr * 0.5, ph - fr * 0.5, fr * 0.2); g.stroke(); g.restore();
-    signText(g, lines, px + fr * 0.4, py + fr * 0.3, pw - fr * 0.8, ph - fr * 0.6, { fg: fgCol(fg) });
+    signText(g, lines, px + fr * 0.4, py + fr * 0.3, pw - fr * 0.8, ph - fr * 0.6, { fg: fgCol(fg), wob: 1.1 });
   }
   streaks(g, Math.max(w, h), rnd, { colors: ['#e8d8b8'], count: 10, len: [6, 22], width: [0.6, 1.2], angle: 1.3, wobble: 0.5, alpha: 0.2 });
   glaze(g, w, h, '#ffe0b0', 0.1, 'soft-light');
@@ -1805,9 +2215,11 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
 
 // gallery samples of each sign style
 register('sign_demo_board', { family: F, w: 512, h: 160, note: 'sign sample: painted board', paint(g) { g.drawImage(signCanvas(["HONEST ED'S PAWN", 'WE BUY ANYTHING'], { w: 512, h: 160, bg: '#f4d35e', fg: '#2b2d42' }), 0, 0); } });
-register('sign_demo_gilded', { family: F, w: 512, h: 160, note: 'sign sample: gilded casino board', paint(g) { g.drawImage(signCanvas(['LUCKY SLOP', 'CASINO · NO CLOCKS'], { w: 512, h: 160, style: 'gilded' }), 0, 0); } });
 register('sign_demo_billboard', { family: F, w: 512, h: 208, note: 'sign sample: roadside billboard', paint(g) { g.drawImage(signCanvas(['SLOPMASTER 9000', 'THE LAST RV YOU WILL EVER NEED'], { w: 512, h: 208, style: 'billboard', bg: '#2e86ab', fg: '#fff' }), 0, 0); } });
 register('sign_demo_carved', { family: F, w: 512, h: 200, note: 'sign sample: carved road sign', paint(g) { g.drawImage(signCanvas(['PAYDIRT', 'POP. 41 · EST. 1971'], { w: 512, h: 200, style: 'carved' }), 0, 0); } });
+for (const [st, note] of [['oakgold', 'Goldshire casino: carved oak, gilded'], ['barn', 'Westfall casino: painted on the barn'], ['dwarf', 'Kharanos: rune-knot border'], ['hide', 'canyon outpost: branded hide (alpha)'], ['goblin', 'Gadgetzan: brass marquee'], ['plaque', 'Gadgetzan: brass plaque']]) {
+  register('sign_demo_' + st, { family: F, w: 640, h: 170, alpha: st === 'hide', note: 'sign sample: ' + note, paint(g) { g.drawImage(signCanvas(st === 'plaque' ? ['LOST WAGES', 'POP. 41 · EST. 1971'] : ['LUCKY SLOP', 'CASINO · NO CLOCKS'], { w: 640, h: 170, style: st }), 0, 0); } });
+}
 
 // ---- quality anchor: Goldshire bridge flagstones ------------------------------------------
 register('flagstone', {

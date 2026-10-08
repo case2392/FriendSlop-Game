@@ -1,16 +1,16 @@
 // Nature: trees, bushes, rocks, cacti, haybales, fences, bones, campfires: every W.decor entry of a
 // natural kind, plus the dead-tree winch anchors.
 //
-// The look is WoW Classic: chunky low-poly silhouettes (pale twisting oak trunks with flared roots
-// forking low into heavy curving limbs under huge drooping canopies, stacked drooping pine tiers,
-// planar chiselled rocks), smooth shading, and the detail painted into textures (paint/nature.js).
-// Canopies are a small solid leaf mass wrapped in alpha leaf-cluster cards whose normals point out of
-// the clump, so a tree lights like a volume: warm on top, cool and dark underneath; the cards turn
-// about the vertical to face the camera (in the shadow pass too, so shadows match what you see).
-// Vertex colours carry baked AO and per-tree tint. A small shader hook adds wind sway, triplanar
-// mapping for rocks, the snowy-top / bare-underside trick for Dun Morogh pine boughs, and a
-// world-space "top cover" that lays moss, lichen, snow, dust or sand on up-facing surfaces (or where
-// a per-vertex amount says so: the moss band at the foot of an oak).
+// The look is WoW Classic: chunky low-poly silhouettes (pale twisting oak boles with flared roots
+// forking at ~3 m into heavy limbs that carry a lifted crown of big leaf clumps, stacked drooping
+// pine tiers, stepped strata ledges and hoodoos, wind-scoured sandstone), smooth shading, and the
+// detail painted into textures (paint/nature.js). A canopy clump is a ring of alpha leaf-cluster cards
+// round one big camera-facing core card, all with normals pointing out of the clump, so it lights like
+// a volume: warm on top, cool underneath; the cards turn about the vertical to face the camera (in the
+// shadow pass too, so shadows match what you see). Vertex colours carry baked AO and per-tree tint. A
+// small shader hook adds wind sway, triplanar mapping for rocks, the frosted-underside trick for Dun
+// Morogh pine boughs, and a world-space "top cover" that lays moss, lichen, snow, dust or sand on
+// up-facing surfaces (or where a per-vertex amount says so: the moss at the foot of an oak).
 //
 // Performance: everything static is built in world space and merged per (material, 300 m stretch of
 // road), so a whole leg of decor costs a few dozen draw calls however many trees there are.
@@ -92,7 +92,8 @@ function ico(detail) {
 
 // atlas cells (canvas top-left = cell 0, row by row; UV v runs up): [u0, v0, u1, v1]
 const cellOf = (i, cols = 2, rows = 2) => { const c = i % cols, r = Math.floor(i / cols); return [c / cols, 1 - (r + 1) / rows, (c + 1) / cols, 1 - r / rows]; };
-const inset = (c, m = 0.006) => [c[0] + m, c[1] + m, c[2] - m, c[3] - m];
+// pulled in by a fraction of the cell, so the coarse mips never sample the neighbouring cell
+const inset = (c, m = 0.025) => { const w = (c[2] - c[0]) * m, h = (c[3] - c[1]) * m; return [c[0] + w, c[1] + h, c[2] - w, c[3] - h]; };
 
 // ---- the batch: merged world-space geometry for one material --------------------------------------
 
@@ -183,14 +184,32 @@ function tube(b, pts, radii, o = {}) {
     const a = base + i * (S + 1) + j, bb = a + 1, c = a + S + 1, d = c + 1;
     b.t(a, bb, c); b.t(bb, d, c);
   }
-  if (cap) {
-    const last = base + (n - 1) * (S + 1);
-    const tip = new V3().copy(pts[n - 1]).addScaledVector(T[n - 1], Math.max(0.004, radii[n - 1]) * (cap === true ? 0.5 : cap));
-    let u = 0.5 * uRep, v = VV[n - 1] + 0.02;
-    if (uvMap) [u, v] = uvMap(u, v, 1);
-    const ap = b.v(tip, T[n - 1], u, v, typeof color === 'function' ? color(tip, T[n - 1], 1) : color, typeof wind === 'function' ? wind(tip, 1) : wind);
-    for (let j = 0; j < S; j++) b.t(last + j, last + j + 1, ap);
-  }
+  // rounded domes: two shrinking rings, then the tip (cap = dome height in radii); cap0 closes the start
+  const dome = (ch, ri, sgn) => {
+    const Tn = T[ri].clone().multiplyScalar(sgn), rl = Math.max(0.004, radii[ri]), ring = R[ri], ctr = pts[ri];
+    let prev = base + ri * (S + 1);
+    const flip = sgn < 0;
+    for (const th of (o.domeRings || [0.6, 1.1])) {
+      const rb = b.n;
+      for (let j = 0; j <= S; j++) {
+        const jj = j % S, rv = new V3().subVectors(ring[jj], ctr);
+        const p = new V3().copy(ctr).addScaledVector(rv, Math.cos(th)).addScaledVector(Tn, rl * ch * Math.sin(th));
+        const nn = new V3().copy(rv).normalize().multiplyScalar(Math.cos(th)).addScaledVector(Tn, Math.sin(th)).normalize();
+        let u = j / S * uRep + twist * (VV[ri] - v0), v = VV[ri] + sgn * rl * ch * Math.sin(th) / vLen;
+        if (uvMap) [u, v] = uvMap(u, v, sgn > 0 ? 1 : 0);
+        b.v(p, nn, u, v, typeof color === 'function' ? color(p, nn, sgn > 0 ? 1 : 0) : color, typeof wind === 'function' ? wind(p, sgn > 0 ? 1 : 0) : wind);
+      }
+      for (let j = 0; j < S; j++) { const a = prev + j, c = rb + j; if (!flip) { b.t(a, a + 1, c); b.t(a + 1, c + 1, c); } else { b.t(a, c, a + 1); b.t(a + 1, c, c + 1); } }
+      prev = rb;
+    }
+    const tip = new V3().copy(ctr).addScaledVector(Tn, rl * ch);
+    let u = 0.5 * uRep, v = VV[ri] + sgn * rl * ch / vLen;
+    if (uvMap) [u, v] = uvMap(u, v, sgn > 0 ? 1 : 0);
+    const ap = b.v(tip, Tn, u, v, typeof color === 'function' ? color(tip, Tn, sgn > 0 ? 1 : 0) : color, typeof wind === 'function' ? wind(tip, sgn > 0 ? 1 : 0) : wind);
+    for (let j = 0; j < S; j++) { if (!flip) b.t(prev + j, prev + j + 1, ap); else b.t(prev + j, ap, prev + j + 1); }
+  };
+  if (cap) dome(cap === true ? 0.5 : cap, n - 1, 1);
+  if (o.cap0) dome(o.cap0, 0, -1);
 }
 
 // An indexed mesh with smooth normals from its faces.
@@ -234,7 +253,7 @@ function faceData(P, idx) {
 // Creased normals: every face corner averages only the neighbouring faces within the crease angle,
 // so a rock's planes read as chiselled faces while each stays smooth-shaded.
 const COS_CREASE = Math.cos(36 * Math.PI / 180);
-function creased(b, P, idx, color, FD = faceData(P, idx)) {
+function creased(b, P, idx, color, FD = faceData(P, idx), cosC = COS_CREASE) {
   const { FN, FA, VF } = FD, n = new V3();
   for (let f = 0; f < FN.length; f++) {
     if (FA[f] < 1e-9) continue;
@@ -242,7 +261,7 @@ function creased(b, P, idx, color, FD = faceData(P, idx)) {
     for (let k = 0; k < 3; k++) {
       const vi = idx[f * 3 + k];
       n.set(0, 0, 0);
-      for (const g of VF[vi]) if (FA[g] > 1e-9 && FN[g].dot(FN[f]) > COS_CREASE) n.addScaledVector(FN[g], FA[g]);
+      for (const g of VF[vi]) if (FA[g] > 1e-9 && FN[g].dot(FN[f]) > cosC) n.addScaledVector(FN[g], FA[g]);
       if (n.lengthSq() < 1e-12) n.copy(FN[f]);
       n.normalize();
       b.v(P[vi], n, 0, 0, color(P[vi], n), 0);
@@ -308,7 +327,7 @@ const COVER = {
   snow: { tex: 'cover_snow', lo: 0.5, hi: 0.74, noise: 0.8, scale: 0.35, gate: [0.18, 0.38] },
   snowLimb: { tex: 'cover_snow', lo: 0.45, hi: 0.68, noise: 0.8, scale: 0.5, gate: [0.15, 0.3] },
   dust: { tex: 'cover_dust', lo: 0.72, hi: 0.95, noise: 1.0, scale: 0.35 },
-  sand: { tex: 'cover_sand', lo: 0.62, hi: 0.9, noise: 1.0, scale: 0.3 },
+  sand: { tex: 'cover_sand', lo: 0.45, hi: 0.76, noise: 1.0, scale: 0.3 },
 };
 
 // Alpha atlases go up as a DataTexture: transparent texels take the colour of the leaves next to
@@ -385,6 +404,12 @@ function alphaTex(name, cols = 2, rows = 2) {
         for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { const o = (y * nw + x) * 4 + 3; out[o] = Math.min(255, nd[o] * lo); }
       });
     }
+    // a transparent ring round every atlas cell at every level: bilinear taps at a card's edge never
+    // pick up the next cell's leaves (or snow) as a bright seam
+    const cwl = nw / cols, chl = nh / rows;
+    if (cwl >= 4 && chl >= 4) {
+      for (let y = 0; y < nh; y++) { const ly = y % chl; for (let x = 0; x < nw; x++) { const lx = x % cwl; if (lx < 1 || ly < 1 || lx >= cwl - 1 || ly >= chl - 1) out[(y * nw + x) * 4 + 3] = 0; } }
+    }
     levels.push({ data: out, width: nw, height: nh });
     cur = nd; cw = nw; ch = nh;
   }
@@ -456,14 +481,16 @@ function natMat(texName, o = {}) {
       ${C ? 'uniform sampler2D uCoverMap; uniform vec4 uCover; uniform vec2 uCoverG;' : ''}`);
     if (o.tri) fs = fs.replace('#include <map_fragment>', `
       {
-        vec3 tw = pow(abs(normalize(vNatN)), vec3(4.0)); tw /= (tw.x + tw.y + tw.z);
-        vec4 tx = texture2D(map, vNatW.zy * uTri), ty = texture2D(map, vNatW.xz * uTri + 0.37), tz = texture2D(map, vNatW.xy * uTri);
+        vec3 tw = pow(abs(normalize(vNatN)), vec3(${o.topScale ? '8.0' : '4.0'})); tw /= (tw.x + tw.y + tw.z);
+        vec4 tx = texture2D(map, vNatW.zy * uTri), ty = texture2D(map, vNatW.xz * uTri * ${o.topScale ?? '1.0'} + 0.37), tz = texture2D(map, vNatW.xy * uTri);
         diffuseColor *= tx * tw.x + ty * tw.y + tz * tw.z;
       }`);
     else if (o.backShift) fs = fs.replace('#include <map_fragment>', `
       {
-        vec2 nUv = vMapUv; if (!gl_FrontFacing) nUv.x += ${o.backShift.toFixed(4)};
-        diffuseColor *= texture2D(map, nUv);
+        // a bough's underside shows the bare needles, still frosted (about 40% of the snowy cell)
+        vec4 tf = texture2D(map, vMapUv);
+        if (!gl_FrontFacing) tf = mix(texture2D(map, vMapUv + vec2(${o.backShift.toFixed(4)}, 0.0)), tf, ${(o.backMix ?? 0.42).toFixed(3)});
+        diffuseColor *= tf;
       }`);
     if (o.noFlip) fs = fs.replace('#include <normal_fragment_begin>', `
       float faceDirection = gl_FrontFacing ? 1.0 : -1.0;
@@ -556,13 +583,14 @@ function matFor(key, biome) {
     case 'needles': return snow ? natMat('needles_snow', { alpha: true, wind: true, backShift: 0.5 }) : natMat('needles_pine', { alpha: true, wind: true });
     case 'frond': return natMat('palm_frond', { alpha: true, wind: true });
     case 'straw': return natMat('straw_tuft', { alpha: true, wind: true });
-    case 'rock': return natMat(B.rock, { tri: true, cover: B.rockCover || null });
-    case 'firestone': return natMat('rock_gray', { tri: true });
+    case 'rock': return natMat(B.rock, { tri: true, cover: B.rockCover || null, triScale: B.strata ? 4.2 : 2.6, topScale: B.strata ? '0.3' : '1.0' });   // strata seen from above: broad soft blotches, never contour lines
+    case 'firestone': return natMat('rock_gray', { tri: true, triScale: 0.9 });
     case 'snowcap': return natMat('snow_pack', { tri: true, triScale: 3.2 });
-    case 'cactus': return natMat(biome === 'badlands' ? 'cactus_dusty' : 'cactus_skin', {});
+    case 'snowridge': return natMat('snow_pack', { tri: true, triScale: 3.2, wind: true });
+    case 'cactus': return biome === 'badlands' ? natMat('cactus_dusty', { cover: 'dust', covAttr: true }) : natMat('cactus_skin', {});
     case 'hay': return natMat('hay', {});
     case 'hay_end': return natMat('hay_end', {});
-    case 'bone': return natMat('bone', { cover: snow ? 'snow' : null });
+    case 'bone': return natMat('bone_bleached', { cover: snow ? 'snow' : null });
     case 'scarecrow': return natMat('scarecrow', {});
     case 'iron': return natMat('iron', {});
     default: return natMat('bark_dead', {});
@@ -576,7 +604,7 @@ function texturesFor(biome) {
   if (biome === 'meadow' || biome === 'fields') out.push(['bark_oak'], [B.leaves, true], ['bark_pine'], ['needles_pine', true], ['cover_moss']);
   if (biome === 'fields') out.push(['hay'], ['hay_end'], ['straw_tuft', true], ['scarecrow'], ['cover_lichen']);
   if (biome === 'snow') out.push(['bark_pine'], ['needles_snow', true], ['snow_pack'], ['cover_snow']);
-  if (biome === 'badlands' || biome === 'desert') out.push(['leaves_scrub', true], [biome === 'badlands' ? 'cactus_dusty' : 'cactus_skin'], ['bone'], ['cover_dust']);
+  if (biome === 'badlands' || biome === 'desert') out.push(['leaves_scrub', true], [biome === 'badlands' ? 'cactus_dusty' : 'cactus_skin'], ['bone_bleached'], ['cover_dust']);
   if (biome === 'desert') out.push(['bark_palm'], ['palm_frond', true], ['cover_sand']);
   return out;
 }
@@ -620,61 +648,50 @@ class Ctx {
 
 // ---- foliage ---------------------------------------------------------------------------------------
 
-// A leaf clump: a small lumpy solid leaf mass, wrapped in leaf-cluster cards whose normals point out
-// of the clump (so it lights like a ball of leaves), darker toward the bottom and the inside. The
-// cards turn about the vertical to face the camera; their tilt is kept within ±35°, so none goes
-// edge-on.
+// A leaf clump: leaf-cluster cards whose normals point out of the clump (so it lights like a ball of
+// leaves: warm on top, cool and darker underneath), round one big camera-facing core card that fills
+// the middle with a leafy edge (no solid inner mesh, so no polygon edge ever shows). The cards turn
+// about the vertical to face the camera; their tilt is kept within ±35°, so none goes edge-on.
 function clump(b, C, R, rnd, o) {
-  const sq = o.squash ?? 0.8, inner = o.inner ?? 0.5, tint0 = o.tint || WHITE, ao = o.ao || (() => 1), grid = o.grid || [2, 2];
+  const sq = o.squash ?? 0.8, tint0 = o.tint || WHITE, ao = o.ao || (() => 1), grid = o.grid || [2, 2];
   const warm = o.warm || null, tintAt = p => (warm ? mul3(tint0, warm(p)) : tint0);
-  const fc = inset(cellOf(o.fill, ...grid), 0.02), sA = rnd() * 40, rows = 4, cols = 7, base = b.n;
-  if (inner > 0) {
-    for (let i = 0; i <= rows; i++) {
-      const th = i / rows * Math.PI;
-      for (let j = 0; j <= cols; j++) {
-        const ph = j / cols * TAU + i * 0.3;
-        const u = new V3(Math.sin(th) * Math.cos(ph), Math.cos(th), Math.sin(th) * Math.sin(ph));
-        const k = inner * (1 + 0.22 * noise3(u.x * 1.4, u.y * 1.4, u.z * 1.4, sA)), ky = u.y < 0 ? (o.under ?? 0.8) : 1;
-        const p = new V3(C.x + u.x * R * k, C.y + u.y * R * k * sq * ky, C.z + u.z * R * k);
-        const n = new V3(u.x, u.y / sq, u.z).normalize();
-        b.v(p, n, fc[0] + (fc[2] - fc[0]) * j / cols, fc[3] - (fc[3] - fc[1]) * i / rows, mulc(tintAt(p), ao(p) * (o.massK ?? 0.55) * (1 + 0.36 * (u.y + 1) / 2)), (o.wind ?? 1) * 0.3);
-      }
-    }
-    for (let i = 0; i < rows; i++) for (let j = 0; j < cols; j++) {
-      const a = base + i * (cols + 1) + j, bb = a + 1, c = a + cols + 1, d = c + 1;
-      b.t(a, bb, c); b.t(bb, d, c);
-    }
-  }
-  const nC = o.cards, gold = 2.39996, sv = o.sizeVar || [0.85, 1.15];
+  const rhoR = o.rho || [0.25, 0.8];
   const e1 = new V3(), up = new V3(), fn = new V3();
-  for (let i = 0; i < nC; i++) {
-    const yy = 1 - (i + 0.5) / nC * (o.span ?? 1.5);
-    const rr = Math.sqrt(Math.max(0, 1 - yy * yy)), ph = i * gold + range(rnd, -0.4, 0.4);
-    const dir = new V3(Math.cos(ph) * rr, yy, Math.sin(ph) * rr).normalize();
-    const rho = range(rnd, 0.45, 0.85);
-    const P = new V3(C.x + dir.x * R * rho, C.y + dir.y * R * rho * sq * (dir.y < 0 ? (o.under ?? 0.8) : 1), C.z + dir.z * R * rho);
-    fn.copy(dir).add(randDir(rnd).multiplyScalar(o.jit ?? 0.42));
+  const quad = (P, dir, face, sz, cellI, rho, tilt = null, rot = 0) => {
+    fn.copy(face);
+    if (tilt != null) fn.y = tilt;
     // keep the card within ±35° of vertical
     const h = Math.hypot(fn.x, fn.z) || 1e-3, fy = Math.max(-0.55, Math.min(0.6, fn.y / Math.max(1e-3, fn.length())));
     const hs = Math.sqrt(1 - fy * fy) / h; fn.set(fn.x * hs, fy, fn.z * hs);
-    if (Math.hypot(fn.x, fn.z) < 0.05) fn.set(Math.cos(ph) * 0.8, fy, Math.sin(ph) * 0.8);
+    if (Math.hypot(fn.x, fn.z) < 0.05) fn.set(0.8, fy, 0.3);
     fn.normalize();
     up.copy(UP).addScaledVector(fn, -fn.y).normalize();
     e1.crossVectors(up, fn).normalize();
-    const sz = o.size * range(rnd, sv[0], sv[1]), hw = sz / 2;
-    const cellI = typeof o.cellFn === 'function' ? o.cellFn(dir) : pick(rnd, o.cells);
-    const cell = inset(cellOf(cellI, ...grid));
+    const hw = sz / 2, cell = inset(cellOf(cellI, ...grid));
     const us = [cell[0], cell[2], cell[2], cell[0]], vs = [cell[1], cell[1], cell[3], cell[3]];
-    const vb = b.n, side = 0.62 + 0.38 * (dir.y + 1) / 2, rot = range(rnd, -0.35, 0.35), cr = Math.cos(rot), sr = Math.sin(rot);
+    const vb = b.n, side = 0.7 + 0.3 * (dir.y + 1) / 2, cr = Math.cos(rot), sr = Math.sin(rot);
     [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, c], k) => {
       const ox = (a * cr - c * sr) * hw, oy = (a * sr + c * cr) * hw;
       const off = new V3().addScaledVector(e1, ox).addScaledVector(up, oy);
       const p = new V3().copy(P).add(off);
-      const q = new V3(P.x, P.y + oy, P.z);
-      const nn = new V3().subVectors(q, C).normalize().multiplyScalar(0.55).addScaledVector(dir, 0.45).add(new V3(0, 0.1, 0)).normalize();
-      b.v(p, nn, us[k], vs[k], mulc(tintAt(q), ao(q) * side * (0.82 + 0.18 * rho)), (o.wind ?? 1) * (c > 0 ? 1 : 0.7), [P, off, fn]);
+      const q = new V3(P.x + off.x * 0.5, P.y + oy, P.z + off.z * 0.5);
+      const nn = new V3().subVectors(q, C).normalize().multiplyScalar(0.55).addScaledVector(dir, 0.45).add(new V3(0, 0.12, 0)).normalize();
+      b.v(p, nn, us[k], vs[k], mulc(tintAt(q), ao(q) * side * (0.86 + 0.14 * rho)), (o.wind ?? 1) * (c > 0 ? 1 : 0.7), [P, off, fn.clone()]);
     });
     b.t(vb, vb + 1, vb + 2); b.t(vb, vb + 2, vb + 3);
+  };
+  // the core: one big card at the middle, a touch behind and below centre
+  if (o.core != null) quad(new V3(C.x, C.y - R * 0.05 * sq, C.z), new V3(0, 0.25, 0), new V3(0.2, 0.15, 1).normalize(), R * (o.coreK ?? 1.55), o.core, 0.3, 0.05, range(rnd, -0.3, 0.3));
+  const nC = o.cards, gold = 2.39996, sv = o.sizeVar || [0.85, 1.15];
+  for (let i = 0; i < nC; i++) {
+    const yy = 1 - (i + 0.5) / nC * (o.span ?? 1.5);
+    const rr = Math.sqrt(Math.max(0, 1 - yy * yy)), ph = i * gold + range(rnd, -0.4, 0.4);
+    const dir = new V3(Math.cos(ph) * rr, yy, Math.sin(ph) * rr).normalize();
+    const rho = range(rnd, rhoR[0], rhoR[1]);
+    const P = new V3(C.x + dir.x * R * rho, C.y + dir.y * R * rho * sq * (dir.y < 0 ? (o.under ?? 0.8) : 1), C.z + dir.z * R * rho);
+    const d2 = dir.clone().add(randDir(rnd).multiplyScalar(o.jit ?? 0.42));
+    const cellI = typeof o.cellFn === 'function' ? o.cellFn(dir) : pick(rnd, o.cells);
+    quad(P, dir, d2, o.size * range(rnd, sv[0], sv[1]), cellI, rho, null, range(rnd, -0.35, 0.35));
   }
 }
 
@@ -682,17 +699,23 @@ function clump(b, C, R, rnd, o) {
 
 const barkAO = (y0 = 0, y1 = 1.8, lo = 0.5, tint = WHITE) => p => { const k = lo + (1 - lo) * smooth(y0, y1, p.y); return mulc(tint, k); };
 
-// Roots that grip the ground: from inside the trunk out and down, following the ground.
+// The flare round a trunk foot: soft overlapping bumps toward each root (a soft union, so between
+// two roots the trunk dips gently, never to a sharp cookie-cutter notch).
+function flare(rootA, width = 0.62) {
+  return ph => { let q = 1; for (const ra of rootA) q *= 1 - Math.exp(-((angDiff(ph, ra) / width) ** 2)); return 1 - q; };
+}
+// Roots that grip the ground: thick convex tubes from inside the trunk out and down into the ground,
+// tapering only to about a third and ending in a rounded cap.
 function roots(ctx, b, rootA, r0, s, rnd, { len = [1.1, 1.7], rad = 0.3, up = 0.85, sides = 7, color = barkAO(-0.3, 1.2, 0.5) } = {}) {
   for (const ra of rootA) {
     const dx = Math.cos(ra), dz = Math.sin(ra), L = range(rnd, len[0], len[1]) * s;
-    const steps = [[0, up], [0.3, up * 0.45], [0.62, 0.1], [0.85, -0.06], [1.08, -0.32]];
+    const steps = [[0, up], [0.28, up * 0.5], [0.58, 0.14], [0.84, -0.02], [1.04, -0.22]];
     const pts = steps.map(([f, yy]) => {
-      const x = dx * (r0 * 0.35 + f * L) + range(rnd, -0.06, 0.06) * s, z = dz * (r0 * 0.35 + f * L) + range(rnd, -0.06, 0.06) * s;
+      const x = dx * (r0 * 0.3 + f * L) + range(rnd, -0.05, 0.05) * s, z = dz * (r0 * 0.3 + f * L) + range(rnd, -0.05, 0.05) * s;
       return new V3(x, ctx.gh(x, z) + yy * s, z);
     });
     const R = rad * s;
-    tube(b, pts, [R, R * 0.8, R * 0.55, R * 0.36, R * 0.16], { sides, uRep: 1, vLen: 1.4, color, lobes: (dir) => 1 + 0.25 * Math.max(0, -dir.y) });
+    tube(b, pts, [R * 1.12, R * 0.86, R * 0.64, R * 0.48, R * 0.36], { sides, uRep: 1, vLen: 1.4, color, cap: 1, lobes: (dir) => (1 + 0.18 * Math.max(0, dir.y)) * (1 - 0.12 * Math.max(0, -dir.y)) });
   }
 }
 
@@ -708,114 +731,114 @@ function limb(P0, dir, L, rnd, { bends = 2, bendAmt = 0.35, rise = 0, segs = 6 }
   return pts;
 }
 
-// Elwynn oak: a pale twisting bole with buttress roots that forks low into 3-4 heavy curving limbs,
-// a domed canopy of clumps that droops past the limb tips and hangs low around the sides.
-// Westfall's is smaller, scruffier, wider and lower, olive-gold with the odd rust clump.
+// Elwynn oak: a pale twisting bole with buttress roots and two swollen rings, leaning in a slow S,
+// that forks at about 3 m into 3-4 heavy curving limbs which spread out and up; the crown rides on
+// top of them as 4-5 big clumps (sky showing between), so the forks read clearly underneath.
+// Westfall's is lower, wider and scruffier, gold with rust clumps.
 function oak(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 11)), s = d.s || 1, B = ctx.bio, west = !!B.west;
   ctx.at(d, d.ry || 0);
   const bark = ctx.b('bark_oak'), leaves = ctx.b('leaves');
-  const rC = 0.42 * s, r0 = rC * 1.05;                      // r0 ≈ the collider through the bumper band
-  const H = (west ? range(rnd, 2.1, 2.5) : range(rnd, 2.6, 3.0)) * s + 0.3;     // the fork
+  const rC = 0.42 * s, r0 = rC * 0.98;                      // r0 ≈ the collider through the bumper band
+  const H = (west ? range(rnd, 2.2, 2.6) : range(rnd, 2.7, 3.2)) * s + 0.3;     // the fork
   const [gLo] = ctx.foot(r0 * 2.2);
   const yBot = Math.min(-0.5, gLo - 0.35);
   const nR = 5 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
   const rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.3, 0.3));
-  const lx = range(rnd, -0.25, 0.25) * s, lz = range(rnd, -0.25, 0.25) * s, NT = 9, ph0 = rnd() * TAU;
+  const fl = flare(rootA);
+  // the S-lean: a slight lean one way low down, then a stronger one the other way above the bumper
+  // band (≤ 0.1 m off the collider axis below 2 m)
+  const la = rnd() * TAU, lc = Math.cos(la), lsn = Math.sin(la);
+  const lean = y => -0.1 * s * smooth(0, 1.6, y) + (west ? 0.45 : 0.6) * s * smooth(1.7, H + 0.4, y);
+  const NT = 13, ph0 = rnd() * TAU, b1 = range(rnd, 1.0, 1.35), b2 = range(rnd, 2.0, 2.4);
   const tp = [], tr = [];
   const swell = y => smooth(Math.min(2.5, H - 0.6), H + 0.2, y);
   for (let i = 0; i <= NT; i++) {
     const t = i / NT, y = yBot + t * (H + 0.35 - yBot), k = clamp01((y + 0.3) / (H + 0.6));
-    tp.push(new V3(lx * k * k + Math.sin(k * 3 + a0) * 0.08 * s * k, y, lz * k * k - Math.cos(k * 2.6 + a0) * 0.06 * s * k));
-    const fl = Math.pow(clamp01(1 - (y + 0.15) / (1.0 * s)), 2);
-    tr.push(r0 * (1 + 0.4 * fl) * (1 + 0.55 * swell(y)));
+    const L = lean(y);
+    tp.push(new V3(lc * L + Math.sin(k * 3 + a0) * 0.04 * s * k, y, lsn * L - Math.cos(k * 2.6 + a0) * 0.03 * s * k));
+    const f = Math.pow(clamp01(1 - (y + 0.15) / (1.0 * s)), 2);
+    const rings = 1 + 0.13 * Math.exp(-(((y - b1) / 0.28) ** 2)) + 0.12 * Math.exp(-(((y - b2) / 0.3) ** 2));
+    tr.push(r0 * (1 + 0.35 * f) * (1 + 0.55 * swell(y)) * rings);
   }
   const tcol = lin(B.oakTrunk || '#ffffff');
   const lobes = (dir, t, i) => {
     const y = tp[i].y, ph = Math.atan2(dir.z, dir.x);
     const f = Math.pow(clamp01(1 - (y + 0.15) / (1.0 * s)), 1.4);
-    let m = 0; for (const ra of rootA) m = Math.max(m, clamp01(1 - angDiff(ph, ra) / 0.6));
-    const twist = 1 + 0.085 * Math.cos(4 * (ph - ph0 - clamp01((y + 0.3) / (H + 0.6)) * 0.7)) * (1 - f);   // lobes that twist ~40° up the bole
-    return (1 + f * 1.6 * m * m) * twist;
+    const twist = 1 + 0.08 * Math.cos(4 * (ph - ph0 - clamp01((y + 0.3) / (H + 0.6)) * 1.1)) * (1 - f);   // lobes that twist up the bole
+    return (1 + f * 1.25 * fl(ph)) * twist;
   };
-  // moss creeps up the foot of the trunk on its shady side, and onto the tops of limbs
-  if (B.barkCover) bark.cf = (p, n) => smooth(1.5 * s, 0.25, p.y) * (0.55 + 0.45 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.3));
-  tube(bark, tp, tr, { sides: 12, uRep: 2, vLen: 1.5, twist: 0.12, lobes, color: barkAO(-0.3, 1.8, 0.5, tcol) });
-  roots(ctx, bark, rootA, r0, s, rnd, { len: [0.8, 1.15], rad: 0.4, up: 0.85, color: barkAO(-0.3, 1.2, 0.5, tcol) });
-  // limbs: 3-4 thick ones, 35-55° up (Westfall 22-38°), each with a swollen collar and 1-2 bends
+  // moss creeps up the foot of the trunk on its shady side
+  if (B.barkCover) bark.cf = (p, n) => smooth(1.3 * s, 0.1, p.y) * (0.7 + 0.3 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.3)) * 0.85;
+  tube(bark, tp, tr, { sides: 12, uRep: 2, vLen: 1.5, twist: 0.22, lobes, color: barkAO(-0.3, 1.8, 0.5, tcol) });
+  roots(ctx, bark, rootA, r0, s, rnd, { len: [0.9, 1.25], rad: 0.3, up: 0.5, color: barkAO(-0.3, 1.8, 0.5, tcol) });
+  if (B.barkCover) bark.cf = (p, n) => 0;
+  // limbs: 3-4 heavy ones spreading out and up (Westfall flatter and longer), each with a swollen
+  // collar, 1-2 bends and often a side branch; the crown clumps sit on and above their tips
   const F = tp[NT - 1], rF = tr[NT - 1], clumps = [];
   const nL = 3 + (rnd() < (west ? 0.7 : 0.55) ? 1 : 0), la0 = rnd() * TAU;
   const bc = barkAO(0, 3, 0.72, tcol);
   const tipR = [];
+  let tipY = 0;
   for (let k = 0; k < nL; k++) {
-    const a = la0 + k * TAU / nL + range(rnd, -0.3, 0.3), el = (west ? range(rnd, 22, 38) : range(rnd, 35, 55)) * Math.PI / 180;
+    const a = la0 + k * TAU / nL + range(rnd, -0.3, 0.3), el = (west ? range(rnd, 27, 38) : range(rnd, 30, 45)) * Math.PI / 180;
     const dir = new V3(Math.cos(a) * Math.cos(el), Math.sin(el), Math.sin(a) * Math.cos(el));
-    const L = (west ? range(rnd, 2.6, 3.3) : range(rnd, 2.2, 2.9)) * s, rb = rF * range(rnd, 0.6, 0.72);
-    const start = new V3(F.x - dir.x * rF * 0.2, F.y - 0.3 * s + range(rnd, -0.15, 0.15) * s, F.z - dir.z * rF * 0.2);
-    const pts = limb(start, dir, L, rnd, { bends: 1 + (rnd() < 0.5 ? 1 : 0), bendAmt: 0.32, rise: west ? 0.05 : 0.12 });
-    const rad = pts.map((_, i) => i === 0 ? rF * 0.92 : rb * lerpArr([1.12, 0.95, 0.8, 0.66, 0.52, 0.4, 0.28], i / (pts.length - 1)));
-    if (B.barkCover) bark.cf = (p, n) => 0;
-    tube(bark, pts, rad, { sides: 9, uRep: 1.5, vLen: 1.4, twist: 0.08, color: bc });
+    const L = (west ? range(rnd, 2.8, 3.4) : range(rnd, 3.0, 3.7)) * s, rb = rF * range(rnd, 0.62, 0.72);
+    const start = new V3(F.x - dir.x * rF * 0.2, F.y - 0.35 * s + range(rnd, -0.15, 0.15) * s, F.z - dir.z * rF * 0.2);
+    const pts = limb(start, dir, L, rnd, { bends: 1 + (rnd() < 0.5 ? 1 : 0), bendAmt: 0.28, rise: west ? 0.06 : 0.14 });
+    const rad = pts.map((_, i) => i === 0 ? rF * 0.92 : rb * lerpArr([1.12, 0.96, 0.82, 0.7, 0.58, 0.46, 0.34], i / (pts.length - 1)));
+    tube(bark, pts, rad, { sides: 9, uRep: 1.5, vLen: 1.4, twist: 0.12, color: bc, cap: 0.6 });
     const tip = pts[pts.length - 1], outD = new V3(tip.x - F.x, 0, tip.z - F.z).normalize();
-    tipR.push(Math.hypot(tip.x - F.x, tip.z - F.z));
-    // the clump hangs out and down past the tip, so the crown droops
-    clumps.push([new V3(tip.x + outD.x * 0.4 * s, tip.y - range(rnd, 0.1, 0.6) * s, tip.z + outD.z * 0.4 * s), range(rnd, 2.0, 2.45) * s]);
-    // a side branch off the middle of the limb
-    if (rnd() < (west ? 0.7 : 0.45)) {
-      const m0 = pts[2].clone(), b2 = a + (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.6, 1.0);
-      const d2 = new V3(Math.cos(b2), range(rnd, 0.15, 0.5), Math.sin(b2));
-      const p2 = limb(m0, d2, range(rnd, 1.3, 1.9) * s, rnd, { bends: 1, bendAmt: 0.3, segs: 4 });
-      tube(bark, p2, p2.map((_, i) => rb * 0.45 * (1 - i / p2.length * 0.7)), { sides: 7, uRep: 1, vLen: 1.4, color: bc });
+    tipR.push(Math.hypot(tip.x - F.x, tip.z - F.z)); tipY += tip.y / nL;
+    clumps.push([new V3(tip.x + outD.x * 0.25 * s, tip.y + range(rnd, 0.15, 0.45) * s, tip.z + outD.z * 0.25 * s), range(rnd, 2.2, 2.7) * s * (west ? 0.92 : 1)]);
+    // a side branch off the middle of the limb, with its own smaller clump
+    if (rnd() < (west ? 0.6 : 0.45)) {
+      const m0 = pts[3].clone(), b2 = a + (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.6, 1.0);
+      const d2 = new V3(Math.cos(b2), range(rnd, 0.6, 1.0), Math.sin(b2));
+      const p2 = limb(m0, d2, range(rnd, 1.4, 2.0) * s, rnd, { bends: 1, bendAmt: 0.3, segs: 4 });
+      tube(bark, p2, p2.map((_, i) => rb * 0.48 * (1 - i / p2.length * 0.6)), { sides: 7, uRep: 1, vLen: 1.4, color: bc, cap: 0.6 });
       const e = p2[p2.length - 1];
-      clumps.push([new V3(e.x, e.y - range(rnd, 0.1, 0.5) * s, e.z), range(rnd, 1.5, 1.85) * s]);
+      clumps.push([new V3(e.x, Math.max(e.y, tip.y) + range(rnd, 0.3, 0.6) * s, e.z), range(rnd, 1.5, 1.85) * s, true]);
     }
   }
-  // a short leader into the crown, and the crown clumps that round off the dome
+  // a short leader into the crown and the top clump(s) that round off the dome above the limbs
   const crownR = tipR.reduce((a, b) => a + b, 0) / tipR.length;
-  const leadTop = new V3(F.x + range(rnd, -0.3, 0.3) * s, F.y + (west ? 1.6 : 2.3) * s, F.z + range(rnd, -0.3, 0.3) * s);
+  const leadTop = new V3(F.x + range(rnd, -0.3, 0.3) * s, F.y + (west ? 2.0 : 2.8) * s, F.z + range(rnd, -0.3, 0.3) * s);
   tube(bark, [new V3(F.x, F.y - 0.3 * s, F.z), F.clone().lerp(leadTop, 0.5), leadTop], [rF * 0.6, rF * 0.42, rF * 0.22], { sides: 8, uRep: 1.5, vLen: 1.4, color: bc });
-  const topY = F.y + (west ? 2.7 : 3.4) * s;
-  clumps.push([new V3(F.x + range(rnd, -0.3, 0.3) * s, topY + 0.3 * s, F.z + range(rnd, -0.3, 0.3) * s), range(rnd, 2.3, 2.7) * s]);
-  const nTop = 2;
-  for (let k = 0; k < nTop; k++) {
-    const a = la0 + (k + 0.5) * TAU / nTop + range(rnd, -0.3, 0.3), dd = crownR * range(rnd, 0.45, 0.6);
-    clumps.push([new V3(F.x + Math.cos(a) * dd, topY - range(rnd, 0.2, 0.6) * s, F.z + Math.sin(a) * dd), range(rnd, 1.9, 2.3) * s]);
-  }
-  // low side clumps between the limbs: the canopy hangs down around the fork, no flat underside
-  const nLow = 2;
-  for (let k = 0; k < nLow; k++) {
-    const a = la0 + (k + 0.5) * TAU / nLow + range(rnd, -0.4, 0.4), dd = crownR * range(rnd, 0.75, 0.95);
-    clumps.push([new V3(F.x + Math.cos(a) * dd, F.y + range(rnd, 1.5, 2.0) * s, F.z + Math.sin(a) * dd), range(rnd, 1.5, 1.8) * s]);
+  const topY = Math.max(tipY + (west ? 1.8 : 2.3) * s, F.y + (west ? 3.4 : 4.1) * s);
+  clumps.push([new V3(F.x + range(rnd, -0.4, 0.4) * s, topY, F.z + range(rnd, -0.4, 0.4) * s), range(rnd, 2.5, 3.0) * s * (west ? 0.9 : 1)]);
+  if (!west && rnd() < 0.85) {
+    const a = la0 + range(rnd, 0.5, 1.5), dd = crownR * range(rnd, 0.35, 0.5);
+    clumps.push([new V3(F.x + Math.cos(a) * dd, topY - range(rnd, 0.4, 0.8) * s, F.z + Math.sin(a) * dd), range(rnd, 1.8, 2.2) * s]);
   }
   let yLo = Infinity, yHi = -Infinity;
-  for (const [c, R] of clumps) { yLo = Math.min(yLo, c.y - R * 0.8); yHi = Math.max(yHi, c.y + R * 0.8); }
+  for (const [c, R] of clumps) { yLo = Math.min(yLo, c.y - R * 0.75); yHi = Math.max(yHi, c.y + R * 0.8); }
   const tint = lin(pick(rnd, B.oakTints));
-  const ao = p => 0.32 + 0.68 * Math.pow(smooth(yLo, yHi, p.y), 1.1);
-  const wk = west ? [1.1, 1.06, 0.86] : [1.12, 1.1, 0.8];
-  const warm = p => { const t = smooth(yLo + (yHi - yLo) * 0.55, yHi, p.y); return [1 + (wk[0] - 1) * t, 1 + (wk[1] - 1) * t, 1 + (wk[2] - 1) * t]; };
+  const ao = p => 0.55 + 0.45 * Math.pow(smooth(yLo, yHi, p.y), 1.1);
+  const wk = west ? [1.08, 1.05, 0.9] : [1.1, 1.08, 0.84];
+  const warm = p => { const t = smooth(yLo + (yHi - yLo) * 0.5, yHi, p.y); return [1 + (wk[0] - 1) * t, 1 + (wk[1] - 1) * t, 1 + (wk[2] - 1) * t]; };
   const den = B.leafDensity;
-  for (const [c, R] of clumps) {
-    if (west && rnd() < 0.18) continue;          // a scruffy, open crown: the limbs show
-    clump(leaves, c, R * 0.92, rnd, { cards: Math.max(4, Math.round((5 + 2.6 * (R / s) ** 2) * den)), size: range(rnd, 1.8, 2.15) * s, cells: west ? [0, 0, 1] : [0, 0, 1], fill: 2, tint, ao, warm, squash: 0.86, inner: 0.5, under: 0.85, sizeVar: [0.8, 1.2] });
-  }
-  // undergrowth: a bush or two at the foot (they have no colliders, like any bush)
+  clumps.forEach(([c, R, side]) => {
+    if (west && side && rnd() < 0.3) return;          // a scruffy, open crown
+    clump(leaves, c, R * 0.92, rnd, { cards: Math.max(5, Math.round((6 + 3.4 * (R / s) ** 2) * den)), size: range(rnd, 2.1, 2.5) * s, cells: [0, 0, 1], core: 2, coreK: 1.75, tint, ao, warm, squash: 0.92, under: 0.85, sizeVar: [0.8, 1.2] });
+  });
+  // undergrowth: a bush at the foot (no collider, like any bush)
   if (rnd() < (west ? 0.3 : 0.45)) {
-    const n = 1;
-    for (let k = 0; k < n; k++) {
-      const a = rnd() * TAU, dd = range(rnd, 1.3, 2.2) * s, R = range(rnd, 0.55, 0.8);
-      const C = new V3(Math.cos(a) * dd, 0, Math.sin(a) * dd); C.y = ctx.gh(C.x, C.z) + R * 0.5;
-      clump(leaves, C, R, rnd, { cards: Math.round(9 + 9 * R * R), size: range(rnd, 0.95, 1.2), cells: [3], fill: 2, tint, ao: p => 0.62 + 0.38 * smooth(C.y - R, C.y + R, p.y), squash: 0.78, inner: 0.42, wind: 0.6, sizeVar: [0.7, 1.3] });
-    }
+    const a = rnd() * TAU, dd = range(rnd, 1.4, 2.3) * s, R = range(rnd, 0.55, 0.8);
+    const C = new V3(Math.cos(a) * dd, 0, Math.sin(a) * dd); C.y = ctx.gh(C.x, C.z) + R * 0.5;
+    clump(leaves, C, R, rnd, { cards: Math.round(10 + 10 * R * R), size: range(rnd, 1.1, 1.4), cells: [3], core: 3, coreK: 1.7, tint, ao: p => 0.66 + 0.34 * smooth(C.y - R, C.y + R, p.y), squash: 0.78, wind: 0.6, sizeVar: [0.7, 1.3] });
   }
 }
 
 // A pine: a straight trunk that stops inside the crown, stacked drooping tiers of bough cards round
-// dark inner cones, closed off by a solid top cone and a tip spray. Dun Morogh's carry snow on every
-// bough (painted; the undersides show bare needles).
+// dark inner cones, closed off by two small tiers and a tip spray. Elwynn's tiers are fewer and
+// droop harder, each lit along its top. Dun Morogh's carry snow: painted on the boughs (the undersides
+// still frosted), plus a lumpy snow ridge along the inner part of every bough, so every tier shows a
+// white line in profile.
 function pine(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 12)), s = d.s || 1, B = ctx.bio, snow = !!B.snow;
   ctx.at(d, d.ry || 0);
-  const bark = ctx.b('bark_pine'), nd = ctx.b('needles');
+  const bark = ctx.b('bark_pine'), nd = ctx.b('needles'), ridge = snow ? ctx.b('snowridge') : null;
   const grid = snow ? [4, 2] : [2, 2];
   const H = (snow ? range(rnd, 8.5, 11) : range(rnd, 8, 10.5)) * s, r0 = 0.31 * s;
   const [gLo] = ctx.foot(r0 * 2);
@@ -826,39 +849,42 @@ function pine(ctx, d) {
   for (let i = 0; i <= NT; i++) {
     const t = i / NT, y = yBot + t * (yTrunk - yBot), [cx, cz] = center(y);
     tp.push(new V3(cx, y, cz));
-    tr.push(Math.max(0.03 * s, r0 * (1.08 - 0.88 * Math.pow(clamp01(y / yTrunk), 1.4)) * (1 + 0.5 * Math.pow(clamp01(1 - (y + 0.2) / (1.0 * s)), 2))));
+    tr.push(Math.max(0.03 * s, r0 * (1.08 - 0.88 * Math.pow(clamp01(y / yTrunk), 1.4)) * (1 + 0.45 * Math.pow(clamp01(1 - (y + 0.2) / (1.0 * s)), 2))));
   }
   const nR = 4, a0 = rnd() * TAU, rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.4, 0.4));
+  const fl = flare(rootA, 0.6);
   tube(bark, tp, tr, {
     sides: 8, uRep: 2, vLen: 2.2, color: barkAO(-0.3, 1.5, 0.45),
-    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / (0.9 * s)), 1.5), ph = Math.atan2(dir.z, dir.x); let m = 0; for (const ra of rootA) m = Math.max(m, clamp01(1 - angDiff(ph, ra) / 0.6)); return 1 + f * 0.8 * m * m; },
+    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / (0.9 * s)), 1.5); return 1 + f * 0.7 * fl(Math.atan2(dir.z, dir.x)); },
   });
   roots(ctx, bark, rootA, r0, s, rnd, { len: [0.7, 1.0], rad: 0.2, up: 0.5, sides: 6, color: barkAO(-0.3, 1.2, 0.45) });
   const tint = lin(pick(rnd, B.pineTints));
-  const nT = Math.round((snow ? 8 : 7) * Math.min(1.1, Math.max(0.85, s)));
-  const Rb = (snow ? 3.0 : 3.3) * s * range(rnd, 0.92, 1.08), dK = snow ? 0.42 : 0.45;
+  const nT = Math.round((snow ? 8 : 6) * Math.min(1.1, Math.max(0.85, s)));
+  const Rb = (snow ? 3.0 : 3.3) * s * range(rnd, 0.92, 1.08), dK = snow ? 0.42 : 0.55;
   const y0 = (Rb + 0.25 * s) * dK * 1.05 + range(rnd, 0.25, 0.45) * s, y1 = H * 0.86;
-  const dyT = (y1 - y0) / (nT - 1);
   const cellDense = inset(cellOf(snow ? 6 : 2, ...grid));
+  const du = cellDense[2] - cellDense[0], dv = cellDense[3] - cellDense[1];
   const tiers = [];
   for (let i = 0; i < nT; i++) {
     const t = i / (nT - 1);
-    const y = y0 + (y1 - y0) * Math.pow(t, 0.8) + range(rnd, -0.08, 0.08) * s;
+    const y = y0 + (y1 - y0) * Math.pow(t, 0.95) + range(rnd, -0.08, 0.08) * s;
     tiers.push({ t, y, R: Rb * (1 - 0.76 * t) * range(rnd, 0.92, 1.06) + 0.5 * s });
   }
   // two small tiers close the crown up to the tip
   tiers.push({ t: 1, y: y1 + (H - y1) * 0.42, R: 0.75 * s, mini: true }, { t: 1, y: y1 + (H - y1) * 0.75, R: 0.45 * s, mini: true });
+  const snowC = lin('#ffffff'), snowLo = lin('#c4d2e6'), snowUnder = lin('#7e8fa8');
   for (let i = 0; i < tiers.length; i++) {
     const { t, y, R, mini } = tiers[i];
     const droop = Math.max(R * dK, 0.55 * s);
     const [cx, cz] = center(y);
-    const tierAO = 0.72 + 0.28 * t;
-    // the dark solid cone under the boughs, overlapping the tier above so no trunk shows
+    const tierAO = 0.74 + 0.26 * t;
+    // the dark solid cone under the boughs, overlapping the tier above so no trunk shows; mapped to a
+    // small patch of the dense-needle cell (a soft dark green, never stretched streaks)
     const yTopC = i < tiers.length - 1 ? tiers[i + 1].y + 0.25 * s : H - 0.2 * s;
     tube(nd, [new V3(cx, y - droop * 0.7, cz), new V3(cx, (y - droop * 0.7 + yTopC) / 2, cz), new V3(cx, yTopC, cz)], [R * 0.4, R * 0.17, 0.04 * s], {
       sides: 9, uRep: 1, vLen: 1,
-      uvMap: (u, v, tt) => [cellDense[0] + u * (cellDense[2] - cellDense[0]), cellDense[1] + tt * (cellDense[3] - cellDense[1])],
-      color: mulc(tint, 0.6 * tierAO), wind: 0.15,
+      uvMap: (u, v, tt) => [cellDense[0] + du * (0.12 + 0.76 * (1 - Math.abs(2 * (u % 1) - 1))), cellDense[1] + dv * (0.35 + 0.25 * tt)],   // mirrored round the cone: no seam, needles at their own aspect
+      color: mulc(tint, (snow ? 0.6 : 0.5) * tierAO), wind: 0.15,
     });
     const K = mini ? 5 : Math.max(7, Math.round(7 + 2 * (1 - t))), th0 = rnd() * TAU;
     for (let k = 0; k < K; k++) {
@@ -876,8 +902,30 @@ function pine(ctx, d) {
       if (snow && i === 0 && rnd() < 0.2) ci += 2;     // the odd bare bough low down
       const cell = inset(cellOf(ci, ...grid));
       const vs = [cell[1], (cell[1] + cell[3]) / 2, cell[3]];
+      // lit along the tier's top (the inner, upper part of each bough), a little darker at the tips
+      const rowK = snow ? [0.74, 0.94, 1.04] : [0.95, 1.08, 0.9];
       strip(nd, rows, [cell[0], cell[2]], vs, (ri) => new V3().copy(nrm).add(new V3(dx, 0, dz).multiplyScalar(ri * 0.15)).normalize(),
-        ri => mulc(tint, tierAO * [0.72, 0.92, 1.06][ri]), ri => [0, 0.45, 1][ri] * 0.8, nrm);
+        ri => mulc(tint, tierAO * rowK[ri]), ri => [0, 0.45, 1][ri] * 0.8, nrm);
+      // the snow: one or two low lumpy mounds riding the inner part of the bough (wide and flat, their
+      // undersides pressed into the needles), so the tier shows a broken white line in profile
+      if (ridge && !mini && ci < 2 && i > 0) {     // (the lowest tier is seen from above: its painted snow is enough)
+        const mid = r => rows[r][0].clone().lerp(rows[r][1], 0.5);
+        const A = mid(0), Bm = mid(1), Cc = mid(2);
+        const at = f => (f < 0.5 ? A.clone().lerp(Bm, f / 0.5) : Bm.clone().lerp(Cc, (f - 0.5) / 0.5));
+        const sv = new V3(dz, 0, -dx);
+        // (it starts at the trunk, inside the dark cone, so it needs no start cap; four sides and a
+        // short tip keep it to 16 vertices a bough)
+        const spans = rnd() < 0.88 ? [[0.04, range(rnd, 0.42, 0.62)]] : [];
+        for (const [fa, fb] of spans) {
+          const rr = range(rnd, 0.12, 0.17) * s * (1 - 0.4 * t), ph = rnd() * 6;
+          const pts = [fa, (fa + fb) * 0.55, fb].map(f => at(f).addScaledVector(nrm, rr * 0.2).addScaledVector(sv, range(rnd, -0.08, 0.08) * s));
+          tube(ridge, pts, [rr * 0.8, rr * range(rnd, 0.95, 1.12), rr * range(rnd, 0.6, 0.8)], { cap: 0.45, domeRings: [],
+            sides: 4, uRep: 1, vLen: 2, a0: 0,
+            lobes: (dir) => { const a = dir.dot(sv), bb = dir.dot(nrm); return 1 / Math.sqrt((a / 2.0) ** 2 + (bb / (bb < 0 ? 0.25 : 0.8)) ** 2 + 1e-4) * (1 + 0.14 * Math.sin(dir.x * 9 + dir.z * 7 + ph)); },
+            color: (p, n) => (n.y < 0 ? mixc(snowUnder, snowLo, 1 + n.y) : mixc(snowLo, snowC, clamp01(0.45 + n.y * 0.6))), wind: (p, tt) => (fa + (fb - fa) * tt) * 0.8,
+          });
+        }
+      }
     }
   }
   // the leader: a short crossed tip spray above the last little tier
@@ -908,7 +956,8 @@ function palm(ctx, d) {
     pts.push(new V3(Math.cos(la) * off + Math.cos(sb) * bow, y, Math.sin(la) * off + Math.sin(sb) * bow));
     rad.push(s * (0.28 + 0.08 * (1 - clamp01(y / L))) + s * 0.22 * Math.pow(clamp01(1 - (y + 0.1) / 1.0), 1.6));
   }
-  tube(bark, pts, rad, { sides: 10, uRep: 1.5, vLen: 2.8, color: barkAO(-0.3, 1.2, 0.55), lobes: (dir, t, i, j) => 1 + 0.03 * Math.sin(j * 2.1 + i) });
+  // the leaf-base rings tighten toward the crown
+  tube(bark, pts, rad, { sides: 10, uRep: 1.5, vLen: 2.4, color: barkAO(-0.3, 1.2, 0.55), uvMap: (u, v, t) => [u, v * (1 + 0.55 * t)], lobes: (dir, t, i, j) => 1 + 0.03 * Math.sin(j * 2.1 + i) });
   const T = pts[NS], Td = new V3().subVectors(pts[NS], pts[NS - 1]).normalize();
   // collar of old frond bases
   const dry = lin('#c0a070');
@@ -965,13 +1014,14 @@ function bush(ctx, d) {
   const ao = p => (dry ? 0.7 : 0.6) + (dry ? 0.3 : 0.4) * smooth(0, 1.4 * s, p.y);
   const warm = snow ? null : p => { const t = smooth(0.5 * s, 1.5 * s, p.y); return [1 + 0.12 * t, 1 + 0.1 * t, 1 - 0.15 * t]; };
   for (let k = 0; k < n; k++) {
-    const a = rnd() * TAU, dd = k === 0 ? 0 : range(rnd, 0.35, 0.65) * s, R = (k === 0 ? range(rnd, 0.75, 0.95) : range(rnd, 0.5, 0.75)) * s * (snow ? 1.25 : 1);
-    const C = new V3(Math.cos(a) * dd, R * (snow ? 0.45 : 0.6), Math.sin(a) * dd);
+    const a = rnd() * TAU, dd = k === 0 ? 0 : range(rnd, 0.35, 0.65) * s, R = (k === 0 ? range(rnd, 0.75, 0.95) : range(rnd, 0.5, 0.75)) * s * (snow ? 1.2 : 1);
+    const C = new V3(Math.cos(a) * dd, R * (snow ? 0.42 : 0.6), Math.sin(a) * dd);
     C.y += ctx.gh(C.x, C.z);
     if (snow) {
-      clump(b, C, R, rnd, { cards: Math.round((9 + 9 * (R / s) ** 2) * 1.3), size: range(rnd, 1.0, 1.25) * s, grid: [4, 2], fill: 4, cellFn: dir => (dir.y > -0.15 ? (rnd() < 0.5 ? 0 : 1) : (rnd() < 0.5 ? 2 : 3)), tint, ao, squash: 0.7, inner: 0.45, wind: 0.4, massK: 0.75, sizeVar: [0.7, 1.3], span: 1.3 });
+      // a snowy juniper mound: a snow-blanketed core, snowy sprays on top, bare ones low round the sides
+      clump(b, C, R, rnd, { cards: Math.round((10 + 10 * (R / s) ** 2) * 1.2), size: range(rnd, 0.95, 1.2) * s, grid: [4, 2], core: 4, coreK: 1.7, cellFn: dir => (dir.y > -0.25 ? (rnd() < 0.5 ? 0 : 1) : (rnd() < 0.5 ? 2 : 3)), tint, ao, squash: 0.7, wind: 0.4, sizeVar: [0.7, 1.25], span: 1.3 });
     } else {
-      clump(b, C, R, rnd, { cards: Math.round((7 + 7 * (R / s) ** 2) * 1.3), size: range(rnd, 1.0, 1.25) * s, cells: B.bushCells, fill: B.bushFill, tint, ao, warm, squash: 0.78, inner: dry ? 0.4 : 0.42, wind: 0.6, massK: dry ? 0.75 : 0.5, sizeVar: [0.7, 1.3] });
+      clump(b, C, R, rnd, { cards: Math.round((8 + 8 * (R / s) ** 2) * 1.3), size: range(rnd, 1.15, 1.4) * s, cells: B.bushCells, core: dry ? (B.bushCells[0] === 0 ? 0 : 1) : 3, coreK: 1.45, tint, ao, warm, squash: 0.78, wind: 0.6, sizeVar: [0.7, 1.3] });
     }
   }
 }
@@ -980,8 +1030,10 @@ function bush(ctx, d) {
 // snag or two, a jagged split point instead of a cap, and rounded roots gripping the ground.
 function deadTree(ctx, s, rnd, { r0 = 0.27, ring = null } = {}) {
   const b = ctx.b('bark_dead');
-  const tint = lin(ctx.bio.deadTint || '#c8c0b8');
+  const tint = lin(ctx.bio.deadTint || '#c8c0b8'), pale = lin('#d8ccb4');
   const col = (lo) => (p) => mulc(tint, lo + (1 - lo) * smooth(-0.2, 1.6, p.y));
+  // a broken end: the bark colour along the branch, the pale split wood on its blunt dome
+  const brk = (lo) => (p, n, t) => (t >= 0.999 ? mixc(mulc(tint, 0.9), pale, 0.8) : col(lo)(p));
   const H = range(rnd, 3.4, 4.4) * s, a0 = rnd() * TAU;
   const [gLo] = ctx.foot(r0 * 2.4);
   const yBot = Math.min(-0.4, gLo - 0.3);
@@ -989,60 +1041,67 @@ function deadTree(ctx, s, rnd, { r0 = 0.27, ring = null } = {}) {
   for (let i = 0; i <= NT; i++) {
     const t = i / NT, y = yBot + t * (H - yBot), k = clamp01(y / H);
     tp.push(new V3(Math.sin(k * 3.1 + a0) * 0.32 * k * s + Math.sin(k * 7 + a0) * 0.05 * k, y, Math.cos(k * 2.3 + a0) * 0.28 * k * s));
-    tr.push(r0 * (1.08 - 0.5 * k) * (1 + 0.55 * Math.pow(clamp01(1 - (y + 0.2) / 1.1), 2)));
+    tr.push(r0 * (1.1 - 0.45 * k) * (1 + 0.45 * Math.pow(clamp01(1 - (y + 0.2) / 1.1), 2)));
   }
-  const nR = 4 + (rnd() < 0.5 ? 1 : 0), rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.4, 0.4));
-  const ph0 = rnd() * TAU;
+  const nR = 4 + (rnd() < 0.5 ? 1 : 0), rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.35, 0.35));
+  const ph0 = rnd() * TAU, fl = flare(rootA, 0.6);
   tube(b, tp, tr, {
-    sides: 10, uRep: 1.5, vLen: 1.6, twist: 0.15, color: col(0.5),
-    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / 1.0), 1.5), ph = Math.atan2(dir.z, dir.x); let m = 0; for (const ra of rootA) m = Math.max(m, clamp01(1 - angDiff(ph, ra) / 0.7)); return (1 + f * 0.75 * m * m) * (1 + 0.08 * Math.cos(3 * (ph - ph0 - t * 1.2))); },
+    sides: 10, uRep: 1.5, vLen: 1.6, twist: 0.2, color: col(0.5),
+    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / 1.0), 1.5), ph = Math.atan2(dir.z, dir.x); return (1 + f * 0.6 * fl(ph)) * (1 + 0.08 * Math.cos(3 * (ph - ph0 - t * 1.2))); },
   });
-  roots(ctx, b, rootA, r0, 1, rnd, { len: [0.65, 1.0], rad: 0.19, up: 0.5, sides: 7, color: col(0.5) });
-  // the split top: two jagged spikes
+  roots(ctx, b, rootA, r0, 1, rnd, { len: [0.6, 0.95], rad: 0.2, up: 0.45, sides: 7, color: col(0.5) });
+  // the split top: two short blunt broken stubs, pale split wood at their ends
   const top = tp[NT], rT = tr[NT];
   for (let k = 0; k < 2; k++) {
-    const a = a0 + k * Math.PI + range(rnd, -0.4, 0.4), h = range(rnd, 0.25, 0.6) * s;
-    tube(b, [new V3(top.x + Math.cos(a) * rT * 0.3, top.y - 0.1, top.z + Math.sin(a) * rT * 0.3), new V3(top.x + Math.cos(a) * rT * 0.5, top.y + h, top.z + Math.sin(a) * rT * 0.5)], [rT * 0.6, 0.01], { sides: 6, uRep: 1, vLen: 1.6, color: col(0.8) });
+    const a = a0 + k * Math.PI + range(rnd, -0.4, 0.4), h = range(rnd, 0.2, 0.45) * s;
+    tube(b, [new V3(top.x + Math.cos(a) * rT * 0.25, top.y - 0.12, top.z + Math.sin(a) * rT * 0.25), new V3(top.x + Math.cos(a) * rT * 0.45, top.y + h, top.z + Math.sin(a) * rT * 0.45)], [rT * 0.62, rT * 0.42], { sides: 6, uRep: 1, vLen: 1.6, color: brk(0.8), cap: 0.35 });
   }
   const at = t => { const f = t * NT, i = Math.min(NT - 1, Math.floor(f)), u = f - i; return [tp[i].clone().lerp(tp[i + 1], u), tr[i] + (tr[i + 1] - tr[i]) * u]; };
   const twigs = (pts, rB, n = 2) => {
     for (let tw = 0; tw < n; tw++) {
-      const q = pts[2 + tw], td = new V3(range(rnd, -1, 1), range(rnd, 0.3, 1), range(rnd, -1, 1)).normalize(), tl = range(rnd, 0.4, 0.8) * s;
-      tube(b, [q, q.clone().addScaledVector(td, tl * 0.5).add(new V3(0, 0.05, 0)), q.clone().addScaledVector(td, tl)], [rB * 0.28, rB * 0.16, 0.01], { sides: 5, uRep: 1, vLen: 1.6, color: col(0.85) });
+      const q = pts[2 + tw], td = new V3(range(rnd, -1, 1), range(rnd, 0.3, 1), range(rnd, -1, 1)).normalize(), tl = range(rnd, 0.35, 0.65) * s;
+      tube(b, [q, q.clone().addScaledVector(td, tl * 0.5).add(new V3(0, 0.05, 0)), q.clone().addScaledVector(td, tl)], [rB * 0.3, rB * 0.24, rB * 0.19], { sides: 5, uRep: 1, vLen: 1.6, color: brk(0.85), cap: 0.4 });
     }
   };
-  // 2-3 major forks from the upper trunk, thick at the base, kinked and twisting
+  // 2-3 major forks from the upper trunk, thick at the base, bending twice, ending in broken stubs
   const nF = 2 + (rnd() < 0.55 ? 1 : 0);
   for (let k = 0; k < nF; k++) {
     const t = range(rnd, 0.55, 0.78), [P0, rr] = at(t), a = a0 + k * TAU / nF + range(rnd, -0.35, 0.35);
-    const rB = rr * range(rnd, 0.7, 0.82), L = range(rnd, 1.3, 2.1) * s * range(rnd, 0.75, 1.25);
-    const pts = limb(P0, new V3(Math.cos(a), range(rnd, 0.45, 1.0), Math.sin(a)), L, rnd, { bends: 2 + (rnd() < 0.5 ? 1 : 0), bendAmt: 0.5, rise: 0.12, segs: 6 });
-    tube(b, pts, pts.map((_, i) => rB * lerpArr([1.1, 1.0, 0.9, 0.78, 0.64, 0.5, 0.34], i / (pts.length - 1))), { sides: 8, uRep: 1, vLen: 1.6, color: col(0.75), cap: 0.8 });
+    const rB = rr * range(rnd, 0.72, 0.84), L = range(rnd, 1.2, 1.9) * s * range(rnd, 0.8, 1.2);
+    const pts = limb(P0, new V3(Math.cos(a), range(rnd, 0.45, 1.0), Math.sin(a)), L, rnd, { bends: 2, bendAmt: 0.5, rise: 0.12, segs: 6 });
+    tube(b, pts, pts.map((_, i) => rB * lerpArr([1.1, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5], i / (pts.length - 1))), { sides: 8, uRep: 1, vLen: 1.6, twist: 0.15, color: brk(0.75), cap: 0.35 });
     twigs(pts, rB, 1);
     // a secondary branch
     const m0 = pts[2], b2 = a + (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.7, 1.3);
-    const p2 = limb(m0, new V3(Math.cos(b2), range(rnd, 0.3, 0.9), Math.sin(b2)), range(rnd, 0.9, 1.5) * s, rnd, { bends: 1, bendAmt: 0.6, segs: 4 });
-    tube(b, p2, p2.map((_, i) => rB * 0.5 * lerpArr([1, 0.85, 0.68, 0.5, 0.3], i / (p2.length - 1))), { sides: 7, uRep: 1, vLen: 1.6, color: col(0.8), cap: 1 });
+    const p2 = limb(m0, new V3(Math.cos(b2), range(rnd, 0.3, 0.9), Math.sin(b2)), range(rnd, 0.8, 1.3) * s, rnd, { bends: 2, bendAmt: 0.55, segs: 4 });
+    tube(b, p2, p2.map((_, i) => rB * 0.52 * lerpArr([1, 0.88, 0.76, 0.64, 0.55], i / (p2.length - 1))), { sides: 7, uRep: 1, vLen: 1.6, color: brk(0.8), cap: 0.35 });
   }
   // lower limbs and broken snags
   const nLow = 1 + (rnd() < 0.6 ? 1 : 0);
   for (let k = 0; k < nLow; k++) {
     const t = range(rnd, 0.3, 0.5), [P0, rr] = at(t), a = a0 + range(rnd, 0, TAU);
-    const rB = rr * range(rnd, 0.45, 0.6), snag = rnd() < 0.5, L = (snag ? range(rnd, 0.3, 0.6) : range(rnd, 1.2, 1.9)) * s;
+    const rB = rr * range(rnd, 0.45, 0.6), snag = rnd() < 0.5, L = (snag ? range(rnd, 0.3, 0.55) : range(rnd, 1.0, 1.6)) * s;
     const pts = limb(P0, new V3(Math.cos(a), range(rnd, 0.3, 0.8), Math.sin(a)), L, rnd, { bends: snag ? 0 : 2, bendAmt: 0.5, segs: snag ? 2 : 5 });
-    tube(b, pts, pts.map((_, i) => rB * (snag ? (i < pts.length - 1 ? 1 - i * 0.15 : 0.55) : lerpArr([1, 0.8, 0.6, 0.4, 0.22, 0.06], i / (pts.length - 1)))), { sides: 7, uRep: 1, vLen: 1.6, color: col(0.72), cap: snag ? 0.9 : 2 });
+    tube(b, pts, pts.map((_, i) => rB * (snag ? 1 - i * 0.12 : lerpArr([1, 0.86, 0.72, 0.6, 0.5, 0.42], i / (pts.length - 1)))), { sides: 7, uRep: 1, vLen: 1.6, color: brk(0.72), cap: 0.3 });
     if (!snag) twigs(pts, rB);
   }
   if (ring != null) {
-    // the winch strap: an iron band round the trunk at the hook's height, and a shackle ring
+    // the winch strap: a flat iron band hugging the trunk at the hook's height, a leather strap wound
+    // above it, and a heavy ring hanging from a tab
     let i = 0; while (i < NT - 1 && tp[i + 1].y < ring) i++;
-    const f = clamp01((ring - tp[i].y) / (tp[i + 1].y - tp[i].y)), c = tp[i].clone().lerp(tp[i + 1], f), rr = (tr[i] + (tr[i + 1] - tr[i]) * f) * 1.06 + 0.03;
-    const ib = ctx.b('iron'), loop = [];
-    for (let k = 0; k <= 16; k++) { const a = k / 16 * TAU; loop.push(new V3(c.x + Math.cos(a) * rr, c.y + Math.sin(a * 3) * 0.015, c.z + Math.sin(a) * rr)); }
-    tube(ib, loop, loop.map(() => 0.04), { sides: 6, uRep: 1, vLen: 0.4, color: WHITE });
+    const f = clamp01((ring - tp[i].y) / (tp[i + 1].y - tp[i].y)), c = tp[i].clone().lerp(tp[i + 1], f), rr = (tr[i] + (tr[i + 1] - tr[i]) * f);
+    const ib = ctx.b('iron');
+    const band = (y, r, th, wd) => { const loop = []; for (let k = 0; k <= 20; k++) { const a = k / 20 * TAU; loop.push(new V3(c.x + Math.cos(a) * r, y + Math.sin(a * 2 + 1) * 0.006, c.z + Math.sin(a) * r)); } return loop; };
+    const lb = band(c.y, rr * 1.04 + 0.022, 0, 0);
+    tube(ib, lb, lb.map(() => 0.036), { sides: 4, a0: Math.PI / 4, uRep: 1, vLen: 0.4, color: [0.95, 0.9, 0.86] });
+    // leather strap: two turns just above the band
+    for (const dy of [0.09, 0.16]) { const sl = band(c.y + dy, rr * 1.03 + 0.012); tube(b, sl, sl.map(() => 0.022), { sides: 5, uRep: 1, vLen: 0.3, color: lin('#7a4e30'), lobes: (dir) => (Math.abs(dir.y) > 0.6 ? 1.6 : 0.7) }); }
+    // the tab and the heavy ring at the hook point, on the trunk's +x side
+    const ox = rr * 1.04 + 0.05;
+    tube(ib, [new V3(c.x + ox - 0.04, c.y + 0.02, c.z), new V3(c.x + ox + 0.04, c.y - 0.04, c.z)], [0.035, 0.03], { sides: 4, uRep: 1, vLen: 0.3, color: WHITE, cap: 0.4, cap0: 0.4 });
     const sh = [];
-    for (let k = 0; k <= 12; k++) { const a = k / 12 * TAU; sh.push(new V3(c.x + rr + 0.1 + Math.cos(a) * 0.09, c.y - 0.1 + Math.sin(a) * 0.11, c.z)); }
-    tube(ib, sh, sh.map(() => 0.024), { sides: 6, uRep: 1, vLen: 0.4, color: WHITE });
+    for (let k = 0; k <= 14; k++) { const a = k / 14 * TAU; sh.push(new V3(c.x + ox + 0.07 + Math.sin(a) * 0.02, c.y - 0.15 + Math.cos(a) * 0.12, c.z + Math.sin(a) * 0.11)); }
+    tube(ib, sh, sh.map(() => 0.028), { sides: 7, uRep: 1, vLen: 0.4, color: WHITE });
   }
 }
 
@@ -1054,13 +1113,14 @@ function stump(ctx, d) {
   const R = range(rnd, 0.42, 0.56) * s, H = range(rnd, 0.45, 0.8) * s, a0 = rnd() * TAU;
   const [gLo, gHi] = ctx.foot(R * 1.2);
   const rootA = []; for (let k = 0; k < 4; k++) rootA.push(a0 + k * TAU / 4 + range(rnd, -0.3, 0.3));
+  const fl = flare(rootA, 0.6);
   const yT = gHi * 0.5 + H;
   const pts = [new V3(0, Math.min(-0.35, gLo - 0.3), 0), new V3(0, 0.1, 0), new V3(0, yT * 0.55, 0), new V3(0, yT, 0), new V3(0, yT + 0.012, 0)];
   const rad = [R * 1.3, R * 1.12, R * 1.02, R, R * 0.88];
   if (ctx.bio.barkCover) bark.cf = (p, n) => smooth(0.7, 0.05, p.y) * 0.5;
   tube(bark, pts, rad, {
     sides: 11, uRep: 2, vLen: 1.4, color: barkAO(-0.3, 0.8, 0.55, lin(ctx.bio.oakTrunk || '#ffffff')),
-    lobes: (dir, t, i) => { if (i >= 3) return 1 + 0.04 * Math.sin(Math.atan2(dir.z, dir.x) * 6); const f = i === 0 ? 1 : i === 1 ? 0.6 : 0.15, ph = Math.atan2(dir.z, dir.x); let m = 0; for (const ra of rootA) m = Math.max(m, clamp01(1 - angDiff(ph, ra) / 0.6)); return 1 + f * 0.6 * m * m; },
+    lobes: (dir, t, i) => { const ph = Math.atan2(dir.z, dir.x); if (i >= 3) return 1 + 0.04 * Math.sin(ph * 6); const f = i === 0 ? 1 : i === 1 ? 0.6 : 0.15; return 1 + f * 0.5 * fl(ph); },
   });
   roots(ctx, bark, rootA, R, s * 0.8, rnd, { len: [0.6, 0.9], rad: 0.24, up: 0.4 });
   disc(top, new V3(0, yT + 0.014, 0), UP, R * 0.9, 14, (c, sn) => [0.5 + c * 0.43, 0.5 + sn * 0.43]);
@@ -1089,6 +1149,7 @@ function rockShape(rnd, o = {}) {
     for (let it = 0; it < 2; it++) for (const [n, dd] of cuts) { const e = p.dot(n) - dd; if (e > 0) p.addScaledVector(n, -e); }
     if (p.y < -bot * sy) p.y = -bot * sy;
     if (o.under && p.y < 0) { const f = 1 - o.under * smooth(0, -bot * sy, p.y); p.x *= f; p.z *= f; }
+    if (o.groove) { const f = 1 - o.groove[0] * (0.5 + 0.5 * Math.sin(TAU * p.y / o.groove[1] + sA)); p.x *= f; p.z *= f; }   // wind-cut horizontal grooves
     return p;
   });
   return { P, idx: I.idx };
@@ -1096,14 +1157,14 @@ function rockShape(rnd, o = {}) {
 
 // Put a rock shape into the world: scale R, tilt, turn, move to C; AO dark at the foot, a little
 // lighter on top. Returns the placed points (for a snow cap).
-function placeRock(b, shape, C, R, { yaw = 0, tilt = 0, tiltA = 0, tint = WHITE, aoLo = 0.42 } = {}) {
+function placeRock(b, shape, C, R, { yaw = 0, tilt = 0, tiltA = 0, tint = WHITE, aoLo = 0.42, cos = COS_CREASE } = {}) {
   const m = new THREE.Matrix4().makeRotationY(yaw);
   if (tilt) m.multiply(new THREE.Matrix4().makeRotationAxis(new V3(Math.cos(tiltA), 0, Math.sin(tiltA)), tilt));
   const P = shape.P.map(p => p.clone().multiplyScalar(R).applyMatrix4(m).add(C));
   let y0 = Infinity, y1 = -Infinity; for (const p of P) { y0 = Math.min(y0, p.y); y1 = Math.max(y1, p.y); }
   const yg = Math.max(y0, C.y - 0.35 * (y1 - y0));
   const FD = faceData(P, shape.idx);
-  creased(b, P, shape.idx, (p, n) => mulc(tint, (aoLo + (1 - aoLo) * smooth(yg - 0.1, yg + Math.max(0.5, (y1 - yg) * 0.7), p.y)) * (0.9 + 0.12 * n.y)), FD);
+  creased(b, P, shape.idx, (p, n) => mulc(tint, (aoLo + (1 - aoLo) * smooth(yg - 0.1, yg + Math.max(0.5, (y1 - yg) * 0.7), p.y)) * (0.9 + 0.12 * n.y)), FD, cos);
   return { P, idx: shape.idx, FD };
 }
 
@@ -1157,6 +1218,124 @@ function snowCap(b, rk, thick) {
   mesh(b, Ps, I, { color: (p, n, i) => (frac[i] < 0 ? mixc(lo, WHITE, 0.15) : mixc(lo, WHITE, clamp01(0.35 + n.y * 0.7))) });
 }
 
+// One layer of a stepped canyon formation: an irregular 6-8-sided slab, its foot pulled in (the dark
+// undercut line under the ledge above it), straight sides, a chamfered lit lip and a flat top (dust
+// settles there). poly: [[angle, radius]...]. Creased at 25°, so its faces read as chiselled planes.
+const COS25 = Math.cos(25 * Math.PI / 180);
+function prism(b, C, y0, h, poly, rnd, { tint = WHITE, tilt = null, under = 0.9, bevel = 0.08, bulge = 1, foot = 0.06, aoLo = 0.42, lipK = 1.12 } = {}) {
+  const N = poly.length, P = [], idx = [];
+  const ring = (y, k, dy = 0) => { const i0 = P.length; for (const [a, r] of poly) { const tY = tilt ? (Math.cos(a) * tilt[0] + Math.sin(a) * tilt[1]) * r : 0; P.push(new V3(C.x + Math.cos(a) * r * k + range(rnd, -0.02, 0.02), y + tY * dy, C.z + Math.sin(a) * r * k + range(rnd, -0.02, 0.02))); } return i0; };
+  const bv = Math.min(bevel, h * 0.25);
+  const rs = [ring(y0 - foot, under, 0), ring(y0 + h * 0.18, 1, 0.18), ring(y0 + h * 0.55, bulge, 0.55), ring(y0 + h - bv, 1, 1), ring(y0 + h, 1 - bv / Math.max(0.2, poly.reduce((m, [, r]) => Math.min(m, r), 9)), 1)];
+  for (let q = 0; q < rs.length - 1; q++) for (let k = 0; k < N; k++) { const a = rs[q] + k, bb = rs[q] + (k + 1) % N, c = rs[q + 1] + k, dd = rs[q + 1] + (k + 1) % N; idx.push(a, c, bb, bb, c, dd); }
+  const top = rs[rs.length - 1], cy = P.slice(top, top + N).reduce((m, p) => m + p.y, 0) / N;
+  const ci = P.length; P.push(new V3(C.x, cy, C.z));
+  for (let k = 0; k < N; k++) idx.push(top + k, ci, top + (k + 1) % N);
+  const yTop = y0 + h;
+  creased(b, P, idx, (p, n) => {
+    const t = clamp01((p.y - (y0 - foot)) / (h + foot));
+    const k = (aoLo + (1 - aoLo) * smooth(0, 0.35, t)) * (t > 0.88 ? lipK : 1) * (0.92 + 0.1 * n.y);
+    return mulc(tint, k);
+  }, faceData(P, idx), COS25);
+  return yTop;
+}
+// an irregular footprint: N corners, radii jittered, angles jittered
+const polyOf = (rnd, N, r, jit = 0.18, sx = 1, sz = 1) => { const a0 = rnd() * TAU, out = []; for (let k = 0; k < N; k++) { const a = a0 + (k + range(rnd, -0.22, 0.22)) * TAU / N, rr = r * range(rnd, 1 - jit, 1 + jit) * Math.hypot(Math.cos(a) * sx, Math.sin(a) * sz); out.push([a, rr]); } return out; };
+// shrink a footprint by a step (varying per corner, so one side steps back further than another)
+const stepIn = (rnd, poly, st) => poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), Math.max(r * 0.35, r - st * range(rnd, 0.5, 1.5))]);
+
+// Badlands: stepped ledge stacks of strata slabs, each narrower than the one below, with a tilted
+// top slab and rubble at the foot; or a cluster of hoodoos: stacked eroded drums narrowing to a neck
+// under a darker, wider caprock.
+function badlandsRock(ctx, b, S, rnd, steep, tintOf, force = null) {
+  const LAYER = [lin('#ffffff'), lin('#f4e0cc'), lin('#ffe9d2'), lin('#ead2bc'), lin('#fff2e0')];
+  if (force === 'hoodoo' || (force !== 'ledge' && S > 1.3 && rnd() < 0.35 && !steep)) {
+    const n = 2 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
+    for (let k = 0; k < n; k++) {
+      const a = a0 + k * TAU / n + range(rnd, -0.4, 0.4), dd = k === 0 ? 0 : S * range(rnd, 1.0, 1.5);
+      const C = new V3(Math.cos(a) * dd, 0, Math.sin(a) * dd);
+      const Ht = range(rnd, 3.5, 5) * Math.max(0.7, Math.min(1.2, S / 1.8)) * (k === 0 ? 1 : range(rnd, 0.6, 0.85));
+      const rb = Math.max(0.55, Ht * range(rnd, 0.17, 0.21));
+      const [lo] = ctx.foot(rb * 1.2, C.x, C.z, 6);
+      let y = lo - 0.3, poly = polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), rb, 0.12);
+      // hard layers (thick, standing proud) alternating with soft ones (thin, eroded back into a
+      // waist), the column narrowing toward the neck; the wavy profile reads as eroded rock, not a
+      // stack of drums
+      const nD = 3 + (rnd() < 0.5 ? 1 : 0), hs = []; let tot = 0;
+      for (let i = 0; i < nD; i++) { const hh = range(rnd, 0.8, 1.25); hs.push(hh); tot += hh; }
+      const capH = Ht * 0.12, neck = rb * 0.6, soft = 0.3;
+      for (let i = 0; i < nD; i++) {
+        const H0 = hs[i] / tot * (Ht - capH) + (i === 0 ? 0.3 : 0), f = (i + 1) / nD;
+        const hHard = H0 * (i === nD - 1 ? 1 : 1 - soft), hSoft = H0 - hHard;
+        const C0 = new V3(C.x + range(rnd, -0.04, 0.04), 0, C.z + range(rnd, -0.04, 0.04)), tnt = mul3(tintOf(), LAYER[i % LAYER.length]);
+        y = prism(b, C0, y, hHard, poly, rnd, { tint: tnt, under: 0.97, bulge: 1.03, bevel: 0.1, foot: 0.03, aoLo: 0.62, lipK: 1.08 });
+        const target = rb + (neck - rb) * f;
+        const next = poly.map(([a, r]) => [a + range(rnd, -0.04, 0.04), Math.max(neck * 0.85, target * range(rnd, 0.9, 1.1))]);
+        if (hSoft > 0.05) {
+          // the soft band: pulled in to a waist under the next hard layer
+          const waist = next.map(([a, r]) => [a, r * 0.78]);
+          y = prism(b, C0, y - 0.02, hSoft + 0.02, waist, rnd, { tint: mul3(tnt, lin('#e8c4a8')), under: 1.0, bulge: 0.96, bevel: 0.02, foot: 0.02, aoLo: 0.55, lipK: 1 });
+        }
+        poly = next;
+      }
+      // the caprock: darker, wider than the neck, tilted
+      const cap = polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), neck * 1.6 * range(rnd, 0.95, 1.1), 0.2);
+      const ta = rnd() * TAU, tk = Math.tan(range(rnd, 3, 7) * Math.PI / 180);
+      prism(b, C, y - 0.04, capH, cap, rnd, { tint: mul3(tintOf(), lin('#c89070')), under: 0.7, bulge: 1.02, bevel: 0.07, foot: 0.02, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: 0.5, lipK: 1.08 });
+    }
+    return;
+  }
+  // a stepped ledge stack
+  const [lo] = ctx.foot(S * 1.1);
+  const nL = 3 + Math.floor(rnd() * 3);
+  let poly = polyOf(rnd, 6 + Math.floor(rnd() * 3), S * range(rnd, 0.95, 1.2), 0.2, range(rnd, 1, 1.3), range(rnd, 0.75, 1));
+  let y = lo - 0.3 * S, cx = 0, cz = 0;
+  const ta = rnd() * TAU, tk = Math.tan(5 * Math.PI / 180);
+  for (let i = 0; i < nL; i++) {
+    const h = S * range(rnd, 0.3, 0.55) + (i === 0 ? 0.3 * S : 0), last = i === nL - 1;
+    y = prism(b, new V3(cx, 0, cz), y, h, poly, rnd, { tint: mul3(tintOf(), LAYER[(i + Math.floor(rnd() * 2)) % LAYER.length]), under: 0.9, bevel: 0.07 * S, foot: 0.05 * S, tilt: last ? [Math.cos(ta) * tk, Math.sin(ta) * tk] : null });
+    poly = stepIn(rnd, poly, S * range(rnd, 0.12, 0.3));
+    cx += range(rnd, -0.08, 0.08) * S; cz += range(rnd, -0.08, 0.08) * S;
+    if (poly[0][1] < 0.3 * S) break;
+  }
+  // fallen blocks at the foot
+  if (!steep) for (let k = 0; k < 1 + Math.floor(rnd() * 3); k++) {
+    const a = rnd() * TAU, dd = S * range(rnd, 1.25, 1.7), r = S * range(rnd, 0.18, 0.32), x = Math.cos(a) * dd, z = Math.sin(a) * dd;
+    const [l2] = ctx.foot(r, x, z, 5);
+    const ta2 = rnd() * TAU, tk2 = Math.tan(range(rnd, 4, 14) * Math.PI / 180);
+    prism(b, new V3(x, 0, z), l2 - r * 0.3, r * range(rnd, 0.8, 1.3), polyOf(rnd, 5 + Math.floor(rnd() * 2), r, 0.25), rnd, { tint: tintOf(), under: 0.92, bevel: 0.04, foot: 0.02, tilt: [Math.cos(ta2) * tk2, Math.sin(ta2) * tk2] });
+  }
+}
+
+// Tanaris: wind-scoured sandstone mounds, the wide base buried, a rounded top; big ones sometimes a
+// low arch on two buried feet.
+function desertRock(ctx, b, S, rnd, steep, tintOf, piece, force = null) {
+  if (force === 'arch' || (force !== 'mound' && S > 1.2 && rnd() < 0.3 && !steep)) {
+    const a = rnd() * TAU, ca = Math.cos(a), sa = Math.sin(a), span = S * range(rnd, 1.7, 2.1), Hh = S * range(rnd, 1.4, 1.8), rr = S * range(rnd, 0.32, 0.4);
+    const ends = [-1, 1].map(sd => ctx.foot(rr * 1.2, ca * span * sd, sa * span * sd, 5)[0]);
+    const pts = [];
+    for (let i = 0; i <= 10; i++) {
+      const t = i / 10, th = Math.PI * (1 - t), x = Math.cos(th) * span, yb = ends[0] + (ends[1] - ends[0]) * t;
+      pts.push(new V3(ca * x, yb - 0.4 * S + Math.sin(th) * (Hh + 0.4 * S) * (1 - 0.15 * Math.sin(th * 2)), sa * x));
+    }
+    const ph = rnd() * 9, nrm = new V3(-sa, 0, ca);
+    const tint = tintOf();
+    tube(b, pts, pts.map((_, i) => rr * (1 + 1.1 * Math.pow(Math.abs(i / 10 - 0.5) * 2, 2.5)) * range(rnd, 0.92, 1.08)), {
+      sides: 9, uRep: 1, vLen: 2, cap: 0.5, cap0: 0.5,
+      lobes: (dir, t) => { const across = Math.abs(dir.dot(nrm)), mid = 1 - Math.abs(t - 0.5) * 2; return (1 + 0.45 * across) * (1 - 0.25 * mid * Math.max(0, dir.y)) * (1 + 0.16 * noise3(dir.x * 2.5 + t * 7, dir.y * 2.5, dir.z * 2.5, ph)); },
+      color: (p, n) => mulc(tint, (0.5 + 0.5 * smooth(Math.min(...ends) - 0.2, Math.min(...ends) + Hh * 0.8, p.y)) * (0.86 + 0.16 * n.y) * (n.y < -0.3 ? 0.82 : 1)),
+    });
+    piece(ca * span * 1.25 + sa * S * 0.4, sa * span * 1.25 - ca * S * 0.4, S * range(rnd, 0.3, 0.45), { detail: 2, top: false, sy: 0.7, sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.14, bottom: 0.5 }, { cos: 0.8 });
+    return;
+  }
+  const n = 1 + (S > 1.0 && !steep ? 1 + (rnd() < 0.5 ? 1 : 0) : 0);
+  for (let k = 0; k < n; k++) {
+    const a = rnd() * TAU, dd = k === 0 ? 0 : S * range(rnd, 0.8, 1.3), R = k === 0 ? S * range(rnd, 0.95, 1.15) : S * range(rnd, 0.35, 0.6);
+    const sy = range(rnd, 0.6, 0.9);
+    piece(Math.cos(a) * dd, Math.sin(a) * dd, R, { detail: 2, top: false, sx: range(rnd, 1.1, 1.45), sy, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, sy * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
+  }
+}
+
 function rock(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 16)), B = ctx.bio, bm = ctx.biome;
   let S = (d.s || 1) * (B.strata ? 1.25 : 1);    // the canyon lands get bigger formations
@@ -1170,37 +1349,16 @@ function rock(ctx, d) {
   const piece = (x, z, R, shapeO, o = {}) => {
     const [lo] = ctx.foot(R * (shapeO.sx ?? 1) * 0.9, x, z, 6);
     const sy = shapeO.sy ?? 0.75, bot = shapeO.bottom ?? 0.5;
-    const C = new V3(x, lo + R * sy * (bot - 0.32) + (o.lift || 0), z);
-    const rk = placeRock(b, rockShape(rnd, { detail: R > 1.25 ? 2 : 1, ...shapeO }), C, R, { yaw: rnd() * TAU, tint: tint(), ...o });
+    const sink = o.sink != null ? (bot - o.sink * (bot + 1)) : (bot - 0.32);
+    const C = new V3(x, lo + R * sy * sink + (o.lift || 0), z);
+    const sh = rockShape(rnd, { detail: R > 1.25 ? 2 : 1, ...shapeO });
+    const rk = placeRock(b, sh, C, R, { yaw: rnd() * TAU, tint: tint(), ...o });
     if (cap) snowCap(cap, rk, Math.min(0.16, 0.05 + 0.05 * R));
     return C;
   };
-  if (bm === 'badlands') {
-    if (S > 1.3 && rnd() < 0.35) {           // a hoodoo: one tall chiselled column under a wider cap stone
-      const [lo] = ctx.foot(S * 0.7), hc = S * range(rnd, 1.7, 2.3), R = S * 0.55;
-      placeRock(b, rockShape(rnd, { detail: 2, sx: 1, sy: hc / R * 0.52, sz: range(rnd, 0.75, 0.95), sides: 5, oblique: 2, topTilt: 0.05, topCut: [0.88, 0.96], bottom: 0.92, sideCut: [0.62, 0.78], under: -0.25, noise: 0.1 }), new V3(0, lo - 0.25 * S + hc * 0.48, 0), R, { yaw: rnd() * TAU, tint: tint(), aoLo: 0.5 });
-      placeRock(b, rockShape(rnd, { sx: 1, sy: 0.34, sz: 0.85, sides: 5, oblique: 2, topTilt: 0.06, topCut: [0.8, 0.92], bottom: 0.9, sideCut: [0.62, 0.8], noise: 0.08 }), new V3(0.05 * S, lo - 0.25 * S + hc * 0.96 + 0.1 * S, 0), S * 0.8, { yaw: rnd() * TAU, tint: tint(), aoLo: 0.75 });
-    } else {                                  // a blocky broken block with ledges stepping out of it
-      const [lo] = ctx.foot(S * 1.1);
-      const hb = S * range(rnd, 0.9, 1.3), ha = rnd() * TAU;
-      placeRock(b, rockShape(rnd, { detail: 2, sx: range(rnd, 1, 1.3), sy: hb / S * 0.55, sz: range(rnd, 0.8, 1), sides: 5, oblique: 2, topTilt: 0.06, topCut: [0.82, 0.94], bottom: 0.9, sideCut: [0.58, 0.74], noise: 0.08 }), new V3(0, lo - 0.3 * S + hb * 0.5, 0), S, { yaw: rnd() * TAU, tint: tint() });
-      // a low ledge slab jutting out at the foot on one side, a thinner one higher on the other
-      const lh = S * range(rnd, 0.3, 0.42);
-      placeRock(b, rockShape(rnd, { sx: 1.3, sy: lh / (S * 0.75) * 0.6, sz: 0.9, sides: 5, oblique: 1, topTilt: 0.04, topCut: [0.84, 0.95], bottom: 0.9, sideCut: [0.58, 0.74], noise: 0.07 }), new V3(Math.cos(ha) * S * 0.55, lo - 0.25 * S + lh * 0.5, Math.sin(ha) * S * 0.55), S * 0.75, { yaw: rnd() * TAU, tint: tint() });
-      if (S > 1.1) { const th = S * 0.24, yy = lo - 0.3 * S + hb * range(rnd, 0.5, 0.75); placeRock(b, rockShape(rnd, { sx: 1.2, sy: th / (S * 0.6) * 0.6, sz: 0.85, sides: 5, oblique: 1, topTilt: 0.03, topCut: [0.84, 0.95], bottom: 0.9, sideCut: [0.6, 0.75], noise: 0.06 }), new V3(-Math.cos(ha) * S * 0.45, yy, -Math.sin(ha) * S * 0.45), S * 0.6, { yaw: rnd() * TAU, tint: tint(), aoLo: 0.7 }); }
-      if (!steep && rnd() < 0.6) { const a = rnd() * TAU, dd = S * 1.3; piece(Math.cos(a) * dd, Math.sin(a) * dd, S * range(rnd, 0.35, 0.5), { sx: 1.2, sy: 0.55, sides: 4, oblique: 1, topCut: [0.75, 0.9], topTilt: 0.1 }); }
-    }
-  } else if (bm === 'desert') {
-    if (S > 1.1 && rnd() < 0.5) {            // a table rock: a wide flat slab on a narrower undercut base
-      const [lo] = ctx.foot(S);
-      const hb = S * range(rnd, 0.5, 0.7);
-      placeRock(b, rockShape(rnd, { sx: 0.8, sy: hb / S * 0.7, sz: 0.75, sides: 4, oblique: 1, topCut: [0.85, 0.95], topTilt: 0.05, bottom: 0.9, under: 0.2, noise: 0.1 }), new V3(0, lo - 0.2 * S + hb * 0.5, 0), S * 0.75, { yaw: rnd() * TAU, tint: tint() });
-      placeRock(b, rockShape(rnd, { sx: 1.25, sy: 0.32, sz: 1, sides: 5, oblique: 2, topCut: [0.8, 0.92], topTilt: 0.08, bottom: 0.85, under: 0.35, noise: 0.08 }), new V3(range(rnd, -0.1, 0.1) * S, lo - 0.2 * S + hb + 0.1 * S, 0), S * 1.05, { yaw: rnd() * TAU, tint: tint(), aoLo: 0.7 });
-    } else {                                  // a wind-scoured tablet, flat-topped and undercut
-      piece(0, 0, S * 1.0, { detail: 2, sx: range(rnd, 1.1, 1.4), sy: range(rnd, 0.5, 0.65), sz: 0.9, sides: 5, oblique: 3, topCut: [0.72, 0.86], topTilt: 0.12, sideCut: [0.55, 0.72], under: 0.3, noise: 0.12 });
-    }
-    if (!steep && rnd() < 0.55) { const a = rnd() * TAU, dd = S * 1.25; piece(Math.cos(a) * dd, Math.sin(a) * dd, S * range(rnd, 0.35, 0.5), { sx: 1.2, sy: 0.5, sides: 3, oblique: 2, topCut: [0.7, 0.85] }); }
-  } else if (bm === 'snow') {
+  if (bm === 'badlands') badlandsRock(ctx, b, S, rnd, steep, tint, d.variant);
+  else if (bm === 'desert') desertRock(ctx, b, S, rnd, steep, tint, piece, d.variant);
+  else if (bm === 'snow') {
     piece(0, 0, S * 1.05, { sx: range(rnd, 1, 1.25), sy: range(rnd, 0.65, 0.85), sides: 3, oblique: 4, topCut: [0.55, 0.75], topTilt: 0.25, noise: 0.14 });
     if (S > 1.0 && rnd() < 0.6 && !steep) {   // a tilted slab leaning beside it
       const a = rnd() * TAU, dd = S * 0.95;
@@ -1233,7 +1391,7 @@ function fence(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 17)), n = Math.max(2, d.len || 4), west = ctx.biome === 'fields';
   ctx.at(d, d.ry || 0);
   const b = ctx.b('wood');
-  const wood = (p, nn) => { const k = (0.6 + 0.4 * smooth(-0.3, 0.6, p.y)) * (0.78 + 0.26 * Math.max(0, nn.y)); return [k, k, k]; };
+  const wood = (p, nn) => { const k = (0.62 + 0.4 * smooth(-0.3, 0.6, p.y)) * (0.8 + 0.26 * Math.max(0, nn.y)); return [k * 1.02, k, k * 0.96]; };
   const posts = [];
   for (let i = 0; i < n; i++) {
     const z = (i - (n - 1) / 2) * 1.9 + range(rnd, -0.12, 0.12), x = range(rnd, -0.06, 0.06), y = ctx.gh(x, z);
@@ -1243,17 +1401,16 @@ function fence(ctx, d) {
     posts.push({ x, y, z, lx, lz, r, h });
   }
   const hs = west ? [0.35, 0.7, 1.05] : [0.45, 0.92];
-  const flat = (dir) => { const hz = Math.hypot(dir.x, dir.z), v = dir.y; return 1 / Math.sqrt((hz / 1.25) ** 2 + (v / 0.78) ** 2); };
+  const flat = (dir) => { const hz = Math.hypot(dir.x, dir.z), v = dir.y; return 1 / Math.sqrt((hz / 0.75) ** 2 + (v / 1.15) ** 2); };   // split rails: taller than thick
   for (let i = 0; i < n - 1; i++) {
     const A = posts[i], Bp = posts[i + 1];
     hs.forEach((h, row) => {
       if (rnd() < 0.06) return;
-      const side = ((i + row) % 2 ? 1 : -1), r = range(rnd, 0.08, 0.09);
+      const side = ((i + row) % 2 ? 1 : -1), r = range(rnd, 0.072, 0.08);
       const ox = side * (A.r + r * 0.9);
-      const ha = h + range(rnd, -0.04, 0.04), hb = h + range(rnd, -0.04, 0.04);
+      const ha = h + range(rnd, -0.05, 0.05), hb = h + range(rnd, -0.05, 0.05);
       const ov = range(rnd, 0.2, 0.3);
       const pa = new V3(A.x + A.lx * ha / A.h + ox, A.y + ha, A.z - ov), pb = new V3(Bp.x + Bp.lx * hb / Bp.h + ox, Bp.y + hb, Bp.z + ov);
-      if (rnd() < 0.05) pb.set(Bp.x + 0.25, ctx.gh(Bp.x + 0.25, Bp.z - 0.2) + 0.08, Bp.z - 0.2);   // a fallen rail
       const mid = pa.clone().lerp(pb, 0.5); mid.y -= 0.03; mid.x += range(rnd, -0.025, 0.025);
       tube(b, [pa, pa.clone().lerp(mid, 0.5), mid, mid.clone().lerp(pb, 0.5), pb], [r, r * 1.04, r * 1.06, r, r * 0.92], { sides: 6, uRep: 1, vLen: 1.6, color: wood, cap: 0.3, lobes: (dir, t, ii, j) => flat(dir) * (1 + 0.05 * Math.sin(j * 3.1 + ii)) });
     });
@@ -1352,24 +1509,33 @@ function scarecrow(ctx, d) {
     const lx = sd * 0.13;
     part([P(lx, 1.0, 0.09), P(lx * 1.1, 0.7, 0.1 + sd * 0.01), P(lx * 1.2, 0.42, 0.12)], [0.12, 0.11, 0.1], 'pants', { lobes: lumpy(0.06) });
   }
+  // the seat: joins both trouser tops up inside the shirt hem
+  part([P(-0.2, 0.98, 0.09), P(0, 0.95, 0.1), P(0.2, 0.98, 0.09)], [0.13, 0.15, 0.13], 'pants', { sides: 9, cap: 0.6, lobes: lumpy(0.05) });
   // straw at the cuffs, the trouser ends, the waist and the neck
   const strawC = (c) => mulc(WHITE, c > 0 ? 1.05 : 0.75);
   const st = ctx.b('straw');
   for (const sd of [-1, 1]) {
-    for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + rnd(); card(st, P(sd * 0.86, 1.58 + Math.sin(a) * 0.05, Math.cos(a) * 0.05), 0.22, 0.2, new V3(Math.cos(a) * 0.3, 0, Math.sin(a) * 0.3 + 1).normalize(), inset(cellOf(pick(rnd, [0, 1]))), strawC, { lean: sd * 1.3 * (k % 2 ? 1 : -1) * 0.5, wind: 0.3 }); }
-    for (let k = 0; k < 3; k++) { const a = k / 3 * TAU + rnd(); card(st, P(sd * 0.155 + Math.cos(a) * 0.04, 0.48, 0.12 + Math.sin(a) * 0.04), 0.2, -0.22, new V3(Math.cos(a), 0, Math.sin(a)), inset(cellOf(pick(rnd, [0, 1]))), strawC, { wind: 0.3 }); }
+    for (let k = 0; k < 5; k++) { const a = k / 5 * TAU + rnd(); card(st, P(sd * 0.86, 1.58 + Math.sin(a) * 0.05, Math.cos(a) * 0.05), 0.28, 0.26, new V3(Math.cos(a) * 0.3, 0, Math.sin(a) * 0.3 + 1).normalize(), inset(cellOf(pick(rnd, [0, 1]))), strawC, { lean: sd * 1.3 * (k % 2 ? 1 : -1) * 0.5, wind: 0.3 }); }
+    for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + rnd(); card(st, P(sd * 0.155 + Math.cos(a) * 0.04, 0.48, 0.12 + Math.sin(a) * 0.04), 0.24, -0.28, new V3(Math.cos(a), 0, Math.sin(a)), inset(cellOf(pick(rnd, [0, 1]))), strawC, { wind: 0.3 }); }
   }
-  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + rnd() * 0.5; card(st, P(Math.cos(a) * 0.28, 0.96, 0.08 + Math.sin(a) * 0.28), 0.2, -0.16, new V3(Math.cos(a), 0, Math.sin(a)), inset(cellOf(2)), strawC, { lean: 0.4, wind: 0.2 }); }
-  for (let k = 0; k < 5; k++) { const a = k / 5 * TAU + rnd() * 0.5; card(st, P(Math.cos(a) * 0.1, 1.76, 0.07 + Math.sin(a) * 0.1), 0.18, 0.16, new V3(Math.cos(a), 0, Math.sin(a)), inset(cellOf(pick(rnd, [0, 1]))), strawC, { lean: -0.5, wind: 0.2 }); }
+  for (let k = 0; k < 8; k++) { const a = k / 8 * TAU + rnd() * 0.5; card(st, P(Math.cos(a) * 0.29, 0.97, 0.08 + Math.sin(a) * 0.29), 0.24, -0.24, new V3(Math.cos(a), 0, Math.sin(a)), inset(cellOf(2)), strawC, { lean: 0.4, wind: 0.2 }); }
+  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + rnd() * 0.5; card(st, P(Math.cos(a) * 0.11, 1.76, 0.07 + Math.sin(a) * 0.11), 0.22, 0.2, new V3(Math.cos(a), 0, Math.sin(a)), inset(cellOf(pick(rnd, [0, 1]))), strawC, { lean: -0.5, wind: 0.2 }); }
   // burlap head, cocked to one side; the face is at u = 0.5, which faces +z
   const hc = P(0.04, 2.12, 0.08), hr = 0.3, hp = [], hrad = [];
   for (let k = 0; k <= 8; k++) { const th = 0.1 * Math.PI + k / 8 * 0.84 * Math.PI; hp.push(new V3(hc.x + Math.sin(k / 8 * 2) * 0.03, hc.y - Math.cos(th) * hr * 1.1, hc.z)); hrad.push(Math.sin(th) * hr * (1 + 0.05 * Math.sin(k * 1.7))); }
   part(hp, hrad, 'head', { sides: 14, cap: true });
-  // floppy felt hat with a wide drooping brim
-  const yb = hc.y + 0.2, hx = hc.x + 0.03, hz = hc.z - 0.02;
-  const brimD = range(rnd, 0.06, 0.1);
-  const hat = [[0.2, -0.05], [0.5, -0.02 - brimD], [0.49, 0.0 - brimD], [0.24, 0.035], [0.21, 0.26], [0.15, 0.3], [0.02, 0.31]];
-  part(hat.map(([r, y], i) => new V3(hx + i * 0.008, yb + y, hz)), hat.map(([r]) => r), 'hat', { sides: 14, lobes: (dir, t, i, j) => i <= 2 ? 1 + 0.07 * Math.sin(j * 1.5) : 1 });
+  // a felt hat: a smooth wide brim (16 segments, drooping on one side, turned up a little on the other)
+  // round a dented crown
+  const yb = hc.y + 0.2, hx = hc.x + 0.03, hz = hc.z - 0.02, da = rnd() * TAU, NB = 16;
+  const ring = (r, dy) => { const row = []; for (let k = 0; k <= NB; k++) { const a = k / NB * TAU, w = Math.cos(a - da); row.push(new V3(hx + Math.cos(a) * r, yb + dy + (r > 0.3 ? (w > 0 ? -0.09 * w * w : 0.035 * w * w) : 0), hz + Math.sin(a) * r)); } return row; };
+  const hatR = SC.hat, us = []; for (let k = 0; k <= NB; k++) us.push(hatR[0] + (hatR[2] - hatR[0]) * (0.02 + 0.96 * k / NB));
+  const topIn = ring(0.2, 0.0), topOut = ring(0.5, -0.03), botIn = ring(0.2, -0.03), botOut = ring(0.5, -0.06);
+  const hatC = (ri) => mulc(WHITE, [1.0, 0.85][ri] ?? 1);
+  strip(sc, [topIn, topOut], us, [hatR[1] + 0.16, hatR[1] + 0.23], () => UP, hatC, () => 0, UP);
+  strip(sc, [botIn, botOut], us, [hatR[1] + 0.16, hatR[1] + 0.23], () => new V3(0, -1, 0), () => [0.55, 0.52, 0.5], () => 0, new V3(0, -1, 0));
+  strip(sc, [topOut, botOut], us, [hatR[1] + 0.2, hatR[1] + 0.22], (ri, ci) => new V3(Math.cos(ci / NB * TAU), 0, Math.sin(ci / NB * TAU)), () => [0.7, 0.68, 0.66], () => 0, new V3(Math.cos(TAU / NB * 0.5), 0, Math.sin(TAU / NB * 0.5)));
+  const crown = [[0.22, -0.01], [0.215, 0.12], [0.2, 0.24], [0.15, 0.3], [0.04, 0.31]];
+  part(crown.map(([r, y], i) => new V3(hx + i * 0.006, yb + y, hz)), crown.map(([r]) => r), 'hat', { sides: 14, cap: 0.3, lobes: (dir, t, i) => (i >= 3 ? 1 - 0.12 * Math.max(0, Math.cos(Math.atan2(dir.z, dir.x) - da)) : 1) });
 }
 
 // ---- desert & badlands ------------------------------------------------------------------------------
@@ -1421,15 +1587,27 @@ function cactus(ctx, d) {
   };
   if (d.variant === 'pear') { pads(0, 0, 2 + Math.floor(rnd() * 2)); return; }
   if (ctx.biome === 'badlands' && d.variant !== 'saguaro') {
-    // organ pipe: the central column fills the collider, the rest rise round it from one base
-    const n = 5 + Math.floor(rnd() * 4), R0 = range(rnd, 0.2, 0.24);
-    for (let k = 0; k < n; k++) {
-      const main = k === 0, a = rnd() * TAU, off = main ? 0 : range(rnd, 0.22, 0.42), hk = main ? h : h * range(rnd, 0.45, 0.85), R = main ? R0 : R0 * range(rnd, 0.6, 0.8);
-      const c = Math.cos(a), s = Math.sin(a);
-      const pts = main ? [new V3(0, g0 - 0.3, 0), new V3(0, g0 + 0.3, 0), new V3(0.03, g0 + hk * 0.5, 0), new V3(0.05, g0 + hk - R * 0.6, 0), new V3(0.05, g0 + hk - R * 0.15, 0), new V3(0.05, g0 + hk + 0.02, 0)]
-        : [new V3(c * 0.05, g0 - 0.2, s * 0.05), new V3(c * off * 0.6, g0 + 0.15, s * off * 0.6), new V3(c * off, g0 + 0.45, s * off), new V3(c * off * 1.08, g0 + hk * 0.6, s * off * 1.08), new V3(c * off * 1.1, g0 + hk - R * 0.5, s * off * 1.1), new V3(c * off * 1.1, g0 + hk, s * off * 1.1)];
-      tube(cb, pts, [R * 1.05, R, R * 1.02, R * 0.98, R * 0.75, R * 0.15], { sides: 14, uRep: 1.75, vLen: 1.6, lobes: ribs(0.15), color: capCol });
-    }
+    // organ pipe: the central column fills the collider; tall columns of varied height rise round it from
+    // one base, with 2-4 short side stubs, rounded tops, rust-pink flower nubs and dust on the tops
+    cb.cf = p => smooth(g0 + h * 0.7, g0 + h * 1.0, p.y) * 0.45;      // patchy dust on the tops
+    const n = 4 + Math.floor(rnd() * 3), R0 = range(rnd, 0.2, 0.24), bone = ctx.b('bone'), nub = lin('#c86a5a');
+    const cols = [];
+    for (let k = 0; k < n; k++) cols.push({ main: k === 0, hk: k === 0 ? h : h * range(rnd, 0.62, 1.1), R: k === 0 ? R0 : R0 * range(rnd, 0.75, 0.92), off: k === 0 ? 0 : range(rnd, 0.3, 0.5) });
+    const nS = 2 + Math.floor(rnd() * 3);
+    for (let k = 0; k < nS; k++) cols.push({ hk: h * range(rnd, 0.22, 0.42), R: R0 * range(rnd, 0.6, 0.75), off: range(rnd, 0.32, 0.55), stub: true });
+    const a0 = rnd() * TAU;
+    cols.forEach((c0, k) => {
+      const a = a0 + k * 2.39996 + range(rnd, -0.3, 0.3), c = Math.cos(a), sn = Math.sin(a), { hk, R } = c0, off = c0.off * 0.85;
+      const lean = c0.main ? 0.04 : range(rnd, 0.05, 0.14);
+      const pts = c0.main ? [new V3(0, g0 - 0.3, 0), new V3(0, g0 + 0.3, 0), new V3(0.02, g0 + hk * 0.5, 0), new V3(0.04, g0 + hk - R * 0.6, 0)]
+        : [new V3(c * 0.05, g0 - 0.2, sn * 0.05), new V3(c * off * 0.6, g0 + 0.12, sn * off * 0.6), new V3(c * off, g0 + Math.min(0.45, hk * 0.4), sn * off), new V3(c * (off + lean * 0.6), g0 + hk * 0.7, sn * (off + lean * 0.6)), new V3(c * (off + lean), g0 + hk - R * 0.6, sn * (off + lean))];
+      tube(cb, pts, pts.map((_, i) => (i === 0 ? R * 1.05 : R) * (i === pts.length - 1 ? 0.96 : 1)), { sides: 14, uRep: 1.75, vLen: 1.6, lobes: ribs(0.15), color: capCol, cap: 0.85 });
+      if (!c0.stub && rnd() < 0.45) {
+        const T = pts[pts.length - 1];
+        for (let q = 0; q < 2 + Math.floor(rnd() * 2); q++) { const aa = rnd() * TAU, F = new V3(T.x + Math.cos(aa) * R * 0.5, T.y + R * 0.6, T.z + Math.sin(aa) * R * 0.5); sphereish(bone, 1, u => new V3(F.x + u.x * 0.055, F.y + u.y * 0.045, F.z + u.z * 0.055), { color: (p2, nn) => mulc(nub, 0.8 + 0.35 * clamp01(nn.y)) }); }
+      }
+    });
+    cb.cf = null;
     return;
   }
   // saguaro: 8 ribs (16 sides, the lobes alternate), a domed top and thick up-turned arms
@@ -1478,30 +1656,34 @@ function skullAt(ctx, C, k) {
     y += 0.06 * Math.exp(-x * x * 30) * (u.y > 0 ? 1 : 0);        // the poll ridge between the horns
     return L(x, y, z);
   }, { color: bone });
-  // the muzzle: an elliptical tube from the plate to the nose, dipping a little
-  const mz = [], NM = 7;
-  for (let i = 0; i <= NM; i++) { const t = i / NM; mz.push(L(0, 0.02 - 0.16 * t * t, -0.02 + t * 1.12)); }
-  const wA = [0.4, 0.37, 0.32, 0.27, 0.235, 0.215, 0.205, 0.2], hA = [0.27, 0.25, 0.21, 0.18, 0.15, 0.14, 0.135, 0.13];
-  tube(b, mz, mz.map(() => k), { sides: 12, uRep: 1, vLen: 0.8 * k, cap: 0.12, color: bone,
+  // the muzzle: a short elliptical tube from the plate to the nose, narrowing then widening again
+  // into a spade at the nose
+  const mz = [], NM = 7, ML = 0.8;
+  for (let i = 0; i <= NM; i++) { const t = i / NM; mz.push(L(0, 0.02 - 0.12 * t * t, -0.02 + t * ML)); }
+  const wA = [0.4, 0.33, 0.26, 0.22, 0.21, 0.23, 0.26, 0.27], hA = [0.27, 0.24, 0.2, 0.17, 0.15, 0.14, 0.13, 0.12];
+  tube(b, mz, mz.map(() => k), { sides: 12, uRep: 2, vLen: 0.8 * k, cap: 0.1, color: bone,
     lobes: (dir, t, i) => { const a = lerpArr(wA, t), hh = lerpArr(hA, t) * (dir.y < 0 ? 0.8 : 1); const hz = Math.hypot(dir.x, dir.z); return 1 / Math.sqrt((hz / a) ** 2 + (dir.y / hh) ** 2); } });
-  // sockets: warm dark hollows (never black) facing forward and out, under lit brows
-  const rim = lin('#5a4230'), deep = lin('#3a2a20');
+  // the jaw line: a low ridge of worn teeth along each side of the upper jaw (no pearl beads)
+  const tooth = [0.82, 0.76, 0.66];
+  // sockets: deep warm-dark hollows (never black) facing forward and out, under lit brows
+  const rim = lin('#6a4c36'), deep = lin('#5a4030');
   for (const sd of [-1, 1]) {
     const f = new V3(sd * 0.55, 0.08, 0.83).normalize(), sc = new V3(sd * 0.31, 0.06, 0.13);
-    sphereish(b, 1, u => { const p = u.clone(); p.addScaledVector(f, -p.dot(f) * 0.55); return L(sc.x + p.x * 0.19, sc.y + p.y * 0.16, sc.z + p.z * 0.19); },
-      { color: (p, n) => mixc(rim, deep, clamp01(n.dot(f)) ** 1.5) });
+    sphereish(b, 1, u => { const p = u.clone(); p.addScaledVector(f, -p.dot(f) * 0.6); return L(sc.x + p.x * 0.2, sc.y + p.y * 0.17, sc.z + p.z * 0.2); },
+      { color: (p, n) => mixc(rim, mulc(deep, 0.75), clamp01(n.dot(f)) ** 1.2) });
     const brow = [L(sd * 0.1, 0.19, 0.15), L(sd * 0.27, 0.22, 0.18), L(sd * 0.43, 0.19, 0.11), L(sd * 0.49, 0.1, 0.0)];
-    tube(b, spline(brow, 3), Array(10).fill(0.05 * k), { sides: 7, uRep: 1, vLen: 0.5 * k, color: bone });
-    // nostril
-    const nc = new V3(sd * 0.075, -0.06, 1.12), nf = new V3(sd * 0.25, 0.1, 1).normalize();
-    sphereish(b, 1, u => { const p = u.clone(); p.addScaledVector(nf, -p.dot(nf) * 0.6); return L(nc.x + p.x * 0.05, nc.y + p.y * 0.08 + Math.max(0, p.y) * 0.03, nc.z + p.z * 0.05); }, { color: (p, n) => mixc(rim, deep, clamp01(n.dot(nf))) });
-    // teeth along the upper jaw
-    for (let j = 0; j < 4; j++) sphereish(b, 0, u => L(sd * (0.19 - j * 0.012) + u.x * 0.04, -0.17 - j * 0.02 + u.y * 0.05, 0.42 + j * 0.13 + u.z * 0.05), { color: [0.9, 0.86, 0.76] });
-    // horns: one smooth arc, tapering to a point, darker at the root
-    const hc = [L(sd * 0.3, 0.2, -0.1), L(sd * 0.68, 0.28, -0.12), L(sd * 0.98, 0.38, -0.08), L(sd * 1.2, 0.58, 0.02), L(sd * 1.28, 0.82, 0.15), L(sd * 1.22, 1.02, 0.3)];
-    const hp = spline(hc, 3), hb = lin('#8a7458'), ht = lin('#e0d0a8');
-    tube(b, hp, hp.map((_, i) => k * lerpArr([0.1, 0.085, 0.068, 0.05, 0.032, 0.008], i / (hp.length - 1))), { sides: 9, uRep: 1, vLen: 0.6 * k, cap: true,
-      color: (p, n, t) => mulc(mixc(hb, ht, Math.pow(t, 0.7)), 0.8 + 0.3 * clamp01(n.y * 0.5 + 0.5)) });
+    tube(b, spline(brow, 3), Array(10).fill(0.055 * k), { sides: 7, uRep: 0.5, vLen: 0.5 * k, color: bone, cap: 0.5, cap0: 0.5 });
+    // nostril, on the spade
+    const nc = new V3(sd * 0.09, -0.04, ML - 0.02), nf = new V3(sd * 0.3, 0.15, 1).normalize();
+    sphereish(b, 1, u => { const p = u.clone(); p.addScaledVector(nf, -p.dot(nf) * 0.6); return L(nc.x + p.x * 0.055, nc.y + p.y * 0.075 + Math.max(0, p.y) * 0.03, nc.z + p.z * 0.05); }, { color: (p, n) => mixc(rim, deep, clamp01(n.dot(nf))) });
+    const tr = [L(sd * 0.2, -0.16, 0.3), L(sd * 0.19, -0.17, 0.45), L(sd * 0.2, -0.15, 0.6)];
+    tube(b, tr, [0.03 * k, 0.034 * k, 0.026 * k], { sides: 6, uRep: 0.4, vLen: 0.4, cap: 0.6, cap0: 0.6, color: tooth });
+    // horns: thick at the root, one smooth arc out, up and forward, darkening toward the tip, with
+    // growth rings
+    const hc = [L(sd * 0.3, 0.2, -0.1), L(sd * 0.62, 0.26, -0.08), L(sd * 0.92, 0.36, 0.0), L(sd * 1.1, 0.55, 0.12), L(sd * 1.15, 0.78, 0.26), L(sd * 1.08, 0.95, 0.4)];
+    const hp = spline(hc, 3), hb = lin('#d8c8a0'), ht = lin('#5a4a36');
+    tube(b, hp, hp.map((_, i) => k * lerpArr([0.1, 0.093, 0.082, 0.068, 0.052, 0.036, 0.02], i / (hp.length - 1))), { sides: 9, uRep: 0.6, vLen: 0.6 * k, cap: 0.8,
+      color: (p, n, t) => mulc(mixc(hb, ht, Math.pow(t, 0.9)), (0.8 + 0.3 * clamp01(n.y * 0.5 + 0.5)) * (0.93 + 0.07 * Math.sin(t * 48))) });
   }
 }
 
@@ -1512,7 +1694,7 @@ function skull(ctx, d) {
   const k = 1.6;
   // the muzzle tip and the back of the cranium rest on the sand
   const [lo] = ctx.foot(1.6);
-  const tipY = -0.27 * Math.cos(pitch) - 1.12 * Math.sin(pitch);
+  const tipY = -0.24 * Math.cos(pitch) - 0.8 * Math.sin(pitch);
   const backY = -0.36 * Math.cos(pitch) + 0.3 * Math.sin(pitch);
   skullAt(ctx, new V3(0, lo - Math.min(tipY, backY) * k - 0.08, 0), k);
 }
@@ -1530,29 +1712,30 @@ function bones(ctx, d) {
     const t = i / nV, z = (t - 0.5) * Ls, x = Math.sin(t * 2.2 + 1) * 0.12 * s;
     sp.push(new V3(x, ctx.gh(x, z) - 0.12 + Hs * Math.pow(Math.sin(Math.PI * Math.min(1, t * 1.08)), 0.75), z));
   }
-  tube(b, sp, sp.map(() => 0.06 * s), { sides: 7, uRep: 1, vLen: 0.6, color: bone });
+  tube(b, sp, sp.map(() => 0.06 * s), { sides: 7, uRep: 0.4, vLen: 0.6, color: bone });
   for (let i = 1; i < nV; i++) {
-    const p = sp[i], r = 0.095 * s;
+    const p = sp[i], r = 0.095 * s * range(rnd, 0.85, 1.15);
     sphereish(b, 0, u => new V3(p.x + u.x * r * 1.1, p.y + u.y * r * 0.9, p.z + u.z * r * 0.8), { color: bone });
-    if (i > 1 && i < nV - 1) tube(b, [p.clone(), new V3(p.x, p.y + 0.2 * s, p.z - 0.04 * s)], [0.035 * s, 0.012 * s], { sides: 5, uRep: 1, vLen: 0.5, cap: true, color: bone });
+    if (i > 1 && i < nV - 1) tube(b, [p.clone(), new V3(p.x, p.y + 0.2 * s * range(rnd, 0.6, 1.4), p.z - 0.05 * s)], [0.035 * s, 0.016 * s], { sides: 5, uRep: 0.3, vLen: 0.5, cap: 0.6, color: bone });
   }
   const nRib = 7 + Math.floor(rnd() * 3), broken = new Set();
   for (let k = 0; k < 2 + Math.floor(rnd() * 2); k++) broken.add(Math.floor(rnd() * nRib * 2));
   for (let i = 0; i < nRib; i++) {
-    const t = 0.24 + i / (nRib - 1) * 0.5, f = t * nV, j = Math.min(nV - 1, Math.floor(f)), V = sp[j].clone().lerp(sp[j + 1], f - j);
-    const W = (0.55 + 0.45 * Math.sin(Math.PI * (t - 0.24) / 0.5)) * 0.75 * s;
+    const t = 0.24 + clamp01((i + range(rnd, -0.25, 0.25)) / (nRib - 1)) * 0.5, f = t * nV, j = Math.min(nV - 1, Math.floor(f)), V = sp[j].clone().lerp(sp[j + 1], f - j);
+    const W0 = (0.55 + 0.45 * Math.sin(Math.PI * (t - 0.24) / 0.5)) * 0.75 * s;
     for (const sd of [-1, 1]) {
       const id = i * 2 + (sd > 0 ? 1 : 0), cut = broken.has(id) ? range(rnd, 0.45, 0.7) : 1;
+      const W = W0 * range(rnd, 0.82, 1.18), arc = Math.PI * 0.62 * range(rnd, 0.85, 1.15);
       const gy = ctx.gh(V.x + sd * W, V.z);
       const pts = [];
       for (let q = 0; q <= 8; q++) {
-        const u = q / 8 * cut, a = u * Math.PI * 0.62;
-        const x = V.x + sd * W * Math.sin(a) / Math.sin(Math.PI * 0.62) * (1 + 0.05 * Math.sin(u * 5));
-        const y = V.y - (V.y - gy + 0.18) * (1 - Math.cos(a)) / (1 - Math.cos(Math.PI * 0.62));
+        const u = q / 8 * cut, a = u * arc;
+        const x = V.x + sd * W * Math.sin(a) / Math.sin(arc) * (1 + 0.05 * Math.sin(u * 5));
+        const y = V.y - (V.y - gy + 0.18) * (1 - Math.cos(a)) / (1 - Math.cos(arc));
         pts.push(new V3(x, y, V.z + 0.06 * s * u));
       }
-      const flat = (dir) => 1 / Math.sqrt((dir.z / 1.5) ** 2 + (dir.x * dir.x + dir.y * dir.y) / 0.5);
-      tube(b, pts, pts.map((_, q) => (0.042 - q * 0.002) * s), { sides: 6, uRep: 1, vLen: 0.6, color: bone, cap: cut < 1 ? 0.8 : false, lobes: flat });
+      const flat = (dir) => 1 / Math.sqrt((dir.z / 1.45) ** 2 + (dir.x * dir.x + dir.y * dir.y) / 0.52);
+      tube(b, pts, pts.map((_, q) => (0.042 - q * 0.002) * s), { sides: 6, uRep: 0.3, vLen: 0.6, color: bone, cap: 0.5, lobes: flat });
     }
   }
   // long bones lying about
@@ -1560,7 +1743,7 @@ function bones(ctx, d) {
     const a = rnd() * TAU, x = range(rnd, -1.2, 1.2) * s, z = range(rnd, -1.3, 1.3) * s, L = range(rnd, 0.5, 0.8) * s;
     const x1 = x + Math.cos(a) * L, z1 = z + Math.sin(a) * L;
     const p0 = new V3(x, ctx.gh(x, z) + 0.04, z), p1 = new V3(x1, ctx.gh(x1, z1) + 0.04, z1);
-    tube(b, [p0, p0.clone().lerp(p1, 0.12), p0.clone().lerp(p1, 0.5), p0.clone().lerp(p1, 0.88), p1], [0.075, 0.042, 0.034, 0.042, 0.075].map(r => r * s), { sides: 7, uRep: 1, vLen: 0.6, cap: true, color: bone });
+    tube(b, [p0, p0.clone().lerp(p1, 0.12), p0.clone().lerp(p1, 0.5), p0.clone().lerp(p1, 0.88), p1], [0.075, 0.042, 0.034, 0.042, 0.075].map(r => r * s), { sides: 7, uRep: 0.4, vLen: 0.6, cap: 0.6, cap0: 0.6, color: bone });
   }
   if (rnd() < 0.6) {
     const e = sp[nV], kk = 0.38 * s;
@@ -1582,16 +1765,21 @@ function campfire(ctx, d, fires) {
   const rnd = rngOf(seedOf(d.x, d.z, 24));
   ctx.at(d, 0);
   const rk = ctx.b('firestone'), lg = ctx.b('bark_dead');
-  // a ring of sooty stones, warm bounce light on their inward faces
-  const nS = 10;
+  // a ring of 11-12 smaller overlapping sooty basalt stones; soot on their inner faces, a faint warm
+  // bounce there too (the fire's own light does the rest)
+  const nS = 11 + (rnd() < 0.5 ? 1 : 0);
   for (let i = 0; i < nS; i++) {
-    const a = i / nS * TAU + range(rnd, -0.1, 0.1), r = range(rnd, 0.68, 0.76), x = Math.cos(a) * r, z = Math.sin(a) * r;
-    const R = range(rnd, 0.18, 0.25), sh = rockShape(rnd, { sx: range(rnd, 1, 1.3), sy: 0.7, sides: 3, oblique: 2, detail: 1 });
-    const C = new V3(x, ctx.gh(x, z) + R * 0.12, z);
-    const m = new THREE.Matrix4().makeRotationY(rnd() * TAU);
+    const a = i / nS * TAU + range(rnd, -0.08, 0.08), r = range(rnd, 0.66, 0.74), x = Math.cos(a) * r, z = Math.sin(a) * r;
+    const R = range(rnd, 0.18, 0.25), sh = rockShape(rnd, { sx: range(rnd, 1.1, 1.4), sy: 0.72, sides: 3, oblique: 2, detail: 1 });
+    const C = new V3(x, ctx.gh(x, z) + R * 0.1, z);
+    const m = new THREE.Matrix4().makeRotationY(-a + range(rnd, -0.3, 0.3));
     const P = sh.P.map(p => p.clone().multiplyScalar(R).applyMatrix4(m).add(C));
-    const inw = new V3(-x, 0, -z).normalize();
-    creased(rk, P, sh.idx, (p, n) => { const k = clamp01(n.dot(inw)), y = smooth(C.y - R * 0.3, C.y + R * 0.5, p.y); return [0.4 + 0.22 * y + 0.16 * k, 0.38 + 0.2 * y + 0.07 * k, 0.37 + 0.19 * y + 0.01 * k]; });
+    const inw = new V3(-x, 0, -z).normalize(), base = lin(pick(rnd, ['#6e727e', '#666a76', '#767884']));   // cool basalt: the firelight warms it to a sooty gray-brown, not terracotta
+    creased(rk, P, sh.idx, (p, n) => {
+      const k = clamp01(n.dot(inw)), y = smooth(C.y - R * 0.3, C.y + R * 0.5, p.y);
+      const soot = 1 - 0.45 * k * y - 0.15 * k;      // charcoal-black where the flames lick
+      return mul3(base, [(0.5 + 0.38 * y) * soot + 0.05 * k, (0.48 + 0.36 * y) * soot + 0.02 * k, (0.5 + 0.38 * y) * soot]);
+    });
   }
   // crossed logs, charred toward the middle, with glowing ends
   const cb = ctx.b('coals');
@@ -1616,8 +1804,8 @@ function campfire(ctx, d, fires) {
     });
     fb.t(base, base + 1, base + 2); fb.t(base, base + 2, base + 3);
   };
-  for (let k = 0; k < 3; k++) quad(k * Math.PI / 3 + 0.3, 1.15, range(rnd, 1.5, 1.8), ph + k * 1.7, false);
-  quad(0, 1.0, 1.65, ph + 5.3, true);
+  for (let k = 0; k < 3; k++) quad(k * Math.PI / 3 + 0.3, 0.95, range(rnd, 1.25, 1.45), ph + k * 1.7, false);
+  quad(0, 0.8, 1.3, ph + 5.3, true);
   const sm = ctx.b('smoke');
   const sc = new V3(0, g0 + 1.3, 0), soff = [[-1, 0], [1, 0], [1, 1], [-1, 1]], base = sm.n;
   soff.forEach(([x, y], k) => { const off = new V3(x * 0.7, y * 2.4, 0); sm.v(sc.clone().add(off), new V3(0, 0, 1), [0, 1, 1, 0][k], y, WHITE, ph, [sc, off, new V3(0, 0, 1)]); });
@@ -1775,7 +1963,7 @@ export function buildNature(W) {
       if (camPos) U_CAM.value.copy(camPos);
       for (const f of fires) {
         const k = 1 + Math.sin(t * 13 + f.ph) * 0.08 + Math.sin(t * 7.3 + f.ph * 2) * 0.06 + Math.sin(t * 23.7 + f.ph) * 0.03;
-        f.light.intensity = f.base * k;
+        f.light.intensity = f.base * k * (0.3 + 0.7 * clamp01(atmo.night ?? 1));   // by day the sun outshines it
       }
       if (coalMat) coalMat.color.setScalar(0.85 + 0.15 * Math.sin(t * 4.3) * Math.sin(t * 2.9 + 1));
       if (sparks) {
@@ -1809,6 +1997,7 @@ export const PREVIEW = {
   cactus: pv('cactus', { h: 3.2 }), cactus_small: pv('cactus', { h: 2.0, variant: 'saguaro', x: 2.3 }), prickly: pv('cactus', { h: 1.9, variant: 'pear' }),
   rock: pv('rock', { s: 1.0 }), outcrop: pv('rock', { s: 1.8, x: 4.2 }), rock2: pv('rock', { s: 1.5, x: 7.7 }), rock3: pv('rock', { s: 1.9, x: 11.3 }), rock4: pv('rock', { s: 1.3, x: -5.1 }), skull: pv('skull', { ry: 0.6 }),
   deadtree: pv('deadtree', { s: 1.1 }),
+  hoodoo: pv('rock', { s: 1.8, variant: 'hoodoo' }), ledge: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }), arch: pv('rock', { s: 1.6, variant: 'arch' }), mound: pv('rock', { s: 1.4, variant: 'mound', x: 6 }),
   anchor: ({ biome = 'meadow' } = {}) => buildNature(fakeW(biome, [], { cyls: [{ x: 0, y: 1.6, z: 0, r: 0.3, hh: 1.6, mat: 'deadtree' }], anchors: [{ id: 0, x: 0, y: 1.1, z: 0 }] })).group,
   campfire: pv('fire'),
 };

@@ -13,8 +13,9 @@ export function mat(name, o = {}) { const m = painted(name, { vertexColors: true
 
 // One shadow policy per material, so a material's indoor and outdoor parts merge into one mesh (and
 // one shadow draw): flat, glowing or indoor-only surfaces never cast, everything else does.
-const NO_CAST = new Set(['window_lead', 'lantern_glass', 'flowerbox', 'banner_red', 'banner_hide', 'rug_red', 'rug_bear', 'rug_hide', 'rug_braid', 'rug_desert',
-  'carpet_casino', 'carpet_border', 'felt_table', 'shelf_goods', 'store_goods', 'latillas', 'embers', 'slot_face', 'flip_face', 'repo_plate', 'plaster_inner', 'granite_inner']);
+const NO_CAST = new Set(['window_lead', 'lantern_glass', 'flowerbox', 'banner_red', 'banner_hide', 'banner_dwarf', 'banner_goblin', 'rug_red', 'rug_bear', 'rug_hide', 'rug_braid', 'rug_desert',
+  'carpet_casino', 'carpet_border', 'tile_goblin', 'felt_table', 'latillas', 'embers', 'slot_face', 'flip_face', 'repo_plate', 'plaster_inner', 'granite_inner',
+  'wall_holes', 'straw_fringe', 'clay', 'endgrain']);
 
 export function matrix(x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1) {
   E.set(rx, ry, rz, 'YXZ'); Q.setFromEuler(E);
@@ -78,6 +79,7 @@ export class Batch {
     const key = material.uuid + (cast ? 'c' : '') + (receive ? 'r' : '');
     if (!this.lists.has(key)) this.lists.set(key, { material, cast, receive, geos: [] });
     this.lists.get(key).geos.push(geo);
+    return geo;
   }
   build(parent) {
     const meshes = [];
@@ -106,7 +108,7 @@ export class ClusterBatch {
     const bb = geo.boundingBox, k = this.keyFn((bb.min.x + bb.max.x) / 2, (bb.min.z + bb.max.z) / 2);
     let b = this.batches.get(k);
     if (!b) this.batches.set(k, b = new Batch());
-    b.add(material, geo, opts);
+    return b.add(material, geo, opts);
   }
   // one group per cluster under parent; returns [{ key, group, center, radius }]
   build(parent) {
@@ -132,7 +134,7 @@ export class ClusterBatch {
 // the kit's frame gives vertex-color lighting (AO, grime, interiors).
 export class Kit {
   constructor(batch, root = new THREE.Matrix4(), shadeFn = null) {
-    this.batch = batch; this.root = root; this.m = new THREE.Matrix4(); this.stack = []; this.shadeFn = shadeFn; this.seed = 1;
+    this.batch = batch; this.root = root; this.m = new THREE.Matrix4(); this.stack = []; this.shadeFn = shadeFn; this.seed = 1; this.log = null;
   }
   push(x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1) { this.stack.push(this.m.clone()); this.m.multiply(matrix(x, y, z, ry, rx, rz, s)); return this; }
   pushM(M) { this.stack.push(this.m.clone()); this.m.multiply(M); return this; }
@@ -141,7 +143,7 @@ export class Kit {
 
   // o: uv ('planar' | 'keep'), uvSpace ('part' | 'kit'), tile, tileV, grain, flipV, uvScale [su, sv], uvOff,
   //    at (Matrix4 in the local frame), shade (false | true | fn), tint ('#rrggbb' | [r,g,b]), warp(v: Vector3) → void,
-  //    cast, receive
+  //    ao(x, y, z) → extra multiplier in the part's frame, cast, receive
   add(material, geo, o = {}) {
     const { uv = 'planar', uvSpace = 'part', tile = 1, tileV = null, grain = 'y', flipV = false, flipU = false, uvScale = null, at = null, shade = true, tint = null, warp = null, cast = true, receive = true } = o;
     if (warp) {
@@ -149,6 +151,9 @@ export class Kit {
       for (let i = 0; i < p.count; i++) { v.fromBufferAttribute(p, i); warp(v); p.setXYZ(i, v.x, v.y, v.z); }
       geo.computeVertexNormals();
     }
+    // o.ao(x, y, z) → multiplier (number or [r, g, b]) evaluated in the part's own frame (before `at`)
+    let aoV = null;
+    if (o.ao) { const p = geo.attributes.position; aoV = []; for (let i = 0; i < p.count; i++) aoV.push(o.ao(p.getX(i), p.getY(i), p.getZ(i))); }
     const off = o.uvOff || [this.rnd(), this.rnd()];
     if (uv === 'planar' && uvSpace === 'part') planarUV(geo, { tile, tileV, grain, off, flipV, flipU });
     else if (uv === 'keep' && uvScale) { const a = geo.attributes.uv; for (let i = 0; i < a.count; i++) a.setXY(i, a.getX(i) * uvScale[0] + (o.uvOff ? off[0] : 0), a.getY(i) * uvScale[1] + (o.uvOff ? off[1] : 0)); }
@@ -163,12 +168,14 @@ export class Kit {
     for (let i = 0; i < p.count; i++) {
       let k = fn ? fn(p.getX(i), p.getY(i), p.getZ(i), n.getX(i), n.getY(i), n.getZ(i)) : 1;
       if (typeof k === 'number') k = [k, k, k];
+      if (aoV) { const a = aoV[i]; k = typeof a === 'number' ? [k[0] * a, k[1] * a, k[2] * a] : [k[0] * a[0], k[1] * a[1], k[2] * a[2]]; }
       col[i * 3] = k[0] * tc[0]; col[i * 3 + 1] = k[1] * tc[1]; col[i * 3 + 2] = k[2] * tc[2];
     }
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
     geo.applyMatrix4(this.root);
-    this.batch.add(material, geo, { cast, receive });
-    return geo;
+    const stored = this.batch.add(material, geo, { cast, receive }) || geo;
+    if (this.log) this.log.push(stored);
+    return stored;
   }
   // a box centered at (x, y, z) in the local frame; o.ry/rx/rz rotate it about its center;
   // o.seg = [sx, sy, sz] subdivides it (for warps and vertex shading)
@@ -250,6 +257,23 @@ export class Kit {
     const g = new THREE.PlaneGeometry(w, h, o.sx || 1, o.sy || 1);
     return this.add(material, g, { uv: 'keep', ...o, at: matrix(x, y, z, o.ry || 0, o.rx || 0, o.rz || 0) });
   }
+}
+
+// A flat grid in the xy plane facing +z at z, with its lines at the given xs and ys (sorted), skipping
+// cells for which skip(x0, x1, y0, y1) is true (a door hole). Positions only; normals +z.
+export function gridGeo(xs, ys, z = 0, skip = null) {
+  const pos = [], idx = [], nx = xs.length, ny = ys.length;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) pos.push(xs[i], ys[j], z);
+  for (let j = 0; j < ny - 1; j++) for (let i = 0; i < nx - 1; i++) {
+    if (skip && skip(xs[i], xs[i + 1], ys[j], ys[j + 1])) continue;
+    const a = j * nx + i, b = a + 1, c = a + nx, d = c + 1;
+    idx.push(a, b, d, a, d, c);
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('normal', new THREE.Float32BufferAttribute(new Array(pos.length).fill(0).map((_, k) => (k % 3 === 2 ? 1 : 0)), 3));
+  g.setIndex(idx);
+  return g;
 }
 
 // smoothstep
