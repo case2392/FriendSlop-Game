@@ -841,7 +841,7 @@ function apronParts(S) {
 // The Dealer's fanned hand of cards, held up in his left hand: five cards fanned round the palm,
 // their faces toward him and their backs to the table. They are built in the hand's bind frame so
 // that in his stance (DEALER_STANCE) they stand up out of his fist facing back and up.
-const DEALER_STANCE = { aL: 0.3, eL: 1.55, inL: 0.55, abL: 0.1, wristL: -0.15, aR: 0.72, eR: 0.18, inR: 0.22, abR: 0.22, wristR: -0.45, bend: -0.12, head: 0.16 };
+const DEALER_STANCE = { aL: 0.3, eL: 1.55, inL: 0.55, abL: 0.1, wristL: -0.15, wiL: 0, aR: 0.72, eR: 0.18, inR: 0.22, abR: 0.22, wristR: -0.45, wiR: 0, bend: -0.12, head: 0.16 };
 function cardParts(S, F) {
   const st = { ...DEALER_STANCE }, s = -1, sh = F.shoulder(s);
   // the hand bone's posed rotation, composed down the chain (spine, chest, arm, forearm, hand)
@@ -850,7 +850,7 @@ function cardParts(S, F) {
   const Ri = R.clone().transpose(), V3 = THREE.Vector3;
   const toBind = v => new V3(...v).normalize().applyMatrix4(Ri);
   const n = toBind([-0.85, 0.45, 0.18]), up0 = toBind([0.4, 1, 0.05]), side = new V3().crossVectors(up0, n).normalize(), up = new V3().crossVectors(n, side).normalize();
-  const k = 1.16, pivot = new V3(sh[0] + 0.012, sh[1] - 0.575 - 0.075 * k, sh[2] + 0.03).addScaledVector(n, 0.012);
+  const { k, kl } = handSize(S, F), pivot = new V3(sh[0] + 0.012 * k, sh[1] + WRIST - 0.075 * kl, sh[2] + 0.026 * k).addScaledVector(n, 0.012 * k);
   const W = 0.07, H = 0.1, reg = REG.pack, P = [];
   [-0.55, -0.28, 0, 0.28, 0.55].forEach((phi, i) => {
     const c = Math.cos(phi), sn = Math.sin(phi);
@@ -987,13 +987,25 @@ const HAND = [   // a hanging hand: slim across (the palm faces the leg), broad 
   [-0.764, 0.015, 0.033, 0.028],
   [-0.778, 0.0, 0.0, 0.0],
 ];
+// Hand size: k = across and front to back, kl = length below the wrist. Big WoW mitts that
+// carry the chunk of the pauldrons and boots on down past the elbow (a glove is a size up again).
+function handSize(S, F) {
+  const bare = S.hands === 'bare';
+  const k = (bare ? 1.28 : S.hands === 'workglove' ? 1.62 : 1.5) * (F.fem ? 0.86 : 1);
+  return { k, kl: (bare ? 1.1 : 1.16) * (F.fem ? 0.94 : 1) };
+}
+// the forearm's girth over the table (1.2: a thick WoW forearm under the big shoulders)
+const FOREARM_K = 1.2;
+const WRIST = ARM_LM.wrist;
 function armParts(S, F, s) {
   const [ua, fa, ha] = ARM(s), sh = F.shoulder(s);
   const bare = S.hands === 'bare';
-  const hk = bare ? 1.0 : S.hands === 'workglove' ? 1.3 : 1.16;     // big WoW hands
+  const { k: hk, kl } = handSize(S, F);
   const ak = (S.armBulk || 1) * (S.bulk || 1) * (F.fem ? 0.86 : 1);
   const rolled = S.arms === 'rolled';
-  const fk = S.forearm || 1;
+  const fk = S.forearm || 1, FK = F.fem ? 1.12 : FOREARM_K;
+  // the forearm thickens in from the elbow (and the gauntlet or bare wrist with it)
+  const fore = dy => 1 + (FK - 1) * sstep(-0.27, -0.37, dy);
   const UP = S.pauldrons === 'none' ? [...ARM_CAP, ...ARM_UP.filter(r => r[0] < -0.06)] : ARM_UP;
   const tab = [
     ...UP.map(([dy, w, d, db]) => {
@@ -1001,15 +1013,17 @@ function armParts(S, F, s) {
       if (S.arms === 'blouse') roll += 0.024 * gauss(dy + 0.12, 0.09) * sstep(0.07, 0.0, dy) - 0.008 * gauss(dy + 0.3, 0.02);    // puffed, gathered at the elbow
       if (S.arms === 'shirt') roll += 0.009 * gauss(dy + 0.09, 0.03) - 0.006 * gauss(dy + 0.125, 0.012);                           // the puff over a sleeve garter
       // a brute's (and Ed's) forearms swell toward the elbow; a rolled sleeve tapers in toward the shoulder
-      const f = (dy < -0.31 ? 1 + (fk - 1) * gauss(dy + 0.37, 0.06) : 1) * (rolled ? 0.82 + 0.18 * sstep(-0.02, -0.2, dy) : 1);
+      const f = (dy < -0.31 ? 1 + (fk - 1) * gauss(dy + 0.37, 0.06) : 1) * (rolled ? 0.82 + 0.18 * sstep(-0.02, -0.2, dy) : 1) * fore(dy);
       return [dy, w * ak * f + roll, d * ak * f + roll, db * ak * f + roll];
     }),
-    ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => [dy, w * (bare ? ak : 1), d * (bare ? ak : 1), db * (bare ? ak : 1)]),
-    ...HAND.map(([dy, w, d, db]) => [dy, w * hk * (F.fem ? 0.9 : 1), d * hk * (F.fem ? 0.9 : 1), db * hk * (F.fem ? 0.9 : 1)]),
+    ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => { const f = FK * (bare ? ak : 1); return [dy, w * f, d * f, db * f]; }),
+    ...HAND.map(([dy, w, d, db]) => [dy, w * hk, d * hk, db * hk]),
   ];
+  // (the hand's rings stretch by kl below the wrist; their texture rows stay where they were)
+  const hy = dy => dy < WRIST ? WRIST + (dy - WRIST) * kl : dy;
   const rings = tab.map(([dy, w, d, db]) => {
     const curl = dy < -0.66 ? (-0.66 - dy) / 0.12 : 0;
-    return { y: dy, w, d, db, n: dy < -0.585 ? 2.6 : 2, cx: 0.008 * curl, cz: -0.02 * curl * curl, v: armV(dy) };
+    return { y: hy(dy), y0: dy, w, d, db, n: dy < -0.585 ? 2.6 : 2, cx: 0.008 * curl * hk, cz: -0.02 * curl * curl * hk, v: armV(dy) };
   });
   const wts = p => {
     const dy = p[1] - sh[1];
@@ -1022,8 +1036,8 @@ function armParts(S, F, s) {
   // below the knuckles, three grooves across the back and the palm split the hand into four fingers
   // (with 12 segments there's a vertex column right on each groove: x = 0, +-d/2)
   const fingers = (p, th, r) => {
-    if (r.y > ARM_LM.knuckle) return p;
-    const t = sstep(ARM_LM.knuckle, ARM_LM.knuckle - 0.03, r.y), xr = p[0] - (r.cx || 0), xn = xr / ((xr >= 0 ? r.d : r.db) || 1);
+    if (r.y0 > ARM_LM.knuckle) return p;
+    const t = sstep(ARM_LM.knuckle, ARM_LM.knuckle - 0.03, r.y0), xr = p[0] - (r.cx || 0), xn = xr / ((xr >= 0 ? r.d : r.db) || 1);
     const gr = gauss(xn + 0.5, 0.14) + gauss(xn, 0.14) + gauss(xn - 0.5, 0.14), cz = r.cz || 0;
     return [p[0], p[1], cz + (p[2] - cz) * (1 - 0.24 * gr * t)];
   };
@@ -1035,9 +1049,9 @@ function armParts(S, F, s) {
     P.push(lathe(ring, { seg: 10, reg: REG.arm, bones: ua, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] }));
   }
   // the thumb (front, toward the body)
-  const k = hk * (F.fem ? 0.9 : 1);
+  const k = hk;
   // a proper thumb on the palm side of the front edge, angled forward and down, clear of the fingers
-  const T = (x, dy, zin) => [sh[0] + x * k, sh[1] - 0.575 + (dy + 0.575) * k, sh[2] - s * zin * k];
+  const T = (x, dy, zin) => [sh[0] + x * k, sh[1] + WRIST + (dy - WRIST) * kl, sh[2] - s * zin * k];
   const path = bez(T(0.026, -0.59, 0.006), T(0.052, -0.608, 0.018), T(0.066, -0.638, 0.022), T(0.066, -0.672, 0.018));
   P.push(tube(path, v => (0.019 - 0.004 * v) * k * Math.pow(Math.sin(Math.min(1, 0.12 + v * 0.88) * Math.PI), 0.4), 8, 7, { reg: REG.arm, uv: (u, v) => [0.55 + u * 0.4, armV(-0.62) - v * 0.12], ref: [0, 0, 1], bones: ha }));
   return P;
@@ -1057,12 +1071,12 @@ const LEG_TALL = [   // a knee boot with a turned-down cuff
   [0.482, 0.105, 0.111, 0.105],
   [0.455, 0.11, 0.116, 0.11],
   [0.41, 0.105, 0.111, 0.105],
-  [0.4, 0.09, 0.096, 0.092],
-  [0.33, 0.09, 0.096, 0.094],
-  [0.22, 0.08, 0.086, 0.082],
-  [0.14, 0.076, 0.082, 0.078],
-  [0.085, 0.072, 0.076, 0.072],
-  [0.06, 0.05, 0.05, 0.05],
+  [0.4, 0.092, 0.098, 0.094],
+  [0.33, 0.092, 0.098, 0.096],
+  [0.22, 0.087, 0.093, 0.089],
+  [0.14, 0.084, 0.09, 0.086],
+  [0.085, 0.081, 0.086, 0.081],
+  [0.06, 0.056, 0.056, 0.056],
   [0.05, 0.0, 0.0, 0.0],
 ];
 const LEG_WORK = [   // work trousers flaring a little and bunching over a short work boot
@@ -1072,19 +1086,19 @@ const LEG_WORK = [   // work trousers flaring a little and bunching over a short
   [0.335, 0.095, 0.101, 0.095],
   [0.31, 0.091, 0.097, 0.092],
   [0.29, 0.095, 0.101, 0.097],
-  [0.276, 0.08, 0.086, 0.082],
-  [0.2, 0.08, 0.086, 0.082],
-  [0.14, 0.078, 0.084, 0.08],
-  [0.085, 0.074, 0.078, 0.074],
-  [0.06, 0.05, 0.05, 0.05],
+  [0.276, 0.084, 0.09, 0.086],
+  [0.2, 0.084, 0.09, 0.086],
+  [0.14, 0.083, 0.089, 0.085],
+  [0.085, 0.08, 0.085, 0.08],
+  [0.06, 0.056, 0.056, 0.056],
   [0.05, 0.0, 0.0, 0.0],
 ];
-const LEG_PLAIN = [
-  [0.44, 0.074, 0.078, 0.076],
-  [0.33, 0.072, 0.076, 0.074],
-  [0.22, 0.065, 0.069, 0.067],
-  [0.13, 0.061, 0.065, 0.063],
-  [0.07, 0.05, 0.05, 0.05],
+const LEG_PLAIN = [   // (a straight, full trouser leg down into the shoe: no pegs into big boots)
+  [0.44, 0.08, 0.084, 0.081],
+  [0.33, 0.079, 0.083, 0.08],
+  [0.22, 0.076, 0.08, 0.077],
+  [0.13, 0.074, 0.078, 0.075],
+  [0.07, 0.058, 0.058, 0.058],
   [0.05, 0.0, 0.0, 0.0],
 ];
 const FOOT = [ // x, half-width, up, down, center y, squareness, v  (a squarer, flatter toe than a clown's bulb)
@@ -1253,8 +1267,11 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 
 // ---- posing --------------------------------------------------------------------------------
 
-const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'hatOff', 'mapK', 'toe', 'sway'];
-function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.24; P.eL = P.eR = 0.3; P.inL = P.inR = 0.08; P.wristL = P.wristR = 0.2; return P; }
+const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'wiL', 'wiR', 'hatOff', 'mapK', 'toe', 'sway'];
+// At rest the arms bow: the upper arm hangs out from the shoulder pad, the elbow bends ~15 deg
+// forward and the forearm swings back in (inL), so the big hands hang by the front of the thighs,
+// turned in toward them a little more at the wrist (wiL), never stiff tubes straight down.
+function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.27; P.eL = P.eR = 0.26; P.inL = P.inR = 0.3; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
 // The heroic WoW idle, layered on a pose by weight w (0 = none): feet apart and turned out, knees
 // a little soft, chest up, and a slow (~4.5 s) weight shift: the hips sway and roll over one leg
 // while the opposite shoulder dips.
@@ -1267,7 +1284,7 @@ function heroicIdle(P, t, k, w = 1) {
 }
 // NPC stances: the Repo Man stands hands-on-hips, the Dealer deals, Ed leans on his counter
 const STANCE = {
-  repo: { abL: 0.76, abR: 0.76, aL: -0.24, aR: -0.24, eL: 0.36, eR: 0.36, inL: 1.6, inR: 1.6, wristL: 0.35, wristR: 0.35, spread: 0.13, bend: 0.05, head: -0.1 },
+  repo: { abL: 0.76, abR: 0.76, aL: -0.24, aR: -0.24, eL: 0.36, eR: 0.36, inL: 1.6, inR: 1.6, wristL: 0.35, wristR: 0.35, wiL: 0, wiR: 0, spread: 0.13, bend: 0.05, head: -0.1 },
   dealer: DEALER_STANCE,
   ed: { aL: 0.35, aR: 0.35, eL: 1.05, eR: 1.05, inL: 0.75, inR: 0.75, abL: 0.18, abR: 0.18, bend: -0.04 },
   clerk: { aL: 0.1, aR: 0.12, eL: 0.5, eR: 0.45, inL: 0.5, inR: 0.45, abL: 0.08, abR: 0.08 },
@@ -1293,7 +1310,7 @@ function applyPose(ch, P) {
   b.footL.rotation.set(-P.roll, 0, P.fL); b.footR.rotation.set(-P.roll, 0, P.fR);
   b.armL.rotation.set(P.abL, 0, P.aL); b.armR.rotation.set(-P.abR, 0, P.aR);
   b.foreL.rotation.set(-P.inL, 0, P.eL); b.foreR.rotation.set(P.inR, 0, P.eR);
-  b.handL.rotation.set(0, 0, P.wristL); b.handR.rotation.set(0, 0, P.wristR);
+  b.handL.rotation.set(-P.wiL, 0, P.wristL); b.handR.rotation.set(P.wiR, 0, P.wristR);
   b.hips.position.y = J.hips + P.bob; b.hips.position.z = P.sway;
   b.hips.rotation.set(-P.roll, P.tw * 0.5, 0);
   b.spine.rotation.set(P.roll * 0.75, P.tw * 0.5, P.bend * 0.5);
@@ -1371,7 +1388,7 @@ function playerPose(st, m) {
       T['f' + side] = g * (0.35 * Math.max(0, -sn) * Math.max(0, cs) - 0.12 * Math.max(0, sn));
       const o = side === 'L' ? 'R' : 'L';
       T['a' + o] = A * sn * (sprint ? 1.3 : 0.85);
-      T['e' + o] = 0.3 + (sprint ? 1.1 : 0.45) * g + 0.3 * g * Math.max(0, sn);
+      T['e' + o] = 0.26 + (sprint ? 1.1 : 0.45) * g + 0.3 * g * Math.max(0, sn);
     }
     T.bob = g * (0.024 + 0.012 * speed) * Math.cos(2 * ph) - 0.014 * g;
     T.tw = 0.12 * g * Math.sin(ph); T.ctw = -0.16 * g * Math.sin(ph);

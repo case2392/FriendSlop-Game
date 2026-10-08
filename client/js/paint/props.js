@@ -2225,3 +2225,38 @@ for (const b of Object.keys(BOULDER)) {
   register(`loot_boulder_${b}`, { family: F, w: 512, h: 256, note: `the road-blocking boulder, ${b} (u wraps round it; v ground → top)`, paint(g, w, rnd, h, cv) { boulderPaint(g, w, rnd, h, b); blurTile(cv, 0.4); } });
   register(`loot_cover_${b}`, { family: F, size: 256, alpha: true, note: `what lies on the ${b} boulder's top faces (alpha-tested, seamless)`, paint(g, s, rnd, h, cv) { coverPaint(g, s, rnd, b); blurTile(cv, 0.5); } });
 }
+
+// ---- the loot twinkle -----------------------------------------------------------------------------------
+
+// The glint over every loose piece of loot (props3d draws them all as one point cloud): a four-point
+// sparkle with pinched, concave sides, taller than it is wide; an amber rim (it covers what's behind it,
+// so the star still reads against snow and sand), a gold body, a cream-white heart, a fainter diagonal
+// cross and a soft warm halo (mostly added light). Alpha: transparent round the edge.
+function sparkle(g, c, Ly, Lx, k, color, alpha, rot = 0) {
+  g.save(); g.globalAlpha *= alpha; g.translate(c, c); g.rotate(rot); g.fillStyle = color;
+  g.beginPath(); g.moveTo(0, -Ly);
+  g.quadraticCurveTo(k, -k, Lx, 0); g.quadraticCurveTo(k, k, 0, Ly);
+  g.quadraticCurveTo(-k, k, -Lx, 0); g.quadraticCurveTo(-k, -k, 0, -Ly);
+  g.fill(); g.restore();
+}
+register('loot_twinkle', {
+  family: F, size: 128, alpha: true, note: 'the glint over loose loot (alpha sprite, not tiled): a four-point gold sparkle with an amber rim and a white heart, a faint diagonal cross, a warm halo',
+  paint(g, s, rnd, h, cv) {
+    const c = s / 2, j = () => range(rnd, 0.97, 1.03);
+    // the halo: warm and soft, gone well inside the sprite's edge (most of it is added light)
+    g.fillStyle = radial(g, c, c, 0, s * 0.3, [[0, '#ffe6a8', 0.6], [0.15, '#ffd070', 0.38], [0.35, '#f8b048', 0.16], [0.6, '#f0a040', 0.05], [1, '#e08830', 0]]);
+    g.fillRect(0, 0, s, s);
+    // the diagonal cross, under the main star
+    sparkle(g, c, s * 0.25 * j(), s * 0.25 * j(), s * 0.022, '#c8701e', 0.75, Math.PI / 4);
+    sparkle(g, c, s * 0.21, s * 0.21, s * 0.012, '#ffd878', 0.9, Math.PI / 4);
+    // the main star, slim: amber rim → gold → cream → white
+    sparkle(g, c, s * 0.485 * j(), s * 0.36 * j(), s * 0.05, '#b05a18', 0.9);
+    sparkle(g, c, s * 0.45, s * 0.33, s * 0.036, '#f0a434', 1);
+    sparkle(g, c, s * 0.39, s * 0.28, s * 0.024, '#ffd468', 1);
+    sparkle(g, c, s * 0.3, s * 0.21, s * 0.013, '#fff4c8', 1);
+    // the white-hot heart
+    blob(g, c, c, s * 0.085, s * 0.085, 0, '#fffbe8', 1, 0.45);
+    blob(g, c, c, s * 0.04, s * 0.04, 0, '#ffffff', 1, 0.6);
+    blurTile(cv, 0.6);
+  },
+});

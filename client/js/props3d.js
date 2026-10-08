@@ -5,10 +5,15 @@
 // (shared/loot.js LOOT[type].shape). Every face that can land facing the camera is painted:
 // loot tumbles, so backs and flanks matter as much as fronts.
 //
+// Loose loot also twinkles (see "the loot twinkle" below): one point cloud for every piece, so a
+// stop's grabbable things stand out from its crates and barrels.
+//
 // API: buildProp(type, W) → Object3D · mapCanvas(W) → the paper road map (canvas) · PREVIEW
 //      prewarm(W) → paints the atlas and builds the geometry in idle time (optional)
 import { THREE, tex, painted, canvasTex, shadowy } from './gfx.js';
 import { LOOT } from '/shared/loot.js';
+import { RV_DIM, toWorld, toLocal, qYaw } from '/shared/rv.js';
+import { FLAG, PLAYER, GRAB } from '/shared/constants.js';
 import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS, DINO, BOULDER_BANDS } from './paint/props.js';
 import { mergeGeometries, mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { rngFrom, rgba, blob, ellipse, range, pick, makeCanvas } from './paint/core.js';
@@ -1347,6 +1352,161 @@ function demoWorld() {
   };
 }
 
+// ---- the loot twinkle --------------------------------------------------------------------------------
+
+// A golden glint hangs ~0.3 m over every loose piece of loot within ~30 m, each pulsing on its own
+// phase (alpha 0.5 → 1 over 1.6 s), like the sparkle over a lootable thing in WoW, so a stop's
+// grabbable things stand out from the crates, barrels and tyres dressing it. All of them are ONE
+// THREE.Points: one draw call, no shadow. Its onBeforeRender gathers the nearest pieces and hands their
+// positions, fades and phases to the shader as uniform arrays, so the stars sit on this frame's poses.
+// It hides (fading) what someone is holding, anything tumbling or flying, and what rides in or on
+// the RV; it fades out with distance. No hook in main.js: loot registers itself when it's added to the
+// scene, and the game state (window.__nmd) says who holds what and where the RV is.
+const TW = { N: 40, far: 34, fade: 10, near: 0.7, lift: 0.3, period: 1.6, minPx: 9, maxPx: 30 };
+const twLoose = new Set();
+let twCloud = null, twSeq = 0, twLast = 0, twDemo = false;
+const twC = new V3(), twE = [];
+const TW_VS = `
+uniform vec4 uP[${TW.N}];
+uniform vec4 uQ[${TW.N}];
+uniform float uTime, uViewH, uPx;
+varying float vA;
+varying float vRot;
+void main() {
+  int i = int(position.x + 0.5);
+  vec4 P = uP[i], Q = uQ[i];
+  vec4 mv = viewMatrix * vec4(P.xyz, 1.0);
+  float pulse = 0.5 + 0.5 * sin(uTime * ${(2 * Math.PI / TW.period).toFixed(5)} + Q.x);
+  vA = P.w * (0.5 + 0.5 * pulse);
+  vRot = 0.22 * sin(uTime * 0.9 + Q.x * 1.7);
+  float px = 0.5 * projectionMatrix[1][1] * uViewH * Q.y / max(0.1, -mv.z);
+  gl_PointSize = P.w > 0.0 ? clamp(px, ${TW.minPx.toFixed(1)} * uPx, ${TW.maxPx.toFixed(1)} * uPx) * (0.84 + 0.26 * pulse) : 0.0;
+  gl_Position = projectionMatrix * mv;
+}`;
+const TW_FS = `
+uniform sampler2D map;
+varying float vA;
+varying float vRot;
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float s = sin(vRot), k = cos(vRot);
+  vec4 t = texture2D(map, vec2(k * c.x - s * c.y, s * c.x + k * c.y) + 0.5);
+  if (t.a * vA < 0.004) discard;
+  // premultiplied: the glow adds light, the star itself also covers what's behind it (snow, sand)
+  gl_FragColor = vec4(t.rgb * t.a * vA * 1.2, t.a * t.a * vA * 0.9);
+  #include <colorspace_fragment>
+}`;
+function twinkleCloud() {
+  if (twCloud) return twCloud;
+  const geo = new THREE.BufferGeometry(), idx = new Float32Array(TW.N * 3);
+  for (let i = 0; i < TW.N; i++) idx[i * 3] = i;
+  geo.setAttribute('position', new THREE.BufferAttribute(idx, 3));
+  geo.boundingBox = new THREE.Box3();                                   // empty: it never widens a bounds check
+  geo.boundingSphere = new THREE.Sphere(new V3(), 1e5);
+  geo.setDrawRange(0, 0);
+  const mat = new THREE.ShaderMaterial({
+    uniforms: {
+      map: { value: tex('loot_twinkle') }, uTime: { value: 0 }, uViewH: { value: 720 }, uPx: { value: 1 },
+      uP: { value: Array.from({ length: TW.N }, () => new THREE.Vector4()) }, uQ: { value: Array.from({ length: TW.N }, () => new THREE.Vector4()) },
+    },
+    vertexShader: TW_VS, fragmentShader: TW_FS, transparent: true, depthWrite: false, depthTest: true, fog: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
+  });
+  mat.name = 'loot_twinkle';
+  twCloud = new THREE.Points(geo, mat);
+  twCloud.name = 'loot_twinkle';
+  twCloud.frustumCulled = false; twCloud.castShadow = false; twCloud.receiveShadow = false;
+  twCloud.renderOrder = 6;
+  twCloud.raycast = () => {};
+  twCloud.onBeforeRender = twUpdate;
+  return twCloud;
+}
+function twAdded(e) {
+  const o = e.target;
+  twLoose.add(o);
+  if (o.parent?.isScene && twCloud?.parent !== o.parent) o.parent.add(twinkleCloud());
+}
+function twRemoved(e) { twLoose.delete(e.target); }
+function twinkleOn(obj, type) {
+  const sh = LOOT[type].shape, half = sh[0] === 'box' ? [sh[1], sh[2], sh[3]] : sh[0] === 'cyl' ? [sh[2], sh[1], sh[2]] : [sh[1], sh[1], sh[1]];
+  obj.userData.tw = { half, phase: (twSeq++ * 2.39996) % TAU, size: 0.36 + 0.25 * Math.max(...half), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0 };
+  obj.addEventListener('added', twAdded);
+  obj.addEventListener('removed', twRemoved);
+  return obj;
+}
+// what someone is holding: mine by id, other players' by their HOLDING flag and the piece nearest their aim
+function twHeld(S, list) {
+  const held = new Set();
+  if (!S) return held;
+  if (S.me?.holding) { const p = S.props?.get(S.me.holding.id); if (p) held.add(p.mesh); }
+  if (!S.meta || !S.interp || S.renderT == null) return held;
+  for (const pl of S.meta.players || []) {
+    if (pl.id === S.selfId) continue;
+    const s = S.interp.samplePlayer(pl.id, S.renderT);
+    if (!s || !(s.flags & FLAG.HOLDING)) continue;
+    let p = s.p, yaw = s.yaw;
+    if (s.par && S.rv) { p = toWorld(S.rv.p, S.rv.q, s.p); yaw += qYaw(S.rv.q); }
+    const ex = p.x, ey = p.y + ((s.flags & FLAG.CROUCH) ? 1.05 : PLAYER.EYE), ez = p.z, cp = Math.cos(s.pitch);
+    const dx = Math.sin(yaw) * cp, dy = -Math.sin(s.pitch), dz = Math.cos(yaw) * cp;
+    let best = null, bd = 0.7;
+    for (const o of list) {
+      const u = o.userData.tw, mx = o.matrixWorld.elements, qx = mx[12] - ex, qy = mx[13] - ey, qz = mx[14] - ez, t = qx * dx + qy * dy + qz * dz;
+      if (t < 0.3 || t > GRAB.HOLD_MAX + 0.9) continue;
+      const off = Math.hypot(qx - t * dx, qy - t * dy, qz - t * dz) - Math.max(...u.half);
+      if (off < bd) { bd = off; best = o; }
+    }
+    if (best) held.add(best);
+  }
+  return held;
+}
+function twUpdate(renderer, scene, camera) {
+  const now = performance.now(), dt = Math.min(0.1, Math.max(0, (now - (twLast || now)) / 1000));
+  twLast = now;
+  const S = typeof window !== 'undefined' ? window.__nmd : null;
+  const U = this.material.uniforms, cam = camera.getWorldPosition(twC);
+  U.uTime.value = (now / 1000) % 3600;
+  U.uPx.value = renderer.getPixelRatio();
+  U.uViewH.value = renderer.domElement.height || 720;
+  this.material.uniformsNeedUpdate = true;
+  if (!S && !twDemo) { this.geometry.setDrawRange(0, 0); return; }
+  // the pieces in this scene, their tops, how far they are
+  const list = [];
+  for (const o of twLoose) {
+    let r = o; while (r.parent) r = r.parent;
+    if (r !== scene || !o.visible) continue;
+    const u = o.userData.tw, m = o.matrixWorld.elements, h = u.half;
+    u.top = m[13] + Math.abs(m[1]) * h[0] + Math.abs(m[5]) * h[1] + Math.abs(m[9]) * h[2];
+    u.d = Math.hypot(m[12] - cam.x, u.top + TW.lift - cam.y, m[14] - cam.z);
+    if (u.d < TW.far + 4) list.push(o); else { u.vis = 0; u.px = NaN; }
+  }
+  const held = twHeld(S, list), rv = S?.rv;
+  twE.length = 0;
+  for (const o of list) {
+    const u = o.userData.tw, m = o.matrixWorld.elements;
+    // tumbling, flying or carried along: speed since the last frame
+    const sp = Number.isNaN(u.px) || dt <= 0 ? 0 : Math.hypot(m[12] - u.px, m[13] - u.py, m[14] - u.pz) / dt;
+    u.px = m[12]; u.py = m[13]; u.pz = m[14];
+    let want = held.has(o) || sp > 0.9 ? 0 : 1;
+    if (want && rv) {
+      const l = toLocal(rv.p, rv.q, { x: m[12], y: m[13], z: m[14] });
+      if (Math.abs(l.x) < RV_DIM.HALF_W + 0.4 && Math.abs(l.z) < RV_DIM.HALF_L + 0.6 && l.y > -0.8 && l.y < RV_DIM.ROOF_Y + 2) want = 0;
+    }
+    u.vis += (want - u.vis) * Math.min(1, dt * (want ? 3 : 8));
+    if (twDemo && !S) u.vis = 1;
+    const a = u.vis * Math.min(1, (TW.far - u.d) / TW.fade) * Math.min(1, (u.d - TW.near) / 0.8);
+    if (a > 0.01) twE.push([u.d, o, a]);
+  }
+  twE.sort((x, y) => x[0] - y[0]);
+  const n = Math.min(TW.N, twE.length);
+  for (let i = 0; i < n; i++) {
+    const [, o, a] = twE[i], u = o.userData.tw, m = o.matrixWorld.elements;
+    U.uP.value[i].set(m[12], u.top + TW.lift, m[14], a);
+    U.uQ.value[i].set(u.phase, u.size, 0, 0);
+  }
+  for (let i = n; i < TW.N; i++) U.uP.value[i].w = 0;
+  this.geometry.setDrawRange(0, n);
+}
+
 // ---- building ------------------------------------------------------------------------------------
 
 const geoCache = new Map();
@@ -1400,14 +1560,14 @@ export function buildProp(type, W) {
     g.add(paper);
     return shadowy(g);
   }
-  return shadowy(mesh);
+  return twinkleOn(shadowy(mesh), type);
 }
 
 // Optional: paint the atlas and build every prop's geometry in idle slices, so the first props
 // (and a new biome's boulder) don't stall the frame they arrive in.
 export function prewarm(W) {
   const idle = (typeof window !== 'undefined' && window.requestIdleCallback) || (f => setTimeout(f, 30));
-  const jobs = [() => lootMat(), ...Object.keys(BUILDERS).map(k => () => geoOf(k)), () => { if (W) buildProp('boulder', W); }, () => { if (W) paperMat(W); }];
+  const jobs = [() => lootMat(), () => twinkleCloud(), ...Object.keys(BUILDERS).map(k => () => geoOf(k)), () => { if (W) buildProp('boulder', W); }, () => { if (W) paperMat(W); }];
   const step = () => { const j = jobs.shift(); if (!j) return; try { j(); } catch (e) { console.warn('props prewarm', e); } idle(step); };
   idle(step);
 }
@@ -1427,6 +1587,18 @@ export const PREVIEW = {
     const o = buildProp(k, null), bb = new THREE.Box3().setFromObject(o), s = bb.getSize(new V3());
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); o.rotation.y = Math.PI; return g;
   }])),
+  // the glint over loose loot, with a few pieces lying about (the pulse is frozen wherever it was)
+  twinkle: () => {
+    twDemo = true;
+    const g = new THREE.Group();
+    ['tv', 'gnome', 'toaster', 'safe', 'vase', 'tire'].forEach((k, i) => {
+      const sh = LOOT[k].shape, o = buildProp(k, null);
+      o.position.set(i * 1.25, sh[0] === 'box' ? sh[2] : sh[1], (i % 2) * 0.6);
+      g.add(o);
+    });
+    g.addEventListener('added', () => { if (g.parent?.isScene) g.parent.add(twinkleCloud()); });
+    return g;
+  },
   // the map sheet standing up, big, for reading it
   mapsheet: (o = {}) => { const W = { ...demoWorld(), biome: o.biome || 'meadow', day: BIOMES.indexOf(o.biome || 'meadow') + 1 }; const m = new THREE.Mesh(new THREE.PlaneGeometry(1.6, 1.19), new THREE.MeshBasicMaterial({ map: canvasTex(mapCanvas(W)), side: THREE.DoubleSide })); m.position.y = 0.7; const g = new THREE.Group(); g.add(m); return g; },
 };
