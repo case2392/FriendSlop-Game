@@ -102,8 +102,20 @@ and towns. Nobody should ever confuse one day's screenshot for another's.
 ```bash
 node tools/gallery.mjs [family] [out.png]           # every registered texture, tiled 2×2 to show seams
 node tools/preview.mjs name1,name2 [out.png] [biome] # 3D assets on a ground patch with game lighting
+node tools/scene.mjs town,pawnin,night out/ 3 18.5  # named in-game viewpoints on a day (biome) and hour
 ONLY=camp,riding node tools/docshots.mjs            # real in-game screenshots → docs/screenshots/
 ```
+
+`scene.mjs` views: camp road vista wall poi crash boulder gate grade winch
+town pawn casino pawnin casinoin repo lot rv rvin crew hands loot night (or
+`all`). Day 1–5 picks the biome.
+
+**Paint fast.** Everything is painted in the player's browser at load, so
+paint cost is load time. Paint canvases are CPU-backed
+(`willReadFrequently`), so pixel reads never stall on the GPU. Blur with
+`blurTile` (a seamless CPU box blur), never a canvas `filter`. Draw a
+repeated mark's alpha and width once, outside `wrap()`. Texture names are
+global: `register` warns when two families claim the same name.
 
 Read the PNG and look at it critically, *next to the reference frames*.
 Ask: "Would this pass as a 2004 Blizzard texture or model? Or would someone
