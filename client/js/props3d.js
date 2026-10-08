@@ -9,7 +9,7 @@
 //      prewarm(W) → paints the atlas and builds the geometry in idle time (optional)
 import { THREE, tex, painted, canvasTex, shadowy } from './gfx.js';
 import { LOOT } from '/shared/loot.js';
-import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS } from './paint/props.js';
+import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS, DINO, BOULDER_BANDS } from './paint/props.js';
 import { mergeGeometries, mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { rngFrom, rgba, blob, ellipse, range, pick, makeCanvas } from './paint/core.js';
 
@@ -149,6 +149,42 @@ function loft(st, segs = 16, pw = 2.6) {
   g.setIndex(idx);
   return g;
 }
+// The dino's loft: superelliptic sections [{ z, w, top, bot }] along z; u round the section with
+// 0.5 on top and the seam underneath, v linear in z from o.v[0] (first section) to o.v[1] (last).
+// o.caps: [back, front]; o.inside turns every face inward (a cavity seen from within).
+const secPoint = (s, u, pw) => { const ph = (u - 0.5) * TAU, S = t => Math.sign(t) * Math.pow(Math.abs(t), 2 / pw); return [s.w * S(Math.sin(ph)), (s.top + s.bot) / 2 + (s.top - s.bot) / 2 * S(Math.cos(ph)), s.z]; };
+function secAt(st, z) {
+  let i = 1; while (i < st.length - 1 && st[i].z < z) i++;
+  const a = st[i - 1], b = st[i], f = Math.min(1, Math.max(0, (z - a.z) / (b.z - a.z || 1)));
+  return { z, w: a.w + (b.w - a.w) * f, top: a.top + (b.top - a.top) * f, bot: a.bot + (b.bot - a.bot) * f };
+}
+function loftU(st, { segs = 28, pw = 2.4, v = [0, 1], caps = [true, true], inside = false } = {}) {
+  const pos = [], uv = [], idx = [], W = segs + 1, za = st[0].z, zb = st[st.length - 1].z;
+  for (const s of st) for (let i = 0; i <= segs; i++) { pos.push(...secPoint(s, i / segs, pw)); uv.push(i / segs, v[0] + (v[1] - v[0]) * (s.z - za) / (zb - za || 1)); }
+  const tri = (a, b, c) => inside ? idx.push(a, c, b) : idx.push(a, b, c);
+  for (let j = 0; j < st.length - 1; j++) for (let i = 0; i < segs; i++) { const a = j * W + i, b = a + 1, c = a + W + 1, d = a + W; tri(a, c, b); tri(a, d, c); }
+  const cap = (j, front) => {
+    const s = st[j], ci = pos.length / 3;
+    pos.push(0, (s.top + s.bot) / 2, s.z); uv.push(0.5, uv[j * W * 2 + 1]);
+    for (let i = 0; i < segs; i++) { const a = j * W + i, b = a + 1; if (front) tri(ci, b, a); else tri(ci, a, b); }
+  };
+  if (caps[0]) cap(0, false);
+  if (caps[1]) cap(st.length - 1, true);
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
+// a rounded peg (a tooth) from base a toward tip b
+function peg(a, b, r) {
+  const A = new V3(...a), d = new V3(...b).sub(A), L = d.length();
+  const g = lathe([[0, -r * 0.4], [r * 0.9, -r * 0.3], [r, L * 0.3], [r * 0.9, L * 0.62], [r * 0.62, L * 0.86], [r * 0.25, L * 0.98], [0, L]], 8);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), d.normalize()));
+  g.translate(A.x, A.y, A.z);
+  return g;
+}
+
 // A rounded pane bulging toward +z (a CRT face): a grid pushed out to a superellipse, uv 0..1.
 function squirclePane(w, h, bulge = 0.02, n = 5, nx = 12, ny = 10) {
   const g = new THREE.PlaneGeometry(2, 2, nx, ny), p = g.attributes.position, uv = g.attributes.uv;
@@ -300,7 +336,7 @@ const BUILDERS = {
     // a big round head, ears, a bulbous rosy nose
     B.add(sphere(GNOME.headR, 18, 12), face, { at: mat4(0, 0.062, 0.01) });
     for (const sx of [-1, 1]) B.add(sphere(1, 8, 6), R.skin, { at: mat4(sx * 0.074, 0.062, 0.006, 0, sx * 0.3, 0, [0.013, 0.024, 0.01]), tint: 0.9 });
-    B.add(sphere(0.026, 12, 9), R.skin, { at: mat4(0, 0.045, 0.084, 0.2, 0, 0) });
+    B.add(sphere(0.03, 14, 10), R.skin, { at: mat4(0, 0.044, 0.086, 0.2, 0, 0, [1, 0.95, 1]) });
     // the beard: a broad wedge from the cheeks to the belt, lying on the chest; a drooping mustache
     const locks = v => {     // the locks in the geometry too: ridges where the paint puts them, converging to the tip
       const r = Math.hypot(v.x, v.z); if (r < 1e-6) return;
@@ -313,16 +349,21 @@ const BUILDERS = {
       { at: mat4(0, 0.002, 0.074, -0.3, 0, 0, [1.2, 1, 0.56]), warp: locks, crease: 70 });
     for (const sx of [-1, 1]) B.add(sphere(1, 10, 7), sub(beard, 0.3, 0.02, 0.7, 0.5), { at: mat4(sx * 0.028, 0.034, 0.08, 0.1, sx * 0.35, sx * -1.05, [0.034, 0.015, 0.019]), tint: 1.05 });
     // the hat, its top flopping over sideways at the crease, and a fat rolled brim
-    const bd = new V3(0.85, 0, 0.3).normalize(), axisK = new V3(bd.z, 0, -bd.x), pivot = 0.195;
-    const rot = new THREE.Matrix4();
-    B.add(lathe([[0.08, 0.1, 0], [0.079, 0.113, 0.1], [0.066, 0.145, 0.28], [0.05, 0.172, 0.45], [0.037, pivot, GNOME.crease], [0.026, 0.212, 0.72], [0.014, 0.23, 0.85], [0.006, 0.243, 0.95], [0, 0.25, 1]], 16), hat, {
-      warp: v => {
-        const t = Math.min(1, Math.max(0, (v.y - pivot + 0.008) / 0.026)), a = 0.72 * t * t * (3 - 2 * t);
-        if (a <= 0) return;
-        rot.makeRotationAxis(axisK, a); v.y -= pivot; v.applyMatrix4(rot); v.y += pivot;
-      },
+    // (the whole hat tips back 9°, brim up at the front, so the face isn't lost in its shadow)
+    const bd = new V3(0.85, 0, 0.3).normalize(), axisK = new V3(bd.z, 0, -bd.x), pivot = 0.182;
+    const flop = v => {
+      const t = Math.min(1, Math.max(0, (v.y - pivot + 0.01) / 0.05)), a = 1.32 * t * t * (3 - 2 * t);
+      if (a > 0) { rot.makeRotationAxis(axisK, a); v.y -= pivot - 0.01; v.applyMatrix4(rot); v.y += pivot - 0.01; }
+      return v;
+    };
+    const rot = new THREE.Matrix4(), tip = new THREE.Matrix4().makeTranslation(0, 0.106, 0).multiply(new THREE.Matrix4().makeRotationX(-0.16)).multiply(new THREE.Matrix4().makeTranslation(0, -0.106, 0));
+    B.add(lathe([[0.08, 0.1, 0], [0.079, 0.113, 0.1], [0.067, 0.14, 0.28], [0.053, 0.162, 0.45], [0.042, pivot, GNOME.crease], [0.031, 0.204, 0.72], [0.019, 0.228, 0.85], [0.009, 0.248, 0.95], [0, 0.258, 1]], 18), hat, {
+      at: tip,
+      warp: flop,
     });
-    B.add(new THREE.TorusGeometry(0.078, 0.016, 8, 22), sub(hat, 0, 0.62, 1, 0.82), { at: mat4(0, 0.106, 0, Math.PI / 2, 0, 0) });
+    const tp = flop(new V3(0, 0.25, 0)).applyMatrix4(tip);
+    B.add(sphere(1, 10, 7), R.gnomefur, { at: mat4(tp.x, tp.y, tp.z, 0, 0, 0, [0.016, 0.016, 0.016]) });
+    B.add(new THREE.TorusGeometry(0.078, 0.017, 8, 24), sub(hat, 0, 0.88, 1, 1), { at: tip.clone().multiply(mat4(0, 0.106, 0, Math.PI / 2, 0, 0)) });
     return B.done({ ao: 0.28, aoH: 0.12 });
   },
 
@@ -346,24 +387,35 @@ const BUILDERS = {
 
   toaster() {
     const B = new Build();
+    const SIDE = sub(R.steel, 0, 0, 1, 2 / 3), TOP = sub(R.steel, 0, 2 / 3, 1, 1);
     // brass domed feet
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) B.add(sphere(1, 10, 6), R.brass, { at: mat4(sx * 0.1, -0.097, sz * 0.056, 0, 0, 0, [0.022, 0.016, 0.022]), tint: [1.1, 1, 0.85] });
-    // the nickel body, well rounded
-    B.add(rbox(0.27, 0.19, 0.17, 0.052, 3), R.steel, { uv: 'box', at: mat4(0, 0.0, 0) });
-    // three art-deco ribs down each long side
-    for (const sz of [-1, 1]) for (const y of [-0.045, -0.024, -0.003]) B.add(rbox(0.21, 0.008, 0.01, 0.0035, 1), R.steel, { uv: 'box', at: mat4(0, y, sz * 0.086), tint: 1.12 });
-    // the slots and two slices of toast
+    // the chrome body, well rounded, painted as a reflection
+    B.add(rbox(0.27, 0.19, 0.17, 0.052, 3), SIDE, { uv: 'box', faces: { py: TOP, ny: sub(R.steel, 0, 0.55, 1, 0.66) } });
+    // three brass art-deco ribs down each long side (stopping short of the knob on the front)
+    for (const sz of [-1, 1]) for (const y of [-0.045, -0.024, -0.003]) {
+      const L = sz > 0 ? 0.15 : 0.21, x = sz > 0 ? -0.03 : 0;
+      B.add(rbox(L, 0.009, 0.01, 0.004, 1), R.brass, { uv: 'box', at: mat4(x, y, sz * 0.086) });
+    }
+    // the slots: dark openings in brass trim rings, two slices of toast
+    const ring = new THREE.Shape([[-0.108, -0.024], [0.108, -0.024], [0.108, 0.024], [-0.108, 0.024]].map(([x, y]) => new THREE.Vector2(x, y)));
+    ring.holes.push(new THREE.Path([[-0.099, -0.016], [-0.099, 0.016], [0.099, 0.016], [0.099, -0.016]].map(([x, y]) => new THREE.Vector2(x, y))));
+    const ringG = new THREE.ExtrudeGeometry(ring, { depth: 0.004, bevelEnabled: true, bevelThickness: 0.002, bevelSize: 0.002, bevelSegments: 1 });
     for (const sz of [-1, 1]) {
       B.add(rbox(0.2, 0.012, 0.032, 0.005, 1), R.rubber, { uv: 'box', at: mat4(0, 0.09, sz * 0.038), tint: 0.6 });
+      B.add(ringG, R.brass, { uv: 'box', at: mat4(0, 0.094, sz * 0.038, -Math.PI / 2, 0, 0) });
       B.add(rbox(0.16, 0.06, 0.02, 0.012, 2), R.toast, { uv: 'box', at: mat4(0.004 * sz, 0.087, sz * 0.038, 0, 0, sz * 0.03) });
     }
-    // the lever (a honey-wood knob) and a ridged brass dial with a dark center
+    // the lever (a honey-wood knob) on the end
     B.add(rbox(0.008, 0.09, 0.022, 0.003, 1), R.rubber, { uv: 'box', at: mat4(0.136, 0.0, 0), tint: 0.6 });
     B.add(rbox(0.026, 0.026, 0.04, 0.01, 2), R.honey, { uv: 'box', at: mat4(0.148, 0.03, 0) });
-    const ridge = v => { const r = Math.hypot(v.x, v.z); if (r > 0.012) { const a = Math.atan2(v.x, v.z), k = 1 + 0.07 * Math.cos(a * 16); v.x *= k; v.z *= k; } };
-    B.add(lathe([[0, 0], [0.021, 0], [0.023, 0.006], [0.021, 0.012], [0.01, 0.014], [0, 0.015]], 32), R.brass, { at: mat4(0.075, -0.03, 0.084, Math.PI / 2, 0, 0), warp: ridge });
-    B.add(cyl(0.007, 0.004, 10), R.rubber, { at: mat4(0.075, -0.03, 0.1, Math.PI / 2, 0, 0) });
-    return B.done({ ao: 0.25, aoH: 0.06 });
+    // a knurled oxblood bakelite knob with a cream pointer
+    const knurl = v => { const r = Math.hypot(v.x, v.z); if (r > 0.012 && v.y < 0.02) { const a = Math.atan2(v.x, v.z), k = 1 + 0.06 * Math.cos(a * 24); v.x *= k; v.z *= k; } };
+    B.add(lathe([[0, 0], [0.019, 0], [0.023, 0.004], [0.023, 0.016], [0.02, 0.021], [0.012, 0.024], [0, 0.025]], 48), R.bakelite, { at: mat4(0.082, -0.03, 0.083, Math.PI / 2, 0, 0), warp: knurl });
+    B.add(rbox(0.004, 0.016, 0.004, 0.0015, 1), R.ivory, { uv: 'box', at: mat4(0.082, -0.022, 0.108, 0, 0, -0.5) });
+    // the riveted brass maker's plate
+    B.add(rbox(0.11, 0.034, 0.004, 0.0015, 1), R.brass, { uv: 'box', faces: { pz: R.toastplate }, at: mat4(-0.04, 0.042, 0.0865) });
+    return B.done({ ao: 0.22, aoH: 0.06 });
   },
 
   register() {
@@ -378,11 +430,12 @@ const BUILDERS = {
     for (let j = 0; j < 3; j++) {
       const n = j === 1 ? 5 : 6, z = 0.06 - j * 0.062;
       for (let i = 0; i < n && ki < 16; i++, ki++) {
-        const x = -0.15 + i * 0.06 + (j === 1 ? 0.03 : 0), y = deckY(z), rr = j === 2 ? 0.017 : 0.0155;
-        B.add(cyl(0.005, 0.024, 8), R.brass, { at: mat4(x, y + 0.008, z), tint: 0.85 });
-        B.add(lathe([[rr, 0, 0.1], [rr * 1.02, 0.008, 0.5], [rr * 0.92, 0.011, 0.9]], 12), R.ivory, { at: mat4(x, y + 0.019, z) });
-        const col = ki % 8, row = Math.floor(ki / 8);
-        B.add(new THREE.CircleGeometry(rr * 0.92, 12), sub(R.keys, col / 8, row / 2, (col + 1) / 8, (row + 1) / 2), { uv: 'planar', axis: 'y', bounds: [-rr * 0.92, -rr * 0.92, rr * 0.92, rr * 0.92], at: mat4(x, y + 0.0305, z, -Math.PI / 2, 0, 0), crease: 80 });
+        const x = -0.15 + i * 0.06 + (j === 1 ? 0.03 : 0), lift = j * 0.007, y = deckY(z) + lift, rr = (j === 2 ? 0.017 : 0.0155) * 1.2;
+        B.add(cyl(0.005, 0.024 + lift * 2, 8), R.brass, { at: mat4(x, y + 0.008 - lift, z), tint: 0.85 });
+        B.add(lathe([[rr * 0.9, 0, 0.1], [rr, 0.004, 0.4], [rr * 0.98, 0.01, 0.8]], 14), R.ivory, { at: mat4(x, y + 0.019, z) });
+        B.add(new THREE.TorusGeometry(rr * 0.99, 0.0018, 4, 12), R.brass, { at: mat4(x, y + 0.029, z, Math.PI / 2, 0, 0), tint: 1.1 });
+        const col = ki % 8, row = Math.floor(ki / 8), rk = rr * 0.98;
+        B.add(lathe([[rk, 0], [rk * 0.8, 0.0035], [rk * 0.5, 0.0058], [0, 0.0066]], 12), sub(R.keys, col / 8, row / 2, (col + 1) / 8, (row + 1) / 2), { uv: 'planar', axis: 'y', bounds: [-rk * 1.2, -rk * 1.2, rk * 1.2, rk * 1.2], at: mat4(x, y + 0.029, z), crease: 80 });
       }
     }
     // the arched brass crest at the back with the $ 25 tab in its window
@@ -399,10 +452,10 @@ const BUILDERS = {
 
   trophy() {
     const B = new Build();
-    B.add(lathe([[0, -0.22, 0], [0.086, -0.22, 0.1], [0.088, -0.212, 0.18], [0.088, -0.18, 0.45], [0.08, -0.174, 0.55], [0.07, -0.15, 0.78], [0.058, -0.145, 0.86], [0, -0.145, 1]], 14), R.turned);
+    B.add(lathe([[0, -0.22, 0], [0.083, -0.22, 0.08], [0.088, -0.215, 0.14], [0.089, -0.208, 0.2], [0.088, -0.18, 0.45], [0.083, -0.176, 0.5], [0.079, -0.172, 0.56], [0.07, -0.15, 0.78], [0.058, -0.145, 0.86], [0, -0.145, 1]], 20), R.turned, { crease: 60 });
     B.add(rbox(0.09, 0.03, 0.006, 0.003, 1), R.brass, { uv: 'box', faces: { pz: sub(R.plaque, 0, 0, 0.5, 1) }, at: mat4(0, -0.196, 0.087) });
     B.add(lathe([[0.046, -0.145, 0.0], [0.042, -0.136, 0.06], [0.02, -0.12, 0.12], [0.013, -0.09, 0.18], [0.026, -0.076, 0.22], [0.028, -0.066, 0.25], [0.013, -0.05, 0.3], [0.015, -0.02, 0.36],
-      [0.03, -0.005, 0.42], [0.054, 0.012, 0.5], [0.068, 0.045, 0.6], [0.072, 0.09, 0.7], [0.074, 0.118, 0.8], [0.079, 0.128, 0.85], [0.071, 0.128, 0.88], [0.064, 0.105, 0.94], [0, 0.085, 1]], 18), R.gilt);
+      [0.03, -0.005, 0.42], [0.054, 0.012, 0.5], [0.068, 0.045, 0.6], [0.072, 0.09, 0.7], [0.074, 0.118, 0.8], [0.079, 0.128, 0.85], [0.071, 0.128, 0.88], [0.064, 0.105, 0.94], [0, 0.085, 1]], 24), R.gilt);
     for (const sx of [-1, 1]) B.add(new THREE.TorusGeometry(0.022, 0.0065, 6, 12, Math.PI), sub(R.gilt, 0, 0.3, 1, 0.45), { at: mat4(sx * 0.068, 0.07, 0, 0, 0, sx > 0 ? -Math.PI / 2 : Math.PI / 2) });
     B.add(sphere(0.043, 16, 12), R.ball, { at: mat4(0, 0.172, 0, -0.45, 0.2, 0), crease: 80 });
     return B.done({ ao: 0.25, aoH: 0.05 });
@@ -422,11 +475,11 @@ const BUILDERS = {
     const taper = v => { const f = Math.max(0, (0.05 - v.z) / 0.31); v.x *= 1 - 0.2 * f; v.y = v.y * (1 - 0.16 * f) - 0.02 * f; };
     B.add(rbox(0.68, 0.47, 0.52, 0.04), R.wood, { uv: 'box', faces: { pz: R.tvfront, nz: R.tvback }, at: mat4(0, -0.035, 0.02), warp: taper });
     // the tube's bulge out of the back
-    B.add(lathe([[0, 0], [0.13, 0], [0.12, 0.028], [0.09, 0.052], [0.05, 0.06], [0, 0.06]], 16), sub(R.tvback, 0.06, 0.58, 0.22, 0.78), { at: mat4(0, -0.06, -0.236, -Math.PI / 2, 0, 0) });
+    B.add(lathe([[0, 0], [0.11, 0], [0.102, 0.026], [0.078, 0.048], [0.042, 0.056], [0, 0.056]], 16), sub(R.tvback, 0.06, 0.58, 0.22, 0.78), { at: mat4(-0.13, -0.11, -0.236, -Math.PI / 2, 0, 0) });
     // the screen: an evenly rounded pane bulging out of the recess
     const [u0, v0, u1, v1] = TV_LAYOUT.screen, fw = 0.68, fh = 0.47, fz = 0.28;
-    const sw = (u1 - u0) * fw * 0.98, sh = (v1 - v0) * fh * 0.98, scx = -fw / 2 + (u0 + u1) / 2 * fw, scy = -0.035 - fh / 2 + (v0 + v1) / 2 * fh;
-    B.add(squirclePane(sw, sh, 0.022, 5), R.screen, { at: mat4(scx, scy, fz - 0.012), crease: 80 });
+    const sw = (u1 - u0) * fw * 0.95, sh = (v1 - v0) * fh * 0.94, scx = -fw / 2 + (u0 + u1) / 2 * fw, scy = -0.035 - fh / 2 + (v0 + v1) / 2 * fh;
+    B.add(squirclePane(sw, sh, 0.02, 5), R.screen, { at: mat4(scx, scy, fz + 0.002), crease: 80 });
     for (const [ku, kv] of TV_LAYOUT.knobs) B.add(lathe([[0, 0], [0.024, 0], [0.026, 0.01], [0.022, 0.022], [0.012, 0.026], [0, 0.027]], 12), R.brass, { at: mat4(-fw / 2 + ku * fw, -0.035 - fh / 2 + kv * fh, fz - 0.002, Math.PI / 2, 0, 0) });
     // rabbit ears
     B.add(sphere(1, 10, 6), R.brass, { at: mat4(0.06, 0.2, -0.06, 0, 0, 0, [0.05, 0.03, 0.05]), tint: 0.85 });
@@ -541,10 +594,10 @@ const BUILDERS = {
   tire() {
     const B = new Build();
     const T = TIRE_V;
-    B.add(lathe([[0.21, -0.088, 0], [0.24, -0.118, T.wallLo[0] * 0.6], [0.28, -0.13, T.wallLo[0]], [0.315, -0.128, T.wallLo[1]], [0.345, -0.108, 0.3], [0.36, -0.07, T.treadLo],
-      [0.362, 0, 0.5], [0.36, 0.07, T.treadHi], [0.345, 0.108, 0.7], [0.315, 0.128, T.wallHi[0]], [0.28, 0.13, T.wallHi[1]], [0.24, 0.118, 0.94], [0.21, 0.088, 1]], 24), R.tire, { crease: 60 });
+    B.add(lathe([[0.21, -0.088, 0], [0.24, -0.118, 0.08], [0.28, -0.13, T.wallLo[0]], [0.315, -0.128, T.wallLo[1]], [0.345, -0.108, 0.31], [0.36, -0.07, T.treadLo],
+      [0.362, 0, 0.5], [0.36, 0.07, T.treadHi], [0.345, 0.108, 0.69], [0.315, 0.128, T.wallHi[0]], [0.28, 0.13, T.wallHi[1]], [0.24, 0.118, 0.92], [0.21, 0.088, 1]], 36), R.tire, { crease: 60 });
     const rim = [[0, -0.045], [0.06, -0.045], [0.085, -0.066], [0.19, -0.075], [0.208, -0.09], [0.214, -0.07], [0.214, 0.07], [0.208, 0.09], [0.19, 0.075], [0.085, 0.066], [0.06, 0.045], [0, 0.045]];
-    B.add(lathe(rim, 24), R.rim, { uv: 'planar', axis: 'y', bounds: [-0.214, -0.214, 0.214, 0.214], crease: 40 });
+    B.add(lathe(rim, 32), R.rim, { uv: 'planar', axis: 'y', bounds: [-0.214, -0.214, 0.214, 0.214], crease: 40 });
     return B.done({ ao: 0.2, aoH: 0.1 });
   },
 
@@ -601,58 +654,98 @@ const BUILDERS = {
   },
 
   dino() {
-    const B = new Build();
-    // The roadside sauropod's goofy fiberglass head, snapped off with a stub of its neck: a big
-    // rounded dome, a short blunt muzzle, a closed smile, the broken neck angling down and back.
-    // The hide is the statue's own paint: u along the head, v from the normal (cream belly
-    // underneath, the green back on top), the same way the statue's body is mapped.
-    const hide = { uv: 'fn', fn: (x, y, z, nx, ny) => [Math.min(1, Math.max(0, (z + 0.8) / 1.6)), 0.06 + 0.9 * (0.5 + 0.5 * ny)], crease: 80 };
+    // The roadside sauropod's goofy fiberglass head, snapped off with a thick stub of its neck: a
+    // round dome with big slit-pupil eyes up on its top corners under heavy brows, plates down the
+    // spine, a blunt snout with its nostrils on top, the jaw hanging open over a pink tongue and two
+    // rows of cream peg teeth. The head and neck share one painted hide (loot_dinohead) wrapped
+    // round them; the lower jaw and the inside of the mouth have their own cells.
+    const B = new Build(), D = DINO, pw = D.pw, rnd = rngFrom('dino-head');
+    const vOf = z => Math.min(1, Math.max(0, (z - D.z0) / (D.z1 - D.z0)));
+    // the small bumps (plates, brows, lids, nostrils) take a plain strip of hide, lit by their normal
+    const PLAIN = sub(R.dinomouth, 2 / 3, 0, 1, 1);
+    const hide = { uv: 'fn', fn: (x, y, z, nx, ny) => [0.5 + 0.4 * nx, Math.min(0.98, Math.max(0.02, 0.5 + 0.48 * ny))], crease: 80 };
     const head = [
-      { z: -0.42, w: 0.2, top: 0.26, bot: -0.12 }, { z: -0.36, w: 0.33, top: 0.4, bot: -0.22 }, { z: -0.24, w: 0.41, top: 0.5, bot: -0.28 },
-      { z: -0.06, w: 0.43, top: 0.53, bot: -0.3 }, { z: 0.12, w: 0.4, top: 0.46, bot: -0.3 }, { z: 0.28, w: 0.33, top: 0.32, bot: -0.28 },
-      { z: 0.42, w: 0.3, top: 0.25, bot: -0.27 }, { z: 0.54, w: 0.31, top: 0.25, bot: -0.26 }, { z: 0.64, w: 0.3, top: 0.23, bot: -0.23 },
-      { z: 0.72, w: 0.25, top: 0.18, bot: -0.18 }, { z: 0.765, w: 0.15, top: 0.1, bot: -0.1 }, { z: 0.78, w: 0.05, top: 0.03, bot: -0.03 },
+      { z: -0.47, w: 0.27, top: 0.27, bot: -0.02 }, { z: -0.41, w: 0.33, top: 0.38, bot: -0.05 }, { z: -0.29, w: 0.36, top: 0.45, bot: -0.07 },
+      { z: -0.14, w: 0.375, top: 0.48, bot: -0.075 }, { z: 0.02, w: 0.36, top: 0.43, bot: -0.07 }, { z: 0.17, w: 0.3, top: 0.32, bot: -0.06 },
+      { z: 0.32, w: 0.275, top: 0.255, bot: -0.05 }, { z: 0.48, w: 0.28, top: 0.245, bot: -0.04 }, { z: 0.6, w: 0.275, top: 0.24, bot: -0.03 },
+      { z: 0.68, w: 0.235, top: 0.215, bot: -0.02 }, { z: 0.735, w: 0.16, top: 0.17, bot: 0.0 }, { z: 0.765, w: 0.07, top: 0.12, bot: 0.03 }, { z: 0.775, w: 0.01, top: 0.085, bot: 0.065 },
     ];
-    B.add(loft(head, 22, 2.4), R.dino, hide);
-    const at = z => { let i = 1; while (i < head.length - 1 && head[i].z < z) i++; const a = head[i - 1], b = head[i], f = Math.min(1, Math.max(0, (z - a.z) / (b.z - a.z))); return { w: a.w + (b.w - a.w) * f, top: a.top + (b.top - a.top) * f, bot: a.bot + (b.bot - a.bot) * f }; };
-    const surfX = (z, y) => { const h = at(z), mid = (h.top + h.bot) / 2, hh = (h.top - h.bot) / 2, t = Math.min(1, Math.abs((y - mid) / hh)); return h.w * Math.pow(Math.max(0, 1 - Math.pow(t, 2.4)), 1 / 2.4); };
-    // the smile: a dark groove round the muzzle, curling up at the corners, with blunt peg teeth
-    const smileAt = s => { const as = Math.abs(s), z = 0.777 - 0.4 * Math.pow(as, 0.75), y = -0.07 + 0.11 * Math.pow(as, 2.2); return [Math.sign(s) * surfX(z, y), y, z]; };
-    const smile = [];
-    for (let k = -16; k <= 16; k++) { const [x, y, z] = smileAt(k / 16); smile.push([x * 0.985, y, z + (k === 0 ? 0.003 : 0)]); }
-    B.add(tube(smile, 0.022, 64, 6), R.rubber, { tint: [1.5, 0.62, 0.52] });
-    const rnd = rngFrom('dino-teeth');
-    for (const sx of [-1, 1]) for (let k = 0; k < 4; k++) {
-      const [x, y, z] = smileAt(sx * (0.1 + k * 0.13)), r = range(rnd, 0.022, 0.034);
-      B.add(sphere(1, 8, 6), R.ivory, { at: mat4(x * 0.97, y - r * 0.75, z, 0, 0, 0, [r, r * 1.35, r]) });
+    B.add(loftU(head, { segs: 32, pw, v: [vOf(head[0].z), vOf(head[head.length - 1].z)] }), R.dinohead, { crease: 80 });
+    // the lower jaw, swung open about the hinge under the back of the skull
+    const jaw = [
+      { z: -0.34, w: 0.2, top: -0.05, bot: -0.19 }, { z: -0.27, w: 0.285, top: -0.05, bot: -0.26 }, { z: -0.12, w: 0.305, top: -0.055, bot: -0.3 },
+      { z: 0.08, w: 0.29, top: -0.06, bot: -0.3 }, { z: 0.28, w: 0.27, top: -0.06, bot: -0.27 }, { z: 0.46, w: 0.255, top: -0.06, bot: -0.24 },
+      { z: 0.59, w: 0.23, top: -0.06, bot: -0.205 }, { z: 0.665, w: 0.17, top: -0.065, bot: -0.165 }, { z: 0.7, w: 0.08, top: -0.08, bot: -0.13 }, { z: 0.71, w: 0.01, top: -0.1, bot: -0.11 },
+    ];
+    const open = 0.21, hy = -0.06, hz = D.hinge;
+    const jawM = new THREE.Matrix4().makeTranslation(0, hy, hz).multiply(new THREE.Matrix4().makeRotationX(open)).multiply(new THREE.Matrix4().makeTranslation(0, -hy, -hz));
+    B.add(loftU(jaw, { segs: 28, pw }), R.dinojaw, { at: jawM, crease: 80 });
+    // inside the mouth: a dark cavity between the jaws, open at the front, the throat at the back
+    const jawAt = z => { const zl = hz + (z - hz) / Math.cos(open), s = secAt(jaw, zl); return { y: hy + (s.top - hy) * Math.cos(open) - (zl - hz) * Math.sin(open), w: s.w }; };
+    const cav = [-0.25, -0.18, -0.06, 0.1, 0.26, 0.42, 0.56, 0.645].map(z => { const u = secAt(head, z), j = jawAt(z); return { z, w: Math.min(u.w, j.w) - 0.05, top: u.bot + 0.05, bot: j.y - 0.045 }; });
+    B.add(loftU(cav, { segs: 20, pw: 4, inside: true, caps: [true, false] }), sub(R.dinomouth, 0, 0, 1 / 3, 1), { crease: 80 });
+    // the tongue lying in the jaw, its tip curling up
+    B.add(sphere(1, 16, 10), sub(R.dinomouth, 1 / 3, 0, 2 / 3, 1), {
+      uv: 'fn', fn: (x, y, z) => [Math.min(1, Math.max(0, (x + 0.16) / 0.32)), Math.min(1, Math.max(0, (z + 0.17) / 0.68))],
+      at: jawM.clone().multiply(mat4(0, -0.075, 0.15, 0, 0, 0, [0.15, 0.05, 0.31])), crease: 80,
+      warp: v => { if (v.y < 0) v.y *= 0.5; else v.y -= 0.22 * Math.exp(-((v.x / 0.3) ** 2)) * v.y; if (v.z > 0.35) v.y += (v.z - 0.35) ** 2 * 1.6; },
+    });
+    // two rows of big cream peg teeth, interleaved
+    for (const sd of [-1, 1]) {
+      const zs = [0.04, 0.16, 0.28, 0.4, 0.52, 0.63];
+      for (const [k, z0] of zs.entries()) {
+        const z = z0 + range(rnd, -0.015, 0.015), p = secPoint(secAt(head, z), sd < 0 ? D.lipU + 0.012 : 1 - D.lipU - 0.012, pw), L = range(rnd, 0.075, 0.095) * (k === 5 ? 0.85 : 1);
+        B.add(peg([p[0] * 0.97, p[1] + 0.025, p[2]], [p[0] * 1.02, p[1] - L, p[2] + 0.01], range(rnd, 0.027, 0.032)), R.ivory, { crease: 70 });
+      }
+      { const p = secPoint(secAt(head, 0.715), sd < 0 ? 0.06 : 0.94, pw); B.add(peg([p[0], p[1] + 0.02, p[2] - 0.01], [p[0] * 1.1, p[1] - 0.07, p[2] + 0.015], 0.026), R.ivory, { crease: 70 }); }
+      for (const [k, zl] of [0.1, 0.23, 0.36, 0.49, 0.6].entries()) {
+        const p = secPoint(secAt(jaw, zl + range(rnd, -0.015, 0.015)), sd < 0 ? 0.5 - D.jawLipU + 0.01 : 0.5 + D.jawLipU - 0.01, pw), L = range(rnd, 0.065, 0.08) * (k === 4 ? 0.85 : 1);
+        const a = new V3(p[0] * 0.98, p[1] - 0.02, p[2]).applyMatrix4(jawM), b = new V3(p[0] * 1.02, p[1] + L, p[2] - 0.005).applyMatrix4(jawM);
+        B.add(peg(a.toArray(), b.toArray(), range(rnd, 0.025, 0.03)), R.ivory, { crease: 70 });
+      }
     }
-    // big round eyes on the sides of the dome, heavy lids rolled over their tops, brow bumps
-    for (const sx of [-1, 1]) {
-      const ez = 0.13, ey = 0.15, ex = sx * (surfX(ez, ey) - 0.035);
-      const E = mat4(ex, ey, ez, -0.1, sx * (Math.PI / 2 - 0.42), 0);
-      B.add(sphere(0.108, 16, 12), R.eye, { at: E, crease: 80 });
-      const lidM = E.clone().multiply(mat4(0, 0.004, 0, -0.42, 0, 0, 1.1));
-      B.add(lathe([[0.1, 0, 0.5], [0.094, 0.034, 0.6], [0.072, 0.07, 0.75], [0.04, 0.092, 0.9], [0, 0.1, 1]], 16), R.dino, { ...hide, at: lidM });
-      B.add(sphere(1, 12, 8), R.dino, { ...hide, at: mat4(ex * 0.82, ey + 0.11, ez + 0.03, 0, sx * 0.3, sx * 0.45, [0.11, 0.04, 0.12]) });
+    // big eyes up on the dome's top corners: an amber slit-pupil eyeball, a heavy lid, a brow ridge
+    for (const sd of [-1, 1]) {
+      const s = secAt(head, D.eye.z), p = secPoint(s, 0.5 + sd * D.eye.u, pw), mid = (s.top + s.bot) / 2;
+      const n = new V3(p[0] / s.w, (p[1] - mid) / ((s.top - s.bot) / 2), 0).normalize(), r = 0.125;
+      const c = new V3(...p).addScaledVector(n, -0.03);
+      const look = new V3(sd * 0.5, 0.22, 0.84).normalize(), ry = Math.atan2(look.x, look.z), rx = -Math.asin(look.y);
+      const E = mat4(c.x, c.y, c.z, rx, ry, 0);
+      B.add(sphere(r, 16, 12), R.eye, { at: E, crease: 80 });
+      B.add(lathe([[r * 1.08, -0.004], [r * 1.06, r * 0.32], [r * 0.92, r * 0.62], [r * 0.6, r * 0.88], [r * 0.25, r * 1.02], [0, r * 1.06]], 18), PLAIN, { ...hide, at: E.clone().multiply(mat4(0, 0, 0, -0.3, 0, 0)) });
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(c.x + sd * 0.004, c.y + 0.11, c.z - 0.035, 0.12, sd * 0.25, sd * -0.3, [0.13, 0.062, 0.105]), tint: 0.95 });
     }
-    // nostril bumps on top of the snout tip
-    for (const sx of [-1, 1]) {
-      B.add(sphere(1, 10, 7), R.dino, { ...hide, at: mat4(sx * 0.07, 0.21, 0.68, 0, 0, 0, [0.042, 0.03, 0.05]) });
-      B.add(sphere(1, 8, 5), R.rubber, { at: mat4(sx * 0.073, 0.232, 0.7, -0.6, 0, 0, [0.019, 0.009, 0.021]), tint: [1.1, 0.8, 0.7] });
+    // nostrils on top of the snout
+    for (const sd of [-1, 1]) {
+      const p = secPoint(secAt(head, D.nostril.z), 0.5 + sd * D.nostril.u, pw);
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(p[0], p[1] - 0.012, p[2], 0, 0, sd * -0.2, [0.055, 0.032, 0.065]) });
+      B.add(sphere(1, 10, 6), R.rubber, { at: mat4(p[0] + sd * 0.004, p[1] + 0.014, p[2] + 0.012, -0.5, 0, sd * -0.2, [0.022, 0.009, 0.03]), tint: [1.25, 0.75, 0.7] });
     }
-    // the broken neck: up from a plaster break at the back-bottom into the underside of the skull,
-    // three rusty rebar stubs poking out of the break
-    const E0 = new V3(0, -0.3, -0.55), d = new V3(0, 0.75, 0.66).normalize();
-    const toD = new THREE.Quaternion().setFromUnitVectors(new V3(0, 1, 0), d);
-    const nk = new THREE.Matrix4().compose(E0, toD, new V3(1, 1, 1)), brk = new THREE.Matrix4().compose(E0.clone().addScaledVector(d, -0.004), toD, new V3(1, 1, 1));   // the cap faces -y: out of the break
-    B.add(lathe([[0.3, 0, 0], [0.295, 0.04, 0.15], [0.285, 0.25, 0.6], [0.27, 0.52, 1]], 18), R.dino, { ...hide, at: nk });
-    B.add(lathe([[0, 0], [0.3, 0], [0.31, 0.012]], 20), R.plaster, { uv: 'planar', axis: 'y', bounds: [-0.31, -0.31, 0.31, 0.31], at: brk });
-    for (let k = 0; k < 3; k++) {
-      const a = k / 3 * TAU + 0.5, bx = Math.cos(a) * 0.15, bz = Math.sin(a) * 0.15, L = range(rnd, 0.07, 0.11);
-      const pts = [[bx, 0.03, bz], [bx * 1.05, -L * 0.5, bz * 1.05], [bx * 1.3 + 0.02, -L, bz * 1.3]].map(p => new V3(...p).applyMatrix4(brk).toArray());
-      B.add(tube(pts, 0.012, 6, 5), R.rubber, { tint: RUST });
+    // plates down the spine, dark green, biggest over the back of the dome
+    for (const [z, s] of [[0.08, 0.6], [-0.06, 0.8], [-0.21, 0.95], [-0.35, 1]]) {
+      const t = secPoint(secAt(head, z), 0.5, pw);
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(0, t[1] - 0.008, z, 0.15, 0, 0, [0.05 * s, 0.07 * s, 0.08 * s]), tint: 0.78 });
     }
-    return B.done({ ao: 0.3, aoH: 0.25, fit: [0.55, 0.45, 0.75] });
+    // the neck: a thick stub flaring out to the break, angling down and back out of the skull
+    const neck = [{ z: 0, w: 0.33, top: 0.28, bot: -0.28 }, { z: 0.2, w: 0.355, top: 0.295, bot: -0.295 }, { z: 0.36, w: 0.39, top: 0.31, bot: -0.31 }, { z: 0.45, w: 0.42, top: 0.32, bot: -0.32 }];
+    const NL = 0.45, nS = new V3(0, 0.06, -0.3), nM = mat4(nS.x, nS.y, nS.z, 0.5, Math.PI, 0);
+    const nEnd = new V3(0, 0, NL).applyMatrix4(nM);
+    const jag = v => { if (v.z > NL - 0.001) { const a = Math.atan2(v.y, v.x); v.z += 0.04 * Math.sin(a * 5 + 1.3) + 0.022 * Math.sin(a * 11 + 0.4) + 0.012 * Math.sin(a * 23) - 0.012; } };
+    B.add(loftU(neck, { segs: 30, pw: 2.2, v: [vOf(nS.z), vOf(nEnd.z)], caps: [false, false] }), R.dinohead, { at: nM, flipU: true, crease: 80, warp: jag });
+    for (const [lz, s] of [[0.12, 0.95], [0.3, 0.85]]) {
+      const q = new V3(0, secAt(neck, lz).top - 0.01, lz).applyMatrix4(nM);
+      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(q.x, q.y, q.z, 0.6, 0, 0, [0.055 * s, 0.07 * s, 0.085 * s]), tint: 0.78 });
+    }
+    // the break: a jagged oval of plaster round the hollow, three rusty rebar stubs
+    const brk = [], ns = neck[neck.length - 1];
+    for (let k = 0; k < 28; k++) { const t = k / 28 * TAU, j = range(rnd, 0.93, 1.03); brk.push([Math.cos(t) * ns.w * j, Math.sin(t) * ns.top * j]); }
+    const brkM = nM.clone().multiply(mat4(0, 0, NL - 0.03));
+    B.add(shapeFace(brk), R.plaster, { uv: 'planar', axis: 'z', bounds: [-ns.w * 1.03, -ns.top * 1.03, ns.w * 1.03, ns.top * 1.03], at: brkM, crease: 30 });
+    for (const [bx, by] of [[-0.2, 0.08], [0.17, 0.12], [0.04, -0.17]]) {
+      const pts = [[bx, by, -0.02], [bx * 1.05, by * 1.05, 0.05], [bx * 1.25 + 0.02, by * 1.1 - 0.03, 0.1]].map(p => new V3(...p).applyMatrix4(brkM).toArray());
+      B.add(tube(pts, 0.014, 6, 5), R.rubber, { tint: RUST });
+    }
+    return B.done({ ao: 0.28, aoH: 0.3, fit: [0.5, 0.45, 0.75] });
   },
 
   map() {      // the leather map case: a rolled edge, a strap with a buckle (the paper is a second mesh)
@@ -665,66 +758,141 @@ const BUILDERS = {
   },
 };
 
-// ---- the boulder: four overlapping lumps that fill the 4 × 2.6 × 3 m box -----------------------------
+// ---- the boulder: fills the 4 × 2.6 × 3 m box --------------------------------------------------------
+// Meadow, fields and snow: three cut-plane lumps with big flat facets (each facet's value painted in by
+// its facing: lit cream-gray tops, cool sides). Badlands and desert: tabular slabs stacked and set back,
+// flat tops, near-vertical sides, a fracture notch or two, their ledges on the painted strata lines
+// (BOULDER_BANDS). Every biome: two or three broken chunks at the foot.
 
 const LUMPS = [
   { c: [-0.25, -0.05, 0.0], r: [1.25, 1.0, 1.15], rz: 0.02, top: 0.8 },     // the main stone, a broken flat top
-  { c: [0.78, -0.32, 0.32], r: [0.9, 0.72, 0.85], rz: -0.24, top: 0.62 },   // a slab leaning off it
+  { c: [0.78, -0.3, 0.32], r: [0.9, 0.72, 0.85], rz: -0.24, top: 0.62 },    // a slab leaning off it
   { c: [0.7, 0.32, -0.42], r: [0.62, 0.44, 0.56], rz: 0.18, top: 0.7 },     // an overhanging shoulder
-  { c: [-0.1, -0.86, 0.1], r: [1.35, 0.26, 1.15], rz: 0.03, top: 0.85 },     // the foot, a low skirt round the base
 ];
+// The mesa block: one angular outline, stepping back at some of the strata edges toward `dir`
+// (k = 1 − setback × max(0, cos(angle − dir))), flush on the far side where only a joint shows.
+const SLABS = {
+  badlands: { n: 9, jit: 0.38, rx: 1.95, rz: 1.45, ch: 0.07, notch: 2, levels: [{ b: [0, 2], sb: 0, dir: 0 }, { b: [2, 4], sb: 0.34, dir: 0.6 }, { b: [4, 5], sb: 0.5, dir: 2.4 }] },
+  desert: { n: 11, jit: 0.22, rx: 1.95, rz: 1.45, ch: 0.14, notch: 1, levels: [{ b: [0, 2], sb: 0, dir: 0 }, { b: [2, 3], sb: 0.3, dir: 3.6 }, { b: [3, 4], sb: 0.46, dir: 0.9 }] },
+};
+const CHUNKS = [[-1.55, 1.05, 0.4, 0.34, 0.36, 0.5], [1.6, -0.9, 0.36, 0.3, 0.3, 2.2], [0.35, -1.25, 0.3, 0.26, 0.26, 4.1]];   // x, z, rx, rz, height, rot
+
+// One continuous block through `levels` [{ P (outline, meters), y0, y1, vTop }] (each outline inside
+// the one below): a wall per level, bulging a little and leaning, then a rounded lip and a flat ledge in
+// to the next level's outline. Where the next level is flush there's no lip, so the cliff runs on
+// unbroken. Pushes triangles into pos and a "v override" per vertex (null = by height).
+function mesaInto(pos, vo, levels, ch, taper = 0.03, rnd = Math.random) {
+  const R = [], cen = P => [P.reduce((a, p) => a + p[0], 0) / P.length, P.reduce((a, p) => a + p[1], 0) / P.length];
+  const ring = (P, y, insets, v, k = 1, jit = null) => {
+    const [cx, cz] = cen(P);
+    return P.map(([x, z], i) => { const L = Math.hypot(x - cx, z - cz) || 1, f = Math.max(0.2, (L - insets[i]) / L) * k * (jit ? jit[i] : 1); return [cx + (x - cx) * f, y, cz + (z - cz) * f, v]; });
+  };
+  levels.forEach((L, i) => {
+    const H = L.y1 - L.y0, n = L.P.length, tp = y => 1 - taper * (y - L.y0) / H, zero = new Array(n).fill(0);
+    const next = levels[i + 1], depth = L.P.map(([x, z], k) => next ? Math.max(0, Math.hypot(x, z) - Math.hypot(...next.P[k])) : 1);
+    const lip = depth.map(d => ch * Math.min(1, d / (ch * 3)));
+    if (i === 0) { R.push(ring(L.P, L.y0, zero.map(() => ch * 0.5), null)); R.push(ring(L.P, L.y0 + ch * 0.4, zero, null)); }
+    else R.push(ring(L.P, L.y0 + 0.02, zero, null));
+    const jit = L.P.map(() => range(rnd, 0.97, 1.05)), jit2 = L.P.map(() => range(rnd, 0.96, 1.03));
+    R.push(ring(L.P, L.y0 + H * 0.45, zero, null, tp(L.y0 + H * 0.45), jit));
+    R.push(ring(L.P, L.y1 - ch * 1.1, zero, null, tp(L.y1 - ch * 1.1), jit2));
+    R.push(ring(L.P, L.y1 - ch * 0.35, lip.map(d => d * 0.45), L.vTop, tp(L.y1), jit2));
+    R.push(ring(L.P, L.y1, lip.map(d => d * 1.1), L.vTop, tp(L.y1), jit2));
+    if (next) R.push(ring(next.P, L.y1, new Array(next.P.length).fill(0), L.vTop, 1 - taper * 0.02));
+  });
+  const n = R[0].length;
+  const tri = (a, b, c) => { for (const p of [a, b, c]) { pos.push(p[0], p[1], p[2]); vo.push(p[3]); } };
+  for (let j = 0; j < R.length - 1; j++) for (let k = 0; k < n; k++) { const a = R[j][k], b = R[j][(k + 1) % n], c = R[j + 1][(k + 1) % n], d = R[j + 1][k]; tri(a, c, b); tri(a, d, c); }
+  const top = R[R.length - 1], bot = R[0], yT = levels[levels.length - 1].y1, vT = levels[levels.length - 1].vTop;
+  const ct = [top.reduce((a, p) => a + p[0], 0) / n, yT + 0.012, top.reduce((a, p) => a + p[2], 0) / n, vT], cb = [bot.reduce((a, p) => a + p[0], 0) / n, levels[0].y0, bot.reduce((a, p) => a + p[2], 0) / n, null];
+  for (let k = 0; k < n; k++) { tri(ct, top[(k + 1) % n], top[k]); tri(cb, bot[k], bot[(k + 1) % n]); }
+}
+// a jittered outline: n points round an ellipse-ish (squarish) shape, some notched in
+function outline(n, rx, rz, cx, cz, rnd, notches = 0, rot = 0, jit = 0.3) {
+  const nk = new Set(Array.from({ length: notches }, () => Math.floor(rnd() * n)));
+  return Array.from({ length: n }, (_, k) => {
+    const a = rot + (k + range(rnd, -jit, jit)) / n * TAU, c = Math.cos(a), sn = Math.sin(a);
+    let r = Math.pow(Math.abs(c) ** 3 + Math.abs(sn) ** 3, -1 / 3) * range(rnd, 0.86, 1.04);
+    if (nk.has(k)) r *= range(rnd, 0.62, 0.72);
+    return [cx + c * r * rx, cz + sn * r * rz, a];
+  });
+}
 function boulderGeo(biome) {
   const [, hx, hy, hz] = LOOT.boulder.shape;
   const rnd = rngFrom('boulder-' + biome);
-  const parts = [];
-  for (const L of LUMPS) {
-    const cuts = [];
-    for (let k = 0; k < 8; k++) { const a = rnd() * TAU, e = range(rnd, -0.3, 0.7); cuts.push([new V3(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).normalize(), range(rnd, 0.74, 0.9)]); }
-    const tilt = range(rnd, -0.15, 0.15);
-    cuts.push([new V3(Math.sin(tilt), Math.cos(tilt), range(rnd, -0.1, 0.1)).normalize(), L.top]);
-    const ph = Array.from({ length: 4 }, () => rnd() * TAU);
-    const g = sphere(1, 18, 12).toNonIndexed(), p = g.attributes.position, v = new V3(), zAxis = new V3(0, 0, 1), c = new V3(...L.c);
-    for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i);
-      v.multiplyScalar(1 + 0.06 * Math.sin(v.x * 3.1 + ph[0]) * Math.sin(v.z * 2.7 + ph[1]) + 0.04 * Math.sin(v.y * 4.3 + ph[2] + v.x * 2));
-      for (const [nn, d] of cuts) { const e = v.dot(nn) - d; if (e > 0) v.addScaledVector(nn, -e * 0.96); }
-      if (v.y < -0.85) v.y = -0.85;
-      v.set(v.x * L.r[0], v.y * L.r[1], v.z * L.r[2]).applyAxisAngle(zAxis, L.rz).add(c);
-      p.setXYZ(i, v.x, v.y, v.z);
-    }
-    g.deleteAttribute('uv'); g.deleteAttribute('normal');
-    parts.push(g);
+  const vOf = y => (y + hy) / (2 * hy);
+  let out;
+  const vo = [];
+  if (SLABS[biome]) {
+    // stacked slabs, built in meters (y exact, so the ledges land on the painted strata)
+    const SB = SLABS[biome], BV = BOULDER_BANDS[biome], E = BV.map(v => -hy + v * 2 * hy), pos = [];
+    const P0 = outline(SB.n, SB.rx, SB.rz, 0, 0, rnd, SB.notch, rnd() * TAU, SB.jit);
+    let K = P0.map(() => 1);     // the setbacks accumulate, so each level sits inside the one below
+    mesaInto(pos, vo, SB.levels.map(L => { K = K.map((k, i) => k * (1 - L.sb * Math.max(0, Math.cos(P0[i][2] - L.dir)))); return { P: P0.map(([x, z], i) => [x * K[i], z * K[i]]), y0: E[L.b[0]], y1: E[L.b[1]], vTop: BV[L.b[1]] - 0.014 }; }), SB.ch, 0.03, rnd);
+    for (const [x, z, rx, rz, ht, rot] of CHUNKS) mesaInto(pos, vo, [{ P: outline(5, rx, rz, x, z, rnd, 0, rot, 0.35), y0: -hy, y1: -hy + ht * range(rnd, 0.8, 1.3), vTop: null }], SB.ch * 0.8, 0.25, rnd);
+    out = new THREE.BufferGeometry(); out.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    out.computeBoundingBox();
+    const bb = out.boundingBox, c = bb.getCenter(new V3()), s = bb.getSize(new V3()), p = out.attributes.position;
+    for (let i = 0; i < p.count; i++) p.setXYZ(i, (p.getX(i) - c.x) / s.x * 2 * hx * 0.995, p.getY(i), (p.getZ(i) - c.z) / s.z * 2 * hz * 0.995);
+  } else {
+    const parts = [];
+    const lump = (L, nCut, depth, chunk = false) => {
+      const cuts = [];
+      for (let k = 0; k < nCut; k++) { const a = rnd() * TAU, e = range(rnd, -0.3, 0.75); cuts.push([new V3(Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e)).normalize(), range(rnd, depth[0], depth[1])]); }
+      const tilt = range(rnd, -0.15, 0.15);
+      cuts.push([new V3(Math.sin(tilt), Math.cos(tilt), range(rnd, -0.1, 0.1)).normalize(), L.top]);
+      const ph = Array.from({ length: 4 }, () => rnd() * TAU);
+      const g = sphere(1, chunk ? 12 : 20, chunk ? 8 : 14).toNonIndexed(), p = g.attributes.position, v = new V3(), zAxis = new V3(0, 0, 1), c = new V3(...L.c);
+      for (let i = 0; i < p.count; i++) {
+        v.fromBufferAttribute(p, i);
+        v.multiplyScalar(1 + 0.05 * Math.sin(v.x * 3.1 + ph[0]) * Math.sin(v.z * 2.7 + ph[1]) + 0.03 * Math.sin(v.y * 4.3 + ph[2] + v.x * 2));
+        for (const [nn, d] of cuts) { const e = v.dot(nn) - d; if (e > 0) v.addScaledVector(nn, -e); }
+        if (v.y < -0.8) v.y = -0.8;
+        v.set(v.x * L.r[0], v.y * L.r[1], v.z * L.r[2]).applyAxisAngle(zAxis, L.rz).add(c);
+        p.setXYZ(i, v.x, Math.max(-0.85, v.y), v.z);     // every lump sits on the same flat floor
+      }
+      g.deleteAttribute('uv'); g.deleteAttribute('normal');
+      parts.push(g);
+    };
+    for (const L of LUMPS) lump(L, 12, [0.68, 0.84]);
+    // broken chunks at the foot (unit space: the whole thing is fitted to the box after)
+    for (const [x, z, rx, rz, ht] of CHUNKS) lump({ c: [x * 0.82, -0.85 + ht * 0.6, z * 0.85], r: [rx * 0.7, ht * 0.75, rz * 0.7], rz: range(rnd, -0.3, 0.3), top: 0.55 }, 7, [0.55, 0.75], true);
+    out = mergeGeometries(parts, false);
+    out.computeBoundingBox();
+    const bb = out.boundingBox, c = bb.getCenter(new V3()), s = bb.getSize(new V3()), p = out.attributes.position;
+    for (let i = 0; i < p.count; i++) p.setXYZ(i, (p.getX(i) - c.x) / s.x * 2 * hx * 0.995, (p.getY(i) - c.y) / s.y * 2 * hy, (p.getZ(i) - c.z) / s.z * 2 * hz * 0.995);
   }
-  const out = mergeGeometries(parts, false);
-  out.computeBoundingBox();
-  const bb = out.boundingBox, c = bb.getCenter(new V3()), s = bb.getSize(new V3()), p = out.attributes.position;
-  for (let i = 0; i < p.count; i++) p.setXYZ(i, (p.getX(i) - c.x) / s.x * 2 * hx * 0.995, (p.getY(i) - c.y) / s.y * 2 * hy, (p.getZ(i) - c.z) / s.z * 2 * hz * 0.995);
-  // u: round the rock (seam fixed per face), v: height, so the strata stay level
-  const n = p.count, uv = new Float32Array(n * 2);
+  const p = out.attributes.position, n = p.count;
+  // u: round the rock (seam fixed per face), v: height (or the slab's override at its ledges)
+  const uv = new Float32Array(n * 2);
   for (let f = 0; f < n / 3; f++) {
     const us = [0, 1, 2].map(k => Math.atan2(p.getX(f * 3 + k), p.getZ(f * 3 + k)) / TAU + 0.5);
     const mx = Math.max(...us);
-    for (let k = 0; k < 3; k++) { const u = mx - us[k] > 0.5 ? us[k] + 1 : us[k]; uv[(f * 3 + k) * 2] = u; uv[(f * 3 + k) * 2 + 1] = 0.01 + 0.98 * (p.getY(f * 3 + k) + hy) / (2 * hy); }
+    for (let k = 0; k < 3; k++) { const i = f * 3 + k; uv[i * 2] = mx - us[k] > 0.5 ? us[k] + 1 : us[k]; uv[i * 2 + 1] = Math.min(0.995, Math.max(0.005, vo[i] ?? vOf(p.getY(i)))); }
   }
   out.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
-  creaseNormals(out, 40);
-  // contact shadow low down, a cool shade under the overhangs
-  const nr = out.attributes.normal, col = new Float32Array(n * 3);
+  creaseNormals(out, SLABS[biome] ? 40 : 46);
+  // the painted light: each facet's value by its facing (lit warm tops and upper-left planes, cool
+  // shaded sides), a contact shadow low down, darker under overhangs
+  const nr = out.attributes.normal, col = new Float32Array(n * 3), Ld = new V3(-0.45, 0.8, 0.4).normalize(), t3 = new V3();
   for (let i = 0; i < n; i++) {
-    const t = Math.min(1, (p.getY(i) + hy) / 0.9), k = (0.6 + 0.4 * t * t * (3 - 2 * t)) * (nr.getY(i) < 0 ? 1 + nr.getY(i) * 0.3 : 1);
-    col[i * 3] = k * 0.97; col[i * 3 + 1] = k * 0.98; col[i * 3 + 2] = k * 1.03;
+    t3.fromBufferAttribute(nr, i);
+    const lit = Math.max(0, t3.dot(Ld)), up = Math.max(0, t3.y), t = Math.min(1, (p.getY(i) + hy) / 0.9), ao = 0.62 + 0.38 * t * t * (3 - 2 * t);
+    const k = ao * (0.78 + 0.34 * lit + 0.08 * up) * (t3.y < 0 ? 1 + t3.y * 0.3 : 1);
+    col[i * 3] = k * (0.94 + 0.08 * lit); col[i * 3 + 1] = k * (0.96 + 0.05 * lit); col[i * 3 + 2] = k * (1.06 - 0.08 * lit);
   }
   out.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  // the cover shell: the upward faces lifted 4.5 cm along their normals; alpha fades with the slope
+  // the cover shell: the upward faces lifted 1.5 cm along their normals; its alpha fades with the
+  // slope and is gone well before the silhouette turns over
   const cp = [], cu = [], cc = [];
   const sm = new THREE.BufferGeometry(); sm.setAttribute('position', p.clone()); creaseNormals(sm, 80);
   const sn = sm.attributes.normal;
   for (let f = 0; f < n / 3; f++) {
     let ny = 0; for (let k = 0; k < 3; k++) ny += sn.getY(f * 3 + k);
-    if (ny / 3 < 0.3) continue;
+    if (ny / 3 < 0.5) continue;
     for (let k = 0; k < 3; k++) {
-      const i = f * 3 + k, x = p.getX(i) + sn.getX(i) * 0.045, y = p.getY(i) + sn.getY(i) * 0.045, z = p.getZ(i) + sn.getZ(i) * 0.045;
-      const a = Math.min(1, Math.max(0, (sn.getY(i) - 0.38) / 0.4));
+      const i = f * 3 + k, x = p.getX(i) + sn.getX(i) * 0.015, y = p.getY(i) + sn.getY(i) * 0.015, z = p.getZ(i) + sn.getZ(i) * 0.015;
+      const a = Math.min(1, Math.max(0, (sn.getY(i) - 0.6) / 0.28));
       cp.push(x, y, z); cu.push(x / 1.7, z / 1.7); cc.push(1, 1, 1, a * a * (3 - 2 * a));
     }
   }
@@ -835,12 +1003,13 @@ function hillStamp(g, kind, px, py, w, h, fillC, rnd) {
   g.restore();
 }
 // ink lettering, each glyph nudged a little so it reads hand-lettered
-function inkText(g, txt, x, y, { size = 12, color = '#3a2a1e', italic = false, align = 'center', halo = '#f2e2b8', weight = 'bold', jit = 0.05 } = {}) {
+function inkText(g, txt, x, y, { size = 12, color = '#3a2a1e', italic = false, align = 'center', halo = '#f2e2b8', weight = 'bold', jit = 0.05, clear = 0 } = {}) {
   g.save();
   g.font = `${italic ? 'italic ' : ''}${weight} ${size}px ${MAPFONT}`;
   g.textBaseline = 'middle';
   const W = g.measureText(txt).width;
   let cx = align === 'center' ? x - W / 2 : align === 'right' ? x - W : x;
+  if (clear) blob(g, cx + W / 2, y, W / 2 + size * 0.7, size * 0.95, 0, '#ecd8aa', clear, 0.5);
   const r = rngFrom(txt + x.toFixed(0));
   g.textAlign = 'left';
   for (const ch of txt) {
@@ -915,9 +1084,13 @@ export function mapCanvas(W) {
   // the projection: x along the leg; the road's sideways wiggle scaled up to fill the sheet, features near it at their true offsets
   const z0 = Wd.Z0 + 30, z1 = Wd.Z1 - 20;
   let rmin = 1e9, rmax = -1e9; for (let z = z0; z <= z1; z += 8) { const r = Wd.roadX(z); rmin = Math.min(rmin, r); rmax = Math.max(rmax, r); }
-  const kRoad = Math.min(4, CH * 0.42 / Math.max(1, rmax - rmin)), rmid = (rmin + rmax) / 2;
+  // the leg runs from the camp low on the left up to the town on the right; its sideways wiggle is
+  // exaggerated by a gain that wanders along the road (0.4–1), so no two stretches snake alike
+  const gph = [rnd() * TAU, rnd() * TAU], gain = z => { const t = (z - z0) / (z1 - z0); return 0.7 + 0.3 * (0.6 * Math.sin(t * TAU * 0.8 + gph[0]) + 0.4 * Math.sin(t * TAU * 1.9 + gph[1])); };
+  const kRoad = Math.min(3.2, CH * 0.36 / Math.max(1, rmax - rmin)), rmid = (rmin + rmax) / 2;
   const X = z => 40 + (z - z0) / (z1 - z0) * 432;
-  const Y = (z, x = Wd.roadX(z)) => CH * 0.52 - (Wd.roadX(z) - rmid) * kRoad - (x - Wd.roadX(z)) * 1.35;
+  const base = z => CH * (0.64 - 0.24 * (z - z0) / (z1 - z0));
+  const Y = (z, x = Wd.roadX(z)) => base(z) - (Wd.roadX(z) - rmid) * kRoad * gain(z) - (x - Wd.roadX(z)) * 1.35;
   const road = []; for (let z = z0; z <= z1; z += 5) road.push([X(z), Y(z)]);
   const roadY = px => { let best = road[0]; for (const q of road) if (Math.abs(q[0] - px) < Math.abs(best[0] - px)) best = q; return best[1]; };
   // the land along the road
@@ -946,7 +1119,7 @@ export function mapCanvas(W) {
     if (Wd.biome === 'desert') for (let k = 0; k < 4; k++) tinyTree(g, 'palm', lake.cx + Math.cos(k * 1.7) * r * 1.9, ly + Math.sin(k * 1.7) * r * 0.9 + 4, rnd, 1.3);
   } else lake = null;
   const inLake = (px, py) => lake && ((px - lake.cx) / (lake.r * 2.1)) ** 2 + ((py - lake.cy) / (lake.r * 1.1)) ** 2 < 1;
-  for (let f = 0; f < 14; f++) {
+  for (let f = 0; f < 8; f++) {
     const cx = range(rnd, 30, CW - 30), cy = range(rnd, 70, CH - 46);
     if (dRoad(cx, cy) < 30 || inLake(cx, cy) || inFurn(cx, cy, 10)) continue;
     if (Wd.biome === 'fields') {          // hatched field plots
@@ -963,17 +1136,17 @@ export function mapCanvas(W) {
       for (const [x, y, sc] of list) if (dRoad(x, y) > 22 && !inLake(x, y)) hillStamp(g, Wd.biome === 'badlands' ? 'mesa' : 'dune', x, y, 10 * sc, 9 * sc, B.hill, rnd);
       continue;
     }
-    const n = 8 + Math.floor(rnd() * 10), pts = [];
+    const n = 5 + Math.floor(rnd() * 6), pts = [];
     for (let k = 0; k < n; k++) pts.push([cx + (rnd() - 0.5) * 60, cy + (rnd() - 0.5) * 26]);
     pts.sort((a, b) => a[1] - b[1]);
     for (const [x, y] of pts) if (dRoad(x, y) > 16 && !inLake(x, y)) tinyTree(g, B.tree, x, y, rnd, 1.15);
   }
   // the canyon walls: clustered hill stamps, back to front
   const hills = [];
-  for (const side of [-1, 1]) for (let z = z0 + 8; z < z1; z += range(rnd, 16, 28)) {
+  for (const side of [-1, 1]) for (let z = z0 + 8; z < z1; z += range(rnd, 26, 42)) {
     const sc = range(rnd, 0.7, 1.4), x = Wd.roadX(z) + side * range(rnd, 32, 48);
     hills.push({ px: X(z) + range(rnd, -4, 4), py: Y(z, x), w: 11 * sc, h: 12 * sc, kind: pick(rnd, B.stamps) });
-    if (rnd() < 0.3) hills.push({ px: X(z) + range(rnd, 4, 10), py: Y(z, x) + side * range(rnd, 4, 9), w: 8 * sc, h: 8 * sc, kind: pick(rnd, B.stamps) });
+    if (rnd() < 0.15) hills.push({ px: X(z) + range(rnd, 4, 10), py: Y(z, x) + side * range(rnd, 4, 9), w: 8 * sc, h: 8 * sc, kind: pick(rnd, B.stamps) });
   }
   for (let i = hills.length - 1; i >= 0; i--) if (inLake(hills[i].px, hills[i].py) || inFurn(hills[i].px, hills[i].py)) hills.splice(i, 1);
   hills.sort((a, b) => a.py - b.py);
@@ -981,7 +1154,7 @@ export function mapCanvas(W) {
     hillStamp(g, h.kind, h.px, h.py, h.w, h.h, B.hill, rnd);
     if (Wd.biome === 'snow' && h.kind === 'peak') { g.save(); g.beginPath(); g.moveTo(h.px - h.w * 0.5, h.py - h.h * 0.62); g.lineTo(h.px - h.w * 0.25, h.py - h.h * 1.2); g.lineTo(h.px + h.w * 0.02, h.py - h.h * 0.95); g.lineTo(h.px - h.w * 0.05, h.py - h.h * 0.66); g.closePath(); g.fillStyle = '#fbfbf6'; g.fill(); g.restore(); }
   }
-  for (let i = 0; i < 44; i++) { const z = z0 + rnd() * (z1 - z0), side = rnd() < 0.5 ? -1 : 1, x = Wd.roadX(z) + side * range(rnd, 12, 28); if (!inLake(X(z), Y(z, x))) tinyTree(g, Wd.biome === 'badlands' && rnd() < 0.5 ? 'cactus' : B.tree, X(z), Y(z, x), rnd); }
+  for (let i = 0; i < 24; i++) { const z = z0 + rnd() * (z1 - z0), side = rnd() < 0.5 ? -1 : 1, x = Wd.roadX(z) + side * range(rnd, 12, 28); if (!inLake(X(z), Y(z, x))) tinyTree(g, Wd.biome === 'badlands' && rnd() < 0.5 ? 'cactus' : B.tree, X(z), Y(z, x), rnd); }
   // fold creases and coffee
   for (const x of [CW / 3, CW * 2 / 3]) { g.fillStyle = 'rgba(120,90,50,0.16)'; g.fillRect(x - 1, 0, 2, CH); g.fillStyle = 'rgba(255,248,220,0.3)'; g.fillRect(x + 1, 0, 1.5, CH); }
   g.fillStyle = 'rgba(120,90,50,0.14)'; g.fillRect(0, CH / 2 - 1, CW, 2); g.fillStyle = 'rgba(255,248,220,0.28)'; g.fillRect(0, CH / 2 + 1, CW, 1.5);
@@ -1028,18 +1201,27 @@ export function mapCanvas(W) {
   const campZ = Math.max(z0 + 10, -40), townZ = Math.min(z1 - 10, Wd.LEN + 60);
   const campP = [X(campZ), Y(campZ) + 30], townP = [X(townZ), Y(townZ) + 30];
   claim([campP[0] - 14, campP[1] - 14, campP[0] + 14, campP[1] + 14]); claim([townP[0] - 15, townP[1] - 15, townP[0] + 15, townP[1] + 15]);
-  for (const [z, px, py] of ticks) { const [lx, ly] = place(px, py, 22, 10, [[0, 18], [0, -16], [12, 18], [-12, 18]]); inkText(g, String(z), lx, ly, { size: 9.5, weight: 'normal' }); }
+  for (const [z, px, py] of ticks) { const [lx, ly] = place(px, py, 22, 10, [[0, 18], [0, -16], [12, 18], [-12, 18]]); inkText(g, String(z), lx, ly, { size: 9.5, weight: 'normal', clear: 0.5 }); }
   // the stops: a medallion on the spot, the name nearby (repeats numbered)
+  // (a kind of stop that comes up more than once gets numbered medallions and one line in the legend)
   const counts = {}, seen = {}; for (const s of stops) counts[s.type] = (counts[s.type] || 0) + 1;
-  const lsize = stops.length > 6 ? 9 : 10.5;
+  const legend = Object.keys(counts).filter(t => counts[t] > 1);
+  const lsize = stops.length - legend.reduce((a, t) => a + counts[t], 0) > 6 ? 9 : 10.5;
+  if (legend.length) claim([12, CH - 56 - 14 * legend.length, 184, CH - 50]);
   for (const s of [...stops].sort((a, b) => a.z - b.z)) {
     seen[s.type] = (seen[s.type] || 0) + 1;
-    const name = (POI_NAMES[s.type] || s.type) + (counts[s.type] > 1 ? ' ' + ROMAN[seen[s.type] - 1] : '');
+    const name = POI_NAMES[s.type] || s.type;
     mapIcon(g, s.type, s.px, s.py, 0.95);
+    if (counts[s.type] > 1) {
+      const bx = s.px + 11, by = s.py - 11;
+      g.save(); g.beginPath(); g.arc(bx, by, 6.5, 0, TAU); g.fillStyle = '#1e3a5a'; g.fill(); g.lineWidth = 1; g.strokeStyle = '#f2e2b8'; g.stroke(); g.restore();
+      inkText(g, ROMAN[seen[s.type] - 1], bx, by + 0.5, { size: 7.5, color: '#f2e2b8', halo: null, jit: 0 });
+      continue;
+    }
     const up = s.py < Y(s.z) ? -1 : 1, w = textW(name, lsize) + 6, extra = s.type === 'crash' ? 10 : 0;
     const [lx, ly] = place(s.px, s.py, w, 12 + extra, [[0, (22 + extra / 2) * up], [0, (34 + extra / 2) * up], [w / 2 + 17, 0], [-w / 2 - 17, 0], [0, -(22 + extra / 2) * up]]);
     leader(s.px, s.py, lx, ly);
-    inkText(g, name, lx, ly - extra / 2, { size: lsize, color: '#1e3a5a' });
+    inkText(g, name, lx, ly - extra / 2, { size: lsize, color: '#1e3a5a', clear: 0.7 });
     if (extra) inkText(g, '(up the mesa)', lx, ly + 6, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
   }
   // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader
@@ -1050,7 +1232,7 @@ export function mapCanvas(W) {
     g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (cy < py ? -5 : 5)); g.lineTo(cx, iy + (cy < py ? 7 : -7)); g.stroke(); g.restore();
     claimLine(px, py, cx, iy);
     obstacleIcon(g, o.type, cx, iy);
-    inkText(g, name, cx, ly, { size: 9.5, color: '#8a1e14' });
+    inkText(g, name, cx, ly, { size: 9.5, color: '#8a1e14', clear: 0.7 });
     g.save(); g.strokeStyle = '#a8241a'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); g.restore();
   }
   // landmarks
@@ -1063,21 +1245,27 @@ export function mapCanvas(W) {
       g.fillStyle = '#3a2a1e'; g.fillRect(-2.2, -1.5, 1.5, 1.5); g.fillRect(0.8, -1.5, 1.5, 1.5); g.restore();
       const [lx, ly] = place(px, py, 48, 10, [[0, 13], [0, -17], [32, 0], [-32, 0]]);
       leader(px, py, lx, ly);
-      inkText(g, 'cow skull', lx, ly, { size: 9, italic: true, weight: 'normal', color: '#5a3a6a' });
+      inkText(g, 'cow skull', lx, ly, { size: 9, italic: true, weight: 'normal', color: '#5a3a6a', clear: 0.6 });
     } else {
       g.save(); g.translate(px, py); g.strokeStyle = '#3a2a1e'; g.lineWidth = 1;
       g.fillStyle = '#8a6a40'; g.fillRect(-0.8, -2, 1.6, 7); g.fillStyle = '#e8d4a0'; g.fillRect(-7, -7, 14, 6); g.strokeRect(-7, -7, 14, 6); g.restore();
       const txt = `"${l.label}"`, w = textW(txt, 8.5, true) + 6;
       const [lx, ly] = place(px, py, w, 10, [[0, -14], [0, 13], [w / 2 + 11, -3], [-w / 2 - 11, -3], [0, -26], [0, 25]]);
       leader(px, py, lx, ly);
-      inkText(g, txt, lx, ly, { size: 8.5, italic: true, weight: 'normal', color: '#5a3a6a' });
+      inkText(g, txt, lx, ly, { size: 8.5, italic: true, weight: 'normal', color: '#5a3a6a', clear: 0.6 });
     }
   }
   // camp and town
   mapIcon(g, 'camp', campP[0], campP[1], 1.05);
-  { const [lx, ly] = place(campP[0], campP[1], 36, 13, [[0, 21], [24, 0], [0, -21]]); inkText(g, 'CAMP', lx, ly, { size: 12, color: '#2d4a2a' }); }
+  { const [lx, ly] = place(campP[0], campP[1], 36, 13, [[0, 21], [24, 0], [0, -21]]); inkText(g, 'CAMP', lx, ly, { size: 12, color: '#2d4a2a', clear: 0.7 }); }
   mapIcon(g, 'town', townP[0], townP[1], 1.15);
-  { const [lx, ly] = place(townP[0], townP[1], 38, 13, [[0, 23], [-26, 0], [0, -23]]); inkText(g, 'TOWN', lx, ly, { size: 12, color: '#2d4a2a' }); }
+  { const [lx, ly] = place(townP[0], townP[1], 38, 13, [[0, 23], [-26, 0], [0, -23]]); inkText(g, 'TOWN', lx, ly, { size: 12, color: '#2d4a2a', clear: 0.7 }); }
+  // the legend for the numbered stops
+  legend.forEach((t, i) => {
+    const y = CH - 62 - 14 * (legend.length - 1 - i), n = counts[t];
+    mapIcon(g, t, 22, y, 0.45);
+    inkText(g, `${ROMAN[0]}\u2013${ROMAN[n - 1]}  ${POI_NAMES[t] || t}${n > 1 ? 's' : ''}`, 33, y + 0.5, { size: 9.5, color: '#1e3a5a', align: 'left', clear: 0.6 });
+  });
   // the title on a scroll banner with curled ends
   {
     const x0 = 24, x1 = x0 + bannerW, y0 = 16, h = 36, wv = x => Math.sin((x - x0) / bannerW * Math.PI * 2) * 2.5;
@@ -1099,24 +1287,28 @@ export function mapCanvas(W) {
   const sb = (X(100) - X(0));
   g.fillStyle = '#3a2a1e'; g.fillRect(20, CH - 30, sb, 3); g.fillStyle = '#f2e2b8'; g.fillRect(20 + sb / 2, CH - 29.5, sb / 2, 2);
   inkText(g, '100 m', 20 + sb / 2, CH - 40, { size: 9, weight: 'normal' });
-  // burnt, ragged edges: char outside a jagged line, a scorched brown halo inside it
-  const edge = [];
-  const bites = Array.from({ length: 4 }, (_, k) => ({ side: k + 1, at: range(rnd, 0.15, 0.85), w: range(rnd, 24, 60), d: range(rnd, 6, 14) }));
-  const jag = (t, k) => {
-    let j = 6 + 2.6 * Math.sin(t * 0.045 + k * 1.7) + 1.8 * Math.sin(t * 0.13 + k * 2.3) + 1.1 * Math.sin(t * 0.41 + k) + range(rnd, 0, 1.2);
-    for (const b of bites) if (b.side === k) { const L = k % 2 ? CW : CH, d = Math.abs(t - b.at * L) / b.w; if (d < 1) j += b.d * (1 - d * d); }
-    return j;
-  };
-  for (let x = 0; x <= CW; x += 4) edge.push([x, jag(x, 1)]);
-  for (let y = 0; y <= CH; y += 4) edge.push([CW - jag(y, 2), y]);
-  for (let x = CW; x >= 0; x -= 4) edge.push([x, CH - jag(x, 3)]);
-  for (let y = CH; y >= 0; y -= 4) edge.push([jag(y, 4), y]);
-  g.save();
-  g.beginPath(); g.rect(0, 0, CW, CH); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath();
-  g.fillStyle = '#2e1e14'; g.fill('evenodd');
-  g.restore();
-  g.save(); g.filter = 'blur(3px)'; g.strokeStyle = 'rgba(110,60,24,0.75)'; g.lineWidth = 9; g.beginPath(); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke(); g.restore();
-  g.save(); g.strokeStyle = 'rgba(40,24,14,0.9)'; g.lineWidth = 2; g.beginPath(); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.stroke(); g.restore();
+  // the edges: torn paper, aged a little toward them; three to five burnt bites eating in, each a
+  // deep char with a scorched halo fading into the paper and a faint ember line
+  const edge = [], tj = (t, k) => 2.2 + 1.1 * Math.sin(t * 0.21 + k * 1.3) + 0.8 * Math.sin(t * 0.67 + k * 2.1) + range(rnd, 0, 1.3);
+  for (let x = 0; x <= CW; x += 3) edge.push([x, tj(x, 1)]);
+  for (let y = 0; y <= CH; y += 3) edge.push([CW - tj(y, 2), y]);
+  for (let x = CW; x >= 0; x -= 3) edge.push([x, CH - tj(x, 3)]);
+  for (let y = CH; y >= 0; y -= 3) edge.push([tj(y, 4), y]);
+  const edgePath = () => { g.beginPath(); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); };
+  g.save(); g.filter = 'blur(6px)'; g.strokeStyle = 'rgba(168,128,72,0.4)'; g.lineWidth = 18; edgePath(); g.stroke(); g.restore();
+  g.save(); g.beginPath(); g.rect(0, 0, CW, CH); edge.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); g.closePath(); g.fillStyle = '#6a5034'; g.fill('evenodd'); g.restore();
+  g.save(); g.strokeStyle = 'rgba(120,88,52,0.7)'; g.lineWidth = 1; edgePath(); g.stroke(); g.restore();
+  const nB = 3 + Math.floor(rnd() * 3), sides = [0, 1, 2, 3].sort(() => rnd() - 0.5);
+  for (let i = 0; i < nB; i++) {
+    const side = sides[i % 4], t = range(rnd, 0.15, 0.85), R = range(rnd, 14, 34);
+    const [ex, ey] = side === 0 ? [t * CW, -4] : side === 1 ? [CW + 4, t * CH] : side === 2 ? [t * CW, CH + 4] : [-4, t * CH];
+    const pts = []; for (let k = 0; k < 30; k++) { const a = k / 30 * TAU, r = R * (0.78 + 0.18 * Math.sin(a * 3 + i * 1.7) + 0.1 * Math.sin(a * 7 + i) + range(rnd, -0.08, 0.08)); pts.push([Math.cos(a) * r * 1.4, Math.sin(a) * r]); }
+    const at = k => { g.beginPath(); pts.forEach(([x, y], j) => j ? g.lineTo(ex + x * k, ey + y * k) : g.moveTo(ex + x * k, ey + y * k)); g.closePath(); };
+    g.save(); g.filter = 'blur(8px)'; at(1.5); g.fillStyle = 'rgba(138,90,42,0.55)'; g.fill(); g.restore();
+    g.save(); g.filter = 'blur(2.5px)'; at(1.15); g.fillStyle = 'rgba(96,54,22,0.85)'; g.fill(); g.restore();
+    at(1); g.fillStyle = '#2a160c'; g.fill();
+    g.save(); g.strokeStyle = 'rgba(214,120,44,0.4)'; g.lineWidth = 1.2; at(1.02); g.stroke(); g.restore();
+  }
   if (W) mapCache.set(W, cv);
   return cv;
 }
@@ -1171,7 +1363,9 @@ export function buildProp(type, W) {
     const { body, cover } = geoCache.get(key);
     const grp = new THREE.Group();
     grp.add(shadowy(new THREE.Mesh(body, painted(`loot_boulder_${biome}`, { repeat: [2, 1], vertexColors: true }))));
-    grp.add(shadowy(new THREE.Mesh(cover, painted(`loot_cover_${biome}`, { alphaTest: 0.5, vertexColors: true })), false, true));
+    const cm = painted(`loot_cover_${biome}`, { alphaTest: 0.5, vertexColors: true });
+    cm.polygonOffset = true; cm.polygonOffsetFactor = -2; cm.polygonOffsetUnits = -2;
+    grp.add(shadowy(new THREE.Mesh(cover, cm), false, true));
     return grp;
   }
   const mesh = new THREE.Mesh(geoOf(type), lootMat());

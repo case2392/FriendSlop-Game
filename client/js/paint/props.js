@@ -35,11 +35,11 @@ const SANS = `'Arial Black', Impact, 'Helvetica Neue', Arial, 'Liberation Sans',
 // content sizes [w, h, 'wrap'?]: every cell is painted at exactly this size
 const PIECES = {
   wood: [256, 256], iron: [256, 256], safe: [256, 256], safeback: [192, 192], porcelain: [256, 256, 'wrap'], leather: [256, 256],
-  dino: [256, 256], sign: [512, 288], slot: [256, 512], slotback: [192, 384], slotside: [96, 192], bulbs: [512, 48],
+  dinohead: [512, 256, 'wrap'], dinojaw: [256, 128, 'wrap'], dinomouth: [192, 64], sign: [512, 288], slot: [256, 512], slotback: [192, 384], slotside: [96, 192], bulbs: [512, 48],
   gnomehat: [128, 128, 'wrap'], gnomecoat: [256, 128, 'wrap'], gnomebeard: [128, 128, 'wrap'], gnomeface: [256, 128, 'wrap'], gnomefur: [128, 32, 'wrap'],
   portrait: [384, 288], gold: [1008, 64], rosette: [64, 64], glass: [512, 128, 'wrap'],
-  brass: [256, 128, 'wrap'], bronze: [256, 128, 'wrap'], gilt: [256, 128, 'wrap'], tire: [256, 128, 'wrap'], turned: [128, 128, 'wrap'],
-  rim: [128, 128], screen: [128, 128], steel: [128, 128], red: [128, 128], regdeck: [256, 128], crest: [192, 96],
+  brass: [256, 128, 'wrap'], bronze: [256, 128, 'wrap'], gilt: [256, 128, 'wrap'], tire: [512, 128, 'wrap'], turned: [128, 128, 'wrap'],
+  rim: [128, 128], screen: [128, 128], steel: [128, 192], bakelite: [64, 64, 'wrap'], toastplate: [128, 40], red: [128, 128], regdeck: [256, 128], crest: [192, 96],
   till: [256, 64], plaque: [256, 64], keys: [256, 64], tvfront: [256, 176], tvback: [256, 176],
   strap: [256, 24], fret: [256, 24], guitar: [160, 256], honey: [96, 256], ball: [128, 64, 'wrap'], eye: [128, 64, 'wrap'],
   ivory: [64, 64, 'wrap'], rubber: [64, 64, 'wrap'], parchment: [64, 64], lantern: [64, 64], skin: [64, 64, 'wrap'],
@@ -130,7 +130,17 @@ export const SLOT_CROWN = { hw: 0.3, side: 0.1, top: 0.255 };
 // The register's key caps, left → right, top row then bottom row (8 × 2 in loot_keys).
 export const KEY_LABELS = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0', '5¢', '10¢', '25¢', '50¢', '$1', '$5'];
 
-export const TIRE_V = { treadLo: 0.38, treadHi: 0.62, wallLo: [0.1, 0.2], wallHi: [0.8, 0.9] };
+export const TIRE_V = { treadLo: 0.38, treadHi: 0.62, wallLo: [0.16, 0.24], wallHi: [0.76, 0.84], textLo: [0.02, 0.15], textHi: [0.85, 0.98] };
+
+// The dino head (meters, before props3d fits it to the collider). The head and neck share one hide
+// cell: u round the cross-section (0.5 = the spine, 0 / 1 = the underside), v along z from the
+// neck's break (z0) to the snout (z1). In front of the hinge the underside is the roof of the open
+// mouth (pink, inside the lip line at lipU). The lower jaw has its own cell: u round it (0.5 = the
+// floor of the mouth, lip at 0.5 ± jawLipU), v from its hinge end (jz0) to the chin (jz1).
+export const DINO = {
+  z0: -0.92, z1: 0.78, hinge: -0.26, lipU: 0.135, jz0: -0.34, jz1: 0.71, jawLipU: 0.13,
+  eye: { z: -0.03, u: 0.145 }, nostril: { z: 0.6, u: 0.055 }, pw: 2.4,
+};
 
 // ---- small painting helpers ---------------------------------------------------------------------------
 
@@ -410,29 +420,59 @@ register('loot_honey', {
   },
 });
 
-// riveted iron: green-black lacquer, worn to bare metal at the edges, rust running down from the rivets
-function ironPlate(g, s, rnd, { base = '#3c4842', door = false, rivets = 9 } = {}) {
+// a wide soft rust stain bleeding down from (x, y): a dark core, a warm orange halo, fading as it runs
+function rustStain(g, x, y, wd, len, rnd, alpha = 1) {
+  const n = Math.max(4, Math.round(len / 5));
+  for (let k = 0; k < n; k++) {
+    const t = k / n, cx = x + Math.sin(t * 5 + x) * wd * 0.15, cy = y + len * t, r = wd * (1 - t * 0.55);
+    blob(g, cx, cy, r * 0.7, r * 0.9, 0, mix('#b8642a', '#8a4a22', t), 0.22 * alpha * (1 - t * 0.6), 0.2);
+  }
+  stroke(g, [[x, y], [x + range(rnd, -1, 1), y + len * 0.4], [x + range(rnd, -2, 2), y + len * 0.75]], wd * 0.35, wd * 0.1, '#5e2c14', 0.35 * alpha);
+  blob(g, x, y + 1, wd * 0.45, wd * 0.35, 0, '#c87a3a', 0.4 * alpha, 0.4);
+}
+// riveted iron: green-black lacquer lit on the upper left, deep on the lower right; rivets set by hand
+// (one or two missing); the lacquer chipped to bare iron at the edges; a few wide rust stains bleeding
+// from the corners and the hinges, a rust bloom along the bottom edge
+function ironPlate(g, s, rnd, { base = '#34463e', door = false, rivets = 9, hinges = null } = {}) {
   fill(g, s, s, base);
-  mottle(g, s, rnd, { colors: ['#4a5850', '#323c38', '#56625a', '#3a4440'], count: 26, rmin: s * 0.08, rmax: s * 0.3, alpha: 0.4, hard: 0.1 });
-  g.save(); g.fillStyle = radial(g, s * 0.42, s * 0.4, s * 0.25, s * 0.75, [[0, '#5c6058', 0], [1, '#5c6058', 0.4]]); g.fillRect(0, 0, s, s); g.restore();
-  // the raised border band with rivets
+  g.fillStyle = lin(g, 0, 0, s, s, [[0, '#6c8c76'], [0.22, '#56725f'], [0.5, '#3c5246'], [0.78, '#263630'], [1, '#1a2424']]); g.fillRect(0, 0, s, s);
+  mottle(g, s, rnd, { colors: ['#4a5e52', '#2e3c36', '#56705e', '#344640'], count: 24, rmin: s * 0.06, rmax: s * 0.22, alpha: 0.3, hard: 0.1 });
+  // hammer marks: soft dents, lit on their upper left
+  for (let i = 0; i < 12; i++) { const x = range(rnd, 0.15, 0.85) * s, y = range(rnd, 0.15, 0.85) * s, r = range(rnd, 10, 20); blob(g, x - r * 0.3, y - r * 0.3, r, r * 0.8, 0, '#7a9a84', 0.16, 0.15); blob(g, x + r * 0.4, y + r * 0.4, r * 0.9, r * 0.7, 0, '#18221e', 0.12, 0.15); }
+  // the raised border band
   const b = Math.round(s * 0.06);
-  molding(g, b - 6, b - 6, s - 2 * b + 12, s - 2 * b + 12, '#46524c', 12, 0.95);
-  const n = rivets, pts = [];
-  for (let k = 0; k < n; k++) { const t = b + (s - 2 * b) * k / (n - 1); pts.push([t, b], [t, s - b], [b, t], [s - b, t]); }
-  for (const [x, y] of pts) rivet(g, x, y, s * 0.014, '#6a726c');
+  molding(g, b - 6, b - 6, s - 2 * b + 12, s - 2 * b + 12, '#46584e', 12, 0.95);
   // gold pinstripe, hand drawn
-  const pin = (o, a, wdt) => { const q = [[b + o, b + o], [s - b - o, b + o], [s - b - o, s - b - o], [b + o, s - b - o], [b + o, b + o]].map(([x, y]) => [x + (rnd() - 0.5) * 1.2, y + (rnd() - 0.5) * 1.2]); line(g, q, wdt, '#c8a050', a); };
+  const pin = (o, a, wdt) => { const q = [[b + o, b + o], [s - b - o, b + o], [s - b - o, s - b - o], [b + o, s - b - o], [b + o, b + o]].map(([x, y]) => [x + (rnd() - 0.5) * 1.4, y + (rnd() - 0.5) * 1.4]); line(g, q, wdt, '#c8a050', a); };
   pin(s * 0.055, 0.75, 1.6); pin(s * 0.072, 0.35, 1);
-  // worn edges: chips of bare gray-green metal
-  edgeWear(g, 0, 0, s, s, rnd, '#6a7a70', door ? 26 : 40, s * 0.035);
-  if (!door) chips(g, rnd, 6, s * 0.15, s * 0.15, s * 0.7, s * 0.7, '#5a6660', 1.5, 4, 0.4);
-  // rust: runs down from rivets and from the top edge, a stain where it pools at the bottom
-  for (const [x, y] of pts) if (rnd() < 0.35) run(g, x + range(rnd, -1, 1), y + 3, range(rnd, 10, 40), range(rnd, 2.2, 3.6), '#8a4a22', 0.32, rnd);
-  for (let i = 0; i < 10; i++) run(g, rnd() * s, range(rnd, 0, 4), range(rnd, 12, s * 0.35), range(rnd, 2, 5), '#8a4a22', 0.26, rnd);
-  g.fillStyle = lin(g, 0, s * 0.82, 0, s, [[0, '#7a4428', 0], [1, '#7a4428', 0.3]]); g.fillRect(0, s * 0.82, s, s * 0.18);
-  blob(g, s * 0.3, s * 0.28, s * 0.35, s * 0.25, -0.5, '#fff1c4', 0.08, 0.1);
-  bevel(g, 0, 0, s, s, base, 10, 0.4, 0.55);
+  // rivets: hand-spaced (±15%), one or two gone, leaving their holes
+  const n = rivets, step = (s - 2 * b) / (n - 1), pts = [];
+  for (let k = 0; k < n; k++) for (const side of [0, 1, 2, 3]) {
+    const t = b + step * k + (k > 0 && k < n - 1 ? range(rnd, -0.15, 0.15) * step : 0), off = range(rnd, -1, 1);
+    pts.push(side === 0 ? [t, b + off] : side === 1 ? [t, s - b + off] : side === 2 ? [b + off, t] : [s - b + off, t]);
+  }
+  const gone = new Set([Math.floor(rnd() * pts.length), Math.floor(rnd() * pts.length)]);
+  pts.forEach(([x, y], i) => {
+    if (gone.has(i)) { ellipse(g, x, y, s * 0.012, s * 0.012, 0, '#141a18'); ellipse(g, x + 0.6, y + 0.8, s * 0.008, s * 0.008, 0, '#5a4030', 0.8); line(g, [[x - 2, y + 3], [x - 1, y + 9]], 2.4, '#8a4a22', 0.4); }
+    else rivet(g, x, y, s * 0.014 * range(rnd, 0.9, 1.1), '#6a7670');
+  });
+  // the lacquer chipped to bare iron along the edges and corners
+  const bare = (x, y, r) => { chips(g, rnd, 1, x - 1, y - 1, 2, 2, '#8a8a86', r * 0.6, r, 0.95); blob(g, x - r * 0.3, y - r * 0.35, r * 0.5, r * 0.3, 0, '#c8bca0', 0.6, 0.4); };
+  for (let i = 0; i < (door ? 18 : 34); i++) {
+    const side = Math.floor(rnd() * 4), t = rnd(), band = s * 0.03;
+    const x = side === 0 || side === 2 ? t * s : side === 1 ? s - rnd() * band : rnd() * band, y = side === 1 || side === 3 ? t * s : side === 0 ? rnd() * band : s - rnd() * band;
+    bare(x, y, range(rnd, 3, 7));
+  }
+  for (const [x, y] of [[4, 4], [s - 4, 4], [4, s - 4], [s - 4, s - 4]]) for (let k = 0; k < 3; k++) bare(x + range(rnd, -4, 4) * (x < s / 2 ? -1 : 1) + (x < s / 2 ? 4 : -4), y + (y < s / 2 ? 4 : -4) + range(rnd, -3, 3), range(rnd, 3, 6));
+  // rust: wide stains from the top corners (and the hinges), a bloom along the bottom
+  const spots = [[b + range(rnd, 4, 14), b + 4], [s - b - range(rnd, 4, 14), b + 4], ...(hinges || [[range(rnd, 0.35, 0.65) * s, b + 2]])];
+  for (const [x, y] of spots) rustStain(g, x, y, range(rnd, 11, 20), range(rnd, s * 0.16, s * 0.34), rnd, 1.3);
+  for (let i = 0; i < 7; i++) blob(g, range(rnd, 0.05, 0.95) * s, s - range(rnd, 2, 10), range(rnd, 10, 26), range(rnd, 5, 10), 0, pick(rnd, ['#8a4a22', '#a85a2a', '#6e3a1c']), 0.35, 0.25);
+  g.fillStyle = lin(g, 0, s * 0.86, 0, s, [[0, '#7a4428', 0], [1, '#7a4428', 0.3]]); g.fillRect(0, s * 0.86, s, s * 0.14);
+  // a cream highlight along the top bevel, the soft bevel round the rest
+  bevel(g, 0, 0, s, s, base, 10, 0.4, 0.6);
+  g.fillStyle = lin(g, 0, 0, 0, 5, [[0, '#f0e4c0', 0.55], [1, '#f0e4c0', 0]]); g.fillRect(0, 0, s, 5);
+  line(g, [[3, 1.5], [s * 0.6, 1.5]], 1.2, '#fff4d8', 0.6);
 }
 register('loot_iron', {
   family: F, size: 256, note: "the Rusty Safe's body: green-black lacquered iron, rivet border, gold pinstripe, worn edges, rust runs",
@@ -441,7 +481,7 @@ register('loot_iron', {
 register('loot_safe', {
   family: F, size: 256, note: "the safe door: pinstripes, corner scrolls, the maker's plate, the dial's number ring",
   paint(g, s, rnd, h, cv) {
-    ironPlate(g, s, rnd, { base: '#34403a', door: true });
+    ironPlate(g, s, rnd, { base: '#34403a', door: true, hinges: [[s * 0.12, s * 0.2], [s * 0.15, s * 0.83]] });
     for (const [x, y, sx, sy] of [[44, 44, 1, 1], [s - 44, 44, -1, 1], [44, s - 44, 1, -1], [s - 44, s - 44, -1, -1]]) {
       const pts = []; for (let k = 0; k <= 14; k++) { const a = k / 14 * TAU * 0.85, r = 3 + k * 0.9; pts.push([x + sx * Math.cos(a) * r, y + sy * Math.sin(a) * r]); }
       line(g, pts, 2.2, '#2a1a10', 0.5); line(g, pts.map(([u, v]) => [u - 0.7, v - 0.7]), 1.6, '#d8b060', 0.85);
@@ -475,7 +515,7 @@ register('loot_safeback', {
     // an arrow pointing the wrong way, and rust running back over the paint
     stroke(g, [[s * 0.77, s * 0.32], [s * 0.77, s * 0.7]], 5, 5, '#c8bf9e', 0.6);
     poly(g, [[s * 0.72, s * 0.32], [s * 0.82, s * 0.32], [s * 0.77, s * 0.24]]); g.save(); g.globalAlpha = 0.6; g.fillStyle = '#c8bf9e'; g.fill(); g.restore();
-    for (let i = 0; i < 6; i++) run(g, range(rnd, s * 0.2, s * 0.8), range(rnd, s * 0.25, s * 0.45), range(rnd, 14, 40), range(rnd, 2, 3.5), '#8a4a22', 0.3, rnd);
+    for (let i = 0; i < 2; i++) rustStain(g, range(rnd, s * 0.25, s * 0.75), range(rnd, s * 0.3, s * 0.5), range(rnd, 6, 10), range(rnd, 20, 40), rnd, 0.8);
     glaze(g, s, s, '#ffe8c0', 0.08); blurTile(cv, 0.45);
   },
 });
@@ -564,39 +604,87 @@ register('loot_bronze', {
 });
 
 register('loot_gilt', {
-  family: F, w: 256, h: 128, note: "the trophy's gilt (u wraps; v up the cup's profile): foot, stem knot, a warm bowl with a cream highlight band, a bright lip, an umber inside",
+  family: F, w: 256, h: 128, note: "the trophy's gilt (u wraps, front at the middle; v up the cup's profile): foot, stem knot, a bowl with a bright cream band under the lip and a dark reflected band at the belly, crisp dents, a bowling pin engraved on the front, an umber inside",
   paint(g, w, rnd, h, cv) {
     const Y = v => (1 - v) * h;
     g.fillStyle = lin(g, 0, Y(1), 0, Y(0), [
       [0, '#3a2408'], [0.1, '#5a3a10'], [0.14, '#8a6020'],      // inside (v 1 → 0.86): umber shadow
-      [0.15, '#fff0b0'], [0.18, '#e8c060'],                     // the lip
-      [0.25, '#b8862e'], [0.34, '#fff0b0'], [0.4, '#f0d070'],   // the upper bowl's highlight band
-      [0.5, '#c8902e'], [0.6, '#a86a20'], [0.66, '#d8a040'],    // warm reflected mid, the bowl's underside
+      [0.15, '#fff6c8'], [0.18, '#e8c060'],                     // the lip
+      [0.22, '#fff0b8'], [0.27, '#fff0b8'], [0.32, '#e8c060'],  // the cream band under the lip
+      [0.4, '#c8902e'], [0.46, '#6a4a18'], [0.52, '#6a4a18'],   // the dark reflected band at the belly
+      [0.58, '#b8862e'], [0.64, '#e8b850'],                     // the bowl's lit underside
       [0.72, '#8a5a18'], [0.76, '#f0d070'], [0.8, '#a8782a'],   // stem knot
       [0.86, '#7a5418'], [0.9, '#f8e090'], [0.94, '#b8862e'], [1, '#6a4814'],  // the foot
     ]);
     g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 26; i++) { const x = rnd() * w, y = Y(range(rnd, 0.1, 0.84)), rx = range(rnd, 4, 14), ry = range(rnd, 8, 24), c = pick(rnd, ['#fff0b0', '#8a5a18', '#e0b050']); wrapX(w, x, rx, X => blob(g, X, y, rx, ry, 0, c, 0.22, 0.2)); }
-    for (let i = 0; i < 8; i++) { const x = rnd() * w, y = Y(range(rnd, 0.3, 0.8)); wrapX(w, x, 8, X => { blob(g, X + 1, y + 1, 4, 3, 0, '#4a3008', 0.35, 0.3); blob(g, X - 1, y - 1, 3, 2, 0, '#fff4c8', 0.4, 0.3); }); }
-    blurTile(cv, 0.6);
+    // the light round the cup: lit on the left of the front, darker on the right
+    g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = lin(g, 0, 0, w, 0, [[0, '#c8b090'], [0.25, '#ffffff'], [0.45, '#fff8ec'], [0.75, '#a89070'], [1, '#c8b090']]); g.fillRect(0, 0, w, Y(0.15)); g.restore();
+    for (let i = 0; i < 6; i++) { const x = range(rnd, 0.18, 0.36) * w; line(g, [[x, Y(0.84)], [x + range(rnd, -2, 2), Y(0.6)]], range(rnd, 1.5, 3), '#fffbe0', 0.5); }
+    for (let i = 0; i < 26; i++) { const x = rnd() * w, y = Y(range(rnd, 0.2, 0.84)), L = range(rnd, 10, 30); wrapX(w, x, L, X => line(g, [[X, y], [X + L, y + range(rnd, -1, 1)]], 0.7, rnd() < 0.5 ? '#fff0b8' : '#6a4a18', 0.2)); }
+    // crisp dents: a short dark edge under a lit one
+    for (let i = 0; i < 9; i++) { const x = rnd() * w, y = Y(range(rnd, 0.25, 0.8)), r = range(rnd, 2.5, 4.5); wrapX(w, x, 8, X => { line(g, [[X - r, y], [X, y - r * 0.6], [X + r, y]], 1.3, '#4a3008', 0.6); line(g, [[X - r, y + 1.4], [X, y - r * 0.6 + 1.4], [X + r, y + 1.4]], 1, '#fff4c8', 0.7); }); }
+    // a bowling pin engraved on the front of the bowl
+    const px = w / 2, py = Y(0.6), pin = [];
+    for (let k = 0; k <= 20; k++) { const t = k / 20, y = py - 15 + t * 30, r = 2 + 2.6 * Math.exp(-(((t - 0.18) / 0.12) ** 2)) * 0.6 + 4.2 * Math.exp(-(((t - 0.72) / 0.22) ** 2)) - (t > 0.32 && t < 0.45 ? 0.8 : 0); pin.push([px + r, y]); }
+    const outlineP = [...pin, ...pin.slice().reverse().map(([x, y]) => [2 * px - x, y])];
+    line(g, [...outlineP, outlineP[0]].map(([x, y]) => [x + 0.7, y + 0.8]), 1.1, '#fff4c8', 0.7);
+    line(g, [...outlineP, outlineP[0]], 1.1, '#4a3008', 0.85);
+    line(g, [[px - 3, py - 5], [px + 3, py - 5]], 1, '#4a3008', 0.8); line(g, [[px - 3, py - 3], [px + 3, py - 3]], 1, '#4a3008', 0.8);
+    blurTile(cv, 0.4);
   },
 });
 
 register('loot_steel', {
-  family: F, size: 128, note: "the toaster's nickel (box faces): warm nickel, a broad cream highlight upper left, cool shade low, dark rims, soft dents, brushing",
-  paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#a8a8a0');
-    g.fillStyle = lin(g, 0, 0, s * 0.5, s, [[0, '#e8e0c8'], [0.3, '#c8c4b4'], [0.55, '#a8a8a0'], [0.85, '#7a7e86'], [1, '#5a6070']]); g.fillRect(0, 0, s, s);
-    blob(g, s * 0.3, s * 0.26, s * 0.42, s * 0.16, -0.35, '#f4ecd4', 0.55, 0.3);
-    for (let i = 0; i < 70; i++) { const y = rnd() * s, x = rnd() * s, L = range(rnd, 10, 50); line(g, [[x, y], [x + L, y + (rnd() - 0.5)]], range(rnd, 0.5, 1), rnd() < 0.5 ? '#f0ead8' : '#6a6e78', 0.16); }
-    for (let i = 0; i < 4; i++) { const x = range(rnd, 0.2, 0.8) * s, y = range(rnd, 0.3, 0.8) * s, r = range(rnd, 5, 10); blob(g, x - r * 0.3, y - r * 0.3, r, r * 0.7, 0, '#fff4dc', 0.3, 0.3); blob(g, x + r * 0.35, y + r * 0.35, r, r * 0.7, 0, '#4a4e58', 0.3, 0.3); }
-    for (let i = 0; i < 5; i++) blob(g, rnd() * s, range(rnd, 0.4, 0.9) * s, range(rnd, 4, 10), range(rnd, 3, 6), rnd() * 3, '#8a8070', 0.18, 0.3);
-    g.save(); g.strokeStyle = rgba('#4a4e58', 0.7); g.lineWidth = 3; g.strokeRect(1.5, 1.5, s - 3, s - 3); g.restore();
-    bevel(g, 0, 0, s, s, '#a8a8a0', 9, 0.35, 0.5);
-    blurTile(cv, 0.6);
+  family: F, w: 128, h: 192, note: "the toaster's chrome, painted as a reflection: the top 128 px are the sides (cream sky, a soft horizon, the warm brown ground, cool blue-gray low, a bright streak near the left edge, dark rims); the bottom 64 px the top face",
+  paint(g, w, rnd, h, cv) {
+    const s = 128;
+    // the sides: sky → horizon → ground → cool shade
+    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#f6ecd0'], [0.2, '#f2e6c8'], [0.34, '#d8ccb0'], [0.4, '#b8b0a0'], [0.43, '#7e6a50'], [0.52, '#6e5c44'], [0.64, '#8a7458'], [0.74, '#7a7468'], [0.86, '#5a6478'], [1, '#444c5e']]);
+    g.fillRect(0, 0, w, s);
+    // the horizon line, soft but definite, wavering a little; tree and hill shapes reflected in it
+    for (let i = 0; i < 9; i++) { const x = rnd() * w, r = range(rnd, 6, 16); wrapX(w, x, r, X => blob(g, X, s * 0.42, r, range(rnd, 2, 5), 0, '#5a4a36', 0.5, 0.4)); }
+    line(g, [[0, s * 0.415], [w * 0.4, s * 0.41], [w, s * 0.418]], 1.6, '#4a3c2c', 0.6);
+    line(g, [[0, s * 0.395], [w, s * 0.398]], 1.2, '#fff8e4', 0.6);
+    for (let i = 0; i < 40; i++) { const y = rnd() * s, x = rnd() * w, L = range(rnd, 10, 40); line(g, [[x, y], [x + L, y + (rnd() - 0.5)]], range(rnd, 0.5, 1), y < s * 0.4 ? '#fffaf0' : '#3e4656', 0.12); }
+    // the bright vertical streak near the left edge, a fainter one to its right
+    g.fillStyle = lin(g, 10, 0, 26, 0, [[0, '#fffaf0', 0], [0.35, '#fffaf0', 0.85], [0.65, '#fffaf0', 0.85], [1, '#fffaf0', 0]]); g.fillRect(10, 0, 16, s * 0.94);
+    g.fillStyle = lin(g, 36, 0, 42, 0, [[0, '#fffaf0', 0], [0.5, '#fffaf0', 0.4], [1, '#fffaf0', 0]]); g.fillRect(36, 0, 6, s * 0.9);
+    // a dark reflected band on the right where the room's corner shows
+    g.fillStyle = lin(g, w * 0.7, 0, w * 0.86, 0, [[0, '#2e3442', 0], [0.5, '#2e3442', 0.35], [1, '#2e3442', 0]]); g.fillRect(w * 0.7, 0, w * 0.16, s);
+    // dents: small, crisp, a lit edge over a dark one
+    for (let i = 0; i < 6; i++) { const x = range(rnd, 0.15, 0.85) * w, y = range(rnd, 0.15, 0.85) * s, r = range(rnd, 3, 6); line(g, [[x - r, y + r * 0.2], [x, y - r * 0.4], [x + r, y]], 1.2, '#2e3442', 0.5); line(g, [[x - r, y + r * 0.2 + 1.4], [x, y - r * 0.4 + 1.4], [x + r, y + 1.4]], 1, '#fffaf0', 0.55); }
+    for (let i = 0; i < 4; i++) blob(g, rnd() * w, range(rnd, 0.5, 0.95) * s, range(rnd, 4, 9), range(rnd, 2, 4), rnd() * 3, '#8a6a48', 0.22, 0.3);
+    // dark rims where the chrome turns over the bevels
+    g.save(); g.strokeStyle = rgba('#2a2e38', 0.75); g.lineWidth = 3; g.strokeRect(1.5, 1.5, w - 3, s - 3); g.restore();
+    line(g, [[3, 4], [w - 3, 4]], 1.4, '#fffaf0', 0.6);
+    // the top face: bright cream chrome with a soft reflected window and a dark rim
+    g.fillStyle = lin(g, 0, s, w, h, [[0, '#fff8e4'], [0.4, '#e8dcc0'], [0.75, '#b8b0a0'], [1, '#8a8478']]); g.fillRect(0, s, w, h - s);
+    g.save(); g.globalAlpha = 0.5; poly(g, [[16, s + 8], [52, s + 6], [44, h - 8], [10, h - 6]]); g.fillStyle = '#fffcf0'; g.fill(); g.restore();
+    line(g, [[0, s + 32], [w, s + 30]], 1.2, '#7a7060', 0.35);
+    g.save(); g.strokeStyle = rgba('#3a3a40', 0.6); g.lineWidth = 3; g.strokeRect(1.5, s + 1.5, w - 3, h - s - 3); g.restore();
+    blurTile(cv, 0.5);
   },
 });
-
+register('loot_bakelite', {
+  family: F, size: 64, note: "oxblood bakelite (u wraps; v up the knob's profile): knurled stripes, a lit band, a dark base",
+  paint(g, s, rnd, h, cv) {
+    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#d07a5a'], [0.25, '#b85a40'], [0.55, '#7a2a22'], [0.85, '#5a1c18'], [1, '#3a1210']]); g.fillRect(0, 0, s, s);
+    for (let k = 0; k < 24; k++) { const x = k / 24 * s; line(g, [[x, s * 0.35], [x, s]], 1.1, k % 2 ? '#3a1210' : '#c86a4a', 0.45); }
+    blob(g, s * 0.3, s * 0.2, 14, 6, 0, '#f0b090', 0.6, 0.3);
+    blurTile(cv, 0.4);
+  },
+});
+register('loot_toastplate', {
+  family: F, w: 128, h: 40, note: "the toaster's riveted brass maker's plate: TOASTMASTER 9000",
+  paint(g, w, rnd, h, cv) {
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#f8e49a'], [0.4, '#d8b058'], [1, '#8a6628']]); g.fillRect(0, 0, w, h);
+    molding(g, 1, 1, w - 2, h - 2, '#c8a050', 5);
+    letters(g, 'TOASTMASTER', w / 2, h * 0.42, 15, { rnd, jit: 0.03, fill: ['#5a3a14', '#3a2410', '#2a1808'], rim: '#fff0b8', lit: '#2a1808', shadow: 0, chip: 0.2, rough: 0.4, maxW: w - 30 });
+    letters(g, '9000', w / 2, h * 0.76, 10, { rnd, jit: 0.03, fill: ['#5a3a14', '#3a2410', '#2a1808'], rim: '#fff0b8', lit: '#2a1808', shadow: 0, chip: 0.1, rough: 0.3 });
+    for (const [x, y] of [[7, 7], [w - 7, 7], [7, h - 7], [w - 7, h - 7]]) rivet(g, x, y, 2.6, '#c8a050');
+    blurTile(cv, 0.3);
+  },
+});
 register('loot_red', {
   family: F, size: 128, note: "the slot machine's red-lacquered goblin steel: rivet border, chips to dark iron, rust runs",
   paint(g, s, rnd, h, cv) {
@@ -620,8 +708,8 @@ register('loot_porcelain', {
   paint(g, s, rnd, h, cv) {
     const Y = y => (1 - vaseT(y)) * s;
     const B1 = '#21408a', B2 = '#3558a8', BW = '#7d94cc', BD = '#172e66', CO = '#2a4a9a';
-    fill(g, s, s, '#eef0ea');
-    mottle(g, s, rnd, { colors: ['#f8f8f2', '#e2e6e4', '#ece8dc', '#e6ecf0'], count: 30, rmin: 30, rmax: 90, alpha: 0.4, hard: 0.1 });
+    fill(g, s, s, '#f2ecdc');
+    mottle(g, s, rnd, { colors: ['#faf6ea', '#e8e4d6', '#efe6d0', '#ece8e0'], count: 30, rmin: 30, rmax: 90, alpha: 0.4, hard: 0.1 });
     const band = (y, w = 2.2, c = B1) => line(g, [[-2, y], [s + 2, y]], w, c, 0.92);
     const yFoot = Y(-0.352);
     rect(g, 0, yFoot, s, s - yFoot, '#cdb48e');
@@ -629,25 +717,28 @@ register('loot_porcelain', {
     band(yFoot - 1, 3, B1);
     // lotus panels, in solid cobalt like the shoulder
     const l0 = Y(-0.33), l1 = Y(-0.2);
-    rect(g, 0, l1, s, l0 - l1, '#e8ecf0');
+    rect(g, 0, l1, s, l0 - l1, '#efe8d8');
     band(l0, 2.6); band(l0 - 4, 1.2);
     const nP = 10, PW = s / nP;
     for (let i = 0; i < nP; i++) {
-      const cx = (i + 0.5) * PW;
-      const petal = (X) => { g.beginPath(); g.moveTo(X - PW * 0.42, l0 - 5); g.quadraticCurveTo(X - PW * 0.48, l1 + 10, X, l1 + 2); g.quadraticCurveTo(X + PW * 0.48, l1 + 10, X + PW * 0.42, l0 - 5); };
+      const cx = (i + 0.5) * PW + range(rnd, -2, 2), pw = PW * range(rnd, 0.85, 1.15), lean = range(rnd, -0.15, 0.15) * (l0 - l1);
+      const petal = (X) => { g.beginPath(); g.moveTo(X - pw * 0.42, l0 - 5); g.quadraticCurveTo(X - pw * 0.48 + lean * 0.5, l1 + 10, X + lean, l1 + 2); g.quadraticCurveTo(X + pw * 0.48 + lean * 0.5, l1 + 10, X + pw * 0.42, l0 - 5); };
       wrapX(s, cx, PW, X => {
         petal(X); g.save(); g.fillStyle = rgba(CO, 0.88); g.fill(); g.lineWidth = 2; g.strokeStyle = rgba(BD, 0.9); g.stroke(); g.restore();
         petal(X); g.save(); g.clip(); blob(g, X - PW * 0.15, l1 + (l0 - l1) * 0.4, PW * 0.18, (l0 - l1) * 0.3, 0, BW, 0.45, 0.3); g.restore();
-        line(g, [[X, l0 - 7], [X, l1 + 9]], 1.4, '#e8ecf0', 0.75);
-        blob(g, X, l1 + 9, 3, 3, 0, '#e8ecf0', 0.8, 0.5);
+        line(g, [[X, l0 - 7], [X + lean * 0.8, l1 + 9]], 1.4, '#f2ecdc', 0.75);
+        blob(g, X + lean * 0.8, l1 + 9, 3, 3, 0, '#f2ecdc', 0.8, 0.5);
       });
     }
     band(l1, 2.4); band(l1 + 4, 1.1);
     // the main field: a peony scroll
     const m0 = Y(-0.17), m1 = Y(0.1);
-    const vine = x => (m0 + m1) / 2 + Math.sin(x / s * TAU * 2 + 0.6) * (m0 - m1) * 0.28;
+    const vph = [rnd() * TAU, rnd() * TAU, rnd() * TAU];
+    const vine = x => (m0 + m1) / 2 + (m0 - m1) * (0.24 * Math.sin(x / s * TAU * 2 + 0.6) + 0.07 * Math.sin(x / s * TAU * 3 + vph[0]) + 0.04 * Math.sin(x / s * TAU * 5 + vph[1]));
     const vp = []; for (let x = -10; x <= s + 10; x += 4) vp.push([x, vine(x)]);
-    line(g, vp, 4, B1, 0.85); line(g, vp.map(([x, y]) => [x, y + Math.sin(x / 9) * 3]), 1.4, B2, 0.6); line(g, vp.map(([x, y]) => [x, y + 1]), 1, BD, 0.5);
+    for (let i = 0; i < vp.length - 1; i++) { const t = 0.5 + 0.5 * Math.sin(i * 0.37 + vph[2]); line(g, [vp[i], vp[i + 1]], 3 + t * 2.4, mix('#2a4aa0', '#6a8ad0', 1 - t), 0.85); }
+    line(g, vp.map(([x, y]) => [x, y + 1.2]), 1, BD, 0.45);
+    for (let i = 0; i < 9; i++) { const x = rnd() * s; wrapX(s, x, 10, X => blob(g, X, vine(X) + range(rnd, -2, 2), range(rnd, 4, 9), 2.5, 0, '#1a3080', 0.35, 0.4)); }
     for (let i = 0; i < 34; i++) {
       const x = rnd() * s, y = vine(x), a = (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.5, 1.4), L = range(rnd, 12, 20);
       wrapX(s, x, 20, X => {
@@ -655,8 +746,9 @@ register('loot_porcelain', {
         g.strokeStyle = rgba(BD, 0.8); g.lineWidth = 0.8; g.beginPath(); g.moveTo(0, 0); g.lineTo(L, 0); g.stroke(); g.restore();
       });
     }
-    for (let i = 0; i < 4; i++) {
-      const x = (i + 0.3 + rnd() * 0.3) * s / 4, y = vine(x) + (i % 2 ? -12 : 12), R = range(rnd, 24, 28);
+    const fl = [[0.12, 27], [0.37, 15], [0.55, 21], [0.8, 26], [0.94, 13]];
+    for (const [i, [fx, R0]] of fl.entries()) {
+      const x = (fx + range(rnd, -0.03, 0.03)) * s, y = vine(x) + (i % 2 ? -10 : 10) * (R0 / 24), R = R0 * range(rnd, 0.92, 1.08);
       wrapX(s, x, R * 1.4, X => {
         blob(g, X, y, R * 1.3, R * 1.1, 0, BW, 0.35, 0.3);
         for (let k = 0; k < 9; k++) {
@@ -703,7 +795,14 @@ register('loot_porcelain', {
     const wv = []; for (let x = -4; x <= s + 4; x += 3) wv.push([x, p0 * 0.5 + Math.sin(x / s * TAU * 9) * p0 * 0.18]);
     line(g, wv, 1.6, '#e8ecf0', 0.85);
     mottle(g, s, rnd, { colors: [BW], count: 14, rmin: 10, rmax: 30, alpha: 0.08, hard: 0.2 });
-    cracks(g, s, rnd, { color: '#8a9498', count: 10, len: [16, 50], width: [0.5, 0.9], alpha: 0.12 });
+    g.save(); g.globalCompositeOperation = 'multiply';
+    g.fillStyle = lin(g, 0, 0, s, 0, [[0, '#d8dce4'], [0.12, '#ffffff'], [0.36, '#ffffff'], [0.5, '#f4f2ee'], [0.68, '#c8ced8'], [0.8, '#b8c0cc'], [0.92, '#c8ced8'], [1, '#d8dce4']]); g.fillRect(0, 0, s, s);
+    g.restore();
+    g.save(); g.globalAlpha = 0.5; g.fillStyle = lin(g, s * 0.16, 0, s * 0.42, 0, [[0, '#fff8e8', 0], [0.5, '#fff8e8'], [1, '#fff8e8', 0]]); g.fillRect(s * 0.16, 0, s * 0.26, s); g.restore();
+    stroke(g, [[s * 0.27, Y(0.19)], [s * 0.285, Y(0.13)], [s * 0.3, Y(0.07)]], 5, 2, '#fffcf2', 0.85);
+    stroke(g, [[s * 0.26, Y(-0.12)], [s * 0.27, Y(-0.2)], [s * 0.275, Y(-0.26)]], 3, 1, '#fffcf2', 0.5);
+    // crackle: a fine net of hairlines in the glaze
+    for (let i = 0; i < 46; i++) { let x = rnd() * s, y = rnd() * s; const pts = [[x, y]]; for (let k = 0; k < 4; k++) { x += range(rnd, -9, 9); y += range(rnd, -9, 9); pts.push([x, y]); } line(g, pts, 0.6, '#9a907c', 0.16); }
     blurTile(cv, 0.6);
   },
 });
@@ -733,7 +832,15 @@ register('loot_sign', {
     clip(g, () => poly(g, f), () => {
       g.globalAlpha = 0.9; g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#305c40'], [1, '#22462e']]); g.fillRect(0, 0, w, h); g.globalAlpha = 1;
       mottle(g, w, rnd, { colors: ['#3a6a48', '#1e3e28', '#2a5236'], count: 22, rmin: 20, rmax: 60, alpha: 0.3, hard: 0.1 });
+      g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#7aa080', 0.4], [0.45, '#5a8a68', 0.15], [0.6, '#5a8a68', 0]]); g.fillRect(0, 0, w, h);   // sun-faded up top
+      // the wood's grain showing through the paint, the plank seams cutting across it
+      g.save(); g.globalCompositeOperation = 'multiply'; grain(g, 0, 0, w, h, rnd, { dark: ['#4a5a40', '#3a4a34'], lite: ['#9ab08a'], n: 40, amp: 2, knots: 2, alpha: 0.35 }); g.restore();
+      for (const y of [92, 190]) { const pts = []; for (let x = -4; x <= w + 4; x += 16) pts.push([x, y + range(rnd, -0.8, 0.8)]); line(g, pts.map(([a, b]) => [a, b + 1.5]), 2.4, '#4a6a50', 0.6); line(g, pts, 3, '#142418', 0.85); }
       for (let i = 0; i < 30; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 3, 12), range(rnd, 2, 5), 0, '#6a4428', 0.7, 0.6);
+      // the paint chipped back to bare wood along the edges, the corners worst
+      const edgeP = offsetPoly(out, -26);
+      for (let i = 0; i < 46; i++) { const k = Math.floor(rnd() * edgeP.length), [ex, ey] = edgeP[k], r = range(rnd, 3, 8); chips(g, rnd, 1, ex - 3, ey - 3, 6, 6, '#8a6a44', r * 0.6, r, 0.95); blob(g, ex - r * 0.3, ey - r * 0.4, r * 0.5, r * 0.3, 0, '#b89060', 0.6, 0.4); }
+      for (const [cx2, cy2] of [[60, h - 40], [w - 60, h - 40], [70, 130], [w - 70, 130]]) for (let k = 0; k < 4; k++) { const r = range(rnd, 4, 9); chips(g, rnd, 1, cx2 + range(rnd, -14, 14), cy2 + range(rnd, -10, 10), 4, 4, '#8a6a44', r * 0.6, r, 0.9); }
       // a hand-drawn gold pinstripe inside
       const pin = offsetPoly(out, -34).map(([x, y]) => [x + (rnd() - 0.5) * 1.4, y + (rnd() - 0.5) * 1.4]);
       line(g, [...pin, pin[0]], 2, '#d8b060', 0.75);
@@ -933,20 +1040,36 @@ register('loot_bulbs', {
 // ---- the CRT ---------------------------------------------------------------------------------------------
 
 register('loot_screen', {
-  family: F, size: 128, note: 'CRT glass: smoky green-gray, curved, a window reflection and a faint glow of a picture',
+  family: F, size: 128, note: 'CRT glass: convex smoky green-gray, a goblin grinning faintly out of the test card, a cream window reflection with two muntins, soft scanlines',
   paint(g, s, rnd, h, cv) {
-    g.fillStyle = radial(g, s * 0.5, s * 0.5, 4, s * 0.75, [[0, '#6e8c86'], [0.55, '#4a6662'], [0.9, '#2e4040'], [1, '#1e2a2a']]); g.fillRect(0, 0, s, s);
-    blob(g, s * 0.52, s * 0.6, 22, 30, 0, '#7aa098', 0.22, 0.3);
-    blob(g, s * 0.52, s * 0.34, 12, 18, 0, '#9a6a60', 0.18, 0.3);
-    blob(g, s * 0.52, s * 0.18, 10, 12, 0, '#a85a4a', 0.16, 0.3);
-    for (let y = 2; y < s; y += 3) line(g, [[0, y], [s, y]], 1, '#0e1414', 0.08);
-    for (let i = 0; i < 6; i++) { const y = rnd() * s; line(g, [[rnd() * s * 0.3, y], [s * 0.7 + rnd() * s * 0.3, y]], range(rnd, 2, 5), '#b8e0d8', 0.08); }
-    g.save(); g.globalAlpha = 0.28; g.fillStyle = '#e8f4f0'; poly(g, [[s * 0.14, s * 0.14], [s * 0.42, s * 0.12], [s * 0.36, s * 0.42], [s * 0.1, s * 0.44]]); g.fill(); g.restore();
-    line(g, [[s * 0.25, s * 0.13], [s * 0.24, s * 0.43]], 2.5, '#22302e', 0.25);
-    const arc = []; for (let k = 0; k <= 10; k++) { const a = Math.PI * (1.05 + k / 10 * 0.4); arc.push([s * 0.5 + Math.cos(a) * s * 0.4, s * 0.55 + Math.sin(a) * s * 0.42]); }
-    line(g, arc, 2, '#f4fffc', 0.5);
-    vignette(g, 0, 0, s, s, '#0a1010', 0.4, 0.08);
-    blurTile(cv, 0.6);
+    g.fillStyle = radial(g, s * 0.44, s * 0.42, 4, s * 0.74, [[0, '#94b2a8'], [0.3, '#7a9a92'], [0.62, '#5e7e78'], [0.86, '#40605c'], [1, '#2e4442']]); g.fillRect(0, 0, s, s);
+    // the picture, faint under the glass: a test-card circle and a grinning goblin
+    g.save(); g.globalAlpha = 0.3;
+    g.strokeStyle = '#c8d8c0'; g.lineWidth = 2; g.beginPath(); g.arc(s / 2, s * 0.52, s * 0.36, 0, TAU); g.stroke();
+    line(g, [[s * 0.1, s * 0.52], [s * 0.9, s * 0.52]], 1.4, '#c8d8c0'); line(g, [[s / 2, s * 0.12], [s / 2, s * 0.92]], 1.4, '#c8d8c0');
+    g.restore();
+    g.save(); g.globalAlpha = 0.34;
+    const fx = s * 0.52, fy = s * 0.56;
+    for (const sd of [-1, 1]) { poly(g, [[fx + sd * 16, fy - 10], [fx + sd * 44, fy - 24], [fx + sd * 22, fy + 2]]); g.fillStyle = '#6a8a58'; g.fill(); }
+    g.fillStyle = radial(g, fx - 6, fy - 8, 2, 26, [[0, '#a8b878'], [0.6, '#7a9a5a'], [1, '#4a6a48']]); g.beginPath(); g.ellipse(fx, fy, 22, 24, 0, 0, TAU); g.fill();
+    for (const sd of [-1, 1]) { ellipse(g, fx + sd * 8, fy - 6, 4.5, 3.4, 0, '#f0e8a0'); ellipse(g, fx + sd * 8, fy - 6, 2, 2.6, 0, '#2a2a20'); }
+    g.beginPath(); g.moveTo(fx - 13, fy + 6); g.quadraticCurveTo(fx, fy + 18, fx + 13, fy + 6); g.quadraticCurveTo(fx, fy + 11, fx - 13, fy + 6); g.fillStyle = '#2a2a20'; g.fill();
+    for (let k = -2; k <= 2; k++) rect(g, fx + k * 4.4 - 1.6, fy + 8 + Math.abs(k) * -0.8, 3.2, 3, '#f0e8c8');
+    stroke(g, [[fx - 2, fy - 2], [fx + 1, fy + 3], [fx - 1, fy + 4]], 3, 2, '#4a6a40');
+    g.restore();
+    // soft scanlines and a little static in bands
+    for (let y = 1; y < s; y += 3) line(g, [[0, y], [s, y]], 1, '#1a2624', 0.06);
+    for (let i = 0; i < 5; i++) { const y = rnd() * s; line(g, [[rnd() * s * 0.3, y], [s * 0.7 + rnd() * s * 0.3, y]], range(rnd, 2, 4), '#c8e8e0', 0.07); }
+    // the convex glass: a darker rim, a lit lower-right edge, a cream window reflected top left
+    g.save(); g.globalCompositeOperation = 'multiply'; g.fillStyle = radial(g, s * 0.46, s * 0.44, s * 0.3, s * 0.75, [[0, '#ffffff'], [1, '#6a8480']]); g.fillRect(0, 0, s, s); g.restore();
+    const arc = []; for (let k = 0; k <= 12; k++) { const a = 0.15 + k / 12 * 1.3; arc.push([s * 0.48 + Math.cos(a) * s * 0.42, s * 0.48 + Math.sin(a) * s * 0.42]); }
+    stroke(g, arc, 2, 5, '#cfe8e0', 0.35);
+    const win = [[s * 0.13, s * 0.12], [s * 0.45, s * 0.1], [s * 0.4, s * 0.4], [s * 0.1, s * 0.43]];
+    g.save(); g.globalAlpha = 0.45; poly(g, win); g.fillStyle = lin(g, s * 0.1, s * 0.1, s * 0.42, s * 0.42, [[0, '#fff8e4'], [1, '#e8eedc']]); g.fill(); g.restore();
+    line(g, [[s * 0.29, s * 0.11], [s * 0.255, s * 0.415]], 2.6, '#4a6460', 0.5);
+    line(g, [[s * 0.115, s * 0.27], [s * 0.425, s * 0.25]], 2.6, '#4a6460', 0.5);
+    blob(g, s * 0.2, s * 0.18, 6, 4, -0.3, '#ffffff', 0.5, 0.5);
+    blurTile(cv, 0.5);
   },
 });
 
@@ -963,7 +1086,13 @@ register('loot_tvfront', {
     clip(g, () => { g.beginPath(); g.roundRect(X0 - 7, Y0 - 7, X1 - X0 + 14, Y1 - Y0 + 14, 17); }, () => {
       g.fillStyle = lin(g, X0, Y0, X1, Y1, [[0, '#f8e49a'], [0.35, '#c8a050'], [0.7, '#8a6628'], [1, '#5a3a14']]); g.fillRect(X0 - 8, Y0 - 8, X1 - X0 + 16, Y1 - Y0 + 16);
     });
-    rrect(g, X0, Y0, X1 - X0, Y1 - Y0, 12, '#141012');
+    // the recess: warm dark bakelite, its top-left inner lip in shadow, the lower-right lip catching the light
+    rrect(g, X0, Y0, X1 - X0, Y1 - Y0, 12, '#3a2a1e');
+    clip(g, () => { g.beginPath(); g.roundRect(X0, Y0, X1 - X0, Y1 - Y0, 12); }, () => {
+      g.fillStyle = lin(g, X0, Y0, X0 + 14, Y0 + 14, [[0, '#1e1610'], [1, '#1e1610', 0]]); g.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+      g.fillStyle = lin(g, X1, Y1, X1 - 7, Y1 - 7, [[0, '#7a5c40'], [0.6, '#6a5038'], [1, '#6a5038', 0]]); g.fillRect(X0, Y0, X1 - X0, Y1 - Y0);
+      for (let i = 0; i < 8; i++) blob(g, range(rnd, X0, X1), range(rnd, Y0, Y1), range(rnd, 6, 16), range(rnd, 4, 10), 0, pick(rnd, ['#4a3828', '#2e2218']), 0.3, 0.3);
+    });
     const px0 = w * 0.75, px1 = w * 0.96;
     rrect(g, px0, h * 0.06, px1 - px0, h * 0.34, 5, '#b08a40');
     molding(g, px0, h * 0.06, px1 - px0, h * 0.34, '#c8a050', 4);
@@ -998,7 +1127,7 @@ register('loot_tvback', {
       line(g, [[x + sw / 2 + 0.5, y0 + 2], [x + sw / 2 + 0.5, y1 - 1]], 1, '#8a6a48', 0.5);
     }
     // the brass plate
-    const bx = w * 0.5 - 62, by = h * 0.62, bw = 124, bh = 40;
+    const bx = w * 0.12, by = h * 0.58, bw = 104, bh = 40;
     rect(g, bx + 2, by + 3, bw, bh, '#140c08', 0.45);
     rect(g, bx, by, bw, bh, '#a88438'); molding(g, bx, by, bw, bh, '#c8a050', 4);
     letters(g, 'SLOPTRON', bx + bw / 2, by + 13, 11, { rnd, jit: 0.03, fill: ['#6a4818', '#4a2e10', '#2a1a08'], rim: '#f8e4a0', lit: '#3a2410', shadow: 0, chip: 0.2, rough: 0.4 });
@@ -1006,7 +1135,7 @@ register('loot_tvback', {
     for (const sx of [bx + 7, bx + bw - 7]) rivet(g, sx, by + bh / 2, 2.6, '#c8a050');
     for (const [x, y] of [[10, 10], [w - 10, 10], [10, h - 10], [w - 10, h - 10]]) { rivet(g, x, y, 3.6, '#8a8a84'); line(g, [[x - 2.2, y - 2.2], [x + 2.2, y + 2.2]], 1, '#2a2a2a', 0.8); }
     // a stamped inspection mark
-    g.save(); g.translate(w * 0.84, h * 0.66); g.rotate(-0.2); g.strokeStyle = rgba('#8a2a1e', 0.55); g.lineWidth = 2; g.beginPath(); g.arc(0, 0, 13, 0, TAU); g.stroke();
+    g.save(); g.translate(w * 0.86, h * 0.86); g.rotate(-0.2); g.strokeStyle = rgba('#8a2a1e', 0.55); g.lineWidth = 2; g.beginPath(); g.arc(0, 0, 13, 0, TAU); g.stroke();
     g.font = `bold 8px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = rgba('#8a2a1e', 0.55); g.fillText('No.7', 0, 1); g.restore();
     glaze(g, w, h, '#ffd8a8', 0.08);
     blurTile(cv, 0.4);
@@ -1083,32 +1212,54 @@ register('loot_bulb', {
 // ---- the gnome ------------------------------------------------------------------------------------------
 
 register('loot_gnomehat', {
-  family: F, size: 128, note: "the gnome's felt hat (u wraps, front at the middle; v brim → tip): fold creases where it flops, a dark stitched patch",
+  family: F, size: 128, note: "the gnome's felt hat (u wraps, front at the middle; v brim → tip; a pixel is ~3× taller in v than it is wide): lit felt on the left, purple shade on the right, broad folds up to the flop, an ochre patch with big cross-stitches, the worn brim roll at the bottom",
   paint(g, s, rnd, h, cv) {
-    const Y = v => (1 - v) * s;
-    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#7a2620'], [0.4, '#9a3228'], [0.85, '#a83a2e'], [1, '#6a201a']]); g.fillRect(0, 0, s, s);
-    for (let i = 0; i < 26; i++) { const x = rnd() * s, y = rnd() * s, rx = range(rnd, 5, 14), ry = range(rnd, 8, 22), c = pick(rnd, ['#b84838', '#7a221c', '#a8382e', '#8a2a22']); wrap(s, x, y, ry, (X, Yy) => blob(g, X, Yy, rx, ry, 0, c, 0.32, 0.15)); }
-    for (let i = 0; i < 60; i++) { const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 7), a = rnd() * TAU, c = rnd() < 0.5 ? '#c85a48' : '#5a1814'; wrapX(s, x, 8, X => line(g, [[X, y], [X + Math.cos(a) * L, y + Math.sin(a) * L]], 0.8, c, 0.3)); }
-    // the convex side of the bend is stretched and catches the light; the concave side folds
-    const ub = GNOME.bendU * s, uc = ((GNOME.bendU + 0.5) % 1) * s, yc = Y(GNOME.crease);
-    wrapX(s, uc, 40, X => blob(g, X, yc, 30, 9, 0, '#d86a54', 0.4, 0.2));
+    const Y = v => (1 - v) * s, K = 2.6;    // K: how much taller a world square is in this cell than it is wide
+    // value round the hat: mid at the back, lit on the left (u ~0.3), deep purple-red shade on the right (u ~0.75)
+    g.fillStyle = lin(g, 0, 0, s, 0, [[0, '#8a3028'], [0.14, '#a8402e'], [0.3, '#c8553a'], [0.42, '#b44a34'], [0.52, '#9a3428'], [0.64, '#7a2a28'], [0.76, '#5a1e2a'], [0.9, '#6a2228'], [1, '#8a3028']]);
+    g.fillRect(0, 0, s, s);
+    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#2a0a14', 0.25], [0.35, '#2a0a14', 0], [0.85, '#fff0d0', 0], [1, '#fff0d0', 0.08]]); g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 22; i++) { const x = rnd() * s, y = rnd() * s, rx = range(rnd, 4, 10), ry = rx * K * range(rnd, 0.7, 1.3), c = pick(rnd, ['#c85a40', '#7a221c', '#a8382e', '#8a2a22']); wrap(s, x, y, ry, (X, Yy) => blob(g, X, Yy, rx, ry, 0, c, 0.25, 0.15)); }
+    // felt nap: short soft strokes
+    for (let i = 0; i < 70; i++) { const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 6), a = rnd() * TAU, c = rnd() < 0.5 ? '#d8684c' : '#4a1418'; wrapX(s, x, 8, X => line(g, [[X, y], [X + Math.cos(a) * L, y + Math.sin(a) * L * K]], 0.9, c, 0.22)); }
+    // broad diagonal folds from the brim up to the flop: a lit ridge with its valley on the right
+    const yc = Y(GNOME.crease), ub = GNOME.bendU * s;
     for (let k = 0; k < 4; k++) {
-      const dy = (k - 1.5) * 5, L = range(rnd, 14, 24), x = ub + range(rnd, -8, 8);
-      wrapX(s, x, 30, X => {
-        const pts = []; for (let m = 0; m <= 6; m++) { const t = m / 6; pts.push([X - L + 2 * L * t, yc + dy + Math.sin(t * Math.PI) * 3]); }
-        stroke(g, pts.map(([a, b]) => [a, b - 1.6]), 2.4, 1, '#c85a48', 0.55); stroke(g, pts, 2.6, 1, '#4a1410', 0.6);
-      });
+      const x0 = s * (0.18 + k * 0.17) + range(rnd, -4, 4), x1 = ub + (k - 1.5) * 9;
+      wrapX(s, (x0 + x1) / 2, 60, () => {});
+      const pts = []; for (let m = 0; m <= 8; m++) { const t = m / 8; pts.push([x0 + (x1 - x0) * t + Math.sin(t * Math.PI) * 6, Y(0.08) + (yc - Y(0.08)) * t]); }
+      for (const off of [0, -s, s]) {
+        stroke(g, pts.map(([a, b]) => [a + off + 4, b]), 7, 3, '#4a1420', 0.45);
+        stroke(g, pts.map(([a, b]) => [a + off - 1, b]), 5, 2, '#e07858', 0.45);
+      }
     }
-    // the patch: a dark square of felt with heavy cream stitching (front, low)
-    g.save(); g.translate(s * 0.47, Y(0.33)); g.rotate(-0.22);
-    const pq = [[-10, -8], [9, -10], [10, 8], [-9, 9]];
-    poly(g, pq.map(([a, b]) => [a + 1.5, b + 2])); g.fillStyle = rgba('#2a0806', 0.45); g.fill();
-    poly(g, pq); g.fillStyle = '#6a2418'; g.fill();
-    blob(g, -3, -4, 8, 4, -0.2, '#8a3a2a', 0.6, 0.3); blob(g, 4, 5, 7, 3, 0, '#4a1810', 0.5, 0.3);
-    for (let k = 0; k < 4; k++) { const [ax, ay] = pq[k], [bx, by] = pq[(k + 1) % 4]; for (let m = 1; m < 5; m++) { const t = m / 5, x = ax + (bx - ax) * t, y = ay + (by - ay) * t, nx = -(by - ay) * 0.12, ny = (bx - ax) * 0.12; line(g, [[x - nx * 0.5 - 1.2, y - ny * 0.5 - 1.2], [x + nx * 0.5 + 1.2, y + ny * 0.5 + 1.2]], 1.3, '#c8b088', 0.85); } }
+    // the flop: the stretched outside of the bend catches the light, the inside crumples
+    const uc = ((GNOME.bendU + 0.5) % 1) * s;
+    wrapX(s, uc, 40, X => blob(g, X, yc, 28, 12, 0, '#e07a5a', 0.45, 0.2));
+    for (let k = 0; k < 4; k++) {
+      const dy = (k - 1.5) * 7, L = range(rnd, 12, 20), x = ub + range(rnd, -6, 6);
+      wrapX(s, x, 30, X => { const pts = []; for (let m = 0; m <= 6; m++) { const t = m / 6; pts.push([X - L + 2 * L * t, yc + dy + Math.sin(t * Math.PI) * 4]); } stroke(g, pts.map(([a, b]) => [a, b - 2.5]), 2.6, 1, '#d06a50', 0.5); stroke(g, pts, 3, 1, '#3a0e18', 0.6); });
+    }
+    // the patch: an ochre square of felt (square in the world, so tall here), big cross-stitches round it
+    g.save(); g.translate(s * 0.4, Y(0.34)); g.rotate(-0.06);
+    const pw = 9, ph = pw * K * 0.95, pq = [[-pw, -ph], [pw * 0.9, -ph * 1.04], [pw * 1.05, ph], [-pw * 0.95, ph * 0.96]];
+    poly(g, pq.map(([a, b]) => [a + 2, b + 3])); g.fillStyle = rgba('#2a0806', 0.5); g.fill();
+    poly(g, pq); g.fillStyle = lin(g, -pw, -ph, pw, ph, [[0, '#d8b060'], [0.5, '#b08a40'], [1, '#7a5a24']]); g.fill();
+    for (let i = 0; i < 6; i++) blob(g, range(rnd, -pw, pw), range(rnd, -ph, ph), 3, 5, 0, pick(rnd, ['#c89a48', '#8a6a2c']), 0.4, 0.3);
+    for (let k = 0; k < 4; k++) {
+      const [ax, ay] = pq[k], [bx, by] = pq[(k + 1) % 4], n = 3 + (k % 2);
+      for (let m = 0; m < n; m++) {
+        const t = (m + 0.5) / n, x = ax + (bx - ax) * t, y = ay + (by - ay) * t, ex = 2.6, ey = 2.6 * K;
+        line(g, [[x - ex + 0.6, y - ey + 1], [x + ex + 0.6, y + ey + 1]], 2, '#2a0806', 0.5); line(g, [[x + ex + 0.6, y - ey + 1], [x - ex + 0.6, y + ey + 1]], 2, '#2a0806', 0.5);
+        line(g, [[x - ex, y - ey], [x + ex, y + ey]], 1.7, '#f0e2b8', 0.95); line(g, [[x + ex, y - ey], [x - ex, y + ey]], 1.7, '#f0e2b8', 0.95);
+      }
+    }
     g.restore();
-    g.fillStyle = lin(g, 0, Y(0.12), 0, s, [[0, '#2a0806', 0], [1, '#2a0806', 0.45]]); g.fillRect(0, Y(0.12), s, s - Y(0.12));
-    glaze(g, s, s, '#ffd8b0', 0.08);
+    // the brim roll (the bottom 12%): worn lighter felt, lit on top, rubbed pale at the edge
+    const b0 = Y(0.12);
+    g.fillStyle = lin(g, 0, b0, 0, s, [[0, '#7a2a24'], [0.3, '#c86a50'], [0.55, '#d88a68'], [0.8, '#a8483a'], [1, '#5a1e22']]); g.fillRect(0, b0, s, s - b0);
+    for (let i = 0; i < 16; i++) { const x = rnd() * s; wrapX(s, x, 8, X => blob(g, X, range(rnd, b0 + 3, s - 3), range(rnd, 3, 7), 2, 0, '#e8b090', 0.35, 0.3)); }
+    glaze(g, s, s, '#ffd8b0', 0.06);
     blurTile(cv, 0.45);
   },
 });
@@ -1117,14 +1268,16 @@ register('loot_gnomecoat', {
   paint(g, w, rnd, h, cv) {
     const Y = v => (1 - v) * h;
     g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#4e6a92'], [0.35, '#3a5680'], [0.8, '#30486c'], [1, '#26385a']]); g.fillRect(0, 0, w, h);
+    g.fillStyle = lin(g, 0, 0, w, 0, [[0, '#2e3a5a', 0.3], [0.25, '#6a86b0', 0.25], [0.45, '#6a86b0', 0.12], [0.62, '#2e3a5a', 0.15], [0.78, '#1e2846', 0.4], [1, '#2e3a5a', 0.3]]); g.fillRect(0, 0, w, h);
     for (let i = 0; i < 20; i++) { const x = rnd() * w, y = rnd() * h, rx = range(rnd, 8, 20), ry = range(rnd, 10, 24), c = pick(rnd, ['#4a6690', '#2e4466', '#3e5a84']); wrapX(w, x, rx, X => blob(g, X, y, rx, ry, 0, c, 0.3, 0.15)); }
     // big folds in the skirt: a shaded valley with the lit ridge to its left, widening to the hem
     const yb = Y(GNOME.belt[0]);
     for (let i = 0; i < 9; i++) {
       const x = (i + 0.5) * w / 9 + range(rnd, -6, 6), spread = range(rnd, 6, 12);
       wrapX(w, x, 30, X => {
-        stroke(g, [[X, yb + 4], [X + spread * 0.3, (yb + h) / 2], [X + spread * 0.6, h + 2]], 2, range(rnd, 9, 14), '#26385a', 0.55);
-        stroke(g, [[X - 6, yb + 6], [X - 7 + spread * 0.2, (yb + h) / 2], [X - 9 + spread * 0.4, h + 2]], 3, range(rnd, 7, 10), '#5a76a0', 0.35);
+        stroke(g, [[X, yb + 4], [X + spread * 0.3, (yb + h) / 2], [X + spread * 0.6, h + 2]], 2, range(rnd, 9, 14), '#2e3a5a', 0.7);
+        stroke(g, [[X - 7, yb + 6], [X - 8 + spread * 0.2, (yb + h) / 2], [X - 10 + spread * 0.4, h + 2]], 3, range(rnd, 7, 10), '#6a86b0', 0.6);
+        stroke(g, [[X - 8, yb + 10], [X - 9 + spread * 0.2, (yb + h) / 2]], 1.5, 2.5, '#9ab0d0', 0.35);
       });
     }
     // the chest: softer folds toward the arms, light on the shoulders
@@ -1135,7 +1288,10 @@ register('loot_gnomecoat', {
     // the front opening above the belt and its buttons
     const fx = w / 2, yt = Y(GNOME.belt[1]);
     line(g, [[fx + 1, 0], [fx + 1.5, yt]], 2, '#1a2846', 0.7); line(g, [[fx - 0.8, 0], [fx - 0.4, yt]], 1, '#7a94b8', 0.6);
-    for (const y of [yt - 12, yt - 28]) { ellipse(g, fx + 0.8, y + 1, 3.2, 3.2, 0, '#141a30'); ellipse(g, fx, y, 3, 3, 0, '#c89a40'); blob(g, fx - 0.9, y - 0.9, 1.3, 1, 0, '#fff4c8', 1, 0.4); }
+    for (const y of [yt - 12, yt - 28]) {
+      ellipse(g, fx + 1, y + 1.4, 4.4, 4.4, 0, '#141a30', 0.8); ellipse(g, fx, y, 4, 4, 0, '#8a5a30'); ellipse(g, fx, y, 2.8, 2.8, 0, '#a87040');
+      ellipse(g, fx - 1, y, 0.7, 0.7, 0, '#3a2010'); ellipse(g, fx + 1, y, 0.7, 0.7, 0, '#3a2010'); blob(g, fx - 1.5, y - 1.6, 1.6, 1, 0, '#f0c890', 0.9, 0.4);
+    }
     // the belt and its brass buckle
     const by0 = Y(GNOME.belt[1]), by1 = Y(GNOME.belt[0]);
     rect(g, 0, by0, w, by1 - by0, '#4a2c18');
@@ -1234,11 +1390,12 @@ register('loot_gnomefur', {
 });
 
 register('loot_skin', {
-  family: F, size: 64, note: "rosy gnome skin (the bulbous nose, the ears), u wraps",
+  family: F, size: 64, note: "rosy gnome skin (the bulbous nose, the ears), u wraps: lit warm on top, ruddy in the middle, cool underneath",
   paint(g, s, rnd, h, cv) {
-    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#f0c09a'], [0.45, '#d8806a'], [1, '#9a5a5a']]); g.fillRect(0, 0, s, s);
-    g.fillStyle = lin(g, 0, 0, s, 0, [[0, '#9a6a6a', 0.3], [0.5, '#9a6a6a', 0], [1, '#9a6a6a', 0.3]]); g.fillRect(0, 0, s, s);
-    blob(g, s * 0.44, s * 0.36, 8, 5, 0, '#fff0d8', 0.6, 0.4);
+    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#f8c0a0'], [0.25, '#f0a080'], [0.55, '#d87060'], [0.85, '#a84a50'], [1, '#7a3a48']]); g.fillRect(0, 0, s, s);
+    g.fillStyle = lin(g, 0, 0, s, 0, [[0, '#8a4a5a', 0.3], [0.5, '#8a4a5a', 0], [1, '#8a4a5a', 0.3]]); g.fillRect(0, 0, s, s);
+    blob(g, s * 0.42, s * 0.3, 9, 5, 0, '#fff0d8', 0.7, 0.4);
+    for (let i = 0; i < 6; i++) ellipse(g, range(rnd, 8, 56), range(rnd, 24, 44), 1, 1, 0, '#a84a48', 0.5);
     blurTile(cv, 0.6);
   },
 });
@@ -1254,106 +1411,127 @@ register('loot_boot', {
 // ---- the velvet portrait -----------------------------------------------------------------------------
 
 register('loot_portrait', {
-  family: F, w: 384, h: 288, note: 'the Velvet Elvis, in big value blocks on black velvet: a black pompadour with blue rim light, sideburns, the sneer, the high white collar',
+  family: F, w: 384, h: 288, note: 'the Velvet Elvis on black-violet velvet: an airbrushed halo, a swept blue-black pompadour, five value steps on the face lit from the upper left, the sneer, a rhinestone collar; soft-edged, crisp glints on top',
   paint(g, w, rnd, h, cv) {
-    rect(g, 0, 0, w, h, '#141020');
-    g.fillStyle = radial(g, w * 0.5, h * 0.42, 20, w * 0.62, [[0, '#2a1e3a'], [0.55, '#1e1630'], [1, '#141020']]); g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 24; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 30, 90), range(rnd, 20, 60), rnd() * 3, pick(rnd, ['#1c1630', '#241a38', '#181226']), 0.4, 0.1);
-    blob(g, w * 0.57, h * 0.36, 125, 110, 0, '#28305e', 0.45, 0.1);
-    const cx = w / 2, cy = 126;
-    // --- the jumpsuit, the chest V, the great collar
-    poly(g, [[cx - 176, h + 4], [cx - 164, h - 48], [cx - 112, h - 76], [cx - 40, h - 86], [cx + 40, h - 86], [cx + 112, h - 76], [cx + 164, h - 48], [cx + 176, h + 4]]);
-    g.save(); g.fillStyle = lin(g, cx - 170, 0, cx + 170, 0, [[0, '#eeeae2'], [0.45, '#dcdce6'], [0.7, '#a8aec8'], [1, '#7a82a6']]); g.fill(); g.restore();
-    blob(g, cx - 100, h - 30, 40, 20, 0, '#fffaf0', 0.4, 0.3);
-    blob(g, cx + 110, h - 20, 40, 30, 0, '#5a6290', 0.4, 0.3);
-    poly(g, [[cx - 24, h - 94], [cx + 2, h + 2], [cx + 28, h - 94]]); g.save(); g.fillStyle = lin(g, cx - 24, 0, cx + 28, 0, [[0, '#c89070'], [0.6, '#9a6a5c'], [1, '#6a4a5a']]); g.fill(); g.restore();
-    line(g, [[cx - 24, h - 94], [cx + 2, h + 2], [cx + 28, h - 94]], 2.4, '#5a5a80', 0.7);
-    // the neck, in shadow under the jaw
-    poly(g, [[cx - 24, cy + 36], [cx + 28, cy + 36], [cx + 30, cy + 92], [cx - 28, cy + 92]]); g.save(); g.fillStyle = lin(g, cx - 24, 0, cx + 30, 0, [[0, '#c89070'], [0.5, '#a87462'], [1, '#6a4a5a']]); g.fill(); g.restore();
-    blob(g, cx + 4, cy + 46, 30, 12, 0, '#6a4a5a', 0.7, 0.3);
-    // the collar: two big smooth wedges standing up and out, studs in a deliberate line down each edge
-    const L = [[cx - 30, cy + 94], [cx - 50, cy + 26], [cx - 100, cy + 6], [cx - 126, cy + 82], [cx - 84, cy + 104]];
-    const Rr = L.map(([x, y]) => [2 * cx - x, y]);
-    poly(g, L); g.save(); g.fillStyle = lin(g, cx - 40, 0, cx - 120, 0, [[0, '#9aa4c0'], [0.5, '#e4e2e8'], [1, '#f6f2e8']]); g.fill(); g.restore();
-    poly(g, Rr); g.save(); g.fillStyle = lin(g, cx + 40, 0, cx + 124, 0, [[0, '#6a7090'], [0.6, '#aab0c8'], [1, '#c8cce0']]); g.fill(); g.restore();
-    line(g, [Rr[1], Rr[2], Rr[3]], 3, '#8ab0e0', 0.55);
-    line(g, [L[1], L[2]], 2, '#fffaf0', 0.7);
-    const studs = (a, b, n) => { for (let k = 0; k <= n; k++) { const t = k / n, x = a[0] + (b[0] - a[0]) * t, y = a[1] + (b[1] - a[1]) * t; ellipse(g, x + 0.8, y + 1, 2.8, 2.8, 0, '#4a3418'); ellipse(g, x, y, 2.6, 2.6, 0, '#d8b050'); blob(g, x - 0.8, y - 0.9, 1.1, 0.9, 0, '#fff4c8', 1, 0.5); } };
-    const inset = (p, q, k) => [p[0] + (q[0] - p[0]) * k, p[1] + (q[1] - p[1]) * k];
-    studs(inset(L[2], L[0], 0.08), inset(L[3], L[4], 0.12), 7); studs(inset(Rr[2], Rr[0], 0.08), inset(Rr[3], Rr[4], 0.12), 7);
-    studs([cx - 30, h - 80], [cx - 8, h - 14], 5); studs([cx + 34, h - 80], [cx + 12, h - 14], 5);
-    // --- the face: three tones, lit from the upper left
-    const face = () => { g.beginPath(); g.moveTo(cx - 34, cy - 46); g.bezierCurveTo(cx - 46, cy - 20, cx - 46, cy + 10, cx - 38, cy + 30); g.bezierCurveTo(cx - 30, cy + 50, cx - 14, cy + 60, cx + 2, cy + 60);
-      g.bezierCurveTo(cx + 18, cy + 60, cx + 32, cy + 48, cx + 38, cy + 28); g.bezierCurveTo(cx + 44, cy + 8, cx + 42, cy - 20, cx + 34, cy - 46); g.closePath(); };
-    face(); g.save(); g.fillStyle = '#c08a6a'; g.fill(); g.clip();
-    blob(g, cx - 16, cy - 10, 30, 46, 0.12, '#e8b890', 0.85, 0.4);
-    blob(g, cx - 4, cy - 34, 28, 13, 0, '#f0c4a0', 0.6, 0.3);
-    blob(g, cx - 6, cy + 42, 14, 12, 0, '#e8b890', 0.55, 0.3);
-    blob(g, cx + 32, cy + 6, 16, 44, 0, '#6a4a5a', 0.75, 0.35);
-    stroke(g, [[cx + 10, cy + 12], [cx + 22, cy + 22], [cx + 34, cy + 30]], 14, 5, '#6a4a5a', 0.5);
-    blob(g, cx + 12, cy + 58, 30, 9, 0.2, '#6a4a5a', 0.5, 0.3);
-    blob(g, cx + 44, cy, 5, 38, 0, '#8ab0e0', 0.55, 0.3);
-    blob(g, cx - 18, cy - 8, 12, 6, 0, '#9a6a60', 0.6, 0.3); blob(g, cx + 18, cy - 8, 12, 6, 0, '#5a3a4a', 0.65, 0.3);
-    g.restore();
-    // eyes: heavy-lidded, two dark strokes; brows, one cocked
-    stroke(g, [[cx - 28, cy - 8], [cx - 18, cy - 11.5], [cx - 8, cy - 8]], 3.4, 2.2, '#2a1a20', 0.95);
-    stroke(g, [[cx + 8, cy - 9], [cx + 18, cy - 11.5], [cx + 28, cy - 7]], 3.4, 2.2, '#2a1a20', 0.95);
-    ellipse(g, cx - 17, cy - 6.5, 2.6, 1.8, 0, '#2a1a20'); ellipse(g, cx + 17, cy - 7, 2.6, 1.8, 0, '#2a1a20');
-    line(g, [[cx - 25, cy - 3], [cx - 11, cy - 3.5]], 1.2, '#e8b890', 0.5);
-    stroke(g, [[cx - 31, cy - 19], [cx - 19, cy - 23], [cx - 7, cy - 20]], 4.5, 2.5, '#141018', 0.95);
-    stroke(g, [[cx + 7, cy - 22], [cx + 18, cy - 29], [cx + 31, cy - 22]], 4.5, 2.5, '#141018', 0.95);
-    // the nose: a lit ridge, the shadow side, the shadow under it
-    stroke(g, [[cx - 3, cy - 6], [cx - 2, cy + 10], [cx, cy + 18]], 4, 3, '#f0c8a0', 0.6);
-    blob(g, cx + 7, cy + 10, 6, 11, 0, '#6a4a5a', 0.5, 0.3);
-    blob(g, cx + 1, cy + 22, 10, 3.6, 0, '#5a3438', 0.7, 0.3);
-    ellipse(g, cx - 4, cy + 21, 1.8, 1.1, 0, '#3a2028'); ellipse(g, cx + 6, cy + 21, 1.8, 1.1, 0, '#3a2028');
-    // the sneer: the upper lip raised on the left, a lit lower lip, its shadow
-    g.save(); g.fillStyle = '#9a5a54'; g.beginPath(); g.moveTo(cx - 16, cy + 30); g.quadraticCurveTo(cx - 8, cy + 26, cx, cy + 31); g.quadraticCurveTo(cx + 8, cy + 30, cx + 15, cy + 33); g.lineTo(cx + 2, cy + 34); g.closePath(); g.fill(); g.restore();
-    stroke(g, [[cx - 16, cy + 30], [cx - 9, cy + 33.5], [cx + 2, cy + 34.5], [cx + 15, cy + 33]], 2.6, 1.6, '#3a1a20', 0.95);
-    blob(g, cx - 1, cy + 38.5, 9, 3.2, 0, '#d89a84', 0.75, 0.4);
-    blob(g, cx + 2, cy + 44, 10, 3, 0, '#6a4a5a', 0.5, 0.3);
-    // sideburns, long and black
-    poly(g, [[cx - 40, cy - 26], [cx - 31, cy - 24], [cx - 30, cy + 26], [cx - 37, cy + 38], [cx - 45, cy + 14]]); g.fillStyle = '#14121c'; g.fill();
-    poly(g, [[cx + 40, cy - 26], [cx + 31, cy - 24], [cx + 31, cy + 26], [cx + 38, cy + 38], [cx + 46, cy + 14]]); g.fill();
-    line(g, [[cx + 46, cy + 14], [cx + 42, cy - 20]], 2, '#4a6aa8', 0.6);
-    // --- the pompadour: one big black mass, a quiff rising high over the forehead and rolling back,
-    // the sides slicked back; the velvet painter's blue rim light only along the top edge
-    const hair = () => {
-      g.beginPath(); g.moveTo(cx - 44, cy - 6);
-      g.bezierCurveTo(cx - 56, cy - 36, cx - 56, cy - 70, cx - 44, cy - 92);      // up the left side
-      g.bezierCurveTo(cx - 38, cy - 118, cx - 14, cy - 128, cx + 6, cy - 122);      // the quiff's crest
-      g.bezierCurveTo(cx + 34, cy - 116, cx + 60, cy - 98, cx + 64, cy - 66);       // rolling back over the top
-      g.bezierCurveTo(cx + 66, cy - 40, cx + 54, cy - 14, cx + 42, cy + 6);         // down the back to the temple
-      g.lineTo(cx + 36, cy - 36);
-      g.bezierCurveTo(cx + 26, cy - 52, cx + 8, cy - 60, cx - 8, cy - 62);          // the hairline under the quiff
-      g.bezierCurveTo(cx - 22, cy - 64, cx - 30, cy - 52, cx - 34, cy - 40);        // the roll of the quiff's front lip
-      g.bezierCurveTo(cx - 37, cy - 30, cx - 38, cy - 18, cx - 38, cy - 6); g.closePath();
-    };
-    hair(); g.save(); g.fillStyle = '#14121c'; g.fill(); g.clip();
-    // strands: from the front lip up through the quiff and back, each its own curve
-    for (let i = 0; i < 12; i++) {
-      const o = i / 11, x0 = cx - 34 + o * 30 + range(rnd, -4, 4), y0 = cy - 46 - o * 10;
-      const pts = [];
-      for (let k = 0; k <= 12; k++) {
-        const t = k / 12, a = t * Math.PI * 0.95;
-        pts.push([x0 + (cx + 56 - x0) * (1 - Math.cos(a)) * 0.5 + Math.sin(a) * range(rnd, 4, 9) - o * 6, y0 - Math.sin(a) * (64 - o * 26) + t * t * (26 + o * 10)]);
+    const cx = 192;
+    // soft fill: the path filled through a blur, so no edge is vector-crisp
+    const soft = (path, style, px = 1.6, alpha = 1) => { g.save(); g.globalAlpha = alpha; g.filter = `blur(${px}px)`; path(); g.fillStyle = style; g.fill(); g.restore(); };
+    const P = pts => () => { g.beginPath(); g.moveTo(...pts[0]); for (let i = 1; i < pts.length; i++) pts[i].length === 6 ? g.bezierCurveTo(...pts[i]) : g.lineTo(...pts[i]); g.closePath(); };
+    const within = (path, fn) => { g.save(); path(); g.clip(); fn(); g.restore(); };
+    // ---- black-violet velvet, the airbrushed halo behind the head
+    rect(g, 0, 0, w, h, '#140c22');
+    for (let i = 0; i < 30; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 20, 70), range(rnd, 16, 50), rnd() * 3, pick(rnd, ['#1c1230', '#100a1a', '#1a1028']), 0.5, 0.1);
+    g.fillStyle = radial(g, cx + 4, 104, 10, 176, [[0, '#4a3a8a', 0.95], [0.4, '#3a2c72', 0.6], [0.75, '#241a48', 0.25], [1, '#140c22', 0]]); g.fillRect(0, 0, w, h);
+    // ---- the white jumpsuit's shoulders, lit on the left, cool on the right
+    const suit = P([[-6, h + 6], [6, 238], [56, 212], [148, 202], [172, 204], [192, 252], [212, 204], [236, 202], [326, 212], [378, 238], [w + 6, h + 6]]);
+    soft(suit, lin(g, 0, 0, w, 0, [[0, '#fbf6ec'], [0.3, '#ecebf0'], [0.55, '#c8cce0'], [0.8, '#8a92b8'], [1, '#6a7098']]), 1.5);
+    within(suit, () => {
+      for (const [x0, y0, x1, y1, c, a] of [[70, 222, 96, 288, '#8a96c4', 0.45], [120, 214, 140, 288, '#8a96c4', 0.4], [262, 214, 250, 288, '#5a6290', 0.5], [318, 226, 300, 288, '#4e5682', 0.5], [40, 240, 54, 288, '#a8b0d0', 0.35]]) { g.save(); g.filter = 'blur(3px)'; stroke(g, [[x0, y0], [(x0 + x1) / 2 + 4, (y0 + y1) / 2], [x1, y1]], 4, 14, c, a); g.restore(); }
+      blob(g, 64, 232, 40, 16, -0.3, '#fffaf0', 0.55, 0.3);
+      blob(g, 330, 250, 50, 30, 0, '#4a5080', 0.45, 0.3);
+    });
+    // ---- the great standing collar, behind the neck: soft folds, warm lit edges
+    const colL = P([[166, 206], [160, 184], [158, 160, 152, 142, 146, 132], [128, 128, 112, 130, 102, 138], [96, 160, 100, 188, 116, 210]]), colR = P([[220, 206], [226, 184], [228, 160, 234, 142, 240, 132], [258, 128, 274, 130, 284, 138], [290, 160, 286, 188, 270, 210]]);
+    soft(colL, lin(g, 104, 140, 156, 206, [[0, '#fff4e0'], [0.45, '#dcdeea'], [1, '#9aa4c8']]), 1.4);
+    soft(colR, lin(g, 228, 206, 280, 140, [[0, '#6a7098'], [0.6, '#8a96c4'], [1, '#b8c0dc']]), 1.4);
+    within(colL, () => { for (const t of [0.3, 0.62]) { g.save(); g.filter = 'blur(2.5px)'; stroke(g, [[158 - t * 40, 206], [150 - t * 34, 172], [146 - t * 30, 136]], 3, 7, '#8a96c4', 0.55); g.restore(); } blob(g, 156, 180, 8, 26, 0, '#7a84b0', 0.5, 0.3); });
+    within(colR, () => { for (const t of [0.3, 0.62]) { g.save(); g.filter = 'blur(2.5px)'; stroke(g, [[228 + t * 40, 206], [236 + t * 34, 172], [240 + t * 30, 136]], 3, 7, '#4e5682', 0.55); g.restore(); } });
+    stroke(g, [[104, 136], [124, 128], [146, 132]], 3, 1.5, '#fff4e0', 0.85);
+    stroke(g, [[100, 150], [100, 182], [114, 208]], 2, 1, '#fff4e0', 0.5);
+    // ---- neck and the open V of the chest, in the jaw's shadow
+    soft(P([[166, 160], [220, 160], [224, 208], [192, 252], [160, 208]]), lin(g, 160, 0, 226, 0, [[0, '#c88660'], [0.45, '#a8705a'], [1, '#5e4058']]), 1.2);
+    blob(g, 196, 184, 34, 12, 0, '#3e2238', 0.8, 0.25);
+    blob(g, 176, 216, 9, 18, 0, '#d8946a', 0.45, 0.3);
+    // ---- ears and the face: a square jaw, five values, the light from the upper left
+    soft(P([[150, 104], [140, 102, 140, 128, 152, 136]]), '#b8765a', 1); soft(P([[234, 104], [244, 102, 244, 128, 232, 136]]), '#6a4458', 1);
+    const face = P([[154, 82], [146, 100, 147, 132, 156, 156], [162, 168, 176, 178, 192, 180], [208, 178, 222, 168, 228, 156], [237, 132, 238, 100, 230, 82], [214, 70, 172, 70, 154, 82]]);
+    soft(face, lin(g, 148, 0, 238, 0, [[0, '#d6926a'], [0.35, '#c47a52'], [0.62, '#a86a54'], [0.8, '#7e5260'], [1, '#6a4a6a']]), 1.3);
+    within(face, () => {
+      blob(g, 178, 84, 30, 13, -0.1, '#f2b884', 0.85, 0.3);          // the brow of the forehead
+      blob(g, 167, 124, 13, 10, 0.2, '#f2b884', 0.75, 0.3);          // the left cheekbone
+      blob(g, 186, 170, 12, 6, 0, '#e8a678', 0.55, 0.3);             // the chin
+      blob(g, 222, 128, 16, 34, 0, '#5e4062', 0.55, 0.25);           // the far side turning away
+      blob(g, 164, 146, 8, 12, 0, '#9a5e56', 0.4, 0.3);              // the cheek hollows
+      blob(g, 214, 148, 10, 14, 0, '#5a3a58', 0.5, 0.3);
+      blob(g, 192, 182, 40, 10, 0, '#4e2c48', 0.8, 0.3);             // under the jaw
+      // eye sockets, dark under heavy lids
+      blob(g, 172, 108, 14, 8, 0, '#5a3446', 0.7, 0.3); blob(g, 211, 108, 14, 8, 0, '#3a2230', 0.8, 0.3);
+      // the nose: a lit bridge, its shadow side, the shadow it casts
+      stroke(g, [[187, 100], [188, 116], [189, 131]], 6, 5, '#f2b884', 0.75);
+      blob(g, 198, 124, 6, 13, 0, '#6a4a6a', 0.6, 0.3);
+      blob(g, 193, 139, 11, 4, 0, '#4e2c40', 0.8, 0.3);
+      ellipse(g, 187, 136, 2.4, 1.4, 0.2, '#3a1e28', 0.85); ellipse(g, 198, 136, 2.4, 1.4, -0.2, '#3a1e28', 0.9);
+      blob(g, 185, 132, 4, 3, 0, '#f6c898', 0.6, 0.4);
+      // the sneer: a crease from the left nostril, the upper lip curled up on the left
+      stroke(g, [[182, 137], [178, 143], [175, 149]], 2.6, 1.4, '#7a4448', 0.7);
+      soft(P([[175, 148], [180, 142], [188, 145], [192, 148], [200, 147], [208, 151], [192, 154]]), '#8a4a4c', 0.8);
+      soft(P([[177, 148], [181, 145], [188, 148], [184, 150]]), '#e8dccc', 0.5);
+      stroke(g, [[150, 104], [156, 114], [158, 128]], 6, 3, '#e8a678', 0.35);
+      blob(g, 192, 157, 12, 4.5, 0, '#d08a6c', 0.9, 0.35);
+      blob(g, 192, 164, 11, 3.5, 0, '#5e3a50', 0.7, 0.3);
+      // the chin's cleft and the square jaw's lit corner
+      stroke(g, [[192, 168], [192.5, 173], [192, 177]], 2, 1.2, '#6a3a44', 0.6);
+      blob(g, 158, 154, 6, 9, 0.4, '#d8966c', 0.45, 0.3);
+    });
+    // brows: the left one heavy and low, the right one cocked
+    stroke(g, [[160, 100], [168, 97], [178, 96.5], [185, 98.5]], 5, 3, '#1a1018', 0.95);
+    stroke(g, [[200, 97], [208, 93.5], [218, 94], [226, 98]], 5, 3, '#1a1018', 0.95);
+    // ---- the hair: a tall swept pompadour, the quiff's front roll over the forehead, long sideburns
+    // the shadow the quiff throws on the forehead
+    within(face, () => blob(g, 196, 80, 40, 9, 0.05, '#4a2a3a', 0.65, 0.3));
+    const hair = P([[148, 112], [138, 90, 136, 58, 146, 38], [152, 22, 166, 10, 184, 9], [208, 8, 232, 20, 244, 38], [254, 58, 250, 92, 238, 112],
+      [235, 98, 232, 88, 226, 80], [218, 72, 208, 74, 200, 76], [192, 78, 186, 80, 180, 88], [176, 80, 168, 74, 160, 80], [154, 86, 154, 98, 156, 108]]);
+    soft(hair, '#141018', 1.3);
+    // a loose lock falling onto the forehead
+    soft(P([[178, 74], [186, 76, 186, 86, 180, 96], [178, 88, 178, 82, 174, 78]]), '#16121c', 0.8);
+    for (const sd of [-1, 1]) soft(P(sd < 0 ? [[149, 100], [158, 102], [159, 128], [157, 150], [151, 132]] : [[235, 100], [226, 102], [225, 128], [227, 150], [233, 132]]), '#16121c', 0.9);
+    within(hair, () => {
+      blob(g, 184, 40, 36, 20, -0.2, '#262646', 0.7, 0.3);
+      blob(g, 230, 60, 20, 30, 0, '#0e0a14', 0.6, 0.3);
+      // strands sweeping up off the front roll, over the crest and back
+      for (let i = 0; i < 16; i++) {
+        const o = i / 15, x0 = 156 + o * 66, y0 = 84 - o * 8 + range(rnd, -2, 2), pts = [];
+        for (let k = 0; k <= 10; k++) { const t = k / 10, a = t * Math.PI; pts.push([x0 + (252 - x0) * (1 - Math.cos(a)) * 0.5 - Math.sin(a) * (22 - o * 12), y0 - Math.sin(a) * (70 - o * 34) + t * t * (14 + o * 16)]); }
+        stroke(g, pts, range(rnd, 2, 4.5), 1, pick(rnd, ['#2a2a50', '#22223e', '#30305a', '#1a1a30']), 0.6);
       }
-      stroke(g, pts, range(rnd, 2.5, 5), range(rnd, 1, 2), pick(rnd, ['#24223c', '#1c1a30', '#2c2a48', '#201e34']), 0.75);
+      // the front roll: lit along its top, falling into deep shade under the lip
+      blob(g, 200, 74, 30, 5, 0, '#06040a', 0.7, 0.3);
+    });
+    // the velvet painter's blue: three long strokes riding the wave, a thin bright one on the crest
+    const wave = (pts, w0, c, a) => { g.save(); g.filter = 'blur(0.8px)'; stroke(g, pts, w0, 0.8, c, a); g.restore(); };
+    wave([[146, 90], [142, 62], [150, 36], [168, 18], [194, 12]], 7, '#3a4a98', 0.8);
+    wave([[160, 78], [160, 56], [174, 36], [198, 26], [226, 28]], 5, '#3a4a98', 0.65);
+    wave([[182, 76], [198, 62], [218, 50], [238, 48], [248, 62]], 4, '#2e3a80', 0.6);
+    wave([[176, 80], [182, 82], [182, 90]], 2.4, '#3a4a98', 0.7);
+    wave([[151, 102], [152, 116], [155, 140]], 2.6, '#3a4a98', 0.55);
+    blurTile(cv, 0.01);
+    { const t = makeCanvas(w, h); t.getContext('2d').drawImage(cv, 0, 0); g.save(); g.filter = 'blur(1px)'; g.drawImage(t, 0, 0); g.restore(); }
+    // ---- crisp on top: the crest's glint, the eyes, the lip's light, the rhinestones
+    stroke(g, [[145, 70], [147, 46], [160, 24], [184, 13]], 2, 0.6, '#8aa0e8', 0.85);
+    stroke(g, [[170, 24], [190, 16], [210, 16]], 1.4, 0.5, '#b8c8f8', 0.7);
+    stroke(g, [[164, 72], [172, 60], [188, 52]], 1.2, 0.5, '#8aa0e8', 0.55);
+    for (const [ex, ey, white, lid] of [[173, 110, '#e0d0c8', '#24121c'], [211, 110, '#a8909c', '#1a0c14']]) {
+      ellipse(g, ex, ey + 0.5, 8, 2.8, 0, white, 0.95);
+      ellipse(g, ex - 1.5, ey + 0.4, 3.2, 2.8, 0, '#2a2a3e');
+      ellipse(g, ex - 2.4, ey - 0.4, 0.9, 0.8, 0, '#fffbe8', 0.9);
+      stroke(g, [[ex - 9, ey + 0.5], [ex - 3, ey - 2.4], [ex + 4, ey - 2.4], [ex + 9, ey]], 3, 2, lid, 0.95);
+      line(g, [[ex - 7, ey - 5], [ex + 7, ey - 5.5]], 1.2, '#5a3446', 0.5);
     }
-    for (let i = 0; i < 5; i++) { const y = cy - 30 + i * 9; stroke(g, [[cx - 50, y - 6], [cx - 44, y - 10], [cx - 36, y - 12]], 2, 1, '#2a2846', 0.6); stroke(g, [[cx + 56, y - 10], [cx + 48, y - 6], [cx + 40, y - 4]], 2, 1, '#2a2846', 0.6); }
-    g.restore();
-    // rim light: a few long broken strokes hugging the crest and the back of the head
-    const rim = (pts, w0, c, a) => stroke(g, pts, w0, 0.6, c, a);
-    rim([[cx - 40, cy - 98], [cx - 30, cy - 116], [cx - 10, cy - 124], [cx + 10, cy - 120]], 4, '#4a6aa8', 0.75);
-    rim([[cx - 33, cy - 110], [cx - 18, cy - 121], [cx - 2, cy - 121]], 2, '#a8c8f0', 0.8);
-    rim([[cx + 18, cy - 116], [cx + 40, cy - 108], [cx + 58, cy - 90], [cx + 62, cy - 72]], 3.5, '#4a6aa8', 0.7);
-    rim([[cx + 34, cy - 110], [cx + 52, cy - 96], [cx + 59, cy - 80]], 1.6, '#8ab0e0', 0.75);
-    rim([[cx + 63, cy - 58], [cx + 60, cy - 36], [cx + 52, cy - 16]], 2.4, '#4a6aa8', 0.55);
-    rim([[cx - 30, cy - 50], [cx - 22, cy - 60], [cx - 8, cy - 62]], 1.6, '#4a6aa8', 0.5);     // light on the quiff's front roll
-    brushify(g, w, h, rnd, { n: 1800, len: [3, 7], wid: [1.2, 2.4], alpha: 0.35, flow: (x, y) => Math.atan2(y - cy, x - cx) + Math.PI / 2 });
+    stroke(g, [[176, 149], [181, 145.5], [188, 148.8], [196, 150.4], [207, 151.5]], 2.2, 1.4, '#2e121a', 0.95);
+    line(g, [[178.5, 146.4], [184, 146.2]], 0.9, '#a85a50', 0.6);
+    blob(g, 189, 155.5, 5, 1.6, 0, '#f6c4a0', 0.8, 0.5);
+    blob(g, 172, 82, 8, 3, -0.1, '#ffe0b4', 0.6, 0.5);
+    // rhinestones: settings in deliberate lines down the collar and the V, each with a four-point glint
+    const gem = (x, y, r = 1.8, glint = true) => {
+      ellipse(g, x + 0.6, y + 0.8, r + 0.8, r + 0.8, 0, '#3a2a40', 0.7); ellipse(g, x, y, r + 0.6, r + 0.6, 0, '#c8a050'); ellipse(g, x, y, r, r, 0, '#eef4ff');
+      if (glint) { line(g, [[x - r * 2.6, y], [x + r * 2.6, y]], 0.7, '#ffffff', 0.85); line(g, [[x, y - r * 2.6], [x, y + r * 2.6]], 0.7, '#ffffff', 0.85); }
+    };
+    const along = (a, b, n, r, gl) => { for (let k = 0; k <= n; k++) { const t = k / n; gem(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, r, gl(k)); } };
+    along([112, 142], [146, 192], 6, 1.7, k => k % 2 === 0); along([108, 160], [116, 202], 4, 1.5, k => k === 1);
+    along([272, 142], [238, 192], 6, 1.5, k => k === 3); along([174, 210], [190, 244], 4, 1.6, k => k % 2 === 1); along([210, 210], [194, 244], 4, 1.5, () => false);
+    for (const [x, y] of [[60, 250], [84, 262], [108, 250], [296, 252], [320, 264]]) gem(x, y, 2, x < 200);
     letters(g, 'E.P.', w - 34, h - 16, 14, { rnd, jit: 0.06, shadow: 0, fill: ['#e8c870', '#c89a40', '#a87a30'], rim: '#1a1008', chip: 0.3, rough: 0.6 });
-    glaze(g, w, h, '#ffe0c0', 0.06);
-    blurTile(cv, 0.55);
+    glaze(g, w, h, '#ffe0c0', 0.05);
   },
 });
 
@@ -1470,32 +1648,52 @@ register('loot_guitar', {
 // ---- tire & wheel ------------------------------------------------------------------------------------
 
 register('loot_tire', {
-  family: F, w: 256, h: 128, note: 'a chunky whitewall tire (u wraps round it; v: bottom bead → sidewall → tread → sidewall → top bead): warm charcoal, chevron tread',
+  family: F, w: 512, h: 128, note: "a chunky whitewall tire (u wraps round it; v: hub bead → lettered sidewall → whitewall → shoulder → tread → and back): warm charcoal rubber, offset lugs with lit tops and deep grooves, GOBLINYEAR · ROAD KING raised on both sides",
   paint(g, w, rnd, h, cv) {
-    const Y = v => (1 - v) * h;
-    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#2e2a2c'], [0.3, '#3a3436'], [0.5, '#322c2e'], [0.7, '#3a3436'], [1, '#2e2a2c']]); g.fillRect(0, 0, w, h);
-    for (let i = 0; i < 20; i++) { const x = rnd() * w, y = rnd() * h, rx = range(rnd, 8, 20), ry = range(rnd, 4, 10), c = pick(rnd, ['#4a4244', '#262224', '#5a4a40']); wrapX(w, x, 20, X => blob(g, X, y, rx, ry, 0, c, 0.3, 0.2)); }
-    for (const [a, b] of [TIRE_V.wallLo, TIRE_V.wallHi]) {
-      g.fillStyle = lin(g, 0, Y(b), 0, Y(a), [[0, '#c8bca4'], [0.3, '#ece2cc'], [1, '#b8ac94']]); g.fillRect(0, Y(b), w, Y(a) - Y(b));
-      for (let i = 0; i < 14; i++) { const x = rnd() * w, y = range(rnd, Y(b), Y(a)), rx = range(rnd, 4, 10); wrapX(w, x, 10, X => blob(g, X, y, rx, 2.5, 0, '#8a7a64', 0.35, 0.3)); }
-      line(g, [[0, Y(b)], [w, Y(b)]], 1.2, '#1e1a1c', 0.6); line(g, [[0, Y(a)], [w, Y(a)]], 1.2, '#1e1a1c', 0.6);
+    const Y = v => (1 - v) * h, T = TIRE_V;
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#2e2a2c'], [0.18, '#3a3436'], [0.38, '#46403e'], [0.5, '#3a3436'], [0.62, '#46403e'], [0.82, '#3a3436'], [1, '#2a2628']]); g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 30; i++) { const x = rnd() * w, y = rnd() * h, rx = range(rnd, 8, 24), ry = range(rnd, 3, 8), c = pick(rnd, ['#4a4244', '#262224', '#524640']); wrapX(w, x, 24, X => blob(g, X, y, rx, ry, 0, c, 0.28, 0.2)); }
+    // the shoulders catch the cool sky light
+    for (const [a, b] of [[T.wallLo[1], T.treadLo], [T.treadHi, T.wallHi[0]]]) { g.fillStyle = lin(g, 0, Y(b), 0, Y(a), [[0, '#5a6070', 0.05], [0.5, '#5a6070', 0.5], [1, '#5a6070', 0.05]]); g.fillRect(0, Y(b), w, Y(a) - Y(b)); }
+    // whitewalls: cream, grimy at the edges, a dark line either side
+    for (const [a, b] of [T.wallLo, T.wallHi]) {
+      g.fillStyle = lin(g, 0, Y(b), 0, Y(a), [[0, '#b8ac94'], [0.35, '#ece2cc'], [0.7, '#e0d6be'], [1, '#a89c84']]); g.fillRect(0, Y(b), w, Y(a) - Y(b));
+      for (let i = 0; i < 22; i++) { const x = rnd() * w, y = range(rnd, Y(b), Y(a)), rx = range(rnd, 4, 14); wrapX(w, x, 14, X => blob(g, X, y, rx, 2, 0, '#8a7a64', 0.3, 0.3)); }
+      line(g, [[0, Y(b)], [w, Y(b)]], 1.4, '#1e1a1c', 0.7); line(g, [[0, Y(a)], [w, Y(a)]], 1.4, '#1e1a1c', 0.7);
     }
-    // tread: chevron blocks (each half slants the other way), lit with cool light on their top edges
-    const t0 = Y(TIRE_V.treadHi), t1 = Y(TIRE_V.treadLo), th = t1 - t0, mid = (t0 + t1) / 2, n = 14, bw = w / n;
-    rect(g, 0, t0, w, th, '#1e1a1c');
-    for (let i = 0; i < n; i++) for (const half of [-1, 1]) {
-      const x = i * bw, c = jitter('#3a3436', rnd, 0.05), sl = bw * 0.35;
-      const yA = half < 0 ? t0 + 2 : mid + 1.5, yB = half < 0 ? mid - 1.5 : t1 - 2;
-      const q = half < 0 ? [[x + 2 + sl, yA], [x + bw - 2 + sl, yA], [x + bw - 2, yB], [x + 2, yB]] : [[x + 2, yA], [x + bw - 2, yA], [x + bw - 2 + sl, yB], [x + 2 + sl, yB]];
+    // the tread: two rows of chunky lugs, offset half a lug, deep grooves between
+    const t0 = Y(T.treadHi), t1 = Y(T.treadLo), mid = (t0 + t1) / 2, n = 24, bw = w / n, gap = 5;
+    rect(g, 0, t0 - 6, w, t1 - t0 + 12, '#1c1a1c');
+    for (const [row, ya, yb] of [[0, t0 - 7, mid - 2], [1, mid + 2, t1 + 7]]) for (let i = 0; i < n; i++) {
+      const x0 = i * bw + (row ? bw / 2 : 0) + gap / 2 + range(rnd, -1, 1), x1 = x0 + bw - gap + range(rnd, -1, 1), sl = row ? -3 : 3;
+      const q = [[x0 + sl, ya], [x1 + sl, ya], [x1, yb], [x0, yb]];
       for (const off of [0, -w, w]) {
         const qq = q.map(([a, b]) => [a + off, b]);
-        poly(g, qq); g.save(); g.fillStyle = lin(g, qq[0][0], yA, qq[0][0] + bw * 0.5, yB, [[0, '#56585e'], [0.35, c], [1, '#262224']]); g.fill(); g.restore();
-        line(g, [qq[0], qq[1]], 1.4, '#6a6e7a', 0.75);
-        line(g, [qq[0], qq[3]], 1, '#6a6e7a', 0.4);
+        poly(g, qq); g.save(); g.fillStyle = lin(g, 0, ya, 0, yb, row ? [[0, '#4a4644'], [0.4, '#3e3a38'], [1, '#2e2a2c']] : [[0, '#2e2a2c'], [0.6, '#3e3a38'], [1, '#4a4644']]); g.fill(); g.restore();
+        line(g, [qq[0], qq[1]], 2, row ? '#6a6460' : '#3a3436', 0.85);       // the lit top edge (toward the light)
+        line(g, [qq[0], qq[3]], 1.6, '#6a6460', 0.55);                           // the lit left flank
+        line(g, [qq[1], qq[2]], 1.6, '#141214', 0.6);                            // the dark right flank
+        line(g, [[(qq[0][0] + qq[1][0]) / 2, ya + 3], [(qq[2][0] + qq[3][0]) / 2, yb - 3]], 1, '#1c1a1c', 0.6);   // a sipe
       }
     }
-    for (let i = 0; i < 32; i++) for (const y of [t0 - 3, t1 + 3]) { const x = i * w / 32; line(g, [[x, y - 2], [x, y + 2]], 1.2, '#1e1a1c', 0.7); }
-    for (let i = 0; i < 18; i++) { const x = rnd() * w, y = range(rnd, t0, h), rx = range(rnd, 4, 12), ry = range(rnd, 2, 4); wrapX(w, x, 10, X => blob(g, X, y, rx, ry, 0, '#8a7458', 0.18, 0.3)); }
+    // the lugs' ends run onto the shoulders as notches
+    for (const [ya, yb] of [[t0 - 16, t0 - 6], [t1 + 6, t1 + 16]]) for (let i = 0; i < n; i++) { const x = i * bw + (ya < t0 ? 0 : bw / 2) + range(rnd, -1, 1); wrapX(w, x, 4, X => { line(g, [[X, ya], [X, yb]], 3, '#1c1a1c', 0.7); line(g, [[X - 2, ya], [X - 2, yb]], 1, '#6a6460', 0.4); }); }
+    // raised lettering on both sidewalls: lit on top, a shadow below, a few shades off the rubber
+    for (const [a, b] of [T.textLo, T.textHi]) {
+      const yc = (Y(a) + Y(b)) / 2, size = (Y(a) - Y(b)) * 0.78, txt = 'GOBLINYEAR \u00b7 ROAD KING \u00b7 ';
+      g.save(); g.font = `bold ${size.toFixed(1)}px ${SANS}`; g.textBaseline = 'middle';
+      const tw = g.measureText(txt).width, k = (w / 2) / tw;
+      for (const off of [0, w / 2]) {
+        g.save(); g.translate(off + 4, yc); g.scale(k, 1);
+        g.fillStyle = rgba('#141214', 0.7); g.fillText(txt, 1.2, 1.4);
+        g.fillStyle = rgba('#7a7470', 0.8); g.fillText(txt, -0.6, -0.8);
+        g.fillStyle = '#4a4442'; g.fillText(txt, 0, 0);
+        g.restore();
+      }
+      g.restore();
+    }
+    // road dust settled in the grooves and the bead
+    for (let i = 0; i < 26; i++) { const x = rnd() * w, y = range(rnd, 0, h), rx = range(rnd, 4, 14), ry = range(rnd, 1.5, 3); wrapX(w, x, 14, X => blob(g, X, y, rx, ry, 0, '#8a7458', 0.16, 0.3)); }
     blurTile(cv, 0.35);
   },
 });
@@ -1526,51 +1724,172 @@ register('loot_rim', {
 
 // ---- the dinosaur's head -------------------------------------------------------------------------------
 
-// The statue's own hide (rs_dino from the roadside family) so the head matches the body it came off.
-// u runs along the head, v from the belly (bottom) to the back (top).
-function dinoHide(g, s, rnd) {
-  g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#45703a'], [0.3, '#548442'], [0.55, '#629048'], [0.66, '#94a058'], [0.74, '#d0c088'], [1, '#dccc96']]); g.fillRect(0, 0, s, s);
-  mottle(g, s, rnd, { colors: ['#6e9c4c', '#4a7a3a', '#7aa456', '#5a8040'], count: 40, rmin: 14, rmax: 46, alpha: 0.3, hard: 0.1, stretch: 1.6, rot: Math.PI / 2 });
-  for (let i = 0; i < 5; i++) {
-    const x = (i + 0.2 + rnd() * 0.6) * s / 5, wd = range(rnd, 18, 26), L = range(rnd, 0.3, 0.42) * s, bend = range(rnd, 10, 22);
-    for (let k = 0; k <= 10; k++) { const tt = k / 10, cx = x + tt * bend, cy = tt * L, r = wd * (1 - tt * 0.45) / 2; wrap(s, cx, cy, r * 1.4, (X, Y) => blob(g, X, Y, r, r * 0.9, 0.3, '#2e4a28', 0.4, 0.45)); }
-  }
-  const cols = 11, W = s / cols;
-  for (let row = 0; row < 8; row++) {
-    const y = 10 + row * 21, off = row % 2 ? W / 2 : 0;
-    for (let i = 0; i < cols; i++) {
-      const x = i * W + off + range(rnd, -2, 2), yy = y + range(rnd, -2, 2), sc = range(rnd, 0.85, 1.1);
-      wrap(s, x, yy, W, (X, Y) => { blob(g, X + 2, Y + 4, W * 0.5 * sc, W * 0.36 * sc, 0, '#1e2a1a', 0.18, 0.3); blob(g, X - 2, Y - 3, W * 0.32 * sc, W * 0.18 * sc, 0, '#c8dc90', 0.28, 0.35); });
+// The statue's palette (rs_dino): a muted teal back, an olive flank, an ochre-cream belly, big
+// scales with a lit upper rim. On the head they're smaller (about 10 cm) and the light is painted
+// in: the head's left side (u < 0.5) is warmer and lighter, its lower right cooler.
+const DH = { back: '#3e6455', back2: '#4b7360', flank: '#6f7a48', flank2: '#8c8a52', belly: '#c4a86e', belly2: '#d6c08a', saddle: '#2f4c3e',
+  scale: '#577e64', scaleF: '#7a8450', lit: '#b8cc94', shade: '#24362e', pink: '#a84858', pink2: '#c86476', pinkD: '#5a1e2c', lip: '#3a2422' };
+// Scales in rows either side of the spine line X = cx (rows run along Y), lit on the rim toward the
+// spine, a cool shadow on the other side; they fade out by dmax (fraction of the half width).
+function dinoScales(g, w, rnd, { cx, half, dmax, y0, y1, sx = 20, sy = 16, rx = 6.5, ry = 7.5, alpha = 1 }) {
+  for (const side of [-1, 1]) for (let k = 0; ; k++) {
+    const dist = (k + 0.5) * sx, d = dist / half;
+    if (d > dmax) break;
+    const fade = alpha * Math.min(1, 1.25 * (1 - d / dmax)), up = -side;
+    for (let Y = y0 + (k % 2 ? sy / 2 : 0) + range(rnd, -2, 2); Y < y1 + sy; Y += sy * range(rnd, 0.85, 1.2)) {
+      if (rnd() < 0.06) continue;
+      const big = k < 2 && rnd() < 0.18 ? 1.45 : 1, X = cx + side * dist + range(rnd, -2.5, 2.5), YY = Y + range(rnd, -2.5, 2.5), sc = range(rnd, 0.78, 1.2) * big;
+      const body = mix(DH.scale, DH.scaleF, Math.min(1, d * 1.2));
+      wrapX(w, X, rx * 2, XX => {
+        blob(g, XX - up * rx * 0.55, YY + 1.5, rx * 1.1 * sc, ry * 0.95 * sc, 0, DH.shade, 0.42 * fade, 0.4);
+        ellipse(g, XX, YY, rx * sc, ry * sc, 0, body, 0.6 * fade);
+        g.save(); g.globalAlpha = 0.7 * fade; g.strokeStyle = DH.lit; g.lineWidth = 2; g.lineCap = 'round';
+        const a = up > 0 ? 0 : Math.PI;
+        g.beginPath(); g.ellipse(XX, YY - 0.5, rx * sc * 0.82, ry * sc * 0.8, 0, a - 1.15, a + 0.9); g.stroke(); g.restore();
+      });
     }
   }
-  for (let y = s * 0.74; y < s; y += range(rnd, 11, 16)) {
-    const pts = []; for (let x = -4; x <= s + 4; x += 8) pts.push([x, y + Math.sin(x / 23 + y) * 1.6]);
-    g.fillStyle = lin(g, 0, y, 0, y + 14, [[0, '#f4e6b8', 0.6], [0.4, '#dccc96', 0], [0.85, '#8a7a50', 0.35], [1, '#5a4a34', 0.5]]);
-    g.save(); g.beginPath(); g.moveTo(-4, y + 14); for (const p of pts) g.lineTo(p[0], p[1]); g.lineTo(s + 4, y + 14); g.closePath(); g.fill(); g.restore();
-  }
-  for (let i = 0; i < 12; i++) chips(g, rnd, 1, 4, 4, s - 8, s - 8, '#a49c90', 3, 8, 0.85);
-  cracks(g, s, rnd, { color: '#3a3430', count: 4, len: [16, 44], width: [0.8, 1.4], alpha: 0.4 });
-  streaks(g, s, rnd, { colors: ['#3a4a2e', '#6a5a40'], count: 14, len: [20, 60], width: [2, 4], angle: Math.PI, wobble: 0.1, alpha: 0.12 });
-  glaze(g, s, s, '#ffe8b8', 0.1);
 }
-register('loot_dino', {
-  family: F, size: 256, note: "the fiberglass sauropod's hide: the statue's own (rs_dino) so the head matches its body; u along, v belly → back",
-  paint(g, s, rnd, h, cv) {
-    if (has('rs_dino')) { g.drawImage(canvasFor('rs_dino'), 0, 0, s, s); return; }
-    dinoHide(g, s, rnd); blurTile(cv, 0.6);
+register('loot_dinohead', {
+  family: F, w: 512, h: 256, note: "the dino head and neck (u round, 0.5 = the spine; v from the neck's break up to the snout at the top): the statue's hide, smaller scales, painted light, the pink roof of the open mouth inside the lip line",
+  paint(g, w, rnd, h, cv) {
+    const D = DINO, Yz = z => (D.z1 - z) / (D.z1 - D.z0) * h, yH = Yz(D.hinge), cx = w / 2;
+    // the hide across the head: belly (edges) → flank → back (middle), the left side a touch warmer
+    g.fillStyle = lin(g, 0, 0, w, 0, [[0, DH.belly2], [0.09, DH.belly], [0.17, DH.flank2], [0.27, DH.flank], [0.38, DH.back2], [0.5, DH.back], [0.62, DH.back2], [0.73, '#66724a'], [0.83, '#7e7c4c'], [0.91, '#b09a64'], [1, DH.belly2]]);
+    g.fillRect(0, 0, w, h);
+    mottle(g, w, rnd, { colors: ['#557c64', '#62784a', '#4a6a56', '#7a8450'], count: 30, rmin: 14, rmax: 40, alpha: 0.22, hard: 0.1 });
+    // dark saddles down the spine: one over the dome, one on the neck
+    for (const [z, ry] of [[-0.14, 34], [-0.66, 40], [0.36, 22]]) blob(g, cx + range(rnd, -6, 6), Yz(z), range(rnd, 54, 70), ry, 0, DH.saddle, 0.42, 0.2);
+    // painted light: warm and lit on the upper left, cool on the lower right
+    blob(g, cx - 92, h * 0.5, 46, h * 0.62, 0, '#d8d49a', 0.2, 0.15);
+    blob(g, cx - 40, h * 0.45, 26, h * 0.6, 0, '#e8e4b0', 0.12, 0.2);
+    blob(g, cx + 150, h * 0.5, 50, h * 0.66, 0, '#3a4258', 0.22, 0.15);
+    dinoScales(g, w, rnd, { cx, half: w / 2, dmax: 0.7, y0: 6, y1: h });
+    // eye sockets: a cool shadow under each eye, a warm lit brow over it
+    for (const sd of [-1, 1]) {
+      const ex = cx + sd * D.eye.u * w, ey = Yz(D.eye.z);
+      blob(g, ex + sd * 20, ey + 4, 30, 34, 0, '#2e3a40', 0.45, 0.25);
+      blob(g, ex - sd * 22, ey - 2, 22, 30, 0, '#d8dca0', sd < 0 ? 0.35 : 0.2, 0.25);
+    }
+    // nostrils: dark rims, lit on the spine side
+    for (const sd of [-1, 1]) { const nx = cx + sd * D.nostril.u * w, ny = Yz(D.nostril.z); blob(g, nx + sd * 5, ny + 2, 14, 11, 0, '#2a3a30', 0.5, 0.35); blob(g, nx - sd * 6, ny - 2, 8, 7, 0, DH.lit, 0.35, 0.4); }
+    // under the head behind the hinge: the cream throat, long soft folds
+    for (const x0 of [0, w]) for (let k = 0; k < 6; k++) {
+      const X = x0 + (x0 ? -1 : 1) * (6 + k * 7) + range(rnd, -2, 2);
+      line(g, [[X, yH + 6], [X + range(rnd, -3, 3), (yH + h) / 2], [X + range(rnd, -3, 3), h]], range(rnd, 1.4, 2.4), '#8a7448', 0.3);
+      line(g, [[X - 1.5, yH + 6], [X - 1.5 + range(rnd, -3, 3), h]], 1, '#f0e0b0', 0.3);
+    }
+    // the roof of the open mouth: pink inside the lip line, palate ridges, darker toward the throat
+    const lipX = D.lipU * w;
+    for (const sd of [-1, 1]) {
+      const edge = sd < 0 ? lipX : w - lipX, x0 = sd < 0 ? -8 : edge, x1 = sd < 0 ? edge : w + 8;
+      clip(g, () => { g.beginPath(); g.rect(x0, -2, x1 - x0, yH + 2); }, () => {
+        g.fillStyle = lin(g, 0, 0, 0, yH, [[0, DH.pink2], [0.45, DH.pink], [1, DH.pinkD]]); g.fillRect(x0, 0, x1 - x0, yH);
+        for (let Y = 8; Y < yH - 6; Y += range(rnd, 10, 14)) {
+          const pts = []; for (let X = x0; X <= x1; X += 6) pts.push([X, Y + Math.sin(X * 0.15) * 1.5]);
+          line(g, pts.map(([a, b]) => [a, b + 2]), 2.4, DH.pinkD, 0.45); line(g, pts, 1.6, '#e08c98', 0.4);
+        }
+      });
+      // the lip: a dark line, a lit olive roll above it, curling up into the corner crease at the hinge
+      const lp = [], hp = [];
+      for (let Y = -4; Y <= yH; Y += 6) { const wob = Math.sin(Y * 0.09) * 1.2; lp.push([edge + wob, Y]); hp.push([edge - sd * 7 + wob, Y]); }
+      const curl = [[edge, yH], [edge - sd * 6, yH + 9], [edge - sd * 16, yH + 13]];
+      stroke(g, hp, 7, 7, '#a8a46a', 0.55);
+      stroke(g, [...lp, ...curl], 4.2, 2, DH.lip, 0.9);
+      line(g, hp.map(([a, b]) => [a - sd * 2, b]), 1.4, '#e0dca8', 0.55);
+    }
+    // a few chips of pale plaster, hairline cracks, rain streaks running down the flanks
+    for (let i = 0; i < 9; i++) { const x = range(rnd, 0.22, 0.78) * w, y = range(rnd, 0.05, 0.95) * h; wrapX(w, x, 10, X => chips(g, rnd, 1, X - 2, y - 2, 4, 4, '#c8bea8', 3, 6, 0.85)); }
+    cracks(g, h, rnd, { color: '#2e3430', count: 5, len: [14, 34], width: [0.7, 1.2], alpha: 0.35 });
+    for (let i = 0; i < 18; i++) {
+      const sd = rnd() < 0.5 ? -1 : 1, X = cx + sd * range(rnd, 20, 150), Y = range(rnd, 0, h), L = range(rnd, 20, 60);
+      line(g, [[X, Y], [X + sd * L * 0.5, Y + range(rnd, -3, 3)], [X + sd * L, Y + range(rnd, -4, 4)]], range(rnd, 1.2, 2.4), pick(rnd, ['#3a4a3a', '#6a6044']), 0.14);
+    }
+    // grime and chipped paint toward the broken neck
+    g.fillStyle = lin(g, 0, h * 0.86, 0, h, [[0, '#4a4438', 0], [1, '#4a4438', 0.35]]); g.fillRect(0, h * 0.86, w, h * 0.14);
+    for (let i = 0; i < 8; i++) { const x = rnd() * w; wrapX(w, x, 10, X => chips(g, rnd, 1, X - 3, h - 14, 6, 10, '#bdb4a2', 3, 7, 0.8)); }
+    glaze(g, w, h, '#ffe8b8', 0.1);
+    blurTile(cv, 0.5);
+  },
+});
+register('loot_dinojaw', {
+  family: F, w: 256, h: 128, note: "the dino's lower jaw (u round, 0.5 = the floor of the mouth; v hinge → chin at the top): pink floor, the lower lip, scaled flanks, the cream chin",
+  paint(g, w, rnd, h, cv) {
+    const cx = w / 2, lipX = DINO.jawLipU * w;
+    g.fillStyle = lin(g, 0, 0, w, 0, [[0, DH.belly2], [0.12, DH.belly], [0.2, DH.flank2], [0.3, DH.flank], [0.36, '#5e7656'], [0.5, '#5e7656'], [0.64, '#5e7656'], [0.7, '#66724a'], [0.8, '#7e7c4c'], [0.88, '#b09a64'], [1, DH.belly2]]);
+    g.fillRect(0, 0, w, h);
+    mottle(g, w, rnd, { colors: ['#62784a', '#7a8450', '#8c8a52'], count: 14, rmin: 10, rmax: 26, alpha: 0.22, hard: 0.1 });
+    blob(g, cx - 64, h * 0.5, 26, h * 0.7, 0, '#d8d49a', 0.2, 0.2);
+    blob(g, cx + 70, h * 0.5, 30, h * 0.7, 0, '#3a4258', 0.22, 0.2);
+    // scales on the flanks: "up" is toward the lip
+    for (const sd of [-1, 1]) {
+      const sp = cx + sd * (lipX + 10);
+      for (let k = 0; k < 3; k++) for (let Y = 4 + (k % 2 ? 7 : 0); Y < h + 8; Y += 14) {
+        const X = sp + sd * k * 16 + range(rnd, -1.5, 1.5), fade = 1 - k * 0.28;
+        blob(g, X + sd * 3.5, Y + 1.5, 6.5, 7, 0, DH.shade, 0.42 * fade, 0.4);
+        ellipse(g, X, Y, 5.5, 6.5, 0, mix(DH.scale, DH.scaleF, k * 0.4), 0.6 * fade);
+        g.save(); g.globalAlpha = 0.7 * fade; g.strokeStyle = DH.lit; g.lineWidth = 1.8; g.lineCap = 'round';
+        const a = sd > 0 ? Math.PI : 0; g.beginPath(); g.ellipse(X, Y - 0.5, 4.6, 5.2, 0, a - 1.15, a + 0.9); g.stroke(); g.restore();
+      }
+    }
+    // the cream chin and throat: soft folds across
+    for (const x0 of [0, w]) for (let Y = 6; Y < h; Y += range(rnd, 9, 13)) {
+      const sd = x0 ? -1 : 1, pts = [[x0, Y], [x0 + sd * 14, Y + range(rnd, -2, 2)], [x0 + sd * 26, Y + range(rnd, -3, 1)]];
+      line(g, pts.map(([a, b]) => [a, b + 1.5]), 2, '#8a7448', 0.3); line(g, pts, 1, '#f4e6b8', 0.35);
+    }
+    // the floor of the mouth, inside the lip
+    clip(g, () => { g.beginPath(); g.rect(cx - lipX, -2, 2 * lipX, h + 4); }, () => {
+      g.fillStyle = lin(g, 0, 0, 0, h, [[0, DH.pink2], [0.5, DH.pink], [1, DH.pinkD]]); g.fillRect(0, 0, w, h);
+      g.fillStyle = lin(g, cx - lipX, 0, cx + lipX, 0, [[0, DH.pinkD, 0.6], [0.3, DH.pinkD, 0], [0.7, DH.pinkD, 0], [1, DH.pinkD, 0.6]]); g.fillRect(cx - lipX, 0, 2 * lipX, h);
+    });
+    for (const sd of [-1, 1]) {
+      const edge = cx + sd * lipX, lp = [], hp = [];
+      for (let Y = -4; Y <= h + 4; Y += 6) { const wob = Math.sin(Y * 0.11) * 1; lp.push([edge + wob, Y]); hp.push([edge + sd * 6 + wob, Y]); }
+      stroke(g, hp, 6, 6, '#a8a46a', 0.5); stroke(g, lp, 3.6, 3.6, DH.lip, 0.9); line(g, hp.map(([a, b]) => [a + sd * 1.5, b]), 1.2, '#e0dca8', 0.5);
+    }
+    for (let i = 0; i < 4; i++) { const x = range(rnd, 0.2, 0.8) * w; chips(g, rnd, 1, x - 2, range(rnd, 10, h - 10), 4, 4, '#c8bea8', 2.5, 5, 0.8); }
+    glaze(g, w, h, '#ffe8b8', 0.1);
+    blurTile(cv, 0.5);
+  },
+});
+register('loot_dinomouth', {
+  family: F, w: 192, h: 64, note: "inside the dino's mouth: the cavity (u round, v throat → lips at the top), the tongue from above, a plain strip of hide for the small bumps",
+  paint(g, w, rnd, h, cv) {
+    // the cavity: deep maroon, darkest at the throat, soft folds down the cheeks
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#7a2a38'], [0.5, '#4e1a26'], [1, '#2c0e16']]); g.fillRect(0, 0, 64, h);
+    for (const x of [16, 48]) for (let k = 0; k < 3; k++) line(g, [[x - 6 + k * 6, 2], [x - 5 + k * 6, h - 2]], 2, '#2a0c12', 0.35);
+    blob(g, 32, 4, 30, 8, 0, '#a8485a', 0.35, 0.3);
+    // the tongue: pink, a lit top, darker sides, a groove down the middle, the tip at the top
+    const tx = 96;
+    rect(g, 64, 0, 64, h, '#8a3442');
+    g.fillStyle = lin(g, 64, 0, 128, 0, [[0, '#6a2232'], [0.3, '#b85060'], [0.45, '#d47484'], [0.55, '#c86070'], [0.75, '#a84858'], [1, '#6a2232']]); g.fillRect(64, 0, 64, h);
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#f0a0a8', 0.25], [0.3, '#f0a0a8', 0], [0.8, '#3a0e18', 0], [1, '#3a0e18', 0.45]]); g.fillRect(64, 0, 64, h);
+    stroke(g, [[tx, 6], [tx + 0.5, 30], [tx, 56]], 2.4, 1.2, '#6a2232', 0.7);
+    line(g, [[tx - 2.5, 8], [tx - 2.5, 52]], 1, '#f4b4bc', 0.4);
+    for (let i = 0; i < 26; i++) ellipse(g, range(rnd, 72, 120), range(rnd, 4, 60), 1, 0.8, 0, rnd() < 0.5 ? '#e89aa4' : '#7a2a38', 0.5);
+    // a plain strip of hide for the small bumps (plates, brows, lids, nostrils): u across, v from the
+    // underside (bottom) to the lit top: no scales to smear, just form
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#b8c890'], [0.18, '#6e9070'], [0.45, DH.back2], [0.75, '#34503f'], [1, '#22342c']]); g.fillRect(128, 0, 64, h);
+    for (let i = 0; i < 10; i++) blob(g, range(rnd, 132, 188), range(rnd, 6, h - 6), range(rnd, 4, 10), range(rnd, 3, 6), 0, pick(rnd, ['#5a7e64', '#3e5a48', '#7a8a58']), 0.3, 0.3);
+    blurTile(cv, 0.4);
   },
 });
 register('loot_eye', {
-  family: F, w: 128, h: 64, note: 'the fiberglass statue\'s goofy eye (a sphere: u wraps, front in the middle): cream, a big amber iris, a round pupil, a catchlight',
+  family: F, w: 128, h: 64, note: "the dino's eye (a sphere: u wraps, front in the middle): ivory, a big amber iris with a slit pupil, a catchlight, the lid's shadow over the top",
   paint(g, w, rnd, h, cv) {
-    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#c8bc98'], [0.5, '#f0e6cc'], [1, '#a89c80']]); g.fillRect(0, 0, w, h);
-    const x = w / 2, y = h / 2;
-    ellipse(g, x + 1, y + 1, 15, 15, 0, '#5a3a14', 0.6);
-    g.fillStyle = radial(g, x - 3, y - 3, 1, 15, [[0, '#f0c050'], [0.6, '#d0902a'], [1, '#7a4a14']]); g.beginPath(); g.arc(x, y, 14, 0, TAU); g.fill();
-    ellipse(g, x + 0.5, y + 0.5, 7.5, 7.5, 0, '#1a100c');
-    blob(g, x - 4, y - 4, 3.6, 3, 0, '#fffbe8', 0.95, 0.5);
-    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#4a3020', 0.35], [0.3, '#4a3020', 0], [1, '#4a3020', 0]]); g.fillRect(0, 0, w, h);
-    blurTile(cv, 0.4);
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#a89c80'], [0.35, '#f0e6cc'], [0.6, '#f4ecd4'], [1, '#a89c80']]); g.fillRect(0, 0, w, h);
+    g.fillStyle = lin(g, 0, 0, w, 0, [[0, '#8a7e68', 0.5], [0.3, '#8a7e68', 0], [0.7, '#8a7e68', 0], [1, '#8a7e68', 0.5]]); g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 5; i++) { const y = range(rnd, 12, 52), x0 = range(rnd, 10, 40); line(g, [[x0, y], [x0 + 12, y + range(rnd, -3, 3)], [x0 + 20, y + range(rnd, -4, 4)]], 0.8, '#c86a5a', 0.4); line(g, [[w - x0, y], [w - x0 - 14, y + range(rnd, -3, 3)]], 0.8, '#c86a5a', 0.4); }
+    const x = w / 2, y = h / 2 + 1;
+    ellipse(g, x + 1, y + 1, 13.5, 13, 0, '#4a2a10', 0.7);
+    g.fillStyle = radial(g, x - 3, y - 3, 1, 13, [[0, '#f8d070'], [0.45, '#d89a2a'], [0.85, '#a86414'], [1, '#5a3410']]); g.beginPath(); g.arc(x, y, 12.5, 0, TAU); g.fill();
+    for (let k = 0; k < 18; k++) { const a = k / 18 * TAU; line(g, [[x + Math.cos(a) * 5, y + Math.sin(a) * 5], [x + Math.cos(a) * 11, y + Math.sin(a) * 11]], 0.8, k % 2 ? '#f8d888' : '#8a5418', 0.45); }
+    stroke(g, [[x, y - 11], [x + 0.6, y], [x, y + 11]], 2, 2, '#3a2410', 0.6);
+    g.save(); g.fillStyle = '#2a1a0c'; g.beginPath(); g.ellipse(x, y, 2.6, 10.5, 0, 0, TAU); g.fill(); g.restore();
+    blob(g, x - 5, y - 5, 3.4, 2.8, 0, '#fffbe8', 1, 0.6);
+    ellipse(g, x + 4, y + 5, 1.2, 1, 0, '#fffbe8', 0.7);
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#3a2818', 0.55], [0.32, '#3a2818', 0], [1, '#3a2818', 0]]); g.fillRect(0, 0, w, h);
+    blurTile(cv, 0.35);
   },
 });
 register('loot_ivory', {
@@ -1582,13 +1901,25 @@ register('loot_ivory', {
   },
 });
 register('loot_plaster', {
-  family: F, size: 64, note: 'the broken neck seen face on: a rim of painted green, gray plaster, a hollow fiberglass dark inside',
+  family: F, size: 64, note: 'the broken neck seen face on: a thin rim of painted fiberglass, chunky gray plaster with lit broken edges, a small dark hollow',
   paint(g, s, rnd, h, cv) {
     const c = s / 2;
-    rect(g, 0, 0, s, s, '#4a7a3c');
-    g.fillStyle = radial(g, c, c, 2, c, [[0, '#2a2420'], [0.5, '#3a3430'], [0.62, '#8a8478'], [0.82, '#b8b0a2'], [0.92, '#a49c90'], [1, '#4a7a3c']]); g.beginPath(); g.arc(c, c, c, 0, TAU); g.fill();
-    for (let k = 0; k < 14; k++) { const a = k / 14 * TAU + rnd() * 0.3; line(g, [[c + Math.cos(a) * c * 0.55, c + Math.sin(a) * c * 0.55], [c + Math.cos(a) * c * 0.85, c + Math.sin(a) * c * 0.85]], 1, '#6a645a', 0.6); }
-    blurTile(cv, 0.4);
+    rect(g, 0, 0, s, s, '#4a7060');
+    g.fillStyle = radial(g, c - 2, c - 3, 2, c, [[0, '#a8a090'], [0.85, '#968e80'], [0.93, '#6a7a60'], [1, '#4a7060']]); g.beginPath(); g.arc(c, c, c, 0, TAU); g.fill();
+    // broken chunks: lit on their upper left, shaded lower right
+    for (let i = 0; i < 16; i++) {
+      const a = rnd() * TAU, r = range(rnd, 0.2, 0.8) * c * 0.9, x = c + Math.cos(a) * r, y = c + Math.sin(a) * r, rr = range(rnd, 3, 7);
+      const pts = []; for (let k = 0; k < 6; k++) { const b = k / 6 * TAU, q = rr * range(rnd, 0.6, 1.2); pts.push([x + Math.cos(b) * q, y + Math.sin(b) * q]); }
+      poly(g, pts.map(([p, q]) => [p + 1.2, q + 1.4])); g.fillStyle = rgba('#4a443e', 0.55); g.fill();
+      poly(g, pts); g.fillStyle = pick(rnd, ['#b8b0a0', '#a49c8e', '#c4bcaa']); g.fill();
+      line(g, pts.slice(3, 6), 1, '#e8e0cc', 0.8);
+    }
+    // the hollow of the fiberglass shell, off center
+    blob(g, c + 3, c + 2, 12, 10, 0.3, '#2a2024', 0.95, 0.55);
+    blob(g, c + 1, c + 1, 6, 5, 0.3, '#1c1418', 0.9, 0.5);
+    line(g, [[c - 8, c - 5], [c - 2, c - 9], [c + 8, c - 8]], 1.4, '#d8d0bc', 0.6);
+    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU + rnd() * 0.3; line(g, [[c + Math.cos(a) * c * 0.5, c + Math.sin(a) * c * 0.5], [c + Math.cos(a) * c * 0.88, c + Math.sin(a) * c * 0.88]], 0.9, '#5a544a', 0.5); }
+    blurTile(cv, 0.3);
   },
 });
 
@@ -1644,17 +1975,19 @@ register('loot_regdeck', {
   },
 });
 register('loot_keys', {
-  family: F, w: 256, h: 64, note: "the register's ivory key caps from above, 8 × 2: digits and coins in dark enamel",
+  family: F, w: 256, h: 64, note: "the register's ivory key caps from above, 8 × 2: domed ivory lit upper left, a brass rim, the digits and coins painted big in umber",
   paint(g, w, rnd, h, cv) {
-    rect(g, 0, 0, w, h, '#c8b890');
+    rect(g, 0, 0, w, h, '#b8902e');
     for (let i = 0; i < 16; i++) {
       const x = (i % 8) * 32 + 16, y = Math.floor(i / 8) * 32 + 16;
-      g.fillStyle = radial(g, x - 4, y - 5, 1, 15, [[0, '#fffbee'], [0.6, '#eadfc4'], [1, '#b8a880']]); g.fillRect(x - 16, y - 16, 32, 32);
-      g.save(); g.strokeStyle = rgba('#7a6a48', 0.7); g.lineWidth = 2; g.beginPath(); g.arc(x, y, 13.5, 0, TAU); g.stroke(); g.restore();
-      const t = KEY_LABELS[i];
-      g.save(); g.font = `bold ${t.length > 2 ? 9 : t.length > 1 ? 11 : 15}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillStyle = '#fff8e8'; g.fillText(t, x - 0.5, y + 0.5); g.fillStyle = '#2a1a14'; g.fillText(t, x, y + 1); g.restore();
+      g.fillStyle = radial(g, x, y, 12, 16, [[0, '#7a5418'], [0.4, '#e8c060'], [1, '#8a6420']]); g.fillRect(x - 16, y - 16, 32, 32);
+      g.fillStyle = radial(g, x - 4, y - 5, 1, 14, [[0, '#fffbee'], [0.55, '#f0e6cc'], [0.85, '#d8c8a0'], [1, '#a89068']]); g.beginPath(); g.arc(x, y, 13.2, 0, TAU); g.fill();
+      const t = KEY_LABELS[i], sz = t.length > 2 ? 10.5 : t.length > 1 ? 13 : 19;
+      g.save(); g.font = `bold ${sz}px ${FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.fillStyle = rgba('#fffaf0', 0.8); g.fillText(t, x - 0.6, y + 0.4); g.fillStyle = '#4a2a14'; g.fillText(t, x, y + 1.2); g.restore();
+      blob(g, x - 6, y - 7, 4, 2.4, -0.5, '#ffffff', 0.7, 0.4);
     }
-    blurTile(cv, 0.3);
+    blurTile(cv, 0.25);
   },
 });
 register('loot_till', {
@@ -1769,93 +2102,116 @@ register('loot_glow', {
 
 // ---- boulders, one per biome ----------------------------------------------------------------------------
 
+// Strata for the slab-built boulders: band edges in v (0 = the ground, 1 = the top). props3d stacks
+// its slabs on some of these edges, so every geometric ledge sits on a painted one.
+export const BOULDER_BANDS = { badlands: [0, 0.2, 0.42, 0.6, 0.78, 1], desert: [0, 0.27, 0.5, 0.74, 1] };
 // The stone: the world's own rock (nature family) when it's there, the zone's character painted over
 // it (strata, lichen, wind grooves, cold cracks). v = height, so bands stay level.
 const BOULDER = {
   meadow: { rock: 'rock_gray', base: '#77746e', cols: ['#97918a', '#6a675f', '#8a857c'], ground: '#4a4030' },
   fields: { rock: 'rock_warm', base: '#8a8170', cols: ['#9a9080', '#766e60', '#a49a86'], ground: '#7a6040' },
   snow: { rock: 'rock_granite', base: '#6f7682', cols: ['#8e96a3', '#5e6470', '#7a828e'], ground: '#5a5e6a' },
-  badlands: { rock: 'rock_red', base: '#a04a2a', cols: ['#b4552f', '#8e3e22', '#cf7a45'], ground: '#8a5a38' },
-  desert: { rock: 'rock_sand', base: '#b7895e', cols: ['#d4ab7c', '#a87a50', '#c89a6a'], ground: '#b89060' },
+  badlands: { rock: 'rock_red', base: '#a04a2a', cols: ['#b4552f', '#8e3e22', '#cf7a45'], ground: '#8a5a38',
+    bands: ['#b4552f', '#8e3e22', '#cf7a45', '#a8482a', '#e3a066'], lit: '#f0b880', under: '#6a2e22' },
+  desert: { rock: 'rock_sand', base: '#b7895e', cols: ['#d4ab7c', '#a87a50', '#c89a6a'], ground: '#b89060',
+    bands: ['#c8986a', '#e0bc8c', '#b7895e', '#d4ab7c'], lit: '#f8e0b4', under: '#8a6040' },
 };
 function boulderPaint(g, w, rnd, h, biome) {
   const B = BOULDER[biome];
   const Y = v => (1 - v) * h;
   if (has(B.rock)) { const src = canvasFor(B.rock); g.drawImage(src, 0, 0, w / 2, h); g.drawImage(src, w / 2, 0, w / 2, h); }
   else fill(g, w, h, B.base);
-  // big soft facets: lit planes and cool shaded ones
-  for (let i = 0; i < 20; i++) {
-    const x = rnd() * w, y = range(rnd, 0.15, 0.85) * h, rx = range(rnd, 20, 60), ry = range(rnd, 14, 40), a = range(rnd, -0.5, 0.5), c = lightOf(pick(rnd, B.cols), 0.25);
-    wrapX(w, x, rx * 1.5, X => { blob(g, X + rx * 0.3, y + ry * 0.35, rx, ry, a, shadowOf(B.base, 0.45), 0.2, 0.3); blob(g, X - rx * 0.2, y - ry * 0.25, rx * 0.8, ry * 0.7, a, c, 0.2, 0.3); });
-  }
-  if (biome === 'badlands' || biome === 'desert') {
-    // strata: uneven bands, each with a lit top edge and a dark under-ledge, wobbling
-    const pal = biome === 'badlands' ? ['#8e3e22', '#b4552f', '#cf7a45', '#a8482a', '#c06a3a'] : ['#c8a070', '#d4ab7c', '#b7895e', '#e0bc8c', '#a87a50'];
-    const litC = biome === 'badlands' ? '#e3a066' : '#f0d4a4', darkC = biome === 'badlands' ? '#6a2a16' : '#7a5a3a';
-    let y = range(rnd, -10, 0);
-    const ph = rnd() * TAU;
-    while (y < h) {
-      const t = range(rnd, 4, 30), c = pick(rnd, pal), wob = x => Math.sin(x / w * TAU * 2 + ph + y * 0.05) * 2.2 + Math.sin(x / w * TAU * 5 + y) * 0.9;
-      const top = [], bot = [];
-      for (let x = 0; x <= w; x += 8) { top.push([x, y + wob(x)]); bot.push([x, y + t + wob(x + 40)]); }
-      g.save(); g.globalAlpha = biome === 'badlands' ? 0.55 : 0.4; g.fillStyle = c; poly(g, [...top, ...bot.slice().reverse()]); g.fill(); g.restore();
-      line(g, top, range(rnd, 1.2, 2.2), litC, 0.55);
-      line(g, bot.map(([a, b]) => [a, b + 1.5]), range(rnd, 2, 4), darkC, 0.45);
-      y += t;
+  if (B.bands) {
+    // 4–5 broad strata, soft edged; within each a couple of faint thin beds
+    const E = BOULDER_BANDS[biome];
+    for (let i = 0; i < E.length - 1; i++) {
+      const y0 = Y(E[i + 1]), y1 = Y(E[i]), c = B.bands[i % B.bands.length];
+      g.save(); g.filter = 'blur(3px)'; g.globalAlpha = 0.72; g.fillStyle = c; g.fillRect(-8, y0 - 2, w + 16, y1 - y0 + 4); g.restore();
+      for (let k = 0; k < 3; k++) { const yy = range(rnd, y0 + 6, y1 - 6), ph = rnd() * TAU; const pts = []; for (let x = 0; x <= w; x += 16) pts.push([x, yy + Math.sin(x / w * TAU * 2 + ph) * 2]); line(g, pts, range(rnd, 1, 2.4), pick(rnd, [lightOf(c, 0.3), shadowOf(c, 0.3)]), 0.35); }
+      for (let k = 0; k < 10; k++) { const x = rnd() * w, r = range(rnd, 14, 40); wrapX(w, x, r, X => blob(g, X, range(rnd, y0, y1), r, range(rnd, 4, 10), 0, pick(rnd, [lightOf(c, 0.25), shadowOf(c, 0.25)]), 0.25, 0.2)); }
     }
-    if (biome === 'desert') for (let i = 0; i < 26; i++) {         // wind-scoured grooves
-      const yy = rnd() * h, x0 = rnd() * w, L = range(rnd, 60, 220);
-      wrapX(w, x0 + L / 2, L, X => { line(g, [[X - L / 2, yy], [X + L / 2, yy + range(rnd, -2, 2)]], range(rnd, 1.5, 3), '#7a5a3a', 0.35); line(g, [[X - L / 2, yy + 2], [X + L / 2, yy + 2]], 1, '#f4dcae', 0.4); });
+    // at every edge: the lit top of the bed below (a ledge's rounded lip) and the cool dark of the one above
+    for (let i = 1; i < E.length; i++) {
+      const y = Y(E[i]), ph = rnd() * TAU, wob = x => Math.sin(x / w * TAU * 2 + ph) * 1.5, ledge = i % 2 === 0 || i === E.length - 1;
+      const top = []; for (let x = 0; x <= w; x += 8) top.push([x, y + wob(x)]);
+      g.fillStyle = lin(g, 0, y, 0, y + 11, [[0, B.lit, ledge ? 0.75 : 0.45], [1, B.lit, 0]]); g.fillRect(0, y, w, 11);
+      line(g, top.map(([a, b]) => [a, b + 1.5]), ledge ? 2.6 : 1.6, '#fff4dc', ledge ? 0.5 : 0.3);
+      if (i < E.length - 1) { g.fillStyle = lin(g, 0, y, 0, y - 12, [[0, B.under, ledge ? 0.8 : 0.45], [1, B.under, 0]]); g.fillRect(0, y - 12, w, 12); }
     }
+    // weathering: vertical streaks and soft vertical fracture shadows
+    for (let i = 0; i < 18; i++) { const x = rnd() * w, y0 = rnd() * h * 0.7, L = range(rnd, 30, 110); wrapX(w, x, 6, X => line(g, [[X, y0], [X + range(rnd, -2, 2), y0 + L]], range(rnd, 1.5, 4), pick(rnd, [B.under, shadowOf(B.base, 0.4)]), 0.2)); }
+    for (let i = 0; i < 4; i++) { const x = rnd() * w, y0 = range(rnd, 0.1, 0.6) * h, L = range(rnd, 30, 70); wrapX(w, x, 10, X => { stroke(g, [[X, y0], [X + range(rnd, -3, 3), y0 + L * 0.5], [X + range(rnd, -4, 4), y0 + L]], 3, 1, B.under, 0.35); line(g, [[X - 3, y0 + 4], [X - 3 + range(rnd, -3, 3), y0 + L * 0.8]], 1.2, B.lit, 0.25); }); }
+    if (biome === 'desert') for (let i = 0; i < 22; i++) {         // wind-scoured grooves
+      const yy = rnd() * h, x0 = rnd() * w, L = range(rnd, 60, 200);
+      wrapX(w, x0 + L / 2, L, X => { line(g, [[X - L / 2, yy], [X + L / 2, yy + range(rnd, -2, 2)]], range(rnd, 1.5, 3), '#8a6a48', 0.3); line(g, [[X - L / 2, yy + 2], [X + L / 2, yy + 2]], 1, '#f4dcae', 0.35); });
+    }
+  } else {
+    // big soft facets: lit planes and cool shaded ones (the geometry paints its facets' values too)
+    for (let i = 0; i < 20; i++) {
+      const x = rnd() * w, y = range(rnd, 0.15, 0.85) * h, rx = range(rnd, 20, 60), ry = range(rnd, 14, 40), a = range(rnd, -0.5, 0.5), c = lightOf(pick(rnd, B.cols), 0.25);
+      wrapX(w, x, rx * 1.5, X => { blob(g, X + rx * 0.3, y + ry * 0.35, rx, ry, a, shadowOf(B.base, 0.45), 0.2, 0.3); blob(g, X - rx * 0.2, y - ry * 0.25, rx * 0.8, ry * 0.7, a, c, 0.2, 0.3); });
+    }
+    if (biome === 'meadow') for (let i = 0; i < 12; i++) { const x = rnd() * w; wrapX(w, x, 10, X => stroke(g, [[X, Y(0.97)], [X + range(rnd, -3, 3), Y(range(rnd, 0.62, 0.85))]], range(rnd, 5, 10), 1, pick(rnd, ['#4f6d2a', '#5d6b3c']), 0.35)); }
+    if (biome === 'fields') for (let i = 0; i < 26; i++) { const x = rnd() * w, y = range(rnd, 0.25, 0.9) * h, rx = range(rnd, 4, 10); wrapX(w, x, 10, X => { blob(g, X, y, rx, rx * 0.7, 0, pick(rnd, ['#d89a3a', '#c8b04a', '#e0b050']), 0.5, 0.55); blob(g, X - rx * 0.3, y - rx * 0.25, rx * 0.4, rx * 0.3, 0, '#f0d888', 0.5, 0.4); }); }
+    if (biome === 'snow') for (let i = 0; i < 14; i++) { const x = rnd() * w, y = range(rnd, 0.3, 0.85) * h, rx = range(rnd, 10, 26); wrapX(w, x, rx * 1.4, X => { blob(g, X + 2, y + 2.5, rx, 3.5, 0, '#3a4a6a', 0.22, 0.3); blob(g, X, y, rx, 3, 0, '#eef2f8', 0.55, 0.35); }); }
   }
-  if (biome === 'meadow') for (let i = 0; i < 26; i++) { const x = rnd() * w; wrapX(w, x, 10, X => stroke(g, [[X, Y(0.95)], [X + range(rnd, -3, 3), Y(range(rnd, 0.45, 0.8))]], range(rnd, 4, 9), 1, pick(rnd, ['#5d6b3c', '#6d7a4a']), 0.28)); }
-  if (biome === 'fields') for (let i = 0; i < 40; i++) { const x = rnd() * w, y = range(rnd, 0.2, 0.9) * h, rx = range(rnd, 3, 8); wrapX(w, x, 8, X => blob(g, X, y, rx, rx * 0.7, 0, pick(rnd, ['#d89a3a', '#c8b04a', '#e8c060']), 0.55, 0.5)); }
-  if (biome === 'snow') for (let i = 0; i < 14; i++) { const x = rnd() * w, y = range(rnd, 0.3, 0.85) * h, rx = range(rnd, 10, 26); wrapX(w, x, rx * 1.4, X => { blob(g, X + 2, y + 2.5, rx, 3.5, 0, '#3a4a6a', 0.22, 0.3); blob(g, X, y, rx, 3, 0, '#eef2f8', 0.55, 0.35); }); }
-  cracks(g, w, rnd, { color: '#2a2030', count: 8, len: [20, 60], width: [1, 2], alpha: 0.4 });
+  cracks(g, w, rnd, { color: '#2a2030', count: 8, len: [20, 60], width: [1, 2], alpha: 0.35 });
   // grime and earth at the foot
-  g.fillStyle = lin(g, 0, Y(0.22), 0, h, [[0, B.ground, 0], [0.6, B.ground, 0.4], [1, shadowOf(B.ground, 0.4), 0.75]]); g.fillRect(0, Y(0.22), w, h - Y(0.22));
+  g.fillStyle = lin(g, 0, Y(0.2), 0, h, [[0, B.ground, 0], [0.6, B.ground, 0.38], [1, shadowOf(B.ground, 0.4), 0.7]]); g.fillRect(0, Y(0.2), w, h - Y(0.2));
   if (biome === 'snow') { g.fillStyle = lin(g, 0, Y(0.12), 0, h, [[0, '#e8eef4', 0], [1, '#dfe6ee', 0.8]]); g.fillRect(0, Y(0.12), w, h - Y(0.12)); }
   glaze(g, w, h, '#ffe2b0', 0.1);
 }
-// The cover: an alpha-tested layer for the rock's upward faces (alpha × the shell's vertex alpha is
-// cut at 0.5, so its edge is ragged where the slope turns). Seamless both ways.
+// The cover: an alpha-tested layer for the rock's upward faces (alpha × the shell's vertex alpha is cut
+// at 0.5). Broad continuous caps with ragged holes where the stone shows through, a darker rim where
+// they meet the stone, lit on their upper left. Seamless both ways.
 function coverPaint(g, s, rnd, biome) {
-  // a patch: a cluster of small overlapping dabs (never one round disc), lit on its upper left
-  const patch = (n, spread, rmin, rmax, cols, lit, dark, { rim = 0.5, hard = 0.55, fringe = null } = {}) => {
-    for (let i = 0; i < n; i++) {
-      const cx = rnd() * s, cy = rnd() * s, m = 5 + Math.floor(rnd() * 7), dabs = [];
-      for (let k = 0; k < m; k++) dabs.push([cx + (rnd() - 0.5) * spread, cy + (rnd() - 0.5) * spread * 0.7, range(rnd, rmin, rmax), pick(rnd, cols)]);
-      for (const [x, y, r] of dabs) wrap(s, x, y, r * 1.5, (X, Y) => blob(g, X + r * 0.3, Y + r * 0.35, r * 1.1, r * 0.9, 0, dark, rim, hard));
-      for (const [x, y, r, c] of dabs) wrap(s, x, y, r * 1.5, (X, Y) => blob(g, X, Y, r, r * 0.8, rnd() * 3, c, 1, hard));
-      for (const [x, y, r] of dabs) if (rnd() < 0.6) wrap(s, x, y, r, (X, Y) => blob(g, X - r * 0.3, Y - r * 0.3, r * 0.45, r * 0.32, 0, lit, 0.7, 0.4));
-      if (fringe) for (const [x, y, r] of dabs) for (let k = 0; k < 3; k++) { const a = rnd() * TAU, bx = x + Math.cos(a) * r, by = y + Math.sin(a) * r * 0.8, c = pick(rnd, fringe); wrap(s, bx, by, 12, (X, Y) => blade(g, X, Y, range(rnd, 4, 9), range(rnd, -0.8, 0.8), range(rnd, 1.4, 2.2), c, 1, range(rnd, -0.3, 0.3))); }
-    }
+  const caps = (base, cols, lit, rim, nHoles, hr) => {
+    fill(g, s, s, base);
+    for (let i = 0; i < 26; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 14, 40); wrap(s, x, y, r, (X, Y) => blob(g, X, Y, r, r * 0.8, rnd() * 3, pick(rnd, cols), 0.45, 0.2)); }
+    const holes = []; for (let i = 0; i < nHoles; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, hr[0], hr[1]), dabs = []; for (let k = 0; k < 5; k++) dabs.push([x + range(rnd, -0.6, 0.6) * r, y + range(rnd, -0.5, 0.5) * r, r * range(rnd, 0.45, 0.75)]); holes.push(dabs); }
+    // the rim: darker where the cover thins to the stone; the light catching it on the far side
+    for (const d of holes) for (const [x, y, r] of d) wrap(s, x, y, r * 1.8, (X, Y) => { blob(g, X - r * 0.35, Y - r * 0.4, r * 1.55, r * 1.35, 0, lit, 0.35, 0.3); blob(g, X + r * 0.1, Y + r * 0.12, r * 1.35, r * 1.2, 0, rim, 0.75, 0.45); });
+    g.save(); g.globalCompositeOperation = 'destination-out';
+    for (const d of holes) for (const [x, y, r] of d) wrap(s, x, y, r * 1.2, (X, Y) => blob(g, X, Y, r, r * 0.85, rnd() * 3, '#000', 1, 0.75));
+    for (let i = 0; i < 90; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 2, 6); wrap(s, x, y, r, (X, Y) => blob(g, X, Y, r, r, 0, '#000', 0.5, 0.5)); }
+    g.restore();
+    return holes;
   };
   if (biome === 'meadow') {
-    patch(46, 44, 5, 11, ['#5d6b3c', '#6d7a4a', '#55663a', '#667544', '#4f5e32'], '#9aa860', '#3a4428', { fringe: ['#4f7d2a', '#6f9c34', '#5d6b3c'] });
-    for (let i = 0; i < 12; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 4, (X, Y) => ellipse(g, X, Y, 1.6, 1.6, 0, pick(rnd, ['#f0e6a0', '#e8a0b0', '#fff8e0']))); }
-  } else if (biome === 'fields') {
-    // Westfall rock: crusts of yellow-orange lichen and tufts of dry grass in the hollows
-    patch(30, 30, 3, 7, ['#c8a848', '#d89a3a', '#b8a858', '#d8b050'], '#f0d888', '#7a6a30', { rim: 0.35, hard: 0.65 });
-    for (let i = 0; i < 26; i++) {
-      const cx = rnd() * s, cy = rnd() * s;
-      for (let k = 0; k < 9; k++) { const c = pick(rnd, ['#a99a45', '#c9ac52', '#e2c56a', '#8a7a3a']); wrap(s, cx, cy, 16, (X, Y) => blade(g, X + (rnd() - 0.5) * 6, Y + (rnd() - 0.5) * 3, range(rnd, 7, 14), range(rnd, -0.9, 0.9), range(rnd, 1.6, 2.6), c, 1, range(rnd, -0.4, 0.4))); }
-    }
-  } else if (biome === 'snow') {
-    g.fillStyle = rgba('#e8eef4', 0.82); g.fillRect(0, 0, s, s);
-    patch(30, 40, 8, 18, ['#f2f4f8', '#e8eef4', '#f7f4ec'], '#ffffff', '#b8c8dc', { rim: 0.6, hard: 0.45 });
-    g.save(); g.globalCompositeOperation = 'destination-out';
-    for (let i = 0; i < 30; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 8, 20); wrap(s, x, y, r, (X, Y) => blob(g, X, Y, r, r * 0.8, rnd() * 3, '#000', 0.5, 0.3)); }
+    const holes = caps('#4f6d2a', ['#5a7a30', '#45612a', '#628436', '#4a6a2c'], '#8aa548', '#3a4e22', 16, [16, 30]);
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    // cushions of moss: small round clumps lit on their upper left
+    for (let i = 0; i < 160; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 3, 7); wrap(s, x, y, r * 1.5, (X, Y) => { blob(g, X + r * 0.3, Y + r * 0.35, r, r * 0.85, 0, '#34481e', 0.4, 0.4); blob(g, X - r * 0.25, Y - r * 0.3, r * 0.7, r * 0.55, 0, pick(rnd, ['#8aa548', '#7a9a40', '#9ab450']), 0.55, 0.4); }); }
+    for (let i = 0; i < 12; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 3, (X, Y) => { ellipse(g, X, Y, 1.8, 1.8, 0, pick(rnd, ['#f0e6a0', '#e8a0b0', '#fff8e0'])); ellipse(g, X, Y, 0.7, 0.7, 0, '#c8902a'); }); }
     g.restore();
-    for (let i = 0; i < 40; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 2, (X, Y) => ellipse(g, X, Y, 1.2, 1.2, 0, '#ffffff', 0.9)); }
+    // grass tufts only where the moss meets the stone
+    for (const d of holes) { const [x, y, r] = d[0]; for (let k = 0; k < 6; k++) { const a = rnd() * TAU, bx = x + Math.cos(a) * r * 1.2, by = y + Math.sin(a) * r; wrap(s, bx, by, 14, (X, Y) => blade(g, X, Y, range(rnd, 6, 12), range(rnd, -0.6, 0.6), range(rnd, 1.6, 2.4), pick(rnd, ['#6f9c34', '#9cb447', '#4f7d2a']), 1, range(rnd, -0.3, 0.3))); } }
+  } else if (biome === 'fields') {
+    // Westfall rock: broad crusts of golden lichen with dry grass in the cracks
+    const holes = caps('#a89a5a', ['#b8a058', '#9a8a50', '#c0a048', '#a89060'], '#d8c888', '#5e5634', 34, [14, 26]);
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 120; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 2, 6); wrap(s, x, y, r * 2, (X, Y) => { ellipse(g, X + 0.8, Y + 1, r, r * 0.8, 0, '#8a6a28', 0.5); ellipse(g, X, Y, r * 0.8, r * 0.65, 0, pick(rnd, ['#d8b058', '#c89a48', '#b8a868', '#d0a040'])); }); }
+    g.restore();
+    for (const d of holes) { const [x, y, r] = d[0]; for (let k = 0; k < 8; k++) { const a = rnd() * TAU, bx = x + Math.cos(a) * r * 1.1, by = y + Math.sin(a) * r * 0.9; wrap(s, bx, by, 16, (X, Y) => blade(g, X, Y, range(rnd, 7, 14), range(rnd, -0.9, 0.9), range(rnd, 1.6, 2.6), pick(rnd, ['#a99a45', '#c9ac52', '#e2c56a', '#8a7a3a']), 1, range(rnd, -0.4, 0.4))); } }
+  } else if (biome === 'snow') {
+    caps('#eef2f8', ['#f7f4ec', '#e2eaf2', '#ffffff', '#dfe6ee'], '#ffffff', '#b8c8dc', 4, [10, 18]);
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 40; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 10, 24); wrap(s, x, y, r * 1.4, (X, Y) => { blob(g, X + r * 0.25, Y + r * 0.3, r, r * 0.6, 0, '#c8d6e8', 0.35, 0.3); blob(g, X - r * 0.2, Y - r * 0.2, r * 0.7, r * 0.45, 0, '#ffffff', 0.5, 0.3); }); }
+    for (let i = 0; i < 50; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 2, (X, Y) => ellipse(g, X, Y, 1.1, 1.1, 0, '#ffffff', 0.9)); }
+    g.restore();
   } else if (biome === 'badlands') {
-    // ochre dust settled in drifts: flat, close to the rock's own tone, no lip
-    patch(18, 44, 5, 12, ['#c48c5a', '#b98457', '#cf9a62', '#b4784a'], '#dcae7a', '#9a5a38', { rim: 0.25, hard: 0.6 });
-    for (let i = 0; i < 30; i++) { const x = rnd() * s, y = rnd() * s, c = pick(rnd, ['#a88850', '#8a7040']); wrap(s, x, y, 12, (X, Y) => blade(g, X, Y, range(rnd, 5, 10), range(rnd, -0.8, 0.8), range(rnd, 1.2, 1.8), c, 1, range(rnd, -0.4, 0.4))); }
-    for (let i = 0; i < 30; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 1.5, 3); wrap(s, x, y, r, (X, Y) => { ellipse(g, X + 0.6, Y + 0.8, r, r * 0.8, 0, '#6a3a20'); ellipse(g, X, Y, r, r * 0.8, 0, pick(rnd, ['#a8583a', '#c87a4a', '#8e3e22'])); }); }
+    // ochre dust settled in drifts on the ledges, pebbles in it
+    caps('#c48c5a', ['#b98457', '#cf9a62', '#b4784a', '#c89060'], '#e0b484', '#8a5034', 18, [16, 30]);
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 30; i++) { const x = rnd() * s, y = rnd() * s, L = range(rnd, 14, 40); wrap(s, x, y, L, (X, Y) => { line(g, [[X - L / 2, Y], [X + L / 2, Y + 1]], 1.6, '#a87048', 0.35); line(g, [[X - L / 2, Y - 1.5], [X + L / 2, Y - 0.5]], 1, '#ecc49a', 0.4); }); }
+    for (let i = 0; i < 46; i++) { const x = rnd() * s, y = rnd() * s, r = range(rnd, 1.5, 3.5); wrap(s, x, y, r, (X, Y) => { ellipse(g, X + 0.6, Y + 0.8, r, r * 0.8, 0, '#6a3a20', 0.8); ellipse(g, X, Y, r, r * 0.8, 0, pick(rnd, ['#a8583a', '#c87a4a', '#8e3e22'])); ellipse(g, X - r * 0.3, Y - r * 0.3, r * 0.35, r * 0.3, 0, '#f0c090', 0.7); }); }
+    g.restore();
   } else {
-    patch(22, 50, 7, 15, ['#e8cc96', '#d9b87f', '#e2c48c'], '#fff0c8', '#c79c62', { rim: 0.3, hard: 0.55 });
-    for (let i = 0; i < 40; i++) { const x = rnd() * s, y = rnd() * s, L = range(rnd, 10, 30); wrap(s, x, y, L, (X, Y) => { line(g, [[X - L / 2, Y], [X + L / 2, Y + 1]], 1.4, '#c79c62', 0.6); line(g, [[X - L / 2, Y - 1.4], [X + L / 2, Y - 0.4]], 1, '#fff4d0', 0.6); }); }
+    // pale sand drifted onto the ledges, wind ripples across it
+    caps('#e2c48c', ['#e8cc96', '#d9b87f', '#ecd4a2', '#d4b078'], '#fff0c8', '#b88a54', 12, [14, 26]);
+    g.save(); g.globalCompositeOperation = 'source-atop';
+    for (let i = 0; i < 60; i++) { const x = rnd() * s, y = rnd() * s, L = range(rnd, 12, 34); wrap(s, x, y, L, (X, Y) => { const pts = [[X - L / 2, Y], [X, Y + range(rnd, -1.5, 1.5)], [X + L / 2, Y + 1]]; line(g, pts, 1.5, '#c79c62', 0.55); line(g, pts.map(([a, b]) => [a, b - 1.6]), 1, '#fff4d8', 0.6); }); }
+    g.restore();
   }
 }
 for (const b of Object.keys(BOULDER)) {

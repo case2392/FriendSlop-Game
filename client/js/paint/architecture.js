@@ -388,8 +388,8 @@ function plates(g, s, rnd, { colors, rows = 2, minW = 90, maxW = 200, gap = 3, r
   mottle(g, s, rnd, { colors: colors.map(c => lightOf(c, 0.15)).concat(colors.map(c => shadowOf(c, 0.2))), count: 40, rmin: 10, rmax: 50, alpha: 0.2, hard: 0.1 });
   // chipped paint: dark metal underneath, with a lit lower lip
   for (let i = 0; i < 26 * chips; i++) {
-    const x = rnd() * s, y = rnd() * s, r = range(rnd, 2, 7);
-    wrap(s, x, y, r * 2, (X, Y) => { ellipse(g, X, Y, r, r * 0.7, rnd() * 3, '#4a4448', 0.85); blob(g, X + r * 0.4, Y + r * 0.4, r * 0.7, r * 0.4, 0, '#d8d0c0', 0.25, 0.4); });
+    const x = rnd() * s, y = rnd() * s, r = range(rnd, 2, 7), ra = rnd() * 3;
+    wrap(s, x, y, r * 2, (X, Y) => { ellipse(g, X, Y, r, r * 0.7, ra, '#4a4448', 0.85); blob(g, X + r * 0.4, Y + r * 0.4, r * 0.7, r * 0.4, 0, '#d8d0c0', 0.25, 0.4); });
   }
   streaks(g, s, rnd, { colors: ['#e8e0d0', '#c8c0b4'], count: scratches, len: [8, 30], width: [0.6, 1.2], angle: 1.3, wobble: 0.4, alpha: 0.35 });
   for (const r of rects) {
@@ -574,7 +574,7 @@ function fieldstone(g, s, rnd, cv, { colors, mortar = '#4a4038', moss = 0.5, siz
   }
   g.putImageData(img, 0, 0);
   // a few pits, chips and cracks, and the odd moss tuft on a top
-  for (let i = 0; i < 90; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 5, (X, Y) => { ellipse(g, X, Y, range(rnd, 1, 2.6), range(rnd, 0.8, 2), 0, INK, 0.3); ellipse(g, X + 1, Y + 1.2, 1.2, 0.9, 0, '#fff0d0', 0.18); }); }
+  for (let i = 0; i < 90; i++) { const x = rnd() * s, y = rnd() * s, ex = range(rnd, 1, 2.6), ey = range(rnd, 0.8, 2); wrap(s, x, y, 5, (X, Y) => { ellipse(g, X, Y, ex, ey, 0, INK, 0.3); ellipse(g, X + 1, Y + 1.2, 1.2, 0.9, 0, '#fff0d0', 0.18); }); }
   cracks(g, s, rnd, { color: '#3a3030', count: 6, len: [14, 40], width: [0.7, 1.3], alpha: 0.45 });
   mottle(g, s, rnd, { colors: mossCols, count: 14, rmin: 5, rmax: 16, alpha: 0.18, hard: 0.3 });
 }
@@ -767,7 +767,8 @@ register('planks_rough', {
         // nails at the studs, a rust run under some
         for (const sx of studs) {
           const nx = sx + range(rnd, -3, 3), ny = y + dy + hh * range(rnd, 0.35, 0.6);
-          wrap(s, nx, ny, 6, (X, Y) => { nailHead(g, X, Y, 2.4, '#4e4a4e'); if (rnd() < 0.3) line(g, [[X, Y + 2.5], [X + range(rnd, -1, 1), Y + range(rnd, 8, 20)]], 1.8, '#6a3a22', 0.3); });
+          const rust = rnd() < 0.3, rx = range(rnd, -1, 1), ry = range(rnd, 8, 20);
+          wrap(s, nx, ny, 6, (X, Y) => { nailHead(g, X, Y, 2.4, '#4e4a4e'); if (rust) line(g, [[X, Y + 2.5], [X + rx, Y + ry]], 1.8, '#6a3a22', 0.3); });
         }
       });
       y += hh;
@@ -799,8 +800,8 @@ function adobePaint(g, s, rnd, cv, { base = '#c08660', blot = ['#cc9268', '#b47a
   }
   // straw flecks in the mud
   for (let i = 0; i < 110; i++) {
-    const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 8), a = rnd() * Math.PI;
-    wrap(s, x, y, 10, (X, Y) => line(g, [[X, Y], [X + Math.cos(a) * L, Y + Math.sin(a) * L]], range(rnd, 0.8, 1.4), rnd() < 0.6 ? '#e8c890' : '#7a5034', 0.45));
+    const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 8), a = rnd() * Math.PI, lw = range(rnd, 0.8, 1.4), lc = rnd() < 0.6 ? '#e8c890' : '#7a5034';
+    wrap(s, x, y, 10, (X, Y) => line(g, [[X, Y], [X + Math.cos(a) * L, Y + Math.sin(a) * L]], lw, lc, 0.45));
   }
   mottle(g, s, rnd, { colors: [dark, '#eec094', '#a87050'], count: 220, rmin: 1.5, rmax: 4, alpha: 0.2, hard: 0.6 });
   for (const y0 of [s * 0.05, s * 0.5]) rainStreaks(g, s, rnd, 0, s, y0, dark, 7, 0.14);
@@ -936,8 +937,8 @@ register('timber_dark', {
       for (const dx of [-s, 0, s]) blob(g, x + dx, s / 2, w, s * 0.75, 0, lit ? '#8a6a4c' : '#2a1c14', lit ? 0.2 : 0.22, 0.1);
     }
     for (let i = 0; i < 10; i++) {
-      const x = rnd() * s, y = rnd() * s, L = range(rnd, 4, 10);
-      wrap(s, x, y, 12, (X, Y) => { line(g, [[X, Y], [X + range(rnd, -2, 2), Y + L]], 1.6, '#1e1410', 0.55); line(g, [[X + 1.2, Y], [X + 1.2, Y + L]], 0.8, '#9a7a58', 0.35); });
+      const x = rnd() * s, y = rnd() * s, L = range(rnd, 4, 10), dx = range(rnd, -2, 2);
+      wrap(s, x, y, 12, (X, Y) => { line(g, [[X, Y], [X + dx, Y + L]], 1.6, '#1e1410', 0.55); line(g, [[X + 1.2, Y], [X + 1.2, Y + L]], 0.8, '#9a7a58', 0.35); });
     }
     glaze(g, s, s, '#ffd8b0', 0.1, 'soft-light');
     blurTile(cv, 0.4);
@@ -984,11 +985,11 @@ register('brass', {
     for (const y of [s * 0.25, s * 0.75]) {
       line(g, [[0, y + 2], [s, y + 2]], 5, '#5a4018', 0.55);
       line(g, [[0, y - 1.5], [s, y - 1.5]], 2, '#f0d080', 0.6);
-      for (let i = 0; i < 10; i++) { const x = rnd() * s; wrap(s, x, y + 3, 20, (X, Y) => blob(g, X, Y, range(rnd, 6, 16), range(rnd, 2, 4), 0, '#6a8a5a', 0.55, 0.3)); }
+      for (let i = 0; i < 10; i++) { const x = rnd() * s, bw = range(rnd, 6, 16), bh = range(rnd, 2, 4); wrap(s, x, y + 3, 20, (X, Y) => blob(g, X, Y, bw, bh, 0, '#6a8a5a', 0.55, 0.3)); }
       for (let k = 0; k < 8; k++) rivet(g, (k + 0.5) * s / 8, y + 10, 3.2, '#c8a050');
     }
     mottle(g, s, rnd, { colors: ['#6a8a5a', '#5a7a52'], count: 12, rmin: 3, rmax: 9, alpha: 0.3, hard: 0.3 });
-    for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 30, (X, Y) => blob(g, X, Y, range(rnd, 10, 26), range(rnd, 3, 6), -0.5, '#fff0b8', 0.35, 0.3)); }
+    for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s, bw = range(rnd, 10, 26), bh = range(rnd, 3, 6); wrap(s, x, y, 30, (X, Y) => blob(g, X, Y, bw, bh, -0.5, '#fff0b8', 0.35, 0.3)); }
     blurTile(cv, 0.4);
   },
 });
@@ -1049,7 +1050,7 @@ register('carpet_casino', {
     fill(g, s, s, '#7a2026');
     mottle(g, s, rnd, { colors: ['#8a2a2c', '#6a1c22', '#842830'], count: 40, rmin: 20, rmax: 80, alpha: 0.4, hard: 0.1 });
     // small damask sprigs
-    for (let i = 0; i < 70; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 8, (X, Y) => { ellipse(g, X, Y, 3, 1.6, rnd() * 3, '#9a3a34', 0.6); ellipse(g, X + 2, Y + 2, 1.6, 1.6, 0, '#a8483c', 0.5); }); }
+    for (let i = 0; i < 70; i++) { const x = rnd() * s, y = rnd() * s, ra = rnd() * 3; wrap(s, x, y, 8, (X, Y) => { ellipse(g, X, Y, 3, 1.6, ra, '#9a3a34', 0.6); ellipse(g, X + 2, Y + 2, 1.6, 1.6, 0, '#a8483c', 0.5); }); }
     // the lattice: hand-wobbled gold strokes, a dark under-stroke and a light upper edge
     const P = 256;
     for (const dir of [1, -1]) for (let k = -3; k <= 4; k++) {
@@ -1079,8 +1080,8 @@ register('carpet_casino', {
     let i = 0;
     for (let y = 0; y < s; y += P / 2) for (let x = (y / (P / 2)) % 2 ? P / 2 : 0; x < s; x += P) { const kind = i++ % 3; wrap(s, x + P / 4, y + P / 4, 40, (X, Y) => med(X, Y, kind)); }
     // worn traffic paths and sun-faded patches
-    for (let k = 0; k < 6; k++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 120, (X, Y) => blob(g, X, Y, range(rnd, 50, 110), range(rnd, 25, 60), rnd() * 3, '#4a1418', 0.22, 0.05)); }
-    for (let k = 0; k < 4; k++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 100, (X, Y) => blob(g, X, Y, range(rnd, 40, 90), range(rnd, 30, 70), rnd() * 3, '#b06a5a', 0.14, 0.05)); }
+    for (let k = 0; k < 6; k++) { const x = rnd() * s, y = rnd() * s, bw = range(rnd, 50, 110), bh = range(rnd, 25, 60), ba = rnd() * 3; wrap(s, x, y, 120, (X, Y) => blob(g, X, Y, bw, bh, ba, '#4a1418', 0.22, 0.05)); }
+    for (let k = 0; k < 4; k++) { const x = rnd() * s, y = rnd() * s, bw = range(rnd, 40, 90), bh = range(rnd, 30, 70), ba = rnd() * 3; wrap(s, x, y, 100, (X, Y) => blob(g, X, Y, bw, bh, ba, '#b06a5a', 0.14, 0.05)); }
     for (let k = 0; k < 400; k++) ellipse(g, rnd() * s, rnd() * s, 0.9, 0.9, 0, rnd() < 0.5 ? '#a04040' : '#4a1418', 0.25);
     glaze(g, s, s, '#ffd0a0', 0.1, 'soft-light');
     blurTile(cv, 0.7);
@@ -1644,7 +1645,7 @@ register('clay', {
     fill(g, s, s, '#d8d0c2');
     mottle(g, s, rnd, { colors: ['#e8e2d6', '#c4baa8', '#d0c6b4'], count: 20, rmin: 10, rmax: 36, alpha: 0.4, hard: 0.1 });
     for (let y = 4; y < s; y += range(rnd, 7, 13)) { const pts = []; for (let x = -4; x <= s + 4; x += 8) pts.push([x, y + Math.sin(TAU * x / s + y) * 1.2]); line(g, pts, range(rnd, 1, 2), rnd() < 0.5 ? '#b0a690' : '#f0ebe0', 0.3); }
-    for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s * 0.5, L = range(rnd, 10, 40); wrap(s, x, y + L / 2, L, (X, Y) => line(g, [[X, Y - L / 2], [X + (rnd() - 0.5) * 2, Y + L / 2]], range(rnd, 2, 4), '#a89c86', 0.3)); }
+    for (let i = 0; i < 6; i++) { const x = rnd() * s, y = rnd() * s * 0.5, L = range(rnd, 10, 40), dx = (rnd() - 0.5) * 2, lw = range(rnd, 2, 4); wrap(s, x, y + L / 2, L, (X, Y) => line(g, [[X, Y - L / 2], [X + dx, Y + L / 2]], lw, '#a89c86', 0.3)); }
     blurTile(cv, 0.8);
   },
 });
@@ -1723,7 +1724,7 @@ register('latillas', {
         g.fillStyle = '#3a2a1e'; g.fillRect(X - gap / 2, y, gap, hh);
         for (const sd of [-1, 1]) { g.fillStyle = grad(g, X + sd * gap / 2, 0, X + sd * (gap / 2 + hh * 0.6), 0, [[0, '#3a2a1e', 0.85], [1, '#3a2a1e', 0]]); g.fillRect(Math.min(X + sd * gap / 2, X + sd * (gap / 2 + hh * 0.6)), y + 0.8, hh * 0.6, hh - 1.6); }
       });
-      for (let j = 0; j < 3; j++) { const x = rnd() * s; wrap(s, x, y + hh / 2, 40, (X, Y) => blob(g, X, Y, range(rnd, 10, 40), hh * 0.25, 0, '#6a4a30', 0.3, 0.3)); }
+      for (let j = 0; j < 3; j++) { const x = rnd() * s, bw = range(rnd, 10, 40); wrap(s, x, y + hh / 2, 40, (X, Y) => blob(g, X, Y, bw, hh * 0.25, 0, '#6a4a30', 0.3, 0.3)); }
       y += hh;
     }
     glaze(g, s, s, '#ffd8a8', 0.1, 'soft-light');
