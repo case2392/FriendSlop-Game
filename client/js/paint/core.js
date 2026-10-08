@@ -363,6 +363,9 @@ const CACHE = new Map();
 
 // paint(g, size, rnd) draws into a size×size canvas (or w×h via opts.w/opts.h).
 export function register(name, { size = 512, w = null, h = null, family = 'misc', alpha = false, paint, note = '' }) {
+  // names are global across families: a second family registering the same name silently replaces the first
+  const prev = REG.get(name);
+  if (prev && prev.family !== family) console.warn(`paint: texture '${name}' from family '${family}' replaces the one from '${prev.family}' (prefix it with the family name)`);
   REG.set(name, { name, size, w: w || size, h: h || size, family, alpha, paint, note });
 }
 export function list(family = null) { return [...REG.values()].filter(t => !family || t.family === family); }
