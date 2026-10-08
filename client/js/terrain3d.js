@@ -656,20 +656,23 @@ function buildApron(W, cfg, data, mat, group) {
 }
 
 // The terrain's skyline seen from the camera: for each of N azimuths, the highest elevation angle
-// (radians) of any land out to the apron's edge, marched over the 10 m height lattice. The horizon
-// rings take it so the land behind a ridge melts into the haze right at the ridge's top.
+// (radians) of any land out to the apron's far corner, marched over the 10 m height lattice
+// (outermost row and column included; the step never longer than 15 m, so the apron's high far rim
+// down a long valley is never skipped). The horizon rings take it so the land behind a ridge melts
+// into the haze right at the ridge's top.
 function skylineFrom(W, L, cam, out) {
   const N = out.length, { x0, z0, step, LX, LZ, H } = L, gx1 = W.X0 + W.nx * W.cell, gz1 = W.Z0 + W.nz * W.cell;
+  const dMax = Math.hypot((LX - 1) * step, (LZ - 1) * step) + 10;
   for (let a = 0; a < N; a++) {
     const ang = ((a + 0.5) / N - 0.5) * Math.PI * 2, dx = Math.cos(ang), dz = Math.sin(ang);
     let best = -0.35;
-    for (let d = 6; d < 1600; d *= 1.05) {
+    for (let d = 6; d < dMax; d += Math.min(d * 0.05, 15)) {
       const x = cam.x + dx * d, z = cam.z + dz * d, fi = (x - x0) / step, fj = (z - z0) / step;
-      if (fi < 0 || fj < 0 || fi >= LX - 1 || fj >= LZ - 1) break;
+      if (fi < 0 || fj < 0 || fi > LX - 1 || fj > LZ - 1) break;
       let h;
       if (x > W.X0 && x < gx1 && z > W.Z0 && z < gz1) h = W.heightAt(x, z);       // the playable grid, exactly
       else {
-        const i = Math.floor(fi), j = Math.floor(fj), u = fi - i, v = fj - j, k = i * LZ + j;
+        const i = Math.min(LX - 2, Math.floor(fi)), j = Math.min(LZ - 2, Math.floor(fj)), u = fi - i, v = fj - j, k = i * LZ + j;
         h = (H[k] * (1 - u) + H[k + LZ] * u) * (1 - v) + (H[k + 1] * (1 - u) + H[k + LZ + 1] * u) * v;
       }
       const e = Math.atan2(h - cam.y, d);
@@ -1032,6 +1035,7 @@ export function buildTerrain(W) {
   buildChunks(W, data, mat, group);
   const { apronTex, lattice } = buildApron(W, cfg, data, mat, group);
   const sky = new Float32Array(128), skyAt = new THREE.Vector3(1e9, 0, 0);
+  let skyT = -1e9;
   const clutter = new Clutter(W, cfg, biome);
   group.add(clutter.mesh);
   for (const n of prewarmQueue(biome)) prewarmed.add(n);
@@ -1047,8 +1051,8 @@ export function buildTerrain(W) {
         requestIdleCallback(() => { const n = queue.shift(); if (n && !prewarmed.has(n)) { try { canvasFor(n); } catch {} prewarmed.add(n); } }, { timeout: 4000 });
       }
       if (!camPos) return;
-      // the skyline for the horizon rings, whenever the camera has moved a metre
-      if (camPos.distanceToSquared(skyAt) > 1) { skyAt.copy(camPos); setSkyline(skylineFrom(W, lattice, camPos, sky)); }
+      // the skyline for the horizon rings, once the camera has moved 2 m (at most five times a second)
+      if (camPos.distanceToSquared(skyAt) > 4 && (t - skyT > 0.2 || t < skyT)) { skyAt.copy(camPos); skyT = t; setSkyline(skylineFrom(W, lattice, camPos, sky)); }
       clutter.update(t, camPos);
     },
     dispose() { clutter.dispose(); data.slopeTex.dispose(); apronTex.dispose(); queue = []; },

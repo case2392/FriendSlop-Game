@@ -28,7 +28,7 @@ export const atmo = { sparkle: 0, biome: 'meadow', night: 0 };   // night: 0 day
 const DAY = {
   meadow: { top: '#4686d4', hor: '#c6dfea', fog: '#b8d2e0', hSky: '#d6e8f2', hGnd: '#6a7a42', sun: '#fff0cc', near: 40, far: 560, light: 1, clouds: 0.04,
     night: { top: '#0a1432', hor: '#22385e', fog: '#1c2c4c', hSky: '#5c74b0', hGnd: '#1e2638', hemiI: 1.45, sun: '#a6b8e8' } },
-  fields: { top: '#5a9ee2', hor: '#e6e8d8', fog: '#d2d4c4', hSky: '#ece8dc', hGnd: '#8c8458', sun: '#fff0c4', near: 50, far: 680, light: 1, clouds: 0.04,
+  fields: { top: '#5a9ee2', hor: '#e4e8dc', fog: '#d0d6cc', hSky: '#ece8dc', hGnd: '#8c8458', sun: '#fff0c4', near: 50, far: 600, light: 1, clouds: 0.04,
     night: { top: '#0e1430', hor: '#2c3456', fog: '#242a44', hSky: '#6670a6', hGnd: '#2a2830', hemiI: 1.45, sun: '#b0b8e0' } },
   snow: { top: '#4e94dc', hor: '#e2edf4', fog: '#d9e6f0', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 35, far: 520, light: 0.8, clouds: 0.0,
     night: { top: '#0c1a3c', hor: '#2c4874', fog: '#24385c', hSky: '#7090cc', hGnd: '#3a4a6c', hemiI: 1.55, sun: '#b4caf4' } },
@@ -148,7 +148,7 @@ void main(){
   vec3 dv = vW - cameraPosition;
   float el = normalize(dv).y;
   float sk = max(texture2D(tSky, vec2(atan(dv.z, dv.x) / 6.2831853 + 0.5, 0.5)).r - 0.35, -0.004);
-  float k = max(fogK, 1.0 - smoothstep(sk + 0.008, sk + 0.075, el));
+  float k = max(fogK, 1.0 - smoothstep(sk + 0.012, sk + 0.10, el));     // (a small margin: the profile is sampled every 2.8 degrees)
   c = mix(c, fogC, clamp(k, 0.0, 1.0));
   gl_FragColor = vec4(c, t.a);
   #include <colorspace_fragment>
