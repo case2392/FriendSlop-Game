@@ -8,8 +8,8 @@
 //   plaster_inner / granite_inner / adobe_inner: the indoor versions (no holes or snow repeating)
 // Roofs (512, tile, ~2.6 m a tile; up in the texture = up the slope):
 //   shingles_red (timber)  thatch + shingles_wood (farm)  slate_roof + snow_roof (alpine)  hide_patch (frontier)
-// Trim, metal, cloth (256, tile): timber_dark  wood_light  wood_white  iron_wrought  brass  metal_green  metal_red  canvas_stripe
-// Wall decals (alpha): wall_holes (4×2 atlas: holes, patches, a map)  arch_splash (adobe foot, tiles across)  arch_streak
+// Trim, metal, cloth (256, tile): timber_dark  wood_light  wood_white  iron_wrought  brass  metal_green  metal_red  canvas_awnings (3 bands)
+// Wall decals (alpha): wall_holes (4×2 atlas: holes and patches; a splash strip for the adobe foot)  arch_streak
 // Interiors: floor_planks + carpet_casino (512, tile)  floor_flags + floor_granite (one flag per 2×2 cell)
 //   rug_red (256)  felt_table (512×256)  adobe_pier (a sign pier, wrapped once round)
 //   shelf_goods + store_goods (512×256, tile across)
@@ -540,10 +540,13 @@ register('plaster_inner', { family: F, size: 512, note: 'indoor plaster: warm ol
 // Holes and patches in the plaster as decals (4×2 atlas of 256 px cells, alpha): [0] bricks and [1]
 // fieldstone through cream plaster, [2] mud bricks and [3] a shallow scar through adobe, [4] a fresh
 // pale patch of mud render, [5] a big fallen piece showing courses of mud brick, [6] a darker, rougher
-// mud repair with straw in it, [7] the traveller's map for the pawnbroker's wall. town_build scatters them
-// per wall (each decal maps the middle 84% × 62% of its cell).
-export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3, 5], adobePatch: [4, 6], map: [7] };
+// mud repair with straw in it, [7] a mid-toned patch with its own straw. town_build scatters them per wall
+// (each decal maps the middle 84% × 62% of its cell).
+export const HOLE_CELLS = { plaster: [0, 1], adobe: [2, 3, 5], adobePatch: [4, 6, 7] };
 export const HOLE_COLS = 4;
+// under the cells, a strip the atlas's full width: the mud splashed up the foot of an adobe wall (tiles
+// across, ~3 m a repeat; v from 0 to HOLE_STRIP; the bottom ~55% of it is the band, a ragged edge, dots above)
+export const HOLE_STRIP = 0.2;
 // A repair patch (cell canvas, centred): a lumpy squarish outline, the patch's own trowel marks, a lit
 // upper-left edge and a shaded lower-right one, a faint darker halo where it was feathered in.
 function patchPaint(g, q, rnd, { col, lite, dark, straw = 0, w = 170, h = 104 }) {
@@ -572,9 +575,13 @@ function patchPaint(g, q, rnd, { col, lite, dark, straw = 0, w = 170, h = 104 })
   line(g, [...pts, pts[0]].map(([u, v]) => [u + 1.4, v + 1.8]), 2.8, shadowOf(dark, 0.2), 0.4);
 }
 register('wall_holes', {
-  family: F, w: 1024, h: 512, alpha: true, note: 'plaster decals (4×2 atlas, alpha): brick and fieldstone through plaster; mud brick, a scar, a big fallen piece through adobe; fresh and rough mud patches; a wall map',
-  paint(g, w, rnd) {
-    g.clearRect(0, 0, w, w / 2);
+  family: F, w: 1024, h: 640, alpha: true, note: 'plaster decals (4×2 atlas, alpha): brick and fieldstone through plaster; mud brick, a scar, a big fallen piece through adobe; three mud patches; under them a full-width strip of mud splash for the foot of adobe walls (tiles across)',
+  paint(g, w, rnd, h) {
+    g.clearRect(0, 0, w, h);
+    const sh = Math.round(h * HOLE_STRIP), sc = makeCanvas(w, sh);
+    splashBand(sc.getContext('2d'), w, sh * 0.06, sh * 0.94, rnd, { a0: 0.62, a1: 0.86 });
+    blurTile(sc, 0.6);
+    g.drawImage(sc, 0, h - sh);
     const q = w / 4;
     const cells = [
       { plaster: '#ddcfae' },
@@ -584,14 +591,13 @@ register('wall_holes', {
       { patch: { col: '#dcb88a', lite: '#f0d4a8', dark: '#a87650' } },
       { plaster: '#c89068', brick: ['#a87650', '#b88458', '#9a6a46', '#b07a52', '#a06e4a'], mortar: '#6a4830', r: 66, squash: 0.66 },
       { patch: { col: '#a87652', lite: '#c89a6e', dark: '#7a5234', straw: 40, w: 150, h: 96 } },
-      { map: true },
+      { patch: { col: '#c89870', lite: '#e4c094', dark: '#946644', straw: 24, w: 176, h: 100 } },
     ];
     cells.forEach((o, i) => {
       const cx = (i % 4) * q + q / 2, cy = Math.floor(i / 4) * q + q / 2;
       // paint on a cell-sized canvas so nothing bleeds into the neighbours
       const cv = makeCanvas(q, q), gg = cv.getContext('2d');
-      if (o.map) { const mw = Math.round(q * 0.84), mh = Math.round(q * 0.62), mc = makeCanvas(mw, mh); mapPaint(mc.getContext('2d'), mw, mh, rnd); gg.drawImage(mc, Math.round(q * 0.08), Math.round(q * 0.19)); }
-      else if (o.patch) patchPaint(gg, q, rnd, o.patch);
+      if (o.patch) patchPaint(gg, q, rnd, o.patch);
       else plasterHole(gg, q * 4, rnd, q / 2, q / 2, o.r || (i === 3 ? 44 : 62), { ...o, squash: o.squash || (i === 1 ? 0.75 : 0.85) });
       g.drawImage(cv, cx - q / 2, cy - q / 2);
     });
@@ -955,24 +961,16 @@ function splashBand(g, w, y0, h, rnd, { col = '#8e6040', deep = '#5e3c24', a0 = 
   g.fillStyle = grad(g, 0, top - h * 0.1, 0, y0 + h, [[0, col, a0], [0.55, mix(col, deep, 0.35), (a0 + a1) / 2], [1, deep, a1]]);
   polyPath(g, pts); g.fill();
   clipped(g, () => polyPath(g, pts), () => {
-    for (let i = 0; i < 26; i++) { const x = rnd() * w, y = range(rnd, top, y0 + h), rx = range(rnd, 10, 40), ry = range(rnd, 4, 12), c = rnd() < 0.55 ? lightOf(col, 0.3) : deep, a = range(rnd, 0.1, 0.22); hw(x, rx, X => blob(g, X, y, rx, ry, 0, c, a, 0.2)); }
+    for (let i = 0, n = Math.round(26 * w / 512); i < n; i++) { const x = rnd() * w, y = range(rnd, top, y0 + h), rx = range(rnd, 10, 40), ry = range(rnd, 4, 12), c = rnd() < 0.55 ? lightOf(col, 0.3) : deep, a = range(rnd, 0.1, 0.22); hw(x, rx, X => blob(g, X, y, rx, ry, 0, c, a, 0.2)); }
     // a darker damp lip right along the edge
     line(g, pts.slice(0, -2).map(([x, y]) => [x, y + 2]), 3, deep, 0.22);
   });
   // splash dots and flicks thrown up out of the band
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0, n = Math.round(90 * w / 512); i < n; i++) {
     const x = rnd() * w, up = h * Math.pow(rnd(), 1.7) * 0.42, y = edgeY(x) - up + 2, r = range(rnd, 0.8, 2.6) * (1 - up / h * 0.8), a = range(rnd, 0.3, 0.65);
     hw(x, r + 6, X => { if (rnd() < 0.3) line(g, [[X, y + r * 2.5], [X + range(rnd, -1.5, 1.5), y]], r * 0.8, col, a * 0.7); ellipse(g, X, y, r, r * range(rnd, 0.7, 1), 0, col, a); });
   }
 }
-register('arch_splash', {
-  family: F, w: 512, h: 128, alpha: true, note: 'the mud splashed up the foot of an adobe wall (alpha decal, tiles across; the bottom ~55% is the band, a ragged edge, splash dots above)',
-  paint(g, w, rnd, h, cv) {
-    g.clearRect(0, 0, w, h);
-    splashBand(g, w, h * 0.06, h * 0.94, rnd, { a0: 0.62, a1: 0.86 });
-    blurTile(cv, 0.6);
-  },
-});
 // The sign piers of Gadgetzan: mud render wrapped round a square pier (u goes once round it, v from the
 // foot (bottom) to the cap (top)): damp and drips under the cap, three big places where the render fell
 // off and the mud brick courses show, vertical cracks, and the splash band at the foot.
@@ -1056,7 +1054,7 @@ register('floor_granite', {
 
 // A traveller's map nailed to the pawnbroker's wall (w×h, alpha): torn, scorched parchment, a coast and a
 // sea, hills, forests, a dotted red road to an X, a compass rose and a cartouche of scribbled words.
-// (Painted into the last cell of the wall_holes atlas, so it costs no material of its own.)
+// (Painted as a sign face, style 'map', into the town's sign atlas, so it costs no material of its own.)
 function mapPaint(g, w, h, rnd) {
   {
     const pts = [];
@@ -1312,9 +1310,18 @@ function canvasStripes(g, s, rnd, cv, dark, light) {
   glaze(g, s, s, '#ffe8c0', 0.12, 'soft-light');
   blurTile(cv, 0.6);
 }
-register('canvas_stripe', { family: F, size: 256, note: 'awning canvas: faded rust and cream stripes, folds, stains', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, '#a84a30', '#e0d2b2'); } });
-register('canvas_teal', { family: F, size: 256, note: 'awning canvas: faded teal and cream', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, '#4a8a8a', '#e2d6b8'); } });
-register('canvas_mustard', { family: F, size: 256, note: 'awning canvas: mustard and cream', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, '#c89a3a', '#e6dcc0'); } });
+// The three Gadgetzan awning canvases stacked in one texture (one material for every awning in town): band
+// k (0 rust, 1 teal, 2 mustard) is v from k/3 to (k+1)/3, the stripes running along v and tiling across u.
+register('canvas_awnings', {
+  family: F, w: 256, h: 768, note: 'awning canvases, three bands (v): faded rust, teal and mustard stripes on cream, folds, stains (stripes tile across)',
+  paint(g, w, rnd, h) {
+    [['#a84a30', '#e0d2b2'], ['#4a8a8a', '#e2d6b8'], ['#c89a3a', '#e6dcc0']].forEach(([dark, light], k) => {
+      const cv = makeCanvas(w, w);
+      canvasStripes(cv.getContext('2d'), w, rnd, cv, dark, light);
+      g.drawImage(cv, 0, h - (k + 1) * w);
+    });
+  },
+});
 
 // ---- interiors ----------------------------------------------------------------------------------
 
@@ -2634,6 +2641,7 @@ function daub(g, text, w, h, rnd, { paint, primer = null, edge = null }) {
 export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e2b8', style = 'board', seed = '', edge = null } = {}) {
   const cv = makeCanvas(w, h), g = cv.getContext('2d');
   const rnd = rngFrom(hashStr(lines.join('|') + style + seed));
+  if (style === 'map') { mapPaint(g, w, h, rnd); return cv; }
   const m = Math.min(w, h);
   const wood = ['#6e4a2e', '#7a5434', '#664428', '#805a38'];
   const boards = (n, cols = wood, weather = 0.2) => {

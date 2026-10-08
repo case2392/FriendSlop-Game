@@ -922,13 +922,15 @@ register('rs_pennant', {
   },
 });
 // The gas bag's torn envelope, dragged over the mesa rim (alpha, fitted: u across, v from the gathered top
-// edge down to the hem). One muted oxblood doped canvas in four gores, a big sun-faded patch, a tan repair
-// patch, a scorch with a burnt hole, rain grime, one worn cream band near the hem, and the hem torn into four
-// ragged tongues of different lengths.
+// edge down to the hem). Weathered off-white doped canvas in six gores, every other one a bold faded-red
+// stripe (sun-bleached in blotches, the cream showing through where the dope wore off), stitched welts
+// between them; the hanging folds painted in (cool shadows in the troughs, warm lit crests), loose folds on
+// the part that lies on the top; rain grime and mud toward the hem, a tan repair patch, a scorch with a burnt
+// hole, and the hem torn into four ragged tongues of different lengths.
 register('rs_gasbag', {
-  family: F, size: 256, alpha: true, note: 'torn gas-bag envelope (alpha, fitted; v=1 top edge, v=0 hem): oxblood doped canvas gores, faded patch, repair patch, scorch and holes, one cream band, hem in 4 tongues',
+  family: F, size: 256, alpha: true, note: 'torn gas-bag envelope (alpha, fitted; v=1 top edge, v=0 hem): off-white doped canvas, six gores with bold faded-red stripes, painted hanging folds, grime, repair patch, scorch and holes, hem in 4 tongues',
   paint(g, s, rnd, h, cv) {
-    const lerp = (a, b, t) => a + (b - a) * t;
+    const lerp = (a, b, t) => a + (b - a) * t, smooth01 = t => { const c = Math.max(0, Math.min(1, t)); return c * c * (3 - 2 * c); };
     // the outline: a gathered top edge, ragged sides narrowing a little, the hem torn into tongues
     const body = 0.66 * s, out = [];
     out.push([2, 0], [s - 2, 0]);
@@ -948,34 +950,58 @@ register('rs_gasbag', {
     }
     for (let k = 8; k >= 1; k--) { const y = body * k / 8; out.push([2 + 9 * (k / 8) + range(rnd, 0, 5), y]); }
     g.save(); polyPath(g, out); g.clip();
-    // four gores, each bellied: lit on the side toward the light, shadowed into the next seam
-    const seams = [0, 0.27, 0.51, 0.76, 1].map((t, i) => (i % 4 ? t + range(rnd, -0.03, 0.03) : t) * s);
-    const gores = ['#86382a', '#7c3226', '#8e402e', '#823a2c'];
-    for (let i = 0; i < 4; i++) {
-      const x0 = seams[i], x1 = seams[i + 1], c = jitter(gores[i], rnd, 0.04);
+    // six gores, the odd ones faded red; each bellied: lit on the side toward the light, shadowed into the next seam
+    const seams = [0, 1, 2, 3, 4, 5, 6].map(i => (i % 6 ? i / 6 + range(rnd, -0.015, 0.015) : i / 6) * s);
+    const CREAM = ['#d6cab0', '#dccfb2', '#d2c6aa'], RED = ['#a14c3c', '#9a4637', '#a8543f'];
+    for (let i = 0; i < 6; i++) {
+      const x0 = seams[i], x1 = seams[i + 1], c = jitter(i % 2 ? RED[(i - 1) / 2] : CREAM[i / 2], rnd, 0.03);
       g.fillStyle = c; g.fillRect(x0, 0, x1 - x0 + 1, s);
-      g.fillStyle = grad(g, x0, 0, x1, 0, [[0, shadowOf(c, 0.3), 0.6], [0.18, lightOf(c, 0.25), 0.35], [0.45, lightOf(c, 0.2), 0.2], [0.85, shadowOf(c, 0.25), 0.25], [1, shadowOf(c, 0.4), 0.55]]);
+      g.fillStyle = grad(g, x0, 0, x1, 0, [[0, shadowOf(c, 0.25), 0.5], [0.2, lightOf(c, 0.2), 0.3], [0.5, lightOf(c, 0.12), 0.12], [0.85, shadowOf(c, 0.2), 0.22], [1, shadowOf(c, 0.35), 0.5]]);
       g.fillRect(x0, 0, x1 - x0 + 1, s);
+      if (i % 2) {
+        // the red dope sun-bleached in soft blotches and worn through to the cream in scuffs
+        for (let k = 0; k < 5; k++) blob(g, range(rnd, x0 + 6, x1 - 6), range(rnd, 0.05, 0.9) * s, range(rnd, 10, 22), range(rnd, 16, 40), range(rnd, -0.3, 0.3), '#c08068', 0.35, 0.1);
+        for (let k = 0; k < 9; k++) blob(g, range(rnd, x0 + 3, x1 - 3), range(rnd, 0.05, 0.95) * s, range(rnd, 2, 7), range(rnd, 1.5, 4), rnd() * 3, '#d4c4a4', 0.6, 0.35);
+      } else {
+        // old canvas: a few warm stains and cool mildew freckles
+        for (let k = 0; k < 4; k++) blob(g, range(rnd, x0 + 6, x1 - 6), range(rnd, 0.05, 0.9) * s, range(rnd, 8, 20), range(rnd, 10, 30), rnd() * 3, pick(rnd, ['#b8a888', '#c4ae86', '#a8a49a']), 0.3, 0.1);
+      }
     }
-    mottle(g, s, rnd, { colors: ['#9a4834', '#6a2a20', '#8a4a3a', '#7a3a2e'], count: 26, rmin: 18, rmax: 60, alpha: 0.24, hard: 0.08 });
-    // the sun-faded patch: a big soft bleached bloom, pinkish tan, across two gores
-    blob(g, s * 0.36, s * 0.3, s * 0.32, s * 0.22, 0.3, '#b48468', 0.5, 0.05);
-    blob(g, s * 0.3, s * 0.26, s * 0.2, s * 0.13, 0.5, '#c8a080', 0.36, 0.1);
-    // rain grime running down from the top, darker toward the hem
-    streaks(g, s, rnd, { colors: ['#4a2018', '#5a2a1e'], count: 26, len: [30, 120], width: [2, 6], angle: Math.PI / 2, wobble: 0.12, alpha: 0.13 });
-    g.fillStyle = grad(g, 0, 0, 0, s, [[0, '#fff0c8', 0.16], [0.3, '#fff0c8', 0], [0.6, '#2c2340', 0], [1, '#2c2340', 0.3]]); g.fillRect(0, 0, s, s);
+    mottle(g, s, rnd, { colors: ['#b8a68a', '#8a6a58', '#c8b898'], count: 18, rmin: 18, rmax: 50, alpha: 0.12, hard: 0.08 });
+    // the hanging folds (the lower two thirds hang down the face): long soft troughs, cool and dark, each with
+    // a warm lit crest on its left, converging a little toward the top edge
+    const folds = [0.07, 0.2, 0.31, 0.45, 0.56, 0.69, 0.83, 0.94].map(f => f + range(rnd, -0.025, 0.025));
+    for (const f of folds) {
+      const x = f * s, top = range(rnd, 0.2, 0.34) * s, lean = range(rnd, -10, 10), w = range(rnd, 7, 11), ph = rnd() * 6;
+      // a soft brush dragged down the fold: overlapping feathered dabs, the trough widening toward the hem
+      for (let t = 0; t <= 1.0001; t += 0.03) {
+        const xx = x + lean * (1 - t) + Math.sin(t * 3 + ph) * 3, yy = lerp(top, s, t), k = smooth01(t / 0.25), ww = w * (0.6 + 0.6 * t);
+        blob(g, xx + ww * 0.25, yy, ww, s * 0.04, 0, '#3a2c48', 0.1 * k, 0.05);
+        blob(g, xx - ww * 0.95, yy, ww * 0.5, s * 0.035, 0, '#fff4dc', 0.1 * k, 0.05);
+      }
+    }
+    // loose folds on the part lying on the top: a few short soft diagonal creases
+    for (const [x0, y0, x1, y1] of [[s * 0.12, s * 0.04, s * 0.3, s * 0.24], [s * 0.6, s * 0.02, s * 0.44, s * 0.2], [s * 0.82, s * 0.06, s * 0.92, s * 0.26]]) {
+      const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([lerp(x0, x1, t) + Math.sin(t * 5) * 3, lerp(y0, y1, t)]); }
+      for (const [u, v] of pts) { blob(g, u + 4, v + 5, 9, 6, 0.6, '#3a2c48', 0.1, 0.05); blob(g, u - 2, v - 2, 6, 4, 0.6, '#fff4dc', 0.1, 0.05); }
+    }
+    // light falls on the top that lies flat; the hanging part darkens and cools toward the hem
+    g.fillStyle = grad(g, 0, 0, 0, s, [[0, '#fff0c8', 0.18], [0.3, '#fff0c8', 0], [0.55, '#2c2340', 0], [1, '#2c2340', 0.32]]); g.fillRect(0, 0, s, s);
+    // rain grime running down from the top, and mud splashed up the hem
+    streaks(g, s, rnd, { colors: ['#6a5a48', '#5a4a40'], count: 18, len: [30, 110], width: [3, 7], angle: Math.PI / 2, wobble: 0.1, alpha: 0.07 });
+    for (let k = 0; k < 14; k++) blob(g, rnd() * s, range(rnd, 0.72, 1) * s, range(rnd, 8, 24), range(rnd, 5, 14), rnd() * 3, pick(rnd, ['#7a6448', '#6a5440']), 0.22, 0.15);
     // seams: a dark welt, a lit lip on its left, the stitching
-    for (let i = 1; i < 4; i++) {
+    for (let i = 1; i < 6; i++) {
       const x = seams[i];
-      g.fillStyle = grad(g, x - 6, 0, x + 6, 0, [[0, '#f0c8a0', 0], [0.35, '#f0c8a0', 0.22], [0.5, '#3a1814', 0.6], [0.75, '#3a1814', 0.15], [1, '#3a1814', 0]]); g.fillRect(x - 6, 0, 12, s);
-      g.save(); g.setLineDash([4, 4]); line(g, [[x - 3, 0], [x - 3, s]], 1.1, '#d8b890', 0.55); line(g, [[x + 3, 2], [x + 3, s]], 1.1, '#d8b890', 0.45); g.restore();
+      g.fillStyle = grad(g, x - 5, 0, x + 5, 0, [[0, '#fff0d0', 0], [0.35, '#fff0d0', 0.22], [0.5, '#3a2c2c', 0.5], [0.75, '#3a2c2c', 0.12], [1, '#3a2c2c', 0]]); g.fillRect(x - 5, 0, 10, s);
+      g.save(); g.setLineDash([4, 4]); line(g, [[x - 3, 0], [x - 3, s]], 1.1, '#efe2c4', 0.5); line(g, [[x + 3, 2], [x + 3, s]], 1.1, '#efe2c4', 0.4); g.restore();
     }
     // gathered top edge: a reinforced hem with puckers where the rigging pulled it
-    g.fillStyle = grad(g, 0, 0, 0, 16, [[0, '#4a2018', 0.75], [0.5, '#6a2e22', 0.4], [1, '#6a2e22', 0]]); g.fillRect(0, 0, s, 16);
-    for (let x = 10; x < s; x += range(rnd, 18, 34)) { stroke(g, [[x, 2], [x + range(rnd, -5, 5), range(rnd, 12, 24)]], 4, 0.6, '#3a1814', 0.22); stroke(g, [[x + 3, 2], [x + 3 + range(rnd, -4, 4), range(rnd, 8, 18)]], 2, 0.4, '#c88a6a', 0.2); }
-    // a tan canvas repair patch, stitched on crooked
+    g.fillStyle = grad(g, 0, 0, 0, 16, [[0, '#5a4636', 0.7], [0.5, '#7a604a', 0.35], [1, '#7a604a', 0]]); g.fillRect(0, 0, s, 16);
+    for (let x = 10; x < s; x += range(rnd, 18, 34)) { stroke(g, [[x, 2], [x + range(rnd, -5, 5), range(rnd, 12, 24)]], 4, 0.6, '#4a3a30', 0.22); stroke(g, [[x + 3, 2], [x + 3 + range(rnd, -4, 4), range(rnd, 8, 18)]], 2, 0.4, '#fff0d0', 0.22); }
+    // a tan canvas repair patch, stitched on crooked across a red stripe
     {
-      const x = s * 0.6, y = s * 0.2, w = 46, hh = 34, rot = 0.12;
+      const x = seams[3] - 20, y = s * 0.2, w = 44, hh = 32, rot = 0.12;
       g.save(); g.translate(x, y); g.rotate(rot);
       g.fillStyle = rgba(INK, 0.3); g.fillRect(3, 4, w, hh);
       g.fillStyle = grad(g, 0, 0, w, hh, [[0, '#c8aa7a'], [1, '#94784e']]); g.fillRect(0, 0, w, hh);
@@ -983,51 +1009,36 @@ register('rs_gasbag', {
       g.setLineDash([3, 3]); g.strokeStyle = rgba('#4a3420', 0.7); g.lineWidth = 1.2; g.strokeRect(3, 3, w - 6, hh - 6);
       g.restore();
     }
-    // the one cream band near the hem, worn through and faded
-    {
-      const y0 = s * 0.56, bh = s * 0.07;
-      g.fillStyle = grad(g, 0, y0, 0, y0 + bh, [[0, '#e2d2ac'], [0.5, '#d2c094'], [1, '#b8a47a']]);
-      g.globalAlpha = 0.62; g.fillRect(0, y0, s, bh); g.globalAlpha = 1;
-      for (let i = 0; i < 22; i++) blob(g, rnd() * s, y0 + rnd() * bh, range(rnd, 5, 18), range(rnd, 2, 7), rnd() * 0.4, pick(rnd, ['#86382a', '#7a3226', '#9a5a44']), 0.55, 0.3);
-      blob(g, s * 0.82, y0 + bh / 2, 26, bh, 0, '#7e3428', 0.75, 0.3);
-      line(g, [[0, y0], [s, y0]], 1.4, '#4a2018', 0.3); line(g, [[0, y0 + bh], [s, y0 + bh]], 1.4, '#4a2018', 0.3);
-    }
-    // creases: soft diagonal folds, light on the ridge, cool shadow under
-    for (const [x0, y0, x1, y1] of [[s * 0.1, s * 0.15, s * 0.45, s * 0.62], [s * 0.85, s * 0.1, s * 0.6, s * 0.55], [s * 0.3, s * 0.05, s * 0.36, s * 0.3]]) {
-      const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([lerp(x0, x1, t) + Math.sin(t * 5) * 4, lerp(y0, y1, t)]); }
-      stroke(g, pts.map(([u, v]) => [u + 3, v + 3]), 8, 2, '#3a1814', 0.22);
-      stroke(g, pts, 4, 1, '#e0a888', 0.2);
-    }
     // the scorch: a brown-black bloom with a singed warm rim, low on the right
     {
-      const x = s * 0.78, y = s * 0.42, r = 38;
-      blob(g, x, y - 4, r * 1.6, r * 1.3, 0.4, '#b0703e', 0.4, 0.1);
-      blob(g, x, y, r * 1.1, r * 0.95, 0.4, '#3a2420', 0.7, 0.12);
-      blob(g, x + 4, y + 2, r * 0.65, r * 0.55, 0, '#1e1618', 0.65, 0.2);
-      for (let i = 0; i < 5; i++) stroke(g, [[x + range(rnd, -20, 20), y - r * 0.8], [x + range(rnd, -26, 26), y - r * 1.9]], 6, 1, '#2e2020', 0.25);
+      const x = s * 0.78, y = s * 0.42, r = 34;
+      blob(g, x, y - 4, r * 1.6, r * 1.3, 0.4, '#a0703e', 0.35, 0.1);
+      blob(g, x, y, r * 1.1, r * 0.95, 0.4, '#3a2a24', 0.6, 0.12);
+      blob(g, x + 4, y + 2, r * 0.6, r * 0.5, 0, '#221a1c', 0.6, 0.2);
+      for (let i = 0; i < 4; i++) blob(g, x + range(rnd, -16, 16), y - r * range(rnd, 1.1, 1.6), range(rnd, 6, 10), range(rnd, 12, 20), range(rnd, -0.3, 0.3), '#3a2c28', 0.16, 0.1);
     }
-    // the edges of the tear darken and curl: a dark rim with a lit lip just inside it
     g.restore();
+    // the edges of the tear darken and curl: a dark rim with a lit lip just inside it
     g.save(); polyPath(g, out); g.clip();
     g.lineJoin = 'round';
-    polyPath(g, out); g.strokeStyle = rgba('#2e1410', 0.75); g.lineWidth = 5; g.stroke();
-    polyPath(g, out.map(([x, y]) => [x + (x < s / 2 ? 2 : -2), y - 2])); g.strokeStyle = rgba('#d89070', 0.35); g.lineWidth = 2; g.stroke();
+    polyPath(g, out); g.strokeStyle = rgba('#3a2c28', 0.7); g.lineWidth = 5; g.stroke();
+    polyPath(g, out.map(([x, y]) => [x + (x < s / 2 ? 2 : -2), y - 2])); g.strokeStyle = rgba('#f4e6c8', 0.4); g.lineWidth = 2; g.stroke();
     g.restore();
     // holes: ragged, with a lit curled lip and a dark scorched ring round them
     const holes = [[s * 0.8, s * 0.45, 9], [s * 0.22, s * 0.42, 7], [s * 0.5, s * 0.78, 6], [s * 0.66, s * 0.08, 5]];
     for (const [x, y, r] of holes) {
       const pts = []; for (let k = 0; k < 11; k++) { const a = k / 11 * TAU, rr = r * range(rnd, 0.55, 1.2); pts.push([x + Math.cos(a) * rr * 1.2, y + Math.sin(a) * rr]); }
-      g.save(); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.5, y + (v - y) * 1.5])); g.fillStyle = rgba('#2a1410', 0.5); g.fill(); g.restore();
-      g.save(); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.25 - 1, y + (v - y) * 1.25 - 1])); g.strokeStyle = rgba('#e0b090', 0.6); g.lineWidth = 1.6; g.stroke(); g.restore();
+      g.save(); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.5, y + (v - y) * 1.5])); g.fillStyle = rgba('#2e2420', 0.45); g.fill(); g.restore();
+      g.save(); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.25 - 1, y + (v - y) * 1.25 - 1])); g.strokeStyle = rgba('#f4e6c8', 0.6); g.lineWidth = 1.6; g.stroke(); g.restore();
       g.save(); g.globalCompositeOperation = 'destination-out'; polyPath(g, pts); g.fillStyle = '#000'; g.fill(); g.restore();
     }
     // frayed threads hanging off the tongues
     for (let i = 0; i < 18; i++) {
       const k = Math.floor(rnd() * (out.length - 2)) + 2, [x, y] = out[k];
       if (y < body) continue;
-      line(g, [[x, y], [x + range(rnd, -3, 3), y + range(rnd, 4, 9)]], 1.4, '#6a3024', 1);
+      line(g, [[x, y], [x + range(rnd, -3, 3), y + range(rnd, 4, 9)]], 1.4, '#8a7a64', 1);
     }
-    glaze(g, s, s, '#ffd8b8', 0.08, 'soft-light');
+    glaze(g, s, s, '#ffe0b8', 0.08, 'soft-light');
     blurTile(cv, 0.45);
   },
 });

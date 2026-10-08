@@ -1348,8 +1348,22 @@ function buildCrash(B, p, parts, ctx, decor) {
       lift += 0.13 * (0.5 + 0.5 * Math.sin(c.x * 2.2 + ph2)) * hang;                                     // hanging folds
       return V(c.x, q.y + q.ny * lift, q.z + q.nz * lift);
     };
-    B.grid('rs_gasbag~^', NU, NV, (u, v) => { const P2 = drapeAt(Math.round(u * NU), v); return [P2.x, P2.y, P2.z]; },
+    // (on the snow day the cloth takes no top cover, which would only wash its red stripes pink: the snow lies on
+    // it as drifts of its own instead)
+    const BAG = ctx.snow ? 'rs_gasbag~^!' : 'rs_gasbag~^';
+    B.grid(BAG, NU, NV, (u, v) => { const P2 = drapeAt(Math.round(u * NU), v); return [P2.x, P2.y, P2.z]; },
       { flip: true, noAO: true, uv: (u, v) => [lerp(0.006, 0.994, u), 1 - lerp(0.01, 0.99, v)] });
+    if (ctx.snow) {
+      // snow lying along the upper folds, in drifts that thin out to nothing (they dip under the cloth between
+      // them), banked deepest against the bunch at the lip, none on the hanging part
+      const sp1 = rnd() * 6, sp2 = rnd() * 6;
+      B.grid('rs_snow!', NU, 9, (u, v) => {
+        const i = Math.round(u * NU), t = v * (TR + 0.04), x = cols[i].x;
+        const lump = (0.55 + 0.45 * Math.sin(x * 2.1 + sp1 + t * 6)) * (0.6 + 0.4 * Math.sin(x * 0.9 - t * 9 + sp2));
+        const th = 0.085 * lump * smooth(0, 0.18, Math.min(u, 1 - u)) * (0.7 + 0.5 * smooth(TR * 0.4, TR, t)) * (1 - smooth(TR - 0.02, TR + 0.04, t)) - 0.03;
+        const P2 = drapeAt(i, t, th + 0.012); return [P2.x, P2.y, P2.z];
+      }, { flip: true, noAO: true, uv: (u, v, P) => [(P[0] + P[2]) / 2, P[1] / 2] });
+    }
     // pinned at the lip: two ropes from grommets at its edges back to stakes driven in beside it
     for (const sx of [-1, 1]) {
       const i = sx < 0 ? 1 : NU - 1, g0 = drapeAt(i, TR - 0.04, 0.02);
@@ -1373,7 +1387,7 @@ function buildCrash(B, p, parts, ctx, decor) {
       const t0 = b0.clone().addScaledVector(dir, 0.12);
       B.push(M4(t0.x, t0.y, t0.z, 0, 0, 0));
       B.M.multiply(new THREE.Matrix4().lookAt(V(0, 0, 0), dir, V(0, 1, 0)));
-      B.torus('rs_gasbag~^', 0.11, 0.05, 0, 0, 0, { seg: 9, tseg: 6, lod0: true, uRep: 1 });
+      B.torus(BAG, 0.11, 0.05, 0, 0, 0, { seg: 9, tseg: 6, lod0: true, uRep: 1 });
       B.pop();
     }
     // a snapped wing panel bent over the rim: the inner half lying on the top, the outer half hanging down
@@ -1781,10 +1795,15 @@ function buildGas(B, p, parts, ctx, decor) {
   barrel(B, 'rs_drum', 0.3, 0.88, 4.0, B.ground(4.0, 3.15) + 0.44, 3.15, { ry: 2.1 });
 }
 
-// The dino: a painted plaster sauropod on a stone plinth that fills its collider. A pear-shaped body (narrow
-// shoulders, full hips under a hump, the top arched, the belly sagging between the legs), elephant legs with
-// bulging thighs and cream toenails, a neck that leaves the shoulders leaning forward and curves up into its
-// column (snapped off at the top: the head is loot), a heavy tail in a gentle S with a flick at the tip.
+// The dino: a painted plaster sauropod on a stone plinth that fills its collider, read from the road by its
+// silhouette: a pear-shaped body (narrow shoulders, full hips under a hump, the belly sagging between the legs),
+// elephant legs with bulging thighs and cream toenails, a row of terracotta back plates running from the tail
+// tip up the back and the neck, a heavy tail in a gentle S that droops at the tip, and a long swan neck that
+// climbs out of the shoulders through its column and arches forward over the plinth toward the road, where it
+// ends in a jagged break: a pale ring of snapped plaster round the dark hollow, rebar bent out of it (the head
+// is loot, lying on the ground under the break). Snow day: a blanket of snow along the back, ridges on the
+// neck's arch and the tail, icicles under the arch.
+const DINO_NECK = [[3.2, -0.15, 0.8], [3.9, 0.75, 0.72], [4.7, 1.25, 0.6], [5.5, 1.42, 0.52], [6.2, 1.56, 0.47], [6.78, 1.92, 0.44], [7.02, 2.48, 0.41], [6.9, 3.02, 0.39]];
 function buildDino(B, p, parts, ctx) {
   const d = p.dino || { x: p.x, y: p.y, z: p.z, ry: p.ry || 0 };
   B.frame(d.x, d.y, d.z, d.ry);
@@ -1803,6 +1822,7 @@ function buildDino(B, p, parts, ctx) {
   const rnd = rngOf(seedOf(p.x, p.z, 13));
   const stoneT = STONE_TINT[ctx.bio.kit];
   const bz = body.z, bx = body.x, phx = body.hx - 0.02, phz = body.hz - 0.02, ptop = 1.1;
+  const PLATE = tint.map((c, i) => c * [0.9, 0.55, 0.47][i]);     // terracotta: the belly's ochre, reddened
   // the plinth: base course, a recessed waist with the plaque, a cap, all inside the collider's footprint
   B.box('rs_stone', phx * 2, 0.6, phz * 2, bx, -0.1, bz, { r: 0.05, S: 2.8, tint: stoneT });
   B.box('rs_stone', (phx - 0.06) * 2, 0.62, (phz - 0.06) * 2, bx, 0.5, bz, { r: 0.04, S: 2.8, off: [0.3, 0.2], tint: stoneT });
@@ -1821,17 +1841,26 @@ function buildDino(B, p, parts, ctx) {
     const front = yN > 0 ? yN * 0.18 * smooth(0.4, 1, zn) : 0;                          // the shoulders lean into the neck
     return { narrow, dy: hump - sag + front };
   };
-  B.grid('rs_dino', 28, 16, (u, v) => {
+  const bodyAt = (u, v) => {
     const th = TAU * u, ph = -Math.PI / 2 + Math.PI * v;
     const ee = ph < 0 ? evLow : ev, r = sp(Math.cos(ph), ee), y = sp(Math.sin(ph), ee);
     const zn = r * sp(Math.cos(th), e), { narrow, dy } = shape(zn, y);
     return [bx + ax * narrow * r * sp(Math.sin(th), e), yc + ay * y + dy, bz + az * zn];
-  }, { wrapU: true, uvFn: uvBody, tint });
+  };
+  B.grid('rs_dino', 28, 16, bodyAt, { wrapU: true, uvFn: uvBody, tint });
   const topAt = zz => { const zn = clamp01(Math.abs((zz - bz) / az)) * Math.sign(zz - bz), c = Math.pow(Math.abs(zn), ev / 2), y = Math.pow(Math.max(0, 1 - c * c), 1 / ev); return yc + ay * y + shape(zn, y).dy; };
-  // rounded spine bumps down the back, biggest over the hips
-  for (let k = 0; k < 8; k++) {
-    const zz = bz + az * (0.55 - k * 0.2), s = 0.7 + 0.4 * Math.exp(-(((k - 4.5) / 2) ** 2));
-    B.ell('rs_dino', 0.12 * s, 0.16 * s, 0.22 * s, bx, topAt(zz) - 0.03, zz, { seg: 8, rings: 5, uvFn: (pl, nl) => [pl.z / S, 0.96], tint: tint.map(c => c * 0.9) });
+  // A back plate: a flattened rounded cone standing on the spine at `at`, its face across `up`, its length along `along`
+  const plateProf = [[1, -0.2], [1, 0], [0.93, 0.28], [0.74, 0.56], [0.46, 0.8], [0.16, 0.96], [0, 1]];
+  const plate = (at, up, along, h, len, k) => {
+    const Y = up.clone().normalize(), Z = along.clone().sub(Y.clone().multiplyScalar(along.dot(Y))).normalize(), X = Y.clone().cross(Z);
+    B.push(new THREE.Matrix4().makeBasis(X, Y, Z).setPosition(at));
+    B.lathe('rs_dino', plateProf, 0, 0, 0, { s: [0.065 + h * 0.06, h, len / 2], seg: 10, uvFn: (pl, nl) => [k * 0.17 + pl.z / S, lerp(0.06, 0.3, 0.5 + 0.5 * nl.y)], tint: PLATE });
+    B.pop();
+  };
+  // the back: plates down the spine, the biggest over the hips, each standing square to the curve of the back
+  for (let k = 0; k < 7; k++) {
+    const zz = bz + az * 0.5 - k * 0.6, h = 0.33 + 0.24 * Math.exp(-(((k - 3.6) / 2.2) ** 2)), sl = (topAt(zz + 0.1) - topAt(zz - 0.1)) / 0.2;
+    plate(V(bx, topAt(zz) - 0.07, zz), V(0, 1, -sl * 0.8), V(0, 0, 1), h, 0.5 + h * 0.3, k);
   }
   // elephant legs: a round foot with three cream toenails, a knee, a full thigh (bulging on the hind legs) that
   // runs up into a rounded haunch on the flank, so the leg grows out of the body instead of standing beside it;
@@ -1850,37 +1879,111 @@ function buildDino(B, p, parts, ctx) {
     B.tube('rs_dino', pts, [lr + 0.06, lr, lr - 0.02, thigh, hip, 0.36, 0.2], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint, capEnd: true });
     for (const k of [-1, 0, 1]) B.ell('rs_dino', 0.13, 0.1, 0.13, at(1) + k * 0.3, ptop + 0.09, fz + lean + 0.56 - Math.abs(k) * 0.13, { seg: 8, rings: 4, uvFn: () => [0.3 + k * 0.1, 0.06], tint: tint.map(c => c * 1.12) });
   }
+  // a tube's frames: tangents, the dorsal direction (the side of it the back plates and the snow sit on: up where
+  // it runs level, back where it climbs) and the arc length at each point
+  const framesOf = (pts, back) => {
+    const tg = pts.map((q, i) => pts[Math.min(pts.length - 1, i + 1)].clone().sub(pts[Math.max(0, i - 1)]).normalize());
+    const dors = tg.map(t => { const u = back.clone(); return u.sub(t.clone().multiplyScalar(u.dot(t))).normalize(); });
+    const len = [0]; for (let i = 1; i < pts.length; i++) len.push(len[i - 1] + pts[i].distanceTo(pts[i - 1]));
+    const at = s => { let i = 0; while (i < pts.length - 2 && len[i + 1] < s) i++; const f = clamp01((s - len[i]) / Math.max(1e-6, len[i + 1] - len[i])); return { i, f, p: pts[i].clone().lerp(pts[i + 1], f), t: tg[i].clone().lerp(tg[i + 1], f).normalize(), d: dors[i].clone().lerp(dors[i + 1], f).normalize() }; };
+    return { tg, dors, len, at };
+  };
+  // A ridge of snow lying along the top of a tube, deepest where the tube runs level, none where it climbs
+  const snowRidge = (pts, radii, F, i0, i1, T0) => {
+    const N = i1 - i0, A = 0.85;
+    B.grid('rs_snow!', N, 6, (u, v) => {
+      const i = i0 + Math.round(u * N), P = pts[i], tg = F.tg[i];
+      // (the side picked so side x tangent points up: the grid's own normals then come out down, hence flip)
+      const side = V(V(1, 0, 0).cross(tg).y < 0 ? -1 : 1, 0, 0), top = side.clone().cross(tg).normalize();
+      const a = (v * 2 - 1) * A, flat = smooth(0.3, 0.85, top.y) * smooth(0, 0.15, Math.min(u, 1 - u) * N / Math.max(1, N) * 2);
+      const th = T0 * flat * Math.pow(Math.cos(a / A * Math.PI / 2), 0.7) * (0.85 + 0.15 * Math.sin(i * 1.7 + a * 2)) - 0.02;
+      const dd = top.clone().multiplyScalar(Math.cos(a)).add(side.clone().multiplyScalar(Math.sin(a)));
+      const q = P.clone().addScaledVector(dd, radii[i] + th);
+      return [q.x, q.y, q.z];
+    }, { noAO: true, flip: true, uv: (u, v, P) => [(P[0] + P[2]) / 2, P[1] / 2] });
+  };
   if (neck) {
-    // leaves the shoulders leaning forward, curves up into the column; fold rings at its root
-    const nTop = neck.y + neck.hy - 0.1, nz = neck.z;
-    const curve = new THREE.CatmullRomCurve3([V(neck.x, 3.25, bz + az * 0.55), V(neck.x, 3.85, nz - 0.55), V(neck.x, 4.6, nz - 0.1), V(neck.x, 5.5, nz + 0.02), V(neck.x, nTop, nz)]);
-    const n = 14, pts = curve.getPoints(n), rr = [0.78, 0.72, 0.6, 0.5, 0.42];
-    const radii = pts.map((_, i) => { const t = i / n * 4, k = Math.min(3, Math.floor(t)); return lerp(rr[k], rr[k + 1], t - k); });
-    B.tube('rs_dino', pts, radii, { seg: 16, uvFn: uvTube(0.2, -1, [0, 0.45, -0.89], 0.3, 0.12, 0.84), tint });
+    // the swan neck: out of the shoulders, up through its column, arching forward over the plinth to the break
+    const nx = neck.x, curve = new THREE.CatmullRomCurve3(DINO_NECK.map(([y, z]) => V(nx, y, z)), false, 'centripetal');
+    const n = 28, pts = [], radii = [];
+    for (let i = 0; i <= n; i++) {
+      const t = i / n, k = t * (DINO_NECK.length - 1), j = Math.min(DINO_NECK.length - 2, Math.floor(k));
+      pts.push(curve.getPoint(t)); radii.push(lerp(DINO_NECK[j][2], DINO_NECK[j + 1][2], k - j));
+    }
+    const F = framesOf(pts, V(0, 1, -0.9)), NL = F.len[n];
+    B.tube('rs_dino', pts, radii, { seg: 16, tint, uvFn: (pl, nl, v) => { const q = F.at(v.uv[1] * S); return [0.2 - v.uv[1], lerp(0.12, 0.84, vOf(nl, [q.d.x, q.d.y, q.d.z], 0.3))]; } });
     // skin folds across the throat where the neck bends up out of the shoulders
-    for (const t of [0.2, 0.28, 0.36]) {
-      const q = curve.getPointAt(t), tg = curve.getTangentAt(t), i = t * 4, k = Math.min(3, Math.floor(i)), r0 = lerp(rr[k], rr[k + 1], i - k) - 0.03;
-      const sd = V(1, 0, 0), fw = sd.clone().cross(tg).normalize().negate();
+    for (const t of [0.12, 0.17, 0.22]) {
+      const q = F.at(NL * t), r0 = lerp(radii[q.i], radii[q.i + 1], q.f) - 0.03;
+      const sd = V(1, 0, 0), fw = sd.clone().cross(q.t).normalize().negate();
       if (fw.z < 0) fw.negate();
       const arc = [];
-      for (let a = -1.25; a <= 1.25001; a += 0.25) arc.push(q.clone().add(fw.clone().multiplyScalar(Math.cos(a) * r0)).add(sd.clone().multiplyScalar(Math.sin(a) * r0)));
+      for (let a = -1.25; a <= 1.25001; a += 0.25) arc.push(q.p.clone().add(fw.clone().multiplyScalar(Math.cos(a) * r0)).add(sd.clone().multiplyScalar(Math.sin(a) * r0)));
       B.tube('rs_dino', arc, arc.map((_, j) => 0.075 * Math.sin(Math.PI * j / (arc.length - 1)) + 0.005), { seg: 6, uvFn: (pl, nl) => [pl.x / S + t, 0.22], tint: tint.map(c => c * 0.97), lod0: false });
     }
-    // the head is gone: a jagged ring of broken plaster, two bent rebar stubs
-    B.lathe('rs_stone', [[0.41, -0.12], [0.43, 0.02], [0.36, 0.1], [0.25, 0.06], [0.12, 0.03], [0, 0.02]], neck.x, nTop, nz, { seg: 12, jit: 0.1, tint: [1.2, 1.15, 1.05] });
-    for (const [a, bend] of [[0.5, 0.25], [2.6, -0.2]]) {
-      const ox = neck.x + Math.cos(a) * 0.15, oz = nz + Math.sin(a) * 0.15;
-      B.tube('rs_iron', [V(ox, nTop, oz), V(ox, nTop + 0.16, oz), V(ox + Math.cos(a) * 0.13, nTop + 0.22, oz + bend * 0.5)], 0.032, { seg: 5, lod0: false, tint: [0.9, 0.62, 0.48] });
+    // plates up the back of the neck and along the top of its arch, shrinking toward the break
+    for (let k = 0; k < 7; k++) {
+      const q = F.at(0.95 + k * (NL - 1.95) / 6.4), r = lerp(radii[q.i], radii[q.i + 1], q.f), h = 0.3 - k * 0.022;
+      plate(q.p.clone().addScaledVector(q.d, r - 0.06), q.d, q.t, h, 0.42 + h * 0.3, k + 7);
     }
-    if (ctx.snow) B.ell('rs_snow!', 0.38, 0.12, 0.38, neck.x, nTop + 0.08, nz, { seg: 12, rings: 4, noAO: true });
+    // the break, square across the end of the neck: the painted skin running on into jagged teeth, a pale lip of
+    // snapped plaster, the dark hollow inside (closed well down), three bent rebar stubs
+    const E = pts[n], Tn = F.tg[n], Yn = F.dors[n], Xn = Yn.clone().cross(Tn).normalize(), rE = radii[n], NJ = 22, ph = rnd() * TAU;
+    const jag = []; for (let i = 0; i < NJ; i++) jag.push(0.03 + 0.05 * (0.5 + 0.5 * Math.sin(i / NJ * TAU * 2 + ph)) + (i % 3 === 1 ? range(rnd, 0.04, 0.1) : range(rnd, 0, 0.025)));
+    const ring = (u, rr, h) => { const a = u * TAU, ii = Math.round(u * NJ) % NJ, hh = h === null ? 0 : h(jag[ii]); return E.clone().addScaledVector(Xn, Math.cos(a) * rr).addScaledVector(Yn, Math.sin(a) * rr).addScaledVector(Tn, hh); };
+    const arr = q => [q.x, q.y, q.z];
+    B.grid('rs_dino', NJ, 1, (u, v) => arr(ring(u, rE * (1 - 0.04 * v), j => v * j)), { wrapU: true, tint, uvFn: (pl, nl) => [0.2 - NL / S, lerp(0.12, 0.84, vOf(nl, [Yn.x, Yn.y, Yn.z], 0.3))] });
+    const lipR = [rE * 0.96, rE * 0.88, rE * 0.8], lipH = [0, 0.012, -0.025];
+    B.grid('rs_stone', NJ, 2, (u, v) => { const k = Math.round(v * 2); return arr(ring(u, lipR[k], j => j + lipH[k])); }, { wrapU: true, tint: [1.3, 1.24, 1.1], noAO: true });
+    const inR = [rE * 0.8, rE * 0.78, rE * 0.55, 0.02], inH = [-0.025, -0.32, -0.6, -0.68];
+    B.grid('rs_iron', NJ, 3, (u, v) => { const k = Math.round(v * 3); return arr(ring(u, inR[k], k === 0 ? (j => j + inH[0]) : (() => inH[k]))); }, { wrapU: true, tint: [0.4, 0.34, 0.32], noAO: true, shelter: true });
+    for (const [a, bend] of [[0.6, 0.35], [2.5, -0.3], [4.3, 0.2]]) {
+      const o = E.clone().addScaledVector(Xn, Math.cos(a) * rE * 0.5).addScaledVector(Yn, Math.sin(a) * rE * 0.5);
+      const radial = Xn.clone().multiplyScalar(Math.cos(a)).addScaledVector(Yn, Math.sin(a));
+      B.tube('rs_iron', [o.clone().addScaledVector(Tn, -0.15), o.clone().addScaledVector(Tn, 0.14), o.clone().addScaledVector(Tn, 0.26).addScaledVector(radial, 0.08 + bend * 0.1), o.clone().addScaledVector(Tn, 0.32).addScaledVector(radial, 0.2 + bend * 0.2)],
+        0.024, { seg: 5, lod0: false, tint: [0.9, 0.62, 0.48], shelter: true });
+    }
+    // two chunks of the neck lying on the plinth's front ledge under the break (painted skin on top, the pale
+    // plaster showing at the broken sides)
+    for (const [cx, cz, w, ry2] of [[-0.75, 1.15, 0.42, 0.5], [0.95, 1.05, 0.3, -0.4]]) {
+      B.box('rs_dino', w, 0.13, w * 0.75, cx, ptop + 0.06, cz, { r: 0.04, jit: 0.07, ry: ry2, rz: 0.12, rx: -0.08, tint, uvFn: (pl, nl) => [pl.x / S, lerp(0.3, 0.8, 0.5 + 0.5 * nl.y)],
+        faces: { px: { m: 'rs_stone', tint: [1.25, 1.2, 1.08] }, nx: { m: 'rs_stone', tint: [1.25, 1.2, 1.08] }, ny: { m: 'rs_stone', tint: [1.1, 1.05, 0.95] } } });
+    }
+    if (ctx.snow) {
+      // snow along the top of the arch (none on the climb), icicles hanging under it
+      snowRidge(pts, radii, F, Math.round(n * 0.55), n - 3, 0.09);
+      for (let k = 0; k < 9; k++) {
+        const q = F.at(NL * lerp(0.62, 0.92, k / 8) + range(rnd, -0.08, 0.08)), r = lerp(radii[q.i], radii[q.i + 1], q.f);
+        if (q.d.y < 0.55) continue;
+        const bot = q.p.clone().addScaledVector(q.d, -r * 0.96).add(V(range(rnd, -0.18, 0.18), 0, 0)), len = range(rnd, 0.12, 0.34) * (k % 3 === 1 ? 1.3 : 1);
+        B.cyl('rs_ice!', range(rnd, 0.028, 0.04), 0, len, bot.x, bot.y - len / 2 + 0.03, bot.z, { seg: 5, caps: false, fit: true, noAO: true, lod0: true });
+      }
+    }
   }
   if (tail) {
-    // a gentle S, held out level in its box, the tip flicked sideways
+    // a gentle S, held out level in its box, the tip flicked sideways and drooping just past the box's end
     const sw = p.id % 2 ? 1 : -1, tz0 = bz - az + 1.0, tz1 = tail.z - tail.hz + 0.12, ty = tail.y;
-    const curve = new THREE.CatmullRomCurve3([V(tail.x, ty - 0.45, tz0), V(tail.x + sw * 0.14, ty - 0.12, lerp(tz0, tz1, 0.3)), V(tail.x + sw * 0.04, ty - 0.02, lerp(tz0, tz1, 0.56)), V(tail.x - sw * 0.18, ty - 0.1, lerp(tz0, tz1, 0.8)), V(tail.x + sw * 0.28, ty - 0.2, tz1)]);
-    const n = 16, pts = curve.getPoints(n), rr = [0.75, 0.55, 0.4, 0.28, 0.12];
-    const radii = pts.map((_, i) => { const t = i / n * 4, k = Math.min(3, Math.floor(t)); return lerp(rr[k], rr[k + 1], t - k); });
+    const ctl = [V(tail.x, ty - 0.45, tz0), V(tail.x + sw * 0.14, ty - 0.12, lerp(tz0, tz1, 0.3)), V(tail.x + sw * 0.04, ty - 0.02, lerp(tz0, tz1, 0.56)), V(tail.x - sw * 0.18, ty - 0.1, lerp(tz0, tz1, 0.8)),
+      V(tail.x + sw * 0.2, ty - 0.24, tz1), V(tail.x + sw * 0.4, ty - 0.62, tz1 - 0.42)];
+    const curve = new THREE.CatmullRomCurve3(ctl, false, 'centripetal'), rr = [0.75, 0.55, 0.4, 0.28, 0.16, 0.07];
+    const n = 20, pts = [], radii = [];
+    for (let i = 0; i <= n; i++) { const t = i / n, k = t * (rr.length - 1), j = Math.min(rr.length - 2, Math.floor(k)); pts.push(curve.getPoint(t)); radii.push(lerp(rr[j], rr[j + 1], k - j)); }
     B.tube('rs_dino', pts, radii, { seg: 14, uvFn: uvTube(tz0 / S, -1, [0, 1, 0]), tint, capEnd: true });
+    const F = framesOf(pts, V(0, 1, 0)), TL = F.len[n];
+    for (let k = 0; k < 6; k++) {
+      const q = F.at(TL * (0.1 + k * 0.14)), r = lerp(radii[q.i], radii[q.i + 1], q.f), h = 0.34 - k * 0.045;
+      plate(q.p.clone().addScaledVector(q.d, r - 0.05), q.d, q.t.clone().negate(), h, 0.4 + h * 0.4, k + 14);
+    }
+    if (ctx.snow) snowRidge(pts, radii, F, 1, Math.round(n * 0.78), 0.1);
+  }
+  if (ctx.snow) {
+    // a blanket of snow along the back, lumpy, its edge wandering down the flanks; the plates stand out of it
+    const sr = rngOf(seedOf(p.x, p.z, 17)), ph1 = sr() * TAU, ph2 = sr() * TAU;
+    B.grid('rs_snow!', 28, 6, (u, v) => {
+      const th = TAU * u, vEdge = 0.74 + 0.035 * Math.sin(3 * th + ph1) + 0.02 * Math.sin(7 * th + ph2);
+      const k = lerp(-0.012, 0.08, smooth(0, 0.45, v)) * (1 + 0.22 * Math.sin(5 * th + ph2 + v * 3)), q = bodyAt(u, lerp(vEdge, 1, v));
+      return [bx + (q[0] - bx) * (1 + k), yc + (q[1] - yc) * (1 + k) + 0.012, bz + (q[2] - bz) * (1 + k * 0.4)];
+    }, { wrapU: true, noAO: true, uv: (u, v, P) => [P[0] / 2, P[2] / 2] });
   }
   if (ctx.driftMat) { drift(B, ctx, bx - body.hx - 0.3, bz, 0.8, 3.0, 0.42, 0); drift(B, ctx, bx + body.hx + 0.3, bz - 1.5, 0.6, 1.6, 0.28, 0); }
 }

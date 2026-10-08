@@ -63,7 +63,7 @@ const CFG = {
       cards: [[0.8, 0.55, 0.38], [0.8, 0.6, 0.16], [0.7, 0.42, 0.04], [0.95, 0.75, 0.26], [1.1, 0.5, 0.14], [0.6, 0.38, 0.2], [0.85, 0.65, 0.08], [0.9, 0.4, 0.12]] },
   },
   badlands: {
-    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands', local: 0.06, mesaK: 0.05, terrace: [12, 0.68, 0.94],
+    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands', local: 0.06, mesaK: 0.05, terrace: [17, 0.7, 0.95],
     ao: [0.52, 0.42, 0.55], tintA: [1.07, 1.0, 0.9], tintB: [0.92, 0.95, 1.03], macro: 0.32, detail: [0.08, 0.45, 0.1],
     clutter: { cell: 3.2, slots: 3, radius: 22, patch: 12, density: 0.42, spread: 1.0, flowers: 0,
       cards: [[0.75, 0.5, 0.3], [0.8, 0.55, 0.12], [0.75, 0.5, 0.12], [0.7, 0.5, 0.12], [0.75, 0.5, 0.16], [0.85, 0.6, 0.06], [0.7, 0.45, 0.06], [0.5, 0.3, 0.14]] },
@@ -201,6 +201,9 @@ function splatMaterial(biome, cfg) {
             float w = 1.0 - smoothstep(uMesa[i].z, uMesa[i].z + 5.0, distance(wp.xz, uMesa[i].xy));
             if (w > mesaK) { mesaK = w; mY = uMesaY[i]; mC = uMesa[i].xy; }
           }
+          #ifndef TERRAIN_SNOWROCK
+            if (sl.y <= 0.1) mesaK = 0.0;          // (elsewhere only the flanks shift the rock)
+          #endif
           #ifdef TERRAIN_SNOWROCK
             // round a crash mesa everything is projected square to the face's own facing (the smoothed
             // facing averages over the whole small form, and its lobes and bench ends face sideways,
@@ -352,14 +355,15 @@ function splatMaterial(biome, cfg) {
               #endif
             }
             #ifdef TERRAIN_STRATA
-              // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces;
-              // where a wall turns over its lip the face's OWN slope decides (the smoothed one still sees
-              // the wall below), so the lip shows the dust on top, never side-projected strata smeared
-              // across it
-              // (by the vertex's own slope, bilinear: the smoothed one spreads a wall over two cells
-              // past its lip, and the face's own normal would cut the edge into triangle teeth)
+              // under strata, moderate slopes are loose scree, so bands only ever show on truly steep faces.
+              // Where a wall turns over its lip (convex) the vertex's own slope decides, bilinear, so the
+              // lip shows the dust on top, never side-projected strata smeared across it (the smoothed
+              // slope spreads a wall over two cells past its lip, and the face's own normal would cut
+              // the edge into triangle teeth). At a foot (concave) the scree keeps to the smoothed
+              // slope, as the grid zigzags there and the raw one would cut teeth into it.
               float rawS = mix(textureLod(tSlopeR, (gqc + 0.5) / uGridN, 0.0).r, sl.y, smoothstep(0.0, 12.0, dOut));
-              float topK = 1.0 - smoothstep(0.3, 0.46, max(rawS, sl.y - 0.16) + (wN.r - 0.5) * 0.1 + (nE - 0.5) * 0.06);
+              float topR = 1.0 - smoothstep(0.3, 0.46, max(rawS, sl.y - 0.16) + (wN.r - 0.5) * 0.1 + (nE - 0.5) * 0.06);
+              float topK = mix(1.0 - smoothstep(0.3, 0.5, max(slope, sl.y)), topR, smoothstep(-0.05, 0.2, vCv));
               cc = mix(cc, col * vec3(0.94, 0.9, 0.88), topK);
             #else
               // ledges and shelves inside the rock hold what the ground holds (grass, golden grass,
@@ -670,7 +674,7 @@ function buildChunks(W, data, mat, group) {
 function buildApron(W, cfg, data, mat, group) {
   const { nx, nz, cell, X0, Z0, heights } = W;
   const X1 = X0 + nx * cell, Zend = Z0 + nz * cell, NZ1 = nz + 1;
-  const OUT = 340, STEP = 10;
+  const OUT = 340, STEP = cfg.terrace ? 5 : 10;      // (terraced land wants a finer lattice, or its risers melt into swells)
   const xs = [], zs = [];
   for (let x = X0 - OUT; x <= X1 + OUT + 0.01; x += STEP) xs.push(x);
   for (let z = Z0 - OUT; z < Z0; z += STEP) zs.push(z);
@@ -741,7 +745,7 @@ function buildApron(W, cfg, data, mat, group) {
     const k = i * NZ + j;
     if (vid[k] >= 0) return vid[k];
     const x = xs[i], z = zs[j], y = hA(x, z);
-    const e = cfg.terrace ? 3.5 : 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
+    const e = cfg.terrace ? 2 : 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
     const cz = Math.max(Z0, Math.min(W.Z1, z)), hwz = roadHW(W, cfg, cz), d = x - rxA(z);
     vid[k] = pos.length / 3;
     pos.push(x, y, z); nor.push(-hx / l, 1 / l, -hz / l);

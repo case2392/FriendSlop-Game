@@ -282,9 +282,10 @@ function rimCode(W, s, batch, group, near) {
       const soft = (px, py, pz, nx, ny) => { const k = 0.92 + 0.08 * Math.max(0, ny); return [k * 0.93, k * 0.97, k]; };
       const r0 = 0.3 + R() * 0.05, cx = sgn * hx * (0.84 + R() * 0.04), cz = (R() - 0.5) * hz * 0.2;
       K.add(sm, new THREE.SphereGeometry(r0, 16, 10), { uv: 'keep', uvScale: [2, 0.8], at: matrix(cx, top(cx, cz) - r0 * 0.42 * 0.45, cz, (R() - 0.5) * 0.15, 0, 0, new THREE.Vector3(0.95, 0.42, hz * 0.68 / r0)), shade: soft, cast: false });
-      for (let i = 0, m = 2 + Math.floor(R() * 2); i < m; i++) {
-        const z = cz + (i % 2 ? 1 : -1) * hz * (0.15 + R() * 0.3), x = cx + sgn * r0 * (0.1 + R() * 0.3), r = 0.15 + R() * 0.06;
-        K.add(sm, new THREE.SphereGeometry(r, 16, 10), { uv: 'keep', uvScale: [1, 0.6], at: matrix(x, top(x, z) + r0 * 0.42 * 0.3 - r * 0.45 * 0.5, z, (R() - 0.5) * 0.6, 0, 0, new THREE.Vector3(1.2, 0.45, 1.8)), shade: soft, cast: false });
+      for (let i = 0, m = 1 + Math.floor(R() * 2); i < m; i++) {
+        // a lump slumping off the outer side of the drift, over the lip (low, never perched on top)
+        const z = cz + (i % 2 ? 1 : -1) * hz * (0.15 + R() * 0.3), x = cx + sgn * r0 * (0.55 + R() * 0.25), r = 0.16 + R() * 0.06;
+        K.add(sm, new THREE.SphereGeometry(r, 16, 10), { uv: 'keep', uvScale: [1, 0.6], at: matrix(x, top(x, z) - 0.06 - r * 0.35 * 0.4, z, (R() - 0.5) * 0.6, 0, 0, new THREE.Vector3(1.3, 0.35, 1.9)), shade: soft, cast: false });
       }
     }
   }
@@ -334,6 +335,9 @@ function buildSigns(W, batch, group, near, ctx) {
   }
   for (const t of ctx.tags) { t.fi = faces.length; faces.push({ lines: t.lines, w: t.w, h: t.h, px: 260, bg: '#e8d8b0', fg: '#2a1e18', style: 'board', seed: t.lines[0] }); }
   for (const t of ctx.plaques || []) { t.fi = faces.length; faces.push({ lines: t.lines, w: t.w, h: t.h, px: 200, bg: '#c8a050', fg: '#2e2008', style: 'plaque', seed: t.lines[0] }); }
+  // painted pieces the buildings hang on their walls (the pawnbroker's map), from buildBuilding's faces
+  const wallFaces = [...(ctx.bInfo ? ctx.bInfo.values() : [])].flatMap(i => i.faces || []);
+  for (const t of wallFaces) { t.fi = faces.length; faces.push({ lines: [t.style], w: t.w, h: t.h, px: 240, style: t.style, seed: t.seed }); }
   const atlas = faces.length ? signAtlas(faces) : null;
   if (!atlas) return;
   // two face materials: lamp-lit boards (casino, billboards, the canopy sign) glow more at night
@@ -361,6 +365,7 @@ function buildSigns(W, batch, group, near, ctx) {
     K.pop();
     K.beam(br, [0, -t.drop - 0.02, t.out - 0.04], [0, -0.05, 0.06], 0.025, 0.02);
   }
+  for (const t of wallFaces) new Kit(batch, t.m, () => 0.84).add(faceDim, remapUV(new THREE.PlaneGeometry(t.w, t.h), atlas.rect(t.fi)), { uv: 'keep', cast: false });
   const shadeSign = () => 1;
   for (const it of items) {
     const { s, att, style } = it;
@@ -775,7 +780,7 @@ function furniture(s, batch, ctx) {
       K.add(mat('rug_hide', { alphaTest: 0.5, side: THREE.DoubleSide }), new THREE.PlaneGeometry(1.0, 1.2), { uv: 'keep', at: matrix(hx - 0.55, top + 0.005, 0.1, 0.3, -Math.PI / 2), cast: false });
     } else if (st === 'adobe') {
       K.box(mat('adobe_inner'), 2 * hx - 0.06, top - 0.1, 2 * hz - 0.06, 0, (top - 0.1) / 2, 0, { tile: 2.4, tint: '#e8d0b0' });
-      K.box(mat('flagstone'), 2 * hx + 0.14, 0.1, 2 * hz + 0.14, 0, top - 0.05, 0, { tile: 2 });
+      K.box(mat('floor_flags'), 2 * hx + 0.14, 0.1, 2 * hz + 0.14, 0, top - 0.05, 0, { tile: 1.3 });
       K.cyl(mat('brass'), [-hx, 0.18, hz + 0.08], [hx, 0.18, hz + 0.08], 0.03, 0.03, { sides: 6 });
     } else {
       const wl = mat('wood_light'), pl = mat('planks_weathered');
@@ -1336,8 +1341,6 @@ export function buildStructures(W) {
 
   // all the merged statics (one group per cluster), the glow cloud
   const clusters = batch.build(group);
-  // the wall decals: the mud splash band first, the holes and patches over it
-  group.traverse(o => { if (o.isMesh && o.material.userData) { const p = o.material.userData.paint; if (p === 'arch_splash') o.renderOrder = 1; else if (p === 'wall_holes') o.renderOrder = 2; } });
   const townCluster = clusters.find(c => c.key === 'town');
   const gp = glows.length ? glowPoints(glows) : null;
   if (gp) group.add(gp);

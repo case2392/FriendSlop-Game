@@ -109,7 +109,7 @@ const inset = (c, m = 0.025) => { const w = (c[2] - c[0]) * m, h = (c[3] - c[1])
 const _p = new V3(), _n = new V3(), _c = new V3(), _o = new V3(), _f = new V3();
 class Batch {
   constructor(key) {
-    this.key = key; this.P = []; this.N = []; this.UV = []; this.C = []; this.WD = []; this.CV = []; this.BC = []; this.BO = []; this.I = [];
+    this.key = key; this.P = []; this.N = []; this.UV = []; this.C = []; this.WD = []; this.CV = []; this.BC = []; this.BO = []; this.BT = []; this.I = [];
     this.n = 0; this.xf = null; this.nm = null; this.rm = null; this.bill = false; this.cf = null;
   }
   // bb = [center, offset, cardNormal] (local): a card that turns about the vertical to face the
@@ -124,7 +124,8 @@ class Batch {
       _c.copy(bb[0]); _o.copy(bb[1]); _f.copy(bb[2]);
       if (this.xf) { _c.applyMatrix4(this.xf); _o.applyMatrix3(this.rm); _f.applyMatrix3(this.rm); }
       this.BC.push(_c.x, _c.y, _c.z); this.BO.push(_o.x, _o.y, _o.z, Math.atan2(_f.x, _f.z));
-    } else { this.BC.push(_p.x, _p.y, _p.z); this.BO.push(0, 0, 0, 0); }
+      this.BT.push(Math.asin(Math.max(-1, Math.min(1, _f.y / (_f.length() || 1)))));     // the card's own pitch
+    } else { this.BC.push(_p.x, _p.y, _p.z); this.BO.push(0, 0, 0, 0); this.BT.push(0); }
     return this.n++;
   }
   t(a, b, c) { this.I.push(a, b, c); }
@@ -139,6 +140,7 @@ class Batch {
     if (this.bill) {
       g.setAttribute('aCtr', new THREE.Float32BufferAttribute(this.BC, 3));
       g.setAttribute('aOff', new THREE.Float32BufferAttribute(this.BO, 4));
+      g.setAttribute('aTilt', new THREE.Float32BufferAttribute(this.BT, 1));
     }
     g.setIndex(this.n > 65535 ? new THREE.Uint32BufferAttribute(this.I, 1) : new THREE.Uint16BufferAttribute(this.I, 1));
     g.computeBoundingSphere();
@@ -438,12 +440,21 @@ function alphaTex(name, cols = 2, rows = 2) {
 const GRID = { needles_snow: [4, 2], palm_frond: [2, 1] };
 
 // The vertex hook shared by the colour pass and the shadow (depth) pass: camera-facing cards (turned
-// about the vertical toward the camera, keeping their authored tilt) and wind sway.
-const vertDecl = o => `attribute float aWind; attribute float aCov; ${o.bill ? 'attribute vec3 aCtr; attribute vec4 aOff;' : ''} uniform float uTime; uniform vec3 uCam;`;
+// about the vertical toward the camera, keeping their authored tilt, and pitched toward a camera that
+// looks up at them from under a crown, so no card is ever seen edge-on as a dark spike) and wind sway.
+const vertDecl = o => `attribute float aWind; attribute float aCov; ${o.bill ? 'attribute vec3 aCtr; attribute vec4 aOff; attribute float aTilt;' : ''} uniform float uTime; uniform vec3 uCam;`;
 const vertBody = o => `
   ${o.bill ? `{
     vec3 toC = uCam - aCtr; float dYaw = atan(toC.x, toC.z) - aOff.w; float cy = cos(dYaw), sy = sin(dYaw);
-    transformed = aCtr + vec3(cy * aOff.x + sy * aOff.z, aOff.y, -sy * aOff.x + cy * aOff.z);
+    vec3 bo = vec3(cy * aOff.x + sy * aOff.z, aOff.y, -sy * aOff.x + cy * aOff.z);
+    // the pitch: from below, the card's elevation eases most of the way to the camera's (a little from
+    // high above too); turned about the horizontal axis across the view
+    float hz = length(toC.xz) + 1e-4, el = atan(toC.y, hz);
+    float wP = smoothstep(0.08, 0.85, -el) * 0.85 + smoothstep(0.35, 1.2, el) * 0.45;
+    float th = (el - aTilt) * wP;
+    vec3 ax = vec3(-toC.z / hz, 0.0, toC.x / hz);
+    bo = bo * cos(th) + cross(ax, bo) * sin(th) + ax * dot(ax, bo) * (1.0 - cos(th));
+    transformed = aCtr + bo;
   }` : ''}
   ${o.wind ? `{
     float ph = uTime * 1.6 + ${o.bill ? 'aCtr.x * 0.31 + aCtr.z * 0.27' : 'position.x * 0.31 + position.z * 0.27'};
@@ -549,7 +560,7 @@ const BIO = {
   },
   fields: {
     rock: 'rock_warm', rockCover: 'lichen', rockTints: ['#ffffff', '#f6eee0', '#ece4d4'],
-    leaves: 'leaves_autumn', oakTints: ['#ffffff', '#fff6e0', '#f6efd8', '#fffae8'], leafDensity: 0.62, west: true,
+    leaves: 'leaves_autumn', oakTints: ['#ffffff', '#fff6e0', '#f6efd8', '#fffae8', '#f0f0d4'], leafDensity: 0.82, west: true,
     pineTints: ['#f4f0d0', '#ece8c8'],
     bush: 'leaves', bushCells: [3], bushFill: 2, bushTints: ['#ffffff', '#fff6e0', '#f4f0d8'],
     deadTint: '#d0c4b0', oakTrunk: '#fff6e4',
@@ -670,8 +681,10 @@ function clump(b, C, R, rnd, o) {
   const quad = (P, dir, face, sz, cellI, rho, tilt = null, rot = 0) => {
     fn.copy(face);
     if (tilt != null) fn.y = tilt;
-    // keep the card within ±35° of vertical
-    const h = Math.hypot(fn.x, fn.z) || 1e-3, fy = Math.max(-0.55, Math.min(0.6, fn.y / Math.max(1e-3, fn.length())));
+    // keep the card within ±35° of vertical; the ones under the lobe (o.down) tip further, face down
+    // and out, so from under the tree they are seen face-on, never as edge-on spikes
+    const fyLo = o.down && dir.y < -0.12 ? -0.55 - (o.down - 0.55) * smooth(-0.12, -0.6, dir.y) : -0.55;
+    const h = Math.hypot(fn.x, fn.z) || 1e-3, fy = Math.max(fyLo, Math.min(0.6, (o.down && dir.y < -0.12 ? Math.min(fn.y, -0.3) : fn.y) / Math.max(1e-3, fn.length())));
     const hs = Math.sqrt(1 - fy * fy) / h; fn.set(fn.x * hs, fy, fn.z * hs);
     if (Math.hypot(fn.x, fn.z) < 0.05) fn.set(0.8, fy, 0.3);
     fn.normalize();
@@ -705,6 +718,42 @@ function clump(b, C, R, rnd, o) {
   }
 }
 
+// The underside of a lobe: a shallow upturned bowl of big near-horizontal cards of the dense core cell
+// under its lower third (one in the middle, a ring round it tipped down and out), static, so from
+// under the tree the crown closes into a leafy ceiling with a scalloped edge instead of sky seen past
+// edge-on cards. Shaded as the lower flank of the lobe (normals out and only a little down) and kept
+// fairly light: a leafy volume from below, never a black hole.
+function ceiling(b, C, R, rnd, o) {
+  const sq = o.squash ?? 0.8, grid = o.grid || [2, 2], cell = inset(cellOf(o.cell ?? 2, ...grid));
+  const us = [cell[0], cell[2], cell[2], cell[0]], vs = [cell[1], cell[1], cell[3], cell[3]];
+  const tint = o.tint || WHITE, lift = o.light ?? 0.82;
+  const e1 = new V3(), e2 = new V3(), nrm = new V3();
+  const put = (P, out, tip, sz, rot, k) => {
+    // the card's plane: facing down, tipped out by `tip`
+    nrm.set(out.x * Math.sin(tip), -Math.cos(tip), out.z * Math.sin(tip)).normalize();
+    e1.crossVectors(nrm, Math.abs(nrm.y) > 0.99 ? XAX : UP).normalize();
+    e2.crossVectors(nrm, e1).normalize();
+    const cr = Math.cos(rot), sr = Math.sin(rot), hw = sz / 2, base = b.n;
+    const sn = new V3(out.x * 0.8, -0.32, out.z * 0.8).normalize();
+    [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, c], q) => {
+      const x = (a * cr - c * sr) * hw, y = (a * sr + c * cr) * hw;
+      const p = new V3().copy(P).addScaledVector(e1, x).addScaledVector(e2, y);
+      // a little lighter toward the bowl's rim (it catches the sky)
+      const rimK = clamp01(Math.hypot(p.x - C.x, p.z - C.z) / R);
+      b.v(p, sn, us[q], vs[q], mulc(tint, k * (0.92 + 0.12 * rimK)), (o.wind ?? 0.5) * (0.4 + 0.6 * rimK));
+    });
+    b.t(base, base + 1, base + 2); b.t(base, base + 2, base + 3);
+  };
+  const yC = C.y - R * sq * (o.depth ?? 0.5);
+  const a0 = rnd() * TAU, n = o.n ?? 4;
+  // (kept inside the lobe's own cards, so from the side they never stick out as flat slabs)
+  put(new V3(C.x, yC - R * 0.04, C.z), new V3(Math.cos(a0), 0, Math.sin(a0)), 0.2, R * 1.05, rnd() * TAU, lift * 0.96);
+  for (let k = 0; k < n; k++) {
+    const a = a0 + (k + range(rnd, -0.2, 0.2)) * TAU / n, out = new V3(Math.cos(a), 0, Math.sin(a)), rr = R * range(rnd, 0.32, 0.42);
+    put(new V3(C.x + out.x * rr, yC + R * sq * range(rnd, 0.1, 0.2), C.z + out.z * rr), out, range(rnd, 0.6, 0.85), R * range(rnd, 0.8, 0.92), rnd() * TAU, lift);
+  }
+}
+
 // ---- trees -----------------------------------------------------------------------------------------
 
 const barkAO = (y0 = 0, y1 = 1.8, lo = 0.5, tint = WHITE) => p => { const k = lo + (1 - lo) * smooth(y0, y1, p.y); return mulc(tint, k); };
@@ -716,16 +765,19 @@ function flare(rootA, width = 0.62) {
 }
 // Roots that grip the ground: thick convex tubes from inside the trunk out and down into the ground,
 // tapering only to about a third and ending in a rounded cap.
-function roots(ctx, b, rootA, r0, s, rnd, { len = [1.1, 1.7], rad = 0.3, up = 0.85, sides = 7, color = barkAO(-0.3, 1.2, 0.5) } = {}) {
+function roots(ctx, b, rootA, r0, s, rnd, { len = [1.1, 1.7], rad = 0.3, up = 0.85, sides = 7, color = barkAO(-0.3, 1.2, 0.5), dive = false } = {}) {
   for (const ra of rootA) {
     const dx = Math.cos(ra), dz = Math.sin(ra), L = range(rnd, len[0], len[1]) * s;
-    const steps = [[0, up], [0.28, up * 0.5], [0.58, 0.14], [0.84, -0.02], [1.04, -0.22]];
+    // dive: the root arches out of the bole as a tall ridge and dives into the ground, tapering almost
+    // to nothing (it never ends in a blunt stub on the grass); otherwise a stout gripping root
+    const steps = dive ? [[0, up], [0.3, up * 0.5], [0.58, 0.16], [0.82, -0.04], [1.0, -0.3]] : [[0, up], [0.28, up * 0.5], [0.58, 0.14], [0.84, -0.02], [1.04, -0.22]];
     const pts = steps.map(([f, yy]) => {
       const x = dx * (r0 * 0.3 + f * L) + range(rnd, -0.05, 0.05) * s, z = dz * (r0 * 0.3 + f * L) + range(rnd, -0.05, 0.05) * s;
       return new V3(x, ctx.gh(x, z) + yy * s, z);
     });
     const R = rad * s;
-    tube(b, pts, [R * 1.12, R * 0.86, R * 0.64, R * 0.48, R * 0.36], { sides, uRep: 1, vLen: 1.4, color, cap: 1, lobes: (dir) => (1 + 0.18 * Math.max(0, dir.y)) * (1 - 0.12 * Math.max(0, -dir.y)) });
+    tube(b, pts, dive ? [R * 1.15, R * 0.84, R * 0.55, R * 0.33, R * 0.16] : [R * 1.12, R * 0.86, R * 0.64, R * 0.48, R * 0.36], { sides, uRep: 1, vLen: 1.4, color, cap: dive ? 0.6 : 1,
+      lobes: dive ? (dir) => (1 + 0.32 * Math.max(0, dir.y)) * (1 - 0.18 * Math.abs(dir.y < 0 ? dir.y : 0)) : (dir) => (1 + 0.18 * Math.max(0, dir.y)) * (1 - 0.12 * Math.max(0, -dir.y)) });
   }
 }
 
@@ -742,11 +794,12 @@ function limb(P0, dir, L, rnd, { bends = 2, bendAmt = 0.35, rise = 0, segs = 6 }
 }
 
 // Oak sizes. G scales the whole tree; the grove's hero (d.hero, else the grove's biggest) is 1.8-2.2x,
-// the rest of the grove 1.2-1.4x the old oak, Westfall's pairs 1.4x. Rc is the crown's radius.
+// the rest of the grove 1.2-1.4x the old oak; Westfall's are the Elwynn build at about two thirds of a
+// hero (G 0.95-1.25). Rc is the crown's radius.
 function oakSize(d, hero, west) {
   const s = d.s || 1;
-  const G = west ? 1.4 * Math.min(1.2, s) : hero ? Math.max(1.8, Math.min(2.2, 1.5 + 0.5 * s)) : Math.max(1.0, Math.min(1.5, 1.25 * s));
-  return { G, Rc: (hero ? 3.5 : west ? 2.8 : 3.2) * G };
+  const G = west ? Math.max(0.95, Math.min(1.25, 1.05 * s)) : hero ? Math.max(1.8, Math.min(2.2, 1.5 + 0.5 * s)) : Math.max(1.0, Math.min(1.5, 1.25 * s));
+  return { G, Rc: (hero ? 3.5 : west ? 2.9 : 3.2) * G };
 }
 
 // Elwynn oak: a massive warm bole that keeps to its collider through the bumper band (≤ 0.1 m off
@@ -754,9 +807,12 @@ function oakSize(d, hero, west) {
 // heavy gnarled limbs spread out and up, each into one big lobe of the crown, smaller branches into
 // small edge lobes and a leader into the top lobe. The crown is a wide dome of 5-8 lobes (3:1 in
 // size), each a ball of leaf cards round a dense core, with a ragged skirt of hanging leaf cards
-// under its outer rim. Crowding: a tree leans its crown away from close neighbours and shrinks the
-// lobes that face them, so a grove reads as one canopy without walls of cards through each other.
-// Westfall's is lower, wider and scruffier: gold, olive and rust, an open crown.
+// under its outer rim, and a leafy ceiling under every lobe (so from under the tree the crown is a
+// closed, lit leafy volume, not sky past edge-on cards). Crowding: a tree leans its crown away from
+// close neighbours and shrinks the lobes that face them, so a grove reads as one canopy without walls
+// of cards through each other. The bole's flare follows the ground round it and dives straight in,
+// and its roots taper into the turf (no flat skirt on the grass). Westfall's is the same oak, smaller,
+// on a shorter bole with a round, lumpy ball of a crown in olive-gold with rust highlights.
 function oak(ctx, d, info = {}) {
   const rnd = rngOf(seedOf(d.x, d.z, 11)), B = ctx.bio, west = !!B.west;
   const hero = !west && !!info.hero;
@@ -777,7 +833,7 @@ function oak(ctx, d, info = {}) {
   const cO = { x: shx * shk * Rc, z: shz * shk * Rc };         // the crown's centre, off the trunk axis
   const crowd = (ux, uz) => { let c = 0; for (const n of nb) c += n.w * Math.max(0, ux * n.ux + uz * n.uz); return Math.min(1, c); };
 
-  const F = (west ? range(rnd, 1.5, 1.8) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
+  const F = (west ? range(rnd, 1.85, 2.15) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
   const [gLo] = ctx.foot(rC * 2.4);
   const yBot = Math.min(-0.5, gLo - 0.35);
   const nR = 5 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
@@ -791,6 +847,11 @@ function oak(ctx, d, info = {}) {
   const NT = hero ? 16 : 13, ph0 = rnd() * TAU;
   const rTop = rC * (hero ? 1.45 : west ? 1.28 : 1.32);
   const hF = 0.7 + 0.22 * G;                                   // the root flare's height
+  // the ground round the foot, by angle: the flare swells down to the ground line there and goes
+  // straight on down below it (the bole dives into the turf, never spreads a flat skirt on it)
+  const NG = 16, gRing = [];
+  for (let k = 0; k < NG; k++) { const a = k / NG * TAU; gRing.push(ctx.gh(Math.cos(a) * rC * 1.6, Math.sin(a) * rC * 1.6)); }
+  const gAt = ph => { const f = (((ph / TAU) % 1) + 1) % 1 * NG, k = Math.floor(f), u = f - k; return gRing[k % NG] * (1 - u) + gRing[(k + 1) % NG] * u; };
   const tp = [], tr = [];
   for (let i = 0; i <= NT; i++) {
     const t = i / NT, y = yBot + t * (F + 0.35 * G - yBot), k = clamp01((y + 0.3) / (F + 0.6));
@@ -802,30 +863,30 @@ function oak(ctx, d, info = {}) {
   }
   const tcol = lin(B.oakTrunk || '#ffffff');
   const lobes = (dir, t, i) => {
-    const y = tp[i].y, ph = Math.atan2(dir.z, dir.x);
-    const f = Math.pow(clamp01(1 - (y + 0.15) / hF), 2);
+    const y = tp[i].y, ph = Math.atan2(dir.z, dir.x), h = Math.max(0, y - gAt(ph));
+    const f = Math.pow(clamp01(1 - (h + 0.04) / hF), 2);
     const twist = 1 + 0.09 * Math.cos(4 * (ph - ph0 - clamp01((y + 0.3) / (F + 0.6)) * 1.3)) * (1 - f);   // ridges that twist up the bole
-    return (1 + f * 1.35 * fl(ph)) * twist;
+    return (1 + f * 1.15 * fl(ph)) * twist;
   };
-  if (B.barkCover) bark.cf = (p, n) => smooth(0.9 * G * 0.8, 0.05, p.y) * (0.5 + 0.5 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.1)) * 0.62;   // moss on the shady side of the foot
+  if (B.barkCover) bark.cf = (p, n) => smooth(0.65 * G, 0.0, p.y - gAt(Math.atan2(p.z, p.x))) * (0.5 + 0.5 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.1)) * 0.5;   // moss on the shady side of the foot
   tube(bark, tp, tr, { sides: hero ? 14 : 12, uRep: hero ? 3 : 2, vLen: 1.5 * Math.min(1.4, G * 0.75), twist: 0.2, lobes, color: barkAO(-0.3, 1.8, 0.5, tcol) });
-  roots(ctx, bark, rootA, rC, Math.max(1, G * 0.6), rnd, { len: [1.0, 1.45], rad: hero ? 0.34 : 0.32, up: hero ? 0.38 : 0.45, color: barkAO(-0.3, 1.8, 0.5, tcol) });
+  roots(ctx, bark, rootA, rC, Math.max(1, G * 0.6), rnd, { len: [1.0, 1.4], rad: hero ? 0.34 : 0.32, up: hero ? 0.42 : 0.48, color: barkAO(-0.3, 1.8, 0.5, tcol), dive: true });
   if (B.barkCover) bark.cf = (p, n) => 0;
 
   // ---- the crown's lobes
-  const Vc = Rc * (west ? 0.5 : 0.58), yB = F + 0.3 * G, Yc = yB + Vc;      // (Westfall's a lower, broad dome: never a flat-bottomed acacia)
+  const Vc = Rc * (west ? 0.66 : 0.58), yB = F + 0.3 * G, Yc = yB + Vc;      // (Westfall's a taller ball: never a flat-topped acacia)
   const L = [];
-  const nRing = hero ? 5 + (rnd() < 0.5 ? 1 : 0) : west ? 3 + (rnd() < 0.6 ? 1 : 0) : 4 + (rnd() < 0.3 ? 1 : 0);
+  const nRing = hero ? 5 + (rnd() < 0.5 ? 1 : 0) : 4 + (rnd() < (west ? 0.5 : 0.3) ? 1 : 0);
   const ra0 = rnd() * TAU;
   for (let k = 0; k < nRing; k++) {
     const a = ra0 + (k + range(rnd, -0.2, 0.2)) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a), c = crowd(ux, uz);
     const r = Rc * range(rnd, 0.42, 0.56) * (1 - 0.35 * c), rho = (Rc - r * 0.95) * (1 - 0.3 * c);
-    L.push({ c: new V3(cO.x + ux * rho, Yc + (west ? range(rnd, -0.7, 0) : range(rnd, -0.5, 0.1)) * Vc, cO.z + uz * rho), r, ux, uz, ring: true });
+    L.push({ c: new V3(cO.x + ux * rho * (west ? 0.9 : 1), Yc + (west ? range(rnd, -0.6, -0.1) : range(rnd, -0.5, 0.1)) * Vc, cO.z + uz * rho * (west ? 0.9 : 1)), r, ux, uz, ring: true });
   }
   // the top lobe, a little off centre
-  L.push({ c: new V3(cO.x + range(rnd, -0.12, 0.12) * Rc, Yc + Vc * range(rnd, 0.32, 0.45), cO.z + range(rnd, -0.12, 0.12) * Rc), r: Rc * (west ? 0.48 : range(rnd, 0.5, 0.56)), top: true, ux: 0, uz: 0 });
-  // a second upper lobe on the big ones, so the dome isn't one ball
-  if (!west && (hero || rnd() < 0.5)) {
+  L.push({ c: new V3(cO.x + range(rnd, -0.12, 0.12) * Rc, Yc + Vc * range(rnd, 0.32, 0.45), cO.z + range(rnd, -0.12, 0.12) * Rc), r: Rc * (west ? range(rnd, 0.54, 0.6) : range(rnd, 0.5, 0.56)), top: true, ux: 0, uz: 0 });
+  // a second upper lobe on the big ones (and every Westfall ball), so the dome isn't one ball
+  if (west || hero || rnd() < 0.5) {
     const a = ra0 + range(rnd, 0.3, 0.7) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a);
     L.push({ c: new V3(cO.x + ux * Rc * 0.42, Yc + Vc * 0.12, cO.z + uz * Rc * 0.42), r: Rc * range(rnd, 0.36, 0.42) * (1 - 0.3 * crowd(ux, uz)), ux, uz, upper: true });
   }
@@ -894,15 +955,16 @@ function oak(ctx, d, info = {}) {
   let yLo = Infinity, yHi = -Infinity;
   for (const l of L) { yLo = Math.min(yLo, l.c.y - l.r * 0.85); yHi = Math.max(yHi, l.c.y + l.r * 0.9); }
   const tint = lin(pick(rnd, B.oakTints));
-  const ao = p => 0.58 + 0.42 * Math.pow(smooth(yLo, yHi, p.y), 1.05);
+  const ao = p => 0.64 + 0.36 * Math.pow(smooth(yLo, yHi, p.y), 1.05);
   const wk = west ? [1.1, 1.06, 0.88] : [1.16, 1.12, 0.84];
   const warm = p => { const t = smooth(yLo + (yHi - yLo) * 0.45, yHi, p.y); return [1 + (wk[0] - 1) * t, 1 + (wk[1] - 1) * t, 1 + (wk[2] - 1) * t]; };
   const den = B.leafDensity;
   for (const l of L) {
-    if (west && l.small && rnd() < 0.4) continue;          // a scruffy, open crown
     const size = Math.min(l.r * range(rnd, 0.92, 1.02), 3.1);
     const n = Math.max(6, Math.round(den * (6 + 13 * (l.r / size) ** 2)));
-    clump(leaves, l.c, l.r * 0.92, rnd, { cards: n, size, cells: [0], core: 2, coreK: 1.7, tint, ao, warm, squash: l.top ? 0.85 : 0.8, under: 0.8, sizeVar: [0.82, 1.18] });
+    clump(leaves, l.c, l.r * 0.92, rnd, { cards: n, size, cells: [0], core: 2, coreK: 1.7, tint, ao, warm, squash: l.top ? 0.85 : 0.8, under: 0.8, sizeVar: [0.82, 1.18], down: 0.72 });
+    // the ceiling under it (the top lobe's is hidden inside the crown but for the gaps between lobes)
+    ceiling(leaves, l.c, l.r * 0.92, rnd, { tint, squash: 0.8, n: l.small ? 3 : l.top ? 3 : 4, light: 0.8, depth: l.top ? 0.62 : 0.5 });
     // the skirt: leaf cards hanging off the lobe's outer, lower rim
     if (l.top) continue;
     const nS = Math.round((l.small ? 1 : 1.5 + l.r * 0.5) * (west ? 0.7 : 1));
@@ -925,13 +987,15 @@ function oak(ctx, d, info = {}) {
 // A hanging leaf card: top-centre at T, w wide, h tall, facing out along `out` (it turns about the
 // vertical toward the camera); its normal tips outward and down (it's lit from below and the side,
 // darker than the crown above), and it sways most at its bottom.
-function hang(b, T, w, h, out, cell, color) {
+function hang(b, T, w, h, out, cell, color, flare = 0) {
   const f = new V3(out.x, 0, out.z).normalize(), r = new V3(f.z, 0, -f.x);
   const C = new V3(T.x, T.y - h / 2, T.z);
   const us = [cell[0], cell[2], cell[2], cell[0]], vs = [cell[1], cell[1], cell[3], cell[3]];
   const base = b.n;
   [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, c], k) => {
-    const off = new V3().addScaledVector(r, a * w / 2).add(new V3(0, c * h / 2, 0));
+    // flare: the bottom edge swings toward the viewer (the card turns to face the camera), so from
+    // under the crown a skirt card is seen tipped toward you, never edge-on
+    const off = new V3().addScaledVector(r, a * w / 2).add(new V3(0, c * h / 2, 0)).addScaledVector(f, -c * flare * h / 2);
     const n = new V3().copy(f).multiplyScalar(0.75).add(new V3(0, c > 0 ? 0.25 : -0.35, 0)).normalize();
     b.v(new V3().copy(C).add(off), n, us[k], vs[k], mulc(color, c > 0 ? 0.9 : 1.05), c > 0 ? 0.6 : 1.3, [C, off, f]);
   });
@@ -2502,32 +2566,33 @@ function rimTrees(ctx) {
   const B = ctx.bio, tintO = () => lin(pick(rnd, B.oakTints));
   ctx.rim = true;
   // a far oak: a stout short trunk under a full dome of lobes that reaches down to about a third of
-  // the tree's height (low side lobes under the ring), so it reads as an oak, never a flat-topped acacia
-  const oakImp = (x, y, z, G) => {
+  // the tree's height (low side lobes under the ring), so it reads as an oak, never a flat-topped acacia;
+  // Westfall's (ball) is a round, lumpy ball, about as tall as it is wide, on a short visible bole
+  const oakImp = (x, y, z, G, ball = false) => {
     ctx.at({ x, y, z }, 0);
-    const lv = ctx.b('leaves'), F = range(rnd, 1.0, 1.2) * G, Rc = range(rnd, 3.0, 3.5) * G, tint = tintO();
+    const lv = ctx.b('leaves'), F = (ball ? range(rnd, 1.35, 1.6) : range(rnd, 1.0, 1.2)) * G, Rc = (ball ? range(rnd, 2.5, 2.9) : range(rnd, 3.0, 3.5)) * G, tint = tintO();
     // the trunk goes in the leaf mesh (no bark draw call for far trees): a dark brown stub sampling the
     // opaque middle of the dense core cell
     const cc = inset(cellOf(2)), uc = (cc[0] + cc[2]) / 2, vc = (cc[1] + cc[3]) / 2;
     tube(lv, [new V3(0, -0.6, 0), new V3(0, F * 0.5, 0), new V3(range(rnd, -0.2, 0.2) * G, F + 0.9 * G, range(rnd, -0.2, 0.2) * G)], [0.6 * G, 0.5 * G, 0.36 * G], { sides: 6, uvMap: () => [uc, vc], color: [0.6, 0.42, 0.3] });
-    const yc = F + Rc * 0.72, n = 4 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU, yLo = F, yHi = yc + Rc * 0.9;
-    const ao = p => 0.58 + 0.42 * smooth(yLo, yHi, p.y);
+    const yc = F + Rc * (ball ? 0.86 : 0.72), n = ball ? 3 + (rnd() < 0.5 ? 1 : 0) : 4 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU, yLo = F, yHi = yc + Rc * 0.9;
+    const ao = p => (ball ? 0.64 : 0.58) + (ball ? 0.36 : 0.42) * smooth(yLo, yHi, p.y);
     for (let k = 0; k <= n; k++) {
-      const top = k === n, a = a0 + k * TAU / n, rr = top ? 0 : Rc * 0.52, R = top ? Rc * 0.58 : Rc * range(rnd, 0.42, 0.52);
-      const C = new V3(Math.cos(a) * rr, top ? yc + Rc * 0.32 : yc - Rc * range(rnd, 0, 0.16), Math.sin(a) * rr);
+      const top = k === n, a = a0 + k * TAU / n, rr = top ? 0 : Rc * (ball ? 0.46 : 0.52), R = top ? Rc * (ball ? 0.62 : 0.58) : Rc * (ball ? range(rnd, 0.46, 0.54) : range(rnd, 0.42, 0.52));
+      const C = new V3(Math.cos(a) * rr + (top && ball ? range(rnd, -0.15, 0.15) * Rc : 0), top ? yc + Rc * (ball ? 0.38 : 0.32) : yc - Rc * (ball ? range(rnd, 0.08, 0.26) : range(rnd, 0, 0.16)), Math.sin(a) * rr);
       clump(lv, C, R, rnd, { cards: 6, size: R * 1.05, cells: [0], core: 2, coreK: 1.8, tint, ao, squash: 0.95, wind: 0.3, sizeVar: [0.9, 1.15] });
     }
     // the dome's low skirt: 1-2 smaller lobes hanging lower on the sides
     const nLow = 1 + (rnd() < 0.6 ? 1 : 0);
     for (let k = 0; k < nLow; k++) {
-      const a = a0 + (k + 0.5) * TAU / n + range(rnd, -0.3, 0.3), R = Rc * range(rnd, 0.3, 0.38), rr = Rc * range(rnd, 0.5, 0.62);
-      clump(lv, new V3(Math.cos(a) * rr, yc - Rc * 0.5, Math.sin(a) * rr), R, rnd, { cards: 5, size: R * 1.1, cells: [0], core: 2, coreK: 1.7, tint, ao, squash: 0.95, wind: 0.3, sizeVar: [0.9, 1.15] });
+      const a = a0 + (k + 0.5) * TAU / n + range(rnd, -0.3, 0.3), R = Rc * range(rnd, 0.3, 0.38), rr = Rc * range(rnd, 0.5, 0.62) * (ball ? 0.85 : 1);
+      clump(lv, new V3(Math.cos(a) * rr, yc - Rc * (ball ? 0.52 : 0.5), Math.sin(a) * rr), R, rnd, { cards: 5, size: R * 1.1, cells: [0], core: 2, coreK: 1.7, tint, ao, squash: 0.95, wind: 0.3, sizeVar: [0.9, 1.15] });
     }
   };
   for (const side of [-1, 1]) {
     let z = W.Z0 + rnd() * 12;
     while (z < Zend - 4) {
-      const n = bm === 'meadow' ? 3 + Math.floor(rnd() * 4) : bm === 'fields' ? 2 + (rnd() < 0.5 ? 1 : 0) : 3 + Math.floor(rnd() * 4);
+      const n = bm === 'meadow' ? 3 + Math.floor(rnd() * 4) : bm === 'fields' ? 1 + (rnd() < 0.35 ? 1 : 0) : 3 + Math.floor(rnd() * 4);
       // Westfall's stand in small touching clumps round one spot
       const fc = { d: range(rnd, 3, 22), z: z };
       for (let k = 0; k < n; k++) {
@@ -2537,10 +2602,10 @@ function rimTrees(ctx) {
         if (zz < W.Z0 + 2 || zz > Zend - 2) continue;
         const y = hA(x, zz) - 0.2;
         if (bm === 'snow' || (bm === 'meadow' && rnd() < 0.22)) pine(ctx, { x, y, z: zz, s: range(rnd, 1.0, 1.35), ry: rnd() * TAU, lite: true });
-        else oakImp(x, y, zz, bm === 'fields' ? range(rnd, 1.1, 1.4) : range(rnd, 1.3, 1.8));
+        else oakImp(x, y, zz, bm === 'fields' ? range(rnd, 1.0, 1.25) : range(rnd, 1.3, 1.8), bm === 'fields');
         ctx.rim = true;
       }
-      z += bm === 'meadow' ? range(rnd, 10, 22) : bm === 'fields' ? range(rnd, 34, 70) : range(rnd, 9, 18);
+      z += bm === 'meadow' ? range(rnd, 10, 22) : bm === 'fields' ? range(rnd, 55, 100) : range(rnd, 9, 18);
     }
   }
   ctx.rim = false;

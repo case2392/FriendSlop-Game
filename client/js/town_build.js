@@ -31,7 +31,7 @@
 // by the windows.
 import { THREE } from './gfx.js';
 import { Kit, mat, matrix, rng, sstep, gridGeo } from './town_kit.js';
-import { LOG_ROWS, HOLE_CELLS, HOLE_COLS } from './paint/architecture.js';
+import { LOG_ROWS, HOLE_CELLS, HOLE_COLS, HOLE_STRIP } from './paint/architecture.js';
 
 const D2R = Math.PI / 180;
 const TAU = Math.PI * 2;
@@ -72,7 +72,7 @@ export const STYLES = {
   alpine: {
     wall: 'granite_block', wallTile: 3.4, base: 'granite_block', baseTile: 2.4, baseH: 0.75, baseTint: '#ccc6bc', beam: 'timber_dark',
     roof: 'slate_roof', roofTile: 2.6, layout: 'gable', pitch: 46, maxRise: 5.2, eave: 1.25, crossEave: 0.55, gableOH: 0.75, thick: 0.3, barge: true, crossCut: true, lowEaves: true,
-    floor: 'flagstone', inner: 'granite_inner', gableFill: 'planks_weathered', gableTint: '#8a7464', gableStone: true, snow: true, quoins: true,
+    floor: 'floor_granite', inner: 'granite_inner', gableFill: 'planks_weathered', gableTint: '#8a7464', gableStone: true, snow: true, quoins: true,
     chimney: 'granite_block', win: 'stone', winW: 0.8, winH: 1.0, winY: 1.2, lamp: 'brazier', ridge: 'snow', topBeams: true, emblem: true, arch: true,
     banner: 'banner_dwarf',
     int: {
@@ -97,7 +97,7 @@ export const STYLES = {
   },
   adobe: {
     wall: 'adobe', wallTile: 3.0, base: null, beam: 'timber_dark', trim: 'brass', layout: 'flat', round: true, holes: 'adobe',
-    floor: 'flagstone', inner: 'adobe_inner', wainscot: false, awnings: ['canvas_stripe', 'canvas_teal', 'canvas_mustard'],
+    floor: 'floor_flags', inner: 'adobe_inner', wainscot: false, awnings: [0, 1, 2],
     win: 'port', winW: 0.85, winH: 0.85, winY: 1.45, lamp: 'goblin', pipes: true, banner: 'banner_goblin',
     int: {
       ceil: 'vigas', kiva: true, rug: 'rug_desert', walls: ['pots', 'gearwall', 'rughang', 'pans'],
@@ -175,7 +175,7 @@ export function buildBuilding(batch, b, sign = null) {
   const W = b.w, D = b.dep, H = b.h, dw = b.door / 2;
   const c = {
     K, S, b, R, W, D, H, dw, ox: W / 2 + 0.15, oz: D / 2 + 0.15, ix: W / 2 - 0.15, iz: D / 2 - 0.15, dh: H - 0.8,
-    sign, glows: [], tall: H > 4.5, signZ: D / 2 + 0.3, up, RH,
+    sign, glows: [], tall: H > 4.5, signZ: D / 2 + 0.3, up, RH, faces: [],
   };
   c.Rox = c.ox + (up ? up.out : 0); c.Roz = c.oz + (up ? up.out : 0);
   c.ww = S.winW * (c.tall ? 1.15 : 1); c.wh = S.winH * (c.tall ? 1.45 : 1); c.winY = S.winY * (c.tall ? 1.2 : 1);
@@ -193,7 +193,7 @@ export function buildBuilding(batch, b, sign = null) {
   dress(c);
   relight(c);
   K.log = null;
-  return { signZ: c.signZ, glows: c.glows, style: S, frame: K.root, apex: c.apex };
+  return { signZ: c.signZ, glows: c.glows, style: S, frame: K.root, apex: c.apex, faces: c.faces };
 }
 
 const FRAMES = (X, Z) => ({
@@ -270,7 +270,7 @@ function walls(c) {
         for (let k = 0, tries = 0; k < n && tries < 40; tries++) {
           const sz = sz0 + R() * (sz1 - sz0), hw = sz / 2;
           const x = R() < 0.6 ? (R() < 0.5 ? -1 : 1) * (lim - hw - R() * 1.3) : (R() - 0.5) * 2 * (lim - hw);
-          const y = low && R() < 0.78 ? 0.45 + R() * Math.max(0.2, H * 0.5 - 0.6) : 0.6 + R() * (H - 1.3);
+          const y = low && R() < 0.78 ? 0.45 + R() * Math.max(0.2, H * 0.5 - 0.6) : 1.05 + R() * (H - 1.75);
           if (Math.abs(x) + hw > lim || y + sz * 0.31 > H - 0.25) continue;
           if (busy.some(([a, bb]) => x + hw > a && x - hw < bb)) continue;
           if (placed.some(p => Math.abs(p.x - x) < (p.s + sz) * 0.5 && Math.abs(p.y - y) < (p.s + sz) * 0.33)) continue;
@@ -288,8 +288,9 @@ function walls(c) {
 // The battered mud skirt along the foot of every adobe wall (framing builds it): how far its face stands
 // out from the wall face at height y (wall frame), 0.33 m at the ground, gone by 1.35 m.
 const skirtZ = y => 0.006 + 0.32 * Math.pow(1 - Math.min(1, Math.max(0, (y + 0.15) / 1.5)), 1.5);
-// The mud splash band round the foot of an adobe building: an alpha decal ribbon lying on the mud skirt of
-// each wall (between the corner piers, broken at the door), from just under the ground to ~0.85 m.
+// The mud splash band round the foot of an adobe building: an alpha decal ribbon (the wall_holes atlas's
+// splash strip, so it shares the holes' draw call, drawn before them) lying on the mud skirt of each wall
+// (between the corner piers, broken at the door), from just under the ground to ~0.85 m.
 function splashBand(c) {
   const { K, dw } = c, R = c.R;
   const ys = [-0.15, 0.05, 0.25, 0.45, 0.65, 0.86];
@@ -302,7 +303,7 @@ function splashBand(c) {
       for (let i = 0; i <= nx; i++) for (let j = 0; j < ys.length; j++) {
         // the band's top wanders up and down along the wall (v bent by a power per column, kept in 0..1)
         const x = a + (bb - a) * i / nx, y = ys[j], p = Math.exp(0.32 * Math.sin(x * 0.7 + ph) + 0.14 * Math.sin(x * 1.9 - ph));
-        pos.push(x, y, skirtZ(y) + 0.014); uv.push(u0 + x / 3, Math.pow((y + 0.15) / 1.01, p));
+        pos.push(x, y, skirtZ(y) + 0.014); uv.push(u0 + x / 3, 0.002 + Math.pow((y + 0.15) / 1.01, p) * (HOLE_STRIP - 0.006));
         if (i && j) { const q = i * ys.length + j, p0 = q - ys.length; idx.push(p0 - 1, q - 1, p0, p0, q - 1, q); }
       }
       const g = new THREE.BufferGeometry();
@@ -310,21 +311,19 @@ function splashBand(c) {
       g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
       g.setIndex(idx);
       g.computeVertexNormals();
-      const m = mat('arch_splash', { transparent: true });
-      m.depthWrite = false; m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -1;
-      K.add(m, g, { uv: 'keep', cast: false });
+      K.add(holeMat(), g, { uv: 'keep', cast: false });
     }
   });
 }
 // one decal from the wall_holes atlas at (x, y) in the current wall frame, sz wide
-// (skirt: bent to lie on the adobe mud skirt where it reaches up under the decal; z0 > 0.01: on an inner
-// wall's lining, shaded like the room)
+// (skirt: bent to lie on the adobe mud skirt where it reaches up under the decal; z0: its offset from the
+// wall face. Shaded by the building's own shader, so it sits in the same light as the wall under it.)
 function decal(c, cell, x, y, sz, rz = 0, skirt = false, z0 = 0.006) {
   const low = skirt && y - sz * 0.4 < 1.35;
   const g = new THREE.PlaneGeometry(sz, sz * 0.62, low ? 4 : 1, low ? 4 : 1);
   holeUV(g, cell);
   const cr = Math.cos(rz), sr = Math.sin(rz);
-  c.K.add(holeMat(), g, { uv: 'keep', at: matrix(x, y, 0, 0, 0, rz), warp: v => { v.z = (low ? skirtZ(y + v.y * cr + v.x * sr) : z0) + 0.01; }, shade: z0 > 0.01 ? true : () => 0.96, cast: false });
+  c.K.add(holeMat(), g, { uv: 'keep', at: matrix(x, y, 0, 0, 0, rz), warp: v => { v.z = (low ? skirtZ(y + v.y * cr + v.x * sr) : z0) + 0.01; }, cast: false });
 }
 function quarter(c, m, sx, sz, y0, y1, r, o, cx = c.ix, cz = c.iz) {
   const th0 = sx > 0 ? (sz > 0 ? 0 : Math.PI / 2) : (sz > 0 ? 1.5 * Math.PI : Math.PI);
@@ -467,7 +466,7 @@ function plasterFace(c, m, len, y0, y1, plan, hole, o) {
 function holeUV(g, cell) {
   const cw = 1 / HOLE_COLS, u0 = (cell % HOLE_COLS) * cw, v0 = cell < HOLE_COLS ? 0.5 : 0;
   const uv = g.attributes.uv;
-  for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + (0.08 + uv.getX(i) * 0.84) * cw, v0 + (0.19 + uv.getY(i) * 0.62) * 0.5);
+  for (let i = 0; i < uv.count; i++) uv.setXY(i, u0 + (0.08 + uv.getX(i) * 0.84) * cw, HOLE_STRIP + (v0 + (0.19 + uv.getY(i) * 0.62) * 0.5) * (1 - HOLE_STRIP));
 }
 // 0-n plaster holes (decals from the wall_holes atlas) in random panels of the current wall frame
 function holes(c, panels, n, kind) {
@@ -935,7 +934,7 @@ function windowAt(c, t, side) {
     for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; K.add(mat('iron_wrought'), new THREE.SphereGeometry(0.035, 5, 4), { uv: 'keep', at: matrix(t + Math.cos(a) * (r + 0.05), cy + Math.sin(a) * (r + 0.05), 0.14) }); }
     K.add(wmat, new THREE.CircleGeometry(r, 20), { uv: 'keep', at: matrix(t, cy, -0.336, Math.PI), shade: false });
     K.add(mat('brass'), new THREE.TorusGeometry(r + 0.04, 0.06, 6, 20), { uv: 'keep', at: matrix(t, cy, -0.35) });
-    if (awn && side !== 'back' && (side === 'front' || (Math.round(t * 7) + b.id) % 3 === 0)) awning(c, t, cy + r + 0.55, Math.max(2.3, ww + 1.6), 1.55, awn, true, 0.32);
+    if (awn !== null && side !== 'back' && (side === 'front' || (Math.round(t * 7) + b.id) % 3 === 0)) awning(c, t, cy + r + 0.55, Math.max(2.3, ww + 1.6), 1.55, awn, true, 0.32);
     return;
   }
   K.quad(wmat, ww, wh, t, cy, 0.012, { shade: false });
@@ -978,9 +977,10 @@ function windowAt(c, t, side) {
 // A canvas awning in a wall frame (x along the wall, z out): a batten on the wall, a striped canvas roof
 // sloping out and sagging between its supports, wrapped over a front pole, a scalloped valance, and (poles)
 // two posts down to the ground, each guyed by a rope stay to a stake (or two struts back to the wall)
-function awning(c, x, y, w, depth, name = 'canvas_stripe', poles = false, slope = 0.42) {
+function awning(c, x, y, w, depth, band = 0, poles = false, slope = 0.42) {
   const { K, R } = c;
-  const am = mat(name, { side: THREE.DoubleSide });
+  // all three canvases are bands of one texture (canvas_awnings): v stays inside band `band`
+  const am = mat('canvas_awnings', { side: THREE.DoubleSide }), vb = band / 3;
   const drop = depth * slope, yf = y - drop, ph = R() * 6;
   const nx = Math.max(4, Math.ceil(w / 0.3)), nz = 4;
   const px = [x - w / 2 + 0.1, x + w / 2 - 0.1];
@@ -990,7 +990,7 @@ function awning(c, x, y, w, depth, name = 'canvas_stripe', poles = false, slope 
     const u = i / nx, v = j / nz, xx = x - w / 2 + w * u, d = 0.03 + (depth - 0.03) * v;
     const between = Math.max(0, Math.min(1, (xx - px[0]) / (px[1] - px[0])));
     const sag = 0.11 * Math.sin(Math.PI * v) * (0.75 + 0.25 * Math.sin(u * 9 + ph)) + 0.07 * v * v * Math.sin(Math.PI * between);
-    pos.push(xx, y - drop * v - sag, d); uv.push(xx / 1.2, -d / 1.2);
+    pos.push(xx, y - drop * v - sag, d); uv.push(xx / 1.2, vb + (0.97 - 0.94 * d / (depth + 0.1)) / 3);
   }
   for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const a = j * (nx + 1) + i, b = a + 1, cc = a + nx + 1, dd = cc + 1; idx.push(a, cc, b, b, cc, dd); }
   const g = new THREE.BufferGeometry();
@@ -1005,9 +1005,9 @@ function awning(c, x, y, w, depth, name = 'canvas_stripe', poles = false, slope 
   // the front pole the canvas wraps over, the valance hanging from it with its scallops
   const fy = yf - 0.07;
   K.cyl(wl, [x - w / 2 - 0.06, fy, depth + 0.01], [x + w / 2 + 0.06, fy - 0.02, depth + 0.01], 0.05, 0.05, { sides: 7, tint: '#b08a68' });
-  K.quad(am, w, 0.26, x, fy - 0.13, depth + 0.06, { uv: 'keep', uvScale: [w / 1.2, 0.22], sx: Math.ceil(w / 0.5), warp: v => { v.z += 0.015 * Math.sin(v.x * 7 + ph); } });
+  K.quad(am, w, 0.26, x, fy - 0.13, depth + 0.06, { uv: 'keep', uvScale: [w / 1.2, 0.22 / 3], uvOff: [0, vb + 0.05 / 3], sx: Math.ceil(w / 0.5), warp: v => { v.z += 0.015 * Math.sin(v.x * 7 + ph); } });
   const ns = Math.round(w / 0.32);
-  for (let k = 0; k < ns; k++) K.add(am, new THREE.CircleGeometry(0.16, 8, Math.PI, Math.PI), { uv: 'keep', uvScale: [0.25, 0.12], at: matrix(x - w / 2 + w * (k + 0.5) / ns, fy - 0.26, depth + 0.061) });
+  for (let k = 0; k < ns; k++) K.add(am, new THREE.CircleGeometry(0.16, 8, Math.PI, Math.PI), { uv: 'keep', uvScale: [0.25, 0.12 / 3], uvOff: [0, vb + 0.4 / 3], at: matrix(x - w / 2 + w * (k + 0.5) / ns, fy - 0.26, depth + 0.061) });
   if (poles) {
     for (const [k, p] of px.entries()) {
       const s = k ? 1 : -1;
@@ -2594,9 +2594,8 @@ function wallItem(c, kind) {
     K.cyl(mat('brass'), [-0.8, y - 0.5, 0.1], [0.8, y - 0.5, 0.1], 0.05, 0.05, { sides: 6, cast: false });
   } else if (kind === 'map') {
     // a traveller's map nailed up a little askew
-    const g = new THREE.PlaneGeometry(0.96, 0.72);
-    holeUV(g, HOLE_CELLS.map[0]);
-    K.add(holeMat(), g, { uv: 'keep', at: matrix(0, y - 0.35, 0.035, 0, 0, (R() - 0.5) * 0.08), cast: false, shade: () => 0.95 });
+    // (painted as a face of the town's sign atlas: town3d lays the quad at this frame)
+    c.faces.push({ m: K.root.clone().multiply(K.m).multiply(matrix(0, y - 0.35, 0.035, 0, 0, (R() - 0.5) * 0.08)), w: 0.96, h: 0.72, style: 'map', seed: String(c.b.id) });
   } else if (kind === 'rack') {
     // a weapon rack: two pegged rails on a backboard, a sword, a spear and a hand axe resting on them
     const db = mat(S.beam);
@@ -2742,13 +2741,14 @@ function dress(c) {
     if (k === 'pawn') {
       // between the back windows and the shelves: a map with a deer skull over it on one wall, a weapon
       // rack on the other
-      for (const [side, kinds] of [['right', ['map', 'antlers']], ['left', ['rack']]]) {
+      const skull = (I.walls || []).includes('antlers') ? 'ram' : 'antlers';   // not the same trophy as over the shelves
+      for (const [side, kinds] of [['right', ['map', skull]], ['left', ['rack']]]) {
         const tb = side === 'right' ? iz - 0.95 : -(iz - 0.95);
         const t = freeSpot(c, side, kinds[0] === 'rack' ? 1.25 : 1.05, tb, c.taken[side]);
         if (t === null) continue;
         c.taken[side].push([t - 0.6, t + 0.6]);
         onInner(c, side, t, () => {
-          if (kinds[0] === 'map') { K.push(0, 0.1, 0); wallItem(c, 'map'); K.pop(); K.push(0, 0.85, 0, 0, 0, 0, 0.78); wallItem(c, 'antlers'); K.pop(); }
+          if (kinds[0] === 'map') { K.push(0, 0.1, 0); wallItem(c, 'map'); K.pop(); K.push(0, 0.85, 0, 0, 0, 0, 0.78); wallItem(c, kinds[1]); K.pop(); }
           else { K.push(0, -0.15, 0); wallItem(c, 'rack'); K.pop(); }
         });
       }
