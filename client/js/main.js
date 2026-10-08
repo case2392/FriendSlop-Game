@@ -443,7 +443,7 @@ function onEvent(e) {
       const p = S.props.get(e.id);
       if (p) { removeProp(e.id, { color: '#ffffff', n: 22, speed: 5 }); }
       positional(e, () => sfx.shatter());
-      floatText(e, `-${fmt$(e.lost)} 💥`, '#ff5252');
+      floatText(e, `-${fmt$(e.lost)}`, '#ff5252');
       break;
     }
     case 'dmg': {

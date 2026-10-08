@@ -47,7 +47,7 @@ export class BJTable {
     if (this.hand.state === 'done') return this.settle(t, -this.stake);
     this.state = 'vote';
     this.until = t + VOTE_TIME;
-    return { delta: -this.stake, msg: `🃏 Dealt — ${this.stake.toLocaleString()} on the line. HIT pad or STAND pad!` };
+    return { delta: -this.stake, msg: `Dealt — ${this.stake.toLocaleString()} on the line. HIT pad or STAND pad!` };
   }
 
   settle(t, already = 0) {

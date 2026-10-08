@@ -75,7 +75,7 @@ wss.on('connection', ws => {
         if (res.error) return fail(res.error);
         room = r; player = res.player;
         r.welcome(player);
-        r.toast(`👋 ${player.name} climbed aboard.`, player.color, 3);
+        r.toast(`${player.name} climbed aboard.`, player.color, 3);
       } else if (room && player) {
         room.handle(player, m);
       }

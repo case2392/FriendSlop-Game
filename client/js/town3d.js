@@ -1178,7 +1178,7 @@ export function buildStructures(W) {
   {
     const pb = W.buildings.find(b => b.kind === 'pawn');
     const ry = pb ? pb.ry : 0, y0 = T.pawn.y - 1.0, ceil = y0 + (pb ? pb.h : 3.6) - 0.04;
-    const PW = 2.9, PH = PW * 96 / 512, by = Math.min(y0 + 2.62, ceil - 0.75);
+    const PW = 2.9, PH = PW * 96 / 512, by = Math.min(y0 + 2.82, ceil - 0.55);   // clear of Ed's nameplate
     const board = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH), own(new THREE.MeshBasicMaterial({ map: pawnLabel.material.map, color: '#e4dccf', alphaTest: 0.4 })));
     board.position.set(T.pawn.x + Math.sin(ry) * 0.03, by, T.pawn.z + Math.cos(ry) * 0.03);
     board.rotation.y = ry;
