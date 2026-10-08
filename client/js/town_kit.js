@@ -12,10 +12,12 @@ const AX = ['x', 'y', 'z'];
 export function mat(name, o = {}) { const m = painted(name, { vertexColors: true, ...o }); m.userData.paint = name; return m; }
 
 // One shadow policy per material, so a material's indoor and outdoor parts merge into one mesh (and
-// one shadow draw): flat, glowing or indoor-only surfaces never cast, everything else does.
+// one shadow draw): flat, glowing or indoor-only surfaces never cast (the roof already shades the whole
+// interior), nor do floors, doors and thin trims (rope, burlap, brass) whose shadows are
+// too small to read; walls, roofs, beams, posts, lamps, barrels, crates and the wagon do.
 const NO_CAST = new Set(['window_lead', 'lantern_glass', 'flowerbox', 'banner_red', 'banner_hide', 'banner_dwarf', 'banner_goblin', 'rug_red', 'rug_bear', 'rug_hide', 'rug_braid', 'rug_desert',
   'carpet_casino', 'carpet_border', 'tile_goblin', 'felt_table', 'latillas', 'embers', 'slot_face', 'flip_face', 'repo_plate', 'plaster_inner', 'granite_inner',
-  'wall_holes', 'straw_fringe', 'clay', 'endgrain']);
+  'wall_holes', 'straw_fringe', 'clay', 'endgrain', 'floor_planks', 'flagstone', 'door_plank', 'rope', 'burlap', 'brass']);
 
 export function matrix(x = 0, y = 0, z = 0, ry = 0, rx = 0, rz = 0, s = 1) {
   E.set(rx, ry, rz, 'YXZ'); Q.setFromEuler(E);

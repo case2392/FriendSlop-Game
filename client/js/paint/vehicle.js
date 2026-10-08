@@ -3,12 +3,15 @@
 // and a few tiling interior surfaces. Light from the upper left: lit cream edges on top, cool
 // violet-brown shadows below, soft dark seams, never pure black. See docs/ART.md.
 //
-//   rv_body     1024², the body atlas: right side, left side, front, rear and roof, each painted for
-//               its own panel (windows, door, wheel arches and the name all line up with RV_ART).
+//   rv_body     1024², the body atlas: right side, left side, front and rear, each painted for its
+//               own panel (windows, door, wheel arches, the name, the hatches and the advert line up
+//               with RV_ART).
+//   rv_tin      512², the roof's tin (tiles ~1.5 m): plates, tar-sealed laps, rivets, rust, leaves.
 //   rv_trim     512×2048 trim sheet: 64 px horizontal bands that tile along u (walnut, oak, brass,
 //               iron, goblin red and green, cream, tread, strap, gingham, slate, canvas, glass, rope,
 //               awning, burlap, carpet, copper, the roof-edge livery, hay, bone, leaf, sand, soot,
-//               leather) plus rows of decal slots (hub, gauges, plates, skull, fan grille...).
+//               leather, butcher block, pennant cloth, corner post) plus rows of decal slots (hub,
+//               gauges, plates, skull, fan grille...) and the brow's destination board.
 //   rv_paneling 1024×512, interior walls: cream plaster between dark studs over a walnut wainscot
 //               (tiles along u only; v runs floor → ceiling).
 //   rv_floor    512², dark umber plank floor with a worn path down the aisle (tiles along u).
@@ -17,7 +20,7 @@
 //               copper wash stall.
 //   rv_lamps    512×256, lenses (headlight, tail, amber marker, lantern glass) and the night glows
 //               (lit window, porthole, halo): the glow mesh draws this atlas additively.
-//   rv_glass    256², see-through window glass (alpha).
+//   rv_glass    512×256, window glass (alpha): the outside face (left half), the inside (right).
 //   rv_snow     256², snow lying on the RV on day 3 (tiles).
 //   rv_grime    1024×256, road grime (alpha, painted white: tinted per biome), sides and ends.
 import {
@@ -62,20 +65,30 @@ export const RV_ART = {
   gold: [0.985, 1.035], orange: [0.71, 0.965], brown: [0.575, 0.69], brassTop: [0.525, 0.56],
   wood: [0.065, 0.525], brassLow: [0.03, 0.065], rail: 0.548,
   emblem: { L: 2.42, R: 2.66, y: 1.56, r: 0.15 },
-  name: { R: [-3.86, -0.3], L: [-3.86, 0.45] },
+  // the name starts clear of the fat rear corner post (it ends at z ≈ -3.78)
+  name: { R: [-3.6, -0.3], L: [-3.6, 0.45] },
   hatches: { R: [[-1.75, -0.65, 'LOOT'], [0.98, 1.84, 'JUNK']], L: [[0.62, 1.8, 'LOOT']] },
+  // iron rib straps down the sides (eave → rub rail), clear of every opening
+  ribs: { R: [-2.85, -1.95, 1.12], L: [-2.05, 0.0, 2.05] },
+  // story elements on the long rear halves: a goblin advert plate and chalk tallies (door side),
+  // a round oak shield with the maker's cog (driver's side, 3D)
+  advert: { z0: -1.72, z1: -0.74, y0: 1.04, y1: 1.7 },
+  tally: { z0: -0.62, z1: -0.28, y0: 1.18, y1: 1.5 },
+  buckler: { z: -2.75, y: 1.42, r: 0.27 },
 };
 // atlas regions (px) of rv_body
 export const BODY = { W: 1024, H: 1024, sidePx: 128, R: 0, L: 384, endY: 768, endW: 256, front: 0, rear: 256, roof: 512 };
-// the roof region of rv_body covers this rectangle of the roof's plan (local x, z)
-export const ROOF_MAP = { z0: -4.35, z1: 4.65, x0: -1.55, x1: 1.55 };
 // trim sheet bands
 export const TRIM = {
   W: 512, H: 2048, band: 64,
   wood: 0, oak: 1, brass: 2, iron: 3, red: 4, green: 5, cream: 6, tread: 7, strap: 8, gingham: 9,
   slate: 10, canvas: 11, glass: 12, rope: 13, slots: 14, wide: 15,
   awning: 16, burlap: 17, carpet: 18, copper: 19, roofedge: 20, hay: 21, bone: 22, leaf: 23,
-  sand: 24, soot: 25, leather: 26, slots2: 27, wide2: 28,
+  sand: 24, soot: 25, leather: 26, slots2: 27, wide2: 28, block: 29, flag: 30, post: 31,
+  // band 28 (wide2) is the brow's destination board, the whole 512×64 band (8:1)
+  board: 28,
+  // band 30: the pennant's cloth [0, 384) px, a rolled carpet's end [384, 448), spare [448, 512)
+  flagPx: { cloth: [0, 384], carpetEnd: [384, 448] },
   // 64×64 decal slots in band 14
   s: { hub: 0, gauge: 1, fuel: 2, frost: 3, emblem: 4, burner: 5, clock: 6, apple: 7 },
   // 64×64 decal slots in band 27
@@ -83,6 +96,8 @@ export const TRIM = {
   // 128×64 slots in band 15
   w: { plate: 0, sticker: 1, radio: 2, plaque: 3 },
 };
+// pleats across one curtain panel (the gingham band's folds line up with rv3d.js' pleated panels)
+export const GINGHAM_PLEATS = 4;
 // soft goods regions (px of a 512² atlas): x, y, w, h. The runner: its end piece is the top
 // RUG_END px of the rug region, the rest is a middle piece that tiles along v.
 export const SOFT = { quilt: [0, 0, 256, 256], plaid: [256, 0, 256, 256], rug: [0, 256, 256, 256], stall: [256, 256, 256, 256], RUG_END: 72 };
@@ -119,6 +134,8 @@ function mottleIn(g, rnd, x, y, w, h, { colors, count = 40, rmin = 10, rmax = 50
     blob(g, x + rnd() * w, y + rnd() * h, r * s, r, stretch === 1 ? rnd() * Math.PI : (rnd() - 0.5) * 0.3, pick(rnd, colors), alpha * range(rnd, 0.6, 1), hard);
   }
 }
+// a tiny seeded generator: lets a mark that is drawn twice across a seam replay the same numbers
+const lcg = seed => { let s = seed % 2147483647 || 1; return () => (s = (s * 16807) % 2147483647) / 2147483647; };
 // horizontal-only wrapping (bands of the trim sheet tile along u). Draw every random number
 // BEFORE calling it, so both copies of a mark that crosses the seam are identical.
 function wrapX(W, x, r, fn) { fn(x); if (x - r < 0) fn(x + W); if (x + r > W) fn(x - W); }
@@ -257,7 +274,7 @@ function handLetter(g, text, cx, cy, maxW, capH, rnd, {
 }
 
 // A worn stencilled word (storage hatches): bridges through the round letters, speckled edges.
-function stencil(g, text, cx, cy, size, rnd, color = '#e6d6ae', alpha = 0.85) {
+function stencil(g, text, cx, cy, size, rnd, color = '#e6d6ae', alpha = 0.85, speckle = 40, wear = 4) {
   const W = Math.ceil(size * text.length * 1.0 + 24), H = Math.ceil(size * 1.5);
   const c = makeCanvas(W, H), b = c.getContext('2d');
   b.font = `bold ${size}px ${STENCIL_FONT}`; b.textBaseline = 'middle'; b.textAlign = 'left';
@@ -266,13 +283,31 @@ function stencil(g, text, cx, cy, size, rnd, color = '#e6d6ae', alpha = 0.85) {
   const centers = [];
   for (let i = 0; i < ws.length; i++) { b.fillStyle = color; b.fillText(text[i], x, H / 2); centers.push([text[i], x + ws[i] / 2]); x += ws[i] + tr; }
   b.globalCompositeOperation = 'destination-out';
+  const bw = Math.max(2.4, size * 0.08);
   for (const [ch, mx] of centers) {
-    if ('OQDB0'.includes(ch)) { b.fillRect(mx - 1.2, 0, 2.4, H * 0.42); b.fillRect(mx - 1.2, H * 0.58, 2.4, H * 0.42); }
-    if ('UNKAR'.includes(ch)) b.fillRect(mx - 1.2, H * 0.5, 2.4, H * 0.5);
+    if ('OQDB0'.includes(ch)) { b.fillRect(mx - bw / 2, 0, bw, H * 0.42); b.fillRect(mx - bw / 2, H * 0.58, bw, H * 0.42); }
+    if ('APR'.includes(ch)) b.fillRect(mx - bw / 2, H * 0.5, bw, H * 0.5);
   }
-  for (let i = 0; i < W * H / 40; i++) { const px = rnd() * W, py = rnd() * H, r = range(rnd, 0.5, 1.8); b.globalAlpha = range(rnd, 0.4, 1); b.beginPath(); b.arc(px, py, r, 0, TAU); b.fill(); }
-  for (let i = 0; i < 4; i++) { const px = rnd() * W, py = rnd() * H; b.globalAlpha = 0.7; b.beginPath(); b.ellipse(px, py, range(rnd, 3, 8), range(rnd, 2, 5), rnd() * 3, 0, TAU); b.fill(); }
+  for (let i = 0; i < W * H / speckle; i++) { const px = rnd() * W, py = rnd() * H, r = range(rnd, 0.5, 1.6); b.globalAlpha = range(rnd, 0.4, 1); b.beginPath(); b.arc(px, py, r, 0, TAU); b.fill(); }
+  for (let i = 0; i < wear; i++) { const px = rnd() * W, py = rnd() * H; b.globalAlpha = 0.7; b.beginPath(); b.ellipse(px, py, range(rnd, 3, 8), range(rnd, 2, 5), rnd() * 3, 0, TAU); b.fill(); }
   g.save(); g.globalAlpha = alpha; g.drawImage(c, cx - W / 2, cy - H / 2); g.restore();
+}
+
+// A paint chip knocked through to the dark primer: an irregular little polygon whose lower-right
+// wall catches the light (the chip's depth) and whose upper-left edge throws a soft shadow.
+function chip(g, rnd, x, y, s) {
+  const n = 5 + Math.floor(rnd() * 3), rot = rnd() * TAU, ax = range(rnd, 0.9, 1.7), pts = [];
+  for (let k = 0; k < n; k++) { const a = (k + rnd() * 0.6) / n * TAU, q = s * range(rnd, 0.5, 1); pts.push([Math.cos(a) * q * ax, Math.sin(a) * q]); }
+  const c = pick(rnd, ['#4e3a2e', '#5a5048', '#47362c']);
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const poly = (dx, dy, col, a) => {
+    g.save(); g.globalAlpha = a; g.fillStyle = col; g.beginPath();
+    pts.forEach(([px, py], i) => { const X = x + dx + px * cr - py * sr, Y = y + dy + px * sr + py * cr; if (i) g.lineTo(X, Y); else g.moveTo(X, Y); });
+    g.closePath(); g.fill(); g.restore();
+  };
+  poly(-1, -1, '#2a1a20', 0.4);
+  poly(1, 1, '#f6e2b4', 0.8);
+  poly(0, 0, c, 1);
 }
 
 // a brass cog with a coin face: the goblin maker's mark
@@ -309,7 +344,7 @@ const WOODS = ['#8e5c34', '#84542f', '#966438', '#7c4e2c'];
 const RUST = '#8a5a30';
 
 // The livery bands from y=hi down to y=lo, painted across [x0, x1] using Y(y) → px.
-function livery(g, rnd, x0, x1, Y, { chips = 1, woodNails = true, woodBand = true } = {}) {
+function livery(g, rnd, x0, x1, Y, { chips = 1, woodNails = true, woodBand = true, hot = [] } = {}) {
   const A = RV_ART, w = x1 - x0;
   const band = (lo, hi, top, mid, bot) => {
     const y0 = Y(hi), y1 = Y(lo);
@@ -328,19 +363,24 @@ function livery(g, rnd, x0, x1, Y, { chips = 1, woodNails = true, woodBand = tru
   band(A.gold[0], A.gold[1], '#ecca7a', GOLD, '#8a5e26');
   band(A.orange[0], A.orange[1], '#e08850', ORANGE, '#94461c');
   band(A.brown[0], A.brown[1], '#7e5234', BROWN, '#3e2416');
-  // worn paint: chips show cream primer, long faded scratches, sun-faded blotches
+  // worn paint: a few broad sun-faded patches, then chips knocked through to the dark primer,
+  // clustered where hands, boots and stones hit (door edges, corners, window corners, arches),
+  // mostly along the stripe's edges
   clipRect(g, x0, Y(A.orange[1]), w, Y(A.brown[0]) - Y(A.orange[1]), () => {
     mottleIn(g, rnd, x0, Y(A.orange[1]), w, Y(A.orange[0]) - Y(A.orange[1]), { colors: ['#d8844a', '#a85424', '#e0a070'], count: Math.round(w / 12), rmin: 6, rmax: 28, alpha: 0.35, stretch: 3 });
-    for (let i = 0; i < w / 40 * chips; i++) {
-      const x = x0 + rnd() * w, edge = rnd() < 0.75;
-      const y = edge ? (rnd() < 0.5 ? Y(A.orange[1]) + range(rnd, 0, 4) : Y(A.orange[0]) - range(rnd, 0, 4)) : range(rnd, Y(A.orange[1]), Y(A.brown[0]));
-      const r = range(rnd, 1.2, 3.4);
-      ellipse(g, x + 0.9, y + 1.0, r * 1.8, r, rnd() * 0.4, INK, 0.25);
-      ellipse(g, x, y, r * 1.8, r, rnd() * 0.4, '#d8c49a', 0.8);
+    const yo0 = Y(A.orange[1]), yo1 = Y(A.orange[0]);
+    for (let i = 0; i < Math.max(1, Math.round(w / 380)); i++) {
+      const x = x0 + range(rnd, 0.1, 0.9) * w, y = range(rnd, yo0 + 5, yo1 - 5), ry = range(rnd, 6, 11);
+      blob(g, x, y, ry * range(rnd, 3.5, 4.5), ry, (rnd() - 0.5) * 0.08, '#e8a870', range(rnd, 0.12, 0.18), 0.15);
     }
-    for (let i = 0; i < w / 50; i++) {
-      const x = x0 + rnd() * w, y = range(rnd, Y(A.orange[1]) + 3, Y(A.brown[0]) - 3), L = range(rnd, 10, 50);
-      line(g, [[x, y], [x + L, y + (rnd() - 0.5) * 3]], 1, '#f0c49a', 0.35);
+    const n = Math.round(w / 100 * chips);
+    for (let i = 0; i < n; i++) {
+      const hx = hot.length ? pick(rnd, hot) : x0 + rnd() * w;
+      const x = hx + (rnd() + rnd() - 1) * 26, e = rnd();
+      const y = e < 0.42 ? yo0 + range(rnd, 1.5, 5) : e < 0.84 ? yo1 - range(rnd, 1.5, 5) : e < 0.93 ? Y(A.brown[0]) - range(rnd, 1.5, 4) : range(rnd, yo0, Y(A.brown[0]));
+      const s = range(rnd, 2, 4);
+      chip(g, rnd, x, y, s);
+      if (rnd() < 0.45) chip(g, rnd, x + range(rnd, 5, 10) * (rnd() < 0.5 ? -1 : 1), y + range(rnd, -3, 3), s * 0.6);
     }
   });
   // brass trim lines either side of the wood band (the oak rub rail covers the top one)
@@ -430,9 +470,9 @@ function paintSide(g, rnd, side, oy) {
     line(g, [[0, y + 2], [W, y + 2]], 1.6, '#fff6dc', 0.6);
     for (let x = 8; x < W; x += range(rnd, 18, 22)) rivet(g, x, y + 7, 3.4, '#dcc8a0', 0.4);
   }
-  // rust and soot runs from the eave
-  for (let i = 0; i < 26; i++) {
-    const x = rnd() * W, y = Y(A.eaveY) + range(rnd, 0, 6);
+  // rust and soot runs from the eave, thicker toward the rear (it sits in the road's spray)
+  for (let i = 0; i < 30; i++) {
+    const u = rnd() ** 1.8, x = side === 'R' ? u * W : W - u * W, y = Y(A.eaveY) + range(rnd, 0, 6);
     line(g, [[x, y], [x + (rnd() - 0.5) * 3, y + range(rnd, 20, 80)]], range(rnd, 1.5, 4), pick(rnd, [RUST, '#6a5a50', '#7a6450']), range(rnd, 0.2, 0.38));
   }
   // under the eave: a cool shadow band 0.35 m tall
@@ -461,7 +501,11 @@ function paintSide(g, rnd, side, oy) {
     rrect(g, xa + 4, ya3 + 4, xb - xa - 8, yb3 - ya3 - 6, 8); g.lineWidth = 1.6; g.strokeStyle = rgba('#fff4dc', 0.55); g.stroke(); g.restore();
   }
   cog(g, X(A.emblem[side]), Y(A.emblem.y), A.emblem.r * P);
-  livery(g, rnd, 0, W, Y);
+  if (side === 'R') { advertPlate(g, rnd, X, Y); chalkTally(g, rnd, X, Y); }
+  // chips cluster at the corners, the door's edges, the window corners and over the arches
+  const hot = [14, W - 14, ...A.archZ.flatMap(az => [X(az - 0.5), X(az + 0.5)]), ...wins.filter(o => !o.r).flatMap(o => [X(o.z0), X(o.z1)])];
+  if (side === 'R') hot.push(X(A.door.z0), X(A.door.z1), X(A.door.z0) + 6, X(A.door.z1) - 6);
+  livery(g, rnd, 0, W, Y, { hot });
   // the name, hand-lettered in gold on the wood band
   {
     const [za, zb] = A.name[side];
@@ -481,15 +525,18 @@ function paintSide(g, rnd, side, oy) {
     rect(g, px, ya4 + 18, pw, 2, '#a8a2b0', 0.6);
     rect(g, px, ya4 + 46, pw, 3, INK, 0.45);
     for (const [u, v] of [[6, 24], [pw - 6, 24], [6, 42], [pw - 6, 42]]) rivet(g, px + u, ya4 + v, 3, '#a29aa4');
-    // storage hatches with strap hinges, a brass latch and a stencilled label
+    // storage hatches: dark iron plates standing proud of the skirt (lit top edge, a cast shadow
+    // below), strap hinges, a brass latch, a bold cream stencil (the grime overlay leaves them clean)
     for (const [za, zb, label] of A.hatches[side]) {
       const xa = Math.min(X(za), X(zb)), xb = Math.max(X(za), X(zb)), hy0 = Y(-0.06), hy1 = Y(-0.5);
-      g.save(); rrect(g, xa + 6, hy0 + 6, xb - xa, hy1 - hy0, 6); g.fillStyle = rgba(INK, 0.4); g.fill(); g.restore();
+      g.save(); g.filter = 'blur(3px)'; rrect(g, xa + 4, hy0 + 7, xb - xa, hy1 - hy0, 6); g.fillStyle = rgba('#1a1218', 0.6); g.fill(); g.restore();
       g.save(); rrect(g, xa, hy0, xb - xa, hy1 - hy0, 6); g.clip();
-      rect(g, xa, hy0, xb - xa, hy1 - hy0, grad(g, xa, hy0, xb, hy1, [[0, '#7a7482'], [0.5, '#5c5664'], [1, '#423c48']]));
-      rect(g, xa, hy0, xb - xa, 2, '#b8b2c0', 0.7); rect(g, xa, hy0, 2, hy1 - hy0, '#b8b2c0', 0.5);
-      rect(g, xa, hy1 - 4, xb - xa, 4, INK, 0.5); rect(g, xb - 4, hy0, 4, hy1 - hy0, INK, 0.4);
-      stencil(g, label, (xa + xb) / 2, (hy0 + hy1) / 2 + 3, 25, rnd);
+      rect(g, xa, hy0, xb - xa, hy1 - hy0, grad(g, xa, hy0, xa + (xb - xa) * 0.5, hy1, [[0, '#585058'], [0.45, '#4a4248'], [1, '#342e36']]));
+      mottleIn(g, rnd, xa, hy0, xb - xa, hy1 - hy0, { colors: ['#544c54', '#3a343c', '#5a4840'], count: 10, rmin: 6, rmax: 18, alpha: 0.3, stretch: 1.8 });
+      rect(g, xa, hy0, xb - xa, 3, '#8a8088', 0.95); rect(g, xa, hy0, 2, hy1 - hy0, '#8a8088', 0.6);
+      rect(g, xa, hy1 - 4, xb - xa, 4, '#1e1820', 0.6); rect(g, xb - 3, hy0, 3, hy1 - hy0, '#1e1820', 0.45);
+      stencil(g, label, (xa + xb) / 2, (hy0 + hy1) / 2 + 2, 33, rnd, '#e6d6a8', 0.92, 140, 2);
+      for (let i = 0; i < 3; i++) { const x = range(rnd, xa + 8, xb - 8); line(g, [[x, hy0 + 4], [x + (rnd() - 0.5) * 2, hy0 + range(rnd, 10, 22)]], range(rnd, 1.4, 2.4), RUST, 0.35); }
       g.restore();
       for (const u of [0.2, 0.8]) {
         const hx = xa + (xb - xa) * u;
@@ -518,6 +565,55 @@ function paintSide(g, rnd, side, oy) {
   g.restore();
 }
 
+// A goblin advert on a riveted tin plate: faded red field, cream border, a flame-in-a-cog, the
+// slogan; a bent corner, scratches and rust.
+function advertPlate(g, rnd, X, Y) {
+  const a = RV_ART.advert, xa = Math.min(X(a.z0), X(a.z1)), xb = Math.max(X(a.z0), X(a.z1)), ya = Y(a.y1), yb = Y(a.y0), w = xb - xa, h = yb - ya;
+  g.save(); g.filter = 'blur(2px)'; rrect(g, xa + 4, ya + 5, w, h, 4); g.fillStyle = rgba('#3a2a34', 0.45); g.fill(); g.restore();
+  g.save(); rrect(g, xa, ya, w, h, 4); g.clip();
+  rect(g, xa, ya, w, h, grad(g, xa, ya, xa + w * 0.6, yb, [[0, '#a8483a'], [0.5, '#8e3a2e'], [1, '#6a2a24']]));
+  mottleIn(g, rnd, xa, ya, w, h, { colors: ['#b85a44', '#7a3028', '#c49a7a'], count: 14, rmin: 8, rmax: 26, alpha: 0.3, stretch: 1.6 });
+  g.save(); rrect(g, xa + 4, ya + 4, w - 8, h - 8, 3); g.lineWidth = 3; g.strokeStyle = '#e2cfa0'; g.stroke(); g.restore();
+  // the flame in a cog (lower left), the slogan over and beside it
+  const cx = xa + w * 0.24, cy = ya + h * 0.66, cr = h * 0.2;
+  cog(g, cx, cy, cr, '');
+  g.save(); g.beginPath(); g.moveTo(cx, cy - cr * 0.62); g.quadraticCurveTo(cx + cr * 0.48, cy, cx, cy + cr * 0.45); g.quadraticCurveTo(cx - cr * 0.48, cy, cx, cy - cr * 0.62); g.fillStyle = '#f0a040'; g.fill(); g.restore();
+  blob(g, cx, cy + cr * 0.12, cr * 0.16, cr * 0.24, 0, '#fff0b0', 0.9, 0.4);
+  g.save(); g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+  for (const [txt, tx, yy, fs, mw] of [['GOBLIN', xa + w / 2, ya + h * 0.36, h * 0.25, w - 18], ['GAS', xa + w * 0.64, ya + h * 0.84, h * 0.36, w * 0.56]]) {
+    g.font = `900 ${fs.toFixed(1)}px ${LETTER_FONT}`;
+    g.fillStyle = '#3a1810'; g.fillText(txt, tx + 1.2, yy + 1.4, mw);
+    g.fillStyle = '#ecdcb0'; g.fillText(txt, tx, yy, mw);
+  }
+  g.restore();
+  // weathering: scratches, rust from the rivets, a faded top-left
+  for (let i = 0; i < 10; i++) { const x = xa + rnd() * w, y = ya + rnd() * h, L = range(rnd, 6, 22), t = rnd() * TAU; line(g, [[x, y], [x + Math.cos(t) * L, y + Math.sin(t) * L * 0.3]], 0.9, '#e8c8a0', 0.35); }
+  rect(g, xa, ya, w, h, grad(g, xa, ya, xa + w, yb, [[0, '#fff0d0', 0.22], [0.5, '#fff0d0', 0], [1, '#2c2030', 0.25]]));
+  g.restore();
+  // the bent corner (lower right) shows the bare backing
+  g.save(); g.beginPath(); g.moveTo(xb, yb - 14); g.lineTo(xb, yb); g.lineTo(xb - 16, yb); g.closePath(); g.fillStyle = '#d8c49a'; g.fill(); g.restore();
+  g.save(); g.beginPath(); g.moveTo(xb, yb - 14); g.lineTo(xb - 16, yb); g.lineTo(xb - 11, yb - 9); g.closePath(); g.fillStyle = '#7a7480'; g.fill(); g.restore();
+  for (const [u, v] of [[6, 6], [w - 6, 6], [6, h - 6], [w / 2, 6], [w / 2, h - 6]]) {
+    rivet(g, xa + u, ya + v, 2.8, '#9a9098', 0.45);
+    if (rnd() < 0.6) line(g, [[xa + u, ya + v + 3], [xa + u + (rnd() - 0.5) * 2, ya + v + range(rnd, 10, 30)]], 1.8, RUST, 0.35);
+  }
+}
+
+// Chalk tally marks by the door (days on the road), a little smudged
+function chalkTally(g, rnd, X, Y) {
+  const t = RV_ART.tally, xa = Math.min(X(t.z0), X(t.z1)), xb = Math.max(X(t.z0), X(t.z1)), ya = Y(t.y1), yb = Y(t.y0);
+  const groups = [5, 5, 3], gw = (xb - xa) / 3.1, hh = (yb - ya) * 0.5;
+  for (let r = 0; r < 2; r++) for (let gi = 0; gi < groups.length; gi++) {
+    const n = r ? (gi === 0 ? 4 : 0) : groups[gi], x0 = xa + gi * gw * 1.05, y0 = ya + r * hh * 1.1;
+    for (let k = 0; k < Math.min(4, n); k++) {
+      const x = x0 + 3 + k * gw * 0.2 + (rnd() - 0.5) * 1.2;
+      line(g, [[x, y0 + 2], [x + (rnd() - 0.5) * 2, y0 + hh * 0.5], [x + (rnd() - 0.5) * 2.5, y0 + hh - 1]], range(rnd, 2.2, 2.8), '#f4f0e4', range(rnd, 0.8, 0.95));
+    }
+    if (n >= 5) line(g, [[x0, y0 + hh - 3], [x0 + gw * 0.82, y0 + 3]], 2.4, '#f4f0e4', 0.9);
+  }
+  blob(g, (xa + xb) / 2, (ya + yb) / 2, (xb - xa) * 0.6, (yb - ya) * 0.5, 0, '#f2eee2', 0.08, 0.1);
+}
+
 // Front (x: -1.25..1.25 seen from the front, +X on the right) or rear (+X on the left).
 function paintEnd(g, rnd, ox, rear) {
   const A = RV_ART, S = BODY.endW, oy = BODY.endY;
@@ -541,8 +637,9 @@ function paintEnd(g, rnd, ox, rear) {
     g.save(); rrect(g, X(rw.x) - gw + 5, Y(rw.y1) - gw + 5, X(-rw.x) - X(rw.x) + gw * 2, Y(rw.y0) - Y(rw.y1) + gw * 2, 8); g.fillStyle = rgba('#4a3a4a', 0.38); g.fill(); g.restore();
     for (let i = 0; i < 6; i++) { const x = range(rnd, X(rw.x), X(-rw.x)), y = Y(rw.y0) + 8; line(g, [[x, y], [x + (rnd() - 0.5) * 2, y + range(rnd, 10, 40)]], 2, RUST, 0.3); }
   }
-  livery(g, rnd, ox, ox + S, Y, { chips: 1.4, woodNails: false, woodBand: rear });
-  if (rear) handLetter(g, 'SLOPMASTER 9000', ox + S / 2, (Y(A.wood[1]) + Y(A.wood[0])) / 2 + 1, S * 0.9, (Y(A.wood[0]) - Y(A.wood[1])) * 0.55, rnd, { chips: 1 });
+  // (no name on the back: the ladder, the spare and the corner posts would cut it up; the maker's
+  // brass crest is bolted on under the spare instead, in rv3d.js)
+  livery(g, rnd, ox, ox + S, Y, { chips: 1.6, woodNails: false, woodBand: rear, hot: [ox + 8, ox + S - 8, ox + S / 2] });
   {
     const ya = Y(A.brassLow[0]), yb = Y(A.y0);
     rect(g, ox, ya, S, yb - ya, grad(g, 0, ya, 0, yb, [[0, '#6a6470'], [0.3, SKIRT], [1, '#38323c']]));
@@ -574,73 +671,108 @@ function leaf(g, x, y, s, rot, c) {
   g.restore();
 }
 
-// Roof: weathered tin plates, darker than the walls: tar-sealed laps, rust blooms, leaves, a
-// canvas patch. z runs along u, x along v (see ROOF_MAP).
-function paintRoof(g, rnd) {
-  const ox = BODY.roof, oy = BODY.endY, W = 512, H = 256, M = ROOF_MAP;
-  const X = z => ox + (z - M.z0) / (M.z1 - M.z0) * W;
-  const Yr = x => oy + (M.x1 - x) / (M.x1 - M.x0) * H;
-  g.save(); g.beginPath(); g.rect(ox, oy, W, H); g.clip();
-  rect(g, ox, oy, W, H, '#8e836e');
-  mottleIn(g, rnd, ox, oy, W, H, { colors: ['#9a8e78', '#7e7462', '#a29680', '#76705e'], count: 80, rmin: 12, rmax: 60, alpha: 0.4 });
-  let z = M.z0;
-  while (z < M.z1) {
-    const L = range(rnd, 0.75, 1.15), x0 = X(z), x1 = X(Math.min(M.z1, z + L));
-    rect(g, x0, oy, x1 - x0, H, grad(g, x0, oy, x1, oy + H, [[0, '#f4e4c0', 0.22], [0.5, '#000000', 0], [1, '#2c2340', 0.25]]));
-    // the tar-sealed lap
-    g.save(); g.beginPath();
-    for (let y = oy; y <= oy + H; y += 8) g.lineTo(x1 - 3 + (rnd() - 0.5) * 2.4, y);
-    for (let y = oy + H; y >= oy; y -= 8) g.lineTo(x1 + 3 + (rnd() - 0.5) * 2.4, y);
-    g.closePath(); g.fillStyle = rgba('#3a302a', 0.85); g.fill(); g.restore();
-    line(g, [[x1 + 4.5, oy], [x1 + 4.5, oy + H]], 1.4, '#d4c8ac', 0.5);
-    for (let y = oy + 8; y < oy + H - 4; y += range(rnd, 14, 18)) {
-      rivet(g, x1 - 7, y, 2.6, '#a89c86', 0.45);
-      if (rnd() < 0.25) blob(g, x1 - 5, y + 7, 4, 11, 0, RUST, 0.35, 0.3);
-    }
-    z += L;
-  }
-  // rust blooms
-  for (let i = 0; i < 16; i++) {
-    const x = ox + rnd() * W, y = oy + rnd() * H, r = range(rnd, 4, 14);
-    blob(g, x, y, r * 1.4, r, rnd() * 3, '#8a4e26', 0.4, 0.3);
-    blob(g, x - r * 0.2, y - r * 0.2, r * 0.6, r * 0.4, 0, '#b0682e', 0.4, 0.4);
-  }
-  // tar patches
-  for (let i = 0; i < 4; i++) {
-    const x = ox + range(rnd, 30, W - 30), y = oy + range(rnd, 50, H - 50), r = range(rnd, 8, 18);
-    g.save(); g.beginPath();
-    for (let k = 0; k < 10; k++) { const a = k / 10 * TAU, rr = r * range(rnd, 0.7, 1.2); g.lineTo(x + Math.cos(a) * rr * 1.4, y + Math.sin(a) * rr); }
-    g.closePath(); g.fillStyle = rgba('#3a302a', 0.8); g.fill(); g.restore();
-    blob(g, x - r * 0.3, y - r * 0.3, r * 0.6, r * 0.3, -0.4, '#8a8484', 0.35, 0.3);
-  }
-  // a nailed canvas patch
-  {
-    const x = X(-1.6), y = Yr(0.35);
-    g.save(); g.translate(x, y); g.rotate(0.08);
-    rect(g, -28, -20, 56, 40, grad(g, 0, -20, 0, 20, [[0, '#c8b48a'], [1, '#98845e']]));
-    rect(g, -28, 18, 56, 3, INK, 0.4);
-    for (let i = -24; i < 28; i += 7) { nail(g, i, -16, 1.4); nail(g, i, 16, 1.4); }
-    g.restore();
-  }
-  // leaves and twigs, gathered along the edges and in the laps
-  for (let i = 0; i < 60; i++) {
-    const x = ox + rnd() * W, edge = rnd() < 0.6, y = edge ? (rnd() < 0.5 ? oy + range(rnd, 30, 70) : oy + H - range(rnd, 30, 70)) : oy + rnd() * H;
-    leaf(g, x, y, range(rnd, 2.5, 5.5), rnd() * TAU, pick(rnd, ['#8a6a2a', '#6a7a3a', '#a2702a', '#9a4a24', '#7a8a3a', '#b88a3a']));
-  }
-  for (let i = 0; i < 8; i++) { const x = ox + rnd() * W, y = oy + rnd() * H, L = range(rnd, 6, 16), a = rnd() * TAU; line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], 1.2, '#4a3624', 0.8); }
-  g.restore();
-}
-
 register('rv_body', {
-  family: F, w: BODY.W, h: BODY.H, note: 'body atlas: right side, left side, front, rear, roof',
+  family: F, w: BODY.W, h: BODY.H, note: 'body atlas: right side, left side, front, rear',
   paint(g, s, rnd) {
     fill(g, BODY.W, BODY.H, CREAM);
     paintSide(g, rnd, 'R', BODY.R);
     paintSide(g, rnd, 'L', BODY.L);
     paintEnd(g, rnd, BODY.front, false);
     paintEnd(g, rnd, BODY.rear, true);
-    paintRoof(g, rnd);
     glaze(g, BODY.W, BODY.H, '#ffe2b0', 0.08, 'soft-light');
+  },
+});
+
+// A crisp three-tone fallen leaf: a soft cast shadow, the dark shaded half, the mid-tone lit half,
+// a lit edge along the upper curve and a dark vein.
+function leaf3(g, x, y, s, rot, c) {
+  g.save(); g.translate(x, y); g.rotate(rot);
+  const shape = (dx, dy) => { g.beginPath(); g.moveTo(-s + dx, dy); g.quadraticCurveTo(-s * 0.2 + dx, -s * 0.62 + dy, s + dx, dy); g.quadraticCurveTo(-s * 0.2 + dx, s * 0.62 + dy, -s + dx, dy); };
+  g.globalAlpha = 0.3; g.fillStyle = '#2a2026'; shape(s * 0.16, s * 0.2); g.fill();
+  g.globalAlpha = 1; g.fillStyle = shadowOf(c, 0.38); shape(0, 0); g.fill();
+  g.save(); g.beginPath(); g.rect(-s * 1.2, -s, s * 2.4, s); g.clip(); g.fillStyle = c; shape(0, 0); g.fill(); g.restore();
+  g.strokeStyle = lightOf(c, 0.6); g.lineWidth = Math.max(0.8, s * 0.14); g.lineCap = 'round';
+  g.beginPath(); g.moveTo(-s * 0.85, -s * 0.06); g.quadraticCurveTo(-s * 0.2, -s * 0.56, s * 0.9, -s * 0.02); g.stroke();
+  g.strokeStyle = shadowOf(c, 0.55); g.lineWidth = Math.max(0.6, s * 0.09);
+  g.beginPath(); g.moveTo(-s * 1.2, s * 0.02); g.lineTo(s * 0.92, 0); g.stroke();
+  g.restore();
+}
+
+// Roof tin: its own tiling texture (≈1.5 m a tile, so the roof people walk on is crisp up close).
+// u runs along the RV, v across. Weathered plates oil-canned in the light, a tar-sealed lap across
+// the roof twice a tile with a lit lip and a soft shadow, rivets at uneven spacing (some missing),
+// small rust blooms, airflow streaks along the length, a few crisp leaves and twigs.
+register('rv_tin', {
+  family: F, size: 512, note: 'roof tin (tiles, ~1.5 m): weathered plates, laps, rivets, rust, leaves',
+  paint(g, s, rnd) {
+    fill(g, s, s, '#857a66');
+    mottle(g, s, rnd, { colors: ['#948872', '#766c5a', '#a09680', '#7a705e', '#6e6a62'], count: 46, rmin: 40, rmax: 120, alpha: 0.36 });
+    mottle(g, s, rnd, { colors: ['#a49a82', '#6e6454', '#867a64'], count: 70, rmin: 10, rmax: 30, alpha: 0.24, stretch: 2.6, rot: 0 });
+    // two sheets a tile: each oil-canned (lit at its upper-left, shaded toward its far lap)
+    const laps = [range(rnd, 6, 30), range(rnd, 250, 290)];
+    for (let i = 0; i < 2; i++) {
+      const a = laps[i], b = i ? laps[0] + s : laps[1], w = b - a;
+      for (const off of [0, -s]) {
+        rect(g, a + off, 0, w, s, grad(g, a + off, 0, b + off, 0, [[0, '#fff4d8', 0.3], [0.22, '#fff4d8', 0], [0.68, '#2c2340', 0], [1, '#2c2340', 0.24]]));
+        for (let k = 0; k < 4; k++) blob(g, a + off + w * (0.15 + k * 0.23), s * (0.15 + 0.23 * k), w * 0.2, s * 0.16, 0.3, k % 2 ? '#fff0d0' : '#5a4e50', 0.16, 0.15);
+      }
+    }
+    // airflow streaks and rust blooms
+    for (let i = 0; i < 26; i++) {
+      const x = rnd() * s, y = rnd() * s, L = range(rnd, 40, 160), w = range(rnd, 2, 6), c = pick(rnd, ['#6e6250', '#b8ae96', '#7a5a3a']), a = range(rnd, 0.12, 0.22);
+      wrap(s, x, y, L, (xx, yy) => line(g, [[xx, yy], [xx + L, yy + (y % 7 - 3.5) * 0.6]], w, c, a));
+    }
+    for (let i = 0; i < 9; i++) {
+      const x = rnd() * s, y = rnd() * s, r = range(rnd, 4, 11), rot = rnd() * 3;
+      wrap(s, x, y, r * 2, (xx, yy) => { blob(g, xx, yy, r * 1.6, r, rot, '#8a4e26', 0.4, 0.35); blob(g, xx - r * 0.25, yy - r * 0.25, r * 0.7, r * 0.45, rot, '#b4703a', 0.4, 0.4); ellipse(g, xx + r * 0.3, yy + r * 0.2, r * 0.25, r * 0.2, 0, '#4a2a1a', 0.5); });
+    }
+    // tar dabs over old leaks
+    for (let i = 0; i < 3; i++) {
+      const x = rnd() * s, y = rnd() * s, r = range(rnd, 7, 14), pts = Array.from({ length: 12 }, (_, k) => { const t = k / 12 * TAU, q = r * range(rnd, 0.55, 1.25); return [Math.cos(t) * q * 1.9, Math.sin(t) * q * 0.8]; });
+      wrap(s, x, y, r * 2, (xx, yy) => {
+        g.save(); g.beginPath(); pts.forEach(([px, py], k) => k ? g.lineTo(xx + px, yy + py) : g.moveTo(xx + px, yy + py)); g.closePath(); g.fillStyle = rgba('#3a302a', 0.55); g.fill(); g.restore();
+        blob(g, xx - r * 0.35, yy - r * 0.3, r * 0.6, r * 0.22, -0.4, '#a8a29a', 0.3, 0.3);
+      });
+    }
+    // the laps: a soft shadow down-sheet, the dark tar seal, a warm lit lip; rivets along them
+    for (const x0 of laps) {
+      const jag = Array.from({ length: Math.ceil(s / 8) + 1 }, () => (rnd() - 0.5) * 1.6);
+      for (const off of [0, s, -s]) {
+        const x = x0 + off;
+        rect(g, x + 2, 0, 4, s, grad(g, x + 2, 0, x + 6, 0, [[0, '#2c2340', 0.3], [1, '#2c2340', 0]]));
+        g.save(); g.beginPath();
+        jag.forEach((d, k) => g.lineTo(x - 2 + d, k * 8));
+        for (let k = jag.length - 1; k >= 0; k--) g.lineTo(x + 1.5 + jag[k] * 0.5, k * 8);
+        g.closePath(); g.fillStyle = rgba('#3e342e', 0.8); g.fill(); g.restore();
+        line(g, [[x - 3, 0], [x - 3, s]], 1, '#e8d8b0', 0.55);
+      }
+      let y = range(rnd, 0, 10);
+      const ys = [];
+      while (y < s - 6) { ys.push(y); y += 22 * range(rnd, 0.75, 1.25); }
+      for (const ry of ys) {
+        if (rnd() < 0.12) continue;
+        const dx = (rnd() - 0.5) * 1.4, rust = rnd() < 0.2, rl = range(rnd, 6, 14);
+        wrap(s, x0 - 9 + dx, ry, 6, (xx, yy) => {
+          blob(g, xx + 1.2, yy + 1.5, 3.6, 3.2, 0, '#3e3438', 0.55, 0.35);
+          ellipse(g, xx, yy, 2.9, 2.9, 0, '#8a7e6a');
+          ellipse(g, xx - 0.4, yy - 0.4, 2.3, 2.3, 0, '#a09480');
+          blob(g, xx - 1.0, yy - 1.1, 1.3, 1.1, 0, '#c0b090', 0.95, 0.5);
+          if (rust) line(g, [[xx + 1, yy + 2], [xx + rl, yy + 3]], 1.6, RUST, 0.4);
+        });
+      }
+    }
+    // a standing seam along the length where the sheets meet across the roof
+    for (const y of [0, s]) { line(g, [[0, y - 2], [s, y - 2]], 1.2, '#2c2340', 0.25); line(g, [[0, y + 1], [s, y + 1]], 1, '#e8d8b0', 0.3); }
+    // a few crisp leaves and twigs
+    for (let i = 0; i < 7; i++) {
+      const x = rnd() * s, y = rnd() * s, sz = range(rnd, 4.5, 8), a = rnd() * TAU, c = pick(rnd, ['#a2702a', '#8a6a2a', '#9a4a24', '#6e7e36', '#b88a3a']);
+      wrap(s, x, y, sz * 1.6, (xx, yy) => leaf3(g, xx, yy, sz, a, c));
+    }
+    for (let i = 0; i < 4; i++) {
+      const x = rnd() * s, y = rnd() * s, L = range(rnd, 10, 22), a = rnd() * TAU;
+      wrap(s, x, y, L, (xx, yy) => { line(g, [[xx + 1, yy + 1.2], [xx + Math.cos(a) * L + 1, yy + Math.sin(a) * L + 1.2]], 1.6, '#2a2026', 0.3); line(g, [[xx, yy], [xx + Math.cos(a) * L, yy + Math.sin(a) * L]], 1.3, '#5a4028', 0.9); });
+    }
+    glaze(g, s, s, '#ffe2b0', 0.07, 'soft-light');
   },
 });
 
@@ -672,11 +804,11 @@ function bandLines(b, W, H, rnd, n, { len = [8, 30], ys = [0, 1], w = 1, colors,
     wrapX(W, x, L, xx => line(b, [[xx, y], [xx + L, y + d]], ww, c, alpha));
   }
 }
-function woodBand(b, W, H, rnd, colors) {
+function woodBand(b, W, H, rnd, colors, [l0, l1] = [120, 230]) {
   rect(b, 0, 0, W, H, '#2a2026');
   const ws = [];
   let tot = 0;
-  while (tot < W - 60) { const L = range(rnd, 120, 230); ws.push(L); tot += L; }
+  while (tot < W - l0 / 2) { const L = range(rnd, l0, l1); ws.push(L); tot += L; }
   const k = W / tot;
   let x = rnd() * W;
   for (const L0 of ws) {
@@ -693,8 +825,9 @@ register('rv_trim', {
   paint(g, s, rnd) {
     const W = TRIM.W;
     fill(g, W, TRIM.H, '#5a4a40');
-    band(g, TRIM.wood, (b, W, H, r) => woodBand(b, W, H, r, ['#5a3a22', '#4e331e', '#603e27', '#46301c']), rnd);
-    band(g, TRIM.oak, (b, W, H, r) => woodBand(b, W, H, r, ['#946236', '#885a32', '#9c683a', '#8c5c36']), rnd);
+    band(g, TRIM.wood, (b, W, H, r) => woodBand(b, W, H, r, ['#5a3a22', '#4e331e', '#603e27', '#46301c'], [230, 420]), rnd);
+    // mid oak (one family with the walnut): no raw pine anywhere
+    band(g, TRIM.oak, (b, W, H, r) => { woodBand(b, W, H, r, ['#845a34', '#7a5230', '#8a5e36', '#7e5632']); glaze(b, W, H, '#5a3a22', 0.12, 'multiply'); }, rnd);
     // brass: dark old brass with a thin lit streak, verdigris and tarnish
     band(g, TRIM.brass, (b, W, H, r) => {
       rect(b, 0, 0, W, H, grad(b, 0, 0, 0, H, [[0, '#6e5024'], [0.1, '#c8a45c'], [0.2, '#a8803a'], [0.5, '#9c7632'], [0.82, '#6a4c22'], [1, '#553a1a']]));
@@ -760,16 +893,26 @@ register('rv_trim', {
       bandMottle(b, W, H, r, ['#8a5a3a', '#6a4a3a'], 12, 0.25, 16);
       bandEdges(b, W, H, '#e07a2a');
     }, rnd);
-    // gingham: big soft brick-red checks on oat, hanging folds, a darker hem line
+    // gingham: small muted brick checks on oat. u runs down the curtain, v across it; the pleats
+    // (PLEATS across v, matching the curtain geometry) bend the check lines into the folds, lit on
+    // the ridges, cool in the valleys.
     band(g, TRIM.gingham, (b, W, H, r) => {
-      rect(b, 0, 0, W, H, '#d8c8a4');
-      const cs = W / 48;   // divides the band: seamless along u
-      for (let x = 0; x < W; x += cs * 2) rect(b, x + 1, 0, cs - 2, H, '#8a3a30', 0.5);
-      for (let y = 0; y < H; y += cs * 2) rect(b, 0, y + 1, W, cs - 2, '#8a3a30', 0.45);
-      for (let i = 0; i < 40; i++) { const x = r() * W, y = r() * H, a = range(r, 0.05, 0.12); wrapX(W, x, 4, xx => line(b, [[xx, y], [xx + 4, y]], 1, '#4a2a24', a)); }
-      // folds run along u: dark cool troughs and lit ridges at fixed heights across the band
-      for (const [y, h, c, a] of [[8, 10, '#4a3040', 0.25], [26, 8, '#fff0d0', 0.22], [40, 10, '#4a3040', 0.28], [54, 6, '#fff0d0', 0.18]]) rect(b, 0, y, W, h, grad(b, 0, y, 0, y + h, [[0, c, 0], [0.5, c, a], [1, c, 0]]));
-      rect(b, 0, H - 4, W, 4, '#5a2a24', 0.45);
+      rect(b, 0, 0, W, H, '#d6c6a2');
+      const cs = W / 64, csv = H / 8, n = GINGHAM_PLEATS;
+      const phase = y => (1 - (y + 0.5) / H) * n * TAU;      // v → pleat phase (ridge at sin = 1)
+      // stripes along u (straight down the curtain, across v)
+      for (let y = 0; y < H; y++) if (Math.floor(y / csv) % 2 === 0) rect(b, 0, y, W, 1, '#8e4234', 0.42);
+      // stripes across u, bent sideways by the pleats
+      for (let y = 0; y < H; y++) {
+        const sh = Math.sin(phase(y)) * 2.2;
+        for (let x = 0; x < W; x += cs * 2) wrapX(W, x + sh, cs, xx => rect(b, xx, y, cs, 1, '#8e4234', 0.42));
+      }
+      for (let i = 0; i < 50; i++) { const x = r() * W, y = r() * H, a = range(r, 0.05, 0.12); wrapX(W, x, 4, xx => line(b, [[xx, y], [xx + 4, y]], 1, '#4a2a24', a)); }
+      // pleat light: lit ridges, cool violet valleys
+      for (let y = 0; y < H; y++) {
+        const s = Math.sin(phase(y));
+        if (s > 0) rect(b, 0, y, W, 1, '#fff0d0', 0.2 * s); else rect(b, 0, y, W, 1, '#5a4050', -0.3 * s);
+      }
     }, rnd);
     band(g, TRIM.slate, (b, W, H, r) => {
       beamShade(b, W, H, '#62666e', 0.5);
@@ -818,18 +961,19 @@ register('rv_trim', {
       bandMottle(b, W, H, r, ['#b89a64', '#6e5634', '#a8885a'], 30, 0.3, 22);
       for (let x = 0; x < W; x += 8) line(b, [[x, 32], [x + 4, 34]], 1.4, '#4a3a24', 0.5);
     }, rnd);
-    // a rolled carpet: deep red field, a navy and gold border, a woven motif
+    // a rolled carpet: a muted navy field, oat borders, a brick lozenge chain, worn and dusty
     band(g, TRIM.carpet, (b, W, H, r) => {
-      rect(b, 0, 0, W, H, '#7a2a22');
-      rect(b, 0, 0, W, 10, '#2e3a5a'); rect(b, 0, H - 10, W, 10, '#2e3a5a');
-      rect(b, 0, 10, W, 3, '#b8913a'); rect(b, 0, H - 13, W, 3, '#b8913a');
-      for (let x = 0; x < W; x += 32) {
-        b.save(); b.beginPath(); b.moveTo(x + 16, 18); b.lineTo(x + 28, 32); b.lineTo(x + 16, 46); b.lineTo(x + 4, 32); b.closePath(); b.fillStyle = '#b8913a'; b.fill();
-        b.beginPath(); b.moveTo(x + 16, 24); b.lineTo(x + 22, 32); b.lineTo(x + 16, 40); b.lineTo(x + 10, 32); b.closePath(); b.fillStyle = '#2e3a5a'; b.fill(); b.restore();
+      rect(b, 0, 0, W, H, '#38425a');
+      bandMottle(b, W, H, r, ['#2c3448', '#46506a'], 20, 0.3, 22);
+      rect(b, 0, 0, W, 9, '#b8a47e'); rect(b, 0, H - 9, W, 9, '#b8a47e');
+      rect(b, 0, 9, W, 3, '#7e3e2e'); rect(b, 0, H - 12, W, 3, '#7e3e2e');
+      for (let x = 0; x < W; x += 64) {
+        b.save(); b.beginPath(); b.moveTo(x + 32, 17); b.lineTo(x + 50, 32); b.lineTo(x + 32, 47); b.lineTo(x + 14, 32); b.closePath(); b.fillStyle = '#7e3e2e'; b.fill();
+        b.beginPath(); b.moveTo(x + 32, 24); b.lineTo(x + 41, 32); b.lineTo(x + 32, 40); b.lineTo(x + 23, 32); b.closePath(); b.fillStyle = '#b8a47e'; b.fill(); b.restore();
       }
-      for (let i = 0; i < W; i += 4) { line(b, [[i, 2], [i + 2, 8]], 1, '#5a6a8a', 0.4); line(b, [[i, H - 8], [i + 2, H - 2]], 1, '#5a6a8a', 0.4); }
-      bandMottle(b, W, H, r, ['#4a1a16', '#c8a070'], 18, 0.2, 20);
-      rect(b, 0, 0, W, H, grad(b, 0, 0, 0, H, [[0, '#fff0d0', 0.25], [0.4, '#000000', 0], [1, '#2c2340', 0.45]]));
+      for (let i = 0; i < W; i += 4) { line(b, [[i, 2], [i + 2, 7]], 1, '#8a7a5a', 0.35); line(b, [[i, H - 7], [i + 2, H - 2]], 1, '#8a7a5a', 0.35); }
+      bandMottle(b, W, H, r, ['#a89878', '#1e2232'], 18, 0.18, 20);
+      rect(b, 0, 0, W, H, grad(b, 0, 0, 0, H, [[0, '#fff0d0', 0.2], [0.4, '#000000', 0], [1, '#2c2340', 0.45]]));
     }, rnd);
     // copper sheet: riveted, lit edge, green patina where the water runs
     band(g, TRIM.copper, (b, W, H, r) => {
@@ -839,22 +983,19 @@ register('rv_trim', {
       for (let x = 12; x < W; x += 36) rivet(b, x, 12, 3, '#c07a46');
       bandEdges(b, W, H, '#9a5a32');
     }, rnd);
-    // the roof edge: the livery wrapped round the roof's shoulder and the cab-over brow. Top of the
-    // band (v=1) meets the tin roof; the bottom sits on the rolled lip: tin, cream, gold, orange, brown.
+    // the roof edge's livery strip: a narrow band painted just above the timber cornice (a few mm
+    // on the sides, the brow's 0.12 m lip at the front). Top (v=1) meets the tin: a dark edge, the
+    // gold pinstripe, the orange, the brown at the bottom. Broad sun-faded patches, no specks.
     band(g, TRIM.roofedge, (b, W, H, r) => {
       const Y = t => t * H;
-      rect(b, 0, 0, W, Y(0.2), grad(b, 0, 0, 0, Y(0.2), [[0, '#8e836e'], [1, '#d8c294']]));
-      rect(b, 0, Y(0.2), W, Y(0.3), grad(b, 0, Y(0.2), 0, Y(0.5), [[0, '#e4cf9f'], [1, '#d2bb8a']]));
-      bandMottle(b, W, H, r, ['#d6bb86', '#ecdcb4', '#a89a80'], 24, 0.3, 18);
-      rect(b, 0, Y(0.5), W, 4, INK, 0.25);
-      rect(b, 0, Y(0.5), W, Y(0.06), grad(b, 0, Y(0.5), 0, Y(0.56), [[0, '#ecca7a'], [1, '#8a5e26']]));
-      rect(b, 0, Y(0.56), W, Y(0.24), grad(b, 0, Y(0.56), 0, Y(0.8), [[0, '#e08850'], [0.4, ORANGE], [1, '#94461c']]));
-      rect(b, 0, Y(0.8), W, Y(0.2), grad(b, 0, Y(0.8), 0, H, [[0, '#7e5234'], [0.4, BROWN], [1, '#3e2416']]));
-      for (let k = 0; k < 16; k++) {
-        const x = r() * W, y = Y(r() < 0.7 ? range(r, 0.53, 0.58) : range(r, 0.6, 0.98)), rr = range(r, 0.8, 1.8), a = r() * 0.4;
-        wrapX(W, x, rr * 2, xx => { ellipse(b, xx + 0.9, y + 1, rr * 1.8, rr, a, INK, 0.25); ellipse(b, xx, y, rr * 1.8, rr, a, '#d8c49a', 0.8); });
-      }
-      bandLines(b, W, H, r, 14, { len: [10, 40], ys: [0.58, 0.95], w: 1, colors: ['#f0c49a'], alpha: 0.35 });
+      rect(b, 0, 0, W, Y(0.08), '#3e3230');
+      rect(b, 0, Y(0.08), W, Y(0.14), grad(b, 0, Y(0.08), 0, Y(0.22), [[0, '#f0d488'], [0.5, GOLD], [1, '#8a5e26']]));
+      rect(b, 0, Y(0.22), W, 2, INK, 0.35);
+      rect(b, 0, Y(0.22), W, Y(0.5), grad(b, 0, Y(0.22), 0, Y(0.72), [[0, '#e08850'], [0.4, ORANGE], [1, '#94461c']]));
+      rect(b, 0, Y(0.72), W, Y(0.28), grad(b, 0, Y(0.72), 0, H, [[0, '#7e5234'], [0.4, BROWN], [1, '#3e2416']]));
+      bandMottle(b, W, H, r, ['#d8844a', '#a85424'], 16, 0.25, 22, 3);
+      for (let k = 0; k < 3; k++) { const x = r() * W, rx = range(r, 40, 70), a = range(r, 0.12, 0.18); wrapX(W, x, rx, xx => blob(b, xx, Y(0.46), rx, rx / 4, 0, '#e8a870', a, 0.15)); }
+      for (let k = 0; k < 4; k++) { const x = r() * W, y = Y(r() < 0.5 ? range(r, 0.24, 0.3) : range(r, 0.66, 0.72)), rs = range(r, 2, 3.2), sd = 1 + Math.floor(r() * 1e9); wrapX(W, x, 14, xx => chip(b, lcg(sd), xx, y, rs)); }
     }, rnd);
     // hay: straw strands along u, gaps, a twine
     band(g, TRIM.hay, (b, W, H, r) => {
@@ -899,10 +1040,95 @@ register('rv_trim', {
       for (let x = 0; x < W; x += 8) { line(b, [[x, 8], [x + 4, 8]], 1.2, '#d8c49a', 0.6); line(b, [[x + 2, H - 8], [x + 6, H - 8]], 1.2, '#d8c49a', 0.6); }
       bandEdges(b, W, H, '#6a4228');
     }, rnd);
+    // butcher block: four glued strips along u, staggered end joints, lit strip tops, knife scores
+    band(g, TRIM.block, (b, W, H, r) => {
+      rect(b, 0, 0, W, H, '#2a1c16');
+      const tones = ['#8e6038', '#a0703e', '#7a5030', '#946640'];
+      for (let k = 0; k < 4; k++) {
+        const ls = []; let tot = 0;
+        while (tot < W - 50) { const L = range(r, 90, 190); ls.push(L); tot += L; }
+        const sc = W / tot; let x = r() * W;
+        for (const L0 of ls) {
+          const L = L0 * sc, c = jitter(tones[(k + Math.floor(r() * 2)) % 4], r, 0.05);
+          const cv = makeCanvas(Math.ceil(L) + 2, 16), pb = cv.getContext('2d');
+          plank(pb, 0, 0, L - 1, 15, c, r, { grain: 5, knots: 0.15, light: 0.55, bevel: 2, nails: 0, endShade: 0.3, splits: 0.08 });
+          wrapX(W, (x + L / 2) % W, L / 2 + 2, xx => b.drawImage(cv, xx - L / 2, k * 16));
+          x += L;
+        }
+      }
+      for (let i = 0; i < 26; i++) { const x = r() * W, y = r() * H, L = range(r, 6, 22), a = (r() - 0.5) * 0.8; wrapX(W, x, L, xx => line(b, [[xx, y], [xx + Math.cos(a) * L, y + Math.sin(a) * L]], 0.8, '#3a2418', 0.45)); }
+      bandMottle(b, W, H, r, ['#4a2e1c', '#c08a50'], 14, 0.15, 24);
+    }, rnd);
+    // the pennant: faded brick cloth, a painted goblin crest, fold shading, a frayed darker tail;
+    // then a rolled carpet's spiral end
+    band(g, TRIM.flag, (b, W, H, r) => {
+      const [c0, c1] = TRIM.flagPx.cloth, L = c1 - c0;
+      rect(b, c0, 0, L, H, grad(b, c0, 0, c1, 0, [[0, '#9a4a38'], [0.6, '#8a3e30'], [1, '#5e2a22']]));
+      mottleIn(b, r, c0, 0, L, H, { colors: ['#a85a44', '#7a3428', '#b8806a'], count: 26, rmin: 6, rmax: 22, alpha: 0.3, stretch: 2 });
+      for (let x = c0; x < c1; x++) { const s = Math.sin((x - c0) / L * 5.5 * TAU); rect(b, x, 0, 1, H, s > 0 ? '#ffe8c8' : '#3a2230', Math.abs(s) * (s > 0 ? 0.14 : 0.22)); }
+      rect(b, c0, 0, 12, H, grad(b, c0, 0, c0 + 12, 0, [[0, '#4a2018'], [1, '#6a2e22']]));
+      for (let y = 4; y < H; y += 7) line(b, [[c0 + 13, y], [c0 + 13, y + 4]], 1.2, '#d8c49a', 0.7);
+      cog(b, c0 + L * 0.34, H / 2, H * 0.32, 'G');
+      for (let i = 0; i < 40; i++) { const y = r() * H, x = c1 - range(r, 0, 26); line(b, [[x, y], [c1, y + (r() - 0.5) * 3]], range(r, 0.8, 1.6), '#3a1a16', range(r, 0.3, 0.6)); }
+      rect(b, c0, 0, L, 3, '#ffe8c8', 0.25); rect(b, c0, H - 3, L, 3, '#2a1820', 0.35);
+      const [e0, e1] = TRIM.flagPx.carpetEnd, cx = (e0 + e1) / 2, cy = H / 2;
+      rect(b, e0, 0, e1 - e0, H, '#2a2430');
+      ellipse(b, cx, cy, 30, 30, 0, '#38425a');
+      b.save(); b.beginPath();
+      for (let t = 0; t < 7 * TAU; t += 0.1) { const rr = 1.5 + t * 0.62; b.lineTo(cx + Math.cos(t) * rr, cy + Math.sin(t) * rr); }
+      b.lineWidth = 2.4; b.strokeStyle = '#b8a47e'; b.stroke(); b.restore();
+      b.save(); b.beginPath();
+      for (let t = 0.5; t < 7 * TAU; t += 0.1) { const rr = 1.5 + t * 0.62 + 1.6; b.lineTo(cx + Math.cos(t) * rr, cy + Math.sin(t) * rr); }
+      b.lineWidth = 1.2; b.strokeStyle = '#7e3e2e'; b.stroke(); b.restore();
+      blob(b, cx + 8, cy + 9, 22, 18, 0, '#1a1622', 0.4, 0.2);
+      blob(b, cx - 9, cy - 10, 12, 8, -0.6, '#fff0d0', 0.18, 0.3);
+    }, rnd);
+    // the corner posts: one continuous walnut grain the whole height (u: bottom → top), lit on one
+    // side and cool on the other, two iron bands at uneven heights
+    band(g, TRIM.post, (b, W, H, r) => {
+      rect(b, 0, 0, W, H, grad(b, 0, 0, 0, H, [[0, '#7a5232'], [0.25, '#6a4428'], [0.6, '#56361f'], [1, '#2e2028']]));
+      bandMottle(b, W, H, r, ['#6e4a2c', '#4a2e1a', '#7e5634'], 24, 0.3, 40, 3);
+      for (let i = 0; i < 16; i++) {
+        const y0 = range(r, 4, H - 4), amp = range(r, 0.6, 2.4), fr = Math.round(range(r, 1, 3)), ph = r() * TAU, c = r() < 0.65 ? '#2e1c12' : '#9a6c42', a = range(r, 0.25, 0.5), w = range(r, 0.7, 1.5);
+        const pts = []; for (let k = 0; k <= 32; k++) { const t = k / 32; pts.push([t * W, y0 + Math.sin(t * fr * TAU + ph) * amp]); }
+        line(b, pts, w, c, a);
+      }
+      for (let i = 0; i < 2; i++) { const x = range(r, 40, W - 40), y = range(r, 18, H - 18); ellipse(b, x, y, 9, 4, 0, '#2e1c12', 0.6); blob(b, x + 2, y + 1, 4, 2, 0, '#9a6c42', 0.4, 0.4); }
+      for (const [x0, w0] of [[range(r, 120, 190), range(r, 12, 16)], [range(r, 330, 430), range(r, 12, 16)]]) {
+        rect(b, x0 - 3, 0, w0 + 6, H, '#1e1418', 0.35);
+        rect(b, x0, 0, w0, H, grad(b, x0, 0, x0 + w0, 0, [[0, '#7a7888'], [0.3, '#5a5866'], [1, '#34323c']]));
+        rect(b, x0, 0, w0, H, grad(b, 0, 0, 0, H, [[0, '#fff0d0', 0.2], [0.5, '#000000', 0], [1, '#2c2340', 0.4]]));
+        for (const y of [12, 32, 52]) rivet(b, x0 + w0 / 2, y, 2.6, '#8a8896', 0.5);
+        line(b, [[x0 + w0 / 2, 56], [x0 + w0 / 2 - range(r, 10, 26), 58]], 1.8, RUST, 0.3);
+      }
+      rect(b, 0, 0, W, 3, '#c89a68', 0.4);
+    }, rnd);
     paintSlots(g, rnd);
     paintSlots2(g, rnd);
+    paintBoard(g, rnd);
   },
 });
+
+// The brow's destination board (band 28, 512×64 = the whole 1.5 × 0.19 m board): a walnut plank
+// in a darker frame, iron corner brackets, SLOPMASTER 9000 sign-painted in cream with an umber outline.
+function paintBoard(g, rnd) {
+  const y0 = TRIM.board * TRIM.band, W = TRIM.W, H = TRIM.band;
+  rect(g, 0, y0, W, H, '#24160e');
+  const cv = makeCanvas(W, H), b = cv.getContext('2d');
+  plank(b, 3, 3, W - 6, H - 6, '#5e3c24', rnd, { grain: 14, knots: 0.7, light: 0.5, bevel: 3, nails: 0, endShade: 0.25, splits: 0.4 });
+  g.drawImage(cv, 0, y0);
+  g.save(); rrect(g, 7, y0 + 7, W - 14, H - 14, 4); g.lineWidth = 1.6; g.strokeStyle = rgba('#c8a070', 0.35); g.stroke(); g.restore();
+  handLetter(g, 'SLOPMASTER 9000', W / 2, y0 + H / 2 + 1, W - 84, 29, rnd, { top: '#fbf0d4', bot: '#d4bc8c', under: '#8a6c46', outline: '#22140e', hi: '#ffffff', outlineW: 0.17, chips: 2, tilt: 0.03, bob: 0.04, wobble: 0.5, shadow: 0.55 });
+  // iron corner brackets
+  for (const [sx, sy] of [[0, 0], [1, 0], [0, 1], [1, 1]]) {
+    const x = sx ? W - 2 : 2, y = y0 + (sy ? H - 2 : 2), dx = sx ? -1 : 1, dy = sy ? -1 : 1;
+    g.save(); g.beginPath(); g.moveTo(x, y); g.lineTo(x + dx * 30, y); g.lineTo(x + dx * 30, y + dy * 8); g.lineTo(x + dx * 8, y + dy * 8); g.lineTo(x + dx * 8, y + dy * 24); g.lineTo(x, y + dy * 24); g.closePath();
+    g.fillStyle = '#4c4a56'; g.fill(); g.lineWidth = 1.2; g.strokeStyle = rgba('#1e1820', 0.7); g.stroke(); g.restore();
+    line(g, [[x + dx * 1, y + dy * 1], [x + dx * 29, y + dy * 1]], 1, '#9a98a8', 0.7);
+    rivet(g, x + dx * 4.5, y + dy * 4.5, 2.4, '#8a8896', 0.5); rivet(g, x + dx * 22, y + dy * 4.5, 2.2, '#8a8896', 0.5); rivet(g, x + dx * 4.5, y + dy * 18, 2.2, '#8a8896', 0.5);
+  }
+  rect(g, 0, y0 + H - 6, W, 6, grad(g, 0, y0 + H - 6, 0, y0 + H, [[0, INK, 0], [1, INK, 0.45]]));
+}
 
 // decal slots (band 14: 64² each; band 15: 128×64 each)
 function paintSlots(g, rnd) {
@@ -1385,19 +1611,36 @@ register('rv_lamps', {
   },
 });
 
+// Window glass (alpha), two halves: the outside face [u 0..0.5] reads as glass from the road (a sky
+// tint, one broad diagonal reflection, darker in its lower third, a warm lit top edge); the inside
+// face [u 0.5..1] stays nearly clear so the road is in view from the seats.
+export const GLASS_U = { out: [0, 0.5], in: [0.5, 1] };
 register('rv_glass', {
-  family: F, size: 256, alpha: true, note: 'see-through window glass (alpha): a soft sky tint, one broad highlight, grime',
-  paint(g, s, rnd) {
-    g.clearRect(0, 0, s, s);
-    rect(g, 0, 0, s, s, grad(g, 0, 0, 0, s, [[0, '#cfe2ea', 0.2], [0.5, '#9ac0cc', 0.1], [1, '#5a7480', 0.16]]));
-    for (let i = 0; i < 2; i++) {
-      const x = range(rnd, -20, s * 0.6), w = range(rnd, 40, 70);
-      g.save(); g.globalAlpha = range(rnd, 0.08, 0.13);
+  family: F, w: 512, h: 256, alpha: true, note: 'window glass (alpha): outside face (left), inside face (right)',
+  paint(g, W, rnd, H) {
+    g.clearRect(0, 0, W, H);
+    const s = H;
+    // outside
+    clipRect(g, 0, 0, s, s, () => {
+      rect(g, 0, 0, s, s, grad(g, 0, 0, 0, s, [[0, '#a8c4cc', 0.42], [0.45, '#6a8494', 0.42], [0.7, '#3e4c58', 0.5], [1, '#2e3a44', 0.6]]));
+      const x = range(rnd, s * 0.05, s * 0.3), w = range(rnd, 60, 80);
+      g.save(); g.globalAlpha = 0.35;
+      g.fillStyle = grad(g, x, 0, x + w, 0, [[0, '#cfe6e2', 0], [0.5, '#cfe6e2', 1], [1, '#cfe6e2', 0]]);
+      g.beginPath(); g.moveTo(x, s); g.lineTo(x + w, s); g.lineTo(x + w + s * 0.45, 0); g.lineTo(x + s * 0.45, 0); g.closePath(); g.fill(); g.restore();
+      g.save(); g.globalAlpha = 0.18; g.fillStyle = '#e8f4f0';
+      g.beginPath(); g.moveTo(x + w + 18, s); g.lineTo(x + w + 30, s); g.lineTo(x + w + 30 + s * 0.45, 0); g.lineTo(x + w + 18 + s * 0.45, 0); g.closePath(); g.fill(); g.restore();
+      rect(g, 0, 0, s, 7, grad(g, 0, 0, 0, 7, [[0, '#f0d8a8', 0.55], [1, '#f0d8a8', 0]]));
+      for (const [cx, cy] of [[0, s], [s, s]]) blob(g, cx, cy, s * 0.3, s * 0.22, 0, '#6a5a44', 0.3, 0.1);
+    });
+    // inside
+    clipRect(g, s, 0, s, s, () => {
+      rect(g, s, 0, s, s, grad(g, 0, 0, 0, s, [[0, '#cfe2ea', 0.16], [0.5, '#9ac0cc', 0.08], [1, '#5a7480', 0.12]]));
+      const x = s + range(rnd, -20, s * 0.5), w = range(rnd, 40, 70);
+      g.save(); g.globalAlpha = 0.08;
       g.fillStyle = grad(g, x, 0, x + w, 0, [[0, '#f4fbff', 0], [0.5, '#f4fbff', 1], [1, '#f4fbff', 0]]);
       g.beginPath(); g.moveTo(x, s); g.lineTo(x + w, s); g.lineTo(x + w + s * 0.35, 0); g.lineTo(x + s * 0.35, 0); g.closePath(); g.fill(); g.restore();
-    }
-    for (const [cx, cy] of [[0, 0], [s, 0], [0, s], [s, s]]) blob(g, cx, cy, s * 0.3, s * 0.3, 0, '#7a6a52', 0.25, 0.1);
-    rect(g, 0, s - 30, s, 30, grad(g, 0, s - 30, 0, s, [[0, '#7a6a52', 0], [1, '#7a6a52', 0.32]]));
+      rect(g, s, s - 24, s, 24, grad(g, 0, s - 24, 0, s, [[0, '#7a6a52', 0], [1, '#7a6a52', 0.25]]));
+    });
   },
 });
 
@@ -1409,7 +1652,22 @@ register('rv_snow', {
   paint(g, s, rnd) {
     fill(g, s, s, '#e6edf4');
     mottle(g, s, rnd, { colors: ['#f8f6ee', '#d2dcea', '#c4cee2', '#fbf8f0'], count: 50, rmin: 14, rmax: 60, alpha: 0.4, hard: 0.2 });
-    mottle(g, s, rnd, { colors: ['#b8c4dc', '#aab8d4'], count: 18, rmin: 6, rmax: 20, alpha: 0.3, hard: 0.3, stretch: 2.2 });
+    // wind-sculpted streaks along u
+    for (let i = 0; i < 26; i++) {
+      const x = rnd() * s, y = rnd() * s, L = range(rnd, 30, 90), h = range(rnd, 2, 5), c = rnd() < 0.5 ? '#ffffff' : '#c8d4e6', a = range(rnd, 0.2, 0.35);
+      wrap(s, x, y, L, (xx, yy) => blob(g, xx, yy, L, h, 0.04, c, a, 0.3));
+    }
+    // soft blue-violet scoops, each with a warm sunlit crest on its upper-left lip
+    for (let i = 0; i < 12; i++) {
+      const x = rnd() * s, y = rnd() * s, r = range(rnd, 24, 50), a0 = range(rnd, 0.3, 0.7), a1 = a0 + range(rnd, 1.4, 2.1), w = range(rnd, 3, 6), sq = range(rnd, 0.22, 0.36), tilt = (rnd() - 0.5) * 0.3;
+      wrap(s, x, y, r + 8, (xx, yy) => {
+        g.save(); g.translate(xx, yy); g.rotate(tilt); g.scale(1, sq); g.lineCap = 'round';
+        g.beginPath(); g.arc(0, 0, r, a0, a1); g.lineWidth = w; g.strokeStyle = rgba('#9aaccc', 0.2); g.filter = 'blur(1.5px)'; g.stroke();
+        g.beginPath(); g.arc(-2, -7, r, a0, a1); g.lineWidth = w * 0.6; g.strokeStyle = rgba('#f7f4ec', 0.45); g.stroke();
+        g.restore();
+      });
+    }
+    mottle(g, s, rnd, { colors: ['#b8c8dc', '#aab8d4'], count: 14, rmin: 6, rmax: 18, alpha: 0.28, hard: 0.3, stretch: 2.2 });
     for (let i = 0; i < 70; i++) { const x = rnd() * s, y = rnd() * s; wrap(s, x, y, 3, (xx, yy) => { ellipse(g, xx, yy, 1.1, 1.1, 0, '#ffffff', 0.9); }); }
     blurTile(g.canvas, 0.6);
   },
@@ -1454,5 +1712,19 @@ register('rv_grime', {
     };
     g.save(); g.beginPath(); g.rect(0, 0, W, RH); g.clip(); row(0, W / 8, [0.172, 0.828]); g.restore();
     g.save(); g.beginPath(); g.rect(0, RH, W, RH); g.clip(); row(RH, W / 2.5, []); g.restore();
+    // keep the storage hatch plates clean (a thin streak of grime left along their bottoms). One
+    // strip serves both sides (u = (z+4)/8 on the door side, (4-z)/8 on the other), so both sides'
+    // hatch spans are cleared.
+    {
+      const Y = y => (1.02 - y) * (RH / 1.62), ya = Y(-0.06), yb = Y(-0.5);
+      const spans = [...RV_ART.hatches.R.map(([a, b]) => [(a + 4) / 8, (b + 4) / 8]), ...RV_ART.hatches.L.map(([a, b]) => [(4 - b) / 8, (4 - a) / 8])];
+      g.save(); g.globalCompositeOperation = 'destination-out';
+      for (const [u0, u1] of spans) {
+        const x0 = u0 * W - 2, x1 = u1 * W + 2;
+        g.fillStyle = grad(g, 0, ya, 0, yb, [[0, '#000000', 0.95], [0.8, '#000000', 0.9], [1, '#000000', 0.3]]);
+        g.fillRect(x0, ya, x1 - x0, yb - ya);
+      }
+      g.restore();
+    }
   },
 });

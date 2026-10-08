@@ -1114,6 +1114,23 @@ export function buildStructures(W) {
 
   const winM = winMat(), glassM2 = glassMat(), faces = sctx.faces;
   let lastNight = -1;
+  // Rooms: from inside a building the outside shows only through the door (the windows are opaque
+  // glowing glass), so other clusters (roadside stops, lone signs) that can't be seen through the door
+  // gap are skipped while the camera is indoors.
+  const rooms = W.buildings.map(b => ({ x: b.x, y: b.y, z: b.z, c: Math.cos(b.ry), s: Math.sin(b.ry), hw: b.w / 2 - 0.2, hd: b.dep / 2 - 0.2, zf: b.dep / 2 + 0.15, h: b.h, dw: (b.door || 1.6) / 2, dh: b.h - 0.8 }));
+  const roomOf = p => { for (const r of rooms) { const dx = p.x - r.x, dz = p.z - r.z, lx = dx * r.c - dz * r.s, lz = dx * r.s + dz * r.c; if (Math.abs(lx) < r.hw && Math.abs(lz) < r.hd && p.y > r.y && p.y < r.y + r.h) return r; } return null; };
+  const throughDoor = (r, p, cl) => {
+    const cx = cl.center.x - r.x, cz = cl.center.z - r.z, R = cl.radius;
+    if (Math.hypot(cx, cz) < R + 1) return true;                       // the cluster this building is in
+    const px = cx * r.c - cz * r.s, pz = cx * r.s + cz * r.c, py = cl.center.y - r.y;
+    if (pz + R < r.zf) return false;                                   // wholly behind the front wall's plane
+    if (pz - R <= r.zf) return true;                                   // straddles it: keep
+    const ex = p.x - r.x, ez = p.z - r.z, qx0 = ex * r.c - ez * r.s, qz0 = ex * r.s + ez * r.c, qy0 = p.y - r.y;
+    const t = (r.zf - qz0) / (pz - qz0), qx = qx0 + t * (px - qx0), qy = qy0 + t * (py - qy0);
+    const cos = (pz - qz0) / Math.max(1e-3, Math.hypot(px - qx0, py - qy0, pz - qz0));
+    const m = R * t * 1.3 / Math.max(0.2, cos) + 0.3;
+    return Math.abs(qx) < r.dw + m && qy > -m && qy < r.dh + m;
+  };
   return {
     group, near, npcs,
     update(dt, t, camPos) {
@@ -1125,7 +1142,8 @@ export function buildStructures(W) {
       const night = sstep(0.66, 0.38, lum);
       // clusters wholly inside the fog are not drawn at all (the town from camp, stops far down the road)
       const far = scene && scene.fog && scene.fog.far ? scene.fog.far + 40 : 1e9;
-      for (const cl of clusters) cl.group.visible = camPos.distanceTo(cl.center) - cl.radius < far;
+      const room = roomOf(camPos);
+      for (const cl of clusters) cl.group.visible = camPos.distanceTo(cl.center) - cl.radius < far && (!room || throughDoor(room, camPos, cl));
       local.visible = !townCluster || townCluster.group.visible;
       if (Math.abs(night - lastNight) > 0.01) {
         lastNight = night;

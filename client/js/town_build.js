@@ -687,7 +687,7 @@ function windowAt(c, t, side) {
     for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; K.add(mat('iron_wrought'), new THREE.SphereGeometry(0.035, 5, 4), { uv: 'keep', at: matrix(t + Math.cos(a) * (r + 0.05), cy + Math.sin(a) * (r + 0.05), 0.14) }); }
     K.add(wmat, new THREE.CircleGeometry(r, 20), { uv: 'keep', at: matrix(t, cy, -0.336, Math.PI), shade: false });
     K.add(mat('brass'), new THREE.TorusGeometry(r + 0.04, 0.06, 6, 20), { uv: 'keep', at: matrix(t, cy, -0.35) });
-    if (awn && side !== 'back' && (side === 'front' || (Math.round(t * 7) + b.id) % 3 === 0)) awning(c, t, cy + r + 0.42, Math.max(2.3, ww + 1.6), 1.2, awn, true);
+    if (awn && side !== 'back' && (side === 'front' || (Math.round(t * 7) + b.id) % 3 === 0)) awning(c, t, cy + r + 0.5, Math.max(2.3, ww + 1.6), 1.2, awn, true, 0.3);
     return;
   }
   K.quad(wmat, ww, wh, t, cy, 0.012, { shade: false });
@@ -729,10 +729,10 @@ function windowAt(c, t, side) {
 
 // a slanted canvas awning in a wall frame (x along the wall, z out): on two struts from the wall, or
 // (poles) on two poles down to the ground with a rope tie at each
-function awning(c, x, y, w, depth, name = 'canvas_stripe', poles = false) {
+function awning(c, x, y, w, depth, name = 'canvas_stripe', poles = false, slope = 0.42) {
   const { K } = c;
   const am = mat(name, { side: THREE.DoubleSide });
-  const drop = depth * 0.42, L = Math.hypot(depth, drop), ang = Math.atan2(drop, depth);
+  const drop = depth * slope, L = Math.hypot(depth, drop), ang = Math.atan2(drop, depth);
   K.push(x, y, 0.02, 0, ang);
   K.quad(am, w, L, 0, 0, L / 2, { rx: -Math.PI / 2, uv: 'keep', uvScale: [w / 1.2, L / 1.2], sx: Math.ceil(w / 0.6), sy: 3, warp: v => { v.z -= 0.07 * Math.sin(Math.PI * (v.y / L + 0.5)) * (0.7 + 0.3 * Math.cos(v.x * 2.6)); } });
   K.pop();
@@ -816,6 +816,12 @@ function framing(c) {
       const segs = side === 'front' ? [[-e, -dw - 0.3], [dw + 0.3, e]] : [[-e, e]];
       for (const [a, bb] of segs) if (bb - a > 0.3) K.box(mat(S.wall), bb - a, 1.5, 0.3, (a + bb) / 2, 0.6, 0.15, { ...o, seg: [Math.ceil((bb - a) / 1.2), 4, 1],
         warp: v => { if (v.z > 0) { const t = Math.min(1, Math.max(0, (v.y + 0.75) / 1.5)); v.z = -0.15 + 0.32 * Math.pow(1 - t, 1.5) + 0.006; } } });
+    });
+    // a proud mud frieze band under the vigas, a shade darker, with a row of little dark niches
+    for (const side of ['front', 'back', 'left', 'right']) onWall(c, side, f => {
+      const e = f.len / 2 - 0.32, y = H - 0.62;
+      K.box(mat(S.wall), 2 * e, 0.26, 0.08, 0, y, 0.04, { ...o, seg: [Math.ceil(e), 1, 1], tint: '#c8a890', warp: v => { v.y += 0.02 * Math.sin(v.x * 2.1); } });
+      for (let x = -e + 0.5; x < e - 0.3; x += 0.62) K.quad(mat('iron_wrought'), 0.12, 0.12, x, y, 0.081, { tint: '#4a3020', shade: false });
     });
     for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
       const h = H * 0.58 + (R() - 0.3) * 1.2, x = sx * (ox + 0.3), z = sz * (oz + 0.3), ph = R() * 9, r0 = 0.72 + R() * 0.16, r1 = r0 / (1.35 + R() * 0.15);
@@ -1126,6 +1132,7 @@ function pitchedRoof(c) {
     gableFill(c, P, oz, 1); gableFill(c, P, -oz, -1, { emblem: true });
     c.signZ = oz + 0.1;
     c.apex = P.apex;
+    if (S.emblem && sign && P.apex - sign.top > 1.5) dwarfEmblem(c, 0, sign.top + Math.min(1.0, (P.apex - sign.top) * 0.42), oz + 0.08, 1, Math.min(0.55, (P.apex - sign.top) * 0.28));
     if (S.chimney) chimney(c, ox * 0.42 * (R() < 0.5 ? -1 : 1), -oz * 0.4, x => H + (ox - Math.abs(x)) * P.tp, P.apex);
     if (kind === 'gambrel') barnFront(c, P);
     return;
@@ -1924,7 +1931,8 @@ function extras(c) {
         }
       });
       onWall(c, 'left', () => gear(c, 0.9, H - 0.6, 0.1, 0.5, 0.15));
-      if (S.awnings) onWall(c, 'front', () => awning(c, 0, c.dh + 0.55, 2 * dw + 1.8, 1.6, S.awnings[(b.id + 1) % S.awnings.length], true));
+      // over the door: flatter, so the valance clears heads (bottom 2.25 m on the 3.2 m gas station)
+      if (S.awnings) onWall(c, 'front', () => awning(c, 0, c.dh + 0.55, 2 * dw + 1.8, 1.4, S.awnings[(b.id + 1) % S.awnings.length], true, 0.22));
     }
   }
 }
@@ -2281,22 +2289,43 @@ function relight(c) {
     return { x: p[0], y: c.winY + c.wh / 2, z: p[1] };
   });
   wins.push({ x: 0, y: 1.2, z: iz });
+  // (hot loop: the room's inverse frame inlined, squared-distance rejects, no allocations per vertex)
+  const e = inv.elements, X = ix + 0.012, Z = iz + 0.012, HT = H + 0.012, WR = 2.2, WR2 = WR * WR;
+  for (const L of lights) L.r2 = L.r * L.r;
   for (const geo of K.log) {
-    const p = geo.attributes.position, col = geo.attributes.color;
-    if (!col) continue;
-    for (let i = 0; i < p.count; i++) {
-      v.fromBufferAttribute(p, i).applyMatrix4(inv);
-      if (!(Math.abs(v.x) < ix + 0.012 && Math.abs(v.z) < iz + 0.012 && v.y > 0.06 && v.y < H + 0.012)) continue;
-      const d = [v.y - 0.1, H - v.y, ix - Math.abs(v.x), iz - Math.abs(v.z)].map(q => Math.max(0, q)).sort((a, b) => a - b);
-      let k = (1 - 0.26 * (1 - sstep(0, 0.6, d[1]))) * (1 - 0.12 * (1 - sstep(0, 0.9, d[2])));
+    const pa = geo.attributes.position, ca = geo.attributes.color;
+    if (!ca) continue;
+    const P = pa.array, C = ca.array, n = pa.count;
+    for (let i = 0, j = 0; i < n; i++, j += 3) {
+      const px = P[j], py = P[j + 1], pz = P[j + 2];
+      const x = e[0] * px + e[4] * py + e[8] * pz + e[12], z = e[2] * px + e[6] * py + e[10] * pz + e[14];
+      if (x >= X || x <= -X || z >= Z || z <= -Z) continue;
+      const y = e[1] * px + e[5] * py + e[9] * pz + e[13];
+      if (!(y > 0.06 && y < HT)) continue;
+      // the 2nd and 3rd smallest of the distances to floor, ceiling and the two nearest walls
+      let a = Math.max(0, y - 0.1), b = Math.max(0, H - y), c2 = Math.max(0, ix - Math.abs(x)), d = Math.max(0, iz - Math.abs(z)), t;
+      if (a > b) { t = a; a = b; b = t; }
+      if (c2 > d) { t = c2; c2 = d; d = t; }
+      if (a > c2) { t = a; a = c2; c2 = t; }
+      if (b > d) { t = b; b = d; d = t; }
+      if (b > c2) { t = b; b = c2; c2 = t; }
+      let k = (1 - 0.26 * (1 - sstep(0, 0.6, b))) * (1 - 0.12 * (1 - sstep(0, 0.9, c2)));
       let w = 0;
-      for (const L of lights) { const dd = Math.hypot(v.x - L.x, v.y - L.y, v.z - L.z); if (dd < L.r) w += L.k * (1 - dd / L.r) * (1 - dd / L.r); }
-      w = Math.min(1, w);
+      for (const L of lights) {
+        const dx = x - L.x, dy = y - L.y, dz = z - L.z, q = dx * dx + dy * dy + dz * dz;
+        if (q < L.r2) { const f = 1 - Math.sqrt(q) / L.r; w += L.k * f * f; }
+      }
+      if (w > 1) w = 1;
       let cw = 0;
-      for (const Wn of wins) { const dd = Math.hypot(v.x - Wn.x, v.y - Wn.y, v.z - Wn.z); if (dd < 2.2) cw += (1 - dd / 2.2) * (1 - dd / 2.2); }
-      cw = Math.min(1, cw);
+      for (const Wn of wins) {
+        const dx = x - Wn.x, dy = y - Wn.y, dz = z - Wn.z, q = dx * dx + dy * dy + dz * dz;
+        if (q < WR2) { const f = 1 - Math.sqrt(q) / WR; cw += f * f; }
+      }
+      if (cw > 1) cw = 1;
       k *= 0.86 + 0.14 * Math.min(1, w * 1.6 + cw);
-      col.setXYZ(i, col.getX(i) * k * (1 + 0.24 * w) * (1 - 0.03 * cw), col.getY(i) * k * (1 + 0.1 * w) * (1 + 0.01 * cw), col.getZ(i) * k * (1 - 0.06 * w) * (1 + 0.07 * cw));
+      C[j] *= k * (1 + 0.24 * w) * (1 - 0.03 * cw);
+      C[j + 1] *= k * (1 + 0.1 * w) * (1 + 0.01 * cw);
+      C[j + 2] *= k * (1 - 0.06 * w) * (1 + 0.07 * cw);
     }
   }
 }

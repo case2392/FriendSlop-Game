@@ -1,10 +1,13 @@
 // The Slopmaster 9000, as seen from outside and in: a 1970s motorhome rebuilt the way Blizzard's
 // 2004 artists would have built it for a goblin zone. A cream riveted body painted as one atlas
-// (rv_body), a heavy crowned roof lofted round a rounded plan with a rolled eave and a cab-over brow
-// that overhangs the windshield (the gold/orange/brown livery wraps over it), an oak rub rail, fat
-// tires under flared fenders, brass lamps, riveted iron, a goblin winch, and the clutter of a
-// caravan that lives on the road: an awning, a lantern by the door, a cask and a crate, tools,
-// cargo all along the roof. Inside: an inn room on wheels.
+// (rv_body) under a tin roof (rv_tin) lofted round a rounded plan: a heavy rolled timber cornice
+// bound with iron straps, swaybacked along the sides and kicked up at the stern, and a cab-over brow
+// like a visor that carries a walnut destination board on two iron straps. Fat walnut corner posts
+// rise through the roof as mushroom-capped finials; a belly flares out below the floor; iron rib
+// straps run down the sides; fat tires under flared fenders, big brass headlamps under iron hoods, a
+// proud brass grille, a goblin winch, and the clutter of a caravan that lives on the road: an
+// awning, lanterns, a cask and a crate, tools, a round oak shield, a goblin advert, cargo all along
+// the roof. Inside: an inn room on wheels.
 //
 // Draw calls: everything static is merged per material, per group: the main body, the roof (a
 // Repo Man part), the rear wall and the door (the other Repo Man part). The wheels and the tow strap
@@ -18,7 +21,7 @@ import { atmo } from './atmosphere.js';
 import { canvasFor, meta, rngFrom } from './paint/index.js';
 import { mergeGeometries, toCreasedNormals } from '/vendor/BufferGeometryUtils.js';
 import { RV_DIM, RV_WHEELS, SUSP_REST, RV_WINCH, RV_PARTS } from '/shared/rv.js';
-import { RV_ART as A, TRIM, SOFT, LAMPS, BODY, ROOF_MAP, LETTER_FONT } from './paint/vehicle.js';
+import { RV_ART as A, TRIM, SOFT, LAMPS, BODY, LETTER_FONT, GLASS_U, GINGHAM_PLEATS } from './paint/vehicle.js';
 
 const D = RV_DIM, PI = Math.PI, TAU = PI * 2;
 const V3 = THREE.Vector3, V2 = THREE.Vector2;
@@ -29,6 +32,7 @@ const DRUM = { x: RV_WINCH.x, y: RV_WINCH.y, z: RV_WINCH.z + 0.07 };
 const CABLE_START = new V3(RV_WINCH.x, RV_WINCH.y, RV_WINCH.z + 0.21);
 const HOOK_STOW = new V3(RV_WINCH.x, RV_WINCH.y + 0.02, RV_WINCH.z + 0.25);
 const BIOMES = ['meadow', 'fields', 'snow', 'badlands', 'desert'];
+const range = (r, a, b) => a + (b - a) * r();
 
 // per-biome road grime [tint, opacity]: Elwynn mud, Westfall golden dust, Dun Morogh slush,
 // Badlands red dust, Tanaris sand
@@ -45,7 +49,7 @@ function prep(geo) {
   g.clearGroups();
   return g;
 }
-const ICE = new THREE.Color('#a8bed8'), SNOWW = new THREE.Color('#f6f8fc');
+const ICE = new THREE.Color('#a8bed8'), SNOWW = new THREE.Color('#f6f8fc'), HOLLOW = new THREE.Color('#aabadc'), CREST = new THREE.Color('#fbf5e6');
 class Bucket {
   constructor() { this.list = []; }
   add(geo) { this.list.push(prep(geo)); return geo; }
@@ -55,7 +59,15 @@ class Bucket {
     if (snow) {
       // icy blue on the undersides and the hanging faces, white where the sky sees it
       const n = g.attributes.normal, c = new Float32Array(n.count * 3), t = new THREE.Color();
-      for (let k = 0; k < n.count; k++) { const s = Math.max(0, Math.min(1, (n.getY(k) + 0.25) / 0.95)); t.copy(ICE).lerp(SNOWW, s * s * (3 - 2 * s)); c[k * 3] = t.r; c[k * 3 + 1] = t.g; c[k * 3 + 2] = t.b; }
+      // ... and painted structure at the lumps' scale: blue-violet in the hollows, a warm sunlit
+      // cream on the crests
+      const P = g.attributes.position;
+      for (let k = 0; k < n.count; k++) {
+        const s = Math.max(0, Math.min(1, (n.getY(k) + 0.25) / 0.95)); t.copy(ICE).lerp(SNOWW, s * s * (3 - 2 * s));
+        const lp = lump(P.getX(k), P.getZ(k));
+        if (lp < -0.15) t.lerp(HOLLOW, Math.min(0.45, (-lp - 0.15) * 0.7)); else if (lp > 0.4 && n.getY(k) > 0.55) t.lerp(CREST, Math.min(0.6, (lp - 0.4) * 1.4));
+        c[k * 3] = t.r; c[k * 3 + 1] = t.g; c[k * 3 + 2] = t.b;
+      }
       g.setAttribute('color', new THREE.BufferAttribute(c, 3));
     }
     g.computeBoundingSphere();
@@ -64,7 +76,7 @@ class Bucket {
     return m;
   }
 }
-const KINDS = ['body', 'trim', 'itrim', 'panel', 'floor', 'soft', 'glass', 'lamps', 'snow', 'grime', 'ceil', 'glow', ...BIOMES.map(b => 'bio_' + b)];
+const KINDS = ['body', 'tin', 'trim', 'itrim', 'panel', 'floor', 'soft', 'glass', 'lamps', 'snow', 'grime', 'ceil', 'glow', ...BIOMES.map(b => 'bio_' + b)];
 const buckets = () => Object.fromEntries(KINDS.map(k => [k, new Bucket()]));
 
 const _o = new THREE.Object3D();
@@ -322,8 +334,6 @@ const uvSideL = (x, y, z) => [(HL - z) * BODY.sidePx / BODY.W, BV(BODY.L + (A.y1
 const endPX = BODY.endW / 2.5, endPY = BODY.endW / 3;
 const uvFront = (x, y) => [(BODY.front + (Math.max(-HW, Math.min(HW, x)) + HW) * endPX) / BODY.W, BV(BODY.endY + (A.y1 - clampY(y)) * endPY)];
 const uvRear = (x, y) => [(BODY.rear + (HW - Math.max(-HW, Math.min(HW, x))) * endPX) / BODY.W, BV(BODY.endY + (A.y1 - clampY(y)) * endPY)];
-const RM = ROOF_MAP;
-const uvRoof = (x, z) => [(BODY.roof + (Math.max(RM.z0, Math.min(RM.z1, z)) - RM.z0) / (RM.z1 - RM.z0) * 512) / BODY.W, BV(BODY.endY + (RM.x1 - Math.max(RM.x0, Math.min(RM.x1, x))) / (RM.x1 - RM.x0) * 256)];
 const uvPanelZ = (x, y, z) => [z / 3.2, y / WH];
 const uvPanelX = (x, y) => [x / 3.2, y / WH];
 const GV = (y) => (y - A.y0) / (1.02 - A.y0);      // grime v over y0..1.02
@@ -354,20 +364,37 @@ const RF = { ax: 1.45, z0: -4.2, z1: 4.55, rr: 0.45, rf: 0.75 };
 const inset = d => [RF.ax - d, RF.z0 + d, RF.z1 - d, RF.rr - d, RF.rf - d];
 const WALL_RING = [HW, -HL, HL, 0.15, 0.12];
 const mixW = (a, b, w) => a * (1 - w) + b * w;
-// the crown: flat down the middle, falling away to the eave (sides) or rounding over into the
-// forehead (front)
+const BASE_RING = ringPts(...inset(0));
+// a ring pushed `off(p)` outward from the plan's edge (point for point the same as
+// ringPts(inset(-off)) for a constant off), its height from yf
+function ringOff(off, yf) {
+  return BASE_RING.map(p => { const o = off(p), q = { x: p.x + p.nx * o, z: p.z + p.nz * o, nx: p.nx, nz: p.nz, w: p.w }; q.y = yf(q); return q; });
+}
+// the crown: flat down the middle, falling away to the eave at the sides and the rear
 const hSide = d => 2.42 - 0.17 * (1 - Math.min(d, 1.45) / 1.45) ** 3;
-// the cab-over forehead: a rounded bulge that crests above the roof line in front of the walkable
-// roof (the roof collider ends at z = 4; the crest is at z ≈ 4.25)
-const hFront = d => d < 0.3 ? 2.06 + 0.5 * Math.sqrt(Math.max(0, 1 - (1 - d / 0.3) ** 2)) : d < 0.6 ? 2.42 + 0.14 * (0.5 + 0.5 * Math.cos(PI * (d - 0.3) / 0.3)) : 2.42;
+// the cab-over brow, a visor: a near-vertical face (its bottom 0.12 m is the livery lip, the
+// destination board hangs on the rest) rounding over into a top that droops a few degrees to the
+// front and crests ~6 cm above the roof line, all in front of the roof collider (z = 4)
+const FRONT_TAB = [[0, 2.08], [0.012, 2.2], [0.03, 2.38], [0.06, 2.44], [0.1, 2.462], [0.16, 2.474], [0.25, 2.481], [0.34, 2.482], [0.45, 2.47], [0.6, 2.432], [0.8, 2.42]];
+function hFront(d) {
+  if (d <= 0) return FRONT_TAB[0][1];
+  for (let i = 1; i < FRONT_TAB.length; i++) if (d <= FRONT_TAB[i][0]) { const [d0, y0] = FRONT_TAB[i - 1], [d1, y1] = FRONT_TAB[i]; return y0 + (y1 - y0) * (d - d0) / (d1 - d0); }
+  return 2.42;
+}
 const hTop = (d, w) => mixW(hSide(d), hFront(d), w);
-// the eave line sags a little toward the middle of the long sides, like an old wagon's
-// ... and kicks up at the back
+// the eave line sags toward the middle of the long sides, like an old wagon's, and kicks up at
+// the back
 const sstep = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
-const eaveOff = z => -0.06 * Math.max(0, 1 - (z / 4.1) ** 2) + 0.08 * sstep(-2.6, -4.2, z);
-const hTopP = (d, p) => hTop(d, p.w) + eaveOff(p.z) * (1 - p.w) * Math.max(0, 1 - d / 0.6);
-const lipTop = p => hTopP(0, p), lipBot = p => mixW(2.03, 1.98, p.w) + eaveOff(p.z) * (1 - p.w), soffitY = p => mixW(2.2, 2.17, p.w);
-const TOP_D = [0, 0.04, 0.09, 0.16, 0.25, 0.35, 0.5, 0.7, 0.95, 1.2, 1.45];
+const eaveOff = z => -0.085 * Math.max(0, 1 - (z / 4.1) ** 2) + 0.13 * sstep(-2.4, -4.25, z);
+const hTopP = (d, p) => hTop(d, p.w) + eaveOff(p.z) * (1 - p.w) * Math.max(0, 1 - d / 0.22);
+const lipTop = p => hTopP(0, p), lipBot = p => mixW(2.0, 1.98, p.w) + eaveOff(p.z) * (1 - p.w), soffitY = p => mixW(2.2, 2.17, p.w);
+// the cornice: a heavy rolled timber, a half-ellipse standing proud of the plan's edge
+const rollR = p => mixW(0.085, 0.06, p.w);
+const ROLL_TH = [-90, -60, -30, 0, 30, 60, 84].map(a => a * PI / 180);
+const rollOff = (p, th) => 0.005 + rollR(p) * Math.cos(th);
+const rollY = (p, th) => (lipBot(p) + lipTop(p)) / 2 + (lipTop(p) - lipBot(p)) / 2 * Math.sin(th);
+const TOP_D = [0, 0.012, 0.03, 0.06, 0.1, 0.16, 0.25, 0.34, 0.45, 0.6, 0.8, 1.05, 1.45];
+const I_TOP = 2 + ROLL_TH.length;            // first ring of the top (d = 0)
 // the roof's top surface height over a plan point (approximate: ignores corner rounding)
 function roofY(x, z) {
   const ds = Math.min(RF.ax - Math.abs(x), z - RF.z0), df = RF.z1 - z;
@@ -382,66 +409,127 @@ function arcLengths(ring) {
   for (let j = 1; j < ring.length; j++) out.push(out[j - 1] + Math.hypot(ring[j].x - ring[j - 1].x, ring[j].z - ring[j - 1].z));
   return out;
 }
+// where along a ring an arc length falls: [segment index, fraction]
+function arcAt(arc, s) {
+  let j = 1; while (j < arc.length - 1 && arc[j] < s) j++;
+  return [j - 1, (s - arc[j - 1]) / Math.max(1e-6, arc[j] - arc[j - 1])];
+}
+const lerpP = (a, b, t) => new V3(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.z + (b.z - a.z) * t);
 
-function buildRoofShell(b) {
-  // rings, from the soffit at the wall out round the rolled lip and up over the crown
-  const levels = [
-    [WALL_RING, p => soffitY(p)],
-    [inset(0.06), p => lipBot(p) + 0.03],
-    [inset(0.015), p => lipBot(p)],
-    [inset(-0.02), p => lipBot(p) + 0.015],
-    [inset(-0.038), p => (lipBot(p) + lipTop(p)) / 2],
-    [inset(-0.025), p => lipTop(p) - 0.014],
-    ...TOP_D.map(d => [inset(d), p => hTopP(d, p)]),
-  ];
-  const rings = levels.map(([r, yf]) => ringPts(...r).map(p => ({ ...p, y: yf(p) })));
-  const cols = rings[0].length;
-  const S = gridSurface(rings.length, cols, (i, j) => [rings[i][j].x, rings[i][j].y, rings[i][j].z], (i, j, p) => i >= 6 ? new V3(0, 1, 0) : null, true);
-  const iTop = 6, iEdge = 6 + TOP_D.indexOf(0.35);
-  const arcLip = arcLengths(rings[4]), arcTop = arcLengths(rings[iTop]);
-  // soffit and rolled lip: walnut boards
-  b.trim.add(toBand(S.part(0, 1, (i, j) => [arcLip[j] * 0.6, i]), TRIM.wood));
-  b.trim.add(toBand(S.part(1, iTop, (i, j) => [arcLip[j] * 0.6, (i - 1) / (iTop - 1)]), TRIM.wood));
-  // the shoulder and the brow: the livery band
-  const band = (u, v) => [u, (1 - TRIM.roofedge * BAND - 2 / TRIM.H) * v + (1 - (TRIM.roofedge + 1) * BAND + 2 / TRIM.H) * (1 - v)];
-  b.trim.add(S.part(iTop, iEdge, (i, j) => band(arcTop[j] * 0.5, TOP_D[i - iTop] / 0.35)));
-  // the tin top
-  b.body.add(S.part(iEdge, rings.length - 1, (i, j, p) => uvRoof(p.x, p.z)));
-  return rings;
+// A thin strap laid over a surface: rows of [point, normal] pairs for its left and right edges,
+// pushed `lift` off the surface. uv runs along the strap into a trim band.
+function strapOver(rowsL, rowsR, band, lift = 0.012, density = 1.5) {
+  const n = rowsL.length;
+  const S = gridSurface(n, 2, (i, j) => { const [p, q] = (j ? rowsR : rowsL)[i]; return [p.x + q.x * lift, p.y + q.y * lift, p.z + q.z * lift]; }, (i, j) => (j ? rowsR : rowsL)[i][1], false);
+  let L = 0; const us = [0];
+  for (let i = 1; i < n; i++) { L += rowsL[i][0].distanceTo(rowsL[i - 1][0]); us.push(L); }
+  return toBand(S.part(0, n - 1, (i, j) => [us[i] * density, j]), band);
 }
 
-// Day 3: a fat lumpy blanket on the roof that rounds over the eave, sags below the lip and grows
-// icicles. Thin over the crown (people walk up there), thick at the edges.
-function buildRoofSnow(b) {
-  const sT = (d, p) => hTopP(d, p) + 0.035 + 0.13 * (1 - Math.min(1, d / 0.6)) ** 2 + lump(p.x, p.z) * (0.015 + 0.04 * (1 - Math.min(1, d / 0.8)));
-  const top0 = p => sT(0, p);
-  const dr = p => (0.05 + 0.08 * droopN(p.x, p.z)) * (1 - 0.4 * p.w);
-  const levels = [
-    [inset(-0.048), p => lipTop(p) - 0.03],
-    [inset(-0.088), p => lipBot(p) - dr(p) * 0.6],
-    [inset(-0.128), p => lipBot(p) - dr(p)],
-    [inset(-0.163), p => lipBot(p) - dr(p) * 0.35 + 0.04],
-    [inset(-0.158), p => (top0(p) + lipBot(p)) / 2 + 0.02],
-    [inset(-0.11), p => top0(p) - 0.03],
-    [inset(-0.05), p => top0(p) - 0.006],
-    ...[0, 0.06, 0.15, 0.3, 0.5, 0.75, 1.0, 1.25, 1.45].map(d => [inset(d), p => sT(d, p)]),
+function buildRoofShell(b) {
+  // rings, from the soffit at the wall, under and round the rolled cornice, then over the crown
+  const rings = [
+    ringPts(...WALL_RING).map(p => ({ ...p, y: soffitY(p) })),
+    ringOff(() => -0.07, p => lipBot(p) + 0.035),
+    ...ROLL_TH.map(th => ringOff(p => rollOff(p, th), p => rollY(p, th))),
+    ...TOP_D.map(d => ringPts(...inset(d)).map(p => ({ ...p, y: hTopP(d, p) }))),
   ];
-  const rings = levels.map(([r, yf]) => ringPts(...r).map(p => ({ ...p, y: yf(p) })));
   const cols = rings[0].length;
-  const S = gridSurface(rings.length, cols, (i, j) => [rings[i][j].x, rings[i][j].y, rings[i][j].z], (i, j, p) => i >= 7 ? new V3(0, 1, 0) : null, true);
+  const S = gridSurface(rings.length, cols, (i, j) => [rings[i][j].x, rings[i][j].y, rings[i][j].z], (i) => i >= I_TOP + 2 ? new V3(0, 1, 0) : null, true);
+  const arcRoll = arcLengths(rings[2 + 3]), arcTop = arcLengths(rings[I_TOP]), arcFace = arcLengths(rings[I_TOP + 1]);
+  // soffit boards and the rolled timber cornice: walnut
+  b.trim.add(toBand(S.part(0, 1, (i, j) => [arcRoll[j] * 0.6, i]), TRIM.wood));
+  b.trim.add(toBand(S.part(1, I_TOP, (i, j) => [arcRoll[j] * 0.6, (i - 1) / (I_TOP - 1)]), TRIM.wood));
+  // the livery lip just above the cornice (mm on the sides, the brow's 0.12 m lip at the front)
+  b.trim.add(toBand(S.part(I_TOP, I_TOP + 1, (i, j) => [arcTop[j] * 0.5, i - I_TOP]), TRIM.roofedge));
+  // the tin: the brow's face (mapped upright), then the top (mapped in plan)
+  b.tin.add(S.part(I_TOP + 1, I_TOP + 2, (i, j, p) => [arcFace[j] / 1.5, p.y / 1.5]));
+  b.tin.add(S.part(I_TOP + 2, rings.length - 1, (i, j, p) => [p.z / 1.5, p.x / 1.5]));
+
+  // iron straps round the cornice every 0.9-1.3 m (jittered), standing 1 cm proud, with fat
+  // bolt heads; none on the brow (its own two straps hold the destination board)
+  {
+    const rnd = rngFrom('rv_cornice'), ref = rings[2 + 3], arc = arcLengths(ref), total = arc[arc.length - 1];
+    const rows = [0, 1, 2, 3, 4, 5, 6, 7, 8, I_TOP];
+    const at2 = (r, j, t) => [lerpP(rings[r][j], rings[r][j + 1], t), S.N[r][j].clone().lerp(S.N[r][j + 1], t).normalize()];
+    let s = range(rnd, 0.3, 0.8);
+    while (s < total - 0.2) {
+      const [j, t] = arcAt(arc, s);
+      if (ref[j].w < 0.2) {
+        const [ja, ta] = arcAt(arc, s - 0.035), [jb, tb] = arcAt(arc, s + 0.035);
+        b.trim.add(strapOver(rows.map(r => at2(r, ja, ta)), rows.map(r => at2(r, jb, tb)), TRIM.iron, 0.012));
+        for (const r of [5, 8]) {
+          const [p, n] = at2(r, j, t);
+          b.trim.add(at(toBand(new THREE.SphereGeometry(0.02, 5, 3), TRIM.iron), p.x + n.x * 0.022, p.y + n.y * 0.022, p.z + n.z * 0.022, 0, 0, 0, [1, 1, 0.7]));
+        }
+      }
+      s += range(rnd, 0.9, 1.3);
+    }
+  }
+  // the brow: two iron straps over the visor, fat bolts, holding a walnut destination board on
+  // its face (iron corner clips; the name painted in cream)
+  {
+    const BD = [0.03, 0.045, 0.06, 0.08, 0.1, 0.13, 0.16, 0.2, 0.25, 0.34, 0.45, 0.6, 0.68];
+    const pt = (x, d) => {
+      const e = 0.004, sl = (hFront(d + e) - hFront(Math.max(0, d - e))) / (d + e - Math.max(0, d - e));
+      return [new V3(x, hFront(d), RF.z1 - d), new V3(0, 1, sl).normalize()];
+    };
+    for (const x of [-0.45, 0.45]) {
+      b.trim.add(strapOver(BD.map(d => pt(x - 0.036, d)), BD.map(d => pt(x + 0.036, d)), TRIM.iron, 0.012));
+      for (const d of [0.1, 0.42]) { const [p, n] = pt(x, d); b.trim.add(at(toBand(new THREE.SphereGeometry(0.026, 5, 3), TRIM.iron), p.x, p.y + n.y * 0.026, p.z + n.z * 0.026)); }
+      b.trim.add(at(beam(0.09, 0.045, 0.06, TRIM.iron), x, 2.395, RF.z1 - 0.005));
+    }
+    const B = BOARD;
+    b.trim.add(at(beam(B.w + 0.03, B.h + 0.02, 0.035, TRIM.wood), 0, B.y, B.z - 0.018));
+    b.trim.add(at(toBand(new THREE.PlaneGeometry(B.w, B.h), TRIM.board), 0, B.y, B.z + 0.0005));
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.013, 5, 3), TRIM.iron), sx * (B.w / 2 - 0.035), B.y + sy * (B.h / 2 - 0.03), B.z + 0.004, 0, 0, 0, [1, 1, 0.6]));
+  }
+  return rings;
+}
+// the destination board on the brow's face
+const BOARD = { w: 1.5, h: 0.19, y: 2.285, z: RF.z1 + 0.013 };
+
+// Day 3: a fat lumpy blanket on the roof that rolls over the cornice, sags below it and grows
+// icicles; thin over the crown (people walk up there), thick at the edges. On the brow it sits as a
+// shelf on the visor and the board's top edge, never over the lettering.
+function buildRoofSnow(b) {
+  const thick = (d, p) => 0.035 + 0.13 * (1 - Math.min(1, d / 0.6)) ** 2 * (1 - 0.55 * p.w);
+  const sT = (d, p) => { const de = Math.max(d, 0.07 * p.w); return hTopP(de, p) + thick(de, p) + lump(p.x, p.z) * (0.015 + 0.04 * (1 - Math.min(1, de / 0.8))); };
+  const top0 = p => sT(0, p);
+  const dr = p => (0.05 + 0.08 * droopN(p.x, p.z)) * (1 - 0.8 * p.w);
+  const yc = p => (lipTop(p) + lipBot(p)) / 2;
+  // [side: offset, y] then [front: offset, y], blended by frontness
+  const prof = [
+    [() => 0.06, p => lipTop(p) - 0.02, 0.0, () => 2.42],
+    [() => 0.125, p => yc(p) - dr(p) * 0.2, 0.02, () => 2.405],
+    [() => 0.15, p => lipBot(p) - dr(p) * 0.6, 0.035, () => 2.393],
+    [() => 0.165, p => lipBot(p) - dr(p), 0.045, () => 2.39],
+    [() => 0.2, p => lipBot(p) - dr(p) * 0.35 + 0.04, 0.06, () => 2.41],
+    [() => 0.195, p => (top0(p) + lipBot(p)) / 2 + 0.02, 0.062, p => (top0(p) + 2.41) / 2],
+    [() => 0.13, p => top0(p) - 0.03, 0.045, p => top0(p) - 0.015],
+    [() => 0.05, p => top0(p) - 0.006, 0.02, p => top0(p) - 0.004],
+  ];
+  const rings = [
+    ...prof.map(([os, ys, of, yf]) => ringOff(p => mixW(os(p), of, p.w), p => mixW(ys(p), yf(p), p.w))),
+    ...[0, 0.06, 0.15, 0.3, 0.5, 0.75, 1.0, 1.25, 1.45].map(d => ringPts(...inset(d)).map(p => ({ ...p, y: sT(d, p) }))),
+  ];
+  const cols = rings[0].length;
+  const S = gridSurface(rings.length, cols, (i, j) => [rings[i][j].x, rings[i][j].y, rings[i][j].z], (i) => i >= prof.length ? new V3(0, 1, 0) : null, true);
   b.snow.add(S.part(0, rings.length - 1, (i, j, p) => [p.z / 3, p.x / 3]));
-  // icicles hanging from the sag, irregularly spaced
-  const rnd = rngFrom('rv_icicles'), sag = rings[2];
-  const arc = arcLengths(sag);
+  // icicles from the sag: short runs and gaps, the long ones at the corners and over the door,
+  // none in front of the brow's board
+  const rnd = rngFrom('rv_icicles'), sag = rings[3], arc = arcLengths(sag);
   let s = rnd() * 0.3;
   while (s < arc[arc.length - 1]) {
-    let j = 1; while (j < arc.length - 1 && arc[j] < s) j++;
-    const t = (s - arc[j - 1]) / Math.max(1e-6, arc[j] - arc[j - 1]), p0 = sag[j - 1], p1 = sag[j];
+    const [j, t] = arcAt(arc, s), p0 = sag[j], p1 = sag[j + 1];
     const x = p0.x + (p1.x - p0.x) * t, z = p0.z + (p1.z - p0.z) * t, y = p0.y + (p1.y - p0.y) * t;
-    const L = 0.08 + 0.27 * rnd() ** 1.5, r = 0.022 + 0.026 * rnd();
-    b.snow.add(at(new THREE.ConeGeometry(r, L, 5, 1), x, y - L / 2 + 0.02, z, PI, rnd() * TAU, 0));
-    if (rnd() < 0.35) { const L2 = L * 0.5; b.snow.add(at(new THREE.ConeGeometry(r * 0.7, L2, 5, 1), x + 0.04, y - L2 / 2 + 0.01, z + 0.03, PI, 0, 0)); }
-    s += 0.1 + 0.3 * rnd();
+    const corner = Math.abs(p0.nx) > 0.25 && Math.abs(p0.nz) > 0.25, door = x < 0 && z > A.door.z0 - 0.3 && z < A.door.z1 + 0.25;
+    const L = corner || door ? 0.16 + 0.19 * rnd() : 0.05 + 0.12 * rnd() ** 1.3, r = 0.02 + 0.026 * rnd() + (corner ? 0.01 : 0), gap = rnd(), a = rnd() * TAU;
+    if (!(p0.w > 0.35 && Math.abs(x) < 0.85)) {
+      b.snow.add(at(new THREE.ConeGeometry(r, L, 5, 1), x, y - L / 2 + 0.02, z, PI, a, 0));
+      if (gap < 0.35) { const L2 = L * 0.5; b.snow.add(at(new THREE.ConeGeometry(r * 0.7, L2, 5, 1), x + 0.04, y - L2 / 2 + 0.01, z + 0.03, PI, 0, 0)); }
+    }
+    s += gap > 0.88 ? 0.35 + 0.5 * rnd() : 0.08 + 0.22 * rnd();
   }
 }
 
@@ -471,6 +559,45 @@ function fenderGeo(side, az, band = TRIM.red, prof = [[0.0, 0.11], [0.06, 0.14],
   return toBand(S.part(0, prof.length - 1, (i, j) => [(th0 + (th1 - th0) * j / n) * R * 1.0, 1 - i / (prof.length - 1)]), band);
 }
 
+// A fat corner post: a tapered partial cylinder whose one walnut grain runs the whole height
+// (TRIM.post: u along the height, offset per post so no two match), v around it.
+function postGeo(r0, r1, h, th0, thL, off) {
+  const g = new THREE.CylinderGeometry(r1, r0, h, 16, 1, true, th0, thL);
+  const uv = g.attributes.uv;
+  for (let k = 0; k < uv.count; k++) { const u = uv.getX(k), v = uv.getY(k); uv.setXY(k, v * 0.94 + off * 0.37, 0.08 + 0.84 * u); }
+  return toBand(g, TRIM.post);
+}
+// A window pane: an outside face (it reads as glass from the road) and a clearer inside face, back
+// to back. geo faces +z; ry turns it to face out.
+function glassUV(geo, [u0, u1]) {
+  const uv = geo.attributes.uv;
+  for (let k = 0; k < uv.count; k++) uv.setX(k, u0 + 0.004 + uv.getX(k) * (u1 - u0 - 0.008));
+  return geo;
+}
+function pane(b, geo, x, y, z, ry) {
+  const inner = flip(geo.clone());
+  b.glass.add(at(glassUV(geo, GLASS_U.out), x, y, z, 0, ry, 0));
+  b.glass.add(at(glassUV(inner, GLASS_U.in), x, y, z, 0, ry, 0));
+}
+
+// The belly: below the floor the skirt bulges out to ±1.32 under a rolled top edge, tucking back to
+// the wall over the last 0.6 m at each end and under the door (the steps stand there); its bottom
+// edge follows the wheel arches. Painted with the skirt (rv_body), then the road grime over it.
+function buildBelly(b) {
+  const prof = [[0.0, 0.07], [0.035, 0.077], [0.066, 0.052], [0.077, 0.012], [0.068, -0.03], [0.058, -0.08], [0.064, -0.24], [0.056, -0.42], [0.03, -0.6]];
+  const zs = []; for (let z = -HL + 0.02; z < HL - 0.02; z += 0.14) zs.push(z); zs.push(HL - 0.02);
+  const archTop = z => { let y = -9; for (const az of A.archZ) { const dz = z - az; if (Math.abs(dz) < A.archR) y = Math.max(y, WHEEL_Y + Math.sqrt(A.archR ** 2 - dz * dz)); } return y; };
+  for (const side of [-1, 1]) {
+    const f = z => { let t = sstep(HL - 0.02, HL - 0.62, Math.abs(z)); if (side < 0) t *= 1 - 0.85 * sstep(A.door.z0 - 0.35, A.door.z0 - 0.05, z) * sstep(A.door.z1 + 0.35, A.door.z1 + 0.05, z); return t; };
+    const pos = (i, j) => { const z = zs[j], [o, y] = prof[i]; return [side * (HW + 0.006 + o * f(z)), Math.max(y, archTop(z)), z]; };
+    const S = gridSurface(prof.length, zs.length, pos, () => new V3(side, 0, 0));
+    const uvS = side < 0 ? uvSideR : uvSideL;
+    b.body.add(S.part(0, prof.length - 1, (i, j, p) => uvS(p.x, p.y, p.z)));
+    const G = gridSurface(prof.length, zs.length, (i, j) => { const p = S.P[i][j], n = S.N[i][j]; return [p.x + n.x * 0.004, p.y + n.y * 0.004, p.z + n.z * 0.004]; }, () => new V3(side, 0, 0));
+    b.grime.add(G.part(0, prof.length - 1, (i, j, p) => [(side < 0 ? p.z + HL : HL - p.z) / 8, 0.5 + 0.5 * GV(p.y)]));
+  }
+}
+
 function buildShell(b) {
   // outer skins (the painted atlas) and the plaster-and-timber inner skins
   const sr = sideOutline(); sr.holes.push(...A.winR.map(holeOf), doorHole());
@@ -495,25 +622,37 @@ function buildShell(b) {
   fi.holes.push(rr(new THREE.Path(), -sw.x, sw.y0, sw.x, sw.y1, 0.12));
   b.panel.add(setUV(wallGeo(fi, 'z', HL - 0.1, -1), uvPanelX));
 
-  // the timber frame: rounded corner posts, wall plates (they cap the walls when the roof is gone)
+  // the timber frame: fat corner posts (one walnut grain the whole height, tapering 5%, an iron
+  // shoe and an iron band at the belt), wall plates (they cap the walls when the roof is gone)
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-    const r = sz < 0 ? 0.15 : 0.13, cx = sx * (HW - 0.08), cz = sz * (HL - 0.08), th = Math.atan2(sx, sz);
-    b.trim.add(at(post(r, 2.78, TRIM.wood, th - 1.75, 3.5, 10), cx, (A.y0 - 0.02 + 2.16) / 2, cz));
+    const cx = sx * (HW - 0.02), cz = sz * (HL - 0.02), th = Math.atan2(sx, sz), y0 = A.y0 - 0.02, y1 = 2.16;
+    b.trim.add(at(postGeo(0.19, 0.18, y1 - y0, th - 2.25, 4.5, 2 + sx + sz * 0.5), cx, (y0 + y1) / 2, cz));
+    b.trim.add(at(post(0.204, 0.17, TRIM.iron, th - 2.25, 4.5, 16), cx, y0 + 0.085, cz));
+    b.trim.add(at(post(0.197, 0.05, TRIM.iron, th - 2.25, 4.5, 16), cx, A.rail, cz));
   }
-  for (const sx of [-1, 1]) b.trim.add(at(beam(0.14, 0.06, 8.0, TRIM.wood), sx * 1.2, 2.27, 0));
+  for (const sx of [-1, 1]) b.trim.add(at(beam(0.1, 0.06, 8.0, TRIM.wood), sx * 1.19, 2.26, 0));
   b.trim.add(at(beam(2.5, 0.06, 0.14, TRIM.wood), 0, 2.27, 3.95));
   // the beltline rub rail: chunky oak standing 0.1 proud, a strong shadow line along the stripe
   const rail = (side, z0, z1) => b.trim.add(at(rboxB(0.1, 0.14, z1 - z0, 0.045, TRIM.oak, 2), side * (HW + 0.05), A.rail, (z0 + z1) / 2));
   rail(1, -3.96, 3.98); rail(-1, -3.96, A.door.z0 - 0.07); rail(-1, A.door.z1 + 0.07, 3.98);
-  // a lower skirt rail
-  b.trim.add(at(beam(0.05, 0.08, 7.9, TRIM.wood), HW + 0.025, 0.03, 0));
-  b.trim.add(at(beam(0.05, 0.08, A.door.z0 + 3.93 - 0.06, TRIM.wood), -HW - 0.025, 0.03, (A.door.z0 - 0.06 - 3.93) / 2));
-  b.trim.add(at(beam(0.05, 0.08, 3.93 - A.door.z1 - 0.06, TRIM.wood), -HW - 0.025, 0.03, (A.door.z1 + 0.06 + 3.93) / 2));
-  // carved brackets under the eave
+  buildBelly(b);
+  // iron rib straps down the sides at panel seams (eave to the rub rail), bolted
+  for (const [side, zs] of [[-1, A.ribs.R], [1, A.ribs.L]]) for (const z of zs) {
+    b.trim.add(at(beam(0.016, 2.2 - A.rail - 0.05, 0.065, TRIM.iron, 1.2), side * (HW + 0.008), (2.2 + A.rail + 0.05) / 2, z));
+    for (let y = A.rail + 0.16, k = 0; y < 2.12; y += 0.25 + 0.07 * Math.abs(Math.sin(z * 7 + k++ * 2.3))) b.trim.add(at(toBand(new THREE.SphereGeometry(0.018, 5, 3), TRIM.iron), side * (HW + 0.017), y, z, 0, 0, 0, [0.6, 1, 1]));
+  }
+  // the driver's side: a round oak shield with the maker's cog, hung from a leather strap
   {
-    const s = new THREE.Shape();
-    s.moveTo(0, 2.2); s.lineTo(0.16, 2.115); s.lineTo(0.16, 2.07); s.quadraticCurveTo(0.03, 2.07, 0.02, 1.95); s.lineTo(0, 1.95); s.closePath();
-    for (const [side, zs] of [[1, [2.35, 0.05, -2.0, -2.95]], [-1, [2.62, -1.0, -2.95]]]) for (const z of zs) b.trim.add(toBand(boxUV(sideProfile(s, side, z, 0.09)), TRIM.wood));
+    const S = A.buckler, x = HW + 0.03;
+    const disc = new THREE.CylinderGeometry(S.r, S.r * 0.97, 0.045, 20, 1, false);
+    setUV(disc, (px, py, pz) => [(-px / (2 * S.r) + 0.5) * 0.6, pz / (2 * S.r) + 0.5]);
+    b.trim.add(at(toBand(disc, TRIM.block), x, S.y, S.z, 0, 0, -PI / 2));
+    b.trim.add(at(ring(S.r, 0.026, TRIM.iron, 24), x + 0.005, S.y, S.z, 0, PI / 2, 0));
+    b.trim.add(at(toSlot(new THREE.CircleGeometry(0.105, 18), TRIM.s.emblem), x + 0.034, S.y, S.z, 0, PI / 2, 0));
+    b.trim.add(at(ring(0.108, 0.016, TRIM.brass, 18), x + 0.034, S.y, S.z, 0, PI / 2, 0));
+    for (let k = 0; k < 8; k++) { const a = k / 8 * TAU + 0.2; b.trim.add(at(toBand(new THREE.SphereGeometry(0.016, 5, 3), TRIM.iron), x + 0.026, S.y + Math.sin(a) * (S.r - 0.05), S.z + Math.cos(a) * (S.r - 0.05), 0, 0, 0, [0.6, 1, 1])); }
+    b.trim.add(at(beam(0.012, 0.16, 0.035, TRIM.leather), HW + 0.012, S.y + S.r + 0.02, S.z));
+    b.trim.add(at(rod(0.016, 0.05, TRIM.iron, { segs: 6 }), HW + 0.025, S.y + S.r + 0.09, S.z, 0, 0, PI / 2));
   }
 
   // windows: chunky wooden frames through the wall, sills, glass, night glow; brass portholes
@@ -524,7 +663,7 @@ function buildShell(b) {
         b.trim.add(at(flip(rod(o.r + 0.002, 0.12, TRIM.brass, { segs: 14, open: true })), side * 1.2, o.y, o.z, 0, 0, PI / 2));
         for (let k = 0; k < 6; k++) { const a = k / 6 * TAU + 0.3; b.trim.add(at(rod(0.012, 0.02, TRIM.iron, { segs: 5 }), side * (HW + 0.03), o.y + Math.sin(a) * (o.r + 0.03), o.z + Math.cos(a) * (o.r + 0.03), 0, 0, PI / 2)); }
         if (o.frost) { for (const f of [1, -1]) b.trim.add(at(toSlot(new THREE.CircleGeometry(o.r, 16), TRIM.s.frost), side * (1.2 + f * 0.01), o.y, o.z, 0, f * side * PI / 2, 0)); }
-        else { b.glass.add(at(new THREE.CircleGeometry(o.r, 16), side * 1.2, o.y, o.z, 0, PI / 2, 0)); b.glow.add(at(toLamp(new THREE.CircleGeometry(o.r, 16), LAMPS.port), side * 1.215, o.y, o.z, 0, side * PI / 2, 0)); }
+        else { pane(b, new THREE.CircleGeometry(o.r, 16), side * 1.2, o.y, o.z, side * PI / 2); b.glow.add(at(toLamp(new THREE.CircleGeometry(o.r, 16), LAMPS.port), side * 1.215, o.y, o.z, 0, side * PI / 2, 0)); }
         b.snow.add(at(snowCap(0.12, o.r * 1.4, 0.05, o.z), side * (HW + 0.05), o.y + o.r + 0.05, o.z));
         continue;
       }
@@ -534,14 +673,14 @@ function buildShell(b) {
       b.trim.add(at(rboxB(0.13, 0.06, w + 0.32, 0.02, TRIM.wood, 2), side * (HW + 0.075), o.y0 - 0.1, cz));
       for (const dz of [-1, 1]) b.trim.add(at(beam(0.08, 0.1, 0.05, TRIM.wood), side * (HW + 0.04), o.y0 - 0.17, cz + dz * (w / 2 + 0.06)));
       b.itrim.add(at(beam(0.07, 0.035, w + 0.16, TRIM.oak), side * (IN - 0.035), o.y0 - 0.08, cz));
-      b.glass.add(at(new THREE.PlaneGeometry(w, h), side * 1.2, cy, cz, 0, PI / 2, 0));
+      pane(b, new THREE.PlaneGeometry(w, h), side * 1.2, cy, cz, side * PI / 2);
       b.glow.add(at(toLamp(new THREE.PlaneGeometry(w, h), LAMPS.window), side * 1.215, cy, cz, 0, side * PI / 2, 0));
       b.snow.add(at(snowCap(0.15, w + 0.3, 0.08, cz), side * (HW + 0.08), o.y0 - 0.04, cz));
     }
   }
   // the door jamb and its brass threshold
   for (const z of [A.door.z0 - 0.04, A.door.z1 + 0.04]) b.trim.add(at(beam(0.2, 2.08, 0.08, TRIM.wood), -1.21, 1.04, z));
-  b.trim.add(at(beam(0.22, 0.1, A.door.z1 - A.door.z0 + 0.2, TRIM.wood), -1.22, 2.02, (A.door.z0 + A.door.z1) / 2));
+  b.trim.add(at(beam(0.22, 0.1, A.door.z1 - A.door.z0 + 0.2, TRIM.wood), -1.2, 2.02, (A.door.z0 + A.door.z1) / 2));
   b.trim.add(at(beam(0.2, 0.025, A.door.z1 - A.door.z0, TRIM.brass), -1.2, 0.012, (A.door.z0 + A.door.z1) / 2));
 
   // wheel arches: flared, rolled fenders and dark wells
@@ -582,15 +721,15 @@ function buildFront(b) {
   b.trim.add(toBand(boxUV(throughWall(s, 'z', HL - 0.12, 1, 0.21)), TRIM.wood));
   b.trim.add(at(beam(0.08, sw.y1 - sw.y0, 0.15, TRIM.wood), 0, (sw.y0 + sw.y1) / 2, HL - 0.02));
   for (const sx of [-1, 1]) {
-    b.glass.add(at(new THREE.PlaneGeometry(sw.x - 0.04, sw.y1 - sw.y0), sx * (sw.x + 0.04) / 2, (sw.y0 + sw.y1) / 2, HL - 0.05));
+    pane(b, new THREE.PlaneGeometry(sw.x - 0.04, sw.y1 - sw.y0), sx * (sw.x + 0.04) / 2, (sw.y0 + sw.y1) / 2, HL - 0.05, 0);
     b.glow.add(at(toLamp(new THREE.PlaneGeometry(sw.x - 0.04, sw.y1 - sw.y0), LAMPS.window), sx * (sw.x + 0.04) / 2, (sw.y0 + sw.y1) / 2, HL + 0.012));
     b.trim.add(at(beam(0.62, 0.025, 0.02, TRIM.iron), sx * 0.5, sw.y0 + 0.12, HL + 0.07, 0, 0, sx * 0.35));
     b.trim.add(at(rod(0.025, 0.04, TRIM.brass), sx * 0.22, sw.y0 + 0.02, HL + 0.07, PI / 2, 0, 0));
   }
   b.snow.add(at(snowCap(2.3, 0.14, 0.07, 3), 0, sw.y0 - 0.06, HL + 0.06));
-  // marker lamps along the brow's lip
+  // marker lamps along the cornice under the brow's board
   for (const x of [-0.9, -0.45, 0, 0.45, 0.9]) {
-    const lip = inset(-0.035), cxr = lip[0] - lip[4], czr = lip[2] - lip[4];
+    const lip = inset(-0.062), cxr = lip[0] - lip[4], czr = lip[2] - lip[4];
     let z = lip[2], nx = 0, nz = 1;
     if (Math.abs(x) > cxr) { const dx = Math.abs(x) - cxr, dz = Math.sqrt(Math.max(0, lip[4] ** 2 - dx * dx)); z = czr + dz; nx = Math.sign(x) * dx / lip[4]; nz = dz / lip[4]; }
     const pp = { w: nz * nz, x, z }, y = (lipBot(pp) + lipTop(pp)) / 2, ry = Math.atan2(nx, nz);
@@ -598,24 +737,30 @@ function buildFront(b) {
     b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.04, 12), LAMPS.amber), x + nx * 0.052, y, z + nz * 0.052, 0, ry, 0));
     b.glow.add(at(halo(0.45), x + nx * 0.07, y, z + nz * 0.07, 0, ry, 0));
   }
-  // grille: brass frame, iron bars; the maker's cog above it
-  const gs = new THREE.Shape(); rr(gs, -0.56, -0.28, 0.56, 0.62, 0.12);
-  gs.holes.push(rr(new THREE.Path(), -0.47, -0.2, 0.47, 0.54, 0.07));
-  b.trim.add(toBand(boxUV(throughWall(gs, 'z', HL - 0.01, 1, 0.08, { bevel: 0.012 })), TRIM.brass));
-  for (let i = 0; i < 9; i++) b.trim.add(at(rod(0.022, 0.76, TRIM.iron, { segs: 6 }), -0.42 + i * 0.105, 0.17, HL + 0.035));
-  b.trim.add(at(rod(0.02, 0.96, TRIM.iron, { segs: 6 }), 0, 0.17, HL + 0.05, 0, 0, PI / 2));
+  // grille: a brass shell standing 0.13 proud, iron bars set back in it; the maker's cog above
+  const gs = new THREE.Shape(); rr(gs, -0.545, -0.28, 0.545, 0.62, 0.12);
+  gs.holes.push(rr(new THREE.Path(), -0.455, -0.2, 0.455, 0.54, 0.07));
+  b.trim.add(toBand(boxUV(throughWall(gs, 'z', HL - 0.01, 1, 0.14, { bevel: 0.014 })), TRIM.brass));
+  for (let i = 0; i < 9; i++) b.trim.add(at(rod(0.024, 0.76, TRIM.iron, { segs: 6 }), -0.42 + i * 0.105, 0.17, HL + 0.07));
+  b.trim.add(at(rod(0.022, 0.92, TRIM.iron, { segs: 6 }), 0, 0.17, HL + 0.095, 0, 0, PI / 2));
+  for (const sx of [-1, 1]) for (const y of [-0.22, 0.56]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.022, 5, 3), TRIM.iron), sx * 0.5, y, HL + 0.135, 0, 0, 0, [1, 1, 0.6]));
   b.trim.add(at(toSlot(new THREE.CircleGeometry(0.1, 18), TRIM.s.emblem), 0, 0.76, HL + 0.012));
   b.trim.add(at(ring(0.104, 0.02, TRIM.brass, 18), 0, 0.76, HL + 0.012));
-  // round brass headlights and amber turn signals
+  // big round brass headlamps under deep iron hood visors; small amber turn lamps below them
   for (const sx of [-1, 1]) {
-    const x = sx * 0.86;
-    b.trim.add(at(rod(0.17, 0.12, TRIM.brass, { segs: 16 }), x, 0.28, HL + 0.05, PI / 2, 0, 0));
-    b.trim.add(at(ring(0.16, 0.024, TRIM.brass, 20), x, 0.28, HL + 0.11));
-    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.15, 20), LAMPS.head), x, 0.28, HL + 0.112));
-    b.trim.add(at(rod(0.072, 0.06, TRIM.brass, { segs: 12 }), x, -0.07, HL + 0.03, PI / 2, 0, 0));
-    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.058, 14), LAMPS.amber), x, -0.07, HL + 0.062));
-    b.glow.add(at(halo(1.1), x, 0.28, HL + 0.14));
-    b.glow.add(at(halo(0.4), x, -0.07, HL + 0.08));
+    const x = sx * 0.835, y = HEAD_Y;
+    b.trim.add(at(rod(0.215, 0.15, TRIM.brass, { segs: 20 }), x, y, HL + 0.075, PI / 2, 0, 0));
+    b.trim.add(at(ring(0.205, 0.03, TRIM.brass, 22), x, y, HL + 0.15));
+    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.2, 22), LAMPS.head), x, y, HL + 0.152));
+    const hoodL = 0.2, hz = HL + 0.02 + hoodL / 2, th0 = PI / 3, thL = PI * 4 / 3;
+    b.trim.add(at(toBand(new THREE.CylinderGeometry(0.248, 0.248, hoodL, 18, 1, true, th0, thL), TRIM.iron), x, y, hz, PI / 2 + 0.08, 0, 0));
+    b.trim.add(at(toBand(flip(new THREE.CylinderGeometry(0.236, 0.236, hoodL, 18, 1, true, th0, thL)), TRIM.soot), x, y, hz, PI / 2 + 0.08, 0, 0));
+    b.trim.add(at(ring(0.242, 0.016, TRIM.iron, 18, thL), x, y - 0.008, hz + hoodL / 2, 0, 0, -PI / 6));
+    for (const a of [0.15, PI / 2, PI - 0.15]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.017, 5, 3), TRIM.iron), x + Math.cos(a) * 0.25, y + Math.sin(a) * 0.25, hz - 0.04, 0, 0, 0, [1, 1, 0.7]));
+    b.trim.add(at(rod(0.066, 0.06, TRIM.brass, { segs: 12 }), x, -0.13, HL + 0.03, PI / 2, 0, 0));
+    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.054, 14), LAMPS.amber), x, -0.13, HL + 0.062));
+    b.glow.add(at(halo(1.2), x, y, HL + 0.17));
+    b.glow.add(at(halo(0.4), x, -0.13, HL + 0.08));
   }
   // the front bumper: an iron beam faced with a plank, rounded iron ends, brass bolts
   b.trim.add(at(beam(2.4, 0.3, 0.24, TRIM.iron), 0, -0.42, 4.06));
@@ -631,23 +776,24 @@ function buildFront(b) {
     b.bio_meadow.add(at(toBand(new THREE.SphereGeometry(1, 8, 5), TRIM.leaf), x, y, z, 0.2, 0, a, [s, s * 0.45, s * 0.25]));
   }
   b.bio_meadow.add(at(rod(0.006, 0.18, TRIM.wood, { segs: 4 }), -0.47, 1.1, 4.1, 0, 0, 1.1));
-  b.bio_meadow.add(at(toSlot2(new THREE.CircleGeometry(0.11, 10), TRIM.s2.flowers), 0.34, 0.46, HL + 0.07));
-  b.bio_meadow.add(at(toBand(lumpy(new THREE.SphereGeometry(0.1, 8, 6), 0.02, 1), TRIM.leaf), 0.34, 0.46, HL + 0.03, 0, 0, 0, [1, 1, 0.5]));
+  b.bio_meadow.add(at(toSlot2(new THREE.CircleGeometry(0.11, 10), TRIM.s2.flowers), 0.34, 0.46, HL + 0.15));
+  b.bio_meadow.add(at(toBand(lumpy(new THREE.SphereGeometry(0.1, 8, 6), 0.02, 1), TRIM.leaf), 0.34, 0.46, HL + 0.11, 0, 0, 0, [1, 1, 0.5]));
   for (const [x, z] of [[-0.7, 4.12], [0.2, 4.1], [0.85, 4.14]]) b.bio_meadow.add(at(toSlot2(lumpy(rbox(0.22, 0.06, 0.14, 0.028, 2), 0.015, x * 9), TRIM.s2.mud), x, -0.25, z));
   {
     // the skull: a bleached cow skull with long horns, wired to the grille's cog
-    b.bio_badlands.add(at(toBand(boxUV(rbox(0.2, 0.26, 0.12, 0.05, 2)), TRIM.bone), 0, 0.72, HL + 0.09));
-    b.bio_badlands.add(at(toSlot2(new THREE.PlaneGeometry(0.19, 0.25), TRIM.s2.skull), 0, 0.72, HL + 0.152));
+    b.bio_badlands.add(at(toBand(boxUV(rbox(0.2, 0.26, 0.12, 0.05, 2)), TRIM.bone), 0, 0.72, HL + 0.15));
+    b.bio_badlands.add(at(toSlot2(new THREE.PlaneGeometry(0.19, 0.25), TRIM.s2.skull), 0, 0.72, HL + 0.212));
     for (const sx of [-1, 1]) {
-      const pts = [[sx * 0.09, 0.8, HL + 0.09], [sx * 0.24, 0.84, HL + 0.1], [sx * 0.36, 0.95, HL + 0.11], [sx * 0.4, 1.07, HL + 0.12]];
+      const pts = [[sx * 0.09, 0.8, HL + 0.15], [sx * 0.24, 0.84, HL + 0.16], [sx * 0.36, 0.95, HL + 0.17], [sx * 0.4, 1.07, HL + 0.18]];
       for (let k = 0; k < 3; k++) b.bio_badlands.add(rodAB(0.035 - k * 0.01, pts[k], pts[k + 1], TRIM.bone, { r2: 0.035 - (k + 1) * 0.01, segs: 7 }));
     }
   }
   b.bio_desert.add(toBand(boxUV(at(lumpy(rbox(2.0, 0.07, 0.2, 0.03, 3), 0.025, 5), 0, -0.24, 4.06)), TRIM.sand));
 }
 
-// The winch: goblin engineering. A strap drum between iron flanges, a green gearbox with a brass
-// cog, a finned green motor with a brass exhaust stack, a fairlead of two rollers.
+// The winch: goblin engineering. A strap drum between fat brass flanges under a riveted green hood,
+// a gearbox with an exposed brass gear pair and a crank, a finned motor with a sooty exhaust stub,
+// a fairlead of two rollers.
 function gearShape(r0, r1, teeth) {
   const s = new THREE.Shape();
   for (let i = 0; i < teeth * 4; i++) {
@@ -660,20 +806,58 @@ function gearShape(r0, r1, teeth) {
 }
 function buildWinch(b) {
   const { x, y, z } = DRUM;
-  b.trim.add(at(beam(1.0, 0.32, 0.05, TRIM.iron), x, y, z - 0.11));
-  b.trim.add(at(toBand(new THREE.CylinderGeometry(0.115, 0.115, 0.46, 14), TRIM.strap, 3), x, y, z, 0, 0, PI / 2));
-  for (const sx of [-1, 1]) b.trim.add(at(rod(0.19, 0.035, TRIM.iron, { segs: 16 }), x + sx * 0.25, y, z, 0, 0, PI / 2));
-  b.trim.add(at(rboxB(0.14, 0.34, 0.32, 0.03, TRIM.green, 2), x + 0.355, y, z));
-  const cg = throughWall(gearShape(0.12, 0.15, 10), 'x', x + 0.425, 1, 0.035);
-  b.trim.add(toBand(boxUV(at(cg, 0, y, z)), TRIM.brass));
-  b.trim.add(at(rod(0.035, 0.06, TRIM.iron), x + 0.46, y, z, 0, 0, PI / 2));
-  b.trim.add(at(rod(0.14, 0.22, TRIM.green, { segs: 12 }), x - 0.39, y, z, 0, 0, PI / 2));
-  b.trim.add(at(rod(0.1, 0.04, TRIM.iron, { segs: 10 }), x - 0.52, y, z, 0, 0, PI / 2));
-  for (const dx of [-0.33, -0.39, -0.45]) b.trim.add(at(ring(0.145, 0.012, TRIM.iron, 14), x + dx, y, z, 0, PI / 2, 0));
-  b.trim.add(at(rod(0.026, 0.36, TRIM.brass), x - 0.42, y + 0.29, z + 0.06, 0, 0, 0.05));
-  b.trim.add(at(rod(0.05, 0.07, TRIM.soot, { r2: 0.02 }), x - 0.43, y + 0.5, z + 0.06));
-  for (const dy of [-0.13, 0.13]) b.trim.add(at(rod(0.03, 0.42, TRIM.iron, { segs: 8 }), x, y + dy, z + 0.14, 0, 0, PI / 2));
-  for (const sx of [-1, 1]) b.trim.add(at(beam(0.04, 0.34, 0.06, TRIM.iron), x + sx * 0.21, y, z + 0.14));
+  // a riveted iron mounting plate on the bumper
+  b.trim.add(at(beam(1.3, 0.38, 0.05, TRIM.iron), x, y, 4.228));
+  // the drum, wound with the orange strap, between fat brass flanges with iron rims
+  b.trim.add(at(toBand(new THREE.CylinderGeometry(0.11, 0.11, 0.5, 16), TRIM.strap, 3), x, y, z, 0, 0, PI / 2));
+  for (const sx of [-1, 1]) {
+    b.trim.add(at(rod(0.2, 0.05, TRIM.brass, { segs: 20 }), x + sx * 0.275, y, z, 0, 0, PI / 2));
+    b.trim.add(at(ring(0.2, 0.017, TRIM.iron, 20), x + sx * 0.275, y, z, 0, PI / 2, 0));
+    b.trim.add(at(rod(0.05, 0.07, TRIM.iron, { segs: 8 }), x + sx * 0.31, y, z, 0, 0, PI / 2));
+  }
+  // the hood: riveted goblin-green sheet over the drum's back and top, open at the front where the
+  // strap pays out, a rolled iron lip
+  {
+    const th0 = 0.5, thL = PI * 1.2 - 0.5, L = 0.64;
+    b.trim.add(at(toBand(new THREE.CylinderGeometry(0.236, 0.236, L, 18, 1, true, th0, thL), TRIM.green), x, y, z, 0, 0, PI / 2));
+    b.trim.add(at(toBand(flip(new THREE.CylinderGeometry(0.226, 0.226, L, 18, 1, true, th0, thL)), TRIM.soot), x, y, z, 0, 0, PI / 2));
+    b.trim.add(at(rod(0.016, L + 0.02, TRIM.iron, { segs: 6 }), x, y + 0.236 * Math.sin(th0), z + 0.236 * Math.cos(th0), 0, 0, PI / 2));
+    for (let k = 0; k < 6; k++) { const th = th0 + 0.35 + k * 0.42; for (const sx of [-1, 1]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.015, 5, 3), TRIM.iron), x + sx * 0.29, y + 0.242 * Math.sin(th), z + 0.242 * Math.cos(th))); }
+    b.trim.add(at(beam(L, 0.03, 0.03, TRIM.iron), x, y + 0.24, z - 0.02));
+  }
+  // the gearbox (right): a riveted green case, a pressure gauge, an exposed brass gear pair with a
+  // crank lever and a red knob
+  {
+    const gx = x + 0.39;
+    b.trim.add(at(rboxB(0.16, 0.46, 0.48, 0.04, TRIM.green, 2), gx, y, z - 0.01));
+    for (const [dy, dz] of [[-0.19, -0.2], [0.19, -0.2], [-0.19, 0.18], [0.19, 0.18]]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.018, 5, 3), TRIM.iron), gx + 0.08, y + dy, z + dz, 0, 0, 0, [0.6, 1, 1]));
+    b.trim.add(at(rod(0.05, 0.03, TRIM.brass, { segs: 12 }), gx, y + 0.1, z + 0.23, PI / 2, 0, 0));
+    b.trim.add(at(toSlot(new THREE.CircleGeometry(0.043, 14), TRIM.s.gauge), gx, y + 0.1, z + 0.247));
+    const ox = gx + 0.085, big = [z, y], small = [z - 0.05, y + 0.107];
+    b.trim.add(toBand(boxUV(at(throughWall(gearShape(0.074, 0.092, 12), 'x', ox, 1, 0.03), 0, big[1], big[0])), TRIM.brass));
+    b.trim.add(toBand(boxUV(at(throughWall(gearShape(0.03, 0.042, 7), 'x', ox + 0.005, 1, 0.03), 0, small[1], small[0])), TRIM.brass));
+    b.trim.add(at(rod(0.022, 0.07, TRIM.iron, { segs: 8 }), ox + 0.03, big[1], big[0], 0, 0, PI / 2));
+    b.trim.add(at(rod(0.013, 0.06, TRIM.iron, { segs: 6 }), ox + 0.035, small[1], small[0], 0, 0, PI / 2));
+    const c0 = [ox + 0.06, small[1], small[0]], c1 = [ox + 0.075, small[1] + 0.15, small[0] + 0.07];
+    b.trim.add(rodAB(0.014, c0, c1, TRIM.iron, { segs: 6 }));
+    b.trim.add(rodAB(0.018, c1, [c1[0] + 0.09, c1[1], c1[2]], TRIM.oak, { segs: 6 }));
+    b.trim.add(at(toBand(new THREE.SphereGeometry(0.034, 8, 6), TRIM.red), c1[0] + 0.115, c1[1], c1[2]));
+  }
+  // the motor (left): a finned goblin-green barrel, an iron end cap, a soot-blackened exhaust stub
+  {
+    const mx = x - 0.45;
+    b.trim.add(at(rod(0.165, 0.27, TRIM.green, { segs: 16 }), mx, y, z - 0.01, 0, 0, PI / 2));
+    for (const dx of [-0.09, -0.03, 0.03, 0.09]) b.trim.add(at(ring(0.168, 0.014, TRIM.iron, 16), mx + dx, y, z - 0.01, 0, PI / 2, 0));
+    b.trim.add(at(rod(0.12, 0.05, TRIM.iron, { segs: 12 }), mx - 0.155, y, z - 0.01, 0, 0, PI / 2));
+    b.trim.add(at(toBand(new THREE.SphereGeometry(0.03, 5, 3), TRIM.brass), mx - 0.18, y, z - 0.01));
+    const e0 = [mx + 0.02, y + 0.14, z - 0.06], e1 = [mx - 0.01, y + 0.3, z - 0.1];
+    b.trim.add(rodAB(0.032, e0, e1, TRIM.soot, { segs: 8, r2: 0.038 }));
+    b.trim.add(along(lathe([[0.038, 0], [0.05, 0.02], [0.046, 0.035], [0.03, 0.035]], TRIM.soot, 8), e1, [e1[0] - 0.006, e1[1] + 0.03, e1[2] - 0.008]));
+    b.trim.add(at(ring(0.04, 0.009, TRIM.brass, 8), (e0[0] + e1[0]) / 2, (e0[1] + e1[1]) / 2, (e0[2] + e1[2]) / 2, PI / 2 - 0.25, 0, 0));
+  }
+  // the fairlead: two iron rollers between posts, in front of the drum
+  for (const dy of [-0.12, 0.1]) b.trim.add(at(rod(0.03, 0.44, TRIM.iron, { segs: 8 }), x, y + dy, z + 0.145, 0, 0, PI / 2));
+  for (const sx of [-1, 1]) b.trim.add(at(beam(0.04, 0.32, 0.06, TRIM.iron), x + sx * 0.22, y - 0.01, z + 0.145));
 }
 
 function buildUnder(b) {
@@ -692,12 +876,14 @@ function buildUnder(b) {
   b.trim.add(at(toWide(new THREE.PlaneGeometry(0.36, 0.18), TRIM.w.plate), -0.42, -0.42, -4.212, 0, PI, 0));
   for (const sx of [-1, 1]) {
     b.trim.add(at(rod(0.12, 0.31, TRIM.iron, { segs: 10 }), sx * 1.18, -0.42, -4.08));
-    b.trim.add(at(rod(0.022, 0.15, TRIM.brass), sx * 0.98, -0.19, -4.09));
-    b.trim.add(at(rod(0.115, 0.1, TRIM.brass, { segs: 14 }), sx * 0.98, -0.02, -4.09, PI / 2, 0, 0));
-    b.trim.add(at(ring(0.108, 0.018, TRIM.brass, 16), sx * 0.98, -0.02, -4.14));
-    b.trim.add(at(rod(0.05, 0.06, TRIM.soot, { r2: 0.012 }), sx * 0.98, 0.1, -4.09));
-    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.1, 16), LAMPS.tail), sx * 0.98, -0.02, -4.142, 0, PI, 0));
-    b.glow.add(at(halo(0.7), sx * 0.98, -0.02, -4.17, 0, PI, 0));
+    const tx = sx * 0.9;
+    b.trim.add(at(rod(0.022, 0.15, TRIM.brass), tx, -0.19, -4.09));
+    b.trim.add(at(rod(0.125, 0.11, TRIM.brass, { segs: 16 }), tx, -0.02, -4.09, PI / 2, 0, 0));
+    b.trim.add(at(ring(0.118, 0.02, TRIM.brass, 18), tx, -0.02, -4.145));
+    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.11, 18), LAMPS.tail), tx, -0.02, -4.147, 0, PI, 0));
+    b.trim.add(at(toBand(new THREE.CylinderGeometry(0.15, 0.15, 0.13, 14, 1, true, -PI * 2 / 3, PI * 4 / 3), TRIM.iron), tx, -0.02, -4.12, -PI / 2 - 0.08, 0, 0));
+    b.trim.add(at(toBand(flip(new THREE.CylinderGeometry(0.142, 0.142, 0.13, 14, 1, true, -PI * 2 / 3, PI * 4 / 3)), TRIM.soot), tx, -0.02, -4.12, -PI / 2 - 0.08, 0, 0));
+    b.glow.add(at(halo(0.75), tx, -0.02, -4.17, 0, PI, 0));
   }
   b.snow.add(at(snowCap(2.5, 0.22, 0.08, 6), 0, -0.24, -4.07));
   // a bucket swinging under the rear bumper
@@ -721,12 +907,12 @@ function lantern(b, x, y, z, s = 1) {
 function buildClutter(b) {
   // the door side: a rolled canvas awning on iron brackets over the door, a lantern by it
   {
-    const x = -HW - 0.13, y = 1.89, z0 = A.door.z0 - 0.3, z1 = A.door.z1 + 0.28;
+    const x = -HW - 0.13, y = 1.83, z0 = A.door.z0 - 0.3, z1 = A.door.z1 + 0.28;
     b.trim.add(at(rod(0.085, z1 - z0, TRIM.awning, { segs: 10, density: 0.9 }), x, y, (z0 + z1) / 2, PI / 2, 0, 0));
     for (const z of [z0 + 0.25, z1 - 0.25]) b.trim.add(at(toBand(new THREE.TorusGeometry(0.088, 0.012, 5, 12), TRIM.leather), x, y, z));
     for (const z of [z0 + 0.06, z1 - 0.06]) {
-      b.trim.add(at(beam(0.18, 0.03, 0.03, TRIM.iron), -HW - 0.09, 1.97, z));
-      b.trim.add(at(beam(0.03, 0.1, 0.03, TRIM.iron), x - 0.02, 1.92, z));
+      b.trim.add(at(beam(0.18, 0.03, 0.03, TRIM.iron), -HW - 0.09, 1.91, z));
+      b.trim.add(at(beam(0.03, 0.1, 0.03, TRIM.iron), x - 0.02, 1.86, z));
     }
     const LZ = 1.28;
     b.trim.add(at(beam(0.03, 0.2, 0.1, TRIM.iron), -HW - 0.015, 1.86, LZ));
@@ -751,12 +937,12 @@ function buildClutter(b) {
     b.trim.add(at(rod(0.025, 0.06, TRIM.brass, { segs: 6 }), sx + 0.33, -0.41, -0.82, 0, 0, PI / 2));
     b.trim.add(at(beam(0.36, 0.035, 0.05, TRIM.leather), sx + 0.17, -0.25, -0.82, 0, 0, 0.0));
     // shovel and pick (along z, flat on the skirt)
-    b.trim.add(at(rod(0.02, 0.86, TRIM.oak, { segs: 6 }), sx + 0.04, -0.2, 0.05, PI / 2, 0, 0.0));
-    b.trim.add(at(rboxB(0.02, 0.2, 0.24, 0.02, TRIM.iron, 2), sx + 0.04, -0.2, -0.5));
-    b.trim.add(at(rod(0.02, 0.86, TRIM.oak, { segs: 6 }), sx + 0.08, -0.42, 0.1, PI / 2, 0, 0.0));
-    b.trim.add(rodAB(0.026, [sx + 0.08, -0.42, 0.55], [sx + 0.08, -0.22, 0.63], TRIM.iron, { r2: 0.008, segs: 6 }));
-    b.trim.add(rodAB(0.026, [sx + 0.08, -0.42, 0.55], [sx + 0.08, -0.57, 0.6], TRIM.iron, { r2: 0.008, segs: 6 }));
-    for (const z of [-0.25, 0.35]) b.trim.add(at(beam(0.13, 0.32, 0.04, TRIM.leather), sx + 0.04, -0.32, z));
+    b.trim.add(at(rod(0.02, 0.86, TRIM.oak, { segs: 6 }), sx + 0.1, -0.2, 0.05, PI / 2, 0, 0.0));
+    b.trim.add(at(rboxB(0.02, 0.2, 0.24, 0.02, TRIM.iron, 2), sx + 0.1, -0.2, -0.5));
+    b.trim.add(at(rod(0.02, 0.86, TRIM.oak, { segs: 6 }), sx + 0.135, -0.42, 0.1, PI / 2, 0, 0.0));
+    b.trim.add(rodAB(0.026, [sx + 0.135, -0.42, 0.55], [sx + 0.135, -0.22, 0.63], TRIM.iron, { r2: 0.008, segs: 6 }));
+    b.trim.add(rodAB(0.026, [sx + 0.135, -0.42, 0.55], [sx + 0.135, -0.57, 0.6], TRIM.iron, { r2: 0.008, segs: 6 }));
+    for (const z of [-0.25, 0.35]) b.trim.add(at(beam(0.09, 0.32, 0.04, TRIM.leather), sx + 0.11, -0.32, z));
   }
 }
 
@@ -772,11 +958,38 @@ function sconce(b, side, y, z) {
   b.itrim.add(at(rod(0.065, 0.025, TRIM.brass, { segs: 8 }), x + dx * 0.18, y - 0.09, z));
   for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + PI / 4; b.itrim.add(at(rod(0.006, 0.13, TRIM.iron, { segs: 4 }), x + dx * 0.18 + Math.cos(a) * 0.055, y - 0.015, z + Math.sin(a) * 0.055)); }
 }
+// A pleated gingham panel hanging in the wall's plane (width along z), its pleats lined up with the
+// band's painted folds (ridges toward the room). tie: gathered at height tie.y toward its edge on
+// the tie.anchor side (±1 along z), where a rope cord holds it.
+function pleated(b, side, w, h, depth, tie = null) {
+  const n = GINGHAM_PLEATS, cols = n * 4 + 1, rows = 7, dens = 0.52;
+  const S = gridSurface(rows, cols, (i, j) => {
+    const v = j / (cols - 1), y = h / 2 - i / (rows - 1) * h;
+    let z = (v - 0.5) * w, x = -side * Math.sin(v * n * TAU) * depth / 2;
+    if (tie) { const g = Math.exp(-(((y - tie.y) / (h * 0.3)) ** 2)), a = tie.anchor * w / 2; z = a + (z - a) * (1 - 0.62 * g); x *= 1 + 0.9 * g; }
+    return [x, y, z];
+  }, () => new V3(-side, 0, 0));
+  const front = toBand(S.part(0, rows - 1, (i, j) => [i / (rows - 1) * h * dens, j / (cols - 1)]), TRIM.gingham);
+  return [front, flip(front.clone())];
+}
 function curtains(b, side, o) {
-  const x = side * (IN - 0.085), h = o.y1 - o.y0 + 0.24, cy = (o.y0 + o.y1) / 2 + 0.03;
-  b.itrim.add(at(rod(0.012, o.z1 - o.z0 + 0.4, TRIM.brass, { segs: 6 }), x + side * 0.02, o.y1 + 0.16, (o.z0 + o.z1) / 2, PI / 2, 0, 0));
-  for (const z of [o.z0 + 0.04, o.z1 - 0.04]) b.itrim.add(at(cloth(0.22, h, 0.03, 3, TRIM.gingham), x, cy, z));
-  b.itrim.add(at(cloth(o.z1 - o.z0 + 0.32, 0.15, 0.03, 6, TRIM.gingham), x - side * 0.01, o.y1 + 0.08, (o.z0 + o.z1) / 2));
+  const x = side * (IN - 0.085), h = o.y1 - o.y0 + 0.24, cy = (o.y0 + o.y1) / 2 + 0.03, zc = (o.z0 + o.z1) / 2;
+  b.itrim.add(at(rod(0.012, o.z1 - o.z0 + 0.4, TRIM.brass, { segs: 6 }), x + side * 0.02, o.y1 + 0.16, zc, PI / 2, 0, 0));
+  for (const [z, tie] of [[o.z0 + 0.06, null], [o.z1 - 0.02, { y: -h * 0.12, anchor: 1 }]]) {
+    for (const g of pleated(b, side, 0.24, h, 0.035, tie)) b.itrim.add(at(g, x, cy, z));
+    if (tie) {
+      const zt = z + 0.12 * 0.62 * 0.6 + 0.12 * 0.38 * 0.5;
+      b.itrim.add(at(ring(0.06, 0.011, TRIM.rope, 12), x, cy + tie.y, zt, PI / 2, 0, 0, [0.55, 1, 1]));
+      b.itrim.add(rodAB(0.008, [x - side * 0.01, cy + tie.y, zt + 0.06], [side * (IN - 0.01), cy + tie.y + 0.02, zt + 0.1], TRIM.rope, { segs: 4 }));
+    }
+  }
+  // a carved walnut pelmet with a scalloped lower edge, on two brackets
+  const L = o.z1 - o.z0 + 0.36, nS = Math.max(3, Math.round(L / 0.17)), sw = L / nS;
+  const ps = new THREE.Shape(); ps.moveTo(-L / 2, 0.065); ps.lineTo(L / 2, 0.065); ps.lineTo(L / 2, -0.035);
+  for (let k = 0; k < nS; k++) { const xr = L / 2 - k * sw; ps.quadraticCurveTo(xr - sw / 2, -0.11, xr - sw, -0.035); }
+  ps.closePath();
+  b.itrim.add(toBand(boxUV(at(throughWall(ps, 'x', side * (IN - 0.105), -side, 0.025, { segs: 4 }), 0, o.y1 + 0.13, zc)), TRIM.wood));
+  for (const dz of [-1, 1]) b.itrim.add(at(beam(0.11, 0.03, 0.03, TRIM.wood), side * (IN - 0.055), o.y1 + 0.18, zc + dz * (L / 2 - 0.05)));
 }
 // the woven runner down the aisle: an end piece at each end, middle pieces between (the soft
 // atlas' rug region: RUG_END px of end, the rest a middle that repeats)
@@ -828,7 +1041,7 @@ function buildInterior(b) {
   b.itrim.add(at(beam(2.36, 0.12, 0.05, TRIM.wood), 0, 0.44, -2.955));
   for (const sx of [-1, 1]) {
     b.itrim.add(at(beam(0.9, 0.24, 0.02, TRIM.wood), sx * 0.56, 0.19, -2.945));
-    b.itrim.add(at(toBand(new THREE.SphereGeometry(0.022, 6, 4), TRIM.brass), sx * 0.56, 0.2, -2.93));
+    b.itrim.add(at(toBand(new THREE.SphereGeometry(0.022, 5, 3), TRIM.brass), sx * 0.56, 0.2, -2.93));
   }
   b.soft.add(at(toRegion(rbox(2.28, 0.17, 0.88, 0.06, 3), SOFT.quilt), 0, 0.48, -3.43));
   b.itrim.add(at(toBand(rbox(0.52, 0.13, 0.32, 0.06, 2), TRIM.canvas), -0.84, 0.61, -3.66, 0, 0.1, 0));
@@ -859,16 +1072,17 @@ function buildInterior(b) {
   for (const y of [0.8, 0.88]) b.itrim.add(at(ring(0.047, 0.006, TRIM.brass, 10), 0.6, y, 0.98, PI / 2, 0, 0));
   b.itrim.add(at(ring(0.035, 0.009, TRIM.brass, 8, PI), 0.6 - 0.045, 0.84, 0.98, 0, PI / 2, PI / 2));
   b.itrim.add(at(rod(0.11, 0.014, TRIM.brass, { segs: 12 }), 0.84, 0.787, 1.08));
-  for (const [dx, dz] of [[0, 0], [0.05, 0.04], [-0.04, 0.05]]) b.itrim.add(at(toSlot(new THREE.SphereGeometry(0.038, 8, 6), TRIM.s.apple), 0.84 + dx, 0.826, 1.08 + dz));
+  for (const [dx, dz] of [[0, 0], [0.05, 0.04], [-0.04, 0.05]]) b.itrim.add(at(toSlot(new THREE.SphereGeometry(0.038, 5, 3), TRIM.s.apple), 0.84 + dx, 0.826, 1.08 + dz));
   for (const [i, a] of [[0, 0.2], [1, -0.5], [2, 0.9]]) b.itrim.add(at(beam(0.09, 0.003, 0.13, TRIM.canvas), 0.66 + i * 0.03, 0.782 + i * 0.002, 1.32, 0, a, 0));
 
   // the galley: an oak cabinet (one door is the icebox: iron, frosted, a brass latch), a slate top,
   // a cast-iron stove with a pot, a kettle and a flue up through the roof, a brass basin and pump,
   // a basket of apples, a shelf of jars over the window and pans on a rail
   b.itrim.add(at(beam(0.58, 0.84, 1.22, TRIM.oak), -0.9, 0.44, 1.95));
-  b.itrim.add(at(beam(0.64, 0.06, 1.28, TRIM.slate), -0.9, 0.89, 1.95));
+  b.itrim.add(at(beam(0.64, 0.06, 1.28, TRIM.block), -0.9, 0.89, 1.95));
+  b.itrim.add(at(beam(0.025, 0.12, 1.24, TRIM.wood), -IN + 0.0125, 0.98, 1.95));
   b.itrim.add(at(beam(0.025, 0.56, 0.52, TRIM.wood), -0.598, 0.38, 2.24));
-  b.itrim.add(at(toBand(new THREE.SphereGeometry(0.022, 6, 4), TRIM.brass), -0.58, 0.5, 2.04));
+  b.itrim.add(at(toBand(new THREE.SphereGeometry(0.022, 5, 3), TRIM.brass), -0.58, 0.5, 2.04));
   b.itrim.add(at(beam(0.03, 0.58, 0.54, TRIM.iron), -0.598, 0.38, 1.66));
   b.itrim.add(at(toSlot(new THREE.PlaneGeometry(0.4, 0.42), TRIM.s.frost), -0.581, 0.4, 1.66, 0, PI / 2, 0));
   for (const dy of [-0.24, 0.24]) b.itrim.add(at(beam(0.035, 0.04, 0.56, TRIM.brass), -0.596, 0.38 + dy, 1.66));
@@ -922,7 +1136,7 @@ function buildCockpit(b) {
   b.itrim.add(at(beam(0.5, 0.36, 0.5, TRIM.oak), 0, 0.18, 3.62));
   b.itrim.add(at(beam(0.52, 0.26, 0.02, TRIM.wood), -0.62, 0.6, 3.335));
   b.itrim.add(at(toWide(new THREE.PlaneGeometry(0.3, 0.15), TRIM.w.plaque), -0.62, 0.62, 3.322, 0, PI, 0));
-  b.itrim.add(at(toBand(new THREE.SphereGeometry(0.02, 6, 4), TRIM.brass), -0.62, 0.5, 3.32));
+  b.itrim.add(at(toBand(new THREE.SphereGeometry(0.02, 5, 3), TRIM.brass), -0.62, 0.5, 3.32));
   // the gauge board sits below the windshield's sill line (the road stays in view)
   const G = GAUGE, n = new V3(0, Math.sin(G.tilt), -Math.cos(G.tilt));
   b.itrim.add(at(beam(0.74, 0.22, 0.05, TRIM.wood), 0.62, G.y, G.z, G.tilt, 0, 0));
@@ -951,12 +1165,26 @@ function buildCockpit(b) {
   }
 }
 const GAUGE = { y: 0.93, z: 3.53, tilt: 0.7 };
+const HEAD_Y = 0.3;
 const WHEEL_POS = { x: 0.62, y: 0.89, z: 3.22 };
 
 // ---- the roof (a Repo Man part) ------------------------------------------------------------------
 
 function buildRoof(b) {
   buildRoofShell(b);
+  // carved knee brackets from the wall up under the cornice, where the rib straps meet it
+  for (const [side, zs] of [[1, [-3.3, -2.05, 0.0, 2.05]], [-1, [-2.85, -1.95, 2.62]]]) for (const z of zs) {
+    const yb = lipBot({ w: 0, z }) + 0.01, s = new THREE.Shape();
+    s.moveTo(0, 2.19); s.lineTo(0.14, yb + 0.03); s.lineTo(0.14, yb - 0.03); s.quadraticCurveTo(0.035, yb - 0.03, 0.025, yb - 0.2); s.lineTo(0, yb - 0.2); s.closePath();
+    b.trim.add(toBand(boxUV(sideProfile(s, side, z, 0.085)), TRIM.wood));
+  }
+  // the corner posts rise through the roof as carved walnut finials: iron-banded, mushroom-capped
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const x = sx * (HW - 0.02), z = sz * (HL - 0.02), y0 = roofY(x, z) - 0.06;
+    b.trim.add(at(lathe([[0.15, 0], [0.13, 0.06], [0.1, 0.12], [0.085, 0.17], [0.09, 0.18], [0.17, 0.205], [0.195, 0.24], [0.18, 0.28], [0.12, 0.315], [0.05, 0.335], [0.03, 0.35], [0.035, 0.37], [0.001, 0.385]], TRIM.wood, 10, 2), x, y0, z));
+    b.trim.add(at(ring(0.1, 0.018, TRIM.iron, 12), x, y0 + 0.125, z, PI / 2, 0, 0));
+    b.snow.add(at(lumpy(new THREE.SphereGeometry(0.2, 10, 5, 0, TAU, 0, PI / 2), 0.012, sx + sz * 3), x, y0 + 0.27, z, 0, 0, 0, [1, 0.45, 1]));
+  }
   // the ceiling: boards between heavy beams (unevenly spaced), inside
   b.ceil.add(setUV(at(new THREE.PlaneGeometry(2.3, 7.8), 0, 2.298, 0, PI / 2, 0, 0), (x, y, z) => [z / 2.0, (x + 1.15) / 2.3]));
   for (const z of [-3.3, -2.28, -1.06, 0.05, 1.18, 2.16, 3.28]) b.itrim.add(at(beam(2.3, 0.11, 0.14, TRIM.wood), 0, 2.24, z));
@@ -981,11 +1209,17 @@ function buildRoof(b) {
     // pennant: a short leaning pole, a red swallow-tail flag with the crest
     const pb = [0.95, y0 + 0.2, 3.85], pt = [0.98, y0 + 0.78, 3.83];
     b.trim.add(rodAB(0.016, pb, pt, TRIM.wood, { segs: 5 }));
-    const fl = new THREE.Shape(); fl.moveTo(0, 0); fl.lineTo(-0.36, -0.03); fl.lineTo(-0.27, -0.09); fl.lineTo(-0.36, -0.16); fl.lineTo(0, -0.17); fl.closePath();
-    const fg = new THREE.ExtrudeGeometry(fl, { depth: 0.008, bevelEnabled: false });
-    fg.rotateY(-PI / 2 + 0.25); fg.translate(pt[0], pt[1] - 0.02, pt[2] - 0.004);
-    b.trim.add(toBand(boxUV(fg, 2.4), TRIM.red));
-    b.trim.add(at(toBand(new THREE.SphereGeometry(0.025, 6, 4), TRIM.brass), pt[0], pt[1] + 0.02, pt[2]));
+    {
+      // the cloth: a swallow-tail that ripples and droops a little, painted both sides
+      const Lf = 0.4, Hf = 0.17, cols = 10;
+      const S = gridSurface(3, cols, (i, j) => {
+        const t = j / (cols - 1), notch = i === 1 ? 0.1 * t ** 6 : 0;
+        return [-(Lf * t - notch), -i / 2 * Hf - 0.02 * t * t, Math.sin(t * PI * 2.2) * 0.03 * t];
+      }, () => new V3(0, 0, 1));
+      const fg = toBand(S.part(0, 2, (i, j) => [j / (cols - 1) * 0.75, 1 - i / 2]), TRIM.flag);
+      for (const g of [fg, flip(fg.clone())]) { g.rotateY(-PI / 2 + 0.25); g.translate(pt[0], pt[1] - 0.02, pt[2] - 0.004); b.trim.add(g); }
+    }
+    b.trim.add(at(toBand(new THREE.SphereGeometry(0.025, 5, 3), TRIM.brass), pt[0], pt[1] + 0.02, pt[2]));
     b.snow.add(at(snowCap(0.52, 0.52, 0.08, 1), -0.4, y0 + 0.42, 2.95, 0, 0.15, 0));
     b.snow.add(at(snowCap(0.38, 0.38, 0.07, 2), 0.56, y0 + 0.54, 3.2));
     b.snow.add(at(snowCap(0.9, 0.2, 0.05, 3), -0.25, y0 + 0.27, 3.62, 0, 0.05, 0));
@@ -1053,7 +1287,9 @@ function buildRoof(b) {
     }
     const cy = R(-0.3, -3.55) + 0.13;
     b.trim.add(at(rod(0.13, 1.25, TRIM.carpet, { segs: 10, density: 0.8 }), -0.32, cy, -3.55, 0, 0.06, PI / 2));
-    b.trim.add(at(toSlot2(new THREE.CircleGeometry(0.13, 10), TRIM.s2.map), -0.32 - 0.626, cy, -3.55 + 0.04, 0, -PI / 2, 0));
+    const endPx = [TRIM.flagPx.carpetEnd[0], TRIM.flag * TRIM.band, 64, 64];
+    b.trim.add(at(toRegion(new THREE.CircleGeometry(0.13, 12), endPx, TRIM.W, TRIM.H), -0.32 - 0.627, cy, -3.55 + 0.038, 0, -PI / 2 + 0.06, 0));
+    b.trim.add(at(toRegion(new THREE.CircleGeometry(0.13, 12), endPx, TRIM.W, TRIM.H), -0.32 + 0.627, cy, -3.55 - 0.038, 0, PI / 2 + 0.06, 0));
     for (const dx of [-0.35, 0.3]) b.trim.add(at(ring(0.134, 0.012, TRIM.rope, 12), -0.32 + dx, cy, -3.55 + dx * 0.06, 0, PI / 2, 0));
     b.snow.add(at(snowCap(1.2, 0.2, 0.05, 8), -0.32, cy + 0.13, -3.55, 0, 0.06, 0));
     const x = 0.15, z = -2.45, y0 = R(x, z);
@@ -1101,6 +1337,10 @@ function buildRear(b, wheel) {
   b.trim.add(at(ring(0.13, 0.03, TRIM.rope, 14, TAU, 3), 0.83, 1.58, lz(1.58) - 0.08, 0.3, 0, -0.4));
   lantern(b, 1.12, 1.95, lz(1.95) - 0.02, 0.9);
   b.trim.add(rodAB(0.008, [1.0, 2.05, lz(2.05)], [1.12, 2.08, lz(2.08) - 0.02], TRIM.iron, { segs: 4 }));
+  // the maker's brass crest bolted to the wood band under the spare (no name on the back)
+  b.trim.add(at(toSlot(new THREE.CircleGeometry(0.17, 20), TRIM.s.emblem), -0.4, 0.29, -HL - 0.014, 0, PI, 0));
+  b.trim.add(at(ring(0.172, 0.024, TRIM.brass, 22), -0.4, 0.29, -HL - 0.012));
+  for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + PI / 4; b.trim.add(at(toBand(new THREE.SphereGeometry(0.015, 5, 3), TRIM.iron), -0.4 + Math.cos(a) * 0.172, 0.29 + Math.sin(a) * 0.172, -HL - 0.03, 0, 0, 0, [1, 1, 0.6])); }
   // the spare on its bracket
   b.trim.add(at(wheel.clone(), -0.4, 0.98, -4.24, 0, PI / 2, 0, 0.86));
   b.trim.add(at(beam(0.12, 0.12, 0.2, TRIM.iron), -0.4, 0.98, -4.08));
@@ -1193,9 +1433,11 @@ function repaintBodyWhenFontLoads() {
   if (ready) return;
   document.fonts.load('900 40px Cinzel', 'SLOPMASTER 9000').then(() => {
     if (!document.fonts.check('900 40px Cinzel')) return;
-    const m = meta('rv_body'), cv = canvasFor('rv_body'), g = cv.getContext('2d');
-    m.paint(g, m.w, rngFrom('rv_body'), m.h, cv);
-    tex('rv_body').needsUpdate = true;
+    for (const name of ['rv_body', 'rv_trim']) {
+      const m = meta(name), cv = canvasFor(name), g = cv.getContext('2d');
+      m.paint(g, m.w, rngFrom(name), m.h, cv);
+      tex(name).needsUpdate = true;
+    }
   }).catch(() => {});
 }
 
@@ -1212,11 +1454,13 @@ export class RVView {
     const trim = painted('rv_trim');
     const mat = {
       body: painted('rv_body'),
+      tin: painted('rv_tin'),
       trim, itrim: trim,
       panel: painted('rv_paneling'),
       floor: painted('rv_floor'),
       soft: painted('rv_soft'),
-      glass: painted('rv_glass', { transparent: true, side: THREE.DoubleSide }),
+      // glass is one-sided: an outside pane faces out, a clearer inside pane faces in
+      glass: painted('rv_glass', { transparent: true }),
       snow: painted('rv_snow', { repeat: [3, 3], vertexColors: true }),
       lamps: new THREE.MeshLambertMaterial({ map: tex('rv_lamps'), emissiveMap: tex('rv_lamps'), emissive: 0x000000 }),
       // faces out: lit windows, portholes and lamp halos, seen from outside only, added on
@@ -1227,7 +1471,7 @@ export class RVView {
     for (const b of BIOMES) mat['bio_' + b] = trim;
     mat.glass.depthWrite = false;
     this.mat = mat;
-    const cast = { body: true, trim: true, snow: true, ...Object.fromEntries(BIOMES.map(b => ['bio_' + b, true])) };
+    const cast = { body: true, tin: true, trim: true, snow: true, ...Object.fromEntries(BIOMES.map(b => ['bio_' + b, true])) };
     this.snowMeshes = []; this.glowMeshes = []; this.interior = [];
     this.bioMeshes = Object.fromEntries(BIOMES.map(b => [b, []]));
     const emit = (parent, bk) => {
@@ -1273,7 +1517,7 @@ export class RVView {
 
     // headlights' reach and the cabin's lantern glow
     this.beam = new THREE.SpotLight(0xfff1c8, 0, 60, 0.5, 0.6, 1.2);
-    this.beam.position.set(0, 0.5, 4.2);
+    this.beam.position.set(0, HEAD_Y + 0.2, 4.2);
     this.beam.target.position.set(0, -1, 14);
     g.add(this.beam, this.beam.target);
     this.light = new THREE.PointLight(0xffd8a0, 3, 7, 1.5);
