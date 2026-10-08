@@ -2098,7 +2098,7 @@ function wallItem(c, kind) {
     }
   } else if (kind === 'herbs') {
     K.box(mat('wood_light'), 1.4, 0.06, 0.06, 0, y + 0.4, 0.08, { grain: 'x', tint: '#a08060', cast: false });
-    for (let k = 0; k < 6; k++) { const x = -0.55 + k * 0.22; K.add(mat('thatch'), new THREE.ConeGeometry(0.08, 0.42, 6), { uv: 'keep', uvScale: [0.5, 0.5], at: matrix(x, y + 0.15, 0.1, k, Math.PI), tint: ['#8aa860', '#a8a060', '#6a8a50', '#c8a868'][k % 4], cast: false }); K.add(mat('rope'), new THREE.TorusGeometry(0.03, 0.01, 3, 6), { uv: 'keep', at: matrix(x, y + 0.34, 0.1, 0, Math.PI / 2), cast: false }); }
+    for (let k = 0; k < 6; k++) { const x = -0.55 + k * 0.22; K.add(mat(c.S.name === 'farm' ? 'thatch' : 'clay'), new THREE.ConeGeometry(0.08, 0.42, 6), { uv: 'keep', uvScale: [0.5, 0.5], at: matrix(x, y + 0.15, 0.1, k, Math.PI), tint: ['#7a9850', '#98904e', '#5a7a40', '#b89858'][k % 4], cast: false, warp: v => { v.x += 0.02 * Math.sin(v.y * 30 + k); } }); K.add(mat('rope'), new THREE.TorusGeometry(0.03, 0.01, 3, 6), { uv: 'keep', at: matrix(x, y + 0.34, 0.1, 0, Math.PI / 2), cast: false }); }
   } else if (kind === 'shoes') {
     K.box(mat('wood_light'), 1.2, 0.5, 0.05, 0, y, 0.03, { tint: '#a08060', cast: false });
     for (let k = 0; k < 6; k++) K.add(iron, new THREE.TorusGeometry(0.09, 0.018, 4, 10, Math.PI * 1.5), { uv: 'keep', at: matrix(-0.45 + (k % 3) * 0.45, y + 0.12 - Math.floor(k / 3) * 0.24, 0.07, 0, 0, Math.PI * 0.75), tint: '#9a9aa4', cast: false });
