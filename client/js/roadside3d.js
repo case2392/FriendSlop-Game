@@ -1242,8 +1242,9 @@ function buildCrash(B, p, parts, ctx, decor) {
       return [x, B.ground(x, z) + 0.1 + bunch + fold, z];
     }, { flip: true, uv: (u, v) => [u * 2 * hw / 3, v * 2.2], noAO: true });
     // patches stitched over its tears
-    for (const [px, pz, w, h, m] of [[-0.8, r0 + 0.6, 1.0, 0.8, 'rs_canvas_blue'], [0.9, r0 + 1.8, 0.8, 1.1, 'rs_burlap'], [0.2, r0 - 0.7, 0.9, 0.6, 'rs_canvas_blue']]) {
-      B.grid(m + '~', 3, 3, (u, v) => { const x = px + (u - 0.5) * w, z = pz + (v - 0.5) * h; return [x, B.ground(x, z) + 0.17 + 0.35 * Math.exp(-(((z - (r0 - 1.3)) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(x * 2.3 + ph)) + 0.09 * Math.sin(x * 3.1 + ph) * smooth(r0 - 0.5, r0 + 1, z), z]; }, { flip: true, uv: (u, v) => [u * w, v * h], noAO: true, lod0: true });
+    // (in the wreck's own doped canvas, so they cost no extra draw calls)
+    for (const [px, pz, w, h, tn] of [[-0.8, r0 + 0.6, 1.0, 0.8, [0.7, 0.8, 0.95]], [0.9, r0 + 1.8, 0.8, 1.1, [0.95, 0.85, 0.65]], [0.2, r0 - 0.7, 0.9, 0.6, [0.7, 0.8, 0.95]]]) {
+      B.grid('rs_wing', 3, 3, (u, v) => { const x = px + (u - 0.5) * w, z = pz + (v - 0.5) * h; return [x, B.ground(x, z) + 0.17 + 0.35 * Math.exp(-(((z - (r0 - 1.3)) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(x * 2.3 + ph)) + 0.09 * Math.sin(x * 3.1 + ph) * smooth(r0 - 0.5, r0 + 1, z), z]; }, { flip: true, uv: (u, v) => [u * w / 1.6, v * h / 1.6], noAO: true, lod0: true, tint: tn });
     }
     // its rigging, still tied to the wreck
     const wreck = B.loc({ x: d.x, y: d.y, z: d.z, ry: 0 });

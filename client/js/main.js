@@ -14,7 +14,7 @@ import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
-import { zoneText, uiText } from './labels.js';
+import { zoneText, uiText, portraitAttrs } from './labels.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -409,7 +409,7 @@ net.on('meta', m => {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<div class="pm" style="--c:${p.color}"><span class="pf"><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i></span></div>`).join('');
+  $('roster').innerHTML = m.players.map(p => `<div class="pm" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i></span></div>`).join('');
 });
 net.on('s', m => {
   if (!S.W || worldBuilding) return;

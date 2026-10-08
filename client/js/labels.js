@@ -8,15 +8,18 @@
 //                                  34..39:  a small outlined object name (casino buttons)
 //                                  <  34:   a small painted wooden placard (status lines)
 //                                  known NPC names get a WoW "<Title>" line under the name.
-//                                  Every label is capped to a fixed size on screen, so a
-//                                  close one never covers a wall.
+//                                  Names keep a fixed size on screen (fading out past 35 m);
+//                                  everything else is capped, so a close one never covers a
+//                                  wall; buttons name only the one nearest the crosshair.
 //   zoneText(title, sub)           the big gold WoW zone text that fades in when a day starts
 //   uiText(s)                      strips emoji (the WoW UI has none) and turns emote toasts into "You laugh."
+//   portraitAttrs(color, id)       attributes for a roster portrait: the player's character, rendered
 //
 // On import this module also (1) waits for the vendored fonts and redraws any
 // sprite drawn before they arrived, (2) paints the UI textures in paint/ui.js
-// and exposes them to style.css as --tx-* custom properties (the title painting
-// in stages, so the menu stays responsive), and (3) keeps emoji out of the prompt.
+// and exposes them to style.css as --tx-* custom properties, (3) builds the title
+// screen (a painted backdrop, then a lit diorama of the game's own RV, trees and
+// road rendered once offscreen over it), and (4) keeps emoji out of the prompt.
 import * as THREE from '/vendor/three.module.js';
 import { canvasTex, tex, painted } from './gfx.js';
 import { canvasFor, hashStr, rngFrom } from './paint/index.js';
@@ -87,6 +90,8 @@ const SKIN_REST = [
   ['endcap', 'ui_endcap'], ['seal', 'ui_seal'], ['ring', 'ui_ring'],
   ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'key', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt', 'ping']
     .map(n => [`ico-${n}`, `ui_ico_${n}`]),
+  ...['sun', 'hourglass', 'coin', 'scroll', 'hook', 'key', 'mic', 'micoff', 'speaker', 'speakeroff', 'gear', 'close', 'walkie']
+    .map(n => [`slot-${n}`, `ui_slot_${n}`]),
 ];
 // as a blob URL, decoded before the custom property is set, so first use never paints empty
 function publish(key, cv, type = 'image/png', done = null) {
@@ -124,11 +129,11 @@ function paintList(list, next) {
 // shifted to 60% down the frame (verticals stay vertical, like a painting). Golden hour on
 // the meadow (atmosphere.js keys), the sun low on the left.
 const DIO = {
-  fov: 36, eye: 2.4, hz: 0.6,
-  sun: [-0.62, 0.42, 0.36], sunC: '#ffd49a', sunI: 2.05, sky: '#e6e0cf', gnd: '#6a7a42', hemiI: 1.7,
-  fog: '#b2b994', fogNear: 45, fogFar: 430, fade: [70, 200],
-  road: [[1.4, 10], [0.8, -2], [-0.4, -9], [-2.4, -16], [-5.4, -22], [-8.6, -28], [-10.6, -36], [-10.4, -46], [-7.6, -58], [-3.4, -74], [0.8, -98], [2.2, -136], [0.8, -190], [-0.4, -300], [0, -700]],
-  rvZ: -27.5,
+  fov: 36, eye: 3.4, hz: 0.6,
+  sun: [-0.5, 0.56, 0.66], sunC: '#ffd08e', sunI: 2.2, sky: '#efe2c6', gnd: '#6a7a42', hemiI: 1.8,
+  fog: '#bcc09c', fogNear: 60, fogFar: 520, fade: [80, 230],
+  road: [[0.4, 8], [0.9, -4], [1.4, -14], [0.6, -21], [-1.6, -26.5], [-5, -31.5], [-9.4, -35.4], [-14.2, -39.4], [-18.2, -45.5], [-19, -55], [-15.6, -70], [-9, -90], [-3, -120], [0.6, -170], [0, -260], [-1, -420], [0, -800]],
+  rvZ: -35.4,
 };
 const tick = () => new Promise(r => setTimeout(r, 0));
 const menuShown = () => { const m = document.getElementById('menu'); return !!m && !m.classList.contains('hidden'); };
@@ -188,7 +193,7 @@ function roadMesh(curve, hw, fade) {
   }
   for (let i = 0; i < N; i++) for (let k = 0; k < U.length - 1; k++) {
     const a = i * U.length + k, b = a + U.length;
-    idx.push(a, a + 1, b, a + 1, b + 1, b);
+    idx.push(a, b, a + 1, a + 1, b, b + 1);
   }
   const geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
@@ -196,7 +201,7 @@ function roadMesh(curve, hw, fade) {
   geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
   geo.setAttribute('color', new THREE.Float32BufferAttribute(col, 4));
   geo.setIndex(idx);
-  const m = fadeMat({ map: tex('road_meadow'), vertexColors: true, transparent: true, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }, fade);
+  const m = fadeMat({ map: tex('road_meadow'), vertexColors: true, transparent: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }, fade);
   const mesh = new THREE.Mesh(geo, m);
   mesh.receiveShadow = true; mesh.renderOrder = 1;
   return { mesh, P };
@@ -308,11 +313,8 @@ function dustTexture() {
 
 // Builds and renders the diorama at W x H; resolves to a canvas with a transparent sky.
 async function renderDiorama(W, H) {
-  const dbg = s => { (window.__dio ||= []).push(s + ' ' + Math.round(performance.now())); };
-  dbg('start');
-  const [nat, rvm] = await Promise.all([import('./nature3d.js'), import('./rv3d.js')]);
+  const [nat, rvm, ppl] = await Promise.all([import('./nature3d.js'), import('./rv3d.js'), import('./people.js').catch(() => null)]);
   if (!menuShown()) return null;
-  dbg('imported');
   const scene = new THREE.Scene();
   scene.fog = new THREE.Fog(DIO.fog, DIO.fogNear, DIO.fogFar);
   scene.add(new THREE.HemisphereLight(DIO.sky, DIO.gnd, DIO.hemiI));
@@ -332,7 +334,6 @@ async function renderDiorama(W, H) {
   scene.add(ground);
   const { mesh: road, P } = roadMesh(curve, 4.7, DIO.fade);
   scene.add(road);
-  dbg('ground');
   await tick();
 
   // the road's x at a given z, and the distance off it
@@ -342,55 +343,66 @@ async function renderDiorama(W, H) {
 
   // the nature: the framing oak, pines on the right, oaks and pines further off, rocks, bushes, a fence
   const decor = [
-    { k: 'oak', x: -6.2, z: -14.5, s: 1.45, ry: 2.2 },
-    { k: 'pine', x: 5.6, z: -10.5, s: 1.55, ry: 0.4 },
-    { k: 'pine', x: 8.6, z: -21, s: 1.25, ry: 1.9 },
-    { k: 'pine', x: 13.5, z: -33, s: 1.1, ry: 3.1 },
-    { k: 'pine', x: 4.6, z: -46, s: 1.0, ry: 0.8 },
-    { k: 'oak', x: 16, z: -62, s: 1.2, ry: 0.5 },
-    { k: 'oak', x: -24, z: -70, s: 1.3, ry: 4.1 },
-    { k: 'pine', x: -19, z: -54, s: 1.05, ry: 2.6 },
-    { k: 'pine', x: -30, z: -96, s: 1.2, ry: 1.1 },
-    { k: 'oak', x: 26, z: -110, s: 1.4, ry: 5.2 },
-    { k: 'rock', x: 4.4, z: -17.5, s: 1.5, ry: 0.6 },
-    { k: 'rock', x: -3.6, z: -10.6, s: 0.8, ry: 2.2 },
-    { k: 'rock', x: -15, z: -34, s: 1.8, ry: 1.4 },
-    { k: 'rock', x: 9.5, z: -40, s: 1.3, ry: 4.4 },
-    { k: 'bush', x: -4.4, z: -18, s: 1.0, ry: 0.3 },
-    { k: 'bush', x: 3.2, z: -13, s: 0.9, ry: 1.3 },
-    { k: 'bush', x: -14, z: -26, s: 1.1, ry: 2.2 },
-    { k: 'bush', x: 2.6, z: -30, s: 1.0, ry: 0.9 },
-    { k: 'stump', x: -8.4, z: -21.5, s: 1.0, ry: 0.7 },
-    { k: 'fence', x: 4.3, z: -24, len: 6, ry: 1.25 },
-    { k: 'fence', x: 2.4, z: -33, len: 6, ry: 1.0 },
+    { k: 'oak', x: -6.4, z: -14.2, s: 1.0, ry: 2.6 },
+    { k: 'pine', x: 9.4, z: -17.5, s: 1.2, ry: 0.4 },
+    { k: 'pine', x: 10.6, z: -28, s: 1.1, ry: 1.9 },
+    { k: 'pine', x: 15, z: -40, s: 1.15, ry: 3.1 },
+    { k: 'pine', x: 7.2, z: -52, s: 0.9, ry: 0.8 },
+    { k: 'oak', x: 21, z: -66, s: 1.15, ry: 0.5 },
+    { k: 'oak', x: -30, z: -66, s: 1.25, ry: 4.1 },
+    { k: 'pine', x: -26, z: -48, s: 1.05, ry: 2.6 },
+    { k: 'pine', x: -34, z: -92, s: 1.2, ry: 1.1 },
+    { k: 'oak', x: 30, z: -112, s: 1.4, ry: 5.2 },
+    { k: 'oak', x: -6, z: -150, s: 1.3, ry: 2.2 },
+    { k: 'rock', x: 7.6, z: -29, s: 1.7, ry: 0.6 },
+    { k: 'rock', x: -5.2, z: -12.6, s: 0.7, ry: 2.2 },
+    { k: 'rock', x: -21, z: -36, s: 1.6, ry: 1.4 },
+    { k: 'rock', x: 12.5, z: -46, s: 1.3, ry: 4.4 },
+    { k: 'bush', x: -3.8, z: -17.6, s: 0.9, ry: 0.3 },
+    { k: 'bush', x: 4.4, z: -14, s: 0.9, ry: 1.3 },
+    { k: 'bush', x: -12.5, z: -30, s: 1.1, ry: 2.2 },
+    { k: 'bush', x: 5.4, z: -36, s: 1.0, ry: 0.9 },
+    { k: 'stump', x: -9.6, z: -22.5, s: 1.0, ry: 0.7 },
+    { k: 'fence', x: 4.6, z: -20.5, len: 6, ry: 1.35 },
+    { k: 'fence', x: 4.0, z: -27, len: 6, ry: 1.05 },
   ];
+  // a forest edge across the far fields, thinning toward the road
+  for (let i = 0; i < 40; i++) {
+    const side = i % 2 ? 1 : -1, z = -R(100, 240), x = rx(z) + side * R(0.1, 0.55) * -z;
+    if (Math.abs(x - rx(z)) < 12) continue;
+    decor.push({ k: rnd() < 0.55 ? 'oak' : 'pine', x, z, s: R(1.0, 1.5), ry: R(0, 6.28) });
+  }
   const nature = nat.buildNature({ biome: 'meadow', decor: decor.map(d => ({ y: 0, ...d })), cyls: [], anchors: [], heightAt: () => 0 });
   nature.update?.(0.016, 1.3, new THREE.Vector3(0, DIO.eye, 0));
   scene.add(nature.group);
-  dbg('nature');
   await tick();
   if (!menuShown()) return null;
 
   // the RV, coming down the road toward us
   const rv = rvm.PREVIEW.rv();
-  const u = (() => { let best = 0, bd = 1e9; for (let i = 0; i <= 200; i++) { const p = curve.getPointAt(i / 200); const d = Math.abs(p.z - DIO.rvZ); if (d < bd) { bd = d; best = i / 200; } } return best; })();
+  const u = (() => { let best = 0, bd = 1e9; for (let i = 0; i <= 3000; i++) { const p = curve.getPointAt(i / 3000); const d = Math.abs(p.z - DIO.rvZ); if (d < bd) { bd = d; best = i / 3000; } } return best; })();
   const at = curve.getPointAt(u), tg = curve.getTangentAt(u);
   rv.position.set(at.x, 0, at.z);
   rv.rotation.y = Math.atan2(-tg.x, -tg.z);       // the curve runs away from us; the RV faces back down it
   scene.add(rv);
   // dust kicked up behind it, back along the road
   const dmap = dustTexture();
-  for (let i = 0; i < 9; i++) {
-    const p = curve.getPointAt(Math.max(0, u - 0.004 - i * 0.0035));
-    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dmap, color: i % 2 ? '#e8d2a6' : '#d9bf94', transparent: true, opacity: 0.32 - i * 0.022, depthWrite: false, fog: true }));
-    const s = 2.4 + i * 0.7;
-    sp.position.set(p.x + R(-0.8, 0.8), s * 0.32, p.z);
-    sp.scale.set(s * 1.5, s, 1);
+  for (let i = 0; i < 10; i++) {
+    const p = curve.getPointAt(Math.max(0, u + 0.006 + i * 0.004));
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: dmap, color: i % 2 ? '#ecd8b0' : '#d8c096', transparent: true, opacity: 0.26 - i * 0.02, depthWrite: false, fog: true }));
+    const s = 1.4 + i * 0.32;
+    sp.position.set(p.x + R(-0.6, 0.6), s * 0.34, p.z + R(-0.6, 0.6));
+    sp.scale.set(s * 1.6, s, 1);
     sp.renderOrder = 3;
     scene.add(sp);
   }
-  scene.add(signpost(4.6, -14.2, -0.35));
-  dbg('rv');
+  scene.add(signpost(5.2, -19.5, -0.5));
+  // the boys: one riding on the roof, one walking alongside
+  try {
+    const P = ppl?.PREVIEW;
+    if (P?.sitter) { const c = P.sitter(); c.position.set(0.55, 2.92, 3.55); rv.add(c); }
+    if (P?.walking) { const c = P.walking(); c.position.set(-2.4, 0, 3.3); c.rotation.y = -0.1; rv.add(c); }
+  } catch (e) { console.warn('title: crew', e.message); }
   await tick();
   if (!menuShown()) return null;
 
@@ -406,34 +418,31 @@ async function renderDiorama(W, H) {
     const r = rnd(), cell = verge ? (r < 0.4 ? 0 : r < 0.7 ? 6 : r < 0.85 ? 1 : 4) : (r < 0.3 ? 0 : r < 0.5 ? 1 : r < 0.62 ? 4 : r < 0.72 ? 6 : r < 0.8 ? 5 : r < 0.88 ? 7 : r < 0.95 ? 2 : 3);
     spots.push({ x, z, s: R(0.5, 0.95) * (cell === 4 ? 1.25 : 1), cell, rot: R(0, Math.PI) });
   }
-  scene.add(clutterMesh(spots, clutterTexture()));
+  const tufts = clutterMesh(spots, clutterTexture());
+  scene.add(tufts);
 
   scene.traverse(o => { if (o.isMesh && o !== ground && o !== road) { o.castShadow = true; o.receiveShadow = true; } });
+  tufts.castShadow = false;
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   const r = new THREE.WebGLRenderer({ canvas: cv, antialias: true, alpha: true, preserveDrawingBuffer: true });
   try {
     r.setPixelRatio(1); r.setSize(W, H, false);
     r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.NoToneMapping;
-    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFSoftShadowMap;
+    r.shadowMap.enabled = true; r.shadowMap.type = THREE.PCFShadowMap;
     r.setClearColor(0x000000, 0);
     const fullH = H * 2 * DIO.hz;
     const cam = new THREE.PerspectiveCamera(DIO.fov, W / fullH, 0.1, 1500);
     cam.setViewOffset(W, fullH, 0, 0, W, H);
     cam.position.set(0, DIO.eye, 0); cam.lookAt(0, DIO.eye, -10);
     cam.updateMatrixWorld();
-    dbg('compile');
-    await r.compileAsync?.(scene, cam).catch(() => {});
-    dbg('compiled');
+    r.compile(scene, cam);
+    await tick();
     if (!menuShown()) return null;
     r.render(scene, cam);
-    dbg('rendered');
     const out = document.createElement('canvas');
     out.width = W; out.height = H;
     out.getContext('2d').drawImage(cv, 0, 0);
-    // where the RV sits on screen, for the painted dust and light around it
-    const v = new THREE.Vector3(at.x, 1.6, at.z).project(cam);
-    out.rv = [(v.x + 1) / 2 * W, (1 - v.y) / 2 * H];
     return out;
   } finally {
     r.dispose(); r.forceContextLoss();
@@ -441,18 +450,16 @@ async function renderDiorama(W, H) {
 }
 
 // The title, in stages so the menu stays responsive: the painted backdrop (a stage per
-// task), the diorama, the finishing glaze; published once. 1280 x 720, or 1600 x 900 on
-// big screens (the backdrop is painted at 1280 and scaled; the diorama renders at size).
-async function paintMenu() {
+// task; shown at once as a quiet meadow), then the diorama over it, faded in when ready.
+// 1280 x 720, or 1600 x 900 on big screens (the backdrop is painted at 1280 and scaled;
+// the diorama renders at size). Without WebGL, the whole scene is painted in 2D.
+async function paintMenu(afterBackdrop) {
   const big = (window.devicePixelRatio || 1) * window.innerWidth > 1400;
-  const W = big ? 1600 : 1280, H = big ? 900 : 720;
-  const bw = 1280, bh = 720;
+  const W = big ? 1600 : 1280, H = big ? 900 : 720, bw = 1280, bh = 720;
   const back = document.createElement('canvas');
   back.width = bw; back.height = bh;
   const bg = back.getContext('2d');
   bg.fillStyle = '#7f7f7f'; bg.fillRect(0, 0, bw, bh);
-  const rnd = rngFrom('ui_menu_bg');
-  let full = false;
   const run = async it => {
     for (;;) {
       const t0 = performance.now();
@@ -462,25 +469,117 @@ async function paintMenu() {
       await tick();
     }
   };
-  await run(paintVista(bg, bw, bh, rnd, { full: false }));
-  let dio = null;
-  try { dio = await renderDiorama(W, H); }
-  catch (e) { console.warn('ui skin: title diorama unavailable, painting it instead:', e.message); }
-  if (!dio) {
-    if (!menuShown()) return;
-    full = true;
-    const it = paintVista(bg, bw, bh, rngFrom('ui_menu_bg'), { full: true });
-    await run(it);
+  const finish = (src, scale) => {
+    const cv = document.createElement('canvas');
+    cv.width = W; cv.height = H;
+    const g = cv.getContext('2d');
+    g.drawImage(back, 0, 0, W, H);
+    if (src) g.drawImage(src, 0, 0);
+    g.save(); g.scale(W / bw, H / bh); finishVista(g, bw, bh, rngFrom('ui_menu_finish'), { sat: scale }); g.restore();
+    return cv;
+  };
+  await run(paintVista(bg, bw, bh, rngFrom('ui_menu_bg'), { full: false }));
+  let dio = null, err = null;
+  // ?title=painted skips the diorama (to check the all-2D fallback)
+  const painted2d = new URLSearchParams(location.search).get('title') === 'painted';
+  const pending = painted2d ? Promise.resolve(null) : renderDiorama(W, H).catch(e => { err = e; return null; });
+  await tick();
+  publish('menu', finish(null, 0.14), 'image/jpeg');
+  afterBackdrop?.();
+  dio = await pending;
+  if (dio) {
+    publish('menu-final', finish(dio, 0.05), 'image/jpeg', () => {
+      document.getElementById('menu')?.classList.add('art-final');
+      document.documentElement.dataset.menuArt = 'diorama';
+    });
+    return;
   }
+  if (!menuShown()) return;
+  if (err) console.warn('ui skin: title diorama unavailable, painting it instead:', err.message);
+  await run(paintVista(bg, bw, bh, rngFrom('ui_menu_bg'), { full: true }));
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
-  const g = cv.getContext('2d');
-  g.drawImage(back, 0, 0, W, H);
-  if (dio) {
-    g.drawImage(dio, 0, 0);
-    g.save(); g.scale(W / bw, H / bh); finishVista(g, bw, bh, rngFrom('ui_menu_finish')); g.restore();
+  cv.getContext('2d').drawImage(back, 0, 0, W, H);
+  publish('menu-final', cv, 'image/jpeg', () => {
+    document.getElementById('menu')?.classList.add('art-final');
+    document.documentElement.dataset.menuArt = 'painted';
+  });
+}
+
+if (typeof document !== 'undefined' && document.getElementById('game')) {
+  // the menu card's pieces, the title's backdrop, then the in-game skin (while the diorama builds)
+  let rest = false;
+  const paintRest = () => { if (!rest) { rest = true; paintList(SKIN_REST); } };
+  paintList(SKIN_FIRST, () => paintMenu(paintRest).catch(e => console.warn('ui skin: menu', e.message)).finally(paintRest));
+  watchText();
+}
+
+// ---- party portraits ------------------------------------------------------------------------
+//
+// WoW unit-frame portraits: each player's real character (people.js), head and shoulders,
+// rendered once in a small offscreen WebGL canvas over a dark vignette in their color, and
+// cached as a data URL. portraitAttrs(color, id) gives the roster's portrait element its
+// attributes; until the picture is ready the frame shows the player's initial.
+const PORTRAITS = new Map();      // key -> data URL, '' while pending or if it failed
+const portraitJobs = [];
+let portraitBusy = false;
+export function portraitAttrs(color, id) {
+  const key = `${id}|${color}`;
+  if (!PORTRAITS.has(key)) { PORTRAITS.set(key, ''); portraitJobs.push({ key, color, id }); setTimeout(pumpPortraits, 0); }
+  const url = PORTRAITS.get(key);
+  return ` data-pk="${key}"` + (url ? ` data-pic="1" style="--pic:url(${url})"` : '');
+}
+async function pumpPortraits() {
+  if (portraitBusy || !portraitJobs.length) return;
+  portraitBusy = true;
+  let r = null;
+  try {
+    const ppl = await import('./people.js');
+    while (portraitJobs.length) {
+      await new Promise(res => (window.requestIdleCallback || (f => setTimeout(f, 30)))(res, { timeout: 1500 }));
+      const job = portraitJobs.shift();
+      try {
+        r ||= new THREE.WebGLRenderer({ canvas: document.createElement('canvas'), antialias: true, alpha: true, preserveDrawingBuffer: true });
+        const url = renderPortrait(r, ppl, job);
+        PORTRAITS.set(job.key, url);
+        for (const el of document.querySelectorAll('.pf[data-pk]')) if (el.dataset.pk === job.key) { el.style.setProperty('--pic', `url(${url})`); el.dataset.pic = '1'; }
+      } catch (e) { console.warn('portrait:', e.message); }
+    }
+  } catch (e) { console.warn('portraits unavailable:', e.message); }
+  finally {
+    if (r) { r.dispose(); r.forceContextLoss(); }
+    portraitBusy = false;
+    if (portraitJobs.length) setTimeout(pumpPortraits, 0);
   }
-  publish('menu', cv, 'image/jpeg', () => { document.documentElement.dataset.menuArt = full ? 'painted' : 'diorama'; });
+}
+function renderPortrait(r, ppl, { color, id }) {
+  const S = 96;
+  r.setPixelRatio(1); r.setSize(S, S, false);
+  r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.NoToneMapping; r.setClearColor(0x000000, 0);
+  const ch = ppl.buildCharacter(color, { hatIndex: id % 6, skinIndex: (id * 7) % 6, variant: id % 6 });
+  ch.driven = true;
+  const scene = new THREE.Scene();
+  scene.add(new THREE.HemisphereLight('#f0e4cc', '#4a3a2a', 1.7));
+  const key = new THREE.DirectionalLight('#ffe2b4', 2.3); key.position.set(-1.4, 1.6, 2.2); scene.add(key);
+  const back = new THREE.DirectionalLight('#9ab0ff', 1.1); back.position.set(1.6, 0.9, -1.6); scene.add(back);
+  scene.add(ch.root);
+  ch.root.updateMatrixWorld(true);
+  const head = new THREE.Vector3();
+  ch.head.getWorldPosition(head);
+  const cam = new THREE.PerspectiveCamera(28, 1, 0.05, 20);
+  const look = head.clone().add(new THREE.Vector3(0, 0.03, 0));
+  cam.position.copy(look).add(new THREE.Vector3(0.32, 0.06, 0.95));
+  cam.lookAt(look);
+  r.render(scene, cam);
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = S;
+  const g = cv.getContext('2d');
+  const bg = g.createRadialGradient(S * 0.45, S * 0.4, 4, S / 2, S / 2, S * 0.62);
+  const [cr, cg, cb] = hexRgb(soft(color));
+  bg.addColorStop(0, `rgb(${cr * 0.35 + 40},${cg * 0.35 + 30},${cb * 0.35 + 24})`); bg.addColorStop(1, '#0c0806');
+  g.fillStyle = bg; g.fillRect(0, 0, S, S);
+  g.drawImage(r.domElement, 0, 0);
+  return cv.toDataURL('image/png');
 }
 
 // ---- zone text ----------------------------------------------------------------------------
@@ -538,7 +637,7 @@ function classColor(c) {
   const [wr, wg, wb] = [0xff, 0xf2, 0xd0].map(v => v / 255);
   return toHex((r * 0.75 + wr * 0.25) * 255, (g * 0.75 + wg * 0.25) * 255, (b * 0.75 + wb * 0.25) * 255);
 }
-const darker = (c, k) => { const [r, g, b] = hexRgb(c); return toHex(r * k, g * k, b * k); };
+const lighter = (c, k) => { const [r, g, b] = hexRgb(c); return toHex(r + (255 - r) * k, g + (255 - g) * k, b + (255 - b) * k); };
 
 // Townsfolk get WoW nameplates: "Name" over "<Title>", colored by how they feel about you.
 const NPCS = {
@@ -606,11 +705,15 @@ export function textCanvas(lines, { w = 512, h = 256, bg = '#fff', fg = '#111', 
 
 // ---- sprites --------------------------------------------------------------------------------
 
-// WoW nameplate lettering: one thin dark outline and a 1px shadow down-right.
+// WoW nameplate lettering: a soft dark halo, one dark outline, then the fill.
 function outlined(g, text, x, y, fill, size) {
-  const ow = Math.max(2.5, size * 0.08);
+  const ow = Math.max(3.5, size * 0.11);
   g.lineJoin = 'round'; g.miterLimit = 2;
-  g.fillStyle = 'rgba(0,0,0,0.6)'; g.fillText(text, x + Math.max(1, size * 0.03), y + Math.max(1, size * 0.03));
+  g.save();
+  g.shadowColor = 'rgba(0,0,0,0.45)'; g.shadowBlur = 4; g.shadowOffsetY = 1;
+  g.lineWidth = ow; g.strokeStyle = 'rgba(6,4,3,0.92)'; g.strokeText(text, x, y);
+  g.restore();
+  g.fillStyle = 'rgba(0,0,0,0.5)'; g.fillText(text, x + Math.max(1, size * 0.03), y + Math.max(1, size * 0.03));
   g.lineWidth = ow; g.strokeStyle = 'rgba(6,4,3,0.92)'; g.strokeText(text, x, y);
   g.fillStyle = fill; g.fillText(text, x, y);
 }
@@ -679,7 +782,7 @@ function drawNpcPlate(g, W, H, name, title, color) {
   const s1 = fitFont(g, name, 58, W - 24);
   outlined(g, name, W / 2, H * 0.32, color, s1);
   const s2 = fitFont(g, title, Math.round(s1 * 0.82), W - 24);
-  outlined(g, title, W / 2, H * 0.76, darker(color, 0.86), s2);
+  outlined(g, title, W / 2, H * 0.76, lighter(color, 0.1), s2);
 }
 
 function drawIcon(g, W, H, name) {
@@ -691,9 +794,16 @@ function drawIcon(g, W, H, name) {
   g.restore();
 }
 
-// on-screen cap (sprite height in CSS px) per kind
-const CAP = { icon: 64, combat: 64, name: 40, npc: 70, button: 34, placard: 50 };
-const _p = new THREE.Vector3(), _c = new THREE.Vector3(), _sz = new THREE.Vector2();
+// Names (players and townsfolk) keep a fixed size on screen like WoW's: the sprite's
+// height in px at 720p (scaled with the window), fading out between 35 and 45 m.
+// Everything else scales with distance but is capped (CSS px) so a close one never
+// covers a wall. Clickable buttons show one name at a time: the one nearest the
+// crosshair within reach (the [E] prompt names the rest).
+const FIXED = { name: 24, npc: 44 };
+const CAP = { icon: 64, combat: 64, button: 34, placard: 50 };
+const NAME_FADE = [35, 45], BTN_REACH = 2.6;
+const BTN = { frame: -1, best: null, ang: Infinity, prev: null };
+const _p = new THREE.Vector3(), _c = new THREE.Vector3(), _f = new THREE.Vector3(), _sz = new THREE.Vector2();
 
 export function labelSprite(text, color = '#fff', px = 40) {
   const raw0 = String(text ?? '').trim();
@@ -703,6 +813,7 @@ export function labelSprite(text, color = '#fff', px = 40) {
   cv.width = W; cv.height = H;
   const tex = canvasTex(cv);
   const mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: true, fog: false });
+  if (px >= 34 && px < 40 && !npc0) mat.opacity = 0;      // buttons fade in when picked
   const sp = new THREE.Sprite(mat);
   sp.scale.set(2.4, 0.45, 1);
   if (npc0) sp.center.set(0.5, 0.1);                 // two-line plates grow upward, clear of the head
@@ -731,21 +842,34 @@ export function labelSprite(text, color = '#fff', px = 40) {
     if (!fontsReady) redrawWhenFonts.add(draw);
   };
   sp.userData.set(text, color);
-  // Keep the label a fixed size on screen once it gets close: the caller's scale
-  // is the size at a distance; nearer than that the sprite shrinks to stay under
-  // CAP[kind] pixels tall. Text labels keep the canvas's aspect.
   const ud = sp.userData;
   sp.onBeforeRender = (renderer, scene, camera) => {
     if (!ud.base || sp.scale.x !== ud.lx || sp.scale.y !== ud.ly) ud.base = sp.scale.clone();
-    let sx = ud.base.x, sy = kind === 'icon' ? ud.base.y : ud.base.x * H / W;
+    let sx = ud.base.x, sy = kind === 'icon' ? ud.base.y : ud.base.x * H / W, alpha = 1;
     if (camera.isPerspectiveCamera) {
       _p.setFromMatrixPosition(sp.matrixWorld);
       _c.setFromMatrixPosition(camera.matrixWorld);
       const d = Math.max(0.05, _p.distanceTo(_c));
-      renderer.getSize(_sz);
-      const onScreen = sy / (2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / (camera.zoom || 1)) * _sz.y;
-      if (onScreen > CAP[kind]) { const k = CAP[kind] / onScreen; sx *= k; sy *= k; }
+      const view = 2 * d * Math.tan(THREE.MathUtils.degToRad(camera.fov) / 2) / (camera.zoom || 1);   // world height of the screen at d
+      if (FIXED[kind]) {
+        sy = FIXED[kind] / 720 * view; sx = sy * W / H;
+        alpha = 1 - THREE.MathUtils.smoothstep(d, NAME_FADE[0], NAME_FADE[1]);
+      } else {
+        renderer.getSize(_sz);
+        const onScreen = sy / view * _sz.y;
+        if (onScreen > CAP[kind]) { const k = CAP[kind] / onScreen; sx *= k; sy *= k; }
+        if (kind === 'button') {
+          const fr = renderer.info.render.frame;
+          if (fr !== BTN.frame) { BTN.prev = BTN.best; BTN.frame = fr; BTN.best = null; BTN.ang = Infinity; }
+          camera.getWorldDirection(_f);
+          const ang = _f.angleTo(_p.sub(_c));
+          if (d < BTN_REACH && ang < BTN.ang) { BTN.ang = ang; BTN.best = sp; }
+          alpha = BTN.prev === sp ? THREE.MathUtils.clamp((BTN_REACH - d) / 0.8, 0, 1) : 0;
+        }
+      }
     }
+    if (kind === 'button') alpha = mat.opacity + (alpha - mat.opacity) * 0.35;
+    if (Math.abs(mat.opacity - alpha) > 0.002) mat.opacity = alpha;
     if (sx !== sp.scale.x || sy !== sp.scale.y) { sp.scale.set(sx, sy, 1); sp.updateMatrixWorld(); }
     ud.lx = sp.scale.x; ud.ly = sp.scale.y;
   };
