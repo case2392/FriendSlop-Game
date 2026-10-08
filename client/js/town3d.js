@@ -1111,7 +1111,7 @@ export function buildStructures(W) {
   const fctx = { glows, domes, styleName: style, casino: W.buildings.find(b => b.kind === 'casino'), slotTint: () => new THREE.Color('#ffffff').lerp(new THREE.Color(muteColor(slotCols[slotI++ % 5], { sMax: 0.5, lMin: 0.35, lMax: 0.6 })), 0.55).toArray() };
   for (const s of W.statics) {
     if (s.mat === 'invisible' || isRoadside(s) || s.bld !== undefined) continue;
-    if (s.part === 'shop_shelf' || s.part === 'rim_slab') continue;   // colliders only: town_build's shopShelves and rimCode draw these
+    if (s.part === 'shop_shelf' || s.part === 'rim_slab' || s.part === 'rock_ledge') continue;   // colliders only: town_build's shopShelves and rimCode draw these
     if (YARD_PARTS.has(s.part)) yardProp(s, batch, style, glows);
     else furniture(s, batch, fctx);
   }

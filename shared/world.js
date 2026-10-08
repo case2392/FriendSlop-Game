@@ -595,13 +595,15 @@ export function generateLeg(seed, day) {
       }
       // the span: players walk under it (2.35 m+ clear) but the RV, roof cargo and all, must not drive through
       const under = Math.max(1.7 * S, 2.35 + 0.36 * S) - 0.25 * S, top = Math.max(1.7 * S, 2.35 + 0.36 * S) + 0.35 * S;
-      box(d.x, d.y + (under + top) / 2, d.z, 1.5 * S, (top - under) / 2, 0.45 * S, d.ry, 'invisible', null, 'arch_span');
+      box(d.x, d.y + (under + top) / 2, d.z, 1.5 * S, (top - under) / 2, 0.62 * S, d.ry, 'invisible', null, 'arch_span');   // the lintel is 1.24 S wide
+    } else if (biome === 'badlands') {
+      // a ledge: a long 2:1 mesa block yawed with the rock (nature3d fills this box), top at 1.35 S
+      box(d.x, d.y + 0.6 * S, d.z, 1.3 * S, 0.75 * S, 0.7 * S, d.ry, 'rock', null, 'rock_ledge');
     } else if (green) {
       // low Elwynn/Westfall/Dun Morogh boulders and outcrops, about 0.7 S tall (the renderer follows the top)
       cyls.push({ x: d.x, y: d.y + S * 0.3, z: d.z, r: S * 0.8, hh: S * 0.4, mat: 'rock' });
     } else {
-      const tall = biome === 'badlands' ? 0.75 : 0.45;
-      cyls.push({ x: d.x, y: d.y + S * tall * 0.8, z: d.z, r: S * (biome === 'desert' ? 0.95 : 0.8), hh: S * tall, mat: 'rock' });
+      cyls.push({ x: d.x, y: d.y + S * 0.36, z: d.z, r: S * 0.95, hh: S * 0.45, mat: 'rock' });   // a desert mound
     }
   };
   for (let i = 0; i < nDecor; i++) {

@@ -20,8 +20,9 @@
 // Rock (tile; world-space triplanar, so v = height and strata stay level):
 //   rock_gray (meadow) rock_warm (fields) rock_granite (snow): big soft value planes, long fractures
 //     with a lit lip and a cool crease, chips, lichen
-//   rock_red (badlands) rock_sand (desert): horizontal strata, seamless in both directions (sand: wide
-//     soft layers, wind-scoured pits, drips)
+//   rock_red (badlands): a few broad beds (thick soft reds between thin hard cream beds with lit lips
+//     and undercuts), a down-dropped fault block, fissures, rain streaks; rock_sand (desert): wide soft
+//     layers, wind-scoured pits, drips. Both seamless in both directions
 // Top cover (tile; alpha = thickness mask, blended on up-facing surfaces by the nature shader):
 //   cover_moss cover_lichen cover_snow cover_dust cover_sand · snow_pack (opaque snow for snow caps)
 // Props: cactus_skin / cactus_dusty (tiles, 4 ribs), hay (tiles), hay_end (disc), stump_top (disc), bone_bleached (tiles),
@@ -343,12 +344,12 @@ const BUSH = {
 };
 // Westfall: olive and sun-baked gold, with rust autumn clumps
 const GOLD = {
-  deep: '#3c3630',
-  dark: ['#5a4c24', '#62522a'],
-  mid: ['#8c7a30', '#967f34', '#807430'],
-  lit: ['#b8983c', '#c2a244'],
-  tip: ['#d8bc5a', '#e2c664'],
-  rim: '#f0da86',
+  deep: '#4a3a2a',
+  dark: ['#6c5a2a', '#74602e'],
+  mid: ['#9a8a3a', '#a2903e', '#948436'],
+  lit: ['#c8a848', '#d0b050'],
+  tip: ['#e0c464', '#e8ce70'],
+  rim: '#f4de8c',
 };
 const RUST = {
   deep: '#3c2c2a',
@@ -359,12 +360,12 @@ const RUST = {
   rim: '#f4c878',
 };
 const OLIVE = {
-  deep: '#2e3430',
-  dark: ['#434a26', '#485028'],
-  mid: ['#687032', '#707836', '#626a30'],
-  lit: ['#929840', '#9ca246'],
-  tip: ['#bcb656', '#c6be5e'],
-  rim: '#dcd478',
+  deep: '#3e3a2a',
+  dark: ['#585626', '#5e5c2a'],
+  mid: ['#808238', '#888a3c', '#7a7c36'],
+  lit: ['#aca848', '#b4ae4e'],
+  tip: ['#ccc25e', '#d4ca66'],
+  rim: '#e4dc80',
 };
 const SAGE = {
   deep: '#3a3e40',
@@ -391,7 +392,7 @@ register('leaves_oak', {
 
 register('leaves_autumn', {
   family: F, size: 512, alpha: true, note: 'Westfall foliage: olive-gold clump (some rust), skirt, dense core, olive-gold bush',
-  paint: foliage(GOLD, OLIVE, [GOLD, GOLD, OLIVE, OLIVE, RUST], [OLIVE, OLIVE, GOLD]),
+  paint: foliage(GOLD, OLIVE, [GOLD, GOLD, GOLD, OLIVE, RUST], [OLIVE, GOLD, GOLD]),
 });
 
 // sage / scrub: small narrow gray-green leaves in solid clumps on a few visible brown twigs
@@ -1049,12 +1050,100 @@ function strata(g, s, rnd, cv, P) {
   glaze(g, s, s, P.glaze, 0.12, 'soft-light');
   jsBlur(cv, 0.7);
 }
+// Canyon strata for the Badlands' rocks, in the cliffs' language: a few broad bands of uneven
+// thickness that swell and pinch out, hard cream and orange beds standing proud (a lit lip on top, a
+// soft cool undercut shadow below) between softer red ones with faint bedding inside, a down-dropped
+// block between two faults, vertical fissures and rain streaks. Seamless both ways (every boundary is
+// periodic in x, the bands add up to the tile, and everything is drawn wrapped).
+function canyon(g, s, rnd, cv, P) {
+  // thick soft red beds between thin hard pale ones (the soft ones vary 2:1 or more)
+  const hs = [], hardOf = []; let tot = 0, i0 = 0;
+  while (tot < s - P.band[0] * 0.6) {
+    const hard = i0 % 2 === 1 && rnd() < 0.85, hh = hard ? range(rnd, P.hardBand[0], P.hardBand[1]) : range(rnd, P.band[0], P.band[1]);
+    hs.push(hh); hardOf.push(hard); tot += hh; i0++;
+  }
+  const k = s / tot;
+  // a down-dropped block between two faults (zero outside it, so it wraps)
+  const fx1 = range(rnd, 0.1, 0.45) * s, fx2 = fx1 + range(rnd, 0.25, 0.4) * s, fd = range(rnd, 4, 8);
+  const sm = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const fault = x => fd * (sm(fx1 - 3, fx1 + 3, x) - sm(fx2 - 3, fx2 + 3, x));
+  let y = -hs[0] * k * 0.4;
+  let ci = Math.floor(rnd() * P.cols.length);
+  const bands = hs.map((hh, i) => {
+    if (!hardOf[i]) ci = (ci + 1 + Math.floor(rnd() * (P.cols.length - 1))) % P.cols.length;      // never the same red twice running
+    const hard = hardOf[i], B = { y0: y, hh: hh * k, hard, c: hard ? pick(rnd, P.hard) : P.cols[ci], f: periodic(rnd, 4, 1.15, 1), amp: Math.min(hh * k * (hard ? 0.45 : 0.3), P.wob) };
+    y += hh * k; return B;
+  });
+  const n = bands.length;
+  const top = (i, x) => { const b = bands[((i % n) + n) % n], w = Math.floor(i / n); return b.y0 + w * s + b.f(fract01(x, s)) * b.amp + fault(fract01(x, s) * s); };
+  const pts = (i, dy, off = 0) => { const o = []; for (let x = -8; x <= s + 8; x += 4) o.push([x, top(i, x) + dy + off]); return o; };
+  // the beds: a lit top, the bed colour, a shaded foot
+  for (const dy of [-s, 0, s]) for (let i = 0; i < n; i++) {
+    const b = bands[i];
+    g.beginPath();
+    for (let x = -8; x <= s + 8; x += 4) g.lineTo(x, top(i, x) + dy);
+    for (let x = s + 8; x >= -8; x -= 4) g.lineTo(x, top(i + 1, x) + dy + 0.6);
+    g.closePath();
+    const gr = g.createLinearGradient(0, b.y0 + dy - 6, 0, b.y0 + b.hh + dy + 6);
+    gr.addColorStop(0, lightOf(b.c, b.hard ? 0.42 : 0.22)); gr.addColorStop(0.22, lightOf(b.c, 0.08)); gr.addColorStop(0.55, b.c);
+    gr.addColorStop(0.9, shadowOf(b.c, b.hard ? 0.3 : 0.18)); gr.addColorStop(1, shadowOf(b.c, 0.36));
+    g.fillStyle = gr; g.fill();
+  }
+  // big soft blotches across the beds
+  mottle(g, s, rnd, { colors: P.blot, count: 34, rmin: 24, rmax: 90, alpha: 0.2, hard: 0.1, stretch: 2.2, rot: 0 });
+  // faint bedding inside the thick soft beds
+  layer(g, s, s, tg => {
+    for (const dy of [-s, 0, s]) for (let i = 0; i < n; i++) {
+      const b = bands[i]; if (b.hard || b.hh < 52) continue;
+      const m = b.hh > 90 ? 2 : 1;
+      for (let q = 1; q <= m; q++) {
+        const t = q / (m + 1) + (rnd() - 0.5) * 0.12, o = [];
+        for (let x = -8; x <= s + 8; x += 4) o.push([x, top(i, x) * (1 - t) + top(i + 1, x) * t + dy]);
+        line(tg, o, 1.6, shadowOf(b.c, 0.4));
+        line(tg, o.map(([u, v]) => [u, v + 1.8]), 1.4, lightOf(b.c, 0.3), 0.6);
+      }
+    }
+  }, { alpha: 0.3, blur: 0.9 });
+  // under every hard bed: a soft cool undercut shadow; on its top: a lit cream lip
+  layer(g, s, s, tg => {
+    for (const dy of [-s, 0, s]) for (let i = 0; i < n; i++) {
+      if (!bands[i].hard) continue;
+      const o = pts(i + 1, dy, 5);
+      line(tg, o, 9, P.under);
+    }
+  }, { alpha: 0.42, blur: 3.5 });
+  layer(g, s, s, tg => {
+    for (const dy of [-s, 0, s]) for (let i = 0; i < n; i++) {
+      const b = bands[i], prev = bands[(i - 1 + n) % n];
+      if (!b.hard && !prev.hard) continue;                 // soft on soft: a gradient, no line
+      line(tg, pts(i, dy, -0.8), 2.2, shadowOf(prev.c, 0.5), b.hard ? 0.7 : 0.35);
+      if (b.hard) line(tg, pts(i, dy, 1.6), 2.6, lightOf(b.c, 0.5), 0.75);
+    }
+  }, { alpha: 0.6, blur: 1 });
+  // vertical fissures, a bed or two long
+  layer(g, s, s, tg => {
+    for (let q = 0; q < P.fissN; q++) {
+      const x = rnd() * s, y0 = rnd() * s, L = range(rnd, 40, 130), o = [];
+      for (let v = 0; v <= L; v += 10) o.push([x + Math.sin(v * 0.07 + x) * 3 + range(rnd, -1.2, 1.2), y0 + v]);
+      wrapPts(s, o, 6, Q => { line(tg, Q.map(([u, v]) => [u + 2, v]), 5, P.under, 0.5); line(tg, Q, 2, P.crack); line(tg, Q.map(([u, v]) => [u - 2, v]), 1.3, '#f2c898', 0.6); });
+    }
+  }, { alpha: 0.5, blur: 0.8 });
+  // rain streaks down from the hard beds, and pale wash
+  streaks(g, s, rnd, { colors: P.streak, count: P.streakN, len: [40, 160], width: [3, 10], angle: Math.PI, wobble: 0.06, alpha: 0.14 });
+  for (let i = 0; i < 18; i++) {
+    const x = rnd() * s, y2 = rnd() * s, r = range(rnd, 3, 8), c = pick(rnd, P.cols);
+    wrap(s, x, y2, r * 2, (X, Y) => { ellipse(g, X, Y, r, r * 0.65, 0, shadowOf(c, 0.55), 0.55); blob(g, X + r * 0.1, Y + r * 0.5, r * 0.9, r * 0.3, 0, lightOf(c, 0.55), 0.5, 0.5); });
+  }
+  glaze(g, s, s, P.glaze, 0.12, 'soft-light');
+  jsBlur(cv, 0.7);
+}
 register('rock_red', {
-  family: F, size: 512, note: 'Badlands strata: red-orange-ochre bands, lit ledges, erosion streaks (seamless)',
-  paint: (g, s, rnd, h, cv) => strata(g, s, rnd, cv, {
-    cols: ['#8e3e22', '#b4552f', '#cf7a45', '#e3a066', '#a8482a', '#c4683a', '#9a4a2c'], band: [18, 72], wob: 5, crease: 3.5, lines: 1,
-    blot: ['#d88a56', '#7a3420', '#c06a40', '#e8b07a'], streak: ['#5a2418', '#6a2c1c', '#f0b884'], streakN: 70, pock: 8,
-    crack: '#3e1a14', crackN: 8, glaze: '#ffd0a0',
+  family: F, size: 512, note: 'Badlands strata: a few broad red, orange and cream beds that pinch out, hard beds with lit lips and undercuts, a fault, fissures, rain streaks (seamless)',
+  paint: (g, s, rnd, h, cv) => canyon(g, s, rnd, cv, {
+    cols: ['#b65a32', '#9a4428', '#c06a3c', '#8c3c24', '#a8502e', '#c87444'], hard: ['#e6bc86', '#dca06a', '#eac898', '#d8925a'],
+    band: [70, 170], hardBand: [16, 40], wob: 9,
+    blot: ['#d88a56', '#7a3420', '#c06a40', '#e8b07a'], streak: ['#5a2418', '#6a2c1c', '#f0b884'], streakN: 46,
+    under: '#4a2228', crack: '#3e1a16', fissN: 5, glaze: '#ffd0a0',
   }),
 });
 // Tanaris sandstone: very wide, soft, low-contrast layers (so it can't read as planks), wind-scoured
@@ -1078,10 +1167,10 @@ register('rock_sand', {
       for (let k = 0; k < n; k++) {
         const x = cx + range(rnd, -34, 34), y = cy + range(rnd, -20, 20), r = range(rnd, 4, 15) * (k ? 0.75 : 1), ry = r * range(rnd, 0.55, 0.8);
         wrap(s, x, y, r * 2, (X, Y) => {
-          blob(g, X, Y - ry * 0.4, r * 1.3, ry * 1.2, 0, '#a07a52', 0.35, 0.3);
-          ellipse(g, X, Y, r, ry, 0, '#8e6a44', 0.9);
-          blob(g, X + r * 0.15, Y - ry * 0.2, r * 0.6, ry * 0.5, 0, '#6e5038', 0.6, 0.4);
-          blob(g, X, Y + ry * 0.85, r * 0.95, ry * 0.32, 0, '#f0dcb4', 0.75, 0.45);
+          blob(g, X, Y - ry * 0.4, r * 1.3, ry * 1.2, 0, '#a88258', 0.28, 0.3);
+          blob(g, X, Y, r, ry, 0, '#9c7650', 0.55, 0.55);
+          blob(g, X + r * 0.15, Y - ry * 0.2, r * 0.6, ry * 0.5, 0, '#86664a', 0.32, 0.4);
+          blob(g, X, Y + ry * 0.85, r * 0.95, ry * 0.32, 0, '#f0dcb4', 0.6, 0.45);
         });
       }
     }

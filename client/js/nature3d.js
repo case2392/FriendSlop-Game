@@ -4,7 +4,8 @@
 // The look is WoW Classic: chunky low-poly silhouettes (Elwynn groves round a huge hero oak: massive
 // warm boles on flared roots, gnarled limbs into wide domed crowns of big leaf lobes with ragged hanging
 // skirts; stacked drooping pine tiers; Badlands hoodoos lofted as one eroded column under a caprock,
-// angular strata ledges; wind-scoured sandstone), smooth shading, and the detail painted into textures
+// strata ledges as one fluted mesa block with a jutting prow and a cuesta top; Tanaris slab arches on
+// blocky stepped legs, wind-scoured sandstone mounds), smooth shading, and the detail painted into textures
 // (paint/nature.js). A canopy lobe is a ring of alpha leaf-cluster cards round one big camera-facing core
 // card, all with normals pointing out of the lobe, so it lights like a volume: warm on top, cool
 // underneath; the cards turn about the vertical to face the camera (in the shadow pass too, so shadows
@@ -14,7 +15,9 @@
 // up-facing surfaces (or where a per-vertex amount says so: the moss at the foot of an oak).
 //
 // Colliders: every solid thing keeps to the collider world gen gave it (tree boles, cacti, haybales, the
-// big rocks: see rockCol), checked by the "audit" preview (tools/preview.mjs audit x.png <biome>).
+// solid rocks: see rockCol; boulders are fitted slice by slice to their cylinders, tops included),
+// checked by the "audit" preview (tools/preview.mjs audit x.png <biome>): per kind, the worst gap and
+// overhang at 0.3-1.5 m and how far the collider's top stands off the rock's.
 //
 // Performance: everything static is built in world space and merged per (material, 600 m stretch of
 // road), so a whole leg of decor costs a few dozen draw calls however many trees there are; the rim tree
@@ -774,7 +777,7 @@ function oak(ctx, d, info = {}) {
   const cO = { x: shx * shk * Rc, z: shz * shk * Rc };         // the crown's centre, off the trunk axis
   const crowd = (ux, uz) => { let c = 0; for (const n of nb) c += n.w * Math.max(0, ux * n.ux + uz * n.uz); return Math.min(1, c); };
 
-  const F = (west ? range(rnd, 1.75, 2.05) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
+  const F = (west ? range(rnd, 1.5, 1.8) : hero ? range(rnd, 2.25, 2.6) : range(rnd, 2.35, 2.75)) * G;   // the fork
   const [gLo] = ctx.foot(rC * 2.4);
   const yBot = Math.min(-0.5, gLo - 0.35);
   const nR = 5 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU;
@@ -810,14 +813,14 @@ function oak(ctx, d, info = {}) {
   if (B.barkCover) bark.cf = (p, n) => 0;
 
   // ---- the crown's lobes
-  const Vc = Rc * (west ? 0.42 : 0.58), yB = F + 0.3 * G, Yc = yB + Vc;
+  const Vc = Rc * (west ? 0.5 : 0.58), yB = F + 0.3 * G, Yc = yB + Vc;      // (Westfall's a lower, broad dome: never a flat-bottomed acacia)
   const L = [];
   const nRing = hero ? 5 + (rnd() < 0.5 ? 1 : 0) : west ? 3 + (rnd() < 0.6 ? 1 : 0) : 4 + (rnd() < 0.3 ? 1 : 0);
   const ra0 = rnd() * TAU;
   for (let k = 0; k < nRing; k++) {
     const a = ra0 + (k + range(rnd, -0.2, 0.2)) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a), c = crowd(ux, uz);
     const r = Rc * range(rnd, 0.42, 0.56) * (1 - 0.35 * c), rho = (Rc - r * 0.95) * (1 - 0.3 * c);
-    L.push({ c: new V3(cO.x + ux * rho, Yc + range(rnd, -0.5, 0.1) * Vc, cO.z + uz * rho), r, ux, uz, ring: true });
+    L.push({ c: new V3(cO.x + ux * rho, Yc + (west ? range(rnd, -0.7, 0) : range(rnd, -0.5, 0.1)) * Vc, cO.z + uz * rho), r, ux, uz, ring: true });
   }
   // the top lobe, a little off centre
   L.push({ c: new V3(cO.x + range(rnd, -0.12, 0.12) * Rc, Yc + Vc * range(rnd, 0.32, 0.45), cO.z + range(rnd, -0.12, 0.12) * Rc), r: Rc * (west ? 0.48 : range(rnd, 0.5, 0.56)), top: true, ux: 0, uz: 0 });
@@ -1362,28 +1365,75 @@ const polyAng = (rnd, N, r, jit = 0.15, sx = 1, ev = 0) => {
 };
 
 // The collider world gen gave a rock (this mirrors shared/world.js rockCollide, steepness test
-// included, and prefers the real collider when one stands at the rock's centre). Only rocks with
-// s > 1.2 are solid; the visuals of those keep to their colliders: no invisible walls, and no rock
-// you can walk into (loose rubble round them stays under the 0.46 m step).
+// included, and prefers the real collider when one stands at the rock's centre). Hoodoos are always
+// solid (3-5 m whatever s is); other rocks over s 1.2 are solid, and so are the knee-to-waist
+// boulders (s 0.9-1.2) of the green and snowy days. The visuals keep to their colliders: no invisible
+// walls or steps, and no rock you can walk into (loose rubble round them stays under the 0.46 m step).
 function rockCol(ctx, d) {
   const W = ctx.W, bm = ctx.biome, s = d.s || 1;
   const S0 = s * (bm === 'badlands' ? 1.25 : 1), R = S0 * 1.1;
   let lo = Infinity, hi = -Infinity;
   for (const [dx, dz] of [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]]) { const h = W.heightAt ? W.heightAt(d.x + dx, d.z + dz) : 0; lo = Math.min(lo, h); hi = Math.max(hi, h); }
   const steep = hi - lo > 0.8 * S0, S = steep ? S0 * 0.75 : S0;
+  const green = bm === 'meadow' || bm === 'fields' || bm === 'snow';
   const out = { S, steep, big: s > 1.2 };
-  if (!out.big) return out;
   const c = (W.cyls || []).find(c => c.mat === 'rock' && Math.abs(c.x - d.x) < 0.02 && Math.abs(c.z - d.z) < 0.02);
   if (bm === 'badlands' && d.variant === 'hoodoo') {
     const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8));
     out.hoodoo = c ? { Ht: c.hh * 2, r: c.r } : { Ht, r: Math.max(0.55, Ht * 0.19) * 0.9 };
+    out.big = true;
+    return out;
+  }
+  if (!out.big) {
+    if (c) out.cyl = { r: c.r, top: c.y + c.hh - d.y };
+    else if (green && s > 0.9) out.cyl = { r: S * 0.75, top: S * 0.8 };
+    return out;
+  }
+  // a Badlands ledge may get an oriented box (part 'rock_ledge', yawed like the rock or not): its mesa
+  // then fills a long rounded rectangle instead of a circle
+  const bx = bm === 'badlands' ? (W.statics || []).find(q => q.part === 'rock_ledge' && Math.abs(q.x - d.x) < 0.05 && Math.abs(q.z - d.z) < 0.05) : null;
+  if (bx) {
+    out.box = { hx: bx.hx, hz: bx.hz, rot: (d.ry || 0) - (bx.ry || 0), top: bx.y + bx.hy - d.y };
   } else if (bm === 'desert' && d.variant === 'arch') {
     out.arch = { span: S * 1.9, r: S * 0.36 * 1.1, top: S * 1.6 };
   } else {
-    const tall = bm === 'badlands' ? 0.75 : bm === 'desert' ? 0.45 : 0.6;
-    out.cyl = c ? { r: c.r, top: c.y + c.hh - d.y } : { r: S * (bm === 'desert' ? 0.95 : 0.8), top: S * tall * 1.8 };
+    const tall = bm === 'badlands' ? 0.75 : bm === 'desert' ? 0.45 : 0.4;
+    out.cyl = c ? { r: c.r, top: c.y + c.hh - d.y } : { r: S * (bm === 'desert' ? 0.95 : 0.8), top: green ? S * 0.7 : S * tall * 1.8 };
   }
   return out;
+}
+
+// The highest surface of a mesh straight above each (x, z) sample (null where there's none).
+// get(i) -> [x, y, z] of vertex i.
+function surfTop(get, idx, samples) {
+  const out = samples.map(() => null);
+  for (let t = 0; t < idx.length; t += 3) {
+    const A = get(idx[t]), B = get(idx[t + 1]), C = get(idx[t + 2]);
+    const x0 = Math.min(A[0], B[0], C[0]), x1 = Math.max(A[0], B[0], C[0]), z0 = Math.min(A[2], B[2], C[2]), z1 = Math.max(A[2], B[2], C[2]);
+    const den = (B[2] - C[2]) * (A[0] - C[0]) + (C[0] - B[0]) * (A[2] - C[2]);
+    if (Math.abs(den) < 1e-12) continue;
+    samples.forEach(([x, z], i) => {
+      if (x < x0 || x > x1 || z < z0 || z > z1) return;
+      const l1 = ((B[2] - C[2]) * (x - C[0]) + (C[0] - B[0]) * (z - C[2])) / den, l2 = ((C[2] - A[2]) * (x - C[0]) + (A[0] - C[0]) * (z - C[2])) / den, l3 = 1 - l1 - l2;
+      if (l1 < -1e-6 || l2 < -1e-6 || l3 < -1e-6) return;
+      const y = l1 * A[1] + l2 * B[1] + l3 * C[1];
+      if (out[i] == null || y > out[i]) out[i] = y;
+    });
+  }
+  return out;
+}
+const discSamples = (cx, cz, r) => { const out = [[cx, cz]]; for (const f of [0.35, 0.6, 0.8]) for (let k = 0; k < 8; k++) { const a = (k + (f > 0.5 ? 0.5 : 0)) / 8 * TAU; out.push([cx + Math.cos(a) * r * f, cz + Math.sin(a) * r * f]); } return out; };
+// the top of a solid rock over its collider's disc: a little under the mean (its low side counts more)
+const topOf = hs => { const v = hs.filter(h => h != null); return v.length ? Math.min(...v) * 0.4 + (v.reduce((a, q) => a + q, 0) / v.length) * 0.6 : null; };
+
+// Raise or lower the top of a fitted rock (scaled, about its centre): its top over the collider's
+// disc lands at `want` (the collider's top), so there's no invisible step on it.
+function fitTop(P, idx, rIn, want) {
+  const low = topOf(surfTop(i => [P[i].x, P[i].y, P[i].z], idx, discSamples(0, 0, rIn)));
+  if (low == null || low < 0.05) return P;
+  const k = Math.max(0.45, Math.min(2.2, want / low));
+  for (const p of P) if (p.y > 0) p.y *= k;
+  return P;
 }
 
 // Squeeze or swell a rock shape (already scaled) in plan so the part of it at bumper height fills a
@@ -1408,6 +1458,61 @@ function fitPlan(P, target, keep = 0.22) {
   return P;
 }
 
+// A mesh's cross-section at height y, as its outermost radius per angle bin (from the triangles
+// the plane cuts, sampled along each cut); empty bins take their neighbours' values.
+function sectionExt(P, idx, y, NB = 24) {
+  const ext = new Array(NB).fill(0);
+  for (let t = 0; t < idx.length; t += 3) {
+    const hit = [];
+    for (let e = 0; e < 3; e++) {
+      const A = P[idx[t + e]], B = P[idx[t + (e + 1) % 3]];
+      if ((A.y - y) * (B.y - y) > 0 || A.y === B.y) continue;
+      const u = (y - A.y) / (B.y - A.y); hit.push([A.x + (B.x - A.x) * u, A.z + (B.z - A.z) * u]);
+    }
+    if (hit.length < 2) continue;
+    for (let q = 0; q <= 8; q++) {
+      const x = hit[0][0] + (hit[1][0] - hit[0][0]) * q / 8, z = hit[0][1] + (hit[1][1] - hit[0][1]) * q / 8;
+      const k = Math.round(((Math.atan2(z, x) + Math.PI) / TAU) * NB) % NB;
+      ext[k] = Math.max(ext[k], Math.hypot(x, z));
+    }
+  }
+  if (!ext.some(v => v > 0)) return null;
+  for (let k = 0; k < NB; k++) if (!ext[k]) {
+    let i = 1; while (!ext[(k - i + NB) % NB] && i < NB) i++;
+    let j = 1; while (!ext[(k + j) % NB] && j < NB) j++;
+    ext[k] = (ext[(k - i + NB) % NB] * j + ext[(k + j) % NB] * i) / (i + j);
+  }
+  return ext;
+}
+// The same, height by height: between yA and yB (the bumper band, about the rock's centre) every
+// slice of the rock is moved most of the way onto the circle, so it fills its collider at every
+// height there (with `bulge` a little proud at mid-height: a rounded boulder, not a drum); above and
+// below, the nearest slice's scaling carries on (the shoulder and the buried foot).
+function fitPlanY(P, idx, target, yA, yB, keep = 0.26, bulge = 0.06) {
+  const NB = 24, NY = 4;
+  for (let pass = 0; pass < 2; pass++) {
+    const ys = [], ext = [];
+    for (let j = 0; j < NY; j++) { const y = yA + (yB - yA) * j / (NY - 1); ys.push(y); ext.push(sectionExt(P, idx, y, NB)); }
+    for (let j = 0; j < NY; j++) if (!ext[j]) ext[j] = ext.find(e => e) || new Array(NB).fill(target);
+    const kAt = (j, a) => {
+      const f = ((a + Math.PI) / TAU) * NB, i = Math.floor(f), u = f - i, row = ext[j];
+      const e = row[((i % NB) + NB) % NB] * (1 - u) + row[(((i + 1) % NB) + NB) % NB] * u;
+      const tg = target * (1 + bulge * Math.sin(Math.PI * j / (NY - 1)));
+      const kp = pass ? 0 : keep;
+      return Math.max(0.6, Math.min(1.6, (tg / Math.max(1e-3, e)) * (1 - kp) + kp));
+    };
+    for (const p of P) {
+      const a = Math.atan2(p.z, p.x), f = Math.max(0, Math.min(NY - 1, ((p.y - yA) / Math.max(1e-3, yB - yA)) * (NY - 1)));
+      const j0 = Math.min(NY - 2, Math.floor(f)), u = f - j0;
+      const k = kAt(j0, a) * (1 - u) + kAt(j0 + 1, a) * u;
+      // the second pass only trims what the first left over (keeping the rock's own wobble)
+      const kk = pass ? 1 + (k - 1) * 0.85 : k;
+      p.x *= kk; p.z *= kk;
+    }
+  }
+  return P;
+}
+
 // Loose rubble round a big rock: small chunks (under the step height) that settle at its foot.
 function rubble(ctx, b, n, r0, r1, rnd, tint, { size = [0.12, 0.26], sy = 0.55 } = {}) {
   for (let k = 0; k < n; k++) {
@@ -1421,22 +1526,24 @@ function rubble(ctx, b, n, r0, r1, rnd, tint, { size = [0.12, 0.26], sy = 0.55 }
 // A Badlands hoodoo: ONE continuous lofted column (12 sides, smooth normals) on a flared talus foot,
 // eroded into 2-4 waists at uneven heights between harder bands that stand proud, leaning a little
 // and wandering ring to ring, with vertical rain flutes, up to a narrow neck under an irregular,
-// tilted, overhanging caprock (the only creased edge is the cap's lip). The strata come from the
-// rock material's world-height bands, so the whole formation is one rock. The column through the
-// bumper band is the collider (centred, radius r).
+// tilted, overhanging caprock (the only creased edge is the cap's lip), a pale bleached band just
+// under it. The strata come from the rock material's broad world-height beds, so the whole formation
+// is one rock. Through the bumper band (below ~2 m) the column keeps to its collider (centred, radius
+// r): the deep waists are higher up.
 function hoodoo(ctx, b, rnd, col, tint) {
   const Ht = col.Ht * range(rnd, 1.0, 1.14), rb = col.r * 0.97;
   const [lo] = ctx.foot(rb * 1.5, 0, 0, 7);
   const y0 = Math.min(-0.45, lo - 0.45), capH = Ht * range(rnd, 0.1, 0.13);
   const yN = Ht - capH * 0.55;                                 // the neck's top, inside the cap
   const nW = 2 + Math.floor(rnd() * 3), waists = [];
-  for (let k = 0; k < nW; k++) waists.push({ t: 0.2 + (k + range(rnd, 0.15, 0.85)) / nW * 0.62, d: range(rnd, 0.65, 0.9), w: range(rnd, 0.04, 0.085) });
-  const bands = []; for (let k = 0; k < 3; k++) bands.push({ t: range(rnd, 0.25, 0.85), w: range(rnd, 0.015, 0.03), a: range(rnd, 0.04, 0.08) });
+  for (let k = 0; k < nW; k++) waists.push({ t: 0.2 + (k + range(rnd, 0.15, 0.85)) / nW * 0.62, d: range(rnd, 0.65, 0.88), w: range(rnd, 0.05, 0.1) });
+  const bands = []; for (let k = 0; k < 2; k++) bands.push({ t: range(rnd, 0.25, 0.85), w: range(rnd, 0.02, 0.04), a: range(rnd, 0.04, 0.07) });
   const waistK = t => { let r = 1; for (const w of waists) r *= 1 - (1 - w.d) * Math.exp(-(((t - w.t) / w.w) ** 2)); return r; };
-  const prof = t => {
-    let r = (1 - 0.2 * t) * waistK(t);
-    r *= 1 + 0.5 * Math.pow(clamp01(1 - t / 0.17), 2);     // the talus foot, 1.5x
+  const prof = (t, y) => {
+    let r = (1 - 0.2 * smooth(0.3, 1, t)) * waistK(t);
     for (const bd of bands) r *= 1 + bd.a * Math.exp(-(((t - bd.t) / bd.w) ** 2));
+    r = r + (Math.max(r, 0.95) - r) * (1 - smooth(1.7, 2.4, y - lo));   // the bumper band keeps to the collider
+    r *= 1 + 0.5 * Math.pow(clamp01(1 - (y - lo + 0.45) / 0.85), 2);   // the talus foot, 1.5x, under the step height
     r *= 1 - 0.32 * smooth(0.84, 1, t);                     // the neck under the cap
     return r;
   };
@@ -1444,19 +1551,21 @@ function hoodoo(ctx, b, rnd, col, tint) {
   const NR = 30, pts = [], rad = [], ts = [];
   for (let i = 0; i <= NR; i++) {
     const t = i / NR, y = y0 + t * (yN - y0), tt = clamp01(y / yN);
-    const L = lean * tt * tt, j = i > 0 && i < NR ? 0.025 * rb : 0;
+    const L = lean * smooth(1.9, yN, y), j = i > 0 && i < NR ? 0.02 * rb : 0;
     pts.push(new V3(Math.cos(la) * L + range(rnd, -j, j), y, Math.sin(la) * L + range(rnd, -j, j)));
-    rad.push(rb * prof(tt)); ts.push(tt);
+    rad.push(rb * prof(tt, y)); ts.push(tt);
   }
   const p1 = rnd() * TAU, p2 = rnd() * TAU, p3 = rnd() * TAU;
-  const aoAt = (y, t) => (0.55 + 0.45 * smooth(lo - 0.2, lo + 1.3, y)) * (1 - 0.32 * smooth(0.8, 0.98, t)) * (0.82 + 0.18 * waistK(t));
+  // a bleached band under the cap: the red pulled toward cream (per-channel, so it desaturates)
+  const bleach = mixc(WHITE, [1.12, 1.42, 1.62], 1);
+  const aoAt = (y, t) => (0.55 + 0.45 * smooth(lo - 0.2, lo + 1.3, y)) * (1 - 0.3 * smooth(0.9, 0.99, t)) * (0.8 + 0.2 * waistK(t));
   tube(b, pts, rad, {
     sides: 12, uRep: 1, vLen: 2,
     lobes: (dir, t, i) => {
-      const a = Math.atan2(dir.z, dir.x), tt = ts[i];
-      return 1 + 0.08 * Math.cos(2 * a + p1 + tt * 1.6) + 0.05 * Math.cos(3 * a + p2 - tt * 2.2) - 0.045 * Math.max(0, Math.cos(7 * a + p3 + tt * 0.6)) * smooth(0.1, 0.25, tt);
+      const a = Math.atan2(dir.z, dir.x), tt = ts[i], k = 0.35 + 0.65 * smooth(1.7, 2.4, pts[i].y - lo);   // rounder through the bumper band
+      return 1 + k * (0.08 * Math.cos(2 * a + p1 + tt * 1.6) + 0.05 * Math.cos(3 * a + p2 - tt * 2.2)) - 0.045 * Math.max(0, Math.cos(7 * a + p3 + tt * 0.6)) * smooth(0.1, 0.25, tt);
     },
-    color: (p, n) => mulc(tint, aoAt(p.y, clamp01(p.y / yN)) * (0.9 + 0.14 * Math.max(0, n.y))),
+    color: (p, n) => { const t = clamp01(p.y / yN), bl = smooth(0.72, 0.8, t) * (1 - smooth(0.93, 0.99, t)); return mul3(mulc(tint, aoAt(p.y, t) * (0.9 + 0.14 * Math.max(0, n.y))), mixc(WHITE, bleach, bl * 0.85)); },
   });
   // the caprock: 1.5-1.8x the neck, irregular, tilted 4-10°, overhanging all round
   const top = pts[NR], rNeck = rad[NR] / (1 - 0.32);
@@ -1465,93 +1574,169 @@ function hoodoo(ctx, b, rnd, col, tint) {
   placeRock(b, capS, new V3(top.x + range(rnd, -0.1, 0.1) * rb, top.y + capH * 0.12, top.z + range(rnd, -0.1, 0.1) * rb), Rcap,
     { yaw: rnd() * TAU, tilt: range(rnd, 4, 10) * Math.PI / 180, tiltA: rnd() * TAU, tint: mul3(tint, lin('#c49274')), aoLo: 0.62 });
   // talus: a few small chunks at the foot (under the step height: no collider needed)
-  rubble(ctx, b, 3 + Math.floor(rnd() * 4), rb * 1.45, rb * 2.1, rnd, tint);
+  rubble(ctx, b, 3 + Math.floor(rnd() * 4), rb * 1.5, rb * 2.2, rnd, tint);
 }
 
-// A Badlands ledge: 2-3 thick strata slabs (their thickness varying 2:1) on angular footprints (long
-// straight faces, uneven corners), each with its top tilted 5-12°: the foot slab battered (wider at the
-// ground), the upper ones undercut so they overhang their own base, stepping back unevenly up the stack
-// except on one side, where every slab stays flush: a continuous cliff face. The strata are the rock
-// material's world-height bands. A solid one's foot slab fills its collider and rises past the knees;
-// a small one is a low tilted outcrop of one or two slabs.
-// The solid ledge: a squat butte in the hoodoo's language. ONE lofted base block (an angular section
-// with softened corners, a talus foot, 1-2 soft-layer waists, a slight lean) that fills the collider,
-// under a tilted, undercut cap slab that steps back toward one side and stays flush with the base on
-// the other (the continuous cliff face), sometimes a smaller block on that.
-function butte(ctx, b, S, rnd, tint, col, steep) {
-  const rb = col.cyl.r * 0.98, Htot = col.cyl.top * range(rnd, 0.98, 1.12);
-  const [lo] = ctx.foot(rb, 0, 0, 8);
-  const y0 = Math.min(-0.45, lo - 0.35), yB = Math.max(1.2, Htot * range(rnd, 0.6, 0.7));
-  // the section: a 7-gon at uneven angles (its long faces on the collider), corners softened
-  const cs = polyAng(rnd, 7, rb / Math.cos(Math.PI / 7), 0.05, range(rnd, 1.0, 1.06), 1);   // its faces' middles on the collider, corners a little proud
-  const secR = a => {                                          // distance to the polygon edge at angle a
-    let best = Infinity;
-    for (let k = 0; k < cs.length; k++) {
-      const [a1, r1] = cs[k], [a2, r2] = cs[(k + 1) % cs.length];
-      const x1 = Math.cos(a1) * r1, z1 = Math.sin(a1) * r1, x2 = Math.cos(a2) * r2, z2 = Math.sin(a2) * r2;
-      const dx = Math.cos(a), dz = Math.sin(a), ex = x2 - x1, ez = z2 - z1, den = dx * ez - dz * ex;
-      if (Math.abs(den) < 1e-9) continue;
-      const t = (x1 * ez - z1 * ex) / den, u = (x1 * dz - z1 * dx) / den;
-      if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.min(best, t);
-    }
-    return best === Infinity ? rb : best;
+// The plan a solid ledge fills: its oriented box when world gen gives one (a rounded 2:1 rectangle),
+// else its collider's circle as an angular polygon of 6-7 faces at uneven angles whose middles lie on
+// it, corners chamfered a little proud. a -> radius at angle a (the ledge's own frame).
+function mesaPlan(rnd, col) {
+  if (col.box) {
+    const { hx, hz, rot } = col.box, n = 6;
+    return a => { const c = Math.abs(Math.cos(a - rot)) / hx, sn = Math.abs(Math.sin(a - rot)) / hz; return Math.pow(Math.pow(c, n) + Math.pow(sn, n), -1 / n); };
+  }
+  const r = col.cyl.r, N = 5 + (rnd() < 0.5 ? 1 : 0), gaps = [];
+  for (let k = 0; k < N; k++) gaps.push(range(rnd, 0.7, 1.3));
+  const tot = gaps.reduce((q, v) => q + v, 0), faces = [];
+  let a = rnd() * TAU;
+  for (let k = 0; k < N; k++) { faces.push(a); a += gaps[k] / tot * TAU; }
+  const ap = r * 0.985, cap = r * 1.07, kk = r * 0.025;
+  return q => {
+    let m = Infinity;
+    for (const f of faces) { const c = Math.cos(q - f); if (c > 0.08) m = Math.min(m, ap / c); }
+    return -kk * Math.log(Math.exp(-m / kk) + Math.exp(-cap / kk));      // a soft min: the chamfer
   };
-  const inR = rb;
-  const nW = 1 + (rnd() < 0.5 ? 1 : 0), waists = [];
-  for (let k = 0; k < nW; k++) waists.push({ t: range(rnd, 0.35, 0.8), d: range(rnd, 0.88, 0.95), w: range(rnd, 0.05, 0.09) });
-  const prof = t => { let k = 1 + 0.18 * Math.pow(clamp01(1 - t / 0.2), 2) + 0.04 * smooth(0.85, 1, t); for (const w of waists) k *= 1 - (1 - w.d) * Math.exp(-(((t - w.t) / w.w) ** 2)); return k; };
-  const la = rnd() * TAU, NR = 14, pts = [], rad = [], ts = [];
-  for (let i = 0; i <= NR; i++) {
-    const t = i / NR, y = y0 + t * (yB - y0), tt = clamp01(y / yB), L = 0.06 * rb * tt * tt;
-    pts.push(new V3(Math.cos(la) * L, y, Math.sin(la) * L)); rad.push(inR * prof(tt)); ts.push(tt);
-  }
-  const ph = rnd() * 9;
-  tube(b, pts, rad, {
-    sides: 21, uRep: 1, vLen: 2, a0: rnd() * TAU,
-    lobes: (dir, t, i) => { const a = Math.atan2(dir.z, dir.x); return secR(a) / inR * (1 + 0.035 * noise3(dir.x * 3, ts[i] * 4, dir.z * 3, ph)); },
-    color: (p, n) => mulc(tint, (0.5 + 0.5 * smooth(lo - 0.2, lo + 1.2, p.y)) * (0.9 + 0.12 * Math.max(0, n.y))),
-  });
-  // the flat top of the base (dust settles there)
-  disc(b, new V3(pts[NR].x, yB - 0.02, pts[NR].z), UP, inR * prof(1) * 0.98, 14, () => [0, 0], mulc(tint, 1.05));
-  // the cap: a tilted chiselled slab, undercut, stepped back toward the cliff side
-  const cliffA = rnd() * TAU, capR = rb * range(rnd, 0.72, 0.9), shift = (rb - capR) * 0.95;
-  const cpoly = polyAng(rnd, 7, capR, 0.12, range(rnd, 1.0, 1.2));
-  const ta = cliffA + Math.PI + range(rnd, -1, 1), tk = Math.tan(range(rnd, 5, 12) * Math.PI / 180);
-  const hCap = Math.max(0.5, (Htot - yB) + range(rnd, 0.15, 0.35) * S);
-  const yC = prism(b, new V3(Math.cos(cliffA) * shift, 0, Math.sin(cliffA) * shift), yB - 0.12, hCap, cpoly, rnd, { tint: mul3(tint, lin('#e8cfc0')), under: 0.84, bulge: 1.03, bevel: 0.08 * S, foot: 0.04 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: 0.6, lipK: 1.1, wob: 0.06 });
-  if (rnd() < 0.4) {
-    const r3 = capR * range(rnd, 0.45, 0.6), sh3 = shift + (capR - r3) * 0.9;
-    prism(b, new V3(Math.cos(cliffA) * sh3, 0, Math.sin(cliffA) * sh3), yC - tk * capR, S * range(rnd, 0.25, 0.4), polyAng(rnd, 6, r3, 0.14, 1.2), rnd, { tint, under: 0.86, bevel: 0.05 * S, foot: 0.03, tilt: [Math.cos(ta + 0.6) * tk, Math.sin(ta + 0.6) * tk], aoLo: 0.65, wob: 0.06 });
-  }
-  if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 3), rb * 1.3, rb * 1.75, rnd, tint, { size: [0.14, 0.28] });
 }
 
-function ledge(ctx, b, S, rnd, tint, col, steep) {
-  const solid = !!(col && col.cyl);
-  if (solid) return butte(ctx, b, S, rnd, tint, col, steep);
-  const rFoot = solid ? col.cyl.r * 0.98 : S * range(rnd, 0.85, 1.0), Htot = solid ? col.cyl.top * range(rnd, 0.95, 1.12) : S * range(rnd, 0.55, 0.85);
+// A solid Badlands ledge: one mesa block, its walls filling its collider through the bumper band (no
+// tiers, no separate cap). Long and low: a continuous cliff face runs along its long axis; above head
+// height its hard cap overhangs both ends of that axis (an anvil, never a drum), and its top tilts
+// 9-13° back from the cliff (a cuesta; the low side on the collider's top). Angular faces, a slight
+// batter, vertical rain flutes (deep on the cliff) and a few clefts break the beds; a soft groove under
+// a hard bed. Round its foot: fallen blocks and a debris apron under the cliff, a long low debris ramp
+// off the back (all under the step height).
+function mesa(ctx, b, S, rnd, tint, col, steep, piece) {
+  const plan = mesaPlan(rnd, col);
+  const top = col.box ? col.box.top : col.cyl.top, rRef = col.box ? Math.min(col.box.hx, col.box.hz) : col.cyl.r;
+  const NA = 64, la = col.box ? col.box.rot : rnd() * TAU;                // the long axis
+  const cliffA = la + (rnd() < 0.5 ? 1 : -1) * Math.PI / 2 + range(rnd, -0.2, 0.2);
+  const cw = a => Math.max(smooth(1.3, 0.4, angDiff(a, cliffA)), 0.6 * smooth(1.2, 0.4, angDiff(a, cliffA + Math.PI)));   // the long sides are cliffs
+  const tk = Math.tan(range(rnd, 12, 16) * Math.PI / 180);
+  const ovK = (col.box ? 0.15 : range(rnd, 0.34, 0.44)) * smooth(2.0, 2.7, top);    // the prow's overhang
+  const yO0 = Math.max(1.95, top * 0.6);
+  const notches = []; for (let k = 0; k < 1 + (rnd() < 0.6 ? 1 : 0); k++) notches.push({ a: cliffA + Math.PI + range(rnd, -1.7, 1.7), w: range(rnd, 0.16, 0.28), d: range(rnd, 0.14, 0.26) });
+  const rp = [rnd() * TAU, rnd() * TAU];
+  const [gLo] = ctx.foot(rRef * 1.1, 0, 0, 9);
+  const yB = Math.min(-0.5, gLo - 0.45);
+  const nF = 10 + Math.floor(rnd() * 5), fph = rnd() * TAU, fph2 = rnd() * TAU;
+  // vertical joints: deep narrow clefts the whole height (they notch the rim too), splitting the
+  // cliffs into a few columns
+  const clefts = []; for (let k = 0; k < 2 + (rnd() < 0.6 ? 1 : 0); k++) clefts.push({ a: cliffA + (k % 2 ? Math.PI : 0) + range(rnd, -0.9, 0.9), w: range(rnd, 0.05, 0.075), d: range(rnd, 0.08, 0.12) });
+  const yG = Math.max(1.05, (top - 0.3) * range(rnd, 0.55, 0.72)), ph = rnd() * 9;
+  // a stepped skyline: a block has broken out of the rim near the tail (a flat-bottomed bite, sharp-edged)
+  const tailW = range(rnd, 0.3, 0.5), tailA = la + Math.PI + range(rnd, -1.0, 1.0), tailD = range(rnd, 0.3, 0.45) * smooth(1.9, 2.5, top);
+  const stepOff = a => -tailD * smooth(tailW + 0.06, tailW - 0.06, angDiff(a, tailA));
+  const skirt = [rnd() * TAU, rnd() * TAU];
+  // the radius of the wall at angle a, height y (ground gl, rim height yt there)
+  const wallF = (a, y, gl, yt, last) => {
+    const h = y - gl, cwa = cw(a);
+    let f = 1;
+    const sk = 0.15 + 0.13 * cwa + 0.07 * (Math.sin(3 * a + skirt[0]) + Math.sin(7 * a + skirt[1])) + 0.04 * Math.sin(13 * a + skirt[0] * 2);
+    f *= 1 + Math.max(0.06, sk) * Math.pow(1 - smooth(-0.15, 0.45, h), 1.6);                       // a lumpy talus cone (most under the cliffs), under the step height
+    const prow = Math.pow(Math.max(0, Math.cos(a - la)), 2), tail = Math.pow(Math.max(0, -Math.cos(a - la)), 2);
+    f *= 1 + ovK * prow * smooth(yO0, Math.max(yO0 + 0.25, yt - 0.1), y);                        // the prow juts out
+    f *= 1 - 0.16 * tail * smooth(Math.max(1.6, yt - 0.9), yt, y);                                // the tail is worn round
+    f *= 1 - 0.08 * (1 - prow) * smooth(1.9, Math.max(2.0, yt), y);                               // the upper walls lean in (a butte, not a barrel)
+    f *= 1 + 0.04 * cwa * smooth(yt - 0.6, yt - 0.12, y) * smooth(1.85, 2.2, y);                  // the cliffs' lips
+    f *= 1 - 0.03 * Math.exp(-(((y - yG) / 0.11) ** 2));                                         // a soft groove under a hard bed
+    const fl = Math.pow(0.5 + 0.5 * Math.cos(nF * a + fph + 0.3 * Math.sin(y * 1.1 + fph2)), 8);
+    f *= 1 - (0.035 + 0.075 * cwa) * fl * smooth(0.15, 0.7, h);                                  // rain flutes
+    for (const cl of clefts) f *= 1 - cl.d * Math.exp(-((angDiff(a, cl.a) / cl.w) ** 2)) * smooth(0.1, 0.6, h);
+    f *= 1 + 0.018 * noise3(Math.cos(a) * 2.2, y * 1.6, Math.sin(a) * 2.2, ph);
+    if (last) f *= 0.965;                                                                          // the lip's chamfer
+    return f;
+  };
+  // the top: a plane tilted up toward the prow, its low side (the tail) on the collider's top
+  const Rmax = rRef * 1.1;
+  const yP = (a, rr) => top + 0.02 + tk * (Math.cos(a - la) * rr + Rmax) * 0.5;
+  const yRim = (a, rr) => yP(a, rr) + stepOff(a) + 0.04 * Math.sin(3 * a + rp[0]) + 0.03 * Math.sin(7 * a + rp[1]) - notches.reduce((m, n) => m + n.d * Math.exp(-((angDiff(a, n.a) / n.w) ** 2)), 0)
+    - clefts.reduce((m, c) => m + 0.06 * Math.exp(-((angDiff(a, c.a) / (c.w * 1.4)) ** 2)), 0);
+  const cols = [];
+  for (let j = 0; j < NA; j++) {
+    const a = j / NA * TAU, R0 = plan(a), gl = ctx.gh(Math.cos(a) * R0, Math.sin(a) * R0);
+    const rTop = R0 * (1 + ovK * Math.pow(Math.max(0, Math.cos(a - la)), 2));
+    cols.push({ a, R0, gl, yt: yRim(a, rTop) });
+  }
+  const rowYs = c => {
+    const ys = [yB, c.gl - 0.1, c.gl + 0.05, c.gl + 0.16, c.gl + 0.28, c.gl + 0.42];
+    const y1 = c.gl + 0.42, y2 = c.yt - 0.2;
+    for (let k = 1; k <= 8; k++) ys.push(y1 + (y2 - y1) * k / 9);
+    ys.push(c.yt - 0.2, c.yt - 0.07, c.yt);
+    return ys;
+  };
+  const P = [], rows = [], NRow = rowYs(cols[0]).length;
+  for (let r = 0; r < NRow; r++) rows.push([]);
+  for (const c of cols) {
+    rowYs(c).forEach((y, r) => {
+      const R = c.R0 * wallF(c.a, y, c.gl, c.yt, r === NRow - 1);
+      rows[r].push(P.length); P.push(new V3(Math.cos(c.a) * R, y, Math.sin(c.a) * R));
+    });
+  }
+  const idx = [];
+  for (let r = 0; r < NRow - 1; r++) for (let j = 0; j < NA; j++) {
+    const A = rows[r][j], B = rows[r][(j + 1) % NA], C = rows[r + 1][j], D = rows[r + 1][(j + 1) % NA];
+    idx.push(A, C, B, B, C, D);
+  }
+  // the top: the rim, two inner rings on the tilted plane (a few soft lumps), the middle
+  const rim = rows[NRow - 1], inner = [];
+  for (const fr of [0.8, 0.42]) {
+    const ring = [];
+    for (let j = 0; j < NA; j++) {
+      const q = P[rim[j]], x = q.x * fr, z = q.z * fr, a = cols[j].a;
+      ring.push(P.length); P.push(new V3(x, yP(a, Math.hypot(x, z)) + stepOff(a) * (fr > 0.6 ? 0.85 : 0) + 0.035 * noise3(x * 1.3, 0, z * 1.3, ph + 3) + (fr < 0.6 ? 0.02 : 0), z));
+    }
+    inner.push(ring);
+  }
+  const mid = P.length; P.push(new V3(0, yP(0, 0) + 0.03, 0));
+  const ringsT = [rim, ...inner];
+  for (let q = 0; q < ringsT.length - 1; q++) for (let j = 0; j < NA; j++) {
+    const A = ringsT[q][j], B = ringsT[q][(j + 1) % NA], C = ringsT[q + 1][j], D = ringsT[q + 1][(j + 1) % NA];
+    idx.push(A, C, B, B, C, D);
+  }
+  const last = inner[inner.length - 1];
+  for (let j = 0; j < NA; j++) idx.push(last[j], mid, last[(j + 1) % NA]);
+  creased(b, P, idx, (p, n) => {
+    const a = Math.atan2(p.z, p.x), j = Math.round(((a + TAU) % TAU) / TAU * NA) % NA, h = p.y - cols[j].gl;
+    let k = 0.5 + 0.5 * smooth(-0.1, 1.3, h);
+    if (n.y < -0.25) k *= 0.78;                                                       // under the overhangs
+    if (n.y > 0.7) k *= 1.06;
+    return mulc(tint, k * (0.92 + 0.1 * Math.max(0, n.y)));
+  }, faceData(P, idx), Math.cos(40 * Math.PI / 180));
+  if (steep) return;
+  // fallen blocks under the cliffs and the prow (under the step height)
+  const nB = 3 + Math.floor(rnd() * 3);
+  for (let k = 0; k < nB; k++) {
+    const a = (k % 3 === 2 ? la : cliffA + (k % 2 ? Math.PI : 0)) + range(rnd, -0.7, 0.7), dd = plan(a) * range(rnd, 1.25, 1.75), R = range(rnd, 0.22, 0.38);
+    const x = Math.cos(a) * dd, z = Math.sin(a) * dd, [lo] = ctx.foot(R, x, z, 5);
+    const sh = rockShape(rnd, { sx: range(rnd, 1.1, 1.5), sy: 0.6, sides: 4, oblique: 2, topCut: [0.5, 0.7], topTilt: 0.25, noise: 0.1, detail: 1 });
+    placeRock(b, sh, new V3(x, lo + R * 0.1, z), R, { yaw: rnd() * TAU, tilt: range(rnd, 0.1, 0.4), tiltA: rnd() * TAU, tint, cos: Math.cos(30 * Math.PI / 180) });
+  }
+  // a long low debris ramp off the tail, and a little rubble
+  if (piece) {
+    const a = la + Math.PI + range(rnd, -0.25, 0.25), Rr = rRef * range(rnd, 0.42, 0.52), dd = plan(a) * 0.92 + Rr * 0.9;
+    piece(Math.cos(a) * dd, Math.sin(a) * dd, Rr, { sx: range(rnd, 1.8, 2.2), sy: 0.26, sz: range(rnd, 0.85, 1.0), sides: 3, oblique: 2, topCut: [0.55, 0.7], topTilt: 0.16, noise: 0.12, bottom: 0.5 }, { yaw: -a, sink: 0.2, cos: Math.cos(32 * Math.PI / 180) });
+  }
+  rubble(ctx, b, 2 + Math.floor(rnd() * 3), rRef * 1.3, rRef * 1.8, rnd, tint, { size: [0.12, 0.24] });
+}
+
+// A small Badlands ledge (no collider): a low tilted outcrop of one or two angular strata slabs.
+function ledge(ctx, b, S, rnd, tint, col, steep, piece) {
+  if (col && (col.cyl || col.box)) return mesa(ctx, b, S, rnd, tint, col, steep, piece);
+  const rFoot = S * range(rnd, 0.85, 1.0), Htot = S * range(rnd, 0.55, 0.85);
   const [lo] = ctx.foot(rFoot, 0, 0, 8);
-  const nS = solid ? 2 + (rnd() < 0.55 ? 1 : 0) : 1 + (rnd() < 0.6 ? 1 : 0), th = [];
+  const nS = 1 + (rnd() < 0.6 ? 1 : 0), th = [];
   for (let i = 0; i < nS; i++) th.push(i === 0 ? range(rnd, 1.4, 2) : range(rnd, 1, 2));
   const bury = 0.3 * S;
-  if (solid) {      // the foot slab rises at least 1.1 m (or 55% of the stack) out of the ground
-    const rest = th.slice(1).reduce((a, v) => a + v, 0), need = Math.max(1.1 - lo + bury, 0.55 * (Htot - lo + bury));
-    th[0] = Math.max(th[0], need / Math.max(0.05, Htot - lo + bury - need) * rest);
-  }
   const sum = th.reduce((a, v) => a + v, 0);
   const cliffA = rnd() * TAU;
-  let poly = polyAng(rnd, solid ? 7 : 6 + (rnd() < 0.5 ? 1 : 0), rFoot, 0.12, solid ? range(rnd, 1.0, 1.1) : range(rnd, 1.15, 1.5), solid ? 1 : 0);
-  // a solid one: corners pushed out so its long faces stay (nearly) on the collider
-  if (solid) poly = poly.map(([a, rr], k) => { const gap = Math.max(angDiff(a, poly[(k + 1) % poly.length][0]), angDiff(a, poly[(k + poly.length - 1) % poly.length][0])); return [a, Math.max(rr, rFoot / Math.cos(Math.min(1.1, gap / 2)) * 0.92)]; });
+  let poly = polyAng(rnd, 6 + (rnd() < 0.5 ? 1 : 0), rFoot, 0.12, range(rnd, 1.15, 1.5), 0);
   let y = lo - bury;
   for (let i = 0; i < nS; i++) {
     const h = th[i] / sum * (Htot - lo + bury) + (i === 0 ? 0 : 0.12 * S), last = i === nS - 1;
-    const ta = cliffA + Math.PI + range(rnd, -1.2, 1.2), tk = Math.tan((solid ? range(rnd, 5, 12) : range(rnd, 8, 18)) * Math.PI / 180);
+    const ta = cliffA + Math.PI + range(rnd, -1.2, 1.2), tk = Math.tan(range(rnd, 8, 18) * Math.PI / 180);
     const yTop = prism(b, new V3(range(rnd, -0.04, 0.04) * S, 0, range(rnd, -0.04, 0.04) * S), y, h, poly, rnd, { tint, under: i === 0 ? 1.1 : 0.84, bulge: i === 0 ? 0.98 : 1.03, bevel: (last ? 0.09 : 0.06) * S, foot: 0.05 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.45 : 0.6, lipK: 1.1, wob: 0.07 });
     const rMax = poly.reduce((m, [, r]) => Math.max(m, r), 0);
-    // the next slab steps back (not on the cliff side) and sinks below the tilted top
-    const low = solid && yTop < 1.1;              // still below the knees: step back only a little
-    poly = poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), angDiff(a, cliffA) < 0.85 ? r * range(rnd, 0.95, 1.01) : Math.max(r * 0.45, r - S * (low ? range(rnd, 0.04, 0.12) : range(rnd, 0.14, 0.38)))]);
+    poly = poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), angDiff(a, cliffA) < 0.85 ? r * range(rnd, 0.95, 1.01) : Math.max(r * 0.45, r - S * range(rnd, 0.14, 0.38))]);
     y = yTop - tk * rMax * 0.9;
   }
   if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 3), rFoot * 1.25, rFoot * 1.7, rnd, tint, { size: [0.14, 0.28] });
@@ -1559,7 +1744,7 @@ function ledge(ctx, b, S, rnd, tint, col, steep) {
 
 function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d, piece) {
   if (col.hoodoo) return hoodoo(ctx, b, rnd, col.hoodoo, tintOf());
-  if (!col.big && d.variant !== hoodoo && piece) {
+  if (!col.big && piece) {
     // a small one: a broken, angular block of the canyon's sandstone (the strata are the material's),
     // tipped over, often with a thinner slab split off against it
     piece(0, 0, S * 0.8, { sx: range(rnd, 1.1, 1.5), sy: range(rnd, 0.6, 0.85), sz: range(rnd, 0.8, 1.0), sides: 4, oblique: 3, topCut: [0.5, 0.7], topTilt: 0.3, sideCut: [0.55, 0.75], noise: 0.1 }, { tilt: range(rnd, 0.05, 0.25), tiltA: rnd() * TAU, cos: Math.cos(30 * Math.PI / 180) });
@@ -1567,51 +1752,129 @@ function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d, piece) {
     if (!steep) rubble(ctx, b, 1 + Math.floor(rnd() * 3), S * 0.9, S * 1.4, rnd, tintOf());
     return;
   }
-  if (d.variant === 'hoodoo') {
-    // a small one (no collider: s ≤ 1.2 never gets the hoodoo variant from world gen, but previews may)
-    const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8));
-    return hoodoo(ctx, b, rnd, { Ht, r: Math.max(0.55, Ht * 0.19) * 0.9 }, tintOf());
-  }
-  ledge(ctx, b, S, rnd, tintOf(), col, steep);
+  ledge(ctx, b, S, rnd, tintOf(), col, steep, piece);
 }
 
-// Tanaris: wind-scoured sandstone mounds, the wide base buried, a rounded top; or a low arch whose
-// two feet stand exactly on their colliders (±1.9 S along the rock's own x axis, legs no thicker
-// than the colliders through the bumper band, wider across only up where the span bends over).
-function desertRock(ctx, b, S, rnd, steep, tintOf, piece, col, d) {
-  if (col.arch || d.variant === 'arch') {
-    // the legs stand straight up through their colliders (to about head height), then the span bends
-    // over on an ellipse, its underside high enough to walk beneath
-    const A = col.arch || { span: S * 1.9, r: S * 0.396, top: S * 1.6 };
-    const span = A.span, rL = A.r * 0.97, archR = Math.min(span * 0.62, S * 1.0);
-    const Hh = Math.max(S * range(rnd, 1.7, 1.9), 2.35 + rL * 0.9), hLeg = Hh - archR;
-    const ends = [-1, 1].map(sd => ctx.foot(rL, span * sd, 0, 6)[0]);
-    const pts = [], arc = [];
-    const leg = (sd, up) => { const ys = [ends[sd < 0 ? 0 : 1] - 0.45 * S, hLeg * 0.4, hLeg * 0.75, hLeg]; for (const y of up ? ys : ys.slice().reverse()) { pts.push(new V3(span * sd, y, 0)); arc.push(0); } };
-    leg(-1, true);
-    // the span thickens toward the crown (a heavy lintel of rock, not a pipe); its centreline rises as it
-    // thickens, so the underside keeps its clearance
-    for (let i = 1; i < 12; i++) { const th = Math.PI * (1 - i / 12), sn = Math.sin(th); pts.push(new V3(Math.cos(th) * span, hLeg + Math.pow(sn, 0.6) * archR + 0.45 * rL * sn * sn, 0)); arc.push(sn); }   // squared shoulders: a rock bridge
-    leg(1, false);
-    const ph = rnd() * 9, tint = tintOf(), n = pts.length;
-    tube(b, pts, pts.map((p, i) => rL * (1 + 0.5 * arc[i] * arc[i]) * (i === 0 || i === n - 1 ? 1.5 : 1)), {   // (the buried ends flare: a talus foot)
-      sides: 12, uRep: 1, vLen: 2, cap: 0.5, cap0: 0.5,
-      lobes: (dir, t, i) => {
-        // a slab, not a pipe: wider across (a little on the legs, a lot up in the span), flatter
-        // under the span, lumpy, with wind-cut horizontal grooves round the legs
-        const up = arc[i], y = pts[i].y, ac = Math.abs(dir.z);
-        const groove = up < 0.3 ? 1 - 0.07 * (0.5 + 0.5 * Math.sin(y * 9.5 + ph)) : 1;
-        return (1 + (0.22 + 0.6 * up) * ac * ac) * (1 - 0.22 * up * Math.max(0, -dir.y)) * (1 + (0.08 + 0.1 * up) * noise3(dir.x * 2.5 + t * 7, dir.y * 2.5, dir.z * 2.5, ph)) * groove;
-      },
-      color: (p, nn) => mulc(tint, (0.52 + 0.48 * smooth(Math.min(...ends) - 0.2, Math.min(...ends) + Hh * 0.8, p.y)) * (0.86 + 0.16 * nn.y) * (nn.y < -0.3 ? 0.84 : 1)),
-    });
-    rubble(ctx, b, 2 + Math.floor(rnd() * 3), span - rL * 2.5, span + rL * 2.5, rnd, tint, { size: [0.14, 0.26], sy: 0.6 });
-    return;
+// A Tanaris sandstone arch: a flat-topped slab bridge (a lintel at least twice as wide as it is thick,
+// its top nearly level and wider than the legs, thinned off-centre and notched underneath by the wind)
+// on two blocky legs stepped in sandstone layers that widen toward the base. The legs stand exactly
+// on their colliders (±1.9 S along the rock's own x axis) through the bumper band; above it the
+// heavier leg swells into the span. The span's underside and top follow world gen's span box (players
+// walk under it, the RV doesn't). Swept as squared sections (soft corners), creased only at the steps.
+function sandArch(ctx, b, S, rnd, tint, col) {
+  const A = col.arch || { span: S * 1.9, r: S * 0.396 };
+  const span = A.span, rL = A.r * 0.97;
+  const H = Math.max(1.7 * S, 2.35 + 0.36 * S), under = H - 0.25 * S, topY = H + 0.35 * S;
+  const heavy = rnd() < 0.5 ? -1 : 1;                         // the side of the heavier leg
+  const aLint = 0.62 * S;                                     // the lintel's half-width (the legs' is about 0.38 S)
+  const rho = Math.min(0.36 * S, under - 1.3);                 // the opening's corner radius (a squarish opening)
+  const xThin = -heavy * range(rnd, 0.15, 0.45) * S, ph = rnd() * 9;
+  const notches = [{ x: range(rnd, -0.9, 0.9) * S, w: range(rnd, 0.16, 0.28) * S, d: range(rnd, 0.08, 0.13) * S }];
+  if (rnd() < 0.5) notches.push({ x: range(rnd, -0.9, 0.9) * S, w: range(rnd, 0.12, 0.2) * S, d: range(rnd, 0.06, 0.1) * S });
+  const yU = x => under + 0.03 * S + 0.13 * S * Math.exp(-(((x - xThin) / (0.75 * S)) ** 2)) + notches.reduce((m, n) => m + n.d * Math.exp(-(((x - n.x) / n.w) ** 2)), 0);
+  const xs = range(rnd, 0.3, 0.9) * S * (rnd() < 0.5 ? -1 : 1);   // a broken step in the top
+  const yT = x => topY - 0.03 * S + 0.03 * S * Math.sin(x * 1.3 / S + ph) - 0.04 * S * Math.exp(-(((x - xThin) / (0.6 * S)) ** 2)) - 0.07 * S * smooth(-0.08 * S, 0.08 * S, (x - xs) * Math.sign(xs));
+  const ends = [-1, 1].map(sd => ctx.foot(rL * 1.3, span * sd, 0, 7)[0]);
+  const Z = new V3(0, 0, 1);
+  const ribs = [];          // { c, e1, a1, a2 }: a section centred at c, half-extent a1 along e1 (in the xy plane) and a2 along z
+  const rib = (inner, outer, a2, lump = 0.045, ex = 2 / 5) => { const c = inner.clone().add(outer).multiplyScalar(0.5), e1 = outer.clone().sub(inner); const a1 = e1.length() / 2; e1.normalize(); ribs.push({ c, e1, a1, a2, lump, ex }); };
+  // a leg's layers, by height over its ground: a broad plinth (under the step height), a lower bed a
+  // touch proud, the column on the collider, and (on the heavier leg) a swelling into the span
+  // (the heavier leg swells only above the bumper band, so a low arch's hardly does)
+  const ykRel = sd => yU(sd * (span - rL - rho)) - rho - ends[sd < 0 ? 0 : 1];
+  const swell = sd => (sd === heavy ? 0.34 : 0.12) * smooth(1.8, 2.6, ykRel(sd));
+  const legK = (h, sd) => {
+    let k = 1.0;
+    if (h < 0.22) k = 1.24; else if (h < 0.9) k = 1.05;
+    const yk = ykRel(sd);
+    k *= 1 + swell(sd) * smooth(Math.min(1.9, yk - 0.4), yk, h);
+    return k * (1 + 0.025 * Math.sin(h * 9 + ph + sd) * (1 - smooth(1.4, 1.9, h)));   // wind-cut grooves
+  };
+  const legSteps = (g, yTop) => {
+    const ys = [g - 0.5, g - 0.05, g + 0.18, g + 0.24, g + 0.56, g + 0.86, g + 0.92];
+    for (let k = 1; k <= 4; k++) ys.push(g + 0.92 + (yTop - g - 0.92) * k / 4);
+    return ys.filter((y, i, arr) => i === 0 || y > arr[i - 1] + 0.01);
+  };
+  const kTops = [-1, 1].map(sd => 1 + swell(sd));
+  const xK = sd => sd * (span - rL * kTops[sd < 0 ? 0 : 1] - rho);     // the opening's corner centres
+  const corner = (sd, a2Leg, kTop) => {
+    // a quarter turn from the leg's inner face to the lintel's underside: the inner point runs round
+    // the opening's rounded corner, the outer one round the squared outer corner
+    const xc = xK(sd), Kc = new V3(xc, yU(xc) - rho, 0);
+    const dx = 2 * rL * kTop / 0.9 * 0.9 + rho, dy = yT(xc) - Kc.y;
+    for (let i = 0; i <= 6; i++) {
+      const phi = (sd < 0 ? i : 6 - i) / 6 * Math.PI / 2, dir = new V3(sd * Math.cos(phi), Math.sin(phi), 0);
+      const inner = Kc.clone().addScaledVector(dir, rho);
+      const n = 8, d = Math.pow(Math.pow(Math.cos(phi) / dx, n) + Math.pow(Math.sin(phi) / dy, n), -1 / n);
+      const outer = Kc.clone().addScaledVector(dir, d);
+      rib(inner, outer, a2Leg + (aLint - a2Leg) * smooth(0, 1, phi / (Math.PI / 2)));
+    }
+  };
+  // left leg up, the span, right leg down
+  for (const sd of [-1, 1]) {
+    const g = ends[sd < 0 ? 0 : 1], xc = xK(sd), yk = yU(xc) - rho;
+    const legRibs = [];
+    for (const y of legSteps(g, yk)) {
+      const k = legK(y - g, sd), cx = sd * span;
+      // the heavier leg swells outward and inward alike; its inner face meets the corner
+      // the plinth: broken slabs, pushed out from under the opening (lumpy, off-centre)
+      // (a blocky section: half-extents 0.9 r, the corners a little proud of the collider)
+      const pl = y - g < 0.22, off = pl ? sd * 0.1 * rL : 0, kk = 0.9 * k;
+      legRibs.push({ inner: new V3(cx - sd * rL * kk + off, y, 0), outer: new V3(cx + sd * rL * kk + off, y, 0), a2: rL * kk * (pl ? 0.94 : 1), lump: pl ? 0.15 : 0.05 });
+    }
+    const kTop = kTops[sd < 0 ? 0 : 1];
+    if (sd < 0) {
+      for (const r of legRibs) rib(r.inner, r.outer, r.a2, r.lump, 2 / 6);
+      corner(-1, rL * kTop * 0.9, kTop * 0.9);
+      const x0 = xK(-1), x1 = xK(1);
+      for (let i = 1; i < 16; i++) { const x = x0 + (x1 - x0) * i / 16; rib(new V3(x, yU(x), 0), new V3(x, yT(x), 0), aLint * (1 + 0.05 * Math.sin(x * 2.1 / S + ph))); }
+    } else {
+      corner(1, rL * kTop * 0.9, kTop * 0.9);
+      for (const r of legRibs.reverse()) rib(r.inner, r.outer, r.a2, r.lump, 2 / 6);
+    }
   }
+  // the sections: a squared ring (superellipse, soft corners) per rib
+  const NS = 24, P = [], idx = [];
+  for (const r of ribs) {
+    const sp = v => Math.sign(v) * Math.pow(Math.abs(v), r.ex);
+    for (let k = 0; k < NS; k++) {
+      const th = (k + 0.5) / NS * TAU, c = Math.cos(th), sn = Math.sin(th);
+      const lump = 1 + r.lump * noise3(r.c.x * 2.3 + c * 1.6, r.c.y * (r.lump > 0.08 ? 0.4 : 2.1), sn * 1.9, ph);
+      P.push(r.c.clone().addScaledVector(r.e1, r.a1 * sp(c) * lump).addScaledVector(Z, r.a2 * sp(sn) * lump));
+    }
+  }
+  // winding: outward faces (checked on the first section)
+  const n0 = new V3().subVectors(P[1], P[0]).cross(new V3().subVectors(P[NS], P[0])), out0 = new V3().subVectors(P[0], ribs[0].c);
+  const flip = n0.dot(out0) < 0;
+  for (let i = 0; i < ribs.length - 1; i++) for (let k = 0; k < NS; k++) {
+    const A0 = i * NS + k, B0 = i * NS + (k + 1) % NS, C0 = (i + 1) * NS + k, D0 = (i + 1) * NS + (k + 1) % NS;
+    if (!flip) idx.push(A0, B0, C0, B0, D0, C0); else idx.push(A0, C0, B0, B0, C0, D0);
+  }
+  const gMin = Math.min(...ends);
+  creased(b, P, idx, (p, nn) => {
+    let k = 0.52 + 0.48 * smooth(gMin - 0.2, gMin + Math.min(2.2, under * 0.8), p.y);
+    if (nn.y < -0.3) k *= 0.8;                       // under the span
+    if (nn.y > 0.75) k *= 1.06;
+    return mulc(tint, k * (0.9 + 0.12 * Math.max(0, nn.y)));
+  }, faceData(P, idx), Math.cos(42 * Math.PI / 180));
+  // slabs fallen against the feet, and rubble (under the step height)
+  for (const sd of [-1, 1]) for (let k = 0; k < 1 + (rnd() < 0.6 ? 1 : 0); k++) {
+    const a = (sd > 0 ? 0 : Math.PI) + range(rnd, -1.3, 1.3), R = 0.26 * S * range(rnd, 0.85, 1.1), dd = rL * range(rnd, 1.25, 1.5);
+    const x = sd * span + Math.cos(a) * dd, z = Math.sin(a) * dd, [lo] = ctx.foot(R, x, z, 5);
+    const sh = rockShape(rnd, { sx: range(rnd, 1.2, 1.5), sy: 0.36, sides: 4, oblique: 2, topCut: [0.55, 0.7], topTilt: 0.2, noise: 0.1, detail: 1 });
+    placeRock(b, sh, new V3(x, lo + R * 0.08, z), R, { yaw: -a + range(rnd, -0.4, 0.4), tilt: range(rnd, 0.12, 0.28), tiltA: a + Math.PI / 2, tint, cos: Math.cos(30 * Math.PI / 180) });
+  }
+  rubble(ctx, b, 2 + Math.floor(rnd() * 3), span - rL * 2.6, span + rL * 2.6, rnd, tint, { size: [0.14, 0.26], sy: 0.6 });
+}
+
+// Tanaris: wind-scoured sandstone mounds, the wide base buried, a rounded top; or a slab arch whose
+// two feet stand exactly on their colliders.
+function desertRock(ctx, b, S, rnd, steep, tintOf, piece, col, d) {
+  if (col.arch || d.variant === 'arch') return sandArch(ctx, b, S, rnd, tintOf(), col);
   const big = !!col.cyl;
   const R = big ? col.cyl.r : S * range(rnd, 0.95, 1.15);
   const sy = big ? col.cyl.top / (R * 0.64) * 0.97 : range(rnd, 0.6, 0.9);
-  if (big) piece(0, 0, R, { detail: 2, top: true, topCut: [0.6, 0.7], topTilt: 0.14, sx: range(rnd, 1.05, 1.25), sy, sz: range(rnd, 0.9, 1.05), sides: 3, oblique: 0, sideCut: [0.82, 0.92], noise: 0.12, bottom: 0.45, under: 0.08, groove: [0.06, sy * range(rnd, 0.32, 0.45)] }, { sink: 0.22, cos: 0.8, fit: col.cyl.r * 0.98 });
+  if (big) piece(0, 0, R, { detail: 2, top: true, topCut: [0.6, 0.7], topTilt: 0.14, sx: range(rnd, 1.05, 1.25), sy, sz: range(rnd, 0.9, 1.05), sides: 3, oblique: 0, sideCut: [0.82, 0.92], noise: 0.12, bottom: 0.45, under: 0.08, groove: [0.06, sy * range(rnd, 0.32, 0.45)] }, { sink: 0.22, cos: 0.8, fit: col.cyl.r * 0.98, topY: col.cyl.top, band: 0.62 });
   else piece(0, 0, R, { detail: 2, top: false, sx: range(rnd, 1.1, 1.4), sy, sz: range(rnd, 0.85, 1.05), sides: 2, oblique: 2, sideCut: [0.75, 0.9], noise: 0.13, bottom: 0.45, under: 0.12, groove: [0.07, sy * range(rnd, 0.42, 0.6)] }, { sink: 0.3, cos: 0.8 });
   if (!steep) {
     if (big) rubble(ctx, b, 2 + Math.floor(rnd() * 3), R * 1.1, R * 1.5, rnd, tintOf(), { size: [0.14, 0.28], sy: 0.6 });
@@ -1637,18 +1900,31 @@ function rock(ctx, d) {
     const sink = o.sink != null ? (bot - o.sink * (bot + 1)) : (bot - 0.32);
     const C = new V3(x, lo + R * sy * sink + (o.lift || 0), z);
     const sh = rockShape(rnd, { detail: R > 1.25 ? 2 : 1, ...shapeO });
-    if (o.fit) { sh.P = fitPlan(sh.P.map(p => p.clone().multiplyScalar(R)), o.fit).map(p => p.multiplyScalar(1 / R)); }
+    if (o.fit) {
+      let Ps = fitPlan(sh.P.map(p => p.clone().multiplyScalar(R)), o.fit);
+      if (o.topY != null) {
+        // plan and top, twice over (each moves the other a little)
+        const g0 = ctx.gh(x, z) - C.y, want = o.topY - C.y;          // the ground and the collider's top, about the rock's centre
+        for (let it = 0; it < 2; it++) {
+          const yb = o.band ? g0 + (want - g0) * o.band : want - Math.max(0.18, (want - g0) * 0.26);
+          Ps = fitPlanY(Ps, sh.idx, o.fit, g0 + 0.15, Math.max(g0 + 0.3, yb), 0.24, 0.05);
+          Ps = fitTop(Ps, sh.idx, o.fit, want);
+        }
+      }
+      sh.P = Ps.map(p => p.multiplyScalar(1 / R));
+    }
     const rk = placeRock(b, sh, C, R, { yaw: rnd() * TAU, tint: tint(), ...o });
     if (cap) snowCap(cap, rk, Math.min(0.16, 0.05 + 0.05 * R));
     return C;
   };
-  const fit = col.cyl ? col.cyl.r * 0.98 : 0;
-  const tall = (sy0, R) => (fit ? col.cyl.top / (R * 0.66) * 0.96 : sy0);           // a solid rock's top-cut plane lands at its collider's top
+  const fit = col.cyl ? col.cyl.r * 0.98 : 0, topY = col.cyl ? col.cyl.top : null;
+  const tall = (sy0, R) => (fit ? col.cyl.top / (R * 0.66) * 0.96 : sy0);           // roughly; fitTop sets the top exactly
   const topC = c => (fit ? [0.6, 0.72] : c);
+  const R0 = k => (fit ? Math.min(S * k, fit * 1.12) : S * k);                       // a fitted rock starts near its collider's size
   if (bm === 'badlands') badlandsRock(ctx, b, S, rnd, steep, tint, col, d, piece);
   else if (bm === 'desert') desertRock(ctx, b, S, rnd, steep, tint, piece, col, d);
   else if (bm === 'snow') {
-    piece(0, 0, S * 1.05, { sx: range(rnd, 1, 1.25), sy: tall(range(rnd, 0.65, 0.85), S * 1.05), sides: 3, oblique: fit ? 1 : 4, topCut: topC([0.55, 0.75]), topTilt: 0.25, noise: 0.14 }, { fit });
+    piece(0, 0, R0(1.05), { sx: range(rnd, 1, 1.25), sy: tall(range(rnd, 0.65, 0.85), R0(1.05)), sides: 3, oblique: fit ? 3 : 4, topCut: topC([0.55, 0.75]), topTilt: fit ? 0.16 : 0.25, noise: 0.14 }, { fit, topY });
     if (S > 1.0 && rnd() < 0.6 && !steep) {   // a tilted slab leaning on it (inside the collider when there is one)
       const a = rnd() * TAU, dd = S * (fit ? 0.45 : 0.95);
       piece(Math.cos(a) * dd, Math.sin(a) * dd, S * (fit ? 0.55 : 0.65), { sx: 0.5, sy: 1.25, sz: 1, sides: 2, oblique: 2, topCut: [0.65, 0.8], topTilt: 0.3 }, { tilt: range(rnd, 0.2, 0.4), tiltA: a + Math.PI / 2, lift: S * 0.15 });
@@ -1660,7 +1936,7 @@ function rock(ctx, d) {
     }
   } else {                                  // Elwynn / Westfall: chunky boulders, outcrops of tilted slabs
     const fields = bm === 'fields';
-    piece(0, 0, S * 1.0, { sx: range(rnd, 1, 1.3), sy: tall(fields ? range(rnd, 0.55, 0.7) : range(rnd, 0.68, 0.85), S), sz: range(rnd, 0.85, 1.05), sides: 3, oblique: fit ? 1 : 3, topCut: topC([0.55, 0.75]), topTilt: fit ? 0.34 : 0.15 }, { fit });
+    piece(0, 0, R0(1.0), { sx: range(rnd, 1, 1.3), sy: tall(fields ? range(rnd, 0.55, 0.7) : range(rnd, 0.68, 0.85), R0(1.0)), sz: range(rnd, 0.85, 1.05), sides: 3, oblique: fit ? 3 : 3, topCut: topC([0.55, 0.75]), topTilt: fit ? 0.12 : 0.15 }, { fit, topY });
     if (S > 1.2 && rnd() < 0.65 && !steep) {          // an outcrop: 2-3 tall slabs leaning together (inside the collider)
       const a = rnd() * TAU, n = 2 + (rnd() < 0.5 ? 1 : 0);
       for (let k = 0; k < n; k++) {
@@ -1688,12 +1964,12 @@ function cairn(ctx, d) {
   const tint = () => lin(pick(rnd, B.rockTints));
   const n = 3 + (rnd() < 0.5 ? 1 : 0), Htot = range(rnd, 0.6, 0.9) * s;
   const [lo] = ctx.foot(0.45 * s, 0, 0, 6);
-  let y = lo - 0.06, r = range(rnd, 0.34, 0.38) * Math.min(1.05, s), cx = 0, cz = 0;   // the foot slab on the 0.35 m collider
+  let y = lo - 0.06, r = range(rnd, 0.37, 0.4) * Math.min(1.05, s), cx = 0, cz = 0;   // the foot slab on the 0.35 m collider
   for (let i = 0; i < n; i++) {
     const h = Htot / n * range(rnd, 0.8, 1.2), ta = rnd() * TAU, tk = Math.tan(range(rnd, 3, 9) * Math.PI / 180);
     const yt = prism(b, new V3(cx, 0, cz), y, h, polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), r, 0.12, range(rnd, 1, 1.15), 1), rnd,
       { tint: tint(), under: 0.88, bulge: 1.02, bevel: 0.03, foot: 0.015, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.5 : 0.7, lipK: 1.1 });
-    y = yt - 0.025; r *= range(rnd, 0.72, 0.86);
+    y = yt - 0.025; r *= range(rnd, 0.82, 0.92);
     cx += range(rnd, -0.05, 0.05) * s; cz += range(rnd, -0.05, 0.05) * s;
   }
   const deco = d.variant ?? (rnd() < 0.45 ? 'skull' : rnd() < 0.5 ? 'horn' : 'none');
@@ -2225,27 +2501,39 @@ function rimTrees(ctx) {
   const rnd = rngOf(((seed * 2654435761) ^ 0x5bd1e995) >>> 0);
   const B = ctx.bio, tintO = () => lin(pick(rnd, B.oakTints));
   ctx.rim = true;
+  // a far oak: a stout short trunk under a full dome of lobes that reaches down to about a third of
+  // the tree's height (low side lobes under the ring), so it reads as an oak, never a flat-topped acacia
   const oakImp = (x, y, z, G) => {
     ctx.at({ x, y, z }, 0);
-    const lv = ctx.b('leaves'), F = range(rnd, 1.5, 1.9) * G, Rc = range(rnd, 3.0, 3.6) * G, tint = tintO();
+    const lv = ctx.b('leaves'), F = range(rnd, 1.0, 1.2) * G, Rc = range(rnd, 3.0, 3.5) * G, tint = tintO();
     // the trunk goes in the leaf mesh (no bark draw call for far trees): a dark brown stub sampling the
     // opaque middle of the dense core cell
     const cc = inset(cellOf(2)), uc = (cc[0] + cc[2]) / 2, vc = (cc[1] + cc[3]) / 2;
-    tube(lv, [new V3(0, -0.6, 0), new V3(0, F * 0.5, 0), new V3(range(rnd, -0.3, 0.3) * G, F + 0.6 * G, range(rnd, -0.3, 0.3) * G)], [0.5 * G, 0.42 * G, 0.3 * G], { sides: 6, uvMap: () => [uc, vc], color: [0.62, 0.42, 0.3] });
-    const yc = F + Rc * 0.62, n = 4 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU, yLo = F, yHi = yc + Rc * 0.8;
+    tube(lv, [new V3(0, -0.6, 0), new V3(0, F * 0.5, 0), new V3(range(rnd, -0.2, 0.2) * G, F + 0.9 * G, range(rnd, -0.2, 0.2) * G)], [0.6 * G, 0.5 * G, 0.36 * G], { sides: 6, uvMap: () => [uc, vc], color: [0.6, 0.42, 0.3] });
+    const yc = F + Rc * 0.72, n = 4 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU, yLo = F, yHi = yc + Rc * 0.9;
     const ao = p => 0.58 + 0.42 * smooth(yLo, yHi, p.y);
     for (let k = 0; k <= n; k++) {
-      const top = k === n, a = a0 + k * TAU / n, rr = top ? 0 : Rc * 0.5, R = top ? Rc * 0.55 : Rc * range(rnd, 0.42, 0.52);
-      const C = new V3(Math.cos(a) * rr, top ? yc + Rc * 0.3 : yc - Rc * range(rnd, 0, 0.2), Math.sin(a) * rr);
-      clump(lv, C, R, rnd, { cards: 6, size: R * 1.05, cells: [0], core: 2, coreK: 1.8, tint, ao, squash: 0.8, wind: 0.3, sizeVar: [0.9, 1.15] });
+      const top = k === n, a = a0 + k * TAU / n, rr = top ? 0 : Rc * 0.52, R = top ? Rc * 0.58 : Rc * range(rnd, 0.42, 0.52);
+      const C = new V3(Math.cos(a) * rr, top ? yc + Rc * 0.32 : yc - Rc * range(rnd, 0, 0.16), Math.sin(a) * rr);
+      clump(lv, C, R, rnd, { cards: 6, size: R * 1.05, cells: [0], core: 2, coreK: 1.8, tint, ao, squash: 0.95, wind: 0.3, sizeVar: [0.9, 1.15] });
+    }
+    // the dome's low skirt: 1-2 smaller lobes hanging lower on the sides
+    const nLow = 1 + (rnd() < 0.6 ? 1 : 0);
+    for (let k = 0; k < nLow; k++) {
+      const a = a0 + (k + 0.5) * TAU / n + range(rnd, -0.3, 0.3), R = Rc * range(rnd, 0.3, 0.38), rr = Rc * range(rnd, 0.5, 0.62);
+      clump(lv, new V3(Math.cos(a) * rr, yc - Rc * 0.5, Math.sin(a) * rr), R, rnd, { cards: 5, size: R * 1.1, cells: [0], core: 2, coreK: 1.7, tint, ao, squash: 0.95, wind: 0.3, sizeVar: [0.9, 1.15] });
     }
   };
   for (const side of [-1, 1]) {
     let z = W.Z0 + rnd() * 12;
     while (z < Zend - 4) {
-      const n = bm === 'meadow' ? 3 + Math.floor(rnd() * 4) : bm === 'fields' ? 1 + (rnd() < 0.4 ? 1 : 0) : 3 + Math.floor(rnd() * 4);
+      const n = bm === 'meadow' ? 3 + Math.floor(rnd() * 4) : bm === 'fields' ? 2 + (rnd() < 0.5 ? 1 : 0) : 3 + Math.floor(rnd() * 4);
+      // Westfall's stand in small touching clumps round one spot
+      const fc = { d: range(rnd, 3, 22), z: z };
       for (let k = 0; k < n; k++) {
-        const dOut = range(rnd, 3, bm === 'snow' ? 34 : 26), x = side > 0 ? X1 + dOut : X0 - dOut, zz = z + range(rnd, -7, 7);
+        const fa = rnd() * TAU, fr = k ? range(rnd, 4.5, 6.5) : 0;
+        const dOut = bm === 'fields' ? Math.max(2, fc.d + Math.cos(fa) * fr) : range(rnd, 3, bm === 'snow' ? 34 : 26), x = side > 0 ? X1 + dOut : X0 - dOut;
+        const zz = bm === 'fields' ? fc.z + Math.sin(fa) * fr : z + range(rnd, -7, 7);
         if (zz < W.Z0 + 2 || zz > Zend - 2) continue;
         const y = hA(x, zz) - 0.2;
         if (bm === 'snow' || (bm === 'meadow' && rnd() < 0.22)) pine(ctx, { x, y, z: zz, s: range(rnd, 1.0, 1.35), ry: rnd() * TAU, lite: true });
@@ -2259,8 +2547,9 @@ function rimTrees(ctx) {
 }
 
 // Oak groves: world gen plants them as runs of consecutive oak entries (the grove's centre first);
-// the hero is the one flagged d.hero, or else the grove's biggest. Every oak also gets its collider
-// radius (its bole matches it) and the oaks whose crowns may reach into its own.
+// the heroes are the ones world gen flags (d.hero). Only a leg (or a preview) with no flags at all
+// falls back on each grove's biggest. Every oak also gets its collider radius (its bole matches it)
+// and the oaks whose crowns may reach into its own.
 function oakInfo(W, deco) {
   const out = new Map(), west = W.biome === 'fields';
   const cyl = new Map();
@@ -2273,9 +2562,9 @@ function oakInfo(W, deco) {
     }
     prev = d;
   }
-  const all = [];
+  const all = [], anyFlag = deco.some(d => d.hero !== undefined);
   for (const g of groves) {
-    const flagged = g.some(d => d.hero !== undefined);
+    const flagged = anyFlag;
     let hero = null;
     if (!west) hero = flagged ? null : g.reduce((m, d) => ((d.s || 1) > (m.s || 1) ? d : m), g[0]);
     for (const d of g) {
@@ -2439,32 +2728,49 @@ function sliceExtents(batches, keys, cx, cz, Y, rMax, NB = 16) {
   }
   return ext;
 }
+// the top of a rock over its collider's disc (an invisible step if the collider's top stands above it)
+function topOver(batches, cx, cz, r) {
+  const S = discSamples(cx, cz, r), best = S.map(() => null);
+  for (const [k, b] of batches) {
+    if (!k.startsWith('rock#') && !k.startsWith('hoodoo#')) continue;
+    const hs = surfTop(i => [b.P[i * 3], b.P[i * 3 + 1], b.P[i * 3 + 2]], b.I, S);
+    hs.forEach((h, i) => { if (h != null && (best[i] == null || h > best[i])) best[i] = h; });
+  }
+  return topOf(best);
+}
 function auditColliders(biome) {
-  const day = BIOME_BY_DAY.indexOf(biome) + 1, rows = {};
+  const day = BIOME_BY_DAY.indexOf(biome) + 1, rows = {}, green = biome === 'meadow' || biome === 'fields' || biome === 'snow';
   const add = (k, gap, out) => { const R = rows[k] || (rows[k] = { n: 0, gap: 0, gapMax: 0, out: 0, outMax: 0 }); R.n++; R.gap += gap; R.gapMax = Math.max(R.gapMax, gap); R.out += out; R.outMax = Math.max(R.outMax, out); };
+  const tops = {};
   for (const seed of [777, 1234, 4242, 99]) {
     const W = generateLeg(seed, day);
     const oaks = oakInfo(W, W.decor);
     for (const d of W.decor) {
-      if (!((d.k === 'rock' && d.s > 1.2) || d.k === 'oak' || d.k === 'cairn')) continue;
+      if (!((d.k === 'rock' && (d.s > 1.2 || d.variant === 'hoodoo' || (green && d.s > 0.9))) || d.k === 'oak' || d.k === 'cairn')) continue;
       const ctx = new Ctx(W);
       if (d.k === 'oak') oak(ctx, d, oaks.get(d)); else if (d.k === 'cairn') cairn(ctx, d); else rock(ctx, d);
       const cm = d.k === 'oak' ? 'tree' : d.k === 'cairn' ? 'cairn' : 'rock';
       const cs = W.cyls.filter(c => c.mat === cm && Math.hypot(c.x - d.x, c.z - d.z) < (d.k === 'rock' ? 5 * d.s : 0.05));
+      const kind = d.k === 'rock' ? (d.variant || (d.s > 1.2 ? 'boulder' : 'boulder-s')) : d.k;
+      if (d.k === 'rock' && cs.length === 1 && d.variant !== 'hoodoo') {
+        const c = cs[0], t = topOver(ctx.batches, c.x, c.z, c.r);
+        if (t != null) { const T = tops[kind] || (tops[kind] = { n: 0, sum: 0, max: 0 }); const e = c.y + c.hh - t; T.n++; T.sum += e; T.max = Math.max(T.max, Math.abs(e)); if (Math.abs(e) > 0.4) console.error(`AUDITX ${kind} s ${d.s.toFixed(2)} e ${e.toFixed(2)} r ${c.r.toFixed(2)} top ${(c.y + c.hh - d.y).toFixed(2)} slope ${(Math.max(...[0, 1, 2, 3].map(q => W.heightAt(d.x + Math.cos(q * 1.57) * c.r, d.z + Math.sin(q * 1.57) * c.r))) - Math.min(...[0, 1, 2, 3].map(q => W.heightAt(d.x + Math.cos(q * 1.57) * c.r, d.z + Math.sin(q * 1.57) * c.r)))).toFixed(2)}`); }
+      }
       for (const c of cs) {
         const g = W.heightAt(c.x, c.z), top = c.y + c.hh;
-        for (const h of d.k === 'cairn' ? [0.15, 0.4] : [0.6, 1.0, 1.5]) {
+        for (const h of d.k === 'cairn' ? [0.15, 0.4] : [0.3, 0.6, 1.0, 1.5]) {
           if (g + h > top - 0.1) continue;
           const ext = sliceExtents(ctx.batches, d.k === 'oak' ? ['bark_oak'] : ['rock'], c.x, c.z, g + h, c.r * 2 + 0.6);
           const has = ext.filter(e => e >= 0);
-          if (has.length < 12) { add((d.k === 'oak' ? 'oak' : (d.variant || 'boulder')) + ' (open slice)', 0, 0); continue; }
+          if (has.length < 12) { add((d.k === 'oak' ? 'oak' : kind) + ' (open slice)', 0, 0); continue; }
           const mn = Math.min(...has), mx = Math.max(...has);
-          add((d.k === 'oak' ? (oaks.get(d).hero ? 'oak hero' : 'oak') : d.k === 'cairn' ? 'cairn' : (d.variant || 'boulder')) + ' @' + h, Math.max(0, c.r - mn), Math.max(0, mx - c.r));
+          add((d.k === 'oak' ? (oaks.get(d).hero ? 'oak hero' : 'oak') : kind) + (d.k === 'rock' && d.s <= 1.2 && d.variant === 'hoodoo' ? ' small' : '') + ' @' + h, Math.max(0, c.r - mn), Math.max(0, mx - c.r));
         }
       }
     }
   }
   for (const [k, R] of Object.entries(rows)) console.error(`AUDIT ${biome} ${k}: slices ${R.n} · gap avg ${(R.gap / R.n).toFixed(2)} max ${R.gapMax.toFixed(2)} m · out avg ${(R.out / R.n).toFixed(2)} max ${R.outMax.toFixed(2)} m`);
+  for (const [k, T] of Object.entries(tops)) console.error(`AUDIT ${biome} ${k} top: n ${T.n} · collider top above rock avg ${(T.sum / T.n).toFixed(2)} · |max| ${T.max.toFixed(2)} m`);
   return new THREE.Group();
 }
 

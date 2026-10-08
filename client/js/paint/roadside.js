@@ -713,6 +713,50 @@ function canvasStripes(g, s, rnd, cv, cols) {
 }
 register('rs_canvas', { family: F, size: 256, note: 'faded red/cream canvas: stripes along u, bellied panels, hem', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, ['#a8463a', '#e0d2b2']); } });
 register('rs_canvas_blue', { family: F, size: 256, note: 'faded blue/cream canvas', paint(g, s, rnd, h, cv) { canvasStripes(g, s, rnd, cv, ['#3e5a7e', '#e0d2b2']); } });
+register('rs_canvas_plain', {
+  family: F, size: 256, note: 'sun-bleached plain canvas (u along the cloth, v down to the hem): sewn widths, soft folds, rust runs and tide-mark stains, a darned patch, a stitched hem',
+  paint(g, s, rnd, h, cv) {
+    fill(g, s, s, '#cdbb94');
+    mottle(g, s, rnd, { colors: ['#dccaa2', '#b8a27a', '#d4c49e', '#c2ad86'], count: 34, rmin: 22, rmax: 70, alpha: 0.34, hard: 0.08 });
+    // a coarse weave, barely there
+    for (let y = 0; y < s; y += 3) line(g, [[0, y + 1], [s, y + 1]], 1, rnd() < 0.5 ? '#9a8460' : '#e6d8b8', 0.08);
+    for (let x = 0; x < s; x += 3) line(g, [[x + 1, 0], [x + 1, s]], 1, rnd() < 0.5 ? '#9a8460' : '#e6d8b8', 0.07);
+    // soft vertical folds: a cool shadow on one side, a warm lit crest on the other
+    for (let i = 0; i < 5; i++) {
+      const x = rnd() * s, w = range(rnd, 14, 30);
+      for (const dx of [-s, 0, s]) { g.fillStyle = grad(g, x + dx - w, 0, x + dx + w, 0, [[0, '#5a4a52', 0], [0.42, '#5a4a52', 0.22], [0.58, '#fff0d0', 0.2], [1, '#fff0d0', 0]]); g.fillRect(x + dx - w, 0, w * 2, s); }
+    }
+    // tide-mark water stains and rust runs from the top edge (where it lies over the plates)
+    for (let i = 0; i < 5; i++) {
+      const x = rnd() * s, y = range(rnd, 0.2, 0.7) * s, r = range(rnd, 12, 26);
+      const a = rnd() * 3, k = range(rnd, 0.4, 0.7);
+      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X, Y, r, r * 0.75, a, '#8e7656', 0.2, 0.25); blob(g, X + r * 0.3, Y + r * 0.2, r * k, r * k * 0.8, a + 1, '#cdbb94', 0.35, 0.3); });
+    }
+    streaks(g, s, rnd, { colors: ['#8a5a36', '#7a5a40'], count: 9, len: [26, 90], width: [2, 5], angle: 0, wobble: 0.08, alpha: 0.2 });
+    // two sewn widths per tile: a dark seam with a lit lap beside it and running stitches
+    for (const sx of [s * 0.18, s * 0.68]) {
+      line(g, [[sx, 0], [sx, s]], 2, '#5e4a3a', 0.45);
+      line(g, [[sx + 2.5, 0], [sx + 2.5, s]], 2, '#f2e4c4', 0.32);
+      g.save(); g.setLineDash([4, 4]);
+      for (const o of [-4, 6]) line(g, [[sx + o, 0], [sx + o, s]], 1, '#4a3a30', 0.38);
+      g.restore();
+    }
+    // a darned square patch, a shade darker and greener
+    {
+      const x = range(rnd, 0.3, 0.55) * s, y = range(rnd, 0.3, 0.5) * s, w = range(rnd, 34, 46), hh = range(rnd, 28, 38);
+      g.save(); g.globalAlpha = 0.5; g.fillStyle = '#a89870'; g.fillRect(x, y, w, hh); g.restore();
+      g.save(); g.setLineDash([3, 3]); g.strokeStyle = rgba('#4a3a30', 0.5); g.lineWidth = 1; g.strokeRect(x + 2, y + 2, w - 4, hh - 4); g.restore();
+      line(g, [[x, y + hh], [x + w, y + hh]], 1.6, '#5a4a52', 0.35);
+      line(g, [[x, y], [x + w, y]], 1.2, '#f6e8c8', 0.3);
+    }
+    // the hem: a turned-over band with two rows of stitching, a little darker with grime
+    g.save(); g.globalAlpha = 0.18; g.fillStyle = '#6a5440'; g.fillRect(0, s - 20, s, 20); g.restore();
+    line(g, [[0, s - 20], [s, s - 20]], 1.4, '#f2e4c4', 0.35);
+    g.save(); g.setLineDash([5, 4]); line(g, [[0, s - 15], [s, s - 15]], 1.2, '#3a2a24', 0.5); line(g, [[0, s - 6], [s, s - 6]], 1.2, '#3a2a24', 0.4); g.restore();
+    glaze(g, s, s, '#ffe8c0', 0.12, 'soft-light');
+    blurTile(cv, 0.7);
+  },
+});
 // Irregular panels on a jittered grid, some merged into bigger ones: per pixel the panel, the distance to its
 // border (to the nearest seed of a different panel) and which way that border lies. Tiles both ways.
 function panelField(s, rnd, { cells = 5, jit = 0.85, merge = 0.3 } = {}) {

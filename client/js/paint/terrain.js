@@ -22,7 +22,7 @@
 // clusters, cracks as open networks, grass as V-shaped clusters of short blades.
 import {
   register, fill, mottle, blade, stroke, cracks, glaze, blurTile, range, pick, wrap, blob, ellipse,
-  mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, worley, streaks,
+  mix, shade, lightOf, shadowOf, jitter, hex, rgba, makeCanvas, worley, streaks, canvasFor,
 } from './core.js';
 
 const TAU = Math.PI * 2;
@@ -956,6 +956,7 @@ function rockMasses(s, rnd, P) {
   return M;
 }
 
+const FORM = new Map();     // name -> the painted rock's form fields (see cliff_snow_form)
 function massRock(g, s, rnd, P, cv) {
   const N = s * s;
   const M = rockMasses(s, rnd, P);
@@ -1045,6 +1046,14 @@ function massRock(g, s, rnd, P, cv) {
     B[o] = r; B[o + 1] = gg; B[o + 2] = b; B[o + 3] = 255;
   }
   g.putImageData(base, 0, 0);
+  // (kept for a companion map: which way the painted rock faces, its height, its creases)
+  if (P.upName) {
+    let h0 = Infinity, h1 = -Infinity;
+    for (let k = 0; k < N; k++) { if (Hs[k] < h0) h0 = Hs[k]; if (Hs[k] > h1) h1 = Hs[k]; }
+    const Hn = new Float32Array(N);
+    for (let k = 0; k < N; k++) Hn[k] = (Hs[k] - h0) / (h1 - h0 || 1);
+    FORM.set(P.upName, { up: blurField(Float32Array.from(UP), s, 2, 2), h: Hn, cr: Float32Array.from(CR) });
+  }
   // -- painted details on the faces: soft chisel strokes, a few short cracks with a lit lip
   if (P.chisel) {
     streaks(g, s, rnd, { colors: [P.light], count: P.chisel, len: [8, 26], width: [2, 4.5], angle: P.chiselA ?? 1.3, wobble: 0.3, alpha: 0.1 });
@@ -1874,13 +1883,32 @@ register('cliff_snow', {
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
       fill: [3, 4], big: 5, bigR: [85, 135], asp: [0.6, 1.8], small: 0, sx: 1, sy: 1, rot: 1.0, warp: 20, tilt: 0.1,
-      dome: 38, zs: 20, smooth: 0.17, exp: 2.3, bulge: 10, soft: 2, relief: 0.8, contrast: 1.9, planes: 0.5, shSlope: 0.5, castA: 0.4, tone: 0.07, hueMix: 0.35,
+      dome: 38, zs: 20, smooth: 0.17, exp: 2.3, bulge: 10, soft: 2, relief: 0.8, contrast: 1.55, planes: 0.5, shSlope: 0.5, castA: 0.32, tone: 0.09, hueMix: 0.35,
       crease: 0.3, creaseW: 5, creaseD: 4, creaseA: 0.5, creaseC: '#444c62',
-      colors: ['#757c88', '#808894', '#9098a6', '#7a828e', '#8a92a0'], blot: ['#6f7682', '#9aa2b0', '#7a7a8a', '#848c9a'],
-      light: '#dce2ec', shadow: '#5a6480', cast: '#5e6a88', deep: '#4c5670', glaze: '#e4ecff',
+      colors: ['#7d8490', '#88909c', '#969eac', '#828a96', '#9098a6'], blot: ['#757c88', '#a0a8b6', '#808090', '#8a92a0'],
+      light: '#dce2ec', shadow: '#606a84', cast: '#646f8c', deep: '#525c74', glaze: '#e4ecff',
       powder: { up: 0.22, a: 0.55 }, powderC: '#e8eef6', caps: { n: 1, T: [8, 14], up: 0.3 }, capShadow: '#9fb0c8', icicles: 2,
-      stains: 20, stain: '#3c4458', stainA: 0.12, lichen: ['#a8b0a0', '#c0c4b0'], chisel: 140, cracks: 8,
+      stains: 20, stain: '#3c4458', stainA: 0.12, lichen: ['#a8b0a0', '#c0c4b0'], chisel: 230, cracks: 14, upName: 'cliff_snow',
     }, cv);
+  },
+});
+// Not a colour: the FORM of cliff_snow's painted granite, texel for texel (linear data for the
+// terrain shader, which lays its snow on whatever the painted rock turns up to the sky).
+// R: which way the surface faces (0.5 + 0.5 * up; > 0.5 faces up), G: height of the rock (0..1),
+// B: the creases between masses.
+register('cliff_snow_form', {
+  family: 'terrain', size: 512, note: 'data, not colour: the form of cliff_snow (R faces up, G height, B creases) for the snow shader',
+  paint(g, s) {
+    canvasFor('cliff_snow');
+    const F = FORM.get('cliff_snow'), img = g.getImageData(0, 0, s, s), D = img.data;
+    for (let k = 0; k < s * s; k++) {
+      const o = k * 4;
+      D[o] = F ? Math.max(0, Math.min(255, Math.round(127.5 + 127.5 * F.up[k]))) : 128;
+      D[o + 1] = F ? Math.round(255 * F.h[k]) : 128;
+      D[o + 2] = F ? Math.round(255 * Math.min(1, F.cr[k])) : 0;
+      D[o + 3] = 255;
+    }
+    g.putImageData(img, 0, 0);
   },
 });
 register('cliff_badlands', {

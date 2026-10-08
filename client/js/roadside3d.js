@@ -75,7 +75,7 @@ const sp = (c, e) => Math.sign(c) * Math.pow(Math.abs(c), 2 / e);   // superelli
 const DENS = {
   rs_tin: 2, rs_tin_red: 2, rs_planks: 1, rs_planks_gray: 1, rs_timber: 1.5, rs_iron: 0.5, rs_brass: 1, rs_scrap: 1.5, rs_stone: 1.6,
   rs_wing: 1.6, rs_gingham: 0.6, rs_bark: 1.2, rs_rv: 3, rs_snow: 2, rs_dust: 2, rs_sand: 2, rs_dirt: 2, rs_tire: 0.6,
-  rs_fascia: 4, rs_shingles: 1.2, rs_slats: 2, rs_dino: 6, rs_canvas: 3, rs_canvas_blue: 3, rs_slate: 1.4, rs_hide: 1.6,
+  rs_fascia: 4, rs_shingles: 1.2, rs_slats: 2, rs_dino: 6, rs_canvas: 3, rs_canvas_blue: 3, rs_canvas_plain: 3, rs_slate: 1.4, rs_hide: 1.6,
   rs_adobe: 2, rs_burlap: 0.9, rs_plaid: 0.9, rs_rope: 0.4, rs_rock: 1.4, rs_hay: 1, rs_bone: 0.6,
   rs_bleach: 1.5, rs_plaster: 1.8, rs_shingles_red: 1.2, rs_thatch: 1.3, rs_rv_green: 3, rs_rv_rust: 3, rs_rv_blue: 3, rs_rv_skins: 3,
   ground_meadow: 7, ground_fields: 7, ground_snow: 8, ground_badlands: 7, ground_desert: 7, dirt_meadow: 6, dirt_fields: 6, dirt_snow: 6, dirt_badlands: 6, dirt_desert: 6,
@@ -90,11 +90,11 @@ const baseName = m => m.replace(/[!*~#%^]+$/, '');
 const densOf = m => { const b = baseName(m); return b.startsWith('rs_steel_') ? 2 : (DENS[b] || 1); };
 const NO_SHADOW = /^(ground_\w+|dirt_\w+|rs_gatelabels|rs_glow|rs_tuft|rs_tuft_dry|rs_scorch|rs_bunting|rs_shield|rs_gasboard|rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid|rs_drum_lid|rs_chevband|rs_rope|rs_bone|rs_pennant|rs_stop|rs_junkboard)$/;
 // the most weather any one material takes (glass and wing fabric stay readable under the dust)
-const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6, rs_gasbag: 0.5 };
+const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_canvas_plain: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6, rs_gasbag: 0.5 };
 // Material classes for the cover: curved things (logs, barrels, the dino) only take it right along the top;
 // cloth keeps most of its pattern (the cover breaks up hard on it); stone stays stone under the sand.
 const CURVED = new Set(['rs_bark', 'rs_barrel', 'rs_drum', 'rs_drum_red', 'rs_dino', 'rs_tire', 'rs_rope', 'rs_hay', 'rs_bone', 'rs_bleach']);
-const CLOTH = new Set(['rs_gingham', 'rs_burlap', 'rs_plaid', 'rs_hide', 'rs_canvas', 'rs_canvas_blue', 'rs_blanket', 'rs_wing', 'rs_thatch', 'rs_gasbag']);
+const CLOTH = new Set(['rs_gingham', 'rs_burlap', 'rs_plaid', 'rs_hide', 'rs_canvas', 'rs_canvas_blue', 'rs_canvas_plain', 'rs_blanket', 'rs_wing', 'rs_thatch', 'rs_gasbag']);
 const MASONRY = new Set(['rs_stone', 'rs_adobe', 'rs_rock']);
 function coverOf(base, ctx) {
   const C = ctx.cover;
@@ -1290,9 +1290,9 @@ function buildCrash(B, p, parts, ctx, decor) {
     const profile = x => {
       const P = []; let sl = 0, pz = 0, py = 0;
       for (let z = Math.max(1, r0 * 0.3); z <= r0 + 12; z += DZ) { const y = B.ground(x, z); if (P.length) sl += Math.hypot(z - pz, y - py); P.push([z, y, sl]); pz = z; py = y; }
-      let iL = -1;
+      let iL = -1, fb = false;
       for (let i = 4; i < P.length - 1; i++) if ((P[i][1] - P[i + 1][1]) / DZ > 1.0) { iL = i; break; }
-      if (iL < 0) { iL = 0; while (iL < P.length - 2 && P[iL][0] < r0) iL++; }
+      if (iL < 0) { iL = 0; fb = true; while (iL < P.length - 2 && P[iL][0] < r0) iL++; }
       const at = sq => {
         let i = 0;
         while (i < P.length - 2 && P[i + 1][2] < sq) i++;
@@ -1301,7 +1301,7 @@ function buildCrash(B, p, parts, ctx, decor) {
         return { z: a[0] + tz * k, y: a[1] + ty * k, nz: -ty / tl, ny: tz / tl };
       };
       const sAtZ = z => { let i = 0; while (i < P.length - 2 && P[i + 1][0] < z) i++; return P[i][2]; };
-      return { P, iL, sL: P[iL][2], zL: P[iL][0], yL: P[iL][1], at, sAtZ };
+      return { P, iL, fb, sL: P[iL][2], zL: P[iL][0], yL: P[iL][1], at, sAtZ };
     };
     const hw = range(rnd, 2.7, 3.1), ph = rnd() * 6, ph2 = rnd() * 6, NU = 16, NV = 24, TR = 0.3, LH = 1.9;
     const cols = [];
@@ -1316,7 +1316,7 @@ function buildCrash(B, p, parts, ctx, decor) {
       const c = cols[i], { pr } = c, sq = t < TR ? lerp(c.sT, pr.sL, t / TR) : pr.sL + (t - TR) / (1 - TR) * LH;
       const q = pr.at(sq), hang = smooth(TR - 0.05, TR + 0.15, t), ds = sq - pr.sL;
       let lift = 0.05 + extra;
-      lift += 0.42 * Math.exp(-(((ds + 0.3) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(c.x * 2.3 + ph));      // bunched at the lip
+      lift += (pr.fb ? 0.25 : 0.42) * Math.exp(-(((ds + 0.3) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(c.x * 2.3 + ph));   // bunched at the lip (less where there is no clear edge)
       for (const [xa, xb, A] of creases) lift += A * Math.exp(-(((c.x - lerp(xa, xb, t)) / 0.5) ** 2)) * smooth(0, 0.25, t);
       lift += 0.07 * (0.5 + 0.5 * Math.sin(c.x * 3.1 + ph + t * 2.5)) * (1 - hang);                     // loose folds on top
       lift += 0.13 * (0.5 + 0.5 * Math.sin(c.x * 2.2 + ph2)) * hang;                                     // hanging folds
@@ -1330,20 +1330,25 @@ function buildCrash(B, p, parts, ctx, decor) {
       const kx = sx * (hw + 0.55), kp = profile(kx), kz = kp.zL - 1.0, ky = B.ground(kx, kz);
       B.cyl('rs_timber', 0.035, 0.06, 0.75, kx, ky + 0.2, kz, { seg: 6, rz: sx * 0.25, rx: -0.2, lod0: false });
       const top = V(kx - sx * 0.07, ky + 0.52, kz + 0.06), mid = g0.clone().lerp(top, 0.5); mid.y -= 0.06;
-      B.tube('rs_rope', [g0, mid, top], 0.022, { seg: 5, lod0: false });
-      B.torus('rs_rope', 0.065, 0.022, top.x, top.y - 0.02, top.z, { rx: Math.PI / 2, seg: 8, tseg: 4, lod0: true });
+      B.tube('rs_rope', [g0, mid, top], 0.022, { seg: 6, lod0: false });
+      B.torus('rs_rope', 0.065, 0.022, top.x, top.y - 0.02, top.z, { rx: Math.PI / 2, seg: 10, tseg: 6, lod0: true });
       B.torus('rs_brass', 0.05, 0.014, g0.x, g0.y + 0.01, g0.z, { rx: Math.PI / 2 - 0.3, seg: 8, tseg: 3, lod0: true });
     }
-    // a strut of the bag's frame snapped and poking out through the cloth over the edge
+    // a strut of the bag's frame snapped and poking out through the hanging cloth just below the edge, out over
+    // the face and a little down, so it never stands proud of the mesa's silhouette
     {
-      const i = Math.round(NU * 0.64), b0 = drapeAt(i, TR - 0.1, -0.2), b1 = b0.clone().add(V(0.35, 0.8, 1.55)), bm = b0.clone().lerp(b1, 0.55); bm.y += 0.06;
+      const i = Math.round(NU * 0.64), b0 = drapeAt(i, TR + 0.05, -0.05), b1 = b0.clone().add(V(0.35, -0.12, 1.35)), bm = b0.clone().lerp(b1, 0.55); bm.y += 0.05;
       B.tube('rs_timber', [b0, bm, b1], [0.07, 0.065, 0.055], { seg: 7, lod0: false });
       const dir = b1.clone().sub(bm).normalize();
-      B.tube('rs_timber', [b1, b1.clone().addScaledVector(dir, 0.22).add(V(0.04, 0, 0))], [0.05, 0.005], { seg: 5, lod0: true });
+      B.tube('rs_timber', [b1, b1.clone().addScaledVector(dir, 0.22).add(V(0.04, -0.02, 0))], [0.05, 0.005], { seg: 5, lod0: true });
       const f = b0.clone().lerp(b1, 0.82);
       B.tube('rs_brass', [f.clone().addScaledVector(dir, -0.06), f.clone().addScaledVector(dir, 0.06)], 0.075, { seg: 7, ends: true });
-      const t0 = drapeAt(i, TR - 0.1, 0.08);
-      B.torus('rs_gasbag~^', 0.12, 0.05, t0.x, t0.y, t0.z, { rx: -0.5, seg: 8, tseg: 4, lod0: true, uRep: 1 });
+      // the torn cloth bunched round it where it comes through
+      const t0 = b0.clone().addScaledVector(dir, 0.12);
+      B.push(M4(t0.x, t0.y, t0.z, 0, 0, 0));
+      B.M.multiply(new THREE.Matrix4().lookAt(V(0, 0, 0), dir, V(0, 1, 0)));
+      B.torus('rs_gasbag~^', 0.11, 0.05, 0, 0, 0, { seg: 9, tseg: 6, lod0: true, uRep: 1 });
+      B.pop();
     }
     // a snapped wing panel bent over the rim: the inner half lying on the top, the outer half hanging down
     {
@@ -1362,21 +1367,29 @@ function buildCrash(B, p, parts, ctx, decor) {
       for (const [ox, len, a] of [[0.66, 0.4, 0.2], [0.15, 0.25, -0.3], [-0.4, 0.32, 0.1]]) B.box('rs_timber', 0.05, 0.05, len, ox, 0.03, -1.18 - len / 2, { ry: a, r: 0.01, jit: 0.02, lod0: true });
       B.pop();
     }
-    // a coil of rope on the top by the lip, paying out over it in a long loop down the face
+    // a coil of rope lying on the top by the lip, one flat spiral seated on the ground, its free end paying out
+    // over the edge in a single loose loop that hangs down the face and comes back up
     {
-      const cx = hw + 1.5, cp = profile(cx), c0 = cp.at(cp.sL - 0.75);
-      for (let k = 0; k < 3; k++) B.torus('rs_rope', 0.3 - k * 0.025, 0.032, cx + k * 0.03, c0.y + 0.04 + k * 0.05, c0.z - k * 0.02, { rx: Math.PI / 2 + range(rnd, -0.12, 0.12), seg: 12, tseg: 4, lod0: false, uRep: 8 });
-      const pts = [];
-      const on = (xx, sq, off = 0.05) => { const pp = profile(xx), q2 = pp.at(pp.sL + sq); return V(xx, q2.y + q2.ny * off, q2.z + q2.nz * off); };
-      pts.push(V(cx + 0.28, c0.y + 0.08, c0.z + 0.1));
-      for (const [dx, sq] of [[0.32, -0.3], [0.3, 0.05], [0.26, 0.5], [0.22, 1.0], [0.32, 1.4], [0.5, 1.5], [0.62, 1.2], [0.66, 0.6], [0.7, 0.2], [0.78, 0.6], [0.8, 1.3], [0.82, 1.9]]) pts.push(on(cx + dx, sq));
-      B.tube('rs_rope', pts, 0.04, { seg: 5, lod0: false });
+      const cx = hw + 1.5, cp = profile(cx), c0 = cp.at(cp.sL - 0.75), a0 = rnd() * TAU, NT = 2.5, NP = 44, coil = [];
+      for (let k = NP; k >= 0; k--) {
+        const t = k / NP, a = a0 + TAU * NT * t, R = lerp(0.3, 0.2, t), x = cx + Math.cos(a) * R, z = c0.z + Math.sin(a) * R;
+        coil.push(V(x, B.ground(x, z) + 0.035 + 0.035 * NT * t, z));
+      }
+      B.tube('rs_rope', coil, 0.035, { seg: 6, lod0: false });
+      // the payout: from the coil's outer end over the lip, down about 1.2 m and back (traced on the face itself,
+      // so no chord cuts through the rock)
+      const end = coil[coil.length - 1];
+      const ctl = [[end.x - cx, -0.75], [0.3, -0.45], [0.32, -0.1], [0.3, 0.35], [0.31, 0.85], [0.4, 1.15], [0.56, 1.24], [0.7, 1.12], [0.76, 0.8], [0.78, 0.35], [0.8, -0.05], [0.88, -0.4], [1.05, -0.62]];
+      const c2 = new THREE.CatmullRomCurve3(ctl.map(([a, b]) => V(a, b, 0)), false, 'centripetal');
+      const on = (xx, sq, off) => { const pp = profile(xx), q2 = pp.at(pp.sL + sq); return V(xx, q2.y + q2.ny * off, q2.z + q2.nz * off); };
+      const pay = c2.getPoints(34).map((q, k) => k === 0 ? end.clone() : on(cx + q.x, q.y, q.y < -0.2 ? 0.045 : 0.08));
+      B.tube('rs_rope', pay, 0.045, { seg: 6, lod0: false, capEnd: true });
     }
     // its rigging, still tied from the wreck to the top edge
     for (const u0 of [0.2, 0.5, 0.82]) {
       const a = V(range(rnd, -0.4, 0.4), 1.2, range(rnd, -0.3, 0.3)), b = drapeAt(Math.round(u0 * NU), 0.02, 0.02), m = a.clone().lerp(b, 0.5);
       m.y = Math.max(B.ground(m.x, m.z) + 0.05, m.y - 0.35);
-      B.tube('rs_rope', [a, m, b], 0.025, { seg: 4, lod0: true });
+      B.tube('rs_rope', [a, m, b], 0.025, { seg: 6, lod0: true });
     }
   }
   B.frame(d.x, d.y, d.z, d.ry);
@@ -2148,21 +2161,26 @@ function buildGateBars(B, g, ctx) {
     }
     B.box(W, hx * 2, H - 0.2, hz * 2 - 0.16, 0, (H - 0.2) / 2, 0, { r: 0.02, tint: [0.4, 0.38, 0.38] });
   } else {
-    // goblin plating in a timber frame: dark riveted iron sheets and brass ones lapped in two courses, bulging a
-    // little between their rivets, verdigris-green brass caps as the only colour, spikes along the top, and a
-    // sun-bleached canvas strip thrown over it and sagging between the uprights
+    // goblin plating in a timber frame: dark riveted iron sheets with one plate in three of aged brass, lapped
+    // in two courses and bulging a little between their rivets, a bright brass lip catching the light along the
+    // top of every plate, verdigris-green caps as the only colour, spikes along the top, and a sun-bleached
+    // plain canvas strip thrown over it and sagging between the uprights
     for (const u of ups) B.box(W, 0.32, H + 0.12, hz * 2 + 0.04, u, (H + 0.12) / 2, 0, { r: 0.04, tint: wood, off: [rnd(), 0] });
     const split = 1.25 + range(rnd, -0.1, 0.1);
     for (let i = 0; i < ups.length - 1; i++) {
       const x0 = ups[i] + 0.16, x1 = ups[i + 1] - 0.16, w = x1 - x0;
       for (const [y0, y1, row] of [[0.04, split + 0.04, 0], [split - 0.04, H - 0.06, 1]]) {
-        const hh = y1 - y0, iron = (i + row) % 2 === 0, m = iron ? 'rs_iron' : 'rs_brass', tn = iron ? [0.72, 0.7, 0.72] : [0.8, 0.7, 0.58];
-        const dz = row ? 0.012 : 0;
-        B.box(m, w + 0.04, hh, hz * 2 - 0.04 + dz * 2, (x0 + x1) / 2, y0 + hh / 2, 0, { r: 0.025, S: iron ? 0.9 : 1.4, off: [rnd(), rnd()], tint: tn, div: [4, 2, 1], smoothN: true,
+        const hh = y1 - y0, iron = (i + row * 2) % 3 !== 0, m = iron ? 'rs_iron' : 'rs_brass', tn = iron ? [0.7, 0.68, 0.72] : [0.62, 0.52, 0.36];
+        const dz = row ? 0.012 : 0, fz = hz - 0.02 + dz;
+        B.box(m, w + 0.04, hh, fz * 2, (x0 + x1) / 2, y0 + hh / 2, 0, { r: 0.025, S: iron ? 0.9 : 1.4, off: [rnd(), rnd()], tint: tn, div: [4, 2, 1], smoothN: true,
           deform: q => { q[2] += Math.sin(Math.PI * (q[0] / (w + 0.04) + 0.5)) * Math.sin(Math.PI * (q[1] / hh + 0.5)) * 0.022 * Math.sign(q[2]); } });
-        // rivet heads along the top and bottom edges of each plate, both faces
+        // the lip: a bright rolled brass edge along the plate's top (on the lower course it stands proud of the
+        // lap; on the upper one it runs just under the verdigris cap)
+        const ly = row ? H - 0.105 : y1 - 0.02, lz = row ? fz + 0.02 : hz + 0.025;
+        B.box('rs_brass', w + 0.06, 0.04, lz * 2, (x0 + x1) / 2, ly, 0, { r: 0.012, tint: [1.15, 1.0, 0.7] });
+        // big rivet heads along the top and bottom edges of each plate, both faces
         B.lod0 = true;
-        for (const yy of [y0 + 0.07, y1 - 0.07]) for (let x = x0 + 0.1; x < x1 - 0.05; x += 0.26) for (const sz of [-1, 1]) B.cyl(iron ? 'rs_brass' : 'rs_iron', 0.026, 0.03, 0.03, x, yy, sz * (hz + dz), { rx: sz * Math.PI / 2, seg: 6, caps: iron ? 'rs_brass' : 'rs_iron' });
+        for (const yy of [y0 + 0.1, y1 - 0.12]) for (let x = x0 + 0.12; x < x1 - 0.06; x += 0.3) for (const sz of [-1, 1]) B.cyl(iron ? 'rs_brass' : 'rs_iron', 0.034, 0.04, 0.035, x, yy, sz * (fz + 0.025), { rx: sz * Math.PI / 2, seg: 6, caps: iron ? 'rs_brass' : 'rs_iron', tint: iron ? [1.05, 0.92, 0.66] : undefined });
         B.lod0 = false;
       }
       // a verdigris cap strip along the top of the bay
@@ -2172,13 +2190,13 @@ function buildGateBars(B, g, ctx) {
     // the bleached canvas strip, thrown over the top and hanging down the approach face in a sag between uprights
     const cs = Math.max(0, Math.floor(ups.length / 2) - 3), ce = Math.min(ups.length - 1, cs + 3);
     const xa = ups[cs] + 0.2, xb = ups[ce] - 0.2;
-    B.grid('rs_canvas_blue', 24, 4, (u, v) => {
+    B.grid('rs_canvas_plain', 24, 4, (u, v) => {
       const x = lerp(xa, xb, u), k = ((x - ups[cs]) / (ups[ce] - ups[cs])) * (ce - cs), bay = Math.sin(Math.PI * (k % 1));
       const tear = v > 0.75 ? 0.06 * Math.sin(x * 9.1) + 0.05 * Math.sin(x * 23.7) : 0;
       if (v < 0.3) { const t = v / 0.3; return [x, H + 0.06 + 0.04 * Math.sin(Math.PI * t), lerp(0.1, -hz - 0.05, t)]; }
       const t = (v - 0.3) / 0.7;
       return [x, H + 0.02 - t * (0.62 + 0.14 * bay) + tear, -hz - 0.06 - 0.05 * t - 0.03 * bay * t];
-    }, { uv: (u, v) => [lerp(xa, xb, u) / 3, v * 0.9], tint: [1.22, 1.14, 1.0] });
+    }, { uv: (u, v) => [lerp(xa, xb, u) / 3, 0.98 - v * 0.96], tint: [1.1, 1.08, 1.0] });   // (the hem at the hanging edge)
   }
   // rails across both faces, strapped to the uprights
   if (rails) for (const sz of [-1, 1]) for (const yy of railY) {
