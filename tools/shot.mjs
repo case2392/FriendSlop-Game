@@ -4,7 +4,8 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 
-const PORT = 3300 + Math.floor(Math.random() * 500);
+const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
+let PORT; do PORT = 3300 + Math.floor(Math.random() * 500); while (UNSAFE_PORTS.has(PORT));
 const OUT = process.env.OUT || 'test/screenshots';
 fs.mkdirSync(OUT, { recursive: true });
 const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';

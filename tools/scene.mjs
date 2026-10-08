@@ -20,7 +20,8 @@ const DAY = Math.max(1, Math.min(5, +dayArg | 0)), HOUR = +hourArg;
 for (const v of views) if (!ALL.includes(v)) { console.error(`unknown view "${v}" (have: ${ALL.join(' ')})`); process.exit(2); }
 fs.mkdirSync(OUT, { recursive: true });
 
-const PORT = 8000 + Math.floor(Math.random() * 900);
+const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
+let PORT; do PORT = 8000 + Math.floor(Math.random() * 900); while (UNSAFE_PORTS.has(PORT));
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 process.on('unhandledRejection', e => { console.log('FAILED:', e.message.split('\n')[0]); if (errors.length) console.log('page errors:\n' + errors.slice(0, 20).join('\n')); process.exit(1); });

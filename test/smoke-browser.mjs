@@ -6,7 +6,8 @@ import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 import { insideRV, toLocal } from '../shared/rv.js';
 
-const PORT = 4700 + Math.floor(Math.random() * 400);
+const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
+let PORT; do PORT = 4700 + Math.floor(Math.random() * 400); while (UNSAFE_PORTS.has(PORT));
 const SHOTS = process.env.SHOTS || 'test/screenshots';
 fs.mkdirSync(SHOTS, { recursive: true });
 const EXE = process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome';

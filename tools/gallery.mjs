@@ -5,7 +5,8 @@ import path from 'node:path';
 import { chromium } from 'playwright-core';
 const [fam = 'all', out = `test/screenshots/gallery-${process.argv[2] || 'all'}.png`, tile = '256', names = ''] = process.argv.slice(2);
 fs.mkdirSync(path.dirname(out), { recursive: true });
-const PORT = 6100 + Math.floor(Math.random() * 800);
+const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
+let PORT; do PORT = 6100 + Math.floor(Math.random() * 800); while (UNSAFE_PORTS.has(PORT));
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT) }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('no server')), 10000); });

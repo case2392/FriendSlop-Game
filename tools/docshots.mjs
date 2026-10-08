@@ -3,7 +3,8 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
-const PORT = 5200 + Math.floor(Math.random() * 300);
+const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
+let PORT; do PORT = 5200 + Math.floor(Math.random() * 300); while (UNSAFE_PORTS.has(PORT));
 const OUT = 'docs/screenshots';
 fs.mkdirSync(OUT, { recursive: true });
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
