@@ -2274,7 +2274,7 @@ export function buildNature(W) {
 
 // ---- previews (tools/preview.mjs) ---------------------------------------------------------------------
 
-const fakeW = (biome, decor, extra = {}) => ({ biome, decor, cyls: extra.cyls || [], anchors: extra.anchors || [], heightAt: () => 0 });
+const fakeW = (biome, decor, extra = {}) => ({ biome, decor, cyls: extra.cyls || [], anchors: extra.anchors || [], heightAt: extra.heightAt || (() => 0) });
 // A collider audit (tools/preview.mjs audit ...): generate real legs, build every solid rock and
 // oak on its own, slice its mesh at a few heights above the ground and compare the cross-section
 // with its collider: "gap" = how far inside the collider the rock surface sits (an invisible wall),
@@ -2355,7 +2355,8 @@ export const PREVIEW = {
     const n = buildNature(fakeW(biome, decor)); n.update(0.016, 1.3); return n.group;
   }, pine: pv('pine'), pine_small: pv('pine', { s: 0.8, x: 1.7 }), palm: pv('palm'),
   bush: pv('bush'), stump: pv('stump'), haybale: pv('haybale', { variant: 0 }), haystack: pv('haybale', { variant: 1 }),
-  scarecrow: pv('scarecrow', { ry: 0.3 }), fence: pv('fence', { len: 5, ry: 1.2 }), bones: pv('bones'),
+  scarecrow: pv('scarecrow', { ry: 0.3 }), fence: pv('fence', { len: 5, ry: 1.2 }),
+  fence_slope: pv('fence', { len: 7, ry: 0, x: 4 }, { heightAt: (x, z) => Math.max(0, z) * 0.32 }), fence_steep: pv('fence', { len: 7, ry: 0, x: 7 }, { heightAt: (x, z) => Math.max(0, z + 1) * 0.7 }), bones: pv('bones'),
   cactus: pv('cactus', { h: 3.2 }), cactus_small: pv('cactus', { h: 2.0, variant: 'saguaro', x: 2.3 }), prickly: pv('cactus', { h: 1.9, variant: 'pear' }),
   rock: pv('rock', { s: 1.0 }), outcrop: pv('rock', { s: 1.8, x: 4.2 }), rock2: pv('rock', { s: 1.5, x: 7.7 }), rock3: pv('rock', { s: 1.9, x: 11.3 }), rock4: pv('rock', { s: 1.3, x: -5.1 }), skull: pv('skull', { ry: 0.6 }),
   deadtree: pv('deadtree', { s: 1.1 }),
