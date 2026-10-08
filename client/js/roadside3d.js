@@ -28,6 +28,7 @@
 import { THREE, tex } from './gfx.js';
 import { canvasFor, has } from './paint/index.js';
 import { generateLeg } from '/shared/world.js';
+import * as TERRAIN from './terrain3d.js';
 
 const ROADSIDE_PARTS = new Set(['log_seat', 'parked_rv', 'keypad_post']);
 // statics this module draws (the rest are town3d's). Note: tags can be 0, so test with !== undefined.
@@ -76,23 +77,24 @@ const DENS = {
   rs_wing: 1.6, rs_gingham: 0.6, rs_bark: 1.2, rs_rv: 3, rs_snow: 2, rs_dust: 2, rs_sand: 2, rs_dirt: 2, rs_tire: 0.6,
   rs_fascia: 4, rs_shingles: 1.2, rs_slats: 2, rs_dino: 6, rs_canvas: 3, rs_canvas_blue: 3, rs_slate: 1.4, rs_hide: 1.6,
   rs_adobe: 2, rs_burlap: 0.9, rs_plaid: 0.9, rs_rope: 0.4, rs_rock: 1.4, rs_hay: 1, rs_bone: 0.6,
-  rs_bleach: 1.5, rs_plaster: 1.8, rs_shingles_red: 1.2, rs_thatch: 1.3, rs_rv_teal: 3, rs_rv_rust: 3, rs_rv_mustard: 3, rs_rv_skins: 3,
+  rs_bleach: 1.5, rs_plaster: 1.8, rs_shingles_red: 1.2, rs_thatch: 1.3, rs_rv_green: 3, rs_rv_rust: 3, rs_rv_blue: 3, rs_rv_skins: 3,
   ground_meadow: 7, ground_fields: 7, ground_snow: 8, ground_badlands: 7, ground_desert: 7, dirt_meadow: 6, dirt_fields: 6, dirt_snow: 6, dirt_badlands: 6, dirt_desert: 6,
 };
 const FIT = new Set(['rs_blanket', 'rs_hub', 'rs_hub_cream', 'rs_glass', 'rs_grille', 'rs_crate_a', 'rs_crate_b', 'rs_crate_c', 'rs_barrel', 'rs_barrel_lid', 'rs_drum',
   'rs_drum_red', 'rs_drum_lid', 'rs_pump_face', 'rs_keypad', 'rs_logend', 'rs_rv_window', 'rs_boards', 'rs_headlamp', 'rs_ice', 'rs_decal_freight', 'rs_ranger_board',
-  'rs_plaque', 'rs_roundel', 'rs_warn', 'rs_stop', 'rs_chevband', 'rs_pennant', 'rs_gasboard', 'rs_bunting', 'rs_tuft', 'rs_tuft_dry', 'rs_scorch', 'rs_shield', 'rs_rune', 'rs_glow', 'rs_gatelabels']);
+  'rs_plaque', 'rs_roundel', 'rs_warn', 'rs_stop', 'rs_chevband', 'rs_pennant', 'rs_gasboard', 'rs_bunting', 'rs_tuft', 'rs_tuft_dry', 'rs_scorch', 'rs_shield', 'rs_rune', 'rs_glow', 'rs_gatelabels',
+  'rs_gasbag', 'rs_junkboard']);
 // flags on a material name: ! no top cover, * glows, ~ double-sided, # alpha-tested decal (no shadow, no LOD),
-// % soft transparent decal lying on the ground (no shadow, no LOD)
-const baseName = m => m.replace(/[!*~#%]+$/, '');
+// % soft transparent decal lying on the ground (no shadow, no LOD), ^ alpha-tested cut-out (keeps its shadow and LOD)
+const baseName = m => m.replace(/[!*~#%^]+$/, '');
 const densOf = m => { const b = baseName(m); return b.startsWith('rs_steel_') ? 2 : (DENS[b] || 1); };
-const NO_SHADOW = /^(ground_\w+|dirt_\w+|rs_gatelabels|rs_glow|rs_tuft|rs_tuft_dry|rs_scorch|rs_bunting|rs_shield|rs_gasboard|rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid|rs_drum_lid|rs_chevband|rs_rope|rs_bone|rs_pennant|rs_stop)$/;
+const NO_SHADOW = /^(ground_\w+|dirt_\w+|rs_gatelabels|rs_glow|rs_tuft|rs_tuft_dry|rs_scorch|rs_bunting|rs_shield|rs_gasboard|rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid|rs_drum_lid|rs_chevband|rs_rope|rs_bone|rs_pennant|rs_stop|rs_junkboard)$/;
 // the most weather any one material takes (glass and wing fabric stay readable under the dust)
-const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6 };
+const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6, rs_gasbag: 0.5 };
 // Material classes for the cover: curved things (logs, barrels, the dino) only take it right along the top;
 // cloth keeps most of its pattern (the cover breaks up hard on it); stone stays stone under the sand.
 const CURVED = new Set(['rs_bark', 'rs_barrel', 'rs_drum', 'rs_drum_red', 'rs_dino', 'rs_tire', 'rs_rope', 'rs_hay', 'rs_bone', 'rs_bleach']);
-const CLOTH = new Set(['rs_gingham', 'rs_burlap', 'rs_plaid', 'rs_hide', 'rs_canvas', 'rs_canvas_blue', 'rs_blanket', 'rs_wing', 'rs_thatch']);
+const CLOTH = new Set(['rs_gingham', 'rs_burlap', 'rs_plaid', 'rs_hide', 'rs_canvas', 'rs_canvas_blue', 'rs_blanket', 'rs_wing', 'rs_thatch', 'rs_gasbag']);
 const MASONRY = new Set(['rs_stone', 'rs_adobe', 'rs_rock']);
 function coverOf(base, ctx) {
   const C = ctx.cover;
@@ -129,7 +131,7 @@ const KIT = {
   barn: { wood: [0.9, 0.88, 0.9], woodMat: 'rs_timber', wall: 'rs_planks_gray', wallRot: true, band: 'rs_iron', post: 'square', bars: 'boards', roof: 'rs_thatch', thatch: true, roofTint: null, ridge: 'rs_timber', light: 'lantern', foot: 'rs_stone', extra: 'hay' },
   dwarf: { wood: [0.86, 0.85, 0.92], woodMat: 'rs_timber', wall: 'rs_stone', band: 'rs_iron', post: 'pier', bars: 'beams', roof: 'rs_slate', roofTint: null, ridge: 'rs_iron', light: 'brazier', foot: null, extra: null },
   frontier: { wood: [1, 1, 1], woodMat: 'rs_bleach', wall: 'rs_hide', band: 'rs_rope', post: 'bundle', bars: 'stakes', roof: 'rs_tin', roofTint: [1.12, 0.86, 0.7], ridge: 'rs_bleach', light: 'torch', foot: null, extra: 'bones' },
-  goblin: { wood: [1.08, 0.98, 0.88], woodMat: 'rs_timber', wall: 'rs_steel_mustard', band: 'rs_brass', post: 'brass', bars: 'plates', roof: 'rs_canvas', roofTint: null, ridge: 'rs_brass', light: 'lantern', foot: 'rs_adobe', extra: null },
+  goblin: { wood: [1.08, 0.98, 0.88], woodMat: 'rs_timber', wall: 'rs_adobe', band: 'rs_brass', post: 'brass', bars: 'plates', roof: 'rs_canvas', roofTint: null, ridge: 'rs_brass', light: 'lantern', foot: 'rs_adobe', extra: null },
 };
 const STONE_TINT = { dwarf: [0.8, 0.88, 1.02] };
 // where each label sits in the rs_gatelabels atlas (uv rects)
@@ -145,7 +147,7 @@ function rsMat(name, ctx) {
   const m = new THREE.MeshLambertMaterial({
     map: tex(base), vertexColors: true,
     side: flags.includes('~') ? THREE.DoubleSide : THREE.FrontSide,
-    alphaTest: flags.includes('#') ? 0.5 : 0,
+    alphaTest: flags.includes('#') || flags.includes('^') ? 0.5 : 0,
   });
   if (flags.includes('*')) { m.emissive = new THREE.Color('#ffcf88'); m.emissiveMap = m.map; m.emissiveIntensity = 0.55; }
   if (flags.includes('#') || flags.includes('%')) { m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -4; }
@@ -486,7 +488,9 @@ class Builder {
       const lx = Math.sin(th) * rx * pr * lobe, lz = Math.cos(th) * rz * pr * lobe;
       const X = x + lx * c + lz * sn, Z = z - lx * sn + lz * c;
       return [X, (o.flat ? y : this.ground(X, Z)) + py * h, Z];
-    }, { wrapU: true, noAO: true, tint: o.tint, lod0: o.lod0, uv: (u, v, P) => { const w = this.world(P[0], P[1], P[2]); return [w.x / S, w.z / S]; } });
+    }, { wrapU: true, noAO: true, tint: o.tint, lod0: o.lod0, uv: (u, v, P) => { const w = this.world(P[0], P[1], P[2]); return [w.x / S, w.z / S]; },
+      // the terrain's own tint and occlusion at each vertex, so the mound's foot carries no colour step
+      tintFn: this.ctx.groundTint ? (u, v, P) => { const w = this.world(P[0], P[1], P[2]), c = this.ctx.groundTint(w.x, w.z), t = o.tint || [1, 1, 1]; return [c[0] * t[0], c[1] * t[1], c[2] * t[2]]; } : undefined });
   }
   // a tube through points (V3) with per-point radii; o.capEnd closes the last end with a point,
   // o.ends (material or true) closes both ends flat (fitted discs: log ends)
@@ -564,7 +568,7 @@ class Builder {
       n = n.map(c => (o.flip ? -c : c) / l);
       N.push(n);
     }
-    const vt = (i, j) => { const k = j * (nu + 1) + i; return { p: P[k], n: N[k], uv: o.uv ? o.uv(i / nu, j / nv, P[k]) : [i / nu * (o.uR || 1), j / nv * (o.vR || 1)] }; };
+    const vt = (i, j) => { const k = j * (nu + 1) + i; return { p: P[k], n: N[k], uv: o.uv ? o.uv(i / nu, j / nv, P[k]) : [i / nu * (o.uR || 1), j / nv * (o.vR || 1)], tint: o.tintFn ? o.tintFn(i / nu, j / nv, P[k]) : undefined }; };
     const T = [];
     for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) T.push(vt(i, j), vt(i + 1, j), vt(i + 1, j + 1), vt(i, j), vt(i + 1, j + 1), vt(i, j + 1));
     this.emit(mat, T, this.M.clone(), o);
@@ -766,6 +770,45 @@ function skull(B, x, y, z, ry = 0, s = 1) {
 // rope lashing round a post
 function lashing(B, x, y, z, r, n = 3) {
   for (let k = 0; k < n; k++) B.torus('rs_rope', r + 0.02, 0.022, x, y + k * 0.05, z, { rx: Math.PI / 2, seg: 10, tseg: 4, uRep: 6, lod0: true });
+}
+// A stretched pelt (the Badlands gate): a skin's outline as a polar grid in the shape's xy plane, facing +z, about
+// w x h: four leg points, a neck at the top, a stub of tail, waisted and ragged between, sagging back into its
+// middle and curling up at the edge, darker there. Its face comes from the gate label atlas (k 0: the cream
+// flesh side with an ochre sun, 1: dark bison fur), its back is plain flesh side, so it costs no draw call.
+// Placed at (x, y, z) with o.rx/ry/rz; returns the four leg tips in the caller's space, for lashings.
+const PELT_UV = [[0.015, 0.01, 0.235, 0.323], [0.265, 0.01, 0.485, 0.323]];
+function pelt(B, k, w, h, x, y, z, o = {}) {
+  const NT = 44, NR = 5, ph = o.ph ?? (x * 1.7 + z * 2.3 + y), sag = o.sag ?? 0.15, R = PELT_UV[k];
+  const legA = [0.72, Math.PI - 0.72, Math.PI + 0.78, -0.78];
+  const dA = (a, b) => ((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  const rAt = th => {
+    let r = 0.82 + 0.04 * Math.sin(3 * th + ph) + 0.025 * Math.sin(7 * th + ph * 2) + 0.05 * (hash3(Math.round(th * 9), ph, 1.3) - 0.5);
+    for (const a of legA) r += 0.36 * Math.exp(-((dA(th, a) / 0.12) ** 2));
+    r += 0.2 * Math.exp(-((dA(th, Math.PI / 2) / 0.22) ** 2));       // the neck
+    r += 0.16 * Math.exp(-((dA(th, -Math.PI / 2) / 0.07) ** 2));     // the tail
+    r -= 0.1 * (Math.exp(-((dA(th, 0) / 0.3) ** 2)) + Math.exp(-((dA(th, Math.PI) / 0.3) ** 2)));   // waisted between the legs
+    return r;
+  };
+  const sx = w / 2 / 1.18, sy = h / 2 / 1.18;
+  const at = (th, rho) => {
+    const r = rAt(th) * rho, px = Math.cos(th) * r * sx, py = Math.sin(th) * r * sy;
+    const pz = -sag * (1 - rho * rho) + 0.015 * Math.sin(px * 7 + py * 3 + ph) * rho + 0.06 * smooth(0.8, 1, rho) * (0.6 + 0.4 * Math.sin(th * 5 + ph));
+    return [px, py, pz];
+  };
+  const fn = (u, v) => at(u * TAU, 0.004 + 0.996 * v);
+  const uvOf = (RR, sc) => (u, v, q) => [lerp(RR[0], RR[2], 0.5 + sc * q[0] / w), lerp(RR[1], RR[3], 0.5 + sc * q[1] / h)];
+  const tn = o.tint || [1, 1, 1], edge = (u, v) => { const e = 1 - 0.35 * smooth(0.75, 1, v); return [e * tn[0], e * 0.97 * tn[1], e * 0.95 * tn[2]]; };
+  const M = M4(x, y, z, o.rx || 0, o.ry || 0, o.rz || 0);
+  B.push(M);
+  B.grid('rs_gatelabels', NT, NR, fn, { wrapU: true, flip: true, noAO: true, uv: uvOf(R, 0.92), tintFn: edge });
+  B.grid('rs_gatelabels', NT, NR, fn, { wrapU: true, noAO: true, uv: uvOf([0.024, 0.13, 0.058, 0.2], 0.9), tint: [1.08, 1.0, 0.88] });   // (a plain patch of the flesh side)
+  B.pop();
+  return legA.map(a => { const q = at(a, 1); return V(q[0], q[1], q[2]).applyMatrix4(M); });
+}
+// a rope from a to b with a little sag, a wrap round b
+function lash(B, a, b, sag = 0.05, r = 0.025) {
+  const m = a.clone().lerp(b, 0.5); m.y -= sag;
+  B.tube('rs_rope', [a, m, b], r, { seg: 4, lod0: false });
 }
 
 // ---- the stops ---------------------------------------------------------------------------------------
@@ -1154,8 +1197,13 @@ function buildCrash(B, p, parts, ctx, decor) {
     B.tube('rs_iron', [V(fus.x + 0.4, 0.3, fz0 + 2.0), V(fus.x + 1.05, 0.22, fz0 + 2.3)], 0.045, { seg: 6 });
     wheel(B, fus.x + 1.15, 0.3, fz0 + 2.32, 0.3, 0.14, { ry: 0.4, lean: 0.35 });
     {
+      // the tail skid's spoked wheel, torn off and lying in the dirt: a brass rim, wire spokes, a hub
       const wx = fus.x - 2.7, wz = fz0 + 2.8, gy = B.ground(wx, wz);
-      B.cyl('rs_tire', 0.3, 0.3, 0.14, wx, gy + 0.06, wz, { caps: 'rs_hub', fit: true, uRep: 6, bevel: 0.035, seg: 14, rx: 0.12 });
+      B.push(M4(wx, gy + 0.06, wz, Math.PI / 2 + 0.12, 0.5, 0));
+      B.torus('rs_brass', 0.28, 0.04, 0, 0, 0, { seg: 16, tseg: 5, lod0: false });
+      B.cyl('rs_iron', 0.06, 0.06, 0.12, 0, 0, 0, { rx: Math.PI / 2, seg: 8 });
+      for (let k = 0; k < 8; k++) B.box('rs_iron', 0.018, 0.5, 0.018, 0, 0, 0, { rz: k * Math.PI / 8, r: 0.004, lod0: true });
+      B.pop();
     }
     // a column of smoke rising off the engine marks the wreck from the road
     if (ctx.smokes) ctx.smokes.push(B.world(fus.x, fy + 0.05, zN - 0.2));
@@ -1228,30 +1276,240 @@ function buildCrash(B, p, parts, ctx, decor) {
     const [cx3, cz3, a3] = spots[2], gy3 = B.ground(cx3, cz3);
     B.box('rs_timber', 0.2, 1.05, 0.06, cx3, gy3 + 0.05, cz3, { rx: -Math.PI / 2 + 0.06, ry: a3, taper: 0.55, r: 0.025 });
   }
-  // the gas bag it carried, torn open and dragged over the rim, hanging down the cliff toward the road: the one
-  // big shape that reads from the road below
+  // the gas bag it carried, torn open and dragged over the rim: a muted oxblood envelope lying bunched on the
+  // mesa top and hanging a metre and a half down the face, its hem torn into tongues, pinned at the lip by two
+  // ropes to stakes, a strut of its frame poking out through it; beside it a snapped wing panel bent over the
+  // rim and a coil of rope paying out down the cliff. Everything follows heightAt, so it drapes over whatever
+  // shape the mesa has.
   if (p.mesa) {
     const side = p.side || 1, r0 = p.mesa.r;
-    B.frame(p.x, d.y, p.z, -side * Math.PI / 2);
-    const hw = range(rnd, 2.9, 3.4), z0 = r0 - 2.2, z1 = r0 + 3.6, ph = rnd() * 6;
-    const hem = []; for (let i = 0; i <= 10; i++) hem.push(range(rnd, -0.9, 0.2));
-    B.grid('rs_canvas~', 12, 14, (u, v) => {
-      const x = (u - 0.5) * 2 * hw * (1 - 0.22 * v), z = lerp(z0, z1 + hem[Math.round(u * 10)], v);
-      const bunch = 0.35 * Math.exp(-(((z - (r0 - 1.3)) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(x * 2.3 + ph));
-      const fold = 0.09 * Math.sin(x * 3.1 + ph) * smooth(r0 - 0.5, r0 + 1, z);
-      return [x, B.ground(x, z) + 0.1 + bunch + fold, z];
-    }, { flip: true, uv: (u, v) => [u * 2 * hw / 3, v * 2.2], noAO: true });
-    // patches stitched over its tears
-    // (in the wreck's own doped canvas, so they cost no extra draw calls)
-    for (const [px, pz, w, h, tn] of [[-0.8, r0 + 0.6, 1.0, 0.8, [0.7, 0.8, 0.95]], [0.9, r0 + 1.8, 0.8, 1.1, [0.95, 0.85, 0.65]], [0.2, r0 - 0.7, 0.9, 0.6, [0.7, 0.8, 0.95]]]) {
-      B.grid('rs_wing', 3, 3, (u, v) => { const x = px + (u - 0.5) * w, z = pz + (v - 0.5) * h; return [x, B.ground(x, z) + 0.17 + 0.35 * Math.exp(-(((z - (r0 - 1.3)) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(x * 2.3 + ph)) + 0.09 * Math.sin(x * 3.1 + ph) * smooth(r0 - 0.5, r0 + 1, z), z]; }, { flip: true, uv: (u, v) => [u * w / 1.6, v * h / 1.6], noAO: true, lod0: true, tint: tn });
+    B.frame(p.x, d.y, p.z, -side * Math.PI / 2);   // local +z points at the road
+    const DZ = 0.04;
+    // the ground's profile along local +z at local x: samples [z, y, s], the lip (where it first steepens past
+    // forty-five degrees) and a lookup by arc length that also gives the outward normal
+    const profile = x => {
+      const P = []; let sl = 0, pz = 0, py = 0;
+      for (let z = Math.max(1, r0 * 0.3); z <= r0 + 12; z += DZ) { const y = B.ground(x, z); if (P.length) sl += Math.hypot(z - pz, y - py); P.push([z, y, sl]); pz = z; py = y; }
+      let iL = -1;
+      for (let i = 4; i < P.length - 1; i++) if ((P[i][1] - P[i + 1][1]) / DZ > 1.0) { iL = i; break; }
+      if (iL < 0) { iL = 0; while (iL < P.length - 2 && P[iL][0] < r0) iL++; }
+      const at = sq => {
+        let i = 0;
+        while (i < P.length - 2 && P[i + 1][2] < sq) i++;
+        const a = P[i], b = P[i + 1], k = Math.max(0, Math.min(1.5, (sq - a[2]) / Math.max(1e-6, b[2] - a[2])));
+        const tz = b[0] - a[0], ty = b[1] - a[1], tl = Math.hypot(tz, ty) || 1;
+        return { z: a[0] + tz * k, y: a[1] + ty * k, nz: -ty / tl, ny: tz / tl };
+      };
+      const sAtZ = z => { let i = 0; while (i < P.length - 2 && P[i + 1][0] < z) i++; return P[i][2]; };
+      return { P, iL, sL: P[iL][2], zL: P[iL][0], yL: P[iL][1], at, sAtZ };
+    };
+    const hw = range(rnd, 2.7, 3.1), ph = rnd() * 6, ph2 = rnd() * 6, NU = 16, NV = 24, TR = 0.3, LH = 1.9;
+    const cols = [];
+    for (let i = 0; i <= NU; i++) {
+      const u = i / NU, x = (u - 0.5) * 2 * hw, pr = profile(x);
+      const sT = pr.sAtZ(pr.zL - (1.9 + 0.35 * Math.sin(u * 4.3 + ph)));
+      cols.push({ x, pr, sT });
     }
-    // its rigging, still tied to the wreck
-    const wreck = B.loc({ x: d.x, y: d.y, z: d.z, ry: 0 });
-    for (const ox of [-1.6, 0, 1.5]) { const a = V(wreck.x + ox * 0.3, 1.2, wreck.z), b = V(ox, B.ground(ox, r0 - 1.6) + 0.35, r0 - 1.6), m = a.clone().lerp(b, 0.5); m.y -= 0.35; B.tube('rs_rope', [a, m, b], 0.025, { seg: 4, lod0: true }); }
+    // creases running diagonally down the cloth (x at the top edge, x at the hem)
+    const creases = [[-hw * 0.55, hw * 0.05, 0.3], [hw * 0.7, hw * 0.2, 0.26]];
+    const drapeAt = (i, t, extra = 0) => {
+      const c = cols[i], { pr } = c, sq = t < TR ? lerp(c.sT, pr.sL, t / TR) : pr.sL + (t - TR) / (1 - TR) * LH;
+      const q = pr.at(sq), hang = smooth(TR - 0.05, TR + 0.15, t), ds = sq - pr.sL;
+      let lift = 0.05 + extra;
+      lift += 0.42 * Math.exp(-(((ds + 0.3) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(c.x * 2.3 + ph));      // bunched at the lip
+      for (const [xa, xb, A] of creases) lift += A * Math.exp(-(((c.x - lerp(xa, xb, t)) / 0.5) ** 2)) * smooth(0, 0.25, t);
+      lift += 0.07 * (0.5 + 0.5 * Math.sin(c.x * 3.1 + ph + t * 2.5)) * (1 - hang);                     // loose folds on top
+      lift += 0.13 * (0.5 + 0.5 * Math.sin(c.x * 2.2 + ph2)) * hang;                                     // hanging folds
+      return V(c.x, q.y + q.ny * lift, q.z + q.nz * lift);
+    };
+    B.grid('rs_gasbag~^', NU, NV, (u, v) => { const P2 = drapeAt(Math.round(u * NU), v); return [P2.x, P2.y, P2.z]; },
+      { flip: true, noAO: true, uv: (u, v) => [lerp(0.006, 0.994, u), 1 - lerp(0.01, 0.99, v)] });
+    // pinned at the lip: two ropes from grommets at its edges back to stakes driven in beside it
+    for (const sx of [-1, 1]) {
+      const i = sx < 0 ? 1 : NU - 1, g0 = drapeAt(i, TR - 0.04, 0.02);
+      const kx = sx * (hw + 0.55), kp = profile(kx), kz = kp.zL - 1.0, ky = B.ground(kx, kz);
+      B.cyl('rs_timber', 0.035, 0.06, 0.75, kx, ky + 0.2, kz, { seg: 6, rz: sx * 0.25, rx: -0.2, lod0: false });
+      const top = V(kx - sx * 0.07, ky + 0.52, kz + 0.06), mid = g0.clone().lerp(top, 0.5); mid.y -= 0.06;
+      B.tube('rs_rope', [g0, mid, top], 0.022, { seg: 5, lod0: false });
+      B.torus('rs_rope', 0.065, 0.022, top.x, top.y - 0.02, top.z, { rx: Math.PI / 2, seg: 8, tseg: 4, lod0: true });
+      B.torus('rs_brass', 0.05, 0.014, g0.x, g0.y + 0.01, g0.z, { rx: Math.PI / 2 - 0.3, seg: 8, tseg: 3, lod0: true });
+    }
+    // a strut of the bag's frame snapped and poking out through the cloth over the edge
+    {
+      const i = Math.round(NU * 0.64), b0 = drapeAt(i, TR - 0.1, -0.2), b1 = b0.clone().add(V(0.35, 0.8, 1.55)), bm = b0.clone().lerp(b1, 0.55); bm.y += 0.06;
+      B.tube('rs_timber', [b0, bm, b1], [0.07, 0.065, 0.055], { seg: 7, lod0: false });
+      const dir = b1.clone().sub(bm).normalize();
+      B.tube('rs_timber', [b1, b1.clone().addScaledVector(dir, 0.22).add(V(0.04, 0, 0))], [0.05, 0.005], { seg: 5, lod0: true });
+      const f = b0.clone().lerp(b1, 0.82);
+      B.tube('rs_brass', [f.clone().addScaledVector(dir, -0.06), f.clone().addScaledVector(dir, 0.06)], 0.075, { seg: 7, ends: true });
+      const t0 = drapeAt(i, TR - 0.1, 0.08);
+      B.torus('rs_gasbag~^', 0.12, 0.05, t0.x, t0.y, t0.z, { rx: -0.5, seg: 8, tseg: 4, lod0: true, uRep: 1 });
+    }
+    // a snapped wing panel bent over the rim: the inner half lying on the top, the outer half hanging down
+    {
+      const wx = -(hw + 1.9), wp = profile(wx), q = wp.at(wp.sL - 0.05), ry2 = range(rnd, -0.25, 0.1);
+      B.push(M4(wx, q.y + 0.06, q.z, 0, ry2, range(rnd, -0.08, 0.08)));
+      B.box('rs_wing', 1.3, 0.09, 1.2, 0, 0.03, -0.58, { r: 0.03, rx: -0.05, jit: 0.03, div: [2, 1, 2], off: [0.3, 0.1] });
+      B.box('rs_wing', 0.08, 0.12, 1.25, 0.66, 0.03, -0.58, { r: 0.02, tint: [0.85, 0.8, 0.7] });
+      B.push(M4(0, 0.02, 0.02, 1.15, 0, 0.06));
+      B.box('rs_wing', 1.3, 0.09, 2.1, 0, 0.0, 1.06, { r: 0.03, jit: 0.04, div: [2, 1, 4], off: [0.7, 0.4] });
+      B.box('rs_wing', 1.32, 0.095, 0.5, 0, 0.0, 1.9, { r: 0.03, tint: WING_RED });
+      B.box(RED, 0.14, 0.12, 2.12, -0.66, 0.0, 1.06, { r: 0.03 });
+      B.cyl('rs_brass', 0.05, 0.05, 2.15, 0.68, 0.0, 1.06, { rx: Math.PI / 2, seg: 6, caps: false });
+      B.quad('rs_roundel#', 0.8, 0.8, 0.0, 0.05, 1.05, { rx: -Math.PI / 2, rz: 0.3 });
+      B.pop();
+      // the snapped spar and rib ends sticking out of the inner end
+      for (const [ox, len, a] of [[0.66, 0.4, 0.2], [0.15, 0.25, -0.3], [-0.4, 0.32, 0.1]]) B.box('rs_timber', 0.05, 0.05, len, ox, 0.03, -1.18 - len / 2, { ry: a, r: 0.01, jit: 0.02, lod0: true });
+      B.pop();
+    }
+    // a coil of rope on the top by the lip, paying out over it in a long loop down the face
+    {
+      const cx = hw + 1.5, cp = profile(cx), c0 = cp.at(cp.sL - 0.75);
+      for (let k = 0; k < 3; k++) B.torus('rs_rope', 0.3 - k * 0.025, 0.032, cx + k * 0.03, c0.y + 0.04 + k * 0.05, c0.z - k * 0.02, { rx: Math.PI / 2 + range(rnd, -0.12, 0.12), seg: 12, tseg: 4, lod0: false, uRep: 8 });
+      const pts = [];
+      const on = (xx, sq, off = 0.05) => { const pp = profile(xx), q2 = pp.at(pp.sL + sq); return V(xx, q2.y + q2.ny * off, q2.z + q2.nz * off); };
+      pts.push(V(cx + 0.28, c0.y + 0.08, c0.z + 0.1));
+      for (const [dx, sq] of [[0.32, -0.3], [0.3, 0.05], [0.26, 0.5], [0.22, 1.0], [0.32, 1.4], [0.5, 1.5], [0.62, 1.2], [0.66, 0.6], [0.7, 0.2], [0.78, 0.6], [0.8, 1.3], [0.82, 1.9]]) pts.push(on(cx + dx, sq));
+      B.tube('rs_rope', pts, 0.04, { seg: 5, lod0: false });
+    }
+    // its rigging, still tied from the wreck to the top edge
+    for (const u0 of [0.2, 0.5, 0.82]) {
+      const a = V(range(rnd, -0.4, 0.4), 1.2, range(rnd, -0.3, 0.3)), b = drapeAt(Math.round(u0 * NU), 0.02, 0.02), m = a.clone().lerp(b, 0.5);
+      m.y = Math.max(B.ground(m.x, m.z) + 0.05, m.y - 0.35);
+      B.tube('rs_rope', [a, m, b], 0.025, { seg: 4, lod0: true });
+    }
   }
   B.frame(d.x, d.y, d.z, d.ry);
   if (ctx.driftMat && fus) drift(B, ctx, fus.x - fus.hx - 0.1, fus.z - 0.5, 0.55, 2.4, 0.32, 0);
+}
+
+// The junk yard's shack, filling the junk_heap box: a lean-to patched together from corrugated tin and painted
+// steel plates on a timber frame, a tin roof weighted with a drum and stones, a boarded door; on the roof a
+// goblin derrick (its legs inside the footprint) carrying the SALVAGE board, a pulley and a boom with a
+// crushed drum hanging off its hook. This is the stop's silhouette from the road.
+function junkShack(B, s, ctx, rnd) {
+  const hx = s.hx, hz = s.hz, top = s.y + s.hy - B.fy;
+  const roofY = z => top + 0.05 - (z / hz) * 0.15;            // the roof falls toward the road
+  // a dark core so no gap between the plates shows daylight
+  B.box('rs_iron', hx * 2 - 0.1, top + 0.08, hz * 2 - 0.1, 0, (top + 0.08) / 2 - 0.1, 0, { r: 0.04, tint: [0.36, 0.33, 0.33] });
+  // the frame: chunky corner posts (the back pair taller), a rail round the middle and the top
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    const h = roofY(sz * hz) + 0.05;
+    B.box('rs_timber', 0.2, h + 0.1, 0.2, sx * (hx - 0.06), (h + 0.1) / 2 - 0.1, sz * (hz - 0.06), { r: 0.04, jit: 0.02, rz: range(rnd, -0.02, 0.02), off: [rnd(), 0] });
+  }
+  const plates = [['rs_tin', null], ['rs_tin', [1.15, 0.74, 0.6]], ['rs_steel_red', null], ['rs_steel_teal', [0.92, 0.95, 1.0]], ['rs_steel_red', [1.2, 1.0, 0.62]], ['rs_planks_gray', null], ['rs_tin', [0.95, 0.9, 0.85]]];
+  // the four walls, each a patchwork of plates lapped over each other, bowed a little, a few hanging crooked
+  for (const [fx, fz, ry, half] of [[0, hz, 0, hx], [0, -hz, Math.PI, hx], [hx, 0, Math.PI / 2, hz], [-hx, 0, -Math.PI / 2, hz]]) {
+    B.push(M4(fx, 0, fz, 0, ry, 0));
+    const wallTop = fz > 0 ? roofY(hz) - 0.06 : fz < 0 ? roofY(-hz) - 0.06 : null;
+    let k = 0;
+    for (const [y0, y1] of [[-0.05, 1.45 + range(rnd, -0.15, 0.15)], [1.25, 9]]) {
+      let x = -half - 0.05;
+      while (x < half + 0.02) {
+        const w = Math.min(range(rnd, 0.75, 1.25), half + 0.08 - x), [m, tn] = pick(rnd, plates), cx = x + w / 2;
+        // the side walls follow the roof's fall
+        const yt = wallTop ?? (roofY(ry > 0 ? -cx : cx) - 0.06);   // (a side wall's local x runs along the frame's z)
+        const yy1 = Math.min(y1, yt), hh = yy1 - y0;
+        if (hh > 0.1 && w > 0.12) {
+          const bow = range(rnd, 0.01, 0.035);
+          B.box(m, w + 0.06, hh, 0.035, cx, y0 + hh / 2, 0.03 + (k % 3) * 0.012, { r: 0.012, rz: range(rnd, -0.04, 0.04), off: [rnd() * 3, rnd()], tint: tn, div: [2, 2, 1], smoothN: true,
+            deform: q => { q[2] += bow * (1 - (2 * q[0] / w) ** 2) * (1 - (2 * q[1] / hh) ** 2); } });
+          // a nailed batten down the lap
+          if (rnd() < 0.5) B.box('rs_timber', 0.08, hh * 0.9, 0.04, x + 0.04, y0 + hh / 2, 0.07 + (k % 3) * 0.012, { r: 0.015, lod0: true });
+        }
+        x += w - 0.06; k++;
+      }
+    }
+    // mid and top rails
+    if (fz !== 0) for (const yy of [1.3, (wallTop ?? top) - 0.12]) B.box('rs_timber', half * 2 + 0.1, 0.14, 0.1, 0, yy, 0.09, { r: 0.03, rz: range(rnd, -0.015, 0.015), off: [rnd(), 0] });
+    B.pop();
+  }
+  // the boarded door on the road face, an old horseshoe of rims nailed over it
+  {
+    const dx = range(rnd, -0.45, 0.45), z = hz + 0.1;
+    B.box('rs_planks_gray', 0.95, 1.95, 0.05, dx, 0.95, z, { r: 0.015, rot: true, tint: [0.62, 0.58, 0.58] });
+    for (const sx of [-1, 1]) B.box('rs_timber', 0.12, 2.05, 0.08, dx + sx * 0.52, 1.0, z + 0.02, { r: 0.02 });
+    B.box('rs_timber', 1.2, 0.12, 0.09, dx, 2.02, z + 0.02, { r: 0.02 });
+    for (let k = 0; k < 3; k++) B.box('rs_planks_gray', 1.25, 0.16, 0.04, dx, 0.5 + k * 0.55 + range(rnd, -0.08, 0.08), z + 0.06, { r: 0.012, rz: range(rnd, -0.22, 0.22), jit: 0.01 });
+    B.cyl('rs_brass', 0.04, 0.04, 0.1, dx + 0.32, 1.0, z + 0.08, { rx: Math.PI / 2, seg: 6, lod0: true });
+  }
+  // the roof: corrugated sheets lapped across, overhanging the road face, held down by a drum and stones
+  const fall = Math.atan2(0.3, hz * 2), L = hz * 2 + 0.75, zc = 0.2;
+  let x = -hx - 0.15, i = 0;
+  while (x < hx + 0.1) {
+    const w = Math.min(range(rnd, 0.95, 1.2), hx + 0.2 - x), cx = x + w / 2;
+    B.box('rs_tin', w + 0.08, 0.045, L + range(rnd, -0.1, 0.1), cx, roofY(zc) + 0.035 + (i % 2) * 0.02, zc, { r: 0.012, rx: fall, rz: range(rnd, -0.025, 0.025), off: [rnd(), rnd()], tint: i % 2 ? [1.12, 0.78, 0.64] : null });
+    x += w - 0.07; i++;
+  }
+  B.box('rs_timber', hx * 2 + 0.3, 0.12, 0.12, 0, roofY(hz + 0.3) - 0.05, hz + 0.3, { r: 0.03 });
+  barrel(B, 'rs_drum', 0.28, 0.82, -hx * 0.45, roofY(-0.5) + 0.3, -0.5, { rz: Math.PI / 2, ry: 0.3 });
+  for (const [sx2, sz2] of [[0.55, 0.6], [0.9, -0.7]]) B.box('rs_iron', 0.36, 0.2, 0.24, sx2 * hx, roofY(sz2 * hz) + 0.13, sz2 * hz, { r: 0.05, jit: 0.03, ry: rnd() * 3, tint: [0.9, 0.78, 0.68] });
+  if (ctx.snow) {
+    snowCap(B, hx * 2 + 0.25, L - 0.1, 0, roofY(zc) + 0.07, zc, { t: 0.2, rx: fall });
+    icicles(B, -hx - 0.1, hz + 0.55, hx + 0.1, hz + 0.55, roofY(hz + 0.55) - 0.02, rnd, { max: 0.35 });
+  }
+  // the derrick: four timber legs from inside the roof's corners up to a small cap, iron-banded, braced in
+  // rings and an X of rods on its face
+  const bx0 = hx - 0.4, bz0 = hz - 0.35, H = 3.5, tw = 0.24, yb = roofY(0) + 0.02, yT = yb + H;
+  const leg = (sx, sz, t) => V(lerp(sx * bx0, sx * tw, t), lerp(roofY(sz * bz0) + 0.02, yT, t), lerp(sz * bz0, sz * tw, t));
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+    B.tube('rs_timber', [leg(sx, sz, -0.02), leg(sx, sz, 0.5), leg(sx, sz, 1.03)], [0.085, 0.075, 0.06], { seg: 7, lod0: false });
+    for (const t of [0.04, 0.5]) { const q = leg(sx, sz, t); B.cyl('rs_iron', 0.09, 0.09, 0.08, q.x, q.y, q.z, { seg: 7, caps: false, lod0: true }); }
+  }
+  for (const t of [0.34, 0.68]) for (const [a, b] of [[[-1, -1], [1, -1]], [[1, -1], [1, 1]], [[1, 1], [-1, 1]], [[-1, 1], [-1, -1]]]) B.tube('rs_timber', [leg(a[0], a[1], t), leg(b[0], b[1], t)], 0.045, { seg: 5, lod0: false });
+  for (const [t0, t1] of [[0.0, 0.34], [0.34, 0.68]]) for (const sx of [-1, 1]) B.tube('rs_iron', [leg(sx, 1, t0), leg(-sx, 1, t1)], 0.016, { seg: 4, lod0: true });
+  B.box('rs_timber', tw * 2 + 0.3, 0.14, tw * 2 + 0.3, 0, yT + 0.05, 0, { r: 0.03 });
+  // the pulley on top, the boom out over the road face, its chain and hook with a crushed drum on it
+  B.push(M4(0, yT + 0.4, 0, 0, Math.PI / 2, 0));
+  B.torus('rs_brass', 0.26, 0.05, 0, 0, 0, { seg: 14, tseg: 5, lod0: false });
+  B.cyl('rs_iron', 0.07, 0.07, 0.2, 0, 0, 0, { rx: Math.PI / 2, seg: 8 });
+  for (let k = 0; k < 4; k++) B.box('rs_brass', 0.04, 0.48, 0.03, 0, 0, 0, { rz: k * Math.PI / 4, r: 0.01, lod0: true });
+  B.pop();
+  for (const sx of [-1, 1]) B.box('rs_timber', 0.06, 0.5, 0.12, sx * 0.13, yT + 0.3, 0, { r: 0.015 });
+  const b0 = V(0, yT + 0.12, -tw), b1 = V(0, yT + 0.35, hz + 1.0);
+  B.tube('rs_timber', [b0, b0.clone().lerp(b1, 0.5), b1], [0.09, 0.08, 0.065], { seg: 7, lod0: false });
+  B.tube('rs_iron', [V(0, yT + 0.62, 0), b1.clone().add(V(0, 0.02, 0))], 0.014, { seg: 4, lod0: true });
+  const hookY = top + 0.55;
+  for (let y = b1.y - 0.06, k = 0; y > hookY + 0.1; y -= 0.1, k++) B.torus('rs_iron', 0.045, 0.014, b1.x, y, b1.z, { ry: k % 2 ? Math.PI / 2 : 0, rx: Math.PI / 2 * 0, seg: 6, tseg: 3, lod0: true, s: [1, 1.4, 1] });
+  B.torus('rs_iron', 0.12, 0.03, b1.x, hookY, b1.z, { seg: 10, tseg: 4, lod0: false });
+  B.push(M4(b1.x, hookY - 0.38, b1.z + 0.05, 0.1, 0.4, Math.PI / 2 + 0.15));
+  B.cyl('rs_drum_red', 0.3, 0.3, 0.86, 0, 0, 0, { s: [1, 1, 0.6], seg: 12, caps: 'rs_drum_lid', jit: 0.07 });
+  B.pop();
+  // the SALVAGE board across the derrick's road face, leaning back with it
+  {
+    const t = 0.42, q = leg(1, 1, t), lean = Math.atan2(bz0 - tw, H);
+    B.box('rs_timber', 2.3, 0.74, 0.08, 0, q.y, q.z + 0.12, { r: 0.025, rx: -lean, rz: range(rnd, -0.03, 0.03), faces: { pz: { m: 'rs_junkboard', fit: true }, nz: { m: 'rs_junkboard', fit: true } } });
+    if (ctx.snow) snowCap(B, 2.3, 0.08, 0, q.y + 0.37, q.z + 0.12, { t: 0.07, lip: 0.02, ext: 0.03, lod0: true });
+  }
+  if (ctx.snow) snowCap(B, tw * 2 + 0.3, tw * 2 + 0.3, 0, yT + 0.12, 0, { t: 0.1, lod0: true });
+  if (ctx.driftMat) { drift(B, ctx, -hx - 0.15, -0.2, 0.55, 1.4, ctx.snow ? 0.5 : 0.32, 0); drift(B, ctx, hx * 0.3, -hz - 0.15, 1.3, 0.5, 0.3, 0); }
+}
+// Yard clutter that is never loot: rusted rims nailed to a post, a crushed drum or two, a crate stack.
+function junkDecor(B, ctx, rnd, x, z, kind) {
+  const gy = B.ground(x, z);
+  if (kind === 'rims') {
+    B.cyl('rs_timber', 0.09, 0.12, 2.1, x, gy + 0.85, z, { seg: 8, rz: range(rnd, -0.04, 0.04), off: [rnd(), 0] });
+    B.box('rs_timber', 0.5, 0.12, 0.1, x, gy + 1.82, z, { r: 0.02, rz: 0.1 });
+    for (const [yy, ox] of [[0.62, 0.05], [1.12, -0.04], [1.55, 0.06]]) {
+      B.push(M4(x + ox, gy + yy, z + 0.14, Math.PI / 2 + range(rnd, -0.15, 0.15), 0, range(rnd, -0.2, 0.2)));
+      const r = range(rnd, 0.3, 0.36), tn = pick(rnd, [[1.0, 0.92, 0.85], [1.1, 0.8, 0.62], [0.85, 0.8, 0.8]]);
+      B.lathe('rs_steel_red', [[r - 0.03, -0.08], [r, -0.065], [r - 0.035, -0.04], [r - 0.035, 0.04], [r, 0.065], [r - 0.03, 0.08]], 0, 0, 0, { seg: 14, tint: tn, S: 0.8 });
+      B.cyl('rs_steel_red', r - 0.04, r - 0.04, 0.02, 0, 0.0, 0, { seg: 14, tint: tn.map(c => c * 0.8), S: 0.8 });
+      B.cyl('rs_iron', 0.08, 0.08, 0.05, 0, 0.03, 0, { seg: 8, tint: [0.7, 0.6, 0.55], lod0: true });
+      B.pop();
+    }
+    if (ctx.snow) B.ell('rs_snow!', 0.14, 0.06, 0.14, x, gy + 1.92, z, { seg: 8, rings: 4, noAO: true, lod0: true });
+  } else {
+    // two crushed drums on their sides, one stood up dented, a crate stack beside them
+    for (const [dx, dz, ry, m] of [[0, 0, 0.3, 'rs_drum'], [0.15, 0.7, -0.2, 'rs_drum_red']]) {
+      B.cyl(m, 0.3, 0.3, 0.86, x + dx, B.ground(x + dx, z + dz) + 0.18, z + dz, { rz: Math.PI / 2, ry, s: [0.62, 1, 1.05], seg: 12, caps: 'rs_drum_lid', jit: 0.06 });
+    }
+    B.cyl('rs_drum', 0.3, 0.3, 0.88, x - 0.7, B.ground(x - 0.7, z + 0.3) + 0.42, z + 0.3, { seg: 12, caps: 'rs_drum_lid', jit: 0.05, rx: 0.06, s: [1, 0.93, 0.9] });
+    const cx = x - 0.4, cz = z - 0.8, cg = B.ground(cx, cz);
+    B.box('rs_crate_b', 0.72, 0.62, 0.66, cx, cg + 0.31, cz, { r: 0.03, ry: range(rnd, -0.15, 0.15) });
+    B.box('rs_crate_a', 0.58, 0.5, 0.56, cx + 0.05, cg + 0.87, cz + 0.02, { r: 0.03, ry: range(rnd, 0.3, 0.6) });
+    if (ctx.snow) snowCap(B, 0.5, 0.48, cx + 0.05, cg + 1.12, cz + 0.02, { t: 0.08, lod0: true });
+  }
 }
 
 // junk: stencilled crates stacked into their boxes, barrels in banded clusters on pallets, scrap heaps
@@ -1261,6 +1519,7 @@ function buildJunk(B, p, parts, ctx) {
     const gy = ctx.H(s.x, s.z);
     B.frame(s.x, gy, s.z, s.ry || 0);
     const rnd = rngOf(seedOf(s.x, s.z, 7));
+    if (s.part === 'junk_heap') { junkShack(B, s, ctx, rnd); continue; }
     const cy = s.y - gy, bot = cy - s.hy, top = cy + s.hy;
     const W2 = s.hx * 2, D2 = s.hz * 2;
     if (s.part !== 'scrap' && bot > 0.06) {
@@ -1384,13 +1643,12 @@ function buildJunk(B, p, parts, ctx) {
       }
     }
   }
-  // stacked tyres beside the pile
+  // beside the shack: rims nailed to a post on one side, crushed drums and a crate stack on the other
+  // (nothing that could be mistaken for loot: the loot tyres are whitewalls)
   B.frame(p.x, p.y, p.z, p.ry || 0);
-  const rnd = rngOf(seedOf(p.x, p.z, 8));
-  for (const [x, z, n] of [[4.6, -1.2, 3], [-4.6, -1.6, 1]]) {
-    const gy = B.ground(x, z);
-    for (let k = 0; k < n; k++) B.cyl('rs_tire', 0.42, 0.42, 0.26, x + range(rnd, -0.06, 0.06), gy + 0.13 + k * 0.25, z + range(rnd, -0.06, 0.06), { caps: 'rs_hub', fit: true, uRep: 6, bevel: 0.07, seg: 14 });
-  }
+  const rnd = rngOf(seedOf(p.x, p.z, 8)), sd = rnd() < 0.5 ? -1 : 1;
+  junkDecor(B, ctx, rnd, sd * 2.75, -5.0, 'rims');
+  junkDecor(B, ctx, rnd, -sd * 2.9, -5.3, 'drums');
 }
 
 function buildGas(B, p, parts, ctx, decor) {
@@ -1492,7 +1750,7 @@ function buildDino(B, p, parts, ctx) {
   const d = p.dino || { x: p.x, y: p.y, z: p.z, ry: p.ry || 0 };
   B.frame(d.x, d.y, d.z, d.ry);
   const L = parts.map(s => B.loc(s));
-  const body = L.find(s => s.part === 'dino_body'), tail = L.find(s => s.part === 'dino_tail'), neck = L.find(s => s.part === 'dino_neck');
+  const body = L.find(s => s.part === 'dino_body'), torso = L.find(s => s.part === 'dino_torso'), tail = L.find(s => s.part === 'dino_tail'), neck = L.find(s => s.part === 'dino_neck');
   const legs = L.filter(s => s.part === 'dino_leg');
   const tint = ctx.bio.dino;
   if (!body) return;
@@ -1513,12 +1771,14 @@ function buildDino(B, p, parts, ctx) {
   B.quad('rs_plaque', 1.5, 0.5, bx, 0.52, bz + phz - 0.06 + 0.02, {});
   // painted rockwork under the belly
   B.box('rs_rock', 2.2, 0.8, 3.6, bx, ptop + 0.3, bz - 0.15, { r: 0.35, jit: 0.16, div: [3, 1, 4], smoothN: true, S: 1.4, tint: [0.66, 0.7, 0.56] });
-  // the body
-  const ax = body.hx - 0.06, az = body.hz - 0.08, yc = 2.92, ay = 1.12, e = 2.2, ev = 2.0, evLow = 2.3;
+  // the body fills the dino_torso box (its widest, longest and lowest points on the box's faces, the hump just
+  // proud of its top), so you can neither see into the collider nor walk into the body
+  const T = torso || { hx: body.hx - 0.06, hz: body.hz - 0.08, y: 2.92, hy: 1.24 };
+  const ax = T.hx + 0.02, az = T.hz, yc = T.y - 0.02, ay = T.hy - 0.1, e = 2.2, ev = 2.0, evLow = 2.3, humpK = torso ? 0.16 : 0.35;
   const shape = (zn, yN) => {
     const narrow = 1 - 0.2 * smooth(0.15, 0.95, zn);                                     // narrow shoulders
-    const hump = yN > 0 ? yN * yN * 0.35 * Math.exp(-(((zn + 0.5) / 0.45) ** 2)) : 0;   // over the hips
-    const sag = yN < 0 ? -yN * 0.15 * Math.exp(-((zn / 0.45) ** 2)) : 0;               // between the legs
+    const hump = yN > 0 ? yN * yN * humpK * Math.exp(-(((zn + 0.5) / 0.45) ** 2)) : 0;   // over the hips
+    const sag = yN < 0 ? -yN * 0.12 * Math.exp(-((zn / 0.45) ** 2)) : 0;               // between the legs
     const front = yN > 0 ? yN * 0.18 * smooth(0.4, 1, zn) : 0;                          // the shoulders lean into the neck
     return { narrow, dy: hump - sag + front };
   };
@@ -1537,11 +1797,13 @@ function buildDino(B, p, parts, ctx) {
   // elephant legs: a full thigh (bulging on the hind legs), a knee, a round foot with three cream toenails;
   // the front legs set a few degrees forward
   for (const l of legs) {
-    const sx = Math.sign(l.x - bx) || 1, fx = bx + sx * Math.min(Math.abs(l.x - bx), ax - 0.62), fz = l.z, front = fz > bz;
-    // the thigh swells just above the knee and runs back into the body (it only bulges the flank a little)
-    const lean = front ? 0.09 : -0.02, thigh = front ? 0.62 : 0.7;
-    const pts = [V(fx, ptop + 0.02, fz + lean), V(fx, ptop + 0.3, fz + lean * 0.9), V(fx * 0.99, ptop + 0.72, fz + lean * 0.6), V(fx * 0.93, ptop + 1.2, fz + lean * 0.2), V(fx * 0.82, 2.75, fz), V(fx * 0.6, 3.25, fz)];
-    B.tube('rs_dino', pts, [0.64, 0.58, 0.5, thigh, thigh * 0.85, 0.5], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint });
+    // each leg stands in its own collider box (the feet on the plinth, the knee at the box's top), the thigh
+    // swelling above it and running back into the body
+    const sx = Math.sign(l.x - bx) || 1, fx = bx + sx * Math.min(Math.abs(l.x - bx), torso ? 1.2 : ax - 0.62), fz = l.z, front = fz > bz;
+    const lr = torso ? Math.min(0.5, l.hx + 0.06) : 0.58, lean = front ? 0.06 : -0.02, thigh = front ? lr + 0.08 : lr + 0.16, knee = torso ? l.y + l.hy : ptop + 0.72;
+    const kx = bx + (fx - bx) * 0.97, tx = bx + (fx - bx) * 0.86, rx2 = bx + (fx - bx) * 0.6;
+    const pts = [V(fx, ptop + 0.02, fz + lean), V(fx, ptop + 0.3, fz + lean * 0.9), V(kx, knee, fz + lean * 0.6), V(tx, knee + 0.5, fz + lean * 0.2), V(bx + (fx - bx) * 0.75, yc - 0.15, fz), V(rx2, yc + 0.35, fz)];
+    B.tube('rs_dino', pts, [lr + 0.06, lr, lr - 0.04, thigh, thigh * 0.85, 0.5], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint });
     for (const k of [-1, 0, 1]) B.ell('rs_dino', 0.13, 0.1, 0.13, fx + k * 0.3, ptop + 0.09, fz + lean + 0.56 - Math.abs(k) * 0.13, { seg: 8, rings: 4, uvFn: () => [0.3 + k * 0.1, 0.06], tint: tint.map(c => c * 1.12) });
   }
   if (neck) {
@@ -1648,6 +1910,10 @@ function gatehouse(B, ctx, K, side, xc, rnd) {
     for (const lz of [-1, 1]) for (const mx of [-0.55, 0, 0.55]) B.box(W, 0.1, wallH, 0.06, xc + mx + range(rnd, -0.05, 0.05), wy, lz * (hz - 0.01), { r: 0.02, tint: wood, rz: range(rnd, -0.03, 0.03) });
   } else if (wallMat.startsWith('rs_steel')) {
     for (const yy of [wy - wallH / 2 + 0.08, wy + wallH / 2 - 0.08]) B.box('rs_brass', hx * 2 + 0.02, 0.1, hz * 2 + 0.02, xc, yy, 0, { r: 0.02 });
+  } else if (wallMat === 'rs_adobe') {
+    // Gadgetzan: a riveted brass sill band, and dark vigas poking out of the plaster under the plate
+    B.box('rs_brass', hx * 2 + 0.04, 0.12, hz * 2 + 0.04, xc, wy - wallH / 2 + 0.07, 0, { r: 0.02 });
+    for (const lz of [-1, 1]) for (const mx of [-0.62, 0, 0.62]) B.box(W, 0.15, 0.15, 0.42, xc + mx + range(rnd, -0.04, 0.04), wallTop - 0.3, lz * (hz + 0.12), { r: 0.03, jit: 0.02, tint: wood.map(c => c * 0.8), rx: range(rnd, -0.04, 0.04) });
   }
   // a lit watch window on the approach face and the road face, a shutter hanging open beside each
   const win = (x, z, ry) => {
@@ -1707,7 +1973,16 @@ function buildGateStatic(B, g, ctx) {
   const { floor, hx, hz, lintel } = GATE;
   // the inner legs stand at the foot of each canyon wall, the booths reach back into it
   const footX = sx => { for (let x = g.hx + 0.5; x > 4; x -= 0.25) { const gy = Math.max(B.ground(sx * x, -1.1), B.ground(sx * x, 1.1), B.ground(sx * x, 0)); if (gy < 0.45) return x; } return 4; };
-  const xIn = { [-1]: Math.min(g.hx - 0.6, footX(-1) - 0.35), [1]: Math.min(g.hx - 0.6, footX(1) - 0.35) };
+  // In a narrow canyon the slope climbs two metres a metre, so a booth standing at the wall's foot would have
+  // its outer half (and the lintel's end) inside the rock: slide it out over the shoulder until its outer wall
+  // clears the slope by its floor and its eave by the plate (never nearer the crown than 5.2 m).
+  const slopeAt = (sx, x) => Math.max(B.ground(sx * x, -hz - 0.15), B.ground(sx * x, 0), B.ground(sx * x, hz + 0.15));
+  const xIn = {};
+  for (const sx of [-1, 1]) {
+    let xi = Math.min(g.hx - 0.6, footX(sx) - 0.35);
+    while (xi > 5.2 && (slopeAt(sx, xi + 2 * hx) > floor - 0.3 || slopeAt(sx, xi + 2 * hx + GATE.eave) > GATE.plate - 0.15)) xi -= 0.1;
+    xIn[sx] = xi;
+  }
   for (const side of [-1, 1]) {
     const xi = side * xIn[side], xc = xi + side * hx;
     gatehouse(B, ctx, K, side, xc, rnd);
@@ -1744,7 +2019,27 @@ function buildGateStatic(B, g, ctx) {
     const xw = sx > 0 ? xr - 0.3 : xl + 0.3, dx = 1.05, dy = lintel - 0.3 - (floor + 0.15), len = Math.hypot(dx, dy);
     B.box(W, 0.18, len, 0.18, xw - sx * dx / 2, (lintel - 0.3 + floor + 0.15) / 2, 0, { rz: sx * Math.atan2(dx, dy), r: 0.03, tint: wood });
   }
-  if (K.extra === 'bones') B.box('rs_hide', 1.0, 1.25, 0.04, cx - 2.6, lintel - 0.95, -0.3, { r: 0.01, rz: 0.04, div: [2, 3, 1], deform: q => { q[2] += Math.sin(q[1] * 4) * 0.03; if (q[1] < -0.5) q[1] += Math.abs(q[0]) * 0.3; } });
+  if (K.extra === 'bones') {
+    // a bison pelt hung off the lintel by its forelegs on two ropes, out over the ditch
+    const hxp = Math.min(xr - 1.3, cx + 3.7), tips = pelt(B, 1, 2.05, 2.2, hxp, 3.68, -0.52, { ry: Math.PI, sag: 0.09, rz: range(rnd, -0.05, 0.05) });
+    for (const t of tips.filter(q => q.y > 3.68)) {
+      B.tube('rs_rope', [t, V(t.x, lintel - 0.18, -0.36), V(t.x, lintel + 0.31, -0.06), V(t.x, lintel + 0.27, 0.12)], 0.026, { seg: 5, lod0: false });
+      B.torus('rs_rope', 0.335, 0.024, t.x + 0.03, lintel, 0, { ry: Math.PI / 2, seg: 10, tseg: 4, uRep: 6, lod0: true });
+    }
+    // and a cream hide painted with the sun, stretched on an X of bleached poles against the right-hand booth
+    const xr0 = xIn[1] + hx + 0.1, zr0 = -hz - 0.85, gy = B.ground(xr0, zr0);
+    if (gy < 1.4) {
+      const poles = [[V(xr0 - 0.82, gy - 0.2, zr0 + 0.04), V(xr0 + 0.78, gy + 2.4, zr0 + 0.1)], [V(xr0 + 0.82, gy - 0.2, zr0 - 0.02), V(xr0 - 0.76, gy + 2.36, zr0 + 0.12)]];
+      for (const [a, b] of poles) B.tube(W, [a, a.clone().lerp(b, 0.5), b], [0.065, 0.058, 0.048], { seg: 7, lod0: false });
+      lashing(B, xr0, gy + 1.05, zr0 + 0.07, 0.07, 3);
+      const tips2 = pelt(B, 1, 1.55, 1.75, xr0, gy + 1.15, zr0 - 0.14, { ry: Math.PI, sag: 0.1, tint: [1.4, 1.22, 1.05] });
+      for (const t of tips2) {
+        let best = null;
+        for (const [a, b] of poles) { const ab = b.clone().sub(a), k = Math.max(0.05, Math.min(0.97, t.clone().sub(a).dot(ab) / ab.lengthSq())), q = a.clone().addScaledVector(ab, k); if (!best || q.distanceTo(t) < best.distanceTo(t)) best = q; }
+        lash(B, t, best, 0.02);
+      }
+    }
+  }
   if (ctx.snow) { snowCap(B, span - 0.6, 0.5, cx, lintel + 0.3, 0, { t: 0.16 }); icicles(B, xl + 0.6, -0.3, xr - 0.6, -0.3, lintel - 0.28, rnd, { max: 0.3 }); }
   // the station's carved board on iron brackets off the lintel's face, hung a little crooked
   const by = lintel - 0.82;
@@ -1806,11 +2101,15 @@ function buildGateBars(B, g, ctx) {
       B.cyl(W, 0.07, 0.075, hx * 2 - 0.1, 0, yy + range(rnd, -0.06, 0.06), sz * (hz + 0.06), { rz: Math.PI / 2 + range(rnd, -0.01, 0.01), seg: 7, caps: 'rs_logend', off: [rnd(), 0] });
       for (let x = -hx + 0.6; x < hx - 0.4; x += range(rnd, 0.7, 1.2)) for (const a of [0.7, -0.7]) B.box('rs_rope', 0.03, 0.26, 0.03, x, yy, sz * (hz + 0.11), { rz: a, r: 0, lod0: true });
     }
-    // a hide stretched over one bay, lashed at its corners
+    // a pelt stretched in one bay above the boom, its four legs lashed back to the uprights either side
     const bi = Math.max(0, Math.min(ups.length - 2, Math.floor(ups.length / 2) - 2));
-    const x0 = ups[bi] + 0.3, x1 = ups[bi + 1] - 0.3, wH = x1 - x0;
-    B.box('rs_hide', wH, 2.2, 0.04, (x0 + x1) / 2, 1.5, -hz - 0.14, { r: 0.01, div: [3, 3, 1], deform: q => { q[2] += Math.sin(q[0] * 2.2) * Math.sin(q[1] * 1.6) * 0.05; if (Math.abs(q[1]) > 0.9) q[0] *= 0.94; } });
-    for (const cx2 of [x0 + 0.05, x1 - 0.05]) for (const cy of [0.45, 2.55]) B.box('rs_rope', 0.16, 0.06, 0.06, cx2, cy, -hz - 0.15, { rz: 0.7, r: 0, lod0: true });
+    const ua = ups[bi], ub = ups[bi + 1], pcx = (ua + ub) / 2, pw = Math.min(ub - ua - 0.3, 2.5), pyc = 2.92;
+    const tips = pelt(B, 0, pw, 1.95, pcx, pyc, -hz - 0.27, { ry: Math.PI, sag: 0.16 });
+    for (const t of tips) {
+      const ux = t.x < pcx ? ua + 0.16 : ub - 0.16, ay = t.y + (t.y > pyc ? 0.14 : -0.14);
+      lash(B, t, V(ux, ay, -hz - 0.08), 0.02);
+      lashing(B, t.x < pcx ? ua : ub, ay - 0.05, 0, 0.2, 2);
+    }
   } else if (style === 'beams') {
     // squared beams stacked on edge with shadow gaps, banded with iron straps at every bay
     rails = false;
@@ -1849,13 +2148,37 @@ function buildGateBars(B, g, ctx) {
     }
     B.box(W, hx * 2, H - 0.2, hz * 2 - 0.16, 0, (H - 0.2) / 2, 0, { r: 0.02, tint: [0.4, 0.38, 0.38] });
   } else {
-    // riveted goblin plates in a timber frame, spikes along the top
+    // goblin plating in a timber frame: dark riveted iron sheets and brass ones lapped in two courses, bulging a
+    // little between their rivets, verdigris-green brass caps as the only colour, spikes along the top, and a
+    // sun-bleached canvas strip thrown over it and sagging between the uprights
     for (const u of ups) B.box(W, 0.32, H + 0.12, hz * 2 + 0.04, u, (H + 0.12) / 2, 0, { r: 0.04, tint: wood, off: [rnd(), 0] });
+    const split = 1.25 + range(rnd, -0.1, 0.1);
     for (let i = 0; i < ups.length - 1; i++) {
       const x0 = ups[i] + 0.16, x1 = ups[i + 1] - 0.16, w = x1 - x0;
-      B.box(i % 2 ? 'rs_steel_teal' : 'rs_steel_mustard', w, H - 0.1, hz * 2 - 0.04, (x0 + x1) / 2, (H - 0.1) / 2, 0, { r: 0.03, fit: 'v', S: 2, off: [rnd(), 0], div: [4, 2, 1], smoothN: true, deform: q => { q[2] += Math.sin(Math.PI * (q[0] / w + 0.5)) * Math.sin(Math.PI * (q[1] / (H - 0.1) + 0.5)) * 0.02 * Math.sign(q[2]); } });
+      for (const [y0, y1, row] of [[0.04, split + 0.04, 0], [split - 0.04, H - 0.06, 1]]) {
+        const hh = y1 - y0, iron = (i + row) % 2 === 0, m = iron ? 'rs_iron' : 'rs_brass', tn = iron ? [0.72, 0.7, 0.72] : [0.8, 0.7, 0.58];
+        const dz = row ? 0.012 : 0;
+        B.box(m, w + 0.04, hh, hz * 2 - 0.04 + dz * 2, (x0 + x1) / 2, y0 + hh / 2, 0, { r: 0.025, S: iron ? 0.9 : 1.4, off: [rnd(), rnd()], tint: tn, div: [4, 2, 1], smoothN: true,
+          deform: q => { q[2] += Math.sin(Math.PI * (q[0] / (w + 0.04) + 0.5)) * Math.sin(Math.PI * (q[1] / hh + 0.5)) * 0.022 * Math.sign(q[2]); } });
+        // rivet heads along the top and bottom edges of each plate, both faces
+        B.lod0 = true;
+        for (const yy of [y0 + 0.07, y1 - 0.07]) for (let x = x0 + 0.1; x < x1 - 0.05; x += 0.26) for (const sz of [-1, 1]) B.cyl(iron ? 'rs_brass' : 'rs_iron', 0.026, 0.03, 0.03, x, yy, sz * (hz + dz), { rx: sz * Math.PI / 2, seg: 6, caps: iron ? 'rs_brass' : 'rs_iron' });
+        B.lod0 = false;
+      }
+      // a verdigris cap strip along the top of the bay
+      B.box('rs_brass', w + 0.06, 0.1, hz * 2 + 0.06, (x0 + x1) / 2, H - 0.04, 0, { r: 0.025, tint: [0.62, 1.0, 0.92] });
     }
-    for (let x = -hx + 0.3; x < hx - 0.2; x += range(rnd, 0.42, 0.62)) B.cyl('rs_iron', 0, 0.06, 0.34, x, H + 0.1, 0, { seg: 6, caps: false, lod0: false });
+    for (let x = -hx + 0.3; x < hx - 0.2; x += range(rnd, 0.42, 0.62)) B.cyl('rs_iron', 0, 0.06, 0.34, x, H + 0.15, 0, { seg: 6, caps: false, lod0: false });
+    // the bleached canvas strip, thrown over the top and hanging down the approach face in a sag between uprights
+    const cs = Math.max(0, Math.floor(ups.length / 2) - 3), ce = Math.min(ups.length - 1, cs + 3);
+    const xa = ups[cs] + 0.2, xb = ups[ce] - 0.2;
+    B.grid('rs_canvas_blue', 24, 4, (u, v) => {
+      const x = lerp(xa, xb, u), k = ((x - ups[cs]) / (ups[ce] - ups[cs])) * (ce - cs), bay = Math.sin(Math.PI * (k % 1));
+      const tear = v > 0.75 ? 0.06 * Math.sin(x * 9.1) + 0.05 * Math.sin(x * 23.7) : 0;
+      if (v < 0.3) { const t = v / 0.3; return [x, H + 0.06 + 0.04 * Math.sin(Math.PI * t), lerp(0.1, -hz - 0.05, t)]; }
+      const t = (v - 0.3) / 0.7;
+      return [x, H + 0.02 - t * (0.62 + 0.14 * bay) + tear, -hz - 0.06 - 0.05 * t - 0.03 * bay * t];
+    }, { uv: (u, v) => [lerp(xa, xb, u) / 3, v * 0.9], tint: [1.22, 1.14, 1.0] });
   }
   // rails across both faces, strapped to the uprights
   if (rails) for (const sz of [-1, 1]) for (const yy of railY) {
@@ -2030,8 +2353,9 @@ function buildLog(B, s, ctx) {
 // wheel-arch flares, a rack on the roof with lashed crates and a rolled tarp, a brass stovepipe, a sagging
 // awning on two poles by the door, one window boarded up crooked; each sits a few degrees off level on its
 // flat tyre.
-// the three skins live in one atlas (rs_rv_skins), a third of v each
-const RV_SKIN_V = [[2 / 3, 1], [1 / 3, 2 / 3], [0, 1 / 3]];
+// the three skins live in one atlas (rs_rv_skins), a quarter of v each, their name boards in the last quarter
+const RV_SKIN_V = [[0.75, 1], [0.5, 0.75], [0.25, 0.5]];
+const RV_NAME = k => [0.01, 1 - (768 + 85 * k + 82) / 1024, 0.99, 1 - (768 + 85 * k + 3) / 1024];
 function buildParkedRV(B, s, ctx, idx = 0) {
   const base = s.y - s.hy;
   B.frame(s.x, base, s.z, s.ry || 0);
@@ -2049,7 +2373,7 @@ function buildParkedRV(B, s, ctx, idx = 0) {
   B.box('rs_rv_window', 1.1, 0.3, 0.03, 0, top - 0.5, zf + 0.53, { r: 0.01, rx: 0.25 });
   // the raked windshield and the nose under it: grille, brass headlamps
   B.box('rs_glass', hx * 2 - 0.5, 0.66, 0.05, 0, 1.62, zf + 0.06, { r: 0.012, rx: -0.26, uvRect: [0, 0, 0.5, 1] });
-  B.box(skin, hx * 2 - 0.1, 0.72, 0.36, 0, 0.92, zf + 0.12, { r: 0.18, fit: 'v', uvRect: SV(0.04, 0.46), div: [2, 1, 1], smoothN: true, deform: q => { q[2] -= 0.04 * (q[0] / hx) ** 2; } });
+  B.box(skin, hx * 2 - 0.1, 0.72, 0.36, 0, 0.92, zf + 0.12, { r: 0.18, fit: 'v', uvRect: SV(0.1, 0.56), div: [2, 1, 1], smoothN: true, deform: q => { q[2] -= 0.04 * (q[0] / hx) ** 2; } });
   B.box('rs_grille', 1.0, 0.44, 0.06, 0, 0.92, zf + 0.31, { r: 0.015 });
   for (const sx of [-1, 1]) B.cyl('rs_brass', 0.15, 0.15, 0.1, sx * 0.82, 0.98, zf + 0.29, { rx: Math.PI / 2, caps: 'rs_headlamp*', seg: 12, bevel: 0.025 });
   // bumpers, tucked in
@@ -2058,6 +2382,17 @@ function buildParkedRV(B, s, ctx, idx = 0) {
   for (let k = 0; k < 5; k++) B.cyl('rs_brass', 0.03, 0.03, 0.04, -1.0 + k * 0.5, 0.5, zf + 0.45, { rx: Math.PI / 2, seg: 6, lod0: true });
   // timber corner posts, an iron chassis rail under the skirt
   for (const sx of [-1, 1]) for (const zz of [zf - 0.3, zr + 0.3]) B.box('rs_timber', 0.15, bh - 0.5, 0.15, sx * (hx - 0.05 - (zz < 0 ? 0.04 : 0)), bcy - 0.05, zz, { r: 0.04, tint: [0.95, 0.9, 0.85] });
+  // brass trim strips proud of the skin along the belt and under the roof edge (the SLOPMASTER's), and the
+  // motorhome's hand-painted name on a board nailed to the planks
+  const nm = RV_NAME(idx % 3);
+  for (const sx of [-1, 1]) {
+    for (const [yy, k] of [[by + bh * 0.53, 0.985], [top - 0.2, 0.955]]) B.box('rs_brass', 0.04, 0.07, bl - 0.75, sx * (hx * k - 0.01), yy, bcz - 0.05, { r: 0.015, rot: true });
+    B.box('rs_timber', 0.05, 0.38, 1.5, sx * (hx - 0.01), by + bh * 0.32, -1.65, { r: 0.015, rz: sx * range(rnd, -0.03, 0.03), faces: { [sx > 0 ? 'px' : 'nx']: { m: skin, fit: true, uvRect: nm } } });
+  }
+  // and its name again on a board up on the roof over the cab, on two brass posts
+  for (const sx of [-0.6, 0.6]) B.cyl('rs_brass', 0.03, 0.03, 0.5, sx, top + 0.22, zf - 0.35, { seg: 6, caps: false });
+  B.box('rs_timber', 1.75, 0.42, 0.07, 0, top + 0.52, zf - 0.33, { r: 0.02, rz: range(rnd, -0.03, 0.03), faces: { pz: { m: skin, fit: true, uvRect: nm }, nz: { m: skin, fit: true, uvRect: nm } } });
+  if (ctx.snow) snowCap(B, 1.75, 0.07, 0, top + 0.73, zf - 0.33, { t: 0.08, lip: 0.02, ext: 0.03, lod0: true });
   for (const sx of [-1, 1]) B.box('rs_iron', 0.14, 0.2, bl - 0.6, sx * 0.62, 0.42, bcz, { r: 0.03 });
   // windows down both sides, one boarded up crooked; the door and its step on the +x side
   for (const sx of [-1, 1]) {
@@ -2129,9 +2464,20 @@ function makeCtx(W) {
   const biome = BIO[W.biome] ? W.biome : 'meadow';
   const b0 = BIO[biome];
   const bio = { ...b0, ground: groundMat(b0.ground, 'rs_dirt!'), drift: b0.drift && groundMat(b0.drift, biome === 'snow' ? 'rs_snow!' : biome === 'desert' ? 'rs_sand!' : 'rs_dust!') };
+  // the terrain's tint at a ground point (terrain3d's terrainTintAt, when it has one), cached on a 0.5 m grid
+  let groundTint = null;
+  if (typeof TERRAIN.terrainTintAt === 'function' && W.heights) {
+    const cache = new Map();
+    groundTint = (x, z) => {
+      const k = Math.round(x * 2) * 100003 + Math.round(z * 2);
+      let c = cache.get(k);
+      if (!c) { try { const t = TERRAIN.terrainTintAt(W, Math.round(x * 2) / 2, Math.round(z * 2) / 2); c = [t.r, t.g, t.b]; } catch { c = [1, 1, 1]; } cache.set(k, c); }
+      return c;
+    };
+  }
   return {
     W, biome, bio, H: (x, z) => W.heightAt(x, z), ao: bio.ao, aoH: 0.9,
-    snow: biome === 'snow', driftMat: bio.drift, cover: bio.cover, smokes: [],
+    snow: biome === 'snow', driftMat: bio.drift, cover: bio.cover, smokes: [], groundTint,
   };
 }
 

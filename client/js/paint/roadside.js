@@ -16,7 +16,7 @@
 //   rs_iron (0.5 m)  rs_brass (1 m)  rs_tire (tread, u around)  rs_gingham (0.6 m)  rs_burlap  rs_plaid  rs_canvas (stripes along u)
 //   rs_wing (doped canvas, ribs along v, 1.6 m)  rs_scrap (junk soil, world-planar 1 m)  rs_stone (1.6 m)  rs_rope  rs_bone
 //   rs_bark (u around, v along)  rs_dino (u along the body, one tile per 6 m; v = 0 belly .. 1 back, from the normal)
-//   rs_rv_teal|rust|mustard (u 3 m, v fitted; atlas rs_rv_skins stacks all three)  rs_fascia (u 4 m, v fitted)
+//   rs_rv_green|rust|blue (u 3 m, v fitted; atlas rs_rv_skins stacks all three over rs_rv_names)  rs_fascia (u 4 m, v fitted)
 //   rs_snow, rs_dust, rs_sand (caps)   rs_cover_snow|dust|sand (alpha = breakup noise, for the world-space
 //   top-cover shader)   rs_ice (icicles)
 // Fitted (one image per face): rs_hub, rs_glass (two panes side by side), rs_grille, rs_crate_a|b|c, rs_barrel,
@@ -877,6 +877,116 @@ register('rs_pennant', {
     g.fillStyle = '#4a3a2c'; g.fillRect(0, 0, 5, h);
   },
 });
+// The gas bag's torn envelope, dragged over the mesa rim (alpha, fitted: u across, v from the gathered top
+// edge down to the hem). One muted oxblood doped canvas in four gores, a big sun-faded patch, a tan repair
+// patch, a scorch with a burnt hole, rain grime, one worn cream band near the hem, and the hem torn into four
+// ragged tongues of different lengths.
+register('rs_gasbag', {
+  family: F, size: 256, alpha: true, note: 'torn gas-bag envelope (alpha, fitted; v=1 top edge, v=0 hem): oxblood doped canvas gores, faded patch, repair patch, scorch and holes, one cream band, hem in 4 tongues',
+  paint(g, s, rnd, h, cv) {
+    const lerp = (a, b, t) => a + (b - a) * t;
+    // the outline: a gathered top edge, ragged sides narrowing a little, the hem torn into tongues
+    const body = 0.66 * s, out = [];
+    out.push([2, 0], [s - 2, 0]);
+    for (let k = 1; k <= 8; k++) { const y = body * k / 8; out.push([s - 2 - 10 * (k / 8) - range(rnd, 0, 5), y]); }
+    // tongues from right to left: [valley x, tip x, tip y]
+    const nT = 4, edges = [s - 14];
+    for (let k = 1; k < nT; k++) edges.push(s - 14 - (s - 28) * (k / nT) + range(rnd, -14, 14));
+    edges.push(14);
+    for (let k = 0; k < nT; k++) {
+      const xr = edges[k], xl = edges[k + 1], tipY = s * [0.97, 0.86, 0.99, 0.9][k] - range(rnd, 0, 8), tipX = lerp(xl, xr, range(rnd, 0.3, 0.6));
+      const valley = body + range(rnd, -6, 10);
+      if (k > 0) out.push([xr, valley]);
+      // the right flank of the tongue frays down to its tip, the left flank back up
+      for (let q = 1; q <= 4; q++) { const t = q / 4; out.push([lerp(xr - 2, tipX + 4, t) + range(rnd, -3, 3), lerp(valley + 4, tipY, t * t)]); }
+      out.push([tipX, tipY + 3]);
+      for (let q = 3; q >= 1; q--) { const t = q / 4; out.push([lerp(xl + 2, tipX - 4, t) + range(rnd, -3, 3), lerp(valley + 6, tipY, t * t)]); }
+    }
+    for (let k = 8; k >= 1; k--) { const y = body * k / 8; out.push([2 + 9 * (k / 8) + range(rnd, 0, 5), y]); }
+    g.save(); polyPath(g, out); g.clip();
+    // four gores, each bellied: lit on the side toward the light, shadowed into the next seam
+    const seams = [0, 0.27, 0.51, 0.76, 1].map((t, i) => (i % 4 ? t + range(rnd, -0.03, 0.03) : t) * s);
+    const gores = ['#86382a', '#7c3226', '#8e402e', '#823a2c'];
+    for (let i = 0; i < 4; i++) {
+      const x0 = seams[i], x1 = seams[i + 1], c = jitter(gores[i], rnd, 0.04);
+      g.fillStyle = c; g.fillRect(x0, 0, x1 - x0 + 1, s);
+      g.fillStyle = grad(g, x0, 0, x1, 0, [[0, shadowOf(c, 0.3), 0.6], [0.18, lightOf(c, 0.25), 0.35], [0.45, lightOf(c, 0.2), 0.2], [0.85, shadowOf(c, 0.25), 0.25], [1, shadowOf(c, 0.4), 0.55]]);
+      g.fillRect(x0, 0, x1 - x0 + 1, s);
+    }
+    mottle(g, s, rnd, { colors: ['#9a4834', '#6a2a20', '#8a4a3a', '#7a3a2e'], count: 26, rmin: 18, rmax: 60, alpha: 0.24, hard: 0.08 });
+    // the sun-faded patch: a big soft bleached bloom, pinkish tan, across two gores
+    blob(g, s * 0.36, s * 0.3, s * 0.32, s * 0.22, 0.3, '#b48468', 0.5, 0.05);
+    blob(g, s * 0.3, s * 0.26, s * 0.2, s * 0.13, 0.5, '#c8a080', 0.36, 0.1);
+    // rain grime running down from the top, darker toward the hem
+    streaks(g, s, rnd, { colors: ['#4a2018', '#5a2a1e'], count: 26, len: [30, 120], width: [2, 6], angle: Math.PI / 2, wobble: 0.12, alpha: 0.13 });
+    g.fillStyle = grad(g, 0, 0, 0, s, [[0, '#fff0c8', 0.16], [0.3, '#fff0c8', 0], [0.6, '#2c2340', 0], [1, '#2c2340', 0.3]]); g.fillRect(0, 0, s, s);
+    // seams: a dark welt, a lit lip on its left, the stitching
+    for (let i = 1; i < 4; i++) {
+      const x = seams[i];
+      g.fillStyle = grad(g, x - 6, 0, x + 6, 0, [[0, '#f0c8a0', 0], [0.35, '#f0c8a0', 0.22], [0.5, '#3a1814', 0.6], [0.75, '#3a1814', 0.15], [1, '#3a1814', 0]]); g.fillRect(x - 6, 0, 12, s);
+      g.save(); g.setLineDash([4, 4]); line(g, [[x - 3, 0], [x - 3, s]], 1.1, '#d8b890', 0.55); line(g, [[x + 3, 2], [x + 3, s]], 1.1, '#d8b890', 0.45); g.restore();
+    }
+    // gathered top edge: a reinforced hem with puckers where the rigging pulled it
+    g.fillStyle = grad(g, 0, 0, 0, 16, [[0, '#4a2018', 0.75], [0.5, '#6a2e22', 0.4], [1, '#6a2e22', 0]]); g.fillRect(0, 0, s, 16);
+    for (let x = 10; x < s; x += range(rnd, 18, 34)) { stroke(g, [[x, 2], [x + range(rnd, -5, 5), range(rnd, 12, 24)]], 4, 0.6, '#3a1814', 0.22); stroke(g, [[x + 3, 2], [x + 3 + range(rnd, -4, 4), range(rnd, 8, 18)]], 2, 0.4, '#c88a6a', 0.2); }
+    // a tan canvas repair patch, stitched on crooked
+    {
+      const x = s * 0.6, y = s * 0.2, w = 46, hh = 34, rot = 0.12;
+      g.save(); g.translate(x, y); g.rotate(rot);
+      g.fillStyle = rgba(INK, 0.3); g.fillRect(3, 4, w, hh);
+      g.fillStyle = grad(g, 0, 0, w, hh, [[0, '#c8aa7a'], [1, '#94784e']]); g.fillRect(0, 0, w, hh);
+      for (let k = 0; k < 6; k++) blob(g, rnd() * w, rnd() * hh, range(rnd, 4, 10), range(rnd, 3, 7), rnd() * 3, '#7a6040', 0.25, 0.2);
+      g.setLineDash([3, 3]); g.strokeStyle = rgba('#4a3420', 0.7); g.lineWidth = 1.2; g.strokeRect(3, 3, w - 6, hh - 6);
+      g.restore();
+    }
+    // the one cream band near the hem, worn through and faded
+    {
+      const y0 = s * 0.56, bh = s * 0.07;
+      g.fillStyle = grad(g, 0, y0, 0, y0 + bh, [[0, '#e2d2ac'], [0.5, '#d2c094'], [1, '#b8a47a']]);
+      g.globalAlpha = 0.62; g.fillRect(0, y0, s, bh); g.globalAlpha = 1;
+      for (let i = 0; i < 22; i++) blob(g, rnd() * s, y0 + rnd() * bh, range(rnd, 5, 18), range(rnd, 2, 7), rnd() * 0.4, pick(rnd, ['#86382a', '#7a3226', '#9a5a44']), 0.55, 0.3);
+      blob(g, s * 0.82, y0 + bh / 2, 26, bh, 0, '#7e3428', 0.75, 0.3);
+      line(g, [[0, y0], [s, y0]], 1.4, '#4a2018', 0.3); line(g, [[0, y0 + bh], [s, y0 + bh]], 1.4, '#4a2018', 0.3);
+    }
+    // creases: soft diagonal folds, light on the ridge, cool shadow under
+    for (const [x0, y0, x1, y1] of [[s * 0.1, s * 0.15, s * 0.45, s * 0.62], [s * 0.85, s * 0.1, s * 0.6, s * 0.55], [s * 0.3, s * 0.05, s * 0.36, s * 0.3]]) {
+      const pts = []; for (let k = 0; k <= 6; k++) { const t = k / 6; pts.push([lerp(x0, x1, t) + Math.sin(t * 5) * 4, lerp(y0, y1, t)]); }
+      stroke(g, pts.map(([u, v]) => [u + 3, v + 3]), 8, 2, '#3a1814', 0.22);
+      stroke(g, pts, 4, 1, '#e0a888', 0.2);
+    }
+    // the scorch: a brown-black bloom with a singed warm rim, low on the right
+    {
+      const x = s * 0.78, y = s * 0.42, r = 38;
+      blob(g, x, y - 4, r * 1.6, r * 1.3, 0.4, '#b0703e', 0.4, 0.1);
+      blob(g, x, y, r * 1.1, r * 0.95, 0.4, '#3a2420', 0.7, 0.12);
+      blob(g, x + 4, y + 2, r * 0.65, r * 0.55, 0, '#1e1618', 0.65, 0.2);
+      for (let i = 0; i < 5; i++) stroke(g, [[x + range(rnd, -20, 20), y - r * 0.8], [x + range(rnd, -26, 26), y - r * 1.9]], 6, 1, '#2e2020', 0.25);
+    }
+    // the edges of the tear darken and curl: a dark rim with a lit lip just inside it
+    g.restore();
+    g.save(); polyPath(g, out); g.clip();
+    g.lineJoin = 'round';
+    polyPath(g, out); g.strokeStyle = rgba('#2e1410', 0.75); g.lineWidth = 5; g.stroke();
+    polyPath(g, out.map(([x, y]) => [x + (x < s / 2 ? 2 : -2), y - 2])); g.strokeStyle = rgba('#d89070', 0.35); g.lineWidth = 2; g.stroke();
+    g.restore();
+    // holes: ragged, with a lit curled lip and a dark scorched ring round them
+    const holes = [[s * 0.8, s * 0.45, 9], [s * 0.22, s * 0.42, 7], [s * 0.5, s * 0.78, 6], [s * 0.66, s * 0.08, 5]];
+    for (const [x, y, r] of holes) {
+      const pts = []; for (let k = 0; k < 11; k++) { const a = k / 11 * TAU, rr = r * range(rnd, 0.55, 1.2); pts.push([x + Math.cos(a) * rr * 1.2, y + Math.sin(a) * rr]); }
+      g.save(); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.5, y + (v - y) * 1.5])); g.fillStyle = rgba('#2a1410', 0.5); g.fill(); g.restore();
+      g.save(); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.25 - 1, y + (v - y) * 1.25 - 1])); g.strokeStyle = rgba('#e0b090', 0.6); g.lineWidth = 1.6; g.stroke(); g.restore();
+      g.save(); g.globalCompositeOperation = 'destination-out'; polyPath(g, pts); g.fillStyle = '#000'; g.fill(); g.restore();
+    }
+    // frayed threads hanging off the tongues
+    for (let i = 0; i < 18; i++) {
+      const k = Math.floor(rnd() * (out.length - 2)) + 2, [x, y] = out[k];
+      if (y < body) continue;
+      line(g, [[x, y], [x + range(rnd, -3, 3), y + range(rnd, 4, 9)]], 1.4, '#6a3024', 1);
+    }
+    glaze(g, s, s, '#ffd8b8', 0.08, 'soft-light');
+    blurTile(cv, 0.45);
+  },
+});
 
 // ---- junk: crates, barrels, drums, scrap ----------------------------------------------------------------
 
@@ -1527,6 +1637,39 @@ register('rs_gasboard', {
     blurTile(g.canvas, 0.35);
   },
 });
+// The junk yard's board on its derrick: SALVAGE hand-lettered in white-lead on weathered gray boards with a
+// painted cog, a smaller TAKE WHAT YOU CAN CARRY under it, nailed-on iron corners.
+register('rs_junkboard', {
+  family: F, w: 512, h: 160, note: 'the junk yard derrick board (fitted): SALVAGE on gray boards, a painted cog, TAKE WHAT YOU CAN CARRY, iron corners',
+  paint(g, w, rnd, h) {
+    fill(g, w, h, '#221a1c');
+    for (let i = 0; i < 4; i++) plank(g, range(rnd, -6, 0), i * h / 4 + 1, w + 8, h / 4 - 2, jitter(pick(rnd, ['#7a746a', '#6e685e', '#847c70']), rnd, 0.05), rnd, { grain: 8, bevel: 3, light: 0.45 });
+    // a painted cog at the left, rust red with a cream rim
+    const cx = 70, cy = h / 2, R = 46;
+    g.save(); g.translate(cx, cy);
+    g.beginPath();
+    for (let k = 0; k < 20; k++) { const a = k / 20 * TAU, r = k % 2 ? R : R * 0.8; g.lineTo(Math.cos(a - 0.12) * r, Math.sin(a - 0.12) * r); g.lineTo(Math.cos(a + 0.12) * r, Math.sin(a + 0.12) * r); }
+    g.closePath(); g.fillStyle = rgba('#2a1c1e', 0.6); g.translate(3, 4); g.fill(); g.translate(-3, -4);
+    g.fillStyle = '#a4432c'; g.fill(); g.lineWidth = 3; g.strokeStyle = rgba('#e8d8b0', 0.85); g.stroke();
+    g.beginPath(); g.arc(0, 0, R * 0.32, 0, TAU); g.fillStyle = '#4a4040'; g.fill(); g.strokeStyle = rgba('#e8d8b0', 0.8); g.stroke();
+    g.restore();
+    g.save(); g.font = SERIF(64); g.textAlign = 'center'; g.textBaseline = 'middle';
+    const t1 = 'SALVAGE', m1 = g.measureText(t1).width, k1 = Math.min(1, (w - 190) / m1);
+    g.translate(w / 2 + 52, h * 0.4); g.scale(k1, 1); g.rotate(-0.015);
+    g.lineJoin = 'round'; g.lineWidth = 7; g.strokeStyle = '#2a1c1e'; g.strokeText(t1, 2, 3);
+    g.fillStyle = '#efe4c8'; g.fillText(t1, 0, 0);
+    g.restore();
+    letters(g, 'TAKE WHAT YOU CAN CARRY', w / 2 + 52, h * 0.78, { font: FONT(27), color: '#2a2030', alpha: 0.9, worn: 0.25, rnd, maxW: w - 190, under: '#7a746a' });
+    for (let i = 0; i < 10; i++) chip(g, w, rnd() * w, range(rnd, 16, h - 16), range(rnd, 2.5, 5), '#4e463e', rnd);
+    for (let i = 0; i < 5; i++) rustRun(g, w, range(rnd, 20, w - 20), range(rnd, 6, 30), range(rnd, 30, 80), range(rnd, 2, 4), 0.4, rnd, h);
+    for (const [x, y, dx, dy] of [[0, 0, 1, 1], [w, 0, -1, 1], [0, h, 1, -1], [w, h, -1, -1]]) {
+      g.fillStyle = '#4a4448'; g.fillRect(Math.min(x, x + dx * 34), Math.min(y, y + dy * 11), 34, 11); g.fillRect(Math.min(x, x + dx * 11), Math.min(y, y + dy * 34), 11, 34);
+      rivet(g, x + dx * 6, y + dy * 6, 3.2, '#8a8478');
+    }
+    g.fillStyle = grad(g, 0, 0, 0, h, [[0, '#fff0c8', 0.2], [0.15, '#fff0c8', 0], [0.75, INK, 0], [1, INK, 0.35]]); g.fillRect(0, 0, w, h);
+    blurTile(g.canvas, 0.35);
+  },
+});
 // The YARD SALE bunting: eight hand-painted pennants side by side (alpha), one letter each, in faded
 // alternating colours. Picked one at a time with a uv rect.
 register('rs_bunting', {
@@ -1609,32 +1752,80 @@ register('rs_rune', {
 });
 // Junked motorhome skins (u along the body, 3 m; v fitted top→bottom): a cream upper body, a painted lower
 // body in the RV's own colour behind a belt stripe, a darker skirt band, rivet seams, rust and mud.
-function rvSkin(g, s, rnd, cv, { upper = '#e2d6bc', lower, belt, skirt }) {
-  fill(g, s, s, upper);
-  mottle(g, s, rnd, { colors: [lightOf(upper, 0.15), shadowOf(upper, 0.12), mix(upper, '#c8b890', 0.5)], count: 26, rmin: 16, rmax: 50, alpha: 0.35, hard: 0.1 });
-  const band = (y0, y1, c, a = 1) => { g.save(); g.globalAlpha = a; g.fillStyle = grad(g, 0, y0, 0, y1, [[0, lightOf(c, 0.25)], [0.4, c], [1, shadowOf(c, 0.3)]]); g.fillRect(0, y0, s, y1 - y0); g.restore(); };
-  band(s * 0.5, s * 0.84, lower);
-  mottle(g, s, rnd, { colors: [lightOf(lower, 0.2), shadowOf(lower, 0.2)], count: 14, rmin: 10, rmax: 30, alpha: 0.25, hard: 0.1 });
-  band(s * 0.46, s * 0.52, belt);
-  band(s * 0.84, s, skirt);
-  line(g, [[0, s * 0.46], [s, s * 0.46]], 1.6, '#fff0d0', 0.4, 'butt');
-  for (const y of [s * 0.06, s * 0.84]) { g.fillStyle = grad(g, 0, y - 2, 0, y + 5, [[0, INK, 0.45], [1, '#fff0d0', 0.2]]); g.fillRect(0, y - 2, s, 7); for (let x = 8; x < s; x += 21) rivet(g, x + range(rnd, -2, 2), y + 6, 2.2, '#9a9284'); }
-  for (let i = 0; i < 3; i++) {
-    const x = (i + 0.3) * s / 3;
-    g.fillStyle = grad(g, x - 2, 0, x + 4, 0, [[0, INK, 0.4], [1, '#fff0d0', 0.2]]); g.fillRect(x - 2, s * 0.06, 6, s * 0.78);
-    for (let y = s * 0.12; y < s * 0.82; y += 19) { rivet(g, x + 6, y + range(rnd, -2, 2), 2.2, '#9a9284'); if (rnd() < 0.2) rustRun(g, s, x + 6, y + 2, range(rnd, 6, 18), 1.4, 0.3, rnd); }
+// A junked motorhome's side in the SLOPMASTER's own language (v fitted bottom to top, u along the body, 3 m):
+// a riveted roof-edge strip, weathered painted steel above (sun-faded toward the top, chipped to primer, rust
+// runs from every rivet row), a brass trim strip at the belt, honey planks below with nail heads and dark gaps,
+// a muddy iron skirt.
+function rvSkin(g, s, rnd, cv, { paint, wood = '#9a7448' }) {
+  fill(g, s, s, paint);
+  const P0 = s * 0.06, P1 = s * 0.44, BR1 = s * 0.5, PL1 = s * 0.86;
+  // the painted steel: sheets between rivet seams, faded and bleached toward the roof
+  g.fillStyle = grad(g, 0, P0, 0, P1, [[0, mix(paint, '#e8dcc0', 0.35)], [0.45, mix(paint, '#d8ccb0', 0.12)], [1, shadowOf(paint, 0.12)]]); g.fillRect(0, P0, s, P1 - P0);
+  mottle(g, s, rnd, { colors: [lightOf(paint, 0.2), shadowOf(paint, 0.2), mix(paint, '#c8b890', 0.4)], count: 24, rmin: 12, rmax: 40, alpha: 0.3, hard: 0.1 });
+  const seams = [0, 0.36, 0.69].map(t => (t + range(rnd, -0.02, 0.02)) * s);
+  for (const x of seams) {
+    g.fillStyle = grad(g, x - 3, 0, x + 5, 0, [[0, INK, 0.35], [0.5, INK, 0.15], [1, '#fff0d0', 0.18]]); g.fillRect(x - 3, P0, 8, P1 - P0);
+    for (let y = P0 + 8; y < P1 - 4; y += 16) { rivet(g, x + 7, y + range(rnd, -1.5, 1.5), 2.2, '#a09888'); if (rnd() < 0.3) rustRun(g, s, x + 7, y + 2, range(rnd, 8, 22), 1.4, 0.32, rnd); }
   }
-  for (let i = 0; i < 10; i++) { const y = range(rnd, 0.1, 0.8) * s; chip(g, s, rnd() * s, y, range(rnd, 2.5, 6), y > s * 0.5 ? '#6a5a4a' : '#8a7a68', rnd); }
-  for (let i = 0; i < 5; i++) dent(g, s, rnd() * s, range(rnd, 0.2, 0.8) * s, range(rnd, 10, 22), upper, 0.45);
-  g.fillStyle = grad(g, 0, s * 0.72, 0, s, [[0, '#5a4a38', 0], [0.6, '#5a4a38', 0.3], [1, '#3a2e24', 0.6]]); g.fillRect(0, 0, s, s);
-  streaks(g, s, rnd, { colors: ['#6a5040', '#7a6048'], count: 26, len: [6, 30], width: [1.2, 3], angle: 0, wobble: 0.6, alpha: 0.28 });
-  for (let i = 0; i < 8; i++) rustRun(g, s, rnd() * s, s * 0.08, range(rnd, 14, 44), range(rnd, 1.2, 2.2), 0.26, rnd);
+  for (let i = 0; i < 12; i++) chip(g, s, rnd() * s, range(rnd, P0 + 6, P1 - 6), range(rnd, 2.5, 6.5), '#8a7a68', rnd);
+  for (let i = 0; i < 4; i++) dent(g, s, rnd() * s, range(rnd, P0 + 10, P1 - 10), range(rnd, 10, 20), paint, 0.4);
+  // the roof-edge strip
+  g.fillStyle = grad(g, 0, 0, 0, P0, [[0, '#4a4040'], [0.5, '#6a605a'], [1, '#3a3234']]); g.fillRect(0, 0, s, P0);
+  for (let x = 6; x < s; x += 18) rivet(g, x, P0 / 2, 2, '#a09888');
+  // planks below the belt: four boards a row, butt joints staggered, nail heads at the joints
+  const rows = 4, rh = (PL1 - BR1) / rows;
+  g.fillStyle = '#2a2024'; g.fillRect(0, BR1, s, PL1 - BR1);
+  for (let r = 0; r < rows; r++) {
+    const y = BR1 + r * rh, x0 = range(rnd, 0, s);
+    let x = x0;
+    // boards laid from a random joint once round the tile; the one crossing the edge is drawn on both sides
+    while (x < x0 + s - 20) {
+      const L = Math.min(range(rnd, 70, 130), x0 + s - x), c = jitter(wood, rnd, 0.07), seed = Math.floor(rnd() * 1e9);
+      for (const dx of [0, -s]) if (x + dx < s && x + dx + L > 0) plank(g, x + dx, y + 0.5, L - 1.5, rh - 2, c, rngFrom(seed), { grain: 6, bevel: 2.5, light: 0.42 });
+      const jx = ((x + L - 4) % s + s) % s;
+      nail(g, jx, y + rh * 0.3, 1.8); nail(g, jx, y + rh * 0.7, 1.8);
+      x += L;
+    }
+  }
+  // the brass belt strip, riveted
+  g.fillStyle = grad(g, 0, P1, 0, BR1, [[0, '#f0d890'], [0.35, '#c8a050'], [1, '#6a5028']]); g.fillRect(0, P1, s, BR1 - P1);
+  for (let x = 9; x < s; x += 22) rivet(g, x, (P1 + BR1) / 2, 2, '#e0c070');
+  line(g, [[0, BR1], [s, BR1]], 2, INK, 0.5, 'butt');
+  // the skirt: dark iron, mud thrown up from the wheels
+  g.fillStyle = grad(g, 0, PL1, 0, s, [[0, '#3e3634'], [0.3, '#4a4240'], [1, '#2a2426']]); g.fillRect(0, PL1, s, s - PL1);
+  for (let x = 8; x < s; x += 20) rivet(g, x, PL1 + 5, 1.8, '#8a8478');
+  g.fillStyle = grad(g, 0, s * 0.7, 0, s, [[0, '#5a4a38', 0], [0.6, '#5a4a38', 0.32], [1, '#3a2e24', 0.6]]); g.fillRect(0, 0, s, s);
+  streaks(g, s, rnd, { colors: ['#6a5040', '#7a6048'], count: 22, len: [6, 28], width: [1.2, 3], angle: 0, wobble: 0.6, alpha: 0.26 });
+  for (let i = 0; i < 6; i++) rustRun(g, s, rnd() * s, P0 + 2, range(rnd, 14, 40), range(rnd, 1.2, 2.2), 0.24, rnd);
   glaze(g, s, s, '#ffe2b8', 0.1, 'soft-light');
   blurTile(cv, 0.5);
 }
-register('rs_rv_teal', { family: F, size: 256, note: 'junked motorhome skin: cream over teal, rust belt, dark skirt', paint(g, s, rnd, h, cv) { rvSkin(g, s, rnd, cv, { lower: '#3e6a68', belt: '#a8603a', skirt: '#2e3e3c' }); } });
-register('rs_rv_rust', { family: F, size: 256, note: 'junked motorhome skin: cream over brick red, mustard belt, dark skirt', paint(g, s, rnd, h, cv) { rvSkin(g, s, rnd, cv, { lower: '#8e3a2c', belt: '#c8963a', skirt: '#3e2a26' }); } });
-register('rs_rv_mustard', { family: F, size: 256, note: 'junked motorhome skin: mustard over brown, cream belt, dark skirt', paint(g, s, rnd, h, cv) { rvSkin(g, s, rnd, cv, { upper: '#d4b26a', lower: '#6a4a30', belt: '#e2d6bc', skirt: '#3a2a22' }); } });
+register('rs_rv_green', { family: F, size: 256, note: 'junked motorhome skin: faded green paint over a brass belt and honey planks, dark skirt', paint(g, s, rnd, h, cv) { rvSkin(g, s, rnd, cv, { paint: '#6a7a4a' }); } });
+register('rs_rv_rust', { family: F, size: 256, note: 'junked motorhome skin: rust-red paint over a brass belt and gray planks, dark skirt', paint(g, s, rnd, h, cv) { rvSkin(g, s, rnd, cv, { paint: '#8e3e2c', wood: '#857a6a' }); } });
+register('rs_rv_blue', { family: F, size: 256, note: 'junked motorhome skin: faded slate-blue paint over a brass belt and dark planks, dark skirt', paint(g, s, rnd, h, cv) { rvSkin(g, s, rnd, cv, { paint: '#4e6a80', wood: '#7a5a3a' }); } });
+// Hand-painted name boards for the three junked motorhomes, stacked (fitted, a uv rect each).
+register('rs_rv_names', {
+  family: F, w: 256, h: 256, note: 'three hand-painted motorhome name boards stacked (fitted by uv rect): DUSTY BELLE, SLOPMASTER 5000, LAST CHANCE',
+  paint(g, w, rnd, h) {
+    fill(g, w, h, '#1e1618');
+    const boards = [['DUSTY BELLE', '#3e5a34', '#efe2c0'], ['SLOPMASTER 5000', '#7a2e24', '#f0d890'], ['LAST CHANCE', '#2e4458', '#efe2c0']];
+    boards.forEach(([txt, bg, fg], k) => {
+      const y0 = k * 85 + 2, bh = 81;
+      for (let i = 0; i < 2; i++) plank(g, 0, y0 + i * bh / 2, w, bh / 2 - 1, jitter(bg, rnd, 0.05), rnd, { grain: 6, bevel: 2.5, light: 0.45 });
+      g.lineWidth = 3; g.strokeStyle = rgba(fg, 0.7); g.strokeRect(7, y0 + 7, w - 14, bh - 14);
+      g.save(); g.font = SERIF(34); g.textAlign = 'center'; g.textBaseline = 'middle';
+      const m = g.measureText(txt).width, sc = Math.min(1, (w - 34) / m);
+      g.translate(w / 2, y0 + bh / 2 + 2); g.scale(sc, 1); g.rotate(range(rnd, -0.02, 0.02));
+      g.lineJoin = 'round'; g.lineWidth = 6; g.strokeStyle = '#1e1618'; g.strokeText(txt, 1.5, 2);
+      g.fillStyle = fg; g.fillText(txt, 0, 0);
+      g.restore();
+      for (let i = 0; i < 5; i++) chip(g, w, rnd() * w, range(rnd, y0 + 10, y0 + bh - 10), range(rnd, 2, 4), '#6a5440', rnd);
+      for (const x of [10, w - 10]) for (const yy of [y0 + 10, y0 + bh - 10]) nail(g, x, yy, 2.4);
+      g.fillStyle = grad(g, 0, y0, 0, y0 + bh, [[0, '#fff0c8', 0.18], [0.2, '#fff0c8', 0], [0.8, INK, 0], [1, INK, 0.35]]); g.fillRect(0, y0, w, bh);
+    });
+    blurTile(g.canvas, 0.35);
+  },
+});
 
 // ---- weather: snow, dust, sand (caps, drifts, cover), icicles, smoke --------------------------------------------
 
@@ -1928,6 +2119,52 @@ register('rs_slats', {
   },
 });
 
+// Two stretched pelts side by side for the Badlands gate (the hide's outline is geometry; this is its face): a
+// scraped flesh-side hide in cream-tan painted with a red-ochre sun and dots, and a dark bison hide, fur side out,
+// with a white painted zigzag. Both darken toward their curling edges. Lives in the gate label atlas.
+register('rs_pelts', {
+  family: F, w: 256, h: 128, note: 'two pelt faces (fitted, 128 px each; outline is geometry): cream flesh-side hide with an ochre sun, dark bison fur with a white zigzag',
+  paint(g, w, rnd, h) {
+    const S = 128;
+    for (const k of [0, 1]) {
+      const X = k * S, cx = X + S / 2, cy = S / 2;
+      g.save(); g.beginPath(); g.rect(X, 0, S, S); g.clip();
+      const base = k ? '#5a3e2e' : '#c49c6c';
+      g.fillStyle = base; g.fillRect(X, 0, S, S);
+      for (let i = 0; i < 14; i++) blob(g, X + rnd() * S, rnd() * S, range(rnd, 12, 30), range(rnd, 8, 22), rnd() * 3, jitter(k ? pick(rnd, ['#6a4a34', '#4a3226', '#74523a']) : pick(rnd, ['#d4ac7a', '#b48a5a', '#caa070']), rnd, 0.04), 0.35, 0.1);
+      // the spine: a soft darker stripe down the middle, the flank on the lit side warmer
+      g.fillStyle = grad(g, X, 0, X + S, 0, [[0, INK, 0.0], [0.38, '#fff0d0', k ? 0.06 : 0.12], [0.5, INK, k ? 0.28 : 0.14], [0.62, INK, 0.04], [1, INK, 0.1]]); g.fillRect(X, 0, S, S);
+      if (k) {
+        // fur: short strokes sweeping out from the spine, lit tips
+        for (let i = 0; i < 260; i++) {
+          const x = X + rnd() * S, y = rnd() * S, dir = x < cx ? -1 : 1, a = Math.atan2(0.6, dir) + range(rnd, -0.3, 0.3), L = range(rnd, 4, 9);
+          line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], range(rnd, 1, 2), rnd() < 0.3 ? '#9a7656' : '#2e2018', 0.45);
+        }
+        // a white-clay zigzag across the shoulders, two handprint dabs
+        const zz = []; for (let q = 0; q <= 8; q++) zz.push([X + 18 + q * 11.5, 42 + (q % 2 ? -9 : 9)]);
+        stroke(g, zz.map(([u, v]) => [u + 1.5, v + 2]), 7, 6, '#1e1410', 0.35); stroke(g, zz, 6, 5, '#e8dcc4', 0.85);
+        for (const [hx2, hy2] of [[cx - 18, 82], [cx + 16, 88]]) { blob(g, hx2, hy2, 7, 8, 0, '#e8dcc4', 0.8, 0.5); for (let f = 0; f < 4; f++) blob(g, hx2 - 6 + f * 4, hy2 - 11, 1.8, 4, 0, '#e8dcc4', 0.75, 0.5); }
+      } else {
+        // scraped flesh side: pale blotches, fine scraping marks, an ochre-and-red sun with a ring of dots
+        for (let i = 0; i < 40; i++) { const x = X + rnd() * S, y = rnd() * S; line(g, [[x, y], [x + range(rnd, 6, 14), y + range(rnd, -2, 2)]], 1, '#e8d0a8', 0.3); }
+        g.save(); g.translate(cx, cy + 4);
+        for (let q = 0; q < 12; q++) { const a = q / 12 * TAU; stroke(g, [[Math.cos(a) * 17, Math.sin(a) * 17], [Math.cos(a) * 29, Math.sin(a) * 29]], 4.5, 1.5, q % 2 ? '#b04a2e' : '#c8862e', 0.85); }
+        g.beginPath(); g.arc(0, 0, 14, 0, TAU); g.fillStyle = rgba('#a8402a', 0.9); g.fill();
+        g.beginPath(); g.arc(0, 0, 7, 0, TAU); g.fillStyle = rgba('#d89a3a', 0.9); g.fill();
+        for (let q = 0; q < 16; q++) { const a = q / 16 * TAU; blob(g, Math.cos(a) * 38, Math.sin(a) * 36, 2.4, 2.4, 0, '#7a2a1e', 0.8, 0.5); }
+        g.restore();
+      }
+      // wrinkles, light over, cool shadow under
+      for (let i = 0; i < 7; i++) { const x = X + range(rnd, 10, S - 30), y = range(rnd, 10, S - 10), L = range(rnd, 12, 26), a = range(rnd, -0.5, 0.5); const pts = [[x, y], [x + Math.cos(a) * L * 0.5, y + Math.sin(a) * L * 0.5 + 2], [x + Math.cos(a) * L, y + Math.sin(a) * L]]; stroke(g, pts.map(([u, v]) => [u, v + 1.6]), 2.6, 0.6, '#2c2018', 0.28); stroke(g, pts, 1.6, 0.4, k ? '#a07a5a' : '#f0dcb4', 0.35); }
+      // the edges darken and curl: a soft vignette toward the outline
+      g.fillStyle = radial(g, cx, cy, S * 0.22, S * 0.62, [[0, INK, 0], [0.6, '#3a2418', 0.2], [1, '#2a1a14', 0.6]]); g.fillRect(X, 0, S, S);
+      g.restore();
+    }
+    glaze(g, w, h, '#ffd8b0', 0.08, 'soft-light');
+    blurTile(g.canvas, 0.4);
+  },
+});
+
 // ---- atlases: textures that share one draw call per cluster -----------------------------------------------
 // Each part is painted exactly as its own texture would be (same paint function, same seed), then placed.
 function part(name) {
@@ -1939,20 +2176,21 @@ function part(name) {
   return cv;
 }
 // the ranger gate's labels: station board (u 0-1, v .667-1), warning boards (u 0-.5; board 0 v .5-.667,
-// board 1 v .333-.5), STOP (u .5-1, v .417-.667), keypad face (u .5-.75, v 0-.417)
+// board 1 v .333-.5), STOP (u .5-1, v .417-.667), keypad face (u .5-.75, v 0-.417), two pelts (u 0-.25 and .25-.5, v 0-.333)
 register('rs_gatelabels', {
-  family: F, w: 512, h: 384, note: 'atlas of the ranger gate labels: station board, two warning boards, STOP, keypad face (fitted by uv rect)',
+  family: F, w: 512, h: 384, note: 'atlas of the ranger gate labels: station board, two warning boards, STOP, keypad face, two pelts (fitted by uv rect)',
   paint(g) {
     g.fillStyle = '#2a2024'; g.fillRect(0, 0, 512, 384);
     g.drawImage(part('rs_ranger_board'), 0, 0);
     g.drawImage(part('rs_warn'), 0, 128);
     g.drawImage(part('rs_stop'), 256, 128);
     g.drawImage(part('rs_keypad'), 256, 224);
+    g.drawImage(part('rs_pelts'), 0, 256);
   },
 });
-// the three parked-RV skins stacked (v fitted into a third each: teal .667-1, rust .333-.667, mustard 0-.333)
+// the three parked-RV skins stacked (v fitted into a quarter each: green .75-1, rust .5-.75, blue .25-.5), name boards in 0-.25
 register('rs_rv_skins', {
-  family: F, w: 256, h: 768, note: 'atlas of the three junked motorhome skins, stacked (u along the body, 3 m; v fitted into a third each)',
-  paint(g) { ['rs_rv_teal', 'rs_rv_rust', 'rs_rv_mustard'].forEach((n, i) => g.drawImage(part(n), 0, i * 256)); },
+  family: F, w: 256, h: 1024, note: 'atlas of the three junked motorhome skins and their name boards, stacked (u along the body, 3 m; v fitted into a quarter each)',
+  paint(g) { ['rs_rv_green', 'rs_rv_rust', 'rs_rv_blue', 'rs_rv_names'].forEach((n, i) => g.drawImage(part(n), 0, i * 256)); },
 });
 

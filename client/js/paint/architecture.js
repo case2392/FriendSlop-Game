@@ -781,38 +781,56 @@ register('planks_rough', {
 
 // Gadgetzan mud plaster: a warm terracotta-tan (well off the pale sand), big soft ochre and rose
 // blotches, trowel swirls, straw flecks, rain runs and hairline cracks. (Holes are wall_holes decals.)
-function adobePaint(g, s, rnd, cv, { base = '#c08660', blot = ['#cc9268', '#b47a56', '#c88a5e'], mid = ['#d8a074', '#a8704e', '#c4865c', '#b98060', '#e2ac7e', '#9e6a4a'], lite = '#e2ac7e', dark = '#8e5e42' } = {}) {
+function adobePaint(g, s, rnd, cv, { base = '#c9976a', blot = ['#d8b083', '#bf8a5e', '#d2a476'], mid = ['#e0bc8e', '#b4825a', '#cc9a6a', '#c4925f', '#e6c496', '#a87650'], lite = '#ecca9a', dark = '#8e6040', chipsN = 0, brick = ['#a87650', '#b88458', '#9a6a46', '#b07a52'] } = {}) {
   fill(g, s, s, base);
+  // big soft blotches of three related tans, then a couple of faint ochre clouds
   mottle(g, s, rnd, { colors: blot, count: 18, rmin: 100, rmax: 230, alpha: 0.55, hard: 0.05 });
-  // a few large ochre and rose clouds (two related hues, so walls are never one flat value)
-  mottle(g, s, rnd, { colors: ['#c89050', '#c07468', '#d09a5c'], count: 6, rmin: 120, rmax: 220, alpha: 0.28, hard: 0.04 });
-  mottle(g, s, rnd, { colors: mid, count: 50, rmin: 30, rmax: 120, alpha: 0.38, hard: 0.08 });
+  mottle(g, s, rnd, { colors: ['#c89050', '#d4aa70', '#b88050'], count: 6, rmin: 120, rmax: 220, alpha: 0.24, hard: 0.04 });
+  mottle(g, s, rnd, { colors: mid, count: 50, rmin: 30, rmax: 120, alpha: 0.36, hard: 0.08 });
   blurTile(cv, 4);
-  // trowel swirls: arcs, lit on their upper edge
-  for (let i = 0; i < 60; i++) {
-    const x = rnd() * s, y = rnd() * s, R = range(rnd, 24, 70), a0 = rnd() * TAU, sweep = range(rnd, 0.8, 1.8), w = range(rnd, 8, 20);
-    const pts = []; for (let k = 0; k <= 8; k++) { const a = a0 + sweep * k / 8; pts.push([x + Math.cos(a) * R, y + Math.sin(a) * R * 0.55]); }
+  // troweled swirl blotches: broad lighter arcs with a shaded lower lip, in loose clusters
+  for (let i = 0; i < 70; i++) {
+    const x = rnd() * s, y = rnd() * s, R = range(rnd, 22, 64), a0 = rnd() * TAU, sweep = range(rnd, 1.0, 2.2), w = range(rnd, 10, 24);
+    const pts = []; for (let k = 0; k <= 10; k++) { const a = a0 + sweep * k / 10; pts.push([x + Math.cos(a) * R, y + Math.sin(a) * R * 0.6]); }
     wrap(s, x, y, R + w, (X, Y) => {
       const sh = pts.map(([u, v]) => [u - x + X, v - y + Y]);
-      line(g, sh.map(([u, v]) => [u + 1.5, v + 2]), w, dark, 0.07);
-      line(g, sh, w * 0.8, lite, 0.1);
+      line(g, sh.map(([u, v]) => [u + 1.5, v + 2.2]), w, dark, 0.08);
+      line(g, sh, w * 0.82, lite, 0.13);
     });
   }
   // straw flecks in the mud
-  for (let i = 0; i < 110; i++) {
-    const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 8), a = rnd() * Math.PI, lw = range(rnd, 0.8, 1.4), lc = rnd() < 0.6 ? '#e8c890' : '#7a5034';
+  for (let i = 0; i < 120; i++) {
+    const x = rnd() * s, y = rnd() * s, L = range(rnd, 3, 8), a = rnd() * Math.PI, lw = range(rnd, 0.8, 1.4), lc = rnd() < 0.6 ? '#f0d49a' : '#7a5034';
     wrap(s, x, y, 10, (X, Y) => line(g, [[X, Y], [X + Math.cos(a) * L, Y + Math.sin(a) * L]], lw, lc, 0.45));
   }
-  mottle(g, s, rnd, { colors: [dark, '#eec094', '#a87050'], count: 220, rmin: 1.5, rmax: 4, alpha: 0.2, hard: 0.6 });
-  for (const y0 of [s * 0.05, s * 0.5]) rainStreaks(g, s, rnd, 0, s, y0, dark, 7, 0.14);
+  mottle(g, s, rnd, { colors: [dark, '#f2d2a2', '#a87650'], count: 220, rmin: 1.5, rmax: 4, alpha: 0.2, hard: 0.6 });
+  // chipped places where the render has fallen away and the mud bricks show
+  for (let i = 0; i < chipsN; i++) plasterHole(g, s, rnd, (i + range(rnd, 0.1, 0.9)) / chipsN * s, range(rnd, 0.15, 0.9) * s, range(rnd, 26, 44) * (i ? 1 : 1.25), { plaster: base, brick, mortar: '#6a4830', squash: range(rnd, 0.6, 0.9) });
+  // long vertical rain runs (darker, soft) and a few pale salt bloom streaks
+  for (const y0 of [s * 0.02, s * 0.36, s * 0.7]) rainStreaks(g, s, rnd, 0, s, y0, dark, 6, 0.16);
+  rainStreaks(g, s, rnd, 0, s, s * 0.55, '#f0dcb4', 4, 0.12);
   cracks(g, s, rnd, { color: '#5a3420', count: 9, len: [20, 70], width: [0.8, 1.6], alpha: 0.42 });
-  glaze(g, s, s, '#ffd8b0', 0.12, 'soft-light');
+  glaze(g, s, s, '#ffe0b0', 0.12, 'soft-light');
   blurTile(cv, 0.6);
 }
-register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm terracotta-tan mud plaster, ochre and rose clouds, trowel swirls, straw flecks, rain runs', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv); } });
+register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud render in three related tans, troweled swirls, straw flecks, rain runs (~3 m a tile; the chips showing mud brick are wall_holes decals, placed per wall)', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv); } });
+register('arch_streak', {
+  family: F, w: 64, h: 256, alpha: true, note: 'a rain run down an adobe wall from under a viga: dark wet mud fading downward, a couple of drips (alpha decal)',
+  paint(g, w, rnd, h) {
+    g.clearRect(0, 0, w, h);
+    for (let k = 0; k < 4; k++) {
+      const x = w / 2 + range(rnd, -12, 12), L = range(rnd, 0.45, 1) * h, ww = range(rnd, 5, 14);
+      g.save(); g.filter = 'blur(3px)';
+      g.fillStyle = grad(g, 0, 0, 0, L, [[0, '#6a4428', 0.55], [0.5, '#7a5030', 0.32], [1, '#8e6040', 0]]);
+      g.beginPath(); g.moveTo(x - ww, 0); g.quadraticCurveTo(x - ww * 0.4, L * 0.6, x + range(rnd, -3, 3), L); g.quadraticCurveTo(x + ww * 0.4, L * 0.6, x + ww, 0); g.closePath(); g.fill();
+      g.restore();
+    }
+    g.fillStyle = grad(g, 0, 0, 0, 30, [[0, '#4a2e1a', 0.5], [1, '#4a2e1a', 0]]); g.fillRect(6, 0, w - 12, 30);
+  },
+});
 register('adobe_inner', {
   family: F, size: 512, note: 'adobe trim and indoor mud: a lighter limewashed tan (parapet caps, piers, upper blocks, interiors)',
-  paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { base: '#d09a76', blot: ['#d8a882', '#c48c68', '#d4a07a'], mid: ['#e2b48c', '#b47c5c', '#cc946e', '#c48e6c', '#e8bc94', '#aa7656'], lite: '#eec29a', dark: '#946446' }); },
+  paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { base: '#d8b088', blot: ['#e4c49a', '#ccA07a', '#dcb890'], mid: ['#ecd0a6', '#bc906a', '#d6ac80', '#cea47a', '#f0d6ae', '#b48862'], lite: '#f4dcb4', dark: '#9a7050', chipsN: 0 }); },
 });
 
 // ---- roofs ----------------------------------------------------------------------------------
@@ -1277,6 +1295,21 @@ register('lantern_glass', {
   },
 });
 
+// the casino button domes, four glasses side by side (u quarters: bet gold, all-in red, clear grey, deal
+// green); the material glows with the texture's own colour, so every button is its colour in one draw
+export const BTN_GLASS = ['#e0b048', '#c8402e', '#9a9aa6', '#4aa85a'];
+register('arch_btn_glass', {
+  family: F, size: 128, note: 'casino button domes: four coloured glasses (gold, red, grey, green) side by side, a bright crown, a darker refracting band, a lit rim',
+  paint(g, s, rnd) {
+    BTN_GLASS.forEach((c, i) => {
+      const x0 = i * s / 4;
+      // sphere UVs: v = 1 at the crown (canvas top), 0.5 at the base of the dome
+      g.fillStyle = grad(g, 0, 0, 0, s, [[0, lightOf(c, 0.9)], [0.16, lightOf(c, 0.45)], [0.34, c], [0.45, shadowOf(c, 0.45)], [0.5, lightOf(c, 0.3)], [1, c]]);
+      g.fillRect(x0, 0, s / 4, s);
+      for (let k = 0; k < 3; k++) { const x = x0 + 4 + rnd() * (s / 4 - 8); line(g, [[x, s * 0.06], [x + range(rnd, -3, 3), s * 0.36]], range(rnd, 1.5, 3), '#fff8e0', 0.3); }
+    });
+  },
+});
 register('slot_face', {
   family: F, w: 256, h: 512, note: 'goblin slot machine front: brass frame, three painted reels, gem lamps, coin tray',
   paint(g, s, rnd, H, cv) {
@@ -1624,7 +1657,7 @@ register('board_rough', {
   },
 });
 
-register('bone', {
+register('arch_bone', {
   family: F, size: 128, note: 'ivory bone and tusk: cream with soft growth rings (they wrap) and a dirty base',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#e8dcc0');
@@ -1679,6 +1712,24 @@ register('straw_fringe', {
   },
 });
 
+register('arch_rag', {
+  family: F, size: 128, alpha: true, note: 'a red rag tied to the rim-code stake: faded red cloth, folds, frayed ragged edges (alpha)',
+  paint(g, s, rnd) {
+    g.clearRect(0, 0, s, s);
+    // a ragged strip: the outline nibbled along both long edges, the ends torn
+    const pts = [];
+    for (let k = 0; k <= 12; k++) pts.push([s * 0.12 + range(rnd, -4, 6), k / 12 * s]);
+    for (let k = 12; k >= 0; k--) pts.push([s * 0.88 + range(rnd, -6, 4), k / 12 * s]);
+    clipped(g, () => polyPath(g, pts), () => {
+      fill(g, s, s, '#9a2a1e');
+      for (let k = 0; k < 7; k++) { const y = rnd() * s; g.fillStyle = grad(g, 0, y - 10, 0, y + 10, [[0, '#7a1e16', 0], [0.5, '#6a1a14', 0.5], [1, '#7a1e16', 0]]); g.fillRect(0, y - 10, s, 20); }
+      for (let k = 0; k < 6; k++) { const y = rnd() * s; line(g, [[0, y], [s, y + range(rnd, -6, 6)]], range(rnd, 2, 4), '#c8503a', 0.35); }
+      for (let x = 0; x < s; x += 3) line(g, [[x, 0], [x, s]], 1, rnd() < 0.5 ? '#b03828' : '#7a2018', 0.25);
+      g.fillStyle = grad(g, 0, 0, s, 0, [[0, '#3a1010', 0.35], [0.3, '#3a1010', 0], [0.75, '#ffd0a0', 0], [1, '#3a1010', 0.3]]); g.fillRect(0, 0, s, s);
+    });
+    for (let k = 0; k < 18; k++) { const sx = rnd() < 0.5 ? s * 0.12 : s * 0.88, y = rnd() * s; line(g, [[sx, y], [sx + range(rnd, -8, 8), y + range(rnd, 2, 9)]], 1.2, '#8a2418', 0.8); }
+  },
+});
 register('rope', {
   family: F, size: 128, note: 'twisted hemp rope: diagonal strands, lit and shaded (tiles)',
   paint(g, s, rnd, h, cv) {
@@ -2030,6 +2081,271 @@ function knotBand(g, x0, y0, x1, y1, r, rnd) {
   }
 }
 
+// ---- door aprons: the paving in front of each door and a few stepping stones out to the street ----------
+
+// A flat stone (or a slab) as a lumpy polygon: base colour with soft lighter and darker patches, a lit
+// upper-left lip and a cool lower-right one, a crack or two, then the style's dirt in its low corner.
+function flatStone(g, pts, c, rnd, { lit = 0.45, cracksN = 1, specks = 4 } = {}) {
+  const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+  const x0 = Math.min(...xs), x1 = Math.max(...xs), y0 = Math.min(...ys), y1 = Math.max(...ys), w = x1 - x0, h = y1 - y0;
+  // a soft contact shadow round it first
+  g.save(); g.filter = 'blur(2px)'; g.translate(2, 2.5); polyPath(g, pts); g.fillStyle = rgba(INK, 0.45); g.fill(); g.restore();
+  clipped(g, () => polyPath(g, pts), () => {
+    g.fillStyle = grad(g, x0, y0, x1, y1, [[0, lightOf(c, 0.18)], [0.5, c], [1, shadowOf(c, 0.22)]]); g.fillRect(x0 - 2, y0 - 2, w + 4, h + 4);
+    for (let i = 0; i < 6; i++) blob(g, x0 + rnd() * w, y0 + rnd() * h, range(rnd, 0.2, 0.5) * w, range(rnd, 0.2, 0.45) * h, rnd() * 3, rnd() < 0.5 ? lightOf(c, 0.3) : shadowOf(c, 0.25), 0.22, 0.15);
+    for (let i = 0; i < specks; i++) blob(g, x0 + rnd() * w, y0 + rnd() * h, range(rnd, 1.5, 3.5), range(rnd, 1.2, 2.8), rnd() * 3, shadowOf(c, 0.45), 0.4, 0.4);
+    for (let i = 0; i < cracksN; i++) {
+      const a = [x0 + rnd() * w, y0 + rnd() * h * 0.3], b = [x0 + rnd() * w, y0 + h * range(rnd, 0.5, 1)];
+      const q = []; for (let k = 0; k <= 5; k++) { const t = k / 5; q.push([a[0] + (b[0] - a[0]) * t + range(rnd, -3, 3), a[1] + (b[1] - a[1]) * t]); }
+      line(g, q.map(([x, y]) => [x + 0.8, y + 0.8]), 1.4, lightOf(c, 0.4), 0.4); line(g, q, 1.1, INK, 0.5);
+    }
+  });
+  // lips: lit along the upper-left edges, shaded along the lower-right
+  g.save(); g.lineJoin = 'round';
+  for (let i = 0; i < pts.length; i++) {
+    const a = pts[i], b = pts[(i + 1) % pts.length], nx = b[1] - a[1], ny = -(b[0] - a[0]), L = Math.hypot(nx, ny) || 1;
+    const f = (nx / L) * -0.707 + (ny / L) * -0.707;   // outward normal against the light (upper left)
+    if (f > 0.15) line(g, [[a[0] - nx / L * -1.2, a[1] - ny / L * -1.2], [b[0] - nx / L * -1.2, b[1] - ny / L * -1.2]], 2.4, lightOf(c, 0.55), lit * f);
+    else if (f < -0.15) line(g, [[a[0] - nx / L * 1.2, a[1] - ny / L * 1.2], [b[0] - nx / L * 1.2, b[1] - ny / L * 1.2]], 2.6, shadowOf(c, 0.5), 0.5 * -f);
+  }
+  g.restore();
+}
+// a jittered polygon for the rect (x, y, w, h), its corners clipped
+function stonePoly(x, y, w, h, rnd, cut = 0.22) {
+  const c = Math.min(w, h) * cut, j = () => range(rnd, -1, 1) * Math.min(w, h) * 0.06;
+  return [[x + c + j(), y + j()], [x + w - c + j(), y + j()], [x + w + j(), y + c + j()], [x + w + j(), y + h - c + j()], [x + w - c + j(), y + h + j()], [x + c + j(), y + h + j()], [x + j(), y + h - c + j()], [x + j(), y + c + j()]];
+}
+const APRON = {
+  timber: { stones: ['#a59c8d', '#958d80', '#b4aa98', '#9c9387', '#ada392'], grout: '#4c4348', dirt: '#7c5b3a', dirt2: '#9a7650', moss: ['#6d7a4a', '#5d6b3c'] },
+  farm: { stones: ['#b8a888', '#a89878', '#c4b494', '#9e8e70'], grout: '#8a6a46', dirt: '#94704a', dirt2: '#b18c5c', straw: true, sparse: 0.35 },
+  alpine: { stones: ['#8e96a3', '#7f8794', '#9ea5b0', '#878e9a'], grout: '#3e4450', dirt: '#8a8478', dirt2: '#a39d90', snow: true },
+  frontier: { planks: ['#8a6a4c', '#7a5a3e', '#9a7a58', '#86664a'], grout: '#3a2a22', dirt: '#a77650', dirt2: '#b98457' },
+  adobe: { stones: ['#c27a50', '#b06a44', '#d08a5e', '#c88458'], grout: '#6a4630', dirt: '#bf9a68', dirt2: '#d9b87f', sand: true, tiles: true },
+};
+// 384 × 640 (3 m × 5 m; y = 0 at the door): an apron of paving 2.2-2.5 m deep with a ragged edge, then
+// stepping stones out to the street over a worn strip of dirt, everything fading into the ground (alpha)
+function apronPaint(g, W, H, rnd, st) {
+  const A = APRON[st];
+  g.clearRect(0, 0, W, H);
+  const PX = W / 3, aD = range(rnd, 2.2, 2.5) * PX;          // px per metre, the apron's depth
+  // the worn dirt under it all, in a separate layer so the soft blobs don't pile up
+  const dc = makeCanvas(W, H), dg = dc.getContext('2d');
+  for (let i = 0; i < 26; i++) blob(dg, W / 2 + range(rnd, -0.42, 0.42) * W, range(rnd, 0.02, 0.48) * H * (aD / (H * 0.45)), range(rnd, 50, 110), range(rnd, 40, 80), rnd() * 3, rnd() < 0.6 ? A.dirt : A.dirt2, 0.7, 0.25);
+  for (let y = aD - 20; y < H - 30; y += 22) blob(dg, W / 2 + range(rnd, -20, 20), y, range(rnd, 50, 80), range(rnd, 30, 50), rnd() * 3, rnd() < 0.6 ? A.dirt : A.dirt2, 0.55 * (1 - (y - aD) / (H - aD) * 0.6), 0.2);
+  g.save(); g.globalAlpha = 0.8; g.drawImage(dc, 0, 0); g.restore();
+  // the apron's outline: a ragged rounded shape, a little narrower away from the door
+  const edge = []; const n = 22;
+  for (let k = 0; k < n; k++) {
+    const t = k / n * TAU, ca = Math.cos(t), sa = Math.sin(t);
+    const r = 1 / Math.pow(Math.pow(Math.abs(ca), 3) + Math.pow(Math.abs(sa), 3), 1 / 3) * range(rnd, 0.9, 1.04);
+    const yy = sa * r * aD * 0.5 + aD * 0.5;
+    edge.push([W / 2 + ca * r * W * (0.47 - 0.05 * Math.max(0, sa)), Math.max(-20, yy)]);
+  }
+  edge[Math.floor(n * 0.75)][1] = -30;   // the door side runs right up to the threshold
+  const inside = (x, y) => { let c = false; for (let i = 0, j = edge.length - 1; i < edge.length; j = i++) { const [xi, yi] = edge[i], [xj, yj] = edge[j]; if (((yi > y) !== (yj > y)) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+  if (A.planks) {
+    // a boardwalk: rough planks laid across, ends ragged, two sleepers showing at the sides
+    let y = 0;
+    while (y < aD - 10) {
+      const ph = range(rnd, 0.22, 0.3) * PX, l0 = W * range(rnd, 0.04, 0.12), l1 = W * range(rnd, 0.88, 0.97);
+      if (rnd() > 0.08) { g.save(); g.filter = 'blur(2px)'; g.fillStyle = rgba(INK, 0.45); g.fillRect(l0 + 2, y + 3, l1 - l0, ph - 2); g.restore(); plank(g, l0, y + 1, l1 - l0, ph - 3, jitter(pick(rnd, A.planks), rnd, 0.07), rnd, { grain: 9, knots: 0.5, splits: 0.6, weather: 0.5, nails: 4, endShade: 0.25 }); }
+      y += ph;
+    }
+    // log rounds for stepping stones
+    for (let y2 = aD + 0.3 * PX, k = 0; y2 < H - 40; y2 += range(rnd, 0.62, 0.8) * PX, k++) {
+      const x = W / 2 + (k % 2 ? 1 : -1) * range(rnd, 6, 26), r = range(rnd, 0.22, 0.3) * PX;
+      blob(g, x + 3, y2 + 4, r * 1.15, r * 1.1, 0, INK, 0.45, 0.4);
+      ellipse(g, x, y2, r, r * 0.96, 0, '#6a4a30');
+      ellipse(g, x - 1, y2 - 1, r * 0.88, r * 0.84, 0, '#c8a070');
+      for (let q = 1; q < 5; q++) g.save(), g.strokeStyle = rgba('#8a6440', 0.55), g.lineWidth = 1.2, g.beginPath(), g.ellipse(x - 1 + range(rnd, -1, 1), y2 - 1, r * 0.88 * q / 5, r * 0.84 * q / 5, 0, 0, TAU), g.stroke(), g.restore();
+      line(g, [[x - r * 0.6, y2 - r * 0.2], [x + r * 0.1, y2 + r * 0.1]], 1.2, INK, 0.5);
+    }
+  } else {
+    // grout under the paving, then the stones in rows (square tiles in Gadgetzan), the edge ones dropped
+    g.save(); g.filter = 'blur(4px)'; polyPath(g, edge); g.fillStyle = A.grout; g.fill(); g.restore();
+    let y = -6;
+    while (y < aD + 10) {
+      const rh = (A.tiles ? range(rnd, 0.36, 0.42) : range(rnd, 0.42, 0.6)) * PX;
+      let x = -range(rnd, 0, 0.4) * PX;
+      while (x < W) {
+        const sw = (A.tiles ? range(rnd, 0.36, 0.44) : range(rnd, 0.45, 0.9)) * PX;
+        const cx = x + sw / 2, cy = y + rh / 2;
+        const keep = inside(cx, cy) && (!A.sparse || rnd() > A.sparse || cy < aD * 0.45);
+        if (keep && inside(x + 6, y + 6) && inside(x + sw - 6, y + rh - 6)) flatStone(g, stonePoly(x + 3, y + 3, sw - 6, rh - 6, rnd, A.tiles ? 0.12 : 0.22), jitter(pick(rnd, A.stones), rnd, 0.06), rnd, { cracksN: rnd() < 0.4 ? 1 : 0 });
+        else if (keep) { const k = 0.6; flatStone(g, stonePoly(cx - sw * k / 2, cy - rh * k / 2, sw * k, rh * k, rnd, 0.3), jitter(pick(rnd, A.stones), rnd, 0.08), rnd, { cracksN: 0 }); }
+        x += sw;
+      }
+      y += rh;
+    }
+    // the grout's own edge, soft: crumbs of stone and dirt where the paving gives out
+    for (let i = 0; i < 40; i++) { const e = edge[Math.floor(rnd() * edge.length)]; const x = e[0] + range(rnd, -14, 14), yy = e[1] + range(rnd, -10, 14); if (yy < 4) continue; flatStone(g, stonePoly(x - 5, yy - 4, range(rnd, 6, 14), range(rnd, 5, 10), rnd, 0.35), pick(rnd, A.stones), rnd, { cracksN: 0, specks: 0, lit: 0.3 }); }
+    // stepping stones out to the street, a little zig-zag
+    for (let y2 = aD + 0.35 * PX, k = 0; y2 < H - 50; y2 += range(rnd, 0.7, 0.88) * PX, k++) {
+      const sw = range(rnd, 0.48, 0.66) * PX, sh = range(rnd, 0.36, 0.5) * PX, x = W / 2 + (k % 2 ? 1 : -1) * range(rnd, 4, 22) - sw / 2;
+      flatStone(g, stonePoly(x, y2 - sh / 2, sw, sh, rnd, 0.32), jitter(pick(rnd, A.stones), rnd, 0.07), rnd, { cracksN: rnd() < 0.3 ? 1 : 0 });
+    }
+  }
+  // the style's dirt on top: moss in the joints (Goldshire), straw (Westfall), snow drifted into the joints
+  // and over the edges (Kharanos), sand blown across (Gadgetzan); a little road dust everywhere
+  const over = (cols, count, rmin, rmax, alpha, yMax = H) => { for (let i = 0; i < count; i++) blob(g, rnd() * W, rnd() * yMax, range(rnd, rmin, rmax), range(rnd, rmin, rmax) * 0.7, rnd() * 3, pick(rnd, cols), alpha, 0.2); };
+  g.save(); g.globalCompositeOperation = 'source-atop';
+  if (A.moss) over(A.moss, 26, 6, 20, 0.28, aD);
+  if (A.snow) { over(['#eef2f6', '#dfe8f0', '#f6f4ee'], 34, 8, 30, 0.55); for (let i = 0; i < 16; i++) { const e = edge[Math.floor(rnd() * edge.length)]; blob(g, e[0], e[1], range(rnd, 18, 40), range(rnd, 12, 26), rnd() * 3, '#eef2f6', 0.8, 0.35); } }
+  if (A.sand) { over(['#d9b87f', '#e8cc96'], 30, 10, 36, 0.4); for (let i = 0; i < 12; i++) { const e = edge[Math.floor(rnd() * edge.length)]; blob(g, e[0], e[1], range(rnd, 20, 46), range(rnd, 12, 26), rnd() * 3, '#e2c48e', 0.65, 0.3); } }
+  if (A.straw) for (let i = 0; i < 50; i++) { const x = rnd() * W, y = rnd() * H, a = rnd() * TAU, L = range(rnd, 8, 22); line(g, [[x, y], [x + Math.cos(a) * L, y + Math.sin(a) * L]], range(rnd, 1, 2), pick(rnd, ['#e2c56a', '#c9ac52', '#f0d888']), 0.8); }
+  over([A.dirt2, A.dirt], 20, 6, 22, 0.16);
+  g.restore();
+  // fade the far end into the ground
+  g.save(); g.globalCompositeOperation = 'destination-out';
+  g.fillStyle = grad(g, 0, H - 120, 0, H, [[0, '#000', 0], [1, '#000', 1]]); g.fillRect(0, H - 120, W, 120);
+  g.restore();
+}
+for (const st of Object.keys(APRON)) register('arch_apron_' + st, { family: F, w: 384, h: 640, alpha: true, note: `door apron (${st}): paving at the door, stepping stones out to the street, fading into the ground (alpha; y = 0 at the door)`, paint(g, w, rnd, h) { apronPaint(g, w, h, rnd, st); } });
+
+// ---- the rim code: house paint brushed onto a rock -------------------------------------------------
+
+// Brush skeletons for the digits in a 0.6 × 1 box (y down), a few strokes each; a stroke is a list of
+// points, smoothed and sampled when it is painted. arc(): degrees, 0 = right, 90 = down (y down).
+const arc = (cx, cy, rx, ry, a0, a1, n = 10) => { const p = []; for (let k = 0; k <= n; k++) { const a = (a0 + (a1 - a0) * k / n) * Math.PI / 180; p.push([cx + Math.cos(a) * rx, cy + Math.sin(a) * ry]); } return p; };
+const DIGITS = {
+  0: [arc(0.3, 0.5, 0.25, 0.46, -100, 262, 18)],
+  1: [[[0.12, 0.25], [0.33, 0.04], [0.34, 0.5], [0.33, 0.97]], [[0.12, 0.96], [0.54, 0.97]]],
+  2: [[...arc(0.3, 0.29, 0.25, 0.24, 192, 370, 9), [0.44, 0.55], [0.05, 0.95]], [[0.03, 0.95], [0.6, 0.94]]],
+  3: [arc(0.28, 0.26, 0.25, 0.22, 205, 450, 10), arc(0.27, 0.72, 0.29, 0.25, -95, 158, 11)],
+  4: [[[0.45, 0.04], [0.03, 0.67]], [[0.02, 0.67], [0.61, 0.66]], [[0.45, 0.05], [0.44, 0.98]]],
+  5: [[[0.56, 0.05], [0.1, 0.06]], [[0.1, 0.05], [0.06, 0.46]], [[0.06, 0.46], ...arc(0.29, 0.69, 0.27, 0.28, -122, 152, 11)]],
+  6: [[[0.52, 0.05], [0.3, 0.15], [0.14, 0.36], [0.06, 0.64], ...arc(0.3, 0.73, 0.25, 0.24, 180, 535, 13)]],
+  7: [[[0.02, 0.06], [0.6, 0.05]], [[0.6, 0.05], [0.38, 0.5], [0.24, 0.97]]],
+  8: [arc(0.3, 0.27, 0.21, 0.22, 95, 452, 13), arc(0.3, 0.72, 0.26, 0.25, -88, 268, 13)],
+  9: [arc(0.29, 0.31, 0.25, 0.27, 5, 368, 13), [[0.55, 0.3], [0.53, 0.62], [0.43, 0.86], [0.25, 0.97], [0.05, 0.91]]],
+};
+// a Catmull-Rom curve through pts, sampled about every `step` px
+function sampleCurve(pts, step) {
+  const out = [];
+  const P = [pts[0], ...pts, pts[pts.length - 1]];
+  for (let i = 1; i < P.length - 2; i++) {
+    const [p0, p1, p2, p3] = [P[i - 1], P[i], P[i + 1], P[i + 2]];
+    const n = Math.max(2, Math.ceil(Math.hypot(p2[0] - p1[0], p2[1] - p1[1]) / step));
+    for (let k = 0; k < n; k++) {
+      const t = k / n, t2 = t * t, t3 = t2 * t;
+      const f = (a, b, c, d) => 0.5 * (2 * b + (-a + c) * t + (2 * a - 5 * b + 4 * c - d) * t2 + (-a + 3 * b - 3 * c + d) * t3);
+      out.push([f(p0[0], p1[0], p2[0], p3[0]), f(p0[1], p1[1], p2[1], p3[1])]);
+    }
+  }
+  out.push(pts[pts.length - 1]);
+  return out;
+}
+// One loaded brush stroke into a mask (gm paints opaque; colour comes later): round dabs along the curve,
+// the width swelling and thinning with the hand's pressure, then bristle gaps dragged out of it where the
+// brush runs dry (more toward the end, more at the brush's edges). Returns the stroke for later passes.
+function brushMask(gm, pts, r0, rnd, { dry = 0.5, bristles = 11, taper = 0.75 } = {}) {
+  const P = sampleCurve(pts, Math.max(0.8, r0 * 0.18)), n = P.length;
+  if (n < 2) return null;
+  const N = P.map((p, i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(n - 1, i + 1)], dx = b[0] - a[0], dy = b[1] - a[1], l = Math.hypot(dx, dy) || 1; return [-dy / l, dx / l]; });
+  const ph = rnd() * 6, ph2 = rnd() * 6, kick = range(rnd, 0.9, 1.25);
+  const rad = t => r0 * (0.8 + 0.2 * Math.sin(Math.PI * Math.min(1, t * 1.4 + 0.2)) + 0.09 * Math.sin(t * 7 + ph) + 0.05 * Math.sin(t * 19 + ph2))
+    * (t < 0.06 ? kick : 1) * (t > taper ? 1 - (t - taper) / (1 - taper) * 0.55 : 1);
+  const R = P.map((_, i) => rad(i / (n - 1)));
+  gm.fillStyle = '#000';
+  for (let i = 0; i < n; i++) { gm.beginPath(); gm.arc(P[i][0], P[i][1], Math.max(0.4, R[i]), 0, TAU); gm.fill(); }
+  // the bristles: thin lines along the stroke, each running dry in its own rhythm
+  gm.save(); gm.globalCompositeOperation = 'destination-out'; gm.lineCap = 'butt';
+  for (let k = 0; k < bristles; k++) {
+    const o = (k / (bristles - 1) - 0.5) * 1.9, edge = Math.abs(o) > 0.62 ? 0.35 : 0;
+    const w = r0 * range(rnd, 0.05, 0.13), f = range(rnd, 5, 14), p0 = rnd() * 6, start = range(rnd, 0.15, 0.7);
+    gm.lineWidth = w;
+    for (let i = 1; i < n; i++) {
+      const t = i / (n - 1);
+      const d = Math.min(0.95, Math.max(0, (Math.max(0, t - start) / (1 - start)) * dry + edge * dry + 0.55 * Math.sin(t * f + p0) - 0.25));
+      if (d < 0.04) continue;
+      gm.strokeStyle = `rgba(0,0,0,${d.toFixed(3)})`;
+      gm.beginPath();
+      gm.moveTo(P[i - 1][0] + N[i - 1][0] * o * R[i - 1] * 0.5, P[i - 1][1] + N[i - 1][1] * o * R[i - 1] * 0.5);
+      gm.lineTo(P[i][0] + N[i][0] * o * R[i] * 0.5, P[i][1] + N[i][1] * o * R[i] * 0.5);
+      gm.stroke();
+    }
+  }
+  gm.restore();
+  return { P, N, R };
+}
+// a few lit and dark ridges of paint along a stroke (drawn onto the coloured paint, source-atop)
+function brushRidges(g, S, rnd, lite, dark) {
+  const { P, N, R } = S;
+  for (let k = 0; k < 5; k++) {
+    const o = range(rnd, -0.75, 0.75), c = k < 3 ? lite : dark, a = k < 3 ? range(rnd, 0.16, 0.3) : range(rnd, 0.12, 0.22);
+    const t0 = Math.floor(rnd() * P.length * 0.4), t1 = Math.min(P.length, t0 + Math.floor(P.length * range(rnd, 0.3, 0.7)));
+    const pts = []; for (let i = t0; i < t1; i++) pts.push([P[i][0] + N[i][0] * o * R[i] * 0.5, P[i][1] + N[i][1] * o * R[i] * 0.5]);
+    if (pts.length > 1) line(g, pts, Math.max(0.8, R[t0] * range(rnd, 0.1, 0.22)), c, a, 'butt');
+  }
+}
+// The code daubed in house paint on the rock: a patchy primer wash of the contrasting value behind it,
+// the digits in loaded brush strokes (uneven width, dry-brush bristle gaps, lit ridges), round splatters
+// where the brush was flicked, and a dry drag of the emptied brush under the number. Transparent elsewhere.
+function daub(g, text, w, h, rnd, { paint, primer = null, edge = null }) {
+  const chars = [...text];
+  const gap = 0.2, cw = 0.6;
+  const size = Math.min(h * 0.52, w * 0.7 / Math.max(1, chars.length * cw + (chars.length - 1) * gap));
+  const r0 = size * 0.085;
+  const tw = size * (chars.length * cw + (chars.length - 1) * gap), x0 = (w - tw) / 2, y0 = (h - size) / 2 - size * 0.04;
+  const lightPaint = hsl(paint).l > 0.55;
+  // 1. the primer: a few broad, patchy horizontal strokes over the code's box
+  if (primer) {
+    const pc = makeCanvas(w, h), pg = pc.getContext('2d');
+    const rows = 3, pr = size * 0.3;
+    for (let k = 0; k < rows; k++) {
+      const y = y0 + size * (0.12 + 0.76 * k / (rows - 1)) + range(rnd, -0.05, 0.05) * size;
+      const a = Math.max(pr * 1.1, x0 - size * range(rnd, 0.2, 0.4)), b = Math.min(w - pr * 1.1, x0 + tw + size * range(rnd, 0.15, 0.4));
+      const pts = []; for (let i = 0; i <= 5; i++) { const t = i / 5; pts.push([a + (b - a) * t, y + Math.sin(t * 3 + k) * size * 0.05]); }
+      brushMask(pg, k % 2 ? pts.reverse() : pts, pr, rnd, { dry: 0.75, bristles: 15, taper: 0.6 });
+    }
+    pg.globalCompositeOperation = 'source-in'; pg.fillStyle = primer; pg.fillRect(0, 0, w, h);
+    g.save(); g.globalAlpha = 0.45; g.drawImage(pc, 0, 0); g.restore();
+  }
+  // 2. the paint mask: digits, splatters, the drag
+  const mc = makeCanvas(w, h), mg = mc.getContext('2d');
+  const strokes = [];
+  chars.forEach((ch, i) => {
+    const sk = DIGITS[ch];
+    const ox = x0 + i * size * (cw + gap) + range(rnd, -0.03, 0.03) * size, oy = y0 + range(rnd, -0.05, 0.05) * size;
+    const rot = range(rnd, -0.09, 0.09), sc = range(rnd, 0.94, 1.06), cx = ox + size * cw / 2, cy = oy + size / 2;
+    const tf = ([u, v]) => { const x = (u - cw / 2) * size * sc, y = (v - 0.5) * size * sc; return [cx + x * Math.cos(rot) - y * Math.sin(rot), cy + x * Math.sin(rot) + y * Math.cos(rot)]; };
+    if (sk) for (const st of sk) { const S = brushMask(mg, st.map(tf), r0 * range(rnd, 0.9, 1.1), rnd, { dry: range(rnd, 0.35, 0.6) }); if (S) strokes.push(S); }
+    else if (ch !== ' ') {
+      // anything but a digit: the serif glyph, roughened
+      mg.save(); mg.font = `bold ${Math.floor(size * 1.05)}px ${SIGN_FONT}`; mg.textAlign = 'center'; mg.textBaseline = 'middle'; mg.fillStyle = '#000';
+      mg.translate(cx, cy); mg.rotate(rot); mg.fillText(ch, 0, 0); mg.restore();
+    }
+  });
+  // splatters: flicked off the loaded brush near the starts of strokes, and a few strays
+  const dot = (x, y, r) => { mg.beginPath(); mg.ellipse(x, y, r * range(rnd, 0.85, 1.2), r, rnd() * 3, 0, TAU); mg.fill(); };
+  mg.fillStyle = '#000';
+  for (let k = 0; k < 7; k++) {
+    const S = strokes[Math.floor(rnd() * strokes.length)]; if (!S) break;
+    const [sx, sy] = S.P[0], a = rnd() * TAU, d = r0 * range(rnd, 1.6, 3.2);
+    const bx = sx + Math.cos(a) * d, by = sy + Math.sin(a) * d;
+    dot(bx, by, r0 * range(rnd, 0.18, 0.4));
+    for (let j = 0; j < 3; j++) { const dd = r0 * range(rnd, 0.5, 1.6); dot(bx + Math.cos(a) * dd + range(rnd, -2, 2), by + Math.sin(a) * dd + range(rnd, -2, 2), r0 * range(rnd, 0.06, 0.16)); }
+  }
+  for (let k = 0; k < 14; k++) dot(x0 - size * 0.2 + rnd() * (tw + size * 0.4), y0 - size * 0.15 + rnd() * size * 1.3, r0 * range(rnd, 0.05, 0.2));
+  // the emptied brush dragged out under the number (dry, broken, trailing off)
+  const ya = y0 + size * 1.14, xa = x0 + tw * range(rnd, 0.0, 0.12);
+  brushMask(mg, [[xa, ya + size * 0.04], [xa + tw * 0.3, ya + size * 0.07], [xa + tw * 0.62, ya + size * 0.02]], r0 * 0.7, rnd, { dry: 1.5, bristles: 9, taper: 0.3 });
+  // 3. colour it: the paint with soft lighter and darker patches and ridges along the strokes
+  const cc = makeCanvas(w, h), cg = cc.getContext('2d');
+  cg.fillStyle = paint; cg.fillRect(0, 0, w, h);
+  cg.globalCompositeOperation = 'destination-in'; cg.drawImage(mc, 0, 0);
+  cg.globalCompositeOperation = 'source-atop';
+  for (let k = 0; k < 26; k++) blob(cg, rnd() * w, rnd() * h, r0 * range(rnd, 1, 3), r0 * range(rnd, 0.6, 1.6), rnd() * 3, rnd() < 0.5 ? lightOf(paint, 0.3) : shadowOf(paint, 0.3), range(rnd, 0.12, 0.28), 0.2);
+  for (const S of strokes) brushRidges(cg, S, rnd, lightOf(paint, 0.4), shadowOf(paint, 0.35));
+  cg.globalCompositeOperation = 'source-over';
+  // 4. lay it down: a soft darker rim under the paint (the edge colour, or a thin shadow), then the paint
+  const ec = makeCanvas(w, h), eg = ec.getContext('2d');
+  eg.filter = `blur(${Math.max(1, r0 * 0.12).toFixed(1)}px)`; eg.drawImage(mc, 0, 0); eg.filter = 'none';
+  eg.globalCompositeOperation = 'source-in'; eg.fillStyle = edge || (lightPaint ? INK : '#1e1410'); eg.fillRect(0, 0, w, h);
+  g.save(); g.globalAlpha = edge ? 0.85 : 0.4; g.drawImage(ec, r0 * 0.12, r0 * 0.16); g.restore();
+  g.save(); g.globalAlpha = 0.94; g.drawImage(cc, 0, 0); g.restore();
+}
+
 // Paint a sign face. style:
 //   'board'   a painted panel on a planked board        'carved'  letters cut into bare wood
 //   'oakgold' carved oak, a moulded frame, gilded letters and scrolls (the Goldshire casino)
@@ -2040,7 +2356,7 @@ function knotBand(g, x0, y0, x1, y1, r, rnd) {
 //   'plaque'  an engraved brass plaque          'billboard'  big painted roadside boards
 //   'daub'    paint on rock (transparent)
 // Returns a canvas of w×h.
-export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e2b8', style = 'board', seed = '' } = {}) {
+export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e2b8', style = 'board', seed = '', edge = null } = {}) {
   const cv = makeCanvas(w, h), g = cv.getContext('2d');
   const rnd = rngFrom(hashStr(lines.join('|') + style + seed));
   const m = Math.min(w, h);
@@ -2051,16 +2367,9 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
   };
   const fgCol = c => { const { l } = hsl(c || '#fff'); return l > 0.6 ? '#f4e6c0' : l < 0.25 ? '#2a1e18' : muteColor(c, { sMax: 0.55, lMin: 0.3, lMax: 0.7 }); };
   if (style === 'daub') {
-    const col = fgCol(fg) === '#2a1e18' ? '#3a2a24' : '#f2ede2';
-    g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
-    let size = Math.floor(h * 0.62); g.font = `bold ${size}px ${SIGN_FONT}`;
-    while (g.measureText(lines[0]).width > w * 0.86) { size -= 2; g.font = `bold ${size}px ${SIGN_FONT}`; }
-    const L = layoutGlyphs(g, lines[0], size, 0.02, rngFrom(hashStr(lines[0])), 1.6);
-    for (let k = 0; k < 9; k++) { g.globalAlpha = 0.22; g.fillStyle = col; drawGlyphs(g, L, w / 2 + (rnd() - 0.5) * size * 0.06, h / 2 + (rnd() - 0.5) * size * 0.06); }
-    g.globalAlpha = 0.8; drawGlyphs(g, L, w / 2, h / 2);
-    g.restore();
-    const tw = L.width;
-    for (let k = 0; k < 9; k++) { const x = w / 2 + (rnd() - 0.5) * tw * 0.9, y0 = h / 2 + size * 0.3, Ln = range(rnd, 8, h * 0.28); line(g, [[x, y0], [x + (rnd() - 0.5) * 2, y0 + Ln]], range(rnd, 2, 5), col, 0.7); ellipse(g, x, y0 + Ln, 3.5, 4, 0, col, 0.7); }
+    // house paint brushed onto a rock: fg is the paint, bg (if a color) the primer wash behind it, edge
+    // an optional darker rim under the strokes
+    daub(g, String(lines[0] || ''), w, h, rnd, { paint: fg || '#f2ead8', primer: bg && !bg.startsWith('rgba') ? bg : null, edge });
     return cv;
   }
   if (style === 'gilded' || style === 'oakgold') {
@@ -2217,6 +2526,14 @@ export function signCanvas(lines, { w = 512, h = 256, bg = '#c9a24a', fg = '#f2e
 // gallery samples of each sign style
 register('sign_demo_board', { family: F, w: 512, h: 160, note: 'sign sample: painted board', paint(g) { g.drawImage(signCanvas(["HONEST ED'S PAWN", 'WE BUY ANYTHING'], { w: 512, h: 160, bg: '#f4d35e', fg: '#2b2d42' }), 0, 0); } });
 register('sign_demo_billboard', { family: F, w: 512, h: 208, note: 'sign sample: roadside billboard', paint(g) { g.drawImage(signCanvas(['SLOPMASTER 9000', 'THE LAST RV YOU WILL EVER NEED'], { w: 512, h: 208, style: 'billboard', bg: '#2e86ab', fg: '#fff' }), 0, 0); } });
+register('sign_demo_daub', { family: F, w: 1024, h: 600, note: 'sign sample: the rim code daubed on rock, per biome (meadow, snow, desert, badlands)', paint(g) {
+  const cells = [['#86827a', '8297', '#f2ead8', '#2e2622', null], ['#78818e', '3240', '#9a2a22', '#ece4d6', '#3a1a14'], ['#c9a274', '5168', '#7a2a1a', '#efe4cc', null], ['#a8553a', '7406', '#f4ecdc', '#2e2420', null]];
+  cells.forEach(([rock, code, paint, primer, edge], i) => {
+    const x = (i % 2) * 512, y = Math.floor(i / 2) * 300;
+    g.fillStyle = rock; g.fillRect(x, y, 512, 300);
+    g.drawImage(signCanvas([code], { w: 512, h: 300, style: 'daub', fg: paint, bg: primer, edge, seed: code }), x, y);
+  });
+} });
 register('sign_demo_carved', { family: F, w: 512, h: 200, note: 'sign sample: carved road sign', paint(g) { g.drawImage(signCanvas(['PAYDIRT', 'POP. 41 · EST. 1971'], { w: 512, h: 200, style: 'carved' }), 0, 0); } });
 for (const [st, note] of [['oakgold', 'Goldshire casino: carved oak, gilded'], ['barn', 'Westfall casino: painted on the barn'], ['dwarf', 'Kharanos: rune-knot border'], ['hide', 'canyon outpost: branded hide (alpha)'], ['goblin', 'Gadgetzan: brass marquee'], ['plaque', 'Gadgetzan: brass plaque']]) {
   register('sign_demo_' + st, { family: F, w: 640, h: 170, alpha: st === 'hide', note: 'sign sample: ' + note, paint(g) { g.drawImage(signCanvas(st === 'plaque' ? ['LOST WAGES', 'POP. 41 · EST. 1971'] : ['LUCKY SLOP', 'CASINO · NO CLOCKS'], { w: 640, h: 170, style: st }), 0, 0); } });

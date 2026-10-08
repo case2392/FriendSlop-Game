@@ -1474,8 +1474,61 @@ function hoodoo(ctx, b, rnd, col, tint) {
 // except on one side, where every slab stays flush: a continuous cliff face. The strata are the rock
 // material's world-height bands. A solid one's foot slab fills its collider and rises past the knees;
 // a small one is a low tilted outcrop of one or two slabs.
+// The solid ledge: a squat butte in the hoodoo's language. ONE lofted base block (an angular section
+// with softened corners, a talus foot, 1-2 soft-layer waists, a slight lean) that fills the collider,
+// under a tilted, undercut cap slab that steps back toward one side and stays flush with the base on
+// the other (the continuous cliff face), sometimes a smaller block on that.
+function butte(ctx, b, S, rnd, tint, col, steep) {
+  const rb = col.cyl.r * 0.98, Htot = col.cyl.top * range(rnd, 0.98, 1.12);
+  const [lo] = ctx.foot(rb, 0, 0, 8);
+  const y0 = Math.min(-0.45, lo - 0.35), yB = Math.max(1.2, Htot * range(rnd, 0.6, 0.7));
+  // the section: a 7-gon at uneven angles (its long faces on the collider), corners softened
+  const cs = polyAng(rnd, 7, rb / Math.cos(Math.PI / 7), 0.05, range(rnd, 1.0, 1.06), 1);   // its faces' middles on the collider, corners a little proud
+  const secR = a => {                                          // distance to the polygon edge at angle a
+    let best = Infinity;
+    for (let k = 0; k < cs.length; k++) {
+      const [a1, r1] = cs[k], [a2, r2] = cs[(k + 1) % cs.length];
+      const x1 = Math.cos(a1) * r1, z1 = Math.sin(a1) * r1, x2 = Math.cos(a2) * r2, z2 = Math.sin(a2) * r2;
+      const dx = Math.cos(a), dz = Math.sin(a), ex = x2 - x1, ez = z2 - z1, den = dx * ez - dz * ex;
+      if (Math.abs(den) < 1e-9) continue;
+      const t = (x1 * ez - z1 * ex) / den, u = (x1 * dz - z1 * dx) / den;
+      if (t > 0 && u >= -1e-6 && u <= 1 + 1e-6) best = Math.min(best, t);
+    }
+    return best === Infinity ? rb : best;
+  };
+  const inR = rb;
+  const nW = 1 + (rnd() < 0.5 ? 1 : 0), waists = [];
+  for (let k = 0; k < nW; k++) waists.push({ t: range(rnd, 0.35, 0.8), d: range(rnd, 0.88, 0.95), w: range(rnd, 0.05, 0.09) });
+  const prof = t => { let k = 1 + 0.18 * Math.pow(clamp01(1 - t / 0.2), 2) + 0.04 * smooth(0.85, 1, t); for (const w of waists) k *= 1 - (1 - w.d) * Math.exp(-(((t - w.t) / w.w) ** 2)); return k; };
+  const la = rnd() * TAU, NR = 14, pts = [], rad = [], ts = [];
+  for (let i = 0; i <= NR; i++) {
+    const t = i / NR, y = y0 + t * (yB - y0), tt = clamp01(y / yB), L = 0.06 * rb * tt * tt;
+    pts.push(new V3(Math.cos(la) * L, y, Math.sin(la) * L)); rad.push(inR * prof(tt)); ts.push(tt);
+  }
+  const ph = rnd() * 9;
+  tube(b, pts, rad, {
+    sides: 21, uRep: 1, vLen: 2, a0: rnd() * TAU,
+    lobes: (dir, t, i) => { const a = Math.atan2(dir.z, dir.x); return secR(a) / inR * (1 + 0.035 * noise3(dir.x * 3, ts[i] * 4, dir.z * 3, ph)); },
+    color: (p, n) => mulc(tint, (0.5 + 0.5 * smooth(lo - 0.2, lo + 1.2, p.y)) * (0.9 + 0.12 * Math.max(0, n.y))),
+  });
+  // the flat top of the base (dust settles there)
+  disc(b, new V3(pts[NR].x, yB - 0.02, pts[NR].z), UP, inR * prof(1) * 0.98, 14, () => [0, 0], mulc(tint, 1.05));
+  // the cap: a tilted chiselled slab, undercut, stepped back toward the cliff side
+  const cliffA = rnd() * TAU, capR = rb * range(rnd, 0.72, 0.9), shift = (rb - capR) * 0.95;
+  const cpoly = polyAng(rnd, 7, capR, 0.12, range(rnd, 1.0, 1.2));
+  const ta = cliffA + Math.PI + range(rnd, -1, 1), tk = Math.tan(range(rnd, 5, 12) * Math.PI / 180);
+  const hCap = Math.max(0.5, (Htot - yB) + range(rnd, 0.15, 0.35) * S);
+  const yC = prism(b, new V3(Math.cos(cliffA) * shift, 0, Math.sin(cliffA) * shift), yB - 0.12, hCap, cpoly, rnd, { tint: mul3(tint, lin('#e8cfc0')), under: 0.84, bulge: 1.03, bevel: 0.08 * S, foot: 0.04 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: 0.6, lipK: 1.1, wob: 0.06 });
+  if (rnd() < 0.4) {
+    const r3 = capR * range(rnd, 0.45, 0.6), sh3 = shift + (capR - r3) * 0.9;
+    prism(b, new V3(Math.cos(cliffA) * sh3, 0, Math.sin(cliffA) * sh3), yC - tk * capR, S * range(rnd, 0.25, 0.4), polyAng(rnd, 6, r3, 0.14, 1.2), rnd, { tint, under: 0.86, bevel: 0.05 * S, foot: 0.03, tilt: [Math.cos(ta + 0.6) * tk, Math.sin(ta + 0.6) * tk], aoLo: 0.65, wob: 0.06 });
+  }
+  if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 3), rb * 1.3, rb * 1.75, rnd, tint, { size: [0.14, 0.28] });
+}
+
 function ledge(ctx, b, S, rnd, tint, col, steep) {
   const solid = !!(col && col.cyl);
+  if (solid) return butte(ctx, b, S, rnd, tint, col, steep);
   const rFoot = solid ? col.cyl.r * 0.98 : S * range(rnd, 0.85, 1.0), Htot = solid ? col.cyl.top * range(rnd, 0.95, 1.12) : S * range(rnd, 0.55, 0.85);
   const [lo] = ctx.foot(rFoot, 0, 0, 8);
   const nS = solid ? 2 + (rnd() < 0.55 ? 1 : 0) : 1 + (rnd() < 0.6 ? 1 : 0), th = [];
