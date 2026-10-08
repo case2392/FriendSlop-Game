@@ -31,6 +31,10 @@ export const pick = (rnd, arr) => arr[Math.floor(rnd() * arr.length)];
 export function makeCanvas(w, h = w) {
   const cv = document.createElement('canvas');
   cv.width = w; cv.height = h;
+  // Paint canvases live on the CPU: textures are read back (blurTile, pixel passes) and composited
+  // with each other, and mixing GPU- and CPU-backed canvases forces slow readbacks. Later
+  // getContext('2d') calls return this same context.
+  cv.getContext('2d', { willReadFrequently: true });
   return cv;
 }
 
@@ -222,18 +226,41 @@ export function glaze(g, w, h, color, alpha = 0.15, mode = 'soft-light') {
 }
 
 // Tileable blur (blurs a 3×3 tiling, keeps the center).
+// Seamless (wrap-around) blur on the CPU: premultiplied alpha, two box passes per axis (close to a
+// gaussian), a 3-tap kernel for sub-pixel radii. Canvas 'filter' blurs round-trip through the GPU and
+// cost seconds per texture on software GL, so painting uses this instead.
 export function blurTile(cv, px) {
-  const s = cv.width;
-  const big = makeCanvas(s * 3, cv.height * 3);
-  const bg = big.getContext('2d');
-  for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) bg.drawImage(cv, i * s, j * cv.height);
-  const out = makeCanvas(s * 3, cv.height * 3);
-  const og = out.getContext('2d');
-  og.filter = `blur(${px}px)`;
-  og.drawImage(big, 0, 0);
-  const g = cv.getContext('2d');
-  g.clearRect(0, 0, s, cv.height);
-  g.drawImage(out, s, cv.height, s, cv.height, 0, 0, s, cv.height);
+  if (!(px > 0)) return cv;
+  const w = cv.width, h = cv.height, g = cv.getContext('2d', { willReadFrequently: true });
+  const img = g.getImageData(0, 0, w, h), d = img.data, n = w * h;
+  let A = new Float32Array(n * 4), B = new Float32Array(n * 4);
+  for (let i = 0; i < n; i++) { const a = d[i * 4 + 3] / 255; A[i * 4] = d[i * 4] * a; A[i * 4 + 1] = d[i * 4 + 1] * a; A[i * 4 + 2] = d[i * 4 + 2] * a; A[i * 4 + 3] = d[i * 4 + 3]; }
+  const pass = (src, dst, horiz, r, k) => {
+    const L = horiz ? w : h, M = horiz ? h : w;
+    for (let m = 0; m < M; m++) {
+      const at = q => { q = ((q % L) + L) % L; return (horiz ? m * w + q : q * w + m) * 4; };
+      if (k) {   // 3-tap kernel for sub-pixel blurs
+        for (let q = 0; q < L; q++) { const i0 = at(q - 1), i1 = at(q), i2 = at(q + 1); for (let c = 0; c < 4; c++) dst[i1 + c] = src[i0 + c] * k + src[i1 + c] * (1 - 2 * k) + src[i2 + c] * k; }
+      } else {   // running box sum
+        const sm = [0, 0, 0, 0], inv = 1 / (2 * r + 1);
+        for (let q = -r; q <= r; q++) { const i = at(q); for (let c = 0; c < 4; c++) sm[c] += src[i + c]; }
+        for (let q = 0; q < L; q++) {
+          const o = at(q); for (let c = 0; c < 4; c++) dst[o + c] = sm[c] * inv;
+          const ia = at(q + r + 1), ib = at(q - r); for (let c = 0; c < 4; c++) sm[c] += src[ia + c] - src[ib + c];
+        }
+      }
+    }
+  };
+  if (px < 1) { const k = Math.min(0.25, px * px / 2); pass(A, B, true, 0, k); pass(B, A, false, 0, k); }
+  else {
+    const r = Math.max(1, Math.round(px * 1.2 - 0.4));
+    for (let it = 0; it < 2; it++) { pass(A, B, true, r, 0); pass(B, A, false, r, 0); }
+  }
+  for (let i = 0; i < n; i++) {
+    const a = A[i * 4 + 3], k = a > 0.01 ? 255 / a : 0;
+    d[i * 4] = A[i * 4] * k; d[i * 4 + 1] = A[i * 4 + 1] * k; d[i * 4 + 2] = A[i * 4 + 2] * k; d[i * 4 + 3] = a;
+  }
+  g.putImageData(img, 0, 0);
   return cv;
 }
 

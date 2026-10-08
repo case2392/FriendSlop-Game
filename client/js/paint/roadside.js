@@ -27,7 +27,7 @@
 //   rs_tuft, rs_tuft_dry (grass cards), rs_scorch, rs_glow (soft decals)
 import {
   register, fill, mottle, stroke, pebbles, cracks, glaze, blurTile, range, pick, wrap, blob, ellipse,
-  mix, lightOf, shadowOf, jitter, rgba, rngFrom, rowLayout, paintRects, streaks, hex, blade, meta,
+  mix, lightOf, shadowOf, jitter, rgba, rngFrom, rowLayout, paintRects, streaks, hex, blade, meta, makeCanvas,
 } from './core.js';
 
 const F = 'roadside';
@@ -1667,7 +1667,7 @@ function sandPaint(g, s, rnd) {
 }
 function coverAlpha(g, s, rnd, lo = 0.35) {
   // breakup noise in alpha (the cover shader reads it): blotchy, never fully transparent
-  const a = document.createElement('canvas'); a.width = a.height = s;
+  const a = makeCanvas(s);
   const ag = a.getContext('2d');
   ag.fillStyle = '#808080'; ag.fillRect(0, 0, s, s);
   mottle(ag, s, rnd, { colors: ['#ffffff', '#202020'], count: 70, rmin: 10, rmax: 40, alpha: 0.5, hard: 0.2 });
@@ -1703,7 +1703,7 @@ register('rs_puff', {
   family: F, size: 128, alpha: true, note: 'a cartoon smoke puff billboard (alpha): soft cauliflower blobs lit warm cream at the upper left, cool lavender-gray lower right, alpha fading well inside the edge',
   paint(g, s, rnd) {
     const c = s / 2;
-    const mask = document.createElement('canvas'); mask.width = mask.height = s;
+    const mask = makeCanvas(s);
     const mg = mask.getContext('2d');
     const lobes = [[0, 0, 0.3]];
     for (let i = 0; i < 5; i++) { const a = i / 5 * TAU + range(rnd, -0.3, 0.3), d = range(rnd, 0.12, 0.18); lobes.push([Math.cos(a) * d, Math.sin(a) * d, range(rnd, 0.15, 0.21)]); }
