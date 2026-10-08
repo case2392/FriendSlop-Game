@@ -244,7 +244,10 @@ function slab(fn, nu, nv, thick, o) {
 
 // ---- the head --------------------------------------------------------------------------------
 
-const H0 = [0, J.head, 0];
+// The head sits back over the shoulders, not on the middle of the torso: the neck rises from the
+// back half of the yoke (see torsoRing's posture) and the chest stands out in front of the chin.
+const HX = -0.04;
+const H0 = [HX, J.head, 0];
 // point on the (undeformed) skull at angle th, height dy above the head origin, in head-local meters
 function skull(th, dy) {
   const k = dy / HS;
@@ -359,7 +362,7 @@ function headPartsOf(S) {
     }, 10, 6, 0.012, { reg: REG.beard, uv: (u, v) => [u, 1 - v], bones: p => { const t = sstep(1.5, 1.4, p[1]); return [[B.head, 1 - t], [B.neck, t * 0.5], [B.chest, t * 0.5]]; }, inside: () => toHead(HC) }));
   }
   if (L.hair === 'braid') {
-    const path = bez(toHead([-0.1 * HS, 0.03 * HS, 0]), toHead([-0.15 * HS, -0.1 * HS, 0]), [-0.19, 1.42, 0], [-0.185, 1.22, 0]);
+    const path = bez(toHead([-0.1 * HS, 0.03 * HS, 0]), toHead([-0.15 * HS, -0.1 * HS, 0]), [-0.19 + HX * 0.5, 1.42, 0], [-0.185, 1.22, 0]);
     parts.push(tube(path, (v) => (0.026 - 0.008 * v) * (0.85 + 0.15 * Math.abs(Math.sin(v * Math.PI * 7))) * Math.sqrt(Math.sin(Math.min(1, v * 1.02 + 0.02) * Math.PI)), 8, 14, {
       reg: REG.beard, ref: [0, 0, 1], bones: p => { const t = sstep(1.5, 1.32, p[1]); return [[B.head, 1 - t], [B.chest, t]]; },
     }));
@@ -635,6 +638,18 @@ function torsoRing(y, S) {
   r.d += 0.012 * gauss(y - 1.33, 0.05);                        // pectorals
   r.db += 0.01 * gauss(y - 1.32, 0.06);                        // shoulder blades
   if (S.look.female) r.d += 0.022 * gauss(y - 1.27, 0.06);   // bust
+  return posture(r, y, S);
+}
+// Posture, for the side profile: the chest stands up and out to the collarbones (a barrel, not a
+// slope from the pecs to the throat), and above the ribs the yoke leans back (scaled by the ring's
+// size, so the closing pole stays a point) so the neck rises from the back half of the shoulders
+// with the head (HX) over it: a proud chest, not a stoop. Everything hung on torsoRing follows.
+const CHEST_UP = 0.032, CHEST_DEEP = 0.022, YOKE_BACK = 0.034;
+function posture(r, y, S) {
+  const fem = S.look.female;
+  r.d += (CHEST_UP * gauss(y - 1.395, 0.05) + CHEST_DEEP * gauss(y - 1.26, 0.12)) * (fem ? 0.4 : 1);
+  const s = YOKE_BACK * sstep(1.37, 1.48, y) * Math.min(1, (r.d + r.db) / 0.12);
+  r.d -= 0.45 * s; r.db += s;
   return r;
 }
 function torsoWeights(p) {
@@ -657,7 +672,7 @@ function bodyParts(S, F) {
   const TT = S.brute ? [...TORSO.filter(r => r[0] <= 1.41), [1.45, 0.19, 0.124, 0.128, 2.4, 0.93], [1.48, 0.125, 0.092, 0.098, 2.2, 0.97], [1.5, 0.075, 0.07, 0.074, 2.0, 0.99], [1.508, 0, 0, 0, 2, 1]] : TORSO;
   P.push(lathe(TT.map(([y, w, d, db, n, v], i) => {
     if (i < 3) { const [kw, kd, kdb] = torsoScale(0.79, S); return { y, w: w * kw, d: d * kd, db: db * kdb, n, v }; }
-    if (y > 1.42 && S.brute) { const b = S.bulk; return { y, w: w * b, d: d * b, db: db * b, n, v }; }
+    if (y > 1.42 && S.brute) { const b = S.bulk, r = posture({ w: w * b, d: d * b, db: db * b }, y, S); return { y, w: r.w, d: r.d, db: r.db, n, v }; }
     const R = torsoRing(y, S); return { y, w: R.w, d: R.d, db: R.db, n: S.brute ? R.n * 0.92 : R.n, v };
   }), { seg: 24, reg: REG.torso, bones: torsoWeights }));
   // a rolled collar round the neck
@@ -665,7 +680,7 @@ function bodyParts(S, F) {
     // a folded neckline: a low soft roll of cloth round the base of the neck
     const prof = [[1.452, 0.0], [1.462, 0.7], [1.474, 1.0], [1.486, 0.75], [1.492, 0.3], [1.49, 0.0]];
     const nk = S.look.female ? 0.86 : 1;
-    P.push(lathe(prof.map(([y, k], i) => ({ y, w: (0.086 + 0.016 * k) * nk, d: (0.082 + 0.014 * k) * nk, db: (0.084 + 0.016 * k) * nk, n: 2.1, cx: -0.004, v: 1 - i / (prof.length - 1) })), {
+    P.push(lathe(prof.map(([y, k], i) => ({ y, w: (0.086 + 0.016 * k) * nk, d: (0.082 + 0.014 * k) * nk, db: (0.084 + 0.016 * k) * nk, n: 2.1, cx: -0.004 + HX, v: 1 - i / (prof.length - 1) })), {
       seg: 18, reg: REG.collar, bones: p => { const t = sstep(1.46, 1.51, p[1]); return [[B.chest, 1 - t * 0.5], [B.neck, t * 0.5]]; },
     }));
   }
@@ -1158,12 +1173,15 @@ function legParts(S, F, s) {
 // A big domed pauldron with a rolled rim and a second lame hanging off the outside.
 function pauldron(S, F, s, size) {
   const [ua] = ARM(s), sh = F.shoulder(s);
-  const R = 0.138 * size, tilt = 0.6, fmax = 1.42;
+  const R = 0.143 * size, tilt = 0.6, fmax = 1.42;
   const A = [0, Math.cos(tilt), s * Math.sin(tilt)], E1 = [1, 0, 0];
   const E2 = [A[1] * E1[2] - A[2] * E1[1], A[2] * E1[0] - A[0] * E1[2], A[0] * E1[1] - A[1] * E1[0]];
-  const Cc = [sh[0] - 0.006, sh[1] + 0.02 * size, sh[2] - s * 0.006];
+  // (an oval dome, deeper front to back than across, swelling toward the back: from the side it spans
+  // the yoke and the shoulder blade, so the profile keeps the big shoulders the front view has, while
+  // the far one doesn't push its shadowed hollow out past the chin in a three-quarter view)
+  const Cc = [sh[0] - 0.004, sh[1] + 0.032 * size, sh[2] - s * 0.006], DEEP_F = 1.0, DEEP_B = 1.22;
   const dir = (th, f) => { const c = Math.cos(th), sn = Math.sin(th), sf = Math.sin(f), cf = Math.cos(f); return [0, 1, 2].map(k => A[k] * cf * 0.74 + (E1[k] * c + E2[k] * sn) * sf); };
-  const pt = (th, f, rr) => { const d = dir(th, f); return [Cc[0] + d[0] * rr, Cc[1] + d[1] * rr, Cc[2] + d[2] * rr]; };
+  const pt = (th, f, rr) => { const d = dir(th, f); return [Cc[0] + d[0] * rr * (d[0] > 0 ? DEEP_F : DEEP_B), Cc[1] + d[1] * rr, Cc[2] + d[2] * rr]; };
   const P = [];
   const out = [0, -0.25, s]; const ol = Math.hypot(...out);
   const thOut = Math.atan2((out[0] * E2[0] + out[1] * E2[1] + out[2] * E2[2]) / ol, (out[0] * E1[0] + out[1] * E1[1] + out[2] * E1[2]) / ol);
@@ -1204,7 +1222,7 @@ function charGeometry(S, F) {
   if (!geoCache.has(key)) {
     const head = headParts(S);
     // the Repo Man's head is a size up, so it isn't a pinhead on his bulk (scaled about the head bone)
-    if (S.brute) for (const g of head) { g.translate(0, -J.head, 0); g.scale(1.12, 1.12, 1.12); g.translate(0, J.head, 0); }
+    if (S.brute) for (const g of head) { g.translate(-HX, -J.head, 0); g.scale(1.12, 1.12, 1.12); g.translate(HX, J.head, 0); }
     const parts = [...bodyParts(S, F), ...head].map(g => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k); return g; });
     const geo = mergeGeometries(parts, false);
     geo.computeBoundingSphere();
@@ -1231,7 +1249,7 @@ function makeSkeleton(F) {
   by.hips.add(by.spine); by.spine.position.set(0, J.spine - J.hips, 0);
   by.spine.add(by.chest); by.chest.position.set(0, J.chest - J.spine, 0);
   by.chest.add(by.neck); by.neck.position.set(0, J.neck - J.chest, 0);
-  by.neck.add(by.head); by.head.position.set(0, J.head - J.neck, 0); by.head.scale.setScalar(HU);
+  by.neck.add(by.head); by.head.position.set(HX, J.head - J.neck, 0); by.head.scale.setScalar(HU);
   for (const [s, a, f, h] of [[-1, by.armL, by.foreL, by.handL], [1, by.armR, by.foreR, by.handR]]) {
     const sh = F.shoulder(s);
     by.chest.add(a); a.position.set(sh[0], sh[1] - J.chest, sh[2]);
@@ -1693,6 +1711,7 @@ function viewIn(id, st, { emote = null, speed = 0, frames = 90 } = {}) {
   return v.group;
 }
 const M_ = C.MODE, F_ = C.FLAG;
+function turned(obj, a) { const g = new THREE.Group(); obj.rotation.y += a; g.add(obj); return g; }
 export const PREVIEW = {
   player: () => buildCharacter('#7CFC00', { hatIndex: 0, skinIndex: 0 }).root,
   player2: () => buildCharacter('#FF6EC7', { hatIndex: 1, skinIndex: 1 }).root,
@@ -1718,5 +1737,25 @@ export const PREVIEW = {
   jumping: () => viewIn(2, { mode: M_.AIR }),
   laughing: () => viewIn(1, {}, { emote: '😂' }),
   crowned: () => viewIn(3, {}, { emote: '👑' }),
+  // side profiles (turned to face +x: the camera sees the left side), standing as players do in game
+  side0: () => turned(viewIn(0, {}), Math.PI / 2),
+  side1: () => turned(viewIn(1, {}), Math.PI / 2),
+  side2: () => turned(viewIn(2, {}), Math.PI / 2),
+  side3: () => turned(viewIn(3, {}), Math.PI / 2),
+  side4: () => turned(viewIn(4, {}), Math.PI / 2),
+  side5: () => turned(viewIn(5, {}), Math.PI / 2),
+  sidewalk: () => turned(viewIn(2, {}, { speed: 4.4, frames: 47 }), Math.PI / 2),
+  sideed: () => turned(buildCharacter('#c0392b', { hatIndex: 2, skinIndex: 3 }).root, Math.PI / 2),
+  siderepo: () => turned(buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }).root, Math.PI / 2),
+  sideclerk: () => turned(buildCharacter('#2e86ab', { hatIndex: 0, skinIndex: 4 }).root, Math.PI / 2),
+  sideko: () => turned(viewIn(0, { mode: M_.KO }), Math.PI / 2),
+  sidedealer: () => turned(buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }).root, Math.PI / 2),
+  back0: () => turned(viewIn(0, {}), Math.PI),
+  stand0: () => viewIn(0, {}),
+  stand1: () => viewIn(1, {}),
+  stand2: () => viewIn(2, {}),
+  stand3: () => viewIn(3, {}),
+  stand4: () => viewIn(4, {}),
+  stand5: () => viewIn(5, {}),
   fphands: () => { const g = new THREE.Group(); const m = painted(handsAtlas('#00E5FF')); const L = new THREE.Mesh(fpHandGeometry(-1), m), R = new THREE.Mesh(fpHandGeometry(1), m); L.position.set(-0.16, 0, 0); R.position.set(0.16, 0, 0); for (const h of [L, R]) { h.rotation.x = 0.5; g.add(h); } g.rotation.y = Math.PI; g.scale.setScalar(3); return g; },
 };

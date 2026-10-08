@@ -20,9 +20,11 @@
 // Rock (tile; world-space triplanar, so v = height and strata stay level):
 //   rock_gray (meadow) rock_warm (fields) rock_granite (snow): big soft value planes, long fractures
 //     with a lit lip and a cool crease, chips, lichen
-//   rock_red (badlands): a few broad beds (thick soft reds between thin hard cream beds with lit lips
-//     and undercuts), a down-dropped fault block, fissures, rain streaks; rock_sand (desert): wide soft
-//     layers, wind-scoured pits, drips. Both seamless in both directions
+//   rock_red (badlands) / rock_sand (desert): bedded rock in the canyon walls' language: soft beds pale
+//     and deep by turns (wandering sub-beds, a few broken ledgelets) between hard beds at the fixed
+//     heights in STRATA_BEDS (exported: nature3d puts its ledges' lips on them), each with a lit lip, a
+//     purple-brown undercut and rain stains; joints, vertical washes; the sand one paler and softer,
+//     with wind pits and grooves. Both seamless in both directions
 // Top cover (tile; alpha = thickness mask, blended on up-facing surfaces by the nature shader):
 //   cover_moss cover_lichen cover_snow cover_dust cover_sand · snow_pack (opaque snow for snow caps)
 // Props: cactus_skin / cactus_dusty (tiles, 4 ribs), hay (tiles), hay_end (disc), stump_top (disc), bone_bleached (tiles),

@@ -3,24 +3,30 @@
 //
 // The look is WoW Classic: chunky low-poly silhouettes (Elwynn groves round a huge hero oak: massive
 // warm boles on flared roots, gnarled limbs into wide domed crowns of big leaf lobes with ragged hanging
-// skirts; stacked drooping pine tiers; Badlands hoodoos lofted as one eroded column under a caprock,
-// strata ledges as one fluted mesa block with a jutting prow and a cuesta top; Tanaris slab arches on
-// blocky stepped legs, wind-scoured sandstone mounds), smooth shading, and the detail painted into textures
-// (paint/nature.js). A canopy lobe is a ring of alpha leaf-cluster cards round one big camera-facing core
-// card, all with normals pointing out of the lobe, so it lights like a volume: warm on top, cool
-// underneath; the cards turn about the vertical to face the camera (in the shadow pass too, so shadows
-// match what you see). Vertex colours carry baked AO and per-tree tint. A small shader hook adds wind
+// skirts; Westfall's the same oak, smaller, a round lumpy olive-gold ball; stacked drooping pine tiers;
+// Badlands hoodoos lofted as one eroded column under a caprock; Badlands ledges and Tanaris mounds as
+// layered rock (strataRock: the day's hard beds jut as lit lips over undercuts at the same world heights
+// the painted strata use, uneven tiers, joints, a stepped skyline, a bank of the ground's own dust or
+// sand round the foot that fades into the terrain); Tanaris slab arches on blocky stepped legs), smooth
+// shading, and the detail painted into textures (paint/nature.js). A canopy lobe is a ring of alpha
+// leaf-cluster cards round one big camera-facing core card, all with normals pointing out of the lobe, so
+// it lights like a volume: warm on top, cool underneath, and a leafy ceiling under it; the cards turn to
+// face the camera (about the vertical, and pitched toward a camera that looks up from under a crown, so
+// no card is ever an edge-on spike; in the shadow pass too, so shadows match what you see). Vertex
+// colours carry baked AO and per-tree tint. A small shader hook adds wind
 // sway, triplanar mapping for rocks (so strata run level in world space), the frosted-underside trick
 // for Dun Morogh pine boughs, and a world-space "top cover" that lays moss, lichen, snow, dust or sand on
 // up-facing surfaces (or where a per-vertex amount says so: the moss at the foot of an oak).
 //
 // Colliders: every solid thing keeps to the collider world gen gave it (tree boles, cacti, haybales, the
-// solid rocks: see rockCol; boulders are fitted slice by slice to their cylinders, tops included),
-// checked by the "audit" preview (tools/preview.mjs audit x.png <biome>): per kind, the worst gap and
-// overhang at 0.3-1.5 m and how far the collider's top stands off the rock's.
+// solid rocks: see rockCol; boulders are fitted slice by slice to their cylinders, tops included; a
+// ledge's walls follow its oriented box), checked by the "audit" preview (tools/preview.mjs audit x.png
+// <biome>): per kind, the worst gap and overhang at 0.3-1.5 m and how far the collider's top stands off
+// the rock's.
 //
 // Performance: everything static is built in world space and merged per (material, 600 m stretch of
-// road), so a whole leg of decor costs a few dozen draw calls however many trees there are; the rim tree
+// road, the camp sharing the first), so a whole leg of decor costs a few dozen draw calls however many
+// trees there are; the rim tree
 // lines are one shadowless mesh per material for the whole leg.
 // API: buildNature(W) -> { group, fires, update(dt, t, camPos) }, NATURE_KINDS, PREVIEW.
 import { THREE, tex } from './gfx.js';
@@ -1430,15 +1436,6 @@ function prism(b, C, y0, h, poly, rnd, { tint = WHITE, tilt = null, under = 0.9,
 }
 // an irregular footprint: N corners, radii jittered, angles jittered
 const polyOf = (rnd, N, r, jit = 0.18, sx = 1, sz = 1) => { const a0 = rnd() * TAU, out = []; for (let k = 0; k < N; k++) { const a = a0 + (k + range(rnd, -0.22, 0.22)) * TAU / N, rr = r * range(rnd, 1 - jit, 1 + jit) * Math.hypot(Math.cos(a) * sx, Math.sin(a) * sz); out.push([a, rr]); } return out; };
-// an angular footprint: N corners at uneven angles (so some faces run long and straight), radii
-// jittered, stretched along x
-const polyAng = (rnd, N, r, jit = 0.15, sx = 1, ev = 0) => {
-  const gaps = []; for (let k = 0; k < N; k++) gaps.push(range(rnd, 0.55 + 0.25 * ev, 1.6 - 0.35 * ev));
-  const tot = gaps.reduce((a, v) => a + v, 0), a0 = rnd() * TAU, out = [];
-  let a = a0;
-  for (let k = 0; k < N; k++) { out.push([a, r * range(rnd, 1 - jit, 1 + jit) * Math.hypot(Math.cos(a) * sx, Math.sin(a))]); a += gaps[k] / tot * TAU; }
-  return out;
-};
 
 // The collider world gen gave a rock (this mirrors shared/world.js rockCollide, steepness test
 // included, and prefers the real collider when one stands at the rock's centre). Hoodoos are always
@@ -3120,6 +3117,7 @@ export const PREVIEW = {
   deadtree: pv('deadtree', { s: 1.1 }),
   hoodoo: pv('rock', { s: 1.8, variant: 'hoodoo' }), ledge: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }), arch: pv('rock', { s: 1.6, variant: 'arch' }), mound: pv('rock', { s: 1.4, variant: 'mound', x: 6 }),
   hoodoo2: pv('rock', { s: 1.3, variant: 'hoodoo', x: 1.7 }), ledge2: pv('rock', { s: 1.9, variant: 'ledge', x: 4.4 }), ledge_small: pv('rock', { s: 0.9, variant: 'ledge', x: 2.2 }),
+  mound2: pv('rock', { s: 1.9, variant: 'mound', x: 4.4 }), mound_small: pv('rock', { s: 1.0, variant: 'mound', x: 2.2 }),
   hoodoo_col: pv('rock', { s: 1.8, variant: 'hoodoo' }, { wires: true }), ledge_col: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }, { wires: true }),
   arch_col: pv('rock', { s: 1.6, variant: 'arch' }, { wires: true }), mound_col: pv('rock', { s: 1.4, variant: 'mound', x: 6 }, { wires: true }), boulder_col: pv('rock', { s: 1.7, x: 3 }, { wires: true }),
   cairn: pv('cairn', { variant: 'skull' }), cairn2: pv('cairn', { variant: 'horn', x: 1.3 }), cairn3: pv('cairn', { variant: 'none', x: 2.9 }),

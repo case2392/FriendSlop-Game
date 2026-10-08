@@ -663,7 +663,14 @@ export function generateLeg(seed, day) {
       cyls.push({ x, y: y + 1.6, z, r: 0.25, hh: 1.6, mat: 'deadtree_decor' });
       decor.push({ k, x, y, z, s, ry });
     } else if (k === 'fence') {
-      decor.push({ k, x, y, z, s, ry: Math.atan2(W_roadDx(z), 1) + (rng() - 0.5) * 0.2, len: 4 + Math.floor(rng() * 4) });
+      const fe = { k, x, y, z, s, ry: Math.atan2(W_roadDx(z), 1) + (rng() - 0.5) * 0.2, len: 4 + Math.floor(rng() * 4) };
+      decor.push(fe);
+      // Westfall: now and then a lone oak just past one end of a fence, a little further from the road
+      if (biome === 'fields' && rngD() < 0.34) {
+        const reach = (fe.len - 1) / 2 * 1.9 + 2.5 + rngD(), sd = rngD() < 0.5 ? -1 : 1, away = Math.sign(x - roadX(z)) || 1;
+        const tx = x + Math.sin(fe.ry) * reach * sd + away * (1 + rngD()), tz = z + Math.cos(fe.ry) * reach * sd;
+        if (decorOk(tx, tz, Math.abs(tx - roadX(tz))) && !cyls.some(c => c.mat === 'tree' && Math.hypot(c.x - tx, c.z - tz) < 3.2)) tree('oak', tx, tz, 0.8 + rngD() * 0.35, rngD() * 6.283);
+      }
     } else if (k === 'rock') {
       const d = { k, x, y, z, s: 0.5 + rng() * 1.4, ry };
       // the renderer's own steepness test: ground under the rock rising more than 0.8 x its size

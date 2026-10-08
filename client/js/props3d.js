@@ -1392,8 +1392,10 @@ void main() {
   float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vRot.z + 0.5, n)), row = floor((vRot.z + 0.5) / n);
   vec4 t = texture2D(map, vec2((col + q.x) / n, 1.0 - (row + q.y) / n));
   if (t.a * vA < 0.004) discard;
-  // premultiplied: the glow adds light, the glint itself (and its dark edge) covers what's behind it
-  gl_FragColor = vec4(t.rgb * t.a * vA * 1.2, t.a * t.a * vA * 0.9);
+  // premultiplied: the bright halo mostly adds light; the glint and above all its dark umber edge cover
+  // what's behind them (so it keeps its edge on white snow and pale sand)
+  float cover = t.a * mix(1.0, t.a, smoothstep(0.35, 0.75, dot(t.rgb, vec3(0.3, 0.59, 0.11))));
+  gl_FragColor = vec4(t.rgb * t.a * vA * 1.2, cover * vA * 0.9);
   #include <colorspace_fragment>
 }`;
 function twinkleCloud() {

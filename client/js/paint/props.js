@@ -2299,21 +2299,22 @@ for (const b of Object.keys(BOULDER)) {
 // ---- the loot twinkle -----------------------------------------------------------------------------------
 
 // The glint over every loose piece of loot (props3d draws them all as one point cloud), painted like
-// the glitter that rises off a quest object in 2004: not a tidy star but a hand-flicked glint. Four of
-// them share the sprite, one per 128 px cell (TWINKLE_CELLS: props3d picks one per piece and may
-// mirror it), each with rays of different lengths (the vertical about 1.6× the horizontal, one short
-// diagonal, the other missing), its heart a little off the cell's middle, and two or three tiny motes
-// round it. Each ray is a thin needle with pinched, concave sides: a dark umber edge (it keeps the glint
-// readable on white snow and pale sand), an amber rim, gold, then cream toward the white-hot heart;
-// a soft warm halo, taller than wide, is mostly added light. Alpha: transparent round every cell's edge
-// (at least 10 px, so the mips don't bleed between cells).
+// the glitter that rises off a quest object in 2004: not a tidy icon star but a hand-flicked glint.
+// Four of them share the sprite, one per 128 px cell (TWINKLE_CELLS: props3d gives each piece one,
+// maybe mirrored). Each is a soft ball of gold light (most of its mass, so it still reads at 12 px)
+// with tapered flares of different lengths: the vertical about 1.6× the horizontal, up and down near
+// enough equal that it never reads as a candle flame, the two side rays unequal, one stub diagonal and
+// the other missing; its heart sits a little off the cell's middle, and two or three round specks of
+// glitter (dust, not more stars) hang round it. A dark umber edge under the amber rim keeps it
+// readable on white snow and pale sand; a soft warm halo, taller than wide, is mostly added light.
+// Alpha: transparent for at least 8 px round every cell's edge, so the mips don't bleed between cells.
 export const TWINKLE_CELLS = 2;    // the sprite is TWINKLE_CELLS × TWINKLE_CELLS glints
 // [angle (deg, 0 = up, clockwise), length (× cell)] per ray; motes: [angle, distance, radius (px)]
 const GLINTS = [
-  { rays: [[-3, 0.46], [178, 0.31], [266, 0.17], [91, 0.27], [44, 0.17]], motes: [[-52, 0.32, 7], [120, 0.31, 5.5], [212, 0.33, 4.5]] },
-  { rays: [[3, 0.44], [184, 0.34], [272, 0.27], [88, 0.16], [222, 0.165]], motes: [[38, 0.32, 6.5], [252, 0.33, 5]] },
-  { rays: [[-2, 0.47], [176, 0.29], [269, 0.24], [94, 0.2], [318, 0.165]], motes: [[62, 0.29, 5.5], [148, 0.29, 6.5], [-118, 0.3, 4.5]] },
-  { rays: [[5, 0.42], [181, 0.36], [264, 0.16], [87, 0.27], [134, 0.17]], motes: [[-34, 0.33, 6], [214, 0.29, 5.5]] },
+  { rays: [[-3, 0.41], [178, 0.36], [266, 0.19], [91, 0.3], [44, 0.17]], motes: [[-52, 0.32, 7], [120, 0.31, 5.5], [212, 0.33, 4.5]] },
+  { rays: [[3, 0.38], [184, 0.4], [272, 0.29], [88, 0.18], [222, 0.165]], motes: [[38, 0.32, 6.5], [252, 0.33, 5]] },
+  { rays: [[-2, 0.42], [176, 0.35], [269, 0.27], [94, 0.22], [318, 0.165]], motes: [[62, 0.29, 5.5], [148, 0.29, 6.5], [-118, 0.3, 4.5]] },
+  { rays: [[5, 0.37], [181, 0.4], [264, 0.18], [87, 0.3], [134, 0.17]], motes: [[-34, 0.33, 6], [214, 0.29, 5.5]] },
 ];
 // one needle from (x, y) out at angle a: tip at len, half-width wb at the heart, concave sides
 function needle(g, x, y, a, len, wb, color, alpha) {
@@ -2329,13 +2330,13 @@ function needle(g, x, y, a, len, wb, color, alpha) {
 // a whole glint, layer by layer across all its rays (each layer: [grow px, length ×, width ×, color, alpha])
 function glint(g, x, y, rays, S, wMain, layers) {
   for (const [grow, kl, kw, color, alpha] of layers) for (const [deg, L] of rays) {
-    const short = L < 0.18, wb = (short ? 0.6 : L > 0.38 ? 1.12 : L < 0.25 ? 0.85 : 1) * wMain;
+    const short = L < 0.175, wb = (short ? 0.6 : L > 0.39 ? 1.08 : 1) * wMain;
     needle(g, x, y, deg * Math.PI / 180, L * S * kl + grow, wb * kw + grow * 0.8, color, alpha);
   }
 }
-const GLINT_LAYERS = [[4, 1, 1, '#5a2e10', 0.6], [0, 1, 1, '#a8681a', 0.95], [0, 0.94, 0.74, '#f2b83c', 1], [0, 0.84, 0.54, '#ffe07a', 1], [0, 0.68, 0.36, '#fff8d8', 1]];
+const GLINT_LAYERS = [[6, 1, 1, '#5a2e10', 0.7], [0, 1, 1, '#a8681a', 0.95], [0, 0.94, 0.74, '#f2b83c', 1], [0, 0.84, 0.54, '#ffe07a', 1], [0, 0.68, 0.36, '#fff8d8', 1]];
 register('loot_twinkle', {
-  family: F, size: 256, alpha: true, note: 'the glint over loose loot (alpha sprite, not tiled): four uneven gold glints, one per 128 px cell: long vertical rays, short side rays, one stub diagonal, an umber edge, an amber rim, a white heart a little off-centre, two or three tiny motes, a warm halo',
+  family: F, size: 256, alpha: true, note: 'the glint over loose loot (alpha sprite, not tiled): four uneven gold glints, one per 128 px cell: a ball of gold light, tall flares, unequal side rays, one stub diagonal, an umber edge, an amber rim, a white heart a little off-centre, two or three round glitter specks, a warm halo',
   paint(g, s, rnd, h, cv) {
     const S = s / TWINKLE_CELLS;
     GLINTS.forEach((G, k) => {
@@ -2349,18 +2350,18 @@ register('loot_twinkle', {
       // the rays' dark edges, then the heart's own round glow (most of the glint's mass is this soft
       // ball of light), then the rays over it
       glint(g, x, y, G.rays, S, S * 0.062, GLINT_LAYERS.slice(0, 1));
-      ellipse(g, x + 0.6, y + 0.9, S * 0.145, S * 0.158, 0, '#5a2e10', 0.45);
+      ellipse(g, x + 0.6, y + 0.9, S * 0.155, S * 0.168, 0, '#5a2e10', 0.62);
       g.fillStyle = radial(g, x - 1.5, y - 2, 0, S * 0.14, [[0, '#fffbe0'], [0.35, '#ffe488'], [0.65, '#f6c048'], [0.88, '#d8962c'], [1, '#a06a1c', 0.95]]);
       g.beginPath(); g.ellipse(x, y, S * 0.13, S * 0.142, 0, 0, TAU); g.fill();
       glint(g, x, y, G.rays, S, S * 0.062, GLINT_LAYERS.slice(1));
       // the white-hot heart, a touch up and left of the rays' meeting point
-      blob(g, x - 1.5, y - 2, S * 0.092, S * 0.1, 0, '#fff8e0', 1, 0.5);
-      blob(g, x - 2, y - 2.6, S * 0.045, S * 0.05, 0, '#ffffff', 1, 0.65);
+      blob(g, x - 1.5, y - 2, S * 0.08, S * 0.088, 0, '#fff4d0', 1, 0.5);
+      blob(g, x - 2, y - 2.6, S * 0.036, S * 0.04, 0, '#ffffff', 1, 0.65);
       // the motes: round specks of glitter (no rays: they're dust, not more stars)
       for (const [deg, dist, r] of G.motes) {
         const a = deg * Math.PI / 180, mx = x + Math.sin(a) * dist * S, my = y - Math.cos(a) * dist * S;
         g.fillStyle = radial(g, mx, my, 0, r * 2.4, [[0, '#ffd890', 0.45], [1, '#f0a040', 0]]); g.fillRect(mx - r * 2.5, my - r * 2.5, r * 5, r * 5);
-        ellipse(g, mx + 0.4, my + 0.6, r + 1.5, r + 1.7, 0, '#5a2e10', 0.3);
+        ellipse(g, mx + 0.4, my + 0.6, r + 2.2, r + 2.4, 0, '#5a2e10', 0.45);
         ellipse(g, mx, my, r, r * 1.08, 0, '#c8902c', 0.95);
         ellipse(g, mx - r * 0.12, my - r * 0.15, r * 0.66, r * 0.7, 0, '#ffe8a0', 1);
         ellipse(g, mx - r * 0.2, my - r * 0.25, r * 0.32, r * 0.34, 0, '#fffbe8', 1);
