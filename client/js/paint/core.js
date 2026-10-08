@@ -143,7 +143,8 @@ export function mottle(g, size, rnd, { colors, count = 60, rmin = 20, rmax = 90,
     const c = pick(rnd, colors);
     const a = rot == null ? rnd() * Math.PI : rot + (rnd() - 0.5) * 0.4;
     const s = stretch * range(rnd, 0.7, 1.3);
-    wrap(size, x, y, r * Math.max(1, s), (xx, yy) => blob(g, xx, yy, r * s, r, a, c, alpha * range(rnd, 0.6, 1), hard));
+    const al = alpha * range(rnd, 0.6, 1);   // drawn once, outside wrap(), so every wrapped copy matches (no seam)
+    wrap(size, x, y, r * Math.max(1, s), (xx, yy) => blob(g, xx, yy, r * s, r, a, c, al, hard));
   }
 }
 
@@ -162,7 +163,8 @@ export function streaks(g, size, rnd, { colors, count = 80, len = [30, 120], wid
       const aa = a + Math.sin(k * 1.3 + i) * wobble;
       px += Math.sin(aa) * L / segs; py -= Math.cos(aa) * L / segs;
     }
-    wrap(size, x, y, L + W, (xx, yy) => stroke(g, pts.map(([u, v]) => [u - x + xx, v - y + yy]), W, W * range(rnd, 0.3, 1), c, alpha * range(rnd, 0.5, 1)));
+    const w1 = W * range(rnd, 0.3, 1), al = alpha * range(rnd, 0.5, 1);   // once, outside wrap(): copies must match
+    wrap(size, x, y, L + W, (xx, yy) => stroke(g, pts.map(([u, v]) => [u - x + xx, v - y + yy]), W, w1, c, al));
   }
 }
 
@@ -336,6 +338,7 @@ export function paintRects(g, size, rects, rnd, { colors, gap = 3, gapColor = '#
     const c = jitter(pick(rnd, colors), rnd, varAmt);
     const x = r.x + gap / 2, y = r.y + gap / 2, w = r.w - gap, h = r.h - gap;
     if (w <= 2 || h <= 2) continue;
+    const seed = Math.floor(rnd() * 4294967296);   // inner() replays the same random detail in every wrapped copy
     wrap(size, x + w / 2, y + h / 2, Math.max(w, h) / 2 + 2, (cx, cy) => {
       const X = cx - w / 2, Y = cy - h / 2;
       g.save();
@@ -345,7 +348,7 @@ export function paintRects(g, size, rects, rnd, { colors, gap = 3, gapColor = '#
       gr.addColorStop(0.5, c);
       gr.addColorStop(1, shadowOf(c, light * 0.7));
       g.fillStyle = gr; g.fillRect(X, Y, w, h);
-      if (inner) inner(g, X, Y, w, h, c, rnd);
+      if (inner) inner(g, X, Y, w, h, c, rngFrom(seed));
       // bevels: lit top + left, shaded bottom + right
       g.globalAlpha = 0.55;
       g.fillStyle = lightOf(c, 0.7); g.fillRect(X, Y, w, bevel); g.fillRect(X, Y, bevel * 0.8, h);
