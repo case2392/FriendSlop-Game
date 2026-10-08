@@ -7,7 +7,8 @@
 //
 // API: initAtmosphere(scene, camera, renderer) once; setBiome(b) before each day's world;
 // setTimeOfDay(hour, night) and updateSun(focus) every frame. `atmo` exposes a few live values
-// (the snow sparkle strength) to the terrain.
+// (the snow sparkle strength) to the terrain; setSkyline(profile) takes the terrain's skyline
+// around the camera (from terrain3d), which the horizon rings haze up from.
 import * as THREE from '/vendor/three.module.js';
 import { canvasFor, has } from './paint/index.js';
 
@@ -129,7 +130,7 @@ void main(){
 
 const RING_VS = `varying vec2 vUv; varying vec3 vW;
 void main(){ vUv = uv; vec4 w = modelMatrix * vec4(position, 1.0); vW = w.xyz; gl_Position = projectionMatrix * viewMatrix * w; }`;
-const RING_FS = `uniform sampler2D map; uniform float row, fogK, light, reps, offs; uniform vec3 fogC, hemi, span;
+const RING_FS = `uniform sampler2D map, tSky; uniform float row, fogK, light, reps, offs; uniform vec3 fogC, hemi, span;
 varying vec2 vUv; varying vec3 vW;
 void main(){
   // the cylinder reaches down to span.x (below the horizon, behind the apron's skyline); the painted
@@ -141,9 +142,13 @@ void main(){
   if (t.a < 0.01) discard;
   vec3 c = t.rgb * hemi * light;
   // haze by view elevation, the same for every ring: equal elevations get equal haze, so a nearer
-  // row can never sit on a paler shelf than the row behind it, and every base melts into the fog
-  float el = normalize(vW - cameraPosition).y;
-  float k = max(fogK, 1.0 - smoothstep(-0.004, 0.022, el));
+  // row can never sit on a paler shelf than the row behind it. It is measured from the terrain's
+  // own skyline in that direction (tSky: elevation + 0.35 per azimuth), so wherever a ring shows
+  // above a ridge it starts as pure haze and only clears higher up: nothing floats over the fog.
+  vec3 dv = vW - cameraPosition;
+  float el = normalize(dv).y;
+  float sk = max(texture2D(tSky, vec2(atan(dv.z, dv.x) / 6.2831853 + 0.5, 0.5)).r - 0.35, -0.004);
+  float k = max(fogK, 1.0 - smoothstep(sk + 0.008, sk + 0.075, el));
   c = mix(c, fogC, clamp(k, 0.0, 1.0));
   gl_FragColor = vec4(c, t.a);
   #include <colorspace_fragment>
@@ -236,6 +241,10 @@ export function initAtmosphere(_scene, _camera, _renderer) {
     { row: 1, R: 820, lo: -0.12, lo0: -0.06, hi: 0.15, fogK: 0.55, light: 0.92, reps: 1, offs: 0.37 },
     { row: 2, R: 620, lo: -0.12, lo0: -0.05, hi: 0.1, fogK: 0.40, light: 0.9, reps: 2, offs: 0.71 },
   ];
+  skyTex = new THREE.DataTexture(skyData, SKY_N, 1, THREE.RGBAFormat);
+  skyTex.wrapS = THREE.RepeatWrapping; skyTex.wrapT = THREE.ClampToEdgeWrapping;
+  skyTex.magFilter = skyTex.minFilter = THREE.LinearFilter; skyTex.generateMipmaps = false;
+  skyTex.colorSpace = THREE.NoColorSpace; skyTex.needsUpdate = true;
   rings = LAYERS.map((L, i) => {
     const h = (L.hi - L.lo) * L.R;
     const geo = new THREE.CylinderGeometry(L.R, L.R, h, 96, 1, true);
@@ -245,7 +254,7 @@ export function initAtmosphere(_scene, _camera, _renderer) {
       blending: THREE.CustomBlending, blendSrc: THREE.SrcAlphaFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
       uniforms: { map: { value: mountains(biome) }, row: { value: L.row }, fogK: { value: L.fogK }, light: { value: L.light }, reps: { value: L.reps }, offs: { value: L.offs },
         fogC: { value: new THREE.Color() }, hemi: { value: new THREE.Color(1, 1, 1) },
-        span: { value: new THREE.Vector3(L.lo, L.lo0, L.hi) } },
+        span: { value: new THREE.Vector3(L.lo, L.lo0, L.hi) }, tSky: { value: skyTex } },
       vertexShader: RING_VS, fragmentShader: RING_FS,
     });
     const m = new THREE.Mesh(geo, mat);
@@ -276,6 +285,16 @@ export function initAtmosphere(_scene, _camera, _renderer) {
   scene.add(motes);
 
   setTimeOfDay(10);
+}
+
+// The terrain's skyline around the camera (elevation angles in radians, one per azimuth from -PI,
+// as atan(dz, dx)), from terrain3d whenever the camera moves; the rings haze up from it.
+const SKY_N = 128, skyData = new Uint8Array(SKY_N * 4).fill(89);
+let skyTex = null;
+export function setSkyline(prof) {
+  const n = Math.min(SKY_N, prof.length);
+  for (let i = 0; i < n; i++) { const v = Math.max(0, Math.min(255, Math.round((prof[i] + 0.35) * 255))); skyData[i * 4] = skyData[i * 4 + 1] = skyData[i * 4 + 2] = v; skyData[i * 4 + 3] = 255; }
+  if (skyTex) skyTex.needsUpdate = true;
 }
 
 export function setBiome(b) {

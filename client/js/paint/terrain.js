@@ -12,7 +12,10 @@
 //   sky_clouds_<b> the painted cloud band around the sky dome (alpha), its own sky per biome
 //   sky_mtn_<b>   3 rows of distant land silhouettes (far, mid, near) for the horizon rings
 // Shared: mud (slush, mud_badlands, mud_desert: road space, puddles along the wheel tracks),
-// terrain_macro (RGB low-frequency variation, not color).
+// terrain_macro (RGB low-frequency variation, not color), terrain_detail (RGB near-field detail
+// multiplied in at the camera's feet: grass blades, grit and pebbles, fine ripples and crust).
+// Packed earth (roads, clearings, worn ground) is a soft painted relief with lengthwise streaks,
+// never a mosaic of cells; hardpan cracks into plates only in a few soft-edged patches.
 //
 // The readable unit of a ground is the CLUMP (20-40 cm: a cluster of blades, a clod, a drift, a
 // ripple), painted with value contrast so it survives the mipmaps at 10-40 m. Stones come in
@@ -1613,13 +1616,13 @@ register('dirt_snow', {
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#bcc2ca');
     mottle(g, s, rnd, { colors: ['#c8ced6', '#a8acb2', '#d6dce2', '#9e9890', '#b4b6b6'], count: 50, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
-    mottle(g, s, rnd, { colors: ['#7e7468', '#8a8070', '#6e665c'], count: 26, rmin: 16, rmax: 50, alpha: 0.32, hard: 0.2, stretch: 1.4 });
+    mottle(g, s, rnd, { colors: ['#7e7468', '#8a8070', '#6e665c'], count: 22, rmin: 16, rmax: 50, alpha: 0.2, hard: 0.15, stretch: 1.4 });
     blurWrap(cv, 3);
     softRelief(g, s, rnd, { g0: 8, k: 30, lit: '#f2f4f6', dark: '#98a4b8', litA: 0.32, darkA: 0.3 });
     // trodden patches: soft cool hollows with a lit far rim
     for (let i = 0; i < 34; i++) {
       const x = rnd() * s, y = rnd() * s, r = range(rnd, 14, 34), rot = rnd() * TAU;
-      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X, Y, r, r * 0.6, rot, '#98a6bc', 0.32, 0.4); blob(g, X + r * 0.25, Y + r * 0.3, r * 0.7, r * 0.35, rot, '#f2f4f6', 0.3, 0.45); });
+      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X, Y, r, r * 0.6, rot, '#98a6bc', 0.22, 0.3); blob(g, X + r * 0.25, Y + r * 0.3, r * 0.7, r * 0.35, rot, '#f2f4f6', 0.24, 0.35); });
     }
     // a few trails of boot prints: pairs, left and right, walking somewhere
     for (let t = 0; t < 4; t++) {

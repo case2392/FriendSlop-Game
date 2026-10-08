@@ -11,16 +11,21 @@
 // repeats; ledges inside the rock hold the ground's grass or snow, and a thin scree collar rings it.
 // Ground on slopes is projected from the side too. Explicit texture gradients with a capped
 // anisotropy keep grazing facets from washing out. Broad warm/cool and value fields and baked
-// ambient occlusion sit on top; the snow glints in low direct sun. Beyond the playable heightfield
-// an apron of unreachable hills carries the land out to the horizon; at both ends the road's valley
-// bends away behind a shoulder and closes over a saddle. Instanced ground clutter grows in patches
-// around the camera, never on the bare dirt of a clearing.
+// ambient occlusion sit on top, a 1.8 m detail map crisps the ground at the camera's feet, and
+// the snow glints in low direct sun. Beyond the playable heightfield an apron of unreachable hills
+// (stitched to the grid's rim vertex for vertex, so no crack of sky) carries the land out to the
+// horizon; at both ends the road's valley bends away behind a shoulder and closes over a saddle.
+// The terrain's skyline around the camera goes to the atmosphere, whose horizon rings haze up
+// from it. Instanced ground clutter grows in patches around the camera, never on the bare dirt of
+// a clearing, a building's lot or a code painted on the ground. terrainTintAt() gives other
+// modules the splat's tint and occlusion at a point.
 //
-// Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos), dispose() }
+// Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos), dispose() },
+// terrainTintAt(W, x, z) -> THREE.Color (see the comment above it).
 // The visible grid is exactly the physics heightfield (same vertices, same diagonal split).
 import { THREE, tex, renderer } from './gfx.js';
 import { canvasFor, has } from './paint/index.js';
-import { atmo } from './atmosphere.js';
+import { atmo, setSkyline } from './atmosphere.js';
 import { fbm, noise2 } from '/shared/rng.js';
 import { BIOME_BY_DAY } from '/shared/world.js';
 
@@ -236,7 +241,8 @@ function splatMaterial(biome, cfg) {
           float cB = sl.x + (vSplat.w - 0.5) * uCliffN.x + (mB.r - 0.5) * uCliffN.y + (mB.g - 0.5) * 0.12 + (nE - 0.5) * 0.16;
           // small steep forms (a crash mesa's flanks, a knoll) are lost in the wide average: the
           // 3 x 3 slope brings their rock out too (snow, badlands, desert)
-          if (uLocal >= 0.0) cB = max(cB, sl.y - uLocal + (nE - 0.5) * 0.1 + (mB.g - 0.5) * 0.06);
+          // (only where the 3 x 3 slope stands well above the wide one: a small form, not a long wall)
+          if (uLocal >= 0.0) cB = max(cB, mix(cB, sl.y - uLocal + (nE - 0.5) * 0.1 + (mB.g - 0.5) * 0.06, smoothstep(0.08, 0.16, sl.y - sl.x)));
           if (cB > uCliff.x - 0.01) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
             float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
@@ -275,16 +281,24 @@ function splatMaterial(biome, cfg) {
             {
               // granite never darker than its own palette (cool blue-gray, #6f7682 at the darkest),
               // and snow lies on every face that looks up, with a lumpy edge
-              cc += max(vec3(0.0), vec3(0.159, 0.181, 0.223) * 0.9 - cc) * 0.65;
-              float up = nr.y + (nE - 0.5) * 0.16 + (mB.g - 0.5) * 0.12 + (mB.r - 0.5) * 0.06;
-              cc = mix(cc, col, smoothstep(0.55, 0.58, up));
+              cc += max(vec3(0.0), vec3(0.159, 0.181, 0.223) - cc) * 0.7;
+              cc = cc * 1.22 + vec3(0.012, 0.016, 0.026);           // granite reads mid gray-blue beside the snow, even in shade
+              // (mostly the smooth 3 x 3 slope: the per-triangle normal alone would cut the snow line
+              // into a row of teeth along the facets)
+              float up = 1.0 - mix(sl.y, 1.0 - nr.y, 0.25) + (nE - 0.5) * 0.16 + (mB.g - 0.5) * 0.12 + (mB.r - 0.5) * 0.06;
+              // and along level ledges every few metres up the face, so a steep face reads as rock
+              // banded with snow on its shelves, never a camouflage of blobs
+              float lw = fract(wp.y / 3.4 + (mB.r - 0.5) * 0.9 + (nE - 0.5) * 0.3);
+              up += 0.11 * smoothstep(0.74, 0.82, lw) * (1.0 - smoothstep(0.92, 0.99, lw));
+              float sn = smoothstep(0.462, 0.476, up);                   // snow holds on anything gentler than ~62 degrees
+              cc = mix(cc, col * (1.0 + 0.1 * (1.0 - smoothstep(0.476, 0.53, up))), sn);   // its lip catches the light
             }
             #endif
             float wk = smoothstep(uCliff.x, uCliff.y, cB);
             // the lit, protruding parts of the rock break through first (a soft height blend); in the
             // snow a sharp reveal, so rock never shows as a soft partial smudge
             #ifdef TERRAIN_SNOWROCK
-            wk = smoothstep(0.46, 0.54, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.14);
+            wk = smoothstep(0.475, 0.525, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.16);
             #else
             wk = smoothstep(0.24, 0.76, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.1);
             #endif
@@ -531,9 +545,10 @@ function buildApron(W, cfg, data, mat, group) {
   // the apron's slopes on a uniform 10 m lattice (from the same height function), tent-smoothed and
   // stored as a texture the shader samples bilinearly, so no rock edge follows a 10 m triangle
   const LX = Math.round((X1 - X0 + 2 * OUT) / STEP) + 1, LZ = Math.round((Zend - Z0 + 2 * OUT) / STEP) + 1;
-  const SG = new Float32Array(LX * LZ), SX = new Float32Array(LX * LZ), SZ = new Float32Array(LX * LZ);
+  const SG = new Float32Array(LX * LZ), SX = new Float32Array(LX * LZ), SZ = new Float32Array(LX * LZ), HL = new Float32Array(LX * LZ);
   for (let i = 0; i < LX; i++) for (let j = 0; j < LZ; j++) {
     const x = X0 - OUT + i * STEP, z = Z0 - OUT + j * STEP, e = 2;
+    HL[i * LZ + j] = hA(x, z);
     const hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
     SG[i * LZ + j] = 1 - 1 / l; SX[i * LZ + j] = -hx / l; SZ[i * LZ + j] = -hz / l;
   }
@@ -637,7 +652,32 @@ function buildApron(W, cfg, data, mat, group) {
   const m = new THREE.Mesh(geo, mat);
   m.receiveShadow = true;
   group.add(m);
-  return apronTex;
+  return { apronTex, lattice: { x0: X0 - OUT, z0: Z0 - OUT, step: STEP, LX, LZ, H: HL } };
+}
+
+// The terrain's skyline seen from the camera: for each of N azimuths, the highest elevation angle
+// (radians) of any land out to the apron's edge, marched over the 10 m height lattice. The horizon
+// rings take it so the land behind a ridge melts into the haze right at the ridge's top.
+function skylineFrom(W, L, cam, out) {
+  const N = out.length, { x0, z0, step, LX, LZ, H } = L, gx1 = W.X0 + W.nx * W.cell, gz1 = W.Z0 + W.nz * W.cell;
+  for (let a = 0; a < N; a++) {
+    const ang = ((a + 0.5) / N - 0.5) * Math.PI * 2, dx = Math.cos(ang), dz = Math.sin(ang);
+    let best = -0.35;
+    for (let d = 6; d < 1600; d *= 1.05) {
+      const x = cam.x + dx * d, z = cam.z + dz * d, fi = (x - x0) / step, fj = (z - z0) / step;
+      if (fi < 0 || fj < 0 || fi >= LX - 1 || fj >= LZ - 1) break;
+      let h;
+      if (x > W.X0 && x < gx1 && z > W.Z0 && z < gz1) h = W.heightAt(x, z);       // the playable grid, exactly
+      else {
+        const i = Math.floor(fi), j = Math.floor(fj), u = fi - i, v = fj - j, k = i * LZ + j;
+        h = (H[k] * (1 - u) + H[k + LZ] * u) * (1 - v) + (H[k + 1] * (1 - u) + H[k + LZ + 1] * u) * v;
+      }
+      const e = Math.atan2(h - cam.y, d);
+      if (e > best) best = e;
+    }
+    out[a] = best;
+  }
+  return out;
 }
 
 // ---- ground clutter ----------------------------------------------------------------------------
@@ -990,7 +1030,8 @@ export function buildTerrain(W) {
   const U = mat.userData.U;
   U.tSlope.value = data.slopeTex; U.uGrid.value.set(W.X0, W.Z0, W.cell, 0); U.uGridN.value.set(W.nx + 1, W.nz + 1);
   buildChunks(W, data, mat, group);
-  const apronTex = buildApron(W, cfg, data, mat, group);
+  const { apronTex, lattice } = buildApron(W, cfg, data, mat, group);
+  const sky = new Float32Array(128), skyAt = new THREE.Vector3(1e9, 0, 0);
   const clutter = new Clutter(W, cfg, biome);
   group.add(clutter.mesh);
   for (const n of prewarmQueue(biome)) prewarmed.add(n);
@@ -1006,6 +1047,8 @@ export function buildTerrain(W) {
         requestIdleCallback(() => { const n = queue.shift(); if (n && !prewarmed.has(n)) { try { canvasFor(n); } catch {} prewarmed.add(n); } }, { timeout: 4000 });
       }
       if (!camPos) return;
+      // the skyline for the horizon rings, whenever the camera has moved a metre
+      if (camPos.distanceToSquared(skyAt) > 1) { skyAt.copy(camPos); setSkyline(skylineFrom(W, lattice, camPos, sky)); }
       clutter.update(t, camPos);
     },
     dispose() { clutter.dispose(); data.slopeTex.dispose(); apronTex.dispose(); queue = []; },

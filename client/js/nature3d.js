@@ -1,24 +1,30 @@
-// Nature: trees, bushes, rocks, cacti, haybales, fences, bones, campfires: every W.decor entry of a
-// natural kind, plus the dead-tree winch anchors.
+// Nature: trees, bushes, rocks, cacti, haybales, fences, bones, campfires, cairns: every W.decor entry
+// of a natural kind, plus the dead-tree winch anchors and the tree lines along the valley rims.
 //
-// The look is WoW Classic: chunky low-poly silhouettes (pale twisting oak boles with flared roots
-// forking at ~3 m into heavy limbs that carry a lifted crown of big leaf clumps, stacked drooping
-// pine tiers, stepped strata ledges and hoodoos, wind-scoured sandstone), smooth shading, and the
-// detail painted into textures (paint/nature.js). A canopy clump is a ring of alpha leaf-cluster cards
-// round one big camera-facing core card, all with normals pointing out of the clump, so it lights like
-// a volume: warm on top, cool underneath; the cards turn about the vertical to face the camera (in the
-// shadow pass too, so shadows match what you see). Vertex colours carry baked AO and per-tree tint. A
-// small shader hook adds wind sway, triplanar mapping for rocks, the frosted-underside trick for Dun
-// Morogh pine boughs, and a world-space "top cover" that lays moss, lichen, snow, dust or sand on
+// The look is WoW Classic: chunky low-poly silhouettes (Elwynn groves round a huge hero oak: massive
+// warm boles on flared roots, gnarled limbs into wide domed crowns of big leaf lobes with ragged hanging
+// skirts; stacked drooping pine tiers; Badlands hoodoos lofted as one eroded column under a caprock,
+// angular strata ledges; wind-scoured sandstone), smooth shading, and the detail painted into textures
+// (paint/nature.js). A canopy lobe is a ring of alpha leaf-cluster cards round one big camera-facing core
+// card, all with normals pointing out of the lobe, so it lights like a volume: warm on top, cool
+// underneath; the cards turn about the vertical to face the camera (in the shadow pass too, so shadows
+// match what you see). Vertex colours carry baked AO and per-tree tint. A small shader hook adds wind
+// sway, triplanar mapping for rocks (so strata run level in world space), the frosted-underside trick
+// for Dun Morogh pine boughs, and a world-space "top cover" that lays moss, lichen, snow, dust or sand on
 // up-facing surfaces (or where a per-vertex amount says so: the moss at the foot of an oak).
 //
-// Performance: everything static is built in world space and merged per (material, 300 m stretch of
-// road), so a whole leg of decor costs a few dozen draw calls however many trees there are.
+// Colliders: every solid thing keeps to the collider world gen gave it (tree boles, cacti, haybales, the
+// big rocks: see rockCol), checked by the "audit" preview (tools/preview.mjs audit x.png <biome>).
+//
+// Performance: everything static is built in world space and merged per (material, 600 m stretch of
+// road), so a whole leg of decor costs a few dozen draw calls however many trees there are; the rim tree
+// lines are one shadowless mesh per material for the whole leg.
 // API: buildNature(W) -> { group, fires, update(dt, t, camPos) }, NATURE_KINDS, PREVIEW.
 import { THREE, tex } from './gfx.js';
 import { canvasFor } from './paint/index.js';
 import { mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { atmo } from './atmosphere.js';
+import { fbm } from '/shared/rng.js';
 import { BIOME_BY_DAY, generateLeg } from '/shared/world.js';
 
 export const NATURE_KINDS = new Set(['oak', 'pine', 'palm', 'bush', 'flowers', 'stump', 'fence', 'haybale', 'wheat', 'scarecrow', 'cactus', 'deadtree', 'rock', 'bones', 'skull', 'fire', 'cairn']);
@@ -26,7 +32,7 @@ export const NATURE_KINDS = new Set(['oak', 'pine', 'palm', 'bush', 'flowers', '
 const V3 = THREE.Vector3;
 const TAU = Math.PI * 2;
 const UP = new V3(0, 1, 0), XAX = new V3(1, 0, 0);
-const CHUNK = 300;
+const CHUNK = 600;
 
 // ---- small math -------------------------------------------------------------------------------------
 
@@ -334,6 +340,7 @@ const COVER = {
 // them (no dark fringes in the mips), and each mip's alpha is rescaled so the alpha-tested coverage
 // of every region stays the same at a distance (canopies don't go thin and see-through far away).
 const ATEX = new Map();
+const ALPHA_CUT = 0.45;          // the cards' alpha test (alpha-to-coverage smooths it when MSAA is on)
 function alphaTex(name, cols = 2, rows = 2) {
   if (ATEX.has(name)) return ATEX.get(name);
   const cv = canvasFor(name), w = cv.width, h = cv.height;
@@ -376,7 +383,7 @@ function alphaTex(name, cols = 2, rows = 2) {
   const regions = (lw, lh) => { const out = []; for (let j = 0; j < RR; j++) for (let i = 0; i < RC; i++) out.push([Math.floor(i * lw / RC), Math.floor(j * lh / RR), Math.floor((i + 1) * lw / RC), Math.floor((j + 1) * lh / RR)]); return out; };
   const cover = (d, lw, [x0, y0, x1, y1], k) => {
     let c = 0, n = 0;
-    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { if (d[(y * lw + x) * 4 + 3] * k > 127.5) c++; n++; }
+    for (let y = y0; y < y1; y++) for (let x = x0; x < x1; x++) { if (d[(y * lw + x) * 4 + 3] * k > ALPHA_CUT * 255) c++; n++; }
     return n ? c / n : 0;
   };
   const cov0 = regions(w, h).map(q => cover(L0, w, q, 1));
@@ -455,7 +462,7 @@ function natMat(texName, o = {}) {
     map: o.alpha ? alphaTex(texName, ...grid) : tex(texName),
     vertexColors: true,
     side: o.alpha || o.double ? THREE.DoubleSide : THREE.FrontSide,
-    alphaTest: o.alpha ? 0.5 : 0,
+    alphaTest: o.alpha ? ALPHA_CUT : 0,
   });
   if (o.alpha) m.alphaToCoverage = true;
   const C = o.cover ? COVER[o.cover] : null;
@@ -583,7 +590,7 @@ function matFor(key, biome) {
     case 'needles': return snow ? natMat('needles_snow', { alpha: true, wind: true, backShift: 0.5 }) : natMat('needles_pine', { alpha: true, wind: true });
     case 'frond': return natMat('palm_frond', { alpha: true, wind: true });
     case 'straw': return natMat('straw_tuft', { alpha: true, wind: true });
-    case 'rock': return natMat(B.rock, { tri: true, cover: B.rockCover || null, triScale: B.strata ? 4.2 : 2.6, topScale: B.strata ? '0.3' : '1.0' });   // strata seen from above: broad soft blotches, never contour lines
+    case 'rock': return natMat(B.rock, { tri: true, cover: B.rockCover || null, triScale: biome === 'badlands' ? 6.2 : B.strata ? 4.2 : 2.6, topScale: B.strata ? '0.3' : '1.0' });   // strata seen from above: broad soft blotches, never contour lines
     case 'firestone': return natMat('rock_gray', { tri: true, triScale: 0.9 });
     case 'snowcap': return natMat('snow_pack', { tri: true, triScale: 3.2 });
     case 'snowridge': return natMat('snow_pack', { tri: true, triScale: 3.2, wind: true });
@@ -626,7 +633,7 @@ class Ctx {
     this.chunk = Math.floor((d.z + 3000) / CHUNK);
   }
   b(key) {
-    const k = key + '#' + this.chunk;
+    const k = key + '#' + (this.rim ? 'rim' : this.chunk);
     let b = this.batches.get(k);
     if (!b) { b = new Batch(key); this.batches.set(k, b); }
     b.xf = this.xf; b.nm = this.nm; b.rm = this.rm; b.cf = null;
@@ -780,7 +787,7 @@ function oak(ctx, d, info = {}) {
   const leanAt = y => smooth(1.9, F + 0.4, y);
   const NT = hero ? 16 : 13, ph0 = rnd() * TAU;
   const rTop = rC * (hero ? 1.45 : west ? 1.28 : 1.32);
-  const hF = 0.75 + 0.3 * G;                                   // the root flare's height
+  const hF = 0.7 + 0.22 * G;                                   // the root flare's height
   const tp = [], tr = [];
   for (let i = 0; i <= NT; i++) {
     const t = i / NT, y = yBot + t * (F + 0.35 * G - yBot), k = clamp01((y + 0.3) / (F + 0.6));
@@ -797,20 +804,20 @@ function oak(ctx, d, info = {}) {
     const twist = 1 + 0.09 * Math.cos(4 * (ph - ph0 - clamp01((y + 0.3) / (F + 0.6)) * 1.3)) * (1 - f);   // ridges that twist up the bole
     return (1 + f * 1.35 * fl(ph)) * twist;
   };
-  if (B.barkCover) bark.cf = (p, n) => smooth(1.4 * G * 0.8, 0.1, p.y) * (0.7 + 0.3 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.3)) * 0.85;
+  if (B.barkCover) bark.cf = (p, n) => smooth(0.9 * G * 0.8, 0.05, p.y) * (0.5 + 0.5 * clamp01(-n.x * 0.7 + n.z * 0.7 + 0.1)) * 0.62;   // moss on the shady side of the foot
   tube(bark, tp, tr, { sides: hero ? 14 : 12, uRep: hero ? 3 : 2, vLen: 1.5 * Math.min(1.4, G * 0.75), twist: 0.2, lobes, color: barkAO(-0.3, 1.8, 0.5, tcol) });
-  roots(ctx, bark, rootA, rC, Math.max(1, G * 0.72), rnd, { len: [0.95, 1.35], rad: hero ? 0.36 : 0.32, up: 0.5, color: barkAO(-0.3, 1.8, 0.5, tcol) });
+  roots(ctx, bark, rootA, rC, Math.max(1, G * 0.6), rnd, { len: [1.0, 1.45], rad: hero ? 0.34 : 0.32, up: hero ? 0.38 : 0.45, color: barkAO(-0.3, 1.8, 0.5, tcol) });
   if (B.barkCover) bark.cf = (p, n) => 0;
 
   // ---- the crown's lobes
-  const Vc = Rc * (west ? 0.4 : 0.5), yB = F + 0.3 * G, Yc = yB + Vc;
+  const Vc = Rc * (west ? 0.42 : 0.58), yB = F + 0.3 * G, Yc = yB + Vc;
   const L = [];
   const nRing = hero ? 5 + (rnd() < 0.5 ? 1 : 0) : west ? 3 + (rnd() < 0.6 ? 1 : 0) : 4 + (rnd() < 0.3 ? 1 : 0);
   const ra0 = rnd() * TAU;
   for (let k = 0; k < nRing; k++) {
     const a = ra0 + (k + range(rnd, -0.2, 0.2)) * TAU / nRing, ux = Math.cos(a), uz = Math.sin(a), c = crowd(ux, uz);
     const r = Rc * range(rnd, 0.42, 0.56) * (1 - 0.35 * c), rho = (Rc - r * 0.95) * (1 - 0.3 * c);
-    L.push({ c: new V3(cO.x + ux * rho, Yc + range(rnd, -0.38, 0.05) * Vc, cO.z + uz * rho), r, ux, uz, ring: true });
+    L.push({ c: new V3(cO.x + ux * rho, Yc + range(rnd, -0.5, 0.1) * Vc, cO.z + uz * rho), r, ux, uz, ring: true });
   }
   // the top lobe, a little off centre
   L.push({ c: new V3(cO.x + range(rnd, -0.12, 0.12) * Rc, Yc + Vc * range(rnd, 0.32, 0.45), cO.z + range(rnd, -0.12, 0.12) * Rc), r: Rc * (west ? 0.48 : range(rnd, 0.5, 0.56)), top: true, ux: 0, uz: 0 });
@@ -895,12 +902,12 @@ function oak(ctx, d, info = {}) {
     clump(leaves, l.c, l.r * 0.92, rnd, { cards: n, size, cells: [0], core: 2, coreK: 1.7, tint, ao, warm, squash: l.top ? 0.85 : 0.8, under: 0.8, sizeVar: [0.82, 1.18] });
     // the skirt: leaf cards hanging off the lobe's outer, lower rim
     if (l.top) continue;
-    const nS = Math.round((l.small ? 2 : 2 + l.r * 0.7) * (west ? 0.7 : 1));
+    const nS = Math.round((l.small ? 1 : 1.5 + l.r * 0.5) * (west ? 0.7 : 1));
     const base = Math.atan2(l.uz, l.ux);
     for (let k = 0; k < nS; k++) {
       const a = base + (nS > 1 ? (k / (nS - 1) - 0.5) * 2.4 : 0) + range(rnd, -0.25, 0.25), ux = Math.cos(a), uz = Math.sin(a);
-      const rr = l.r * range(rnd, 0.6, 0.78), w = l.r * range(rnd, 0.85, 1.05), h = l.r * range(rnd, 0.7, 0.95);
-      const top = new V3(l.c.x + ux * rr, l.c.y - l.r * range(rnd, 0.05, 0.2), l.c.z + uz * rr);
+      const rr = l.r * range(rnd, 0.6, 0.78), w = l.r * range(rnd, 0.85, 1.05), h = l.r * range(rnd, 0.48, 0.64);
+      const top = new V3(l.c.x + ux * rr, l.c.y - l.r * range(rnd, 0.18, 0.32), l.c.z + uz * rr);
       hang(leaves, top, w, h, new V3(ux, 0, uz), inset(cellOf(1)), mulc(tint, ao(new V3(0, top.y - h * 0.5, 0)) * 0.95));
     }
   }
@@ -934,9 +941,9 @@ function hang(b, T, w, h, out, cell, color) {
 // still frosted), plus a lumpy snow ridge along the inner part of every bough, so every tier shows a
 // white line in profile.
 function pine(ctx, d) {
-  const rnd = rngOf(seedOf(d.x, d.z, 12)), s = d.s || 1, B = ctx.bio, snow = !!B.snow;
+  const rnd = rngOf(seedOf(d.x, d.z, 12)), s = d.s || 1, B = ctx.bio, snow = !!B.snow, lite = !!d.lite;
   ctx.at(d, d.ry || 0);
-  const bark = ctx.b('bark_pine'), nd = ctx.b('needles'), ridge = snow ? ctx.b('snowridge') : null;
+  const bark = lite ? null : ctx.b('bark_pine'), nd = ctx.b('needles'), ridge = snow && !lite ? ctx.b('snowridge') : null;
   const grid = snow ? [4, 2] : [2, 2];
   const H = (snow ? range(rnd, 8.5, 11) : range(rnd, 8, 10.5)) * s, r0 = 0.31 * s;
   const [gLo] = ctx.foot(r0 * 2);
@@ -951,17 +958,21 @@ function pine(ctx, d) {
   }
   const nR = 4, a0 = rnd() * TAU, rootA = []; for (let k = 0; k < nR; k++) rootA.push(a0 + k * TAU / nR + range(rnd, -0.4, 0.4));
   const fl = flare(rootA, 0.6);
-  tube(bark, tp, tr, {
-    sides: 8, uRep: 2, vLen: 2.2, color: barkAO(-0.3, 1.5, 0.45),
-    lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / (0.9 * s)), 1.5); return 1 + f * 0.7 * fl(Math.atan2(dir.z, dir.x)); },
-  });
-  roots(ctx, bark, rootA, r0, s, rnd, { len: [0.7, 1.0], rad: 0.2, up: 0.5, sides: 6, color: barkAO(-0.3, 1.2, 0.45) });
+  if (bark) {
+    tube(bark, tp, tr, {
+      sides: 8, uRep: 2, vLen: 2.2, color: barkAO(-0.3, 1.5, 0.45),
+      lobes: (dir, t, i) => { const f = Math.pow(clamp01(1 - (tp[i].y + 0.2) / (0.9 * s)), 1.5); return 1 + f * 0.7 * fl(Math.atan2(dir.z, dir.x)); },
+    });
+    roots(ctx, bark, rootA, r0, s, rnd, { len: [0.7, 1.0], rad: 0.2, up: 0.5, sides: 6, color: barkAO(-0.3, 1.2, 0.45) });
+  }
   const tint = lin(pick(rnd, B.pineTints));
-  const nT = Math.round((snow ? 8 : 6) * Math.min(1.1, Math.max(0.85, s)));
+  const nT = lite ? 4 : Math.round((snow ? 8 : 6) * Math.min(1.1, Math.max(0.85, s)));
   const Rb = (snow ? 3.0 : 3.3) * s * range(rnd, 0.92, 1.08), dK = snow ? 0.42 : 0.55;
   const y0 = (Rb + 0.25 * s) * dK * 1.05 + range(rnd, 0.25, 0.45) * s, y1 = H * 0.86;
   const cellDense = inset(cellOf(snow ? 6 : 2, ...grid));
   const du = cellDense[2] - cellDense[0], dv = cellDense[3] - cellDense[1];
+  // a far (rim) pine has no bark mesh: a dark stub in the needle material holds it up to its boughs
+  if (lite) tube(nd, [new V3(0, yBot, 0), new V3(0, y0, 0)], [r0 * 1.2, r0 * 0.8], { sides: 5, uvMap: () => [cellDense[0] + du * 0.5, cellDense[1] + dv * 0.5], color: [0.3, 0.24, 0.2] });
   const tiers = [];
   for (let i = 0; i < nT; i++) {
     const t = i / (nT - 1);
@@ -984,7 +995,7 @@ function pine(ctx, d) {
       uvMap: (u, v, tt) => [cellDense[0] + du * (0.12 + 0.76 * (1 - Math.abs(2 * (u % 1) - 1))), cellDense[1] + dv * (0.35 + 0.25 * tt)],   // mirrored round the cone: no seam, needles at their own aspect
       color: mulc(tint, (snow ? 0.6 : 0.5) * tierAO), wind: 0.15,
     });
-    const K = mini ? 5 : Math.max(7, Math.round(7 + 2 * (1 - t))), th0 = rnd() * TAU;
+    const K = lite ? (mini ? 3 : 5) : mini ? 5 : Math.max(7, Math.round(7 + 2 * (1 - t))), th0 = rnd() * TAU;
     for (let k = 0; k < K; k++) {
       const th = th0 + k * TAU / K + range(rnd, -0.18, 0.18), dx = Math.cos(th), dz = Math.sin(th);
       const RR = R * range(rnd, 0.88, 1.12), W = TAU * RR / K * 1.45, dr = droop * range(rnd, 0.8, 1.2);
@@ -1119,7 +1130,7 @@ function bush(ctx, d) {
       // a snowy juniper mound: a snow-blanketed core, snowy sprays on top, bare ones low round the sides
       clump(b, C, R, rnd, { cards: Math.round((10 + 10 * (R / s) ** 2) * 1.2), size: range(rnd, 0.95, 1.2) * s, grid: [4, 2], core: 4, coreK: 1.7, cellFn: dir => (dir.y > -0.25 ? (rnd() < 0.5 ? 0 : 1) : (rnd() < 0.5 ? 2 : 3)), tint, ao, squash: 0.7, wind: 0.4, sizeVar: [0.7, 1.25], span: 1.3 });
     } else {
-      clump(b, C, R, rnd, { cards: Math.round((8 + 8 * (R / s) ** 2) * 1.3), size: range(rnd, 1.15, 1.4) * s, cells: B.bushCells, core: dry ? (B.bushCells[0] === 0 ? 0 : 1) : 3, coreK: 1.45, tint, ao, warm, squash: 0.78, wind: 0.6, sizeVar: [0.7, 1.3] });
+      clump(b, C, R, rnd, { cards: Math.round((8 + 8 * (R / s) ** 2) * 1.3), size: range(rnd, 1.15, 1.4) * s, cells: B.bushCells, core: dry ? (B.bushCells[0] === 0 ? 2 : 1) : 3, coreK: 1.45, tint, ao, warm, squash: 0.78, wind: 0.6, sizeVar: [0.7, 1.3] });
     }
   }
 }
@@ -1320,9 +1331,10 @@ function snowCap(b, rk, thick) {
 // undercut line under the ledge above it), straight sides, a chamfered lit lip and a flat top (dust
 // settles there). poly: [[angle, radius]...]. Creased at 25°, so its faces read as chiselled planes.
 const COS25 = Math.cos(25 * Math.PI / 180);
-function prism(b, C, y0, h, poly, rnd, { tint = WHITE, tilt = null, under = 0.9, bevel = 0.08, bulge = 1, foot = 0.06, aoLo = 0.42, lipK = 1.12 } = {}) {
+function prism(b, C, y0, h, poly, rnd, { tint = WHITE, tilt = null, under = 0.9, bevel = 0.08, bulge = 1, foot = 0.06, aoLo = 0.42, lipK = 1.12, wob = 0 } = {}) {
   const N = poly.length, P = [], idx = [];
-  const ring = (y, k, dy = 0) => { const i0 = P.length; for (const [a, r] of poly) { const tY = tilt ? (Math.cos(a) * tilt[0] + Math.sin(a) * tilt[1]) * r : 0; P.push(new V3(C.x + Math.cos(a) * r * k + range(rnd, -0.02, 0.02), y + tY * dy, C.z + Math.sin(a) * r * k + range(rnd, -0.02, 0.02))); } return i0; };
+  // wob: each corner of each ring pushed in or out a little, so the faces aren't planes (no crates)
+  const ring = (y, k, dy = 0) => { const i0 = P.length; for (const [a, r] of poly) { const tY = tilt ? (Math.cos(a) * tilt[0] + Math.sin(a) * tilt[1]) * r : 0, w = 1 + range(rnd, -wob, wob); P.push(new V3(C.x + Math.cos(a) * r * k * w + range(rnd, -0.02, 0.02), y + tY * dy, C.z + Math.sin(a) * r * k * w + range(rnd, -0.02, 0.02))); } return i0; };
   const bv = Math.min(bevel, h * 0.25);
   const rs = [ring(y0 - foot, under, 0), ring(y0 + h * 0.18, 1, 0.18), ring(y0 + h * 0.55, bulge, 0.55), ring(y0 + h - bv, 1, 1), ring(y0 + h, 1 - bv / Math.max(0.2, poly.reduce((m, [, r]) => Math.min(m, r), 9)), 1)];
   for (let q = 0; q < rs.length - 1; q++) for (let k = 0; k < N; k++) { const a = rs[q] + k, bb = rs[q] + (k + 1) % N, c = rs[q + 1] + k, dd = rs[q + 1] + (k + 1) % N; idx.push(a, c, bb, bb, c, dd); }
@@ -1339,8 +1351,15 @@ function prism(b, C, y0, h, poly, rnd, { tint = WHITE, tilt = null, under = 0.9,
 }
 // an irregular footprint: N corners, radii jittered, angles jittered
 const polyOf = (rnd, N, r, jit = 0.18, sx = 1, sz = 1) => { const a0 = rnd() * TAU, out = []; for (let k = 0; k < N; k++) { const a = a0 + (k + range(rnd, -0.22, 0.22)) * TAU / N, rr = r * range(rnd, 1 - jit, 1 + jit) * Math.hypot(Math.cos(a) * sx, Math.sin(a) * sz); out.push([a, rr]); } return out; };
-// shrink a footprint by a step (varying per corner, so one side steps back further than another)
-const stepIn = (rnd, poly, st) => poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), Math.max(r * 0.35, r - st * range(rnd, 0.5, 1.5))]);
+// an angular footprint: N corners at uneven angles (so some faces run long and straight), radii
+// jittered, stretched along x
+const polyAng = (rnd, N, r, jit = 0.15, sx = 1, ev = 0) => {
+  const gaps = []; for (let k = 0; k < N; k++) gaps.push(range(rnd, 0.55 + 0.25 * ev, 1.6 - 0.35 * ev));
+  const tot = gaps.reduce((a, v) => a + v, 0), a0 = rnd() * TAU, out = [];
+  let a = a0;
+  for (let k = 0; k < N; k++) { out.push([a, r * range(rnd, 1 - jit, 1 + jit) * Math.hypot(Math.cos(a) * sx, Math.sin(a))]); a += gaps[k] / tot * TAU; }
+  return out;
+};
 
 // The collider world gen gave a rock (this mirrors shared/world.js rockCollide, steepness test
 // included, and prefers the real collider when one stands at the rock's centre). Only rocks with
@@ -1441,7 +1460,7 @@ function hoodoo(ctx, b, rnd, col, tint) {
   });
   // the caprock: 1.5-1.8x the neck, irregular, tilted 4-10°, overhanging all round
   const top = pts[NR], rNeck = rad[NR] / (1 - 0.32);
-  const capS = rockShape(rnd, { sx: range(rnd, 1.0, 1.15), sy: 0.42, sz: range(rnd, 0.82, 0.98), topCut: [0.45, 0.6], topTilt: 0.1, sides: 5, oblique: 3, sideCut: [0.72, 0.86], noise: 0.12, bottom: 0.5, detail: 1 });
+  const capS = rockShape(rnd, { sx: range(rnd, 1.0, 1.15), sy: 0.56, sz: range(rnd, 0.82, 0.98), topCut: [0.5, 0.64], topTilt: 0.1, sides: 5, oblique: 3, sideCut: [0.72, 0.86], noise: 0.12, bottom: 0.42, detail: 1 });
   const Rcap = rNeck * range(rnd, 1.5, 1.8) / 0.82;
   placeRock(b, capS, new V3(top.x + range(rnd, -0.1, 0.1) * rb, top.y + capH * 0.12, top.z + range(rnd, -0.1, 0.1) * rb), Rcap,
     { yaw: rnd() * TAU, tilt: range(rnd, 4, 10) * Math.PI / 180, tiltA: rnd() * TAU, tint: mul3(tint, lin('#c49274')), aoLo: 0.62 });
@@ -1449,39 +1468,52 @@ function hoodoo(ctx, b, rnd, col, tint) {
   rubble(ctx, b, 3 + Math.floor(rnd() * 4), rb * 1.45, rb * 2.1, rnd, tint);
 }
 
-// A Badlands ledge: 2-3 thick strata slabs (their thickness varying 2:1), each undercut so it
-// overhangs its own base, its top tilted 5-12°, stepping back unevenly up the stack, except on one
-// side where every slab stays flush: a continuous cliff face. The foot slab fills the collider.
+// A Badlands ledge: 2-3 thick strata slabs (their thickness varying 2:1) on angular footprints (long
+// straight faces, uneven corners), each with its top tilted 5-12°: the foot slab battered (wider at the
+// ground), the upper ones undercut so they overhang their own base, stepping back unevenly up the stack
+// except on one side, where every slab stays flush: a continuous cliff face. The strata are the rock
+// material's world-height bands. A solid one's foot slab fills its collider and rises past the knees;
+// a small one is a low tilted outcrop of one or two slabs.
 function ledge(ctx, b, S, rnd, tint, col, steep) {
-  const rFoot = col && col.cyl ? col.cyl.r * 0.98 : S * 0.85, Htot = col && col.cyl ? col.cyl.top * range(rnd, 0.95, 1.12) : S * range(rnd, 1.1, 1.45);
+  const solid = !!(col && col.cyl);
+  const rFoot = solid ? col.cyl.r * 0.98 : S * range(rnd, 0.85, 1.0), Htot = solid ? col.cyl.top * range(rnd, 0.95, 1.12) : S * range(rnd, 0.55, 0.85);
   const [lo] = ctx.foot(rFoot, 0, 0, 8);
-  const nS = 2 + (rnd() < 0.55 ? 1 : 0), th = [];
+  const nS = solid ? 2 + (rnd() < 0.55 ? 1 : 0) : 1 + (rnd() < 0.6 ? 1 : 0), th = [];
   for (let i = 0; i < nS; i++) th.push(i === 0 ? range(rnd, 1.4, 2) : range(rnd, 1, 2));
   const bury = 0.3 * S;
-  if (col && col.cyl) {      // the foot slab rises at least 1.1 m (or 55% of the stack) out of the ground
+  if (solid) {      // the foot slab rises at least 1.1 m (or 55% of the stack) out of the ground
     const rest = th.slice(1).reduce((a, v) => a + v, 0), need = Math.max(1.1 - lo + bury, 0.55 * (Htot - lo + bury));
     th[0] = Math.max(th[0], need / Math.max(0.05, Htot - lo + bury - need) * rest);
   }
   const sum = th.reduce((a, v) => a + v, 0);
   const cliffA = rnd() * TAU;
-  let poly = polyOf(rnd, 8, rFoot, 0.08);
-  if (col && col.cyl) poly = poly.map(([a]) => [a, rFoot * range(rnd, 1.0, 1.1)]);   // its flat faces stay (nearly) on the collider
+  let poly = polyAng(rnd, solid ? 7 : 6 + (rnd() < 0.5 ? 1 : 0), rFoot, 0.12, solid ? range(rnd, 1.0, 1.1) : range(rnd, 1.15, 1.5), solid ? 1 : 0);
+  // a solid one: corners pushed out so its long faces stay (nearly) on the collider
+  if (solid) poly = poly.map(([a, rr], k) => { const gap = Math.max(angDiff(a, poly[(k + 1) % poly.length][0]), angDiff(a, poly[(k + poly.length - 1) % poly.length][0])); return [a, Math.max(rr, rFoot / Math.cos(Math.min(1.1, gap / 2)) * 0.92)]; });
   let y = lo - bury;
   for (let i = 0; i < nS; i++) {
     const h = th[i] / sum * (Htot - lo + bury) + (i === 0 ? 0 : 0.12 * S), last = i === nS - 1;
-    const ta = cliffA + Math.PI + range(rnd, -1.2, 1.2), tk = Math.tan(range(rnd, 5, 12) * Math.PI / 180);
-    const yTop = prism(b, new V3(range(rnd, -0.04, 0.04) * S, 0, range(rnd, -0.04, 0.04) * S), y, h, poly, rnd, { tint, under: i === 0 ? 0.95 : 0.84, bulge: 1.03, bevel: (last ? 0.09 : 0.06) * S, foot: 0.05 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.45 : 0.6, lipK: 1.1 });
+    const ta = cliffA + Math.PI + range(rnd, -1.2, 1.2), tk = Math.tan((solid ? range(rnd, 5, 12) : range(rnd, 8, 18)) * Math.PI / 180);
+    const yTop = prism(b, new V3(range(rnd, -0.04, 0.04) * S, 0, range(rnd, -0.04, 0.04) * S), y, h, poly, rnd, { tint, under: i === 0 ? 1.1 : 0.84, bulge: i === 0 ? 0.98 : 1.03, bevel: (last ? 0.09 : 0.06) * S, foot: 0.05 * S, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.45 : 0.6, lipK: 1.1, wob: 0.07 });
     const rMax = poly.reduce((m, [, r]) => Math.max(m, r), 0);
     // the next slab steps back (not on the cliff side) and sinks below the tilted top
-    const low = col && col.cyl && yTop < 1.7;            // still at body height: step back only a little
-    poly = poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), angDiff(a, cliffA) < 0.85 ? r * range(rnd, 0.95, 1.01) : Math.max(r * 0.45, r - S * (low ? range(rnd, 0.04, 0.12) : range(rnd, 0.12, 0.4)))]);
+    const low = solid && yTop < 1.1;              // still below the knees: step back only a little
+    poly = poly.map(([a, r]) => [a + range(rnd, -0.03, 0.03), angDiff(a, cliffA) < 0.85 ? r * range(rnd, 0.95, 1.01) : Math.max(r * 0.45, r - S * (low ? range(rnd, 0.04, 0.12) : range(rnd, 0.14, 0.38)))]);
     y = yTop - tk * rMax * 0.9;
   }
   if (!steep) rubble(ctx, b, 2 + Math.floor(rnd() * 3), rFoot * 1.25, rFoot * 1.7, rnd, tint, { size: [0.14, 0.28] });
 }
 
-function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d) {
+function badlandsRock(ctx, b, S, rnd, steep, tintOf, col, d, piece) {
   if (col.hoodoo) return hoodoo(ctx, b, rnd, col.hoodoo, tintOf());
+  if (!col.big && d.variant !== hoodoo && piece) {
+    // a small one: a broken, angular block of the canyon's sandstone (the strata are the material's),
+    // tipped over, often with a thinner slab split off against it
+    piece(0, 0, S * 0.8, { sx: range(rnd, 1.1, 1.5), sy: range(rnd, 0.6, 0.85), sz: range(rnd, 0.8, 1.0), sides: 4, oblique: 3, topCut: [0.5, 0.7], topTilt: 0.3, sideCut: [0.55, 0.75], noise: 0.1 }, { tilt: range(rnd, 0.05, 0.25), tiltA: rnd() * TAU, cos: Math.cos(30 * Math.PI / 180) });
+    if (!steep && rnd() < 0.55) { const a = rnd() * TAU, dd = S * range(rnd, 0.75, 1.0); piece(Math.cos(a) * dd, Math.sin(a) * dd, S * range(rnd, 0.35, 0.5), { sx: 1.3, sy: 0.45, sides: 3, oblique: 2, topCut: [0.5, 0.7], topTilt: 0.2 }, { tilt: range(rnd, 0.2, 0.5), tiltA: a + Math.PI, cos: Math.cos(30 * Math.PI / 180) }); }
+    if (!steep) rubble(ctx, b, 1 + Math.floor(rnd() * 3), S * 0.9, S * 1.4, rnd, tintOf());
+    return;
+  }
   if (d.variant === 'hoodoo') {
     // a small one (no collider: s ≤ 1.2 never gets the hoodoo variant from world gen, but previews may)
     const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8));
@@ -1504,10 +1536,12 @@ function desertRock(ctx, b, S, rnd, steep, tintOf, piece, col, d) {
     const pts = [], arc = [];
     const leg = (sd, up) => { const ys = [ends[sd < 0 ? 0 : 1] - 0.45 * S, hLeg * 0.4, hLeg * 0.75, hLeg]; for (const y of up ? ys : ys.slice().reverse()) { pts.push(new V3(span * sd, y, 0)); arc.push(0); } };
     leg(-1, true);
-    for (let i = 1; i < 12; i++) { const th = Math.PI * (1 - i / 12); pts.push(new V3(Math.cos(th) * span, hLeg + Math.sin(th) * archR, 0)); arc.push(Math.sin(th)); }
+    // the span thickens toward the crown (a heavy lintel of rock, not a pipe); its centreline rises as it
+    // thickens, so the underside keeps its clearance
+    for (let i = 1; i < 12; i++) { const th = Math.PI * (1 - i / 12), sn = Math.sin(th); pts.push(new V3(Math.cos(th) * span, hLeg + Math.pow(sn, 0.6) * archR + 0.45 * rL * sn * sn, 0)); arc.push(sn); }   // squared shoulders: a rock bridge
     leg(1, false);
     const ph = rnd() * 9, tint = tintOf(), n = pts.length;
-    tube(b, pts, pts.map((p, i) => rL * (1 - 0.1 * arc[i]) * (i === 0 || i === n - 1 ? 1.08 : 1)), {
+    tube(b, pts, pts.map((p, i) => rL * (1 + 0.5 * arc[i] * arc[i]) * (i === 0 || i === n - 1 ? 1.5 : 1)), {   // (the buried ends flare: a talus foot)
       sides: 12, uRep: 1, vLen: 2, cap: 0.5, cap0: 0.5,
       lobes: (dir, t, i) => {
         // a slab, not a pipe: wider across (a little on the legs, a lot up in the span), flatter
@@ -1558,7 +1592,7 @@ function rock(ctx, d) {
   const fit = col.cyl ? col.cyl.r * 0.98 : 0;
   const tall = (sy0, R) => (fit ? col.cyl.top / (R * 0.66) * 0.96 : sy0);           // a solid rock's top-cut plane lands at its collider's top
   const topC = c => (fit ? [0.6, 0.72] : c);
-  if (bm === 'badlands') badlandsRock(ctx, b, S, rnd, steep, tint, col, d);
+  if (bm === 'badlands') badlandsRock(ctx, b, S, rnd, steep, tint, col, d, piece);
   else if (bm === 'desert') desertRock(ctx, b, S, rnd, steep, tint, piece, col, d);
   else if (bm === 'snow') {
     piece(0, 0, S * 1.05, { sx: range(rnd, 1, 1.25), sy: tall(range(rnd, 0.65, 0.85), S * 1.05), sides: 3, oblique: fit ? 1 : 4, topCut: topC([0.55, 0.75]), topTilt: 0.25, noise: 0.14 }, { fit });
@@ -1573,7 +1607,7 @@ function rock(ctx, d) {
     }
   } else {                                  // Elwynn / Westfall: chunky boulders, outcrops of tilted slabs
     const fields = bm === 'fields';
-    piece(0, 0, S * 1.0, { sx: range(rnd, 1, 1.3), sy: tall(fields ? range(rnd, 0.55, 0.7) : range(rnd, 0.68, 0.85), S), sz: range(rnd, 0.85, 1.05), sides: 3, oblique: fit ? 1 : 3, topCut: topC([0.55, 0.75]), topTilt: fit ? 0.22 : 0.15 }, { fit });
+    piece(0, 0, S * 1.0, { sx: range(rnd, 1, 1.3), sy: tall(fields ? range(rnd, 0.55, 0.7) : range(rnd, 0.68, 0.85), S), sz: range(rnd, 0.85, 1.05), sides: 3, oblique: fit ? 1 : 3, topCut: topC([0.55, 0.75]), topTilt: fit ? 0.34 : 0.15 }, { fit });
     if (S > 1.2 && rnd() < 0.65 && !steep) {          // an outcrop: 2-3 tall slabs leaning together (inside the collider)
       const a = rnd() * TAU, n = 2 + (rnd() < 0.5 ? 1 : 0);
       for (let k = 0; k < n; k++) {
@@ -1593,7 +1627,7 @@ function rock(ctx, d) {
 }
 
 // A desert road marker: 3-4 flat sandstone slabs stacked 0.6-0.9 m high, each a little askew, and
-// often a sun-bleached skull or horn on top. (No collider: it's knee height.)
+// often a sun-bleached skull or horn on top. World gen gives it a flimsy 0.35 m collider (mat 'cairn').
 function cairn(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 27)), s = d.s || 1;
   ctx.at(d, d.ry || 0);
@@ -1601,10 +1635,10 @@ function cairn(ctx, d) {
   const tint = () => lin(pick(rnd, B.rockTints));
   const n = 3 + (rnd() < 0.5 ? 1 : 0), Htot = range(rnd, 0.6, 0.9) * s;
   const [lo] = ctx.foot(0.45 * s, 0, 0, 6);
-  let y = lo - 0.06, r = range(rnd, 0.36, 0.44) * s, cx = 0, cz = 0;
+  let y = lo - 0.06, r = range(rnd, 0.34, 0.38) * Math.min(1.05, s), cx = 0, cz = 0;   // the foot slab on the 0.35 m collider
   for (let i = 0; i < n; i++) {
     const h = Htot / n * range(rnd, 0.8, 1.2), ta = rnd() * TAU, tk = Math.tan(range(rnd, 3, 9) * Math.PI / 180);
-    const yt = prism(b, new V3(cx, 0, cz), y, h, polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), r, 0.16, range(rnd, 1, 1.3), 1), rnd,
+    const yt = prism(b, new V3(cx, 0, cz), y, h, polyOf(rnd, 6 + (rnd() < 0.5 ? 1 : 0), r, 0.12, range(rnd, 1, 1.15), 1), rnd,
       { tint: tint(), under: 0.88, bulge: 1.02, bevel: 0.03, foot: 0.015, tilt: [Math.cos(ta) * tk, Math.sin(ta) * tk], aoLo: i === 0 ? 0.5 : 0.7, lipK: 1.1 });
     y = yt - 0.025; r *= range(rnd, 0.72, 0.86);
     cx += range(rnd, -0.05, 0.05) * s; cz += range(rnd, -0.05, 0.05) * s;
@@ -2123,6 +2157,54 @@ function fxMats() {
   sparkMat = new THREE.PointsMaterial({ map: tex('spark'), size: 0.09, color: 0xffc070, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, sizeAttenuation: true });
 }
 
+// Tree lines on the unreachable apron past both side edges of the playable grid (no colliders
+// needed), so every valley rim has a wooded skyline: Elwynn oak clumps with a few conifers, sparse
+// olive-gold oaks in Westfall, ranks of snowy pines in Dun Morogh; the canyon and the desert stay
+// bare. Cheap impostors (a short trunk, a few leaf clumps; pines with fewer tiers), merged into one
+// mesh per material for the whole leg, casting no shadows: 2-3 draw calls.
+const sst = (e0, e1, x) => { const t = clamp01((x - e0) / (e1 - e0)); return t * t * (3 - 2 * t); };
+function rimTrees(ctx) {
+  const W = ctx.W, bm = ctx.biome;
+  if (!(bm === 'meadow' || bm === 'fields' || bm === 'snow') || !W.heightAt || !W.nx || !W.cell) return;
+  const X0 = W.X0, X1 = W.X0 + W.nx * W.cell, Zend = W.Z0 + W.nz * W.cell, seed = W.seed | 0;
+  // the apron's height (mirrors terrain3d buildApron along the sides)
+  const hA = (x, z) => { const cx = Math.max(X0, Math.min(X1, x)), dOut = Math.abs(x - cx); return W.heightAt(cx, z) + dOut * 0.25 + sst(180, 340, dOut) * 70 + fbm(x / 70, z / 70, seed + 901, 3) * 22 * sst(0, 90, dOut); };
+  const rnd = rngOf(((seed * 2654435761) ^ 0x5bd1e995) >>> 0);
+  const B = ctx.bio, tintO = () => lin(pick(rnd, B.oakTints));
+  ctx.rim = true;
+  const oakImp = (x, y, z, G) => {
+    ctx.at({ x, y, z }, 0);
+    const lv = ctx.b('leaves'), F = range(rnd, 1.5, 1.9) * G, Rc = range(rnd, 3.0, 3.6) * G, tint = tintO();
+    // the trunk goes in the leaf mesh (no bark draw call for far trees): a dark brown stub sampling the
+    // opaque middle of the dense core cell
+    const cc = inset(cellOf(2)), uc = (cc[0] + cc[2]) / 2, vc = (cc[1] + cc[3]) / 2;
+    tube(lv, [new V3(0, -0.6, 0), new V3(0, F * 0.5, 0), new V3(range(rnd, -0.3, 0.3) * G, F + 0.6 * G, range(rnd, -0.3, 0.3) * G)], [0.5 * G, 0.42 * G, 0.3 * G], { sides: 6, uvMap: () => [uc, vc], color: [0.62, 0.42, 0.3] });
+    const yc = F + Rc * 0.62, n = 4 + (rnd() < 0.5 ? 1 : 0), a0 = rnd() * TAU, yLo = F, yHi = yc + Rc * 0.8;
+    const ao = p => 0.58 + 0.42 * smooth(yLo, yHi, p.y);
+    for (let k = 0; k <= n; k++) {
+      const top = k === n, a = a0 + k * TAU / n, rr = top ? 0 : Rc * 0.5, R = top ? Rc * 0.55 : Rc * range(rnd, 0.42, 0.52);
+      const C = new V3(Math.cos(a) * rr, top ? yc + Rc * 0.3 : yc - Rc * range(rnd, 0, 0.2), Math.sin(a) * rr);
+      clump(lv, C, R, rnd, { cards: 6, size: R * 1.05, cells: [0], core: 2, coreK: 1.8, tint, ao, squash: 0.8, wind: 0.3, sizeVar: [0.9, 1.15] });
+    }
+  };
+  for (const side of [-1, 1]) {
+    let z = W.Z0 + rnd() * 12;
+    while (z < Zend - 4) {
+      const n = bm === 'meadow' ? 3 + Math.floor(rnd() * 4) : bm === 'fields' ? 1 + (rnd() < 0.4 ? 1 : 0) : 3 + Math.floor(rnd() * 4);
+      for (let k = 0; k < n; k++) {
+        const dOut = range(rnd, 3, bm === 'snow' ? 34 : 26), x = side > 0 ? X1 + dOut : X0 - dOut, zz = z + range(rnd, -7, 7);
+        if (zz < W.Z0 + 2 || zz > Zend - 2) continue;
+        const y = hA(x, zz) - 0.2;
+        if (bm === 'snow' || (bm === 'meadow' && rnd() < 0.22)) pine(ctx, { x, y, z: zz, s: range(rnd, 1.0, 1.35), ry: rnd() * TAU, lite: true });
+        else oakImp(x, y, zz, bm === 'fields' ? range(rnd, 1.1, 1.4) : range(rnd, 1.3, 1.8));
+        ctx.rim = true;
+      }
+      z += bm === 'meadow' ? range(rnd, 10, 22) : bm === 'fields' ? range(rnd, 34, 70) : range(rnd, 9, 18);
+    }
+  }
+  ctx.rim = false;
+}
+
 // Oak groves: world gen plants them as runs of consecutive oak entries (the grove's centre first);
 // the hero is the one flagged d.hero, or else the grove's biggest. Every oak also gets its collider
 // radius (its bole matches it) and the oaks whose crowns may reach into its own.
@@ -2190,6 +2272,7 @@ export function buildNature(W) {
       }
     } catch (e) { console.warn('nature: failed to build', d.k, e); }
   }
+  try { rimTrees(ctx); } catch (e) { ctx.rim = false; console.warn('nature: rim trees', e); }
   // winch anchors: a dead tree with an iron strap where the hook goes
   for (const c of W.cyls || []) {
     if (c.mat !== 'deadtree') continue;
@@ -2208,7 +2291,7 @@ export function buildNature(W) {
     else if (key === 'coals') { m = b.build(coalMat); m.receiveShadow = true; }
     else {
       const mat = matFor(key, ctx.biome);
-      m = b.build(mat); m.castShadow = true; m.receiveShadow = true;
+      m = b.build(mat); m.castShadow = !k.endsWith('#rim'); m.receiveShadow = true;
       if (mat.userData.depth) m.customDepthMaterial = mat.userData.depth;
       if (b.bill) m.onBeforeRender = camHook;
     }
@@ -2310,19 +2393,20 @@ function auditColliders(biome) {
     const W = generateLeg(seed, day);
     const oaks = oakInfo(W, W.decor);
     for (const d of W.decor) {
-      if (!((d.k === 'rock' && d.s > 1.2) || d.k === 'oak')) continue;
+      if (!((d.k === 'rock' && d.s > 1.2) || d.k === 'oak' || d.k === 'cairn')) continue;
       const ctx = new Ctx(W);
-      if (d.k === 'oak') oak(ctx, d, oaks.get(d)); else rock(ctx, d);
-      const cs = W.cyls.filter(c => (c.mat === (d.k === 'oak' ? 'tree' : 'rock')) && Math.hypot(c.x - d.x, c.z - d.z) < (d.k === 'oak' ? 0.05 : 5 * d.s));
+      if (d.k === 'oak') oak(ctx, d, oaks.get(d)); else if (d.k === 'cairn') cairn(ctx, d); else rock(ctx, d);
+      const cm = d.k === 'oak' ? 'tree' : d.k === 'cairn' ? 'cairn' : 'rock';
+      const cs = W.cyls.filter(c => c.mat === cm && Math.hypot(c.x - d.x, c.z - d.z) < (d.k === 'rock' ? 5 * d.s : 0.05));
       for (const c of cs) {
         const g = W.heightAt(c.x, c.z), top = c.y + c.hh;
-        for (const h of [0.6, 1.0, 1.5]) {
+        for (const h of d.k === 'cairn' ? [0.15, 0.4] : [0.6, 1.0, 1.5]) {
           if (g + h > top - 0.1) continue;
           const ext = sliceExtents(ctx.batches, d.k === 'oak' ? ['bark_oak'] : ['rock'], c.x, c.z, g + h, c.r * 2 + 0.6);
           const has = ext.filter(e => e >= 0);
           if (has.length < 12) { add((d.k === 'oak' ? 'oak' : (d.variant || 'boulder')) + ' (open slice)', 0, 0); continue; }
           const mn = Math.min(...has), mx = Math.max(...has);
-          add((d.k === 'oak' ? (oaks.get(d).hero ? 'oak hero' : 'oak') : (d.variant || 'boulder')) + ' @' + h, Math.max(0, c.r - mn), Math.max(0, mx - c.r));
+          add((d.k === 'oak' ? (oaks.get(d).hero ? 'oak hero' : 'oak') : d.k === 'cairn' ? 'cairn' : (d.variant || 'boulder')) + ' @' + h, Math.max(0, c.r - mn), Math.max(0, mx - c.r));
         }
       }
     }
@@ -2358,7 +2442,7 @@ export const PREVIEW = {
   scarecrow: pv('scarecrow', { ry: 0.3 }), fence: pv('fence', { len: 5, ry: 1.2 }),
   fence_slope: pv('fence', { len: 7, ry: 0, x: 4 }, { heightAt: (x, z) => Math.max(0, z) * 0.32 }), fence_steep: pv('fence', { len: 7, ry: 0, x: 7 }, { heightAt: (x, z) => Math.max(0, z + 1) * 0.7 }), bones: pv('bones'),
   cactus: pv('cactus', { h: 3.2 }), cactus_small: pv('cactus', { h: 2.0, variant: 'saguaro', x: 2.3 }), prickly: pv('cactus', { h: 1.9, variant: 'pear' }),
-  rock: pv('rock', { s: 1.0 }), outcrop: pv('rock', { s: 1.8, x: 4.2 }), rock2: pv('rock', { s: 1.5, x: 7.7 }), rock3: pv('rock', { s: 1.9, x: 11.3 }), rock4: pv('rock', { s: 1.3, x: -5.1 }), skull: pv('skull', { ry: 0.6 }),
+  rock: pv('rock', { s: 1.0 }), outcrop: pv('rock', { s: 1.8, x: 4.2 }), rock2: pv('rock', { s: 1.5, x: 7.7 }), rock3: pv('rock', { s: 1.9, x: 11.3 }), boulder_a: pv('rock', { s: 1.5, x: 3 }), boulder_b: pv('rock', { s: 1.85, x: 6 }), rock4: pv('rock', { s: 1.3, x: -5.1 }), skull: pv('skull', { ry: 0.6 }),
   deadtree: pv('deadtree', { s: 1.1 }),
   hoodoo: pv('rock', { s: 1.8, variant: 'hoodoo' }), ledge: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }), arch: pv('rock', { s: 1.6, variant: 'arch' }), mound: pv('rock', { s: 1.4, variant: 'mound', x: 6 }),
   hoodoo2: pv('rock', { s: 1.3, variant: 'hoodoo', x: 1.7 }), ledge2: pv('rock', { s: 1.9, variant: 'ledge', x: 4.4 }), ledge_small: pv('rock', { s: 0.9, variant: 'ledge', x: 2.2 }),
