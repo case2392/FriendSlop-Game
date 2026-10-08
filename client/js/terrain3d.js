@@ -256,7 +256,7 @@ function splatMaterial(biome, cfg) {
           float farA = 0.0, cShift = 0.0;
           #ifdef TERRAIN_SNOWROCK
             farA = smoothstep(70.0, 220.0, distance(cameraPosition, wp));
-            cShift = 0.2 * farA + 0.24 * locK;
+            cShift = 0.2 * farA + 0.24 * smoothstep(0.04, 0.2, sl.y - sl.x);
           #endif
           if (cB + cShift > uCliff.x - 0.01) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
@@ -325,8 +325,10 @@ function splatMaterial(biome, cfg) {
               cc += max(vec3(0.0), vec3(0.159, 0.181, 0.223) - cc) * 0.7;
               cc = cc * 1.24 + vec3(0.01, 0.013, 0.02);
               float cq = cB + cShift;
-              float zone = smoothstep(uCliff.y + 0.03, uCliff.y + 0.09, cq + (mB.r - 0.5) * 0.08 + (sN.x - 0.5) * 0.07 + (vSplat.w - 0.5) * 0.05);
-              float cover = 1.45 - 1.17 * zone - 2.0 * max(0.0, cq - uCliff.y - 0.09) - farA * 0.12;
+              // (its edge broken up by 1-4 m noise too: the smoothed slope is bilinear over a 2.5 m grid,
+              // and round a small steep form its threshold alone would cut teeth along the cells)
+              float zone = smoothstep(uCliff.y + 0.03, uCliff.y + 0.11, cq + (mB.r - 0.5) * 0.08 + (sN.x - 0.5) * 0.07 + (vSplat.w - 0.5) * 0.05 + (nE - 0.5) * 0.12 + (sN.y - 0.5) * 0.12);
+              float cover = 1.45 - 1.17 * zone - 2.0 * max(0.0, cq - uCliff.y - 0.11) - farA * 0.12;
               // (where the zone begins the face is a snowfield with the odd rock showing, not a
               // scatter of holes: the shelf noise and the height blend both come in with the zone)
               float F = cover + ((sN.x - 0.5) * 0.8 + (sN.y - 0.5) * 0.3) * mix(0.6, 1.0, zone) + ((fm.x - 0.54) * 2.0 + (fm.y - 0.5) * 0.3) * zone * zone;

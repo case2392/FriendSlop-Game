@@ -1316,8 +1316,10 @@ function buildCrash(B, p, parts, ctx, decor) {
       const c = cols[i], { pr } = c, sq = t < TR ? lerp(c.sT, pr.sL, t / TR) : pr.sL + (t - TR) / (1 - TR) * LH;
       const q = pr.at(sq), hang = smooth(TR - 0.05, TR + 0.15, t), ds = sq - pr.sL;
       let lift = 0.05 + extra;
-      lift += (pr.fb ? 0.25 : 0.42) * Math.exp(-(((ds + 0.3) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(c.x * 2.3 + ph));   // bunched at the lip (less where there is no clear edge)
-      for (const [xa, xb, A] of creases) lift += A * Math.exp(-(((c.x - lerp(xa, xb, t)) / 0.5) ** 2)) * smooth(0, 0.25, t);
+      // bunched low at the lip (lower still where there is no clear edge), so the cloth slumps over the rim
+      // instead of tenting above the mesa's silhouette
+      lift += (pr.fb ? 0.14 : 0.2) * Math.exp(-(((ds + 0.3) / 0.5) ** 2)) * (0.6 + 0.4 * Math.sin(c.x * 2.3 + ph));
+      for (const [xa, xb, A] of creases) lift += A * lerp(0.3, 1, hang) * Math.exp(-(((c.x - lerp(xa, xb, t)) / 0.5) ** 2)) * smooth(0, 0.25, t);
       lift += 0.07 * (0.5 + 0.5 * Math.sin(c.x * 3.1 + ph + t * 2.5)) * (1 - hang);                     // loose folds on top
       lift += 0.13 * (0.5 + 0.5 * Math.sin(c.x * 2.2 + ph2)) * hang;                                     // hanging folds
       return V(c.x, q.y + q.ny * lift, q.z + q.nz * lift);
@@ -1807,17 +1809,21 @@ function buildDino(B, p, parts, ctx) {
     const zz = bz + az * (0.55 - k * 0.2), s = 0.7 + 0.4 * Math.exp(-(((k - 4.5) / 2) ** 2));
     B.ell('rs_dino', 0.12 * s, 0.16 * s, 0.22 * s, bx, topAt(zz) - 0.03, zz, { seg: 8, rings: 5, uvFn: (pl, nl) => [pl.z / S, 0.96], tint: tint.map(c => c * 0.9) });
   }
-  // elephant legs: a full thigh (bulging on the hind legs), a knee, a round foot with three cream toenails;
+  // elephant legs: a round foot with three cream toenails, a knee, a full thigh (bulging on the hind legs) that
+  // runs up into a rounded haunch on the flank, so the leg grows out of the body instead of standing beside it;
   // the front legs set a few degrees forward
   for (const l of legs) {
-    // each leg stands in its own collider box (the feet on the plinth, the knee at the box's top), the thigh
-    // swelling above it and running back into the body
-    const sx = Math.sign(l.x - bx) || 1, fx = bx + sx * Math.min(Math.abs(l.x - bx), torso ? 1.2 : ax - 0.62), fz = l.z, front = fz > bz;
-    const lr = torso ? Math.min(0.5, l.hx + 0.06) : 0.58, lean = front ? 0.06 : -0.02, thigh = front ? lr + 0.08 : lr + 0.16, knee = torso ? l.y + l.hy : ptop + 0.72;
-    const kx = bx + (fx - bx) * 0.97, tx = bx + (fx - bx) * 0.86, rx2 = bx + (fx - bx) * 0.6;
-    const pts = [V(fx, ptop + 0.02, fz + lean), V(fx, ptop + 0.3, fz + lean * 0.9), V(kx, knee, fz + lean * 0.6), V(tx, knee + 0.5, fz + lean * 0.2), V(bx + (fx - bx) * 0.75, yc - 0.15, fz), V(rx2, yc + 0.35, fz)];
-    B.tube('rs_dino', pts, [lr + 0.06, lr, lr - 0.04, thigh, thigh * 0.85, 0.5], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint });
-    for (const k of [-1, 0, 1]) B.ell('rs_dino', 0.13, 0.1, 0.13, fx + k * 0.3, ptop + 0.09, fz + lean + 0.56 - Math.abs(k) * 0.13, { seg: 8, rings: 4, uvFn: () => [0.3 + k * 0.1, 0.06], tint: tint.map(c => c * 1.12) });
+    // each leg stands in its own collider box (the feet on the plinth, the knee at the box's top); the haunch
+    // stays inside the torso box (its outer face on the box's side)
+    const sx = Math.sign(l.x - bx) || 1, fo = torso ? Math.min(Math.abs(l.x - bx), 1.2) : ax - 0.62, fz = l.z, front = fz > bz;
+    const at = k => bx + sx * fo * k;
+    const lr = torso ? Math.min(0.5, l.hx + 0.06) : 0.58, lean = front ? 0.06 : -0.02, thigh = front ? lr + 0.02 : lr + 0.08, knee = torso ? l.y + l.hy : ptop + 0.72;
+    const hr = front ? [0.5, 0.64, 0.66] : [0.55, 0.72, 0.76], hxc = torso ? sx * (T.hx - hr[0] - 0.01) + bx : at(0.75), hyc = yc - (front ? 0.28 : 0.34);
+    const pts = [V(at(1), ptop + 0.02, fz + lean), V(at(1), ptop + 0.3, fz + lean * 0.9), V(at(0.97), knee, fz + lean * 0.6), V(at(0.82), knee + 0.45, fz + lean * 0.25),
+      V(at(0.56), yc - 0.15, fz + lean * 0.1), V(at(0.4), yc + 0.1, fz)];
+    B.tube('rs_dino', pts, [lr + 0.06, lr, lr - 0.04, thigh, 0.45, 0.42], { seg: 14, uvFn: uvLeg(fz / S, [sx * 0.95, 0.3, 0]), tint, capEnd: true });
+    B.ell('rs_dino', hr[0], hr[1], hr[2], hxc, hyc, fz + lean * 0.3, { seg: 14, rings: 8, uvFn: (pl, nl) => [pl.z / S + 0.13, lerp(0.42, 0.72, vOf(nl, [sx * 0.8, 0.6, 0], 0.1))], tint });
+    for (const k of [-1, 0, 1]) B.ell('rs_dino', 0.13, 0.1, 0.13, at(1) + k * 0.3, ptop + 0.09, fz + lean + 0.56 - Math.abs(k) * 0.13, { seg: 8, rings: 4, uvFn: () => [0.3 + k * 0.1, 0.06], tint: tint.map(c => c * 1.12) });
   }
   if (neck) {
     // leaves the shoulders leaning forward, curves up into the column; fold rings at its root
