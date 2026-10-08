@@ -217,7 +217,10 @@ export function generateLeg(seed, day) {
     const side = d >= 0 ? 1 : 0;
     const wd = wallDist(side, z);
     const jag = fbm(x / 9, z / 9, S + 21, 2) * 2.4;
-    const t = smoothstep(wd, wd + wallSoft(z), ad + jag);
+    // the face, then a rounded shoulder easing over the lip (a crease sharper than the 2.5 m grid would
+    // show as a sawtooth of triangle teeth along the rim)
+    const ws = wallSoft(z), q = ad + jag;
+    const t = 0.85 * smoothstep(wd, wd + ws, q) + 0.15 * smoothstep(wd + 0.6 * ws, wd + ws + 5, q);
     h += t * (wallH(side, z) + fbm(x / 22, z / 22, S + 31, 2) * 3.2);
     // beyond the rim: rolling plateau, then the world's edge rises
     h += smoothstep(wd + 8, wd + 60, ad) * 6 * (fbm(x / 60, z / 60, S + 41, 2) + 0.6);
@@ -235,14 +238,23 @@ export function generateLeg(seed, day) {
       if (d0 > M.r * 1.4 + 6) continue;
       const a = Math.atan2(dz, dx);
       const lobe = 1 + 0.25 * (0.65 * Math.sin(a * M.lobes + M.ph) + 0.35 * Math.sin(a * (M.lobes + 2) + M.ph * 1.7));
-      const R = M.r * (d0 < M.r * 0.6 ? 1 : lobe);
+      // (notches never cut inside 6.95 m, so the wreck, its wings and the loot keep a flat top out to 5.2 m;
+      // the bulges, which set how close the foot comes to the road, are unchanged)
+      // and on the side facing the road, the foot (bench included) stops at the end of the ditch, 6.4 m from
+      // the road's centre
+      const toRoad = -p.side * Math.cos(a), lim = toRoad > 0.05 ? (p.off - 6.4) / toRoad - 1.5 : Infinity;
+      const R = Math.min(Math.max(M.r * (d0 < M.r * 0.6 ? 1 : lobe), 6.95), lim);
       const dm = d0 + noise2(x / 3, z / 3, S + 51) * 0.5;
-      const ff = smoothstep(R + 1.5, R, dm);
+      // the flanks fall over 3.25 m (more than a grid cell, inside the old footprint, so the road keeps its
+      // clearance): any sharper and
+      // the heightfield draws them as a few huge facets with snow teeth at their feet
+      const ff = smoothstep(R + 1.5, R - 1.75, dm);
       const benchSide = smoothstep(0.5, 0.87, Math.cos(a - M.benchA));
-      const bR = R + 3 * benchSide, fb = smoothstep(bR + 1.5, bR, dm) * benchSide;
+      const bR = Math.min(R + 3 * benchSide, lim), fb = smoothstep(bR + 1.5, bR - 1.75, dm) * benchSide;
       const top = M.base + M.h + fbm(x / 6, z / 6, S + 61, 2) * 0.35 * smoothstep(M.r * 0.6, M.r, d0);
-      if (fb > 0) h = Math.max(h, lerp(h, M.base + M.h * M.benchK, fb));
-      if (ff > 0) h = Math.max(h, lerp(h, top, ff));
+      const keep = smoothstep(6.4, 8.9, ad);   // where the road bends toward a mesa, its foot still stops at the ditch
+      if (fb > 0) h = Math.max(h, lerp(h, M.base + M.h * M.benchK, fb * keep));
+      if (ff > 0) h = Math.max(h, lerp(h, top, ff * keep));
     }
     return h;
   }

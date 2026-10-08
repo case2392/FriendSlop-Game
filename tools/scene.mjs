@@ -213,6 +213,9 @@ for (const v of views) {
       const x = -10, z = -58;
       await steveAt(x + 0.4, z + 3.0, Math.PI - 0.35);
       await ev(steve, () => { window.__nmd.me.pitch = 0; });
+      // with the host quiet, Steve's pose reaches Dave late: wait until Dave's copy of him stands there
+      await dave.waitForFunction(([px, pz]) => [...window.__nmd.views.values()].some(v => v.group.visible && Math.hypot(v.group.position.x - px, v.group.position.z - pz) < 0.6), [x + 0.4, z + 3.0], { timeout: 120000 }).catch(() => console.log('crew: Steve not seen at his mark (shooting anyway)'));
+      await wait(dave, 1500);
       await camAt(x, z, x + 0.4, (await hy(x, z)) + 1.2, z + 3.0);
       await shot(dave, v, { hud: false });
     } else if (v === 'hands') {

@@ -1472,7 +1472,7 @@ export class PlayerView {
     this.tilt.add(this.ch.root);
     this.group.add(this.tilt);
     this.label = labelSprite(p.name, labelColor(p.color), 40);
-    this.label.position.y = ['brim', 'straw', 'helm'].includes(this.ch.spec.hat) ? 2.12 : 2.05;   // a hand above the hat
+    this.label.position.y = ['brim', 'straw', 'helm'].includes(this.ch.spec.hat) ? 2.07 : 2.0;   // a hand above the hat
     this.group.add(this.label);
     this.mic = labelSprite('🔊', '#fff', 60);
     this.mic.scale.set(0.9, 0.45, 1);

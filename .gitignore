@@ -4,5 +4,3 @@ dist/
 .DS_Store
 test/screenshots/
 client/js/*_old.js
-/[0-9]/
-/[0-9][0-9]/
