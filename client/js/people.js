@@ -1590,8 +1590,10 @@ export class Hands {
       this.map.add(this.board);
       this.g.add(this.map);
     }
-    this.mapTex.image = canvas;
-    this.mapTex.needsUpdate = true;
+    if (this.mapTex.image !== canvas) {   // the map is painted once per day: upload it only when it changes
+      this.mapTex.image = canvas;
+      this.mapTex.needsUpdate = true;
+    }
     this.map.visible = true;
   }
   hideMap() { if (this.map) this.map.visible = false; }
