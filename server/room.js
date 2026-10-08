@@ -69,7 +69,7 @@ export class Room {
     this.broadcast(this.worldMsg());
     this.broadcast({ t: 'props', list: this.sim.allProps() });
     this.spawnStragglers();
-    this.toast(`☀️ DAY ${this.day} — ${fmt$(this.due)} due at midnight. The Repo Man is already on the road.`, '#ffd166', 7);
+    this.toast(`DAY ${this.day} — ${fmt$(this.due)} due at midnight. The Repo Man is already on the road.`, '#ffd166', 7);
     this.sendMeta();
   }
 
@@ -261,7 +261,7 @@ export class Room {
       p.seat = idx;
       if (idx === 0) sim.setDrive({ th: 0, st: 0, hb: 0 });
       this.send(p, { t: 'seat', seat: idx });
-      if (idx === 0) this.toast(`🚐 ${p.name} is driving. God help us.`, p.color, 3);
+      if (idx === 0) this.toast(`${p.name} is driving. God help us.`, p.color, 3);
       return;
     }
     if (kind === 'unseat') {
@@ -289,7 +289,7 @@ export class Room {
     if (kind === 'hook') {
       const H = sim.hook;
       if (H.state === 'out' && H.holder === p.id) {
-        if (sim.anchorHook(p.id, p)) { this.send(p, { t: 'hooked', on: false }); this.toast(`⚓ ${p.name} hooked the winch. Driver: R to reel in!`, p.color, 4); }
+        if (sim.anchorHook(p.id, p)) { this.send(p, { t: 'hooked', on: false }); this.toast(`${p.name} hooked the winch. Driver: R to reel in!`, p.color, 4); }
         else this.toast('Nothing to hook onto here — find a post, a dead tree, or a big rock.', '#fff', 3, p);
       } else if (H.state === 'anchored' && dist3(p.pos, sim.hookPos()) < 3.2) {
         sim.unhook();
@@ -303,7 +303,7 @@ export class Room {
       if (!inRV) return;
       if (this.phase !== 'night') { this.toast('Not bedtime. The Repo Man doesn\'t sleep and neither do you.', '#fff', 3, p); return; }
       p.bed = !p.bed;
-      this.toast(p.bed ? `😴 ${p.name} is in a bunk.` : `${p.name} got up.`, p.color, 2);
+      this.toast(p.bed ? `${p.name} is in a bunk.` : `${p.name} got up.`, p.color, 2);
       return;
     }
     if (kind === 'revive') {
@@ -311,7 +311,7 @@ export class Room {
       if (!q || !q.ko || !q.pos || dist3(q.pos, p.pos) > 3.5) return;
       q.ko = false;
       this.send(q, { t: 'revived', by: p.id });
-      this.toast(`🩹 ${p.name} picked ${q.name} up off the ground. No ambulance bill.`, '#7CFC00', 3);
+      this.toast(`${p.name} picked ${q.name} up off the ground. No ambulance bill.`, '#7CFC00', 3);
       return;
     }
 
@@ -326,10 +326,10 @@ export class Room {
         this.gatesOpen.add(g.id);
         sim.openGate(g.id);
         this.broadcast({ t: 'ev', list: [{ k: 'gate', id: g.id }] });
-        this.toast(`🔓 ${p.name} cracked the gate. ${code}.`, '#7CFC00', 4);
+        this.toast(`${p.name} cracked the gate. ${code}.`, '#7CFC00', 4);
       } else {
         this.broadcast({ t: 'ev', list: [{ k: 'buzz', id: g.id }] });
-        this.toast(`❌ ${code || '????'} — wrong. Somebody go read the rock.`, '#ff8a80', 3, p);
+        this.toast(`${code || '????'} — wrong. Somebody go read the rock.`, '#ff8a80', 3, p);
       }
     } else if (u.kind === 'pawnBell') {
       const ids = sim.propsIn(W.town.pawn);
@@ -345,7 +345,7 @@ export class Room {
       this.bank += total;
       this.stats.sold += total; this.dayStats.sold += total;
       this.broadcast({ t: 'ev', list: [{ k: 'sold', ids, total, by: p.id }] });
-      this.toast(`💵 SOLD: ${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
+      this.toast(`SOLD: ${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
     } else if (u.kind === 'bj') {
       if (u.arg === 'deal') {
         const r = this.bj.deal(this.t, this.bank);
@@ -370,12 +370,12 @@ export class Room {
         const n = sim.tieDown();
         if (!n) return this.toast('Nothing loose in the RV to tie down.', '#fff', 3, p);
         this.bank -= price;
-        this.toast(`🪢 ${p.name} bungee'd ${n} things down in the RV (${fmt$(price)}). Grab one to untie it.`, p.color, 4);
+        this.toast(`${p.name} bungee'd ${n} things down in the RV (${fmt$(price)}). Grab one to untie it.`, p.color, 4);
         return;
       }
       this.bank -= price;
-      if (what === 'walkie') { p.walkie = true; this.sendMeta(); this.toast(`📻 ${p.name} bought a walkie-talkie. Hold T to talk to anyone else with one.`, p.color, 4); }
-      if (what === 'drink') { this.send(p, { t: 'drink' }); this.toast(`⚡ ${p.name} chugged an energy drink.`, p.color, 3); }
+      if (what === 'walkie') { p.walkie = true; this.sendMeta(); this.toast(`${p.name} bought a walkie-talkie. Hold T to talk to anyone else with one.`, p.color, 4); }
+      if (what === 'drink') { this.send(p, { t: 'drink' }); this.toast(`${p.name} chugged an energy drink.`, p.color, 3); }
     } else if (u.kind === 'pay') {
       if (this.paid) return this.toast('Already paid. He\'s just... watching you now.', '#fff', 3, p);
       if (this.bank < this.due) return this.toast(`The Repo Man wants ${fmt$(this.due)}. You have ${fmt$(this.bank)}.`, '#ff8a80', 4, p);
@@ -394,13 +394,13 @@ export class Room {
     if (won > 0 && (!this.stats.bestWin || won > this.stats.bestWin.amt)) this.stats.bestWin = { amt: won, name: p?.name, game };
     if (won < 0 && (!this.stats.worstLoss || won < this.stats.worstLoss.amt)) this.stats.worstLoss = { amt: won, name: p?.name, game };
     this.broadcast({ t: 'ev', list: [{ k: 'bet', won, game }] });
-    this.toast(won > 0 ? `🎰 ${game}: +${fmt$(won)}!` : won < 0 ? `🎰 ${game}: ${fmt$(won)}. Ouch.` : `🎰 ${game}: push.`, won > 0 ? '#7CFC00' : won < 0 ? '#ff8a80' : '#fff', 4);
+    this.toast(won > 0 ? `${game}: +${fmt$(won)}!` : won < 0 ? `${game}: ${fmt$(won)}. Ouch.` : `${game}: push.`, won > 0 ? '#7CFC00' : won < 0 ? '#ff8a80' : '#fff', 4);
   }
 
   pay(p = null) {
     this.bank -= this.due;
     this.paid = true;
-    this.toast(`🧾 Paid the Repo Man ${fmt$(this.due)}${p ? ` (${p.name} handed it over)` : ''}. The RV is yours for one more night.`, '#7CFC00', 6);
+    this.toast(`Paid the Repo Man ${fmt$(this.due)}${p ? ` (${p.name} handed it over)` : ''}. The RV is yours for one more night.`, '#7CFC00', 6);
     if (this.day >= C.DAYS) return this.finish(true);
     this.beginNight();
   }
@@ -414,14 +414,14 @@ export class Room {
     this.sim.dropHook(p.id);
     this.stats.kos++;
     const how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)' }[m.why] || 'is down';
-    this.toast(`💫 ${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
+    this.toast(`${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
   }
 
   onWake(p) {
     if (!p.ko) return;
     p.ko = false;
     const bill = C.medBill(this.day);
-    this.bill(bill, `🚑 ${p.name} woke up alone. Ambulance: ${fmt$(bill)}`);
+    this.bill(bill, `${p.name} woke up alone. Ambulance: ${fmt$(bill)}`);
   }
 
   bill(amt, text) {
@@ -464,13 +464,13 @@ export class Room {
     this.bank = Math.min(0, this.bank);
     this.broadcast({ t: 'ev', list: [{ k: 'repo', part, took }] });
     if (part === 'rv' || this.strikes >= C.STRIKES_TO_LOSE) {
-      this.toast('🚛 The Repo Man hooks the RV. It\'s over.', '#ff5252', 8);
+      this.toast('The Repo Man hooks the RV. It\'s over.', '#ff5252', 8);
       return this.finish(false);
     }
     this.parts[part] = false;
     this.sim.removePart(part);
     this.broadcast({ t: 'parts', parts: this.parts });
-    this.toast(`🚛 MIDNIGHT. Short on the payment — the Repo Man took ${fmt$(took)} AND THE ${part.toUpperCase()}. Strike ${this.strikes}/${C.STRIKES_TO_LOSE - 1}.`, '#ff5252', 8);
+    this.toast(`MIDNIGHT. Short on the payment — the Repo Man took ${fmt$(took)} AND THE ${part.toUpperCase()}. Strike ${this.strikes}/${C.STRIKES_TO_LOSE - 1}.`, '#ff5252', 8);
     this.beginNight();
   }
 
@@ -488,13 +488,13 @@ export class Room {
     const rvp = sim.rv.translation();
     if (this.phase === 'camp' && rvp.z > this.W.camp.exitZ) {
       this.phase = 'road';
-      this.toast(`🛣️ ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
+      this.toast(`ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
     }
     if (this.phase === 'road') {
       this.clock += dt / C.HOUR_SEC;
       if (!this.inTown && rvp.z > this.W.LEN - 8) {
         this.inTown = true;
-        this.toast(`🏘️ Made it to town at ${fmtClock(this.clock)}. Pawn shop on the left, casino on the right, Repo Man out front.`, '#7CFC00', 7);
+        this.toast(`Made it to town at ${fmtClock(this.clock)}. Pawn shop on the left, casino on the right, Repo Man out front.`, '#7CFC00', 7);
       }
       if (this.clock >= C.MIDNIGHT) { this.clock = C.MIDNIGHT; this.midnight(); }
     }
@@ -533,7 +533,7 @@ export class Room {
       if (this.flippedT > 7) {
         this.flippedT = 0;
         sim.rightRV();
-        this.bill(800, '🛻 The RV was on its back. Tow truck: $800.');
+        this.bill(800, 'The RV was on its back. Tow truck: $800.');
       }
     } else this.flippedT = 0;
 
@@ -554,7 +554,7 @@ export class Room {
           this.send(pl, { t: 'knock', v: e.v, ko: e.ko });
           if (e.ko) {
             const drv = [...this.players.values()].find(q => q.seat === 0);
-            this.bill(C.RV_HIT_BILL, `🚐💥 ${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
+            this.bill(C.RV_HIT_BILL, `${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
           }
           pub.push({ k: 'thud', id: e.id });
         } else {

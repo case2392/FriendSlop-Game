@@ -131,7 +131,9 @@ try {
   await wait(host, 600);
   await host.mouse.down();
   await host.keyboard.down('w');
+  // climbing moves per frame (dt is capped at 50 ms), so hold W until he is up there, not for a fixed time
   await wait(host, 2600);
+  await host.waitForFunction(b => { const m = window.__nmd.me; return m.mode !== 'climb' || m.pos.y > b + 3.2; }, wall.base, { timeout: 180000 }).catch(() => {});
   await host.keyboard.up('w');
   const climbing = await me(host);
   check(climbing.mode === 'climb' && climbing.pos.y > wall.base + 3, `Steve is climbing the canyon wall (${(climbing.pos.y - wall.base).toFixed(1)} m up)`);

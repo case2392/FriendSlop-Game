@@ -11,6 +11,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
+import { LOOT } from '../shared/loot.js';
 
 const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'crash', 'boulder', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
 const [viewArg = 'camp,road,town', OUT = 'test/screenshots/scene', dayArg = '1', hourArg = '10', seed = '777'] = process.argv.slice(2);
@@ -218,7 +219,9 @@ for (const v of views) {
       const z = 30, x0 = await rx(z) - 5;
       for (const [i, type] of types.entries()) {
         const x = x0 + (i % 5) * 2.1, zz = z + Math.floor(i / 5) * 2.4;
-        await send({ t: 'dbg', op: 'spawn', type, x, y: (await hy(x, zz)) + 0.8, z: zz, value: 300 });
+        // resting height, as world gen places loot: the collider's half-height + 6 cm (a drop would chip it)
+        const sh = LOOT[type].shape, half = sh[0] === 'box' ? sh[2] : sh[1];
+        await send({ t: 'dbg', op: 'spawn', type, x, y: (await hy(x, zz)) + half + 0.06, z: zz, value: 300 });
       }
       await wait(steve, 2500);
       await camAt(x0 + 4.2, z - 6.5, x0 + 4.2, (await hy(x0 + 4, z)) + 0.3, z + 2.6);
