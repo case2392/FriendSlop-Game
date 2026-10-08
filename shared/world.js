@@ -388,7 +388,7 @@ export function generateLeg(seed, day) {
       const cy = heightAt(cx, cz);
       o.codeAt = { x: cx, y: cy, z: cz };
       signs.push({ x: cx, y: cy + 0.06, z: cz, ry: side > 0 ? Math.PI / 2 : -Math.PI / 2, w: 3.4, h: 2.0,
-        lines: [o.code], bg: 'rgba(0,0,0,0)', fg: '#ffffff', flat: true, near: 10, painted: true });
+        lines: [o.code], bg: 'rgba(0,0,0,0)', fg: biome === 'snow' ? '#9a2a22' : '#ffffff', flat: true, near: 10, painted: true });
     }
   }
 
@@ -538,18 +538,26 @@ export function generateLeg(seed, day) {
     if (obstacles.some(o => o.codeAt && Math.hypot(o.codeAt.x - x, o.codeAt.z - z) < 3.5)) return false;   // keep the rim code readable
     return true;
   };
-  // hero: the big Elwynn oak at a grove's centre (a ~1.5 m bole); other oaks are the nature pass's satellites
+  // hero: the big Elwynn oak at a grove's centre (a ~1.5 m bole); other oaks are the nature pass's satellites.
+  // The renderer sizes each bole from its collider here (0.97 x r), so these radii are the trees' girth.
   const tree = (k, x, z, s, ry, hero = false) => {
     const y = heightAt(x, z), hh = k === 'palm' ? 2.6 : 1.8;
-    cyls.push({ x, y: y + hh, z, r: (k === 'oak' ? (hero ? 0.72 : 0.55) : 0.3) * s, hh, mat: 'tree' });   // bole and root flare
+    const r = k === 'oak' ? (hero ? 0.6 + 0.15 * s : 0.55 * s) : 0.3 * s;
+    cyls.push({ x, y: y + hh, z, r, hh, mat: 'tree' });   // bole and root flare
     decor.push({ k, x, y, z, s, ry, ...(hero ? { hero: true } : {}) });
   };
   // Big rocks: the renderer draws the shape world gen picks here (d.variant), so its collider can match.
   // Badlands: a cluster of hoodoos (3.5-5 m) or a stepped ledge stack; desert: a sandstone arch on two
-  // feet (along d.ry) or a buried mound; elsewhere a boulder or outcrop.
+  // feet (along d.ry) or a buried mound; elsewhere a boulder or outcrop. Hoodoos are always solid (they
+  // stand 3-5 m whatever s is); other rocks over s 1.2 are fitted to their colliders by the renderer, and
+  // the knee-to-waist boulders of the green and snowy days (s 0.9-1.2) get a collider tucked inside them.
   const rockCollide = (d, steep) => {
     const strata = biome === 'badlands', S0 = d.s * (strata ? 1.25 : 1), S = steep ? S0 * 0.75 : S0;
-    if (d.s <= 1.2) return;
+    const green = biome === 'meadow' || biome === 'fields' || biome === 'snow';
+    if (d.s <= 1.2 && d.variant !== 'hoodoo') {
+      if (green && d.s > 0.9) cyls.push({ x: d.x, y: d.y + S * 0.4, z: d.z, r: S * 0.75, hh: S * 0.4, mat: 'rock' });
+      return;
+    }
     if (biome === 'badlands' && d.variant === 'hoodoo') {
       const Ht = 4.25 * Math.max(0.7, Math.min(1.2, S / 1.8)), r = Math.max(0.55, Ht * 0.19) * 0.9;
       cyls.push({ x: d.x, y: d.y + Ht / 2 - 0.3, z: d.z, r, hh: Ht / 2, mat: 'rock' });
@@ -560,8 +568,14 @@ export function generateLeg(seed, day) {
         const fx = d.x + c * span * sd, fz = d.z - sn * span * sd;
         cyls.push({ x: fx, y: heightAt(fx, fz) + S * 0.7, z: fz, r, hh: S * 0.9, mat: 'rock' });
       }
+      // the span: players walk under it (2.35 m+ clear) but the RV, roof cargo and all, must not drive through
+      const under = Math.max(1.7 * S, 2.35 + 0.36 * S) - 0.25 * S, top = Math.max(1.7 * S, 2.35 + 0.36 * S) + 0.35 * S;
+      box(d.x, d.y + (under + top) / 2, d.z, 1.5 * S, (top - under) / 2, 0.45 * S, d.ry, 'invisible', null, 'arch_span');
+    } else if (green) {
+      // low Elwynn/Westfall/Dun Morogh boulders and outcrops, about 0.7 S tall (the renderer follows the top)
+      cyls.push({ x: d.x, y: d.y + S * 0.3, z: d.z, r: S * 0.8, hh: S * 0.4, mat: 'rock' });
     } else {
-      const tall = biome === 'badlands' ? 0.75 : biome === 'desert' ? 0.45 : 0.6;
+      const tall = biome === 'badlands' ? 0.75 : 0.45;
       cyls.push({ x: d.x, y: d.y + S * tall * 0.8, z: d.z, r: S * (biome === 'desert' ? 0.95 : 0.8), hh: S * tall, mat: 'rock' });
     }
   };
@@ -581,13 +595,20 @@ export function generateLeg(seed, day) {
     const s = 0.75 + rng() * 0.6;
     if (k === 'oak' && (biome === 'meadow' || biome === 'fields')) {
       // Elwynn oaks stand in groves (3-6 within ~12 m); Westfall's in pairs
+      // (a crowded spot, within a hero's crown of another oak, gets one plain oak and no grove)
+      const crowded = biome === 'meadow' && cyls.some(c => c.mat === 'tree' && Math.hypot(c.x - x, c.z - z) < 5.5);
+      if (crowded) {
+        if (!decor.some(o => o.hero && Math.hypot(o.x - x, o.z - z) < 5.5) && !cyls.some(c => c.mat === 'tree' && Math.hypot(c.x - x, c.z - z) < 3.2)) tree('oak', x, z, s, ry);
+        continue;
+      }
       const n = biome === 'meadow' ? 3 + Math.floor(rngD() * 4) : 2;
       tree('oak', x, z, s, ry, biome === 'meadow');
       for (let j = 1; j < n; j++) {
-        const a = rngD() * 6.283, dd = 4.5 + rngD() * 7.5;
+        const a = rngD() * 6.283, dd = 5.5 + rngD() * 6.5;
         const gx = x + Math.cos(a) * dd, gz = z + Math.sin(a) * dd, goff = Math.abs(gx - roadX(gz));
         if (!decorOk(gx, gz, goff)) continue;
         if (cyls.some(c => c.mat === 'tree' && Math.hypot(c.x - gx, c.z - gz) < 3.2)) continue;   // room for the canopies
+        if (decor.some(o => o.hero && Math.hypot(o.x - gx, o.z - gz) < 5.5)) continue;          // a hero's crown is ~7 m across
         tree('oak', gx, gz, 0.75 + rngD() * 0.6, rngD() * 6.283);
       }
     } else if (k === 'oak' || k === 'pine' || k === 'palm') {
@@ -748,7 +769,7 @@ export function generateLeg(seed, day) {
   const clearOfTown = (x, z, r) => !lots.some(b => Math.hypot(b.x - x, b.z - z) < Math.hypot(b.w, b.dep) / 2 + r)
     && !cyls.some(c => Math.hypot(c.x - x, c.z - z) < 3.2) && !statics.some(st => st.mat !== 'invisible' && Math.hypot(st.x - x, st.z - z) < Math.max(st.hx, st.hz) + r);
   const townTree = (x, z) => {
-    if (!clearOfTown(x, z, 2.5)) return;
+    if (!clearOfTown(x, z, 2.5) || decor.some(o => o.hero && Math.hypot(o.x - x, o.z - z) < 5.5)) return;
     const s = 1.0 + rngD() * 0.3, ry = rngD() * 6.283;
     if (treeKind === 'deadtree') {
       const y = heightAt(x, z);
