@@ -9,6 +9,11 @@
 // triangle, so no edge ever follows the heightfield's triangles. Rock is projected from the side
 // (x or z picked from the smoothed facing, dithered), crossfaded at two scales so a long wall never
 // repeats; ledges inside the rock hold the ground's grass or snow, and a thin scree collar rings it.
+// In the snow, the granite shows only on faces steeper than ~60 degrees (crash mesas and far
+// mountains on gentler ones), and the snow on it is laid on whatever the PAINTED rock turns up to
+// the sky (cliff_snow_form, a companion map of the texture's form), in long lumpy shelves, with
+// every edge antialiased. On steep faces the edges are broken by a noise laid ON the face (the
+// slope and macro noise are sampled by x and z, so up a face they would only run in vertical bands).
 // Ground on slopes is projected from the side too. Explicit texture gradients with a capped
 // anisotropy keep grazing facets from washing out. Broad warm/cool and value fields and baked
 // ambient occlusion sit on top, a 1.8 m detail map crisps the ground at the camera's feet, and

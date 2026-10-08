@@ -17,9 +17,9 @@
 //   portraitAttrs(color, id)       attributes for a roster portrait: the player's character, rendered
 //
 // Names and townsfolk titles are drawn over the world (like WoW's): a sign post, a cart or a
-// tree between you and the Repo Man never slices his plate. Building walls and hills do hide
-// townsfolk (a friend's name fades to 35% instead), and so does anything in your hands (the
-// plate is pulled to just past them, at the same size on screen).
+// tree between you and the Repo Man never slices his plate. Building walls, the RV's walls (not
+// its windows) and hills do hide townsfolk (a friend's name fades to 35% instead), and so does
+// anything in your hands (the plate is pulled to just past them, at the same size on screen).
 //
 // On import this module also (1) waits for the vendored fonts and redraws any
 // sprite drawn before they arrived, (2) paints the UI textures in paint/ui.js
@@ -30,6 +30,8 @@ import * as THREE from '/vendor/three.module.js';
 import { canvasTex, tex, painted } from './gfx.js';
 import { canvasFor, hashStr, rngFrom } from './paint/index.js';
 import { paintVista, finishVista } from './paint/ui.js';
+import { RV_ART } from './paint/vehicle.js';
+import { RV_DIM, toLocal, insideRV } from '/shared/rv.js';
 
 export const UI_FONT = "'NMD UI', 'Marcellus', 'Friz Quadrata TT', 'Friz Quadrata', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif";
 export const TITLE_FONT = "'Cinzel', 'Trajan Pro', 'Marcellus', 'Palatino Linotype', Georgia, serif";
@@ -607,17 +609,18 @@ function hexRgb(c) {
   return Number.isFinite(n) ? [(n >> 16) & 255, (n >> 8) & 255, n & 255] : [255, 255, 255];
 }
 const toHex = (r, g, b) => '#' + [r, g, b].map(v => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join('');
-// player names: 25% toward warm white, saturation clamped, like WoW class colours
+// player names: the player's own hue as a strong WoW class colour (full and light, not washed
+// toward cream), so a friend's name reads at a glance on snow, sand and grass; blues and violets
+// look darker at the same lightness, so they get a lift. A grey or white stays white.
 function classColor(c) {
-  let [r, g, b] = hexRgb(soft(c)).map(v => v / 255);
-  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2;
-  const sMax = 0.75;
-  if (mx !== mn) {
-    const s = l > 0.5 ? (mx - mn) / (2 - mx - mn) : (mx - mn) / (mx + mn);
-    if (s > sMax) { const k = sMax / s; [r, g, b] = [r, g, b].map(v => l + (v - l) * k); }
-  }
-  const [wr, wg, wb] = [0xff, 0xf2, 0xd0].map(v => v / 255);
-  return toHex((r * 0.75 + wr * 0.25) * 255, (g * 0.75 + wg * 0.25) * 255, (b * 0.75 + wb * 0.25) * 255);
+  const [r, g, b] = hexRgb(soft(c)).map(v => v / 255);
+  const mx = Math.max(r, g, b), d = mx - Math.min(r, g, b);
+  if (d < 0.08) return '#ffffff';
+  const h = 60 * (mx === r ? ((g - b) / d + 6) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4);
+  const s = 0.82, l = h > 200 && h < 300 ? 0.68 : 0.6;
+  const C = (1 - Math.abs(2 * l - 1)) * s, X = C * (1 - Math.abs((h / 60) % 2 - 1)), m = l - C / 2;
+  const [R, G, B] = h < 60 ? [C, X, 0] : h < 120 ? [X, C, 0] : h < 180 ? [0, C, X] : h < 240 ? [0, X, C] : h < 300 ? [X, 0, C] : [C, 0, X];
+  return toHex((R + m) * 255, (G + m) * 255, (B + m) * 255);
 }
 const lighter = (c, k) => { const [r, g, b] = hexRgb(c); return toHex(r + (255 - r) * k, g + (255 - g) * k, b + (255 - b) * k); };
 
@@ -781,7 +784,7 @@ function drawIcon(g, W, H, name) {
 // Everything else scales with distance but is capped (CSS px) so a close one never
 // covers a wall. Clickable buttons show one name at a time: the one nearest the
 // crosshair within reach (the [E] prompt names the rest).
-const FIXED = { name: 24, npc: 44 };
+const FIXED = { name: 30, npc: 44 };     // a friend's name at 16 px, a townsman's at 15 px over his title
 const CAP = { icon: 64, combat: 64, button: 34, placard: 50 };
 const NAME_FADE = [35, 45], BTN_REACH = 2.6;
 const BTN = { frame: -1, best: null, ang: Infinity, prev: null };
@@ -800,6 +803,32 @@ const terrainHides = (W, c, p) => {
   }
   return false;
 };
+// The RV's walls hide a plate the same way, but not through its windows, an open or missing door,
+// or a missing roof: where the sight line leaves the hull is tested against the openings (the
+// layout rv3d.js builds from). Driving into town, the Repo Man's plate shows through the windshield.
+const RV_OPEN = 0.04;
+const inRect = (u, v, u0, u1, v0, v1) => u > u0 - RV_OPEN && u < u1 + RV_OPEN && v > v0 - RV_OPEN && v < v1 + RV_OPEN;
+function rvHides(S, c, p) {
+  const rv = S?.rv;
+  if (!rv?.p || !rv.q) return false;
+  const a = toLocal(rv.p, rv.q, c), b = toLocal(rv.p, rv.q, p);
+  const ia = insideRV(a.x, a.y, a.z), ib = insideRV(b.x, b.y, b.z);
+  if (ia === ib) return false;                        // both in, or both out (then it's a cart: draw over it)
+  const i = ia ? a : b, o = ia ? b : a;
+  const dx = o.x - i.x, dy = o.y - i.y, dz = o.z - i.z, XW = RV_DIM.HALF_W - 0.05, ZL = RV_DIM.HALF_L;
+  const tx = dx > 0 ? (XW - i.x) / dx : dx < 0 ? (-XW - i.x) / dx : Infinity;
+  const tz = dz > 0 ? (ZL - i.z) / dz : dz < 0 ? (-ZL - i.z) / dz : Infinity;
+  const ty = dy > 0 ? (RV_DIM.WALL_H - i.y) / dy : dy < 0 ? -i.y / dy : Infinity;
+  const t = Math.max(0, Math.min(tx, ty, tz)), hx = i.x + dx * t, hy = i.y + dy * t, hz = i.z + dz * t;
+  if (t === ty) return dy < 0 || S.parts?.roof !== false;          // the floor, or the roof unless it's gone
+  if (t === tz) { const w = dz > 0 ? RV_ART.shield : RV_ART.rearWin; return !inRect(hx, hy, -w.x, w.x, w.y0, w.y1); }
+  const side = dx > 0 ? 1 : -1, D = RV_ART.door;
+  if (side < 0 && (S.door || S.parts?.doors === false) && inRect(hz, hy, D.z0, D.z1, D.y0, D.y1)) return false;
+  for (const w of side > 0 ? RV_ART.winL : RV_ART.winR) {
+    if (w.r ? !w.frost && Math.hypot(hz - w.z, hy - w.y) < w.r + RV_OPEN : inRect(hz, hy, w.z0, w.z1, w.y0, w.y1)) return false;
+  }
+  return true;
+}
 // the walk-in building (world.js buildings: centered frames, w across, dep deep) a point is in, or -1
 function buildingAt(W, p) {
   const B = W.buildings || [];
@@ -863,9 +892,9 @@ export function labelSprite(text, color = '#fff', px = 40) {
       if (FIXED[kind]) {
         sy = FIXED[kind] / 720 * view; sx = sy * W / H;
         alpha = 1 - THREE.MathUtils.smoothstep(d, NAME_FADE[0], NAME_FADE[1]);
-        const world = typeof window !== 'undefined' ? window.__nmd?.W : null;
+        const S = typeof window !== 'undefined' ? window.__nmd : null, world = S?.W;
         const hidden = alpha > 0 && typeof world?.heightAt === 'function' &&
-          (buildingAt(world, _c) !== buildingAt(world, _p) || (d > 6 && terrainHides(world, _c, _p)));
+          (buildingAt(world, _c) !== buildingAt(world, _p) || rvHides(S, _c, _p) || (d > 6 && terrainHides(world, _c, _p)));
         const now = performance.now(), dt = ud.tVis ? Math.min(1, (now - ud.tVis) / 1000) : 1;
         ud.tVis = now;
         ud.vis += ((hidden ? OCCLUDED[kind] : 1) - ud.vis) * (1 - Math.exp(-dt * 12));   // ~0.2 s fades

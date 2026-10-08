@@ -42,17 +42,18 @@
   <canvas id="canvas"></canvas>
   <div id="vignette"></div>
 
-  <div id="hud" class="hud">
-    <div id="hDay" class="pill"></div>
-    <div id="hClock" class="pill"></div>
-    <div id="hBank" class="pill gold"></div>
-    <div id="hDue" class="pill red"></div>
-    <div id="hStrikes" class="pill"></div>
-    <!-- top right: the room's invite code, and under it the quest tracker (WoW's quest watch) -->
-    <div class="hud-side">
-      <div id="hCode" class="pill code" title="invite code: click to copy"></div>
-      <div id="tracker" class="tracker hidden"><div id="qtTitle" class="qt-title"></div><div id="qtLines" class="qt-lines"></div></div>
+  <!-- the top row: the bar in the middle; at the right end the room's invite code, and under it
+       the quest tracker (WoW's quest watch) -->
+  <div id="hud" class="hud-row">
+    <div class="hud">
+      <div id="hDay" class="pill"></div>
+      <div id="hClock" class="pill"></div>
+      <div id="hBank" class="pill gold"></div>
+      <div id="hDue" class="pill red"></div>
+      <div id="hStrikes" class="pill"></div>
     </div>
+    <div id="hCode" class="pill code" title="invite code: click to copy"></div>
+    <div id="tracker" class="tracker hidden"><div id="qtTitle" class="qt-title"></div><div id="qtLines" class="qt-lines"></div></div>
   </div>
   <div id="roster" class="roster"></div>
 
