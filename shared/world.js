@@ -311,6 +311,30 @@ export function generateLeg(seed, day) {
     const p = F(lx, ly, lz);
     box(p.x, p.y, p.z, hx, hy, hz, ry, mat, col, part);
   };
+  // The slab of rim rock a gate code is brushed on (town3d's rimCode draws it from the same numbers): a
+  // plane fitted to the ground under it, lifted clear of the bumps, its top 0.24 m up. Its collider is a
+  // 4 x 3 grid of boxes stepping along that plane, so nobody stands ankle-deep in the rock.
+  const rimSlab = (sx, sz, w, h) => {
+    const yaw = Math.atan2(sx - roadX(sz), 0) + Math.PI;
+    const F = frame(sx, 0, sz, yaw), gy = (lx, lz) => { const p = F(lx, 0, lz); return heightAt(p.x, p.z); };
+    const hx = w / 2 + 0.5, hz = h / 2 + 0.45;
+    let n = 0, sy = 0, sxy = 0, szy = 0, sxx = 0, szz = 0;
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) {
+      const lx = (i / 4 - 0.5) * 2.2 * hx, lz = (j / 4 - 0.5) * 2.2 * hz, y = gy(lx, lz);
+      n++; sy += y; sxy += lx * y; szy += lz * y; sxx += lx * lx; szz += lz * lz;
+    }
+    const a0 = sy / n, bx = sxy / sxx, bz = szy / szz;
+    let lift = 0;
+    for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) { const lx = (i / 4 - 0.5) * (w + 0.3), lz = (j / 4 - 0.5) * (h + 0.3); lift = Math.max(lift, gy(lx, lz) - (a0 + bx * lx + bz * lz)); }
+    const top0 = a0 + Math.min(lift, 0.6) + 0.24, NX = 4, NZ = 3, cw = hx * 0.95 / NX, cd = hz * 0.95 / NZ;
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      const lx = -hx * 0.95 + cw * (2 * i + 1), lz = -hz * 0.95 + cd * (2 * j + 1), t = top0 + bx * lx + bz * lz;
+      let lo = t - 0.3;
+      for (const [dx, dz] of [[-cw, -cd], [cw, -cd], [-cw, cd], [cw, cd]]) lo = Math.min(lo, gy(lx + dx, lz + dz) - 0.2);
+      const p = F(lx, 0, lz);
+      box(p.x, (t + lo) / 2, p.z, cw, (t - lo) / 2, cd, yaw, 'rock', null, 'rim_slab');
+    }
+  };
   // a walk-in building: front wall (local +z) has a door gap. Returns its frame.
   function building(ox, oz, ry, w, dep, h, mat, col, oy = null, kind = 'house') {
     const y0 = oy ?? heightAt(ox, oz);
@@ -389,6 +413,7 @@ export function generateLeg(seed, day) {
       o.codeAt = { x: cx, y: cy, z: cz };
       signs.push({ x: cx, y: cy + 0.06, z: cz, ry: side > 0 ? Math.PI / 2 : -Math.PI / 2, w: 3.4, h: 2.0,
         lines: [o.code], bg: 'rgba(0,0,0,0)', fg: biome === 'snow' ? '#9a2a22' : '#ffffff', flat: true, near: 10, painted: true });
+      rimSlab(cx, cz, 3.4, 2.0);
     }
   }
 
@@ -475,7 +500,7 @@ export function generateLeg(seed, day) {
         placeLoot(POI_LOOT.junk[Math.floor(rng() * POI_LOOT.junk.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
       }
       // a tall scrap heap behind the pile (the stop's silhouette from the road), and a fence run at a flank
-      lbox(F, ry, 0, 1.6, -5.2, 1.5, 1.6, 1.2, 'junk', '#6b5a4a', 'junk_heap');
+      lbox(F, ry, 0, 1.625, -5.2, 1.5, 1.625, 1.2, 'junk', '#6b5a4a', 'junk_heap');
       for (let k = 0; k < 1 + (rngD() < 0.5 ? 1 : 0); k++) {
         const sd = k === 0 ? (rngD() < 0.5 ? -1 : 1) : -1, f = F(sd * (4.6 + rngD()), 0, -1.5 + rngD() * 2);
         decor.push({ k: 'fence', x: f.x, y: heightAt(f.x, f.z), z: f.z, s: 1, ry: ry + (rngD() - 0.5) * 0.2, len: 3 + Math.floor(rngD() * 2) });

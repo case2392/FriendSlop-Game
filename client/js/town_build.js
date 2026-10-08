@@ -21,8 +21,10 @@
 //   adobe    Gadgetzan: terracotta adobe with a mud splash band, lumpy parapets, stacked blocks, a
 //            turret with a riveted spiked cap, vigas with lit end grain, big awnings on poles, goblin
 //            tanks, pipes, riveted plates and gears
-// Interiors are dressed per style too (floors, ceilings, hearths, rugs, shelves of goods drawn from a
-// per-style pool, wall trophies, the casino hall), then relit: soft dark corners and junctions, warm
+// Facades get per-style wall dressing within ~0.4 m (planters, benches, woodpiles, forks, fire baskets,
+// tool racks, ristras). Interiors are dressed per style too (floors laid board by board or stone by stone,
+// ceilings, hearths, big worn rugs, shelves of goods drawn from a per-style pool, wall trophies, bottle
+// shelves and kegs, the casino hall), then relit: soft dark corners and junctions, warm
 // pools round every lamp and fire, cooler light by the windows.
 import { THREE } from './gfx.js';
 import { Kit, mat, matrix, rng, sstep, gridGeo } from './town_kit.js';

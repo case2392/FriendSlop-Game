@@ -1,10 +1,12 @@
 // The town: every W.buildings entry (gas station, pawn shop, store, casino) drawn from its record
 // by town_build.js in the day's style (interiors included); every W.signs (carved and painted wooden
 // boards hung between posts, a gilded casino board, roadside billboards that face the drivers, the
-// code daubed on the rim); street lamps (W.decor 'lamp'); the town's furniture and interactables
-// (pawn counter and bell, store goods and price boards, the half-moon blackjack table, hit/stand rugs,
-// buttons, the double-or-nothing contraption, slot machines); the NPCs; the Repo Man's steam tow wagon;
-// and a Westfall windmill out past the end of the farm town.
+// gate code brushed in house paint on a slab of rim rock with a rag-tied stake beside it); street lamps
+// (W.decor 'lamp'); the yards (town_yard.js: door aprons and the yard_* props); the town's furniture and
+// interactables (pawn counter and bell, Ed's chained placard, store goods and price boards, the blackjack
+// table, hit/stand rugs, coloured glass buttons with engraved brass plaques, the double-or-nothing
+// contraption, slot machines, the bar); the NPCs; the Repo Man's steam tow wagon; and a Westfall windmill
+// out past the end of the farm town. Lamps, windows and signs glow with atmo.night.
 // Static geometry is merged per material and per spatial cluster (the town, each roadside stop, each
 // lone sign), so far clusters are culled. Roadside stuff (POI furniture, gates, anchors, camp) is in
 // roadside3d.js.
@@ -1109,7 +1111,7 @@ export function buildStructures(W) {
   const fctx = { glows, domes, styleName: style, casino: W.buildings.find(b => b.kind === 'casino'), slotTint: () => new THREE.Color('#ffffff').lerp(new THREE.Color(muteColor(slotCols[slotI++ % 5], { sMax: 0.5, lMin: 0.35, lMax: 0.6 })), 0.55).toArray() };
   for (const s of W.statics) {
     if (s.mat === 'invisible' || isRoadside(s) || s.bld !== undefined) continue;
-    if (s.part === 'shop_shelf') continue;   // collider only: town_build's shopShelves draws the shelves
+    if (s.part === 'shop_shelf' || s.part === 'rim_slab') continue;   // colliders only: town_build's shopShelves and rimCode draw these
     if (YARD_PARTS.has(s.part)) yardProp(s, batch, style, glows);
     else furniture(s, batch, fctx);
   }
