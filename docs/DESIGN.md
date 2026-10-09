@@ -499,12 +499,28 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
 5. **Scope.** The rule in §3 is the defense. If a mechanic doesn't touch
    the RV or the wallet, it doesn't ship.
 6. **Load time.** Zero assets means every texture is painted and every mesh
-   built in the browser. Measured with software rendering on 4 CPU cores,
-   the first day appears after about 35 s and each later day rebuilds in
-   9–14 s. It hasn't been measured on a real GPU. If players bounce off the
-   wait, the fixes are cheap: cache the painted canvases in IndexedDB keyed
-   by texture name and version, paint in a worker with OffscreenCanvas, and
-   build the next day's world during the night scene.
+   built in the browser. Three things now cut the wait. Painted textures are
+   kept in the browser (IndexedDB, as PNG, keyed by a hash of the paint code
+   that made them), so a returning player decodes them instead of painting.
+   A pool of paint workers (the same family modules on OffscreenCanvas) paints
+   the day's textures while the loading bar is up. At nightfall the next
+   day's world data and textures get ready behind the night scene.
+   `tools/texhash.mjs` checks every texture comes out pixel-identical all
+   three ways; `tools/loadtime.mjs` measures. With software rendering on 4 CPU
+   cores, from "Start a Trip" (median of two runs, before → after): a first
+   visit's world is built in 13.3 → 14.6 s and draws its first frames at
+   38 → 32 s; a returning player's world is built in 12.5 → 7.7 s and draws at
+   37 → 30.5 s; a new day draws in 17–22 s → 15–21 s the first time,
+   13–14.5 s once its textures are cached, NIGHT_AFTER after a night. What's
+   left: on that machine most of the wait is the software renderer building
+   shader pipelines (a trace of a returning player's load shows about 28 s
+   of GPU-process time in pipeline creation); a first visit still paints
+   about half the textures on the main thread, because their paints clip
+   with antialiasing and an OffscreenCanvas clips without it; and the
+   character atlases are never cached, because their pixels depend on what
+   was painted before them (characters.js strokes through a shared scratch
+   canvas whose size depends on history), so they're painted in game order
+   as before. None of it has been measured on a real GPU.
 
 ---
 

@@ -214,14 +214,18 @@ function settle(name, v) {
   if (j) { S.jobs.delete(name); j.resolve(v); }
 }
 
+// Background work (a prefetch: prio >= 1) gets one worker at a time, so it never takes more than a
+// core from the game it runs behind; a build that is waiting (prio 0) gets them all.
 function pump() {
   if (!S.ready) return;
   S.queue.sort((a, b) => a.prio - b.prio || a.seq - b.seq);
   for (const W of S.workers) {
     if (W.busy || W.storeCb || !W.alive) continue;
-    let j;
-    while ((j = S.queue.shift()) && P.ready(j.name)) settle(j.name, true);   // the page got there first
+    while (S.queue.length && P.ready(S.queue[0].name)) settle(S.queue.shift().name, true);   // the page got there first
+    const j = S.queue[0];
     if (!j) break;
+    if (j.prio >= 1 && S.workers.some(x => x.busy && x.busy.prio >= 1)) break;
+    S.queue.shift();
     W.busy = j;
     W.w.postMessage({ t: 'paint', id: j.seq, name: j.name });
   }
@@ -274,7 +278,7 @@ function paintIdle(name, ok) {
       while (idleQ.length && (P.ready(idleQ[0].name) || idleQ[0].ok() === null)) { const j = idleQ.shift(); j.res(P.ready(j.name)); }
       const j = idleQ[0];
       if (!j) { idleRunning = false; return; }
-      if (j.ok() && dl.timeRemaining() >= 40) {
+      if (j.ok() && dl.timeRemaining() >= 8) {   // a paint can outlast the slot: ok() only says yes while nobody is typing
         idleQ.shift();
         try { P.canvasFor(j.name); } catch (e) { console.warn('texture', j.name, e.message); }
         j.res(P.ready(j.name));
@@ -311,12 +315,14 @@ export async function prepare(names, { prio = 0, page = true, idleOk = () => tru
   const loaded = (H ? loadFromCache(lookup) : Promise.resolve(new Map())).then(hits => {
     for (const [name, bmp] of hits) if (P.adopt(name, bmp)) { S.good.add(name); S.stats.cacheHits++; }
   });
-  let warm = false, tw = t0, tp = t0;
+  let warm = false, tw = t0, tp = t0, bumped = false;
   try { warm = !!localStorage.getItem('nmdTexStored'); } catch { warm = false; }
   if (warm) await loaded;
   const tasks = want.map((name, k) => {
     if (S.waiting.has(name)) {   // already on its way (a night prefetch, say): wait for it, then paint here if it couldn't
       if (page === true) promote(name);
+      const qd = S.queue.find(j => j.name === name);   // still queued at a background priority: it's wanted now
+      if (qd && prio + k * 1e-6 < qd.prio) { qd.prio = prio + k * 1e-6; bumped = true; }
       return S.waiting.get(name).then(async () => { if (!P.ready(name) && page === true && !ALONE.has(name)) await paintHere(name); }).then(step);
     }
     const p = (async () => {
@@ -330,6 +336,7 @@ export async function prepare(names, { prio = 0, page = true, idleOk = () => tru
     S.waiting.set(name, p);
     return p.then(step);
   });
+  if (bumped) pump();
   await Promise.all(tasks);
   await loaded;
   const r = { ready: want.filter(n => P.ready(n)).length, total, ms: Math.round(now() - t0), workersDone: Math.round(Math.max(0, tw - t0)), pageDone: Math.round(Math.max(0, tp - t0)) };

@@ -80,11 +80,15 @@ One person **STARTS A TRIP**, sends the 4-letter code, and everyone else
 replay the same roads, put the same number in "trip seed".
 
 **The first load takes a while.** Every texture is painted and every mesh is
-built in your browser when a day starts. On a machine with no GPU (software
-rendering on 4 CPU cores) the first day takes about 35 s to appear, and each
-later day about 9–14 s. A real graphics card does the shader and texture
-work much faster, but we haven't measured it. Use a browser with hardware
-acceleration on.
+built in your browser. Background workers paint what they can while the
+loading bar is up, your browser keeps the painted textures (IndexedDB) so
+the next visit decodes them instead, and the next day gets ready during the
+night. On a machine with no GPU (software rendering on 4 CPU cores), from
+"Start a Trip": the first visit draws its first frames after about 32 s, a
+returning visit after about 30 s (its world is built in about 8 s), and a
+later day takes 13–21 s. Most of the rest on that machine is software shader
+compiling; a real graphics card does that much faster, but we haven't
+measured it. Use a browser with hardware acceleration on.
 
 | | |
 |---|---|

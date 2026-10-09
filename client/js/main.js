@@ -46,10 +46,10 @@ const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').class
 // (the few the page must paint itself only in long idle stretches while nobody is typing)
 let lastInput = 0;
 for (const ev of ['keydown', 'pointerdown']) window.addEventListener(ev, () => { lastInput = performance.now(); }, { capture: true, passive: true });
-const menuIdle = () => (S.phase !== 'menu' || S.W ? null : !document.hidden && performance.now() - lastInput > 2000);
-// Started once the title screen has finished painting (labels.js marks it with data-menu-art), so the
-// workers don't slow it down; at the latest 10 s after load, or as soon as a trip starts (prepare()
-// starts them itself).
+const titleDone = () => !!document.documentElement.dataset.menuArt;   // labels.js: the title screen is painted
+const menuIdle = () => (S.phase !== 'menu' || S.W ? null : titleDone() && !document.hidden && performance.now() - lastInput > 2000);
+// Started once the title screen has finished painting (labels.js marks it with data-menu-art) or 2 s
+// after load, whichever is first, or as soon as a trip starts (prepare() starts them itself).
 let texPrepStarted = false;
 const startTexPrep = () => {
   if (texPrepStarted) return;
@@ -57,7 +57,7 @@ const startTexPrep = () => {
   texPrep.init().then(() => { if (S.phase === 'menu' && !S.W) texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[0]), { prio: 2, page: 'idle', idleOk: menuIdle }); });
 };
 const t0Boot = performance.now();
-const waitTitle = () => { if (texPrepStarted) return; if (document.documentElement.dataset.menuArt || S.phase !== 'menu' || performance.now() - t0Boot > 10000) startTexPrep(); else setTimeout(waitTitle, 400); };
+const waitTitle = () => { if (texPrepStarted) return; if (titleDone() || S.phase !== 'menu' || performance.now() - t0Boot > 2000) startTexPrep(); else setTimeout(waitTitle, 250); };
 if (document.readyState === 'complete') waitTitle(); else window.addEventListener('load', waitTitle, { once: true });
 S.texCache = { idle: texPrep.idle, stats: texPrep.stats, pagePainted: texPrep.pagePainted };
 S.texRecording = () => texPrep.recorded() !== null;
