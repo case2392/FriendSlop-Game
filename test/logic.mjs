@@ -27,6 +27,48 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(bad === 0 && tally.lose > tally.win, `blackjack engine: 3000 hands consistent ${JSON.stringify(tally)}`);
 }
 
+// --- painted textures: dependency tracking, adopted pictures, cache keys (pure logic) ---
+// client/js/paint/core.js and client/js/texcache.js, with a stand-in canvas (node has none)
+{
+  const ctx2d = cv => ({ canvas: cv, fillStyle: '', globalCompositeOperation: 'source-over', fillRect() {}, drawImage() {} });
+  const hadOC = 'OffscreenCanvas' in globalThis;
+  if (!hadOC) globalThis.OffscreenCanvas = class { constructor(w, h) { this.width = w; this.height = h; this.g = ctx2d(this); } getContext() { return this.g; } };
+  const P = await import('../client/js/paint/core.js');
+  const TC = await import('../client/js/texcache.js');
+  let xPaints = 0;
+  P.register('lt_a', { family: 'terrain', size: 8, paint() {} });
+  P.register('lt_b', { family: 'nature', size: 8, paint() { P.canvasFor('lt_a'); P.has('lt_missing'); } });
+  P.register('lt_c', { family: 'props', size: 8, paint() { P.canvasFor('lt_b'); } });
+  P.register('lt_x', { family: 'terrain', size: 8, paint() { xPaints++; } });
+  P.register('lt_y', { family: 'terrain', size: 8, paint() { P.canvasFor('lt_x'); } });
+  P.canvasFor('lt_c');
+  const deps = P.depsOf('lt_c');
+  check(JSON.stringify(deps) === JSON.stringify(['lt_a', 'lt_b', 'lt_missing']), `textures: a paint's dependencies are recorded transitively, absent ones too (${deps})`);
+  const H = { env: 'e', core: 'c', fam: { terrain: '1', nature: '2', props: '3' } };
+  const k0 = TC.keyOf('lt_c', deps, H, P.meta);
+  const differs = (h, why) => check(TC.keyOf('lt_c', deps, h, P.meta) !== k0, `textures: the cache key changes with ${why}`);
+  check(TC.keyOf('lt_c', deps, { ...H, fam: { ...H.fam } }, P.meta) === k0, 'textures: the cache key is stable for the same sources');
+  differs({ ...H, core: 'c2' }, 'core.js');
+  differs({ ...H, fam: { ...H.fam, props: '3b' } }, "the texture's own family");
+  differs({ ...H, fam: { ...H.fam, terrain: '1b' } }, "a dependency's family (two levels down)");
+  differs({ ...H, env: 'e2' }, 'the cache version or the browser');
+  P.register('lt_missing', { family: 'ui', size: 8, paint() {} });
+  check(TC.keyOf('lt_c', deps, { ...H, fam: { ...H.fam, ui: '4' } }, P.meta) !== k0, 'textures: the cache key changes when a texture the paint looked for appears');
+  check(TC.keyOf('lt_c', deps, H, P.meta) === null, 'textures: no key (never cached) when a dependency\'s family is not hashed');
+  check(TC.keyOf('lt_q', [], H, n => (n === 'lt_q' ? { family: 'characters-live', w: 8, h: 8 } : null)) === null, 'textures: no key for a texture registered at run time');
+  let closed = 0;
+  const bmp = (w, h) => ({ width: w, height: h, close() { closed++; } });
+  check(!P.adopt('lt_x', bmp(4, 4)) && closed === 1, 'textures: a picture of the wrong size is refused');
+  check(P.adopt('lt_x', bmp(8, 8)) && P.ready('lt_x') && !P.painted('lt_x'), 'textures: an adopted picture waits for canvasFor');
+  P.canvasFor('lt_x');
+  check(xPaints === 0 && closed === 2 && !P.painted('lt_x'), 'textures: canvasFor copies an adopted picture instead of painting');
+  P.canvasFor('lt_y');
+  check(xPaints === 1, "textures: a paint that reads an adopted texture gets it painted (whatever painting it leaves behind)");
+  check(!P.adopt('lt_y', bmp(8, 8)) && closed === 3, 'textures: a picture for an already painted texture is refused');
+  check(TC.hash53('core.js v1') !== TC.hash53('core.js v2') && TC.hash53('x') === TC.hash53('x'), 'textures: source hash');
+  if (!hadOC) delete globalThis.OffscreenCanvas;
+}
+
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server did not start')), 8000); });

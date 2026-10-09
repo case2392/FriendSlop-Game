@@ -2506,8 +2506,7 @@ register('rs_pelts', {
 // ---- atlases: textures that share one draw call per cluster -----------------------------------------------
 // Each part is painted exactly as its own texture would be (same paint function, same seed), then placed.
 function part(name) {
-  const t = meta(name), cv = document.createElement('canvas');
-  cv.width = t.w; cv.height = t.h;
+  const t = meta(name), cv = makeCanvas(t.w, t.h);
   const g = cv.getContext('2d', { willReadFrequently: true });
   if (!t.alpha) { g.fillStyle = '#7f7f7f'; g.fillRect(0, 0, t.w, t.h); }
   t.paint(g, t.w, rngFrom(name), t.h, cv);

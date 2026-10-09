@@ -67,6 +67,9 @@ async function jump(page, d, tag) {
 }
 // the texture cache writes in idle time after the world is up: wait for it to drain (no-op on old code)
 const cacheIdle = page => page.waitForFunction(() => { const c = window.__nmd?.texCache; return !c || c.idle(); }, null, { timeout: 600000, polling: 500 }).catch(() => console.log('  (cache never went idle)'));
+// the client's own marks (main.js): textures ready, build, prefetch; and texprep.js's counters
+const marks = page => page.evaluate(() => performance.getEntriesByType('measure').map(m => `${m.name} ${(m.duration / 1000).toFixed(1)}s`).join(' · ')).catch(() => '');
+const texStats = page => page.evaluate(() => { const s = window.__nmd?.texCache?.stats?.(); return s ? `workers ${s.workers}, cache hits ${s.cacheHits}, misses ${s.cacheMiss}, worker paints ${s.workerPaints}, page paints ${s.pagePaints} (${(s.pageMs / 1000).toFixed(1)} s), stored ${s.stored} (${s.storedKB} KB)${s.storeErr ? ', store error: ' + s.storeErr : ''}${s.failed ? ', ' + s.failed : ''}` : '(no texture cache)'; }).catch(() => '');
 async function night(page, secs) {
   await send(page, { t: 'dbg', op: 'phase', ph: 'night' });
   await send(page, { t: 'dbg', op: 'clock', h: 22.5 });
@@ -90,15 +93,15 @@ if (!SKIP.has('cold') || !SKIP.has('warm')) {
   let t = Date.now();
   await cacheIdle(a);
   console.log(`  (cache writes drained ${((Date.now() - t) / 1000).toFixed(1)} s after the last build)`);
-  const stats = await a.evaluate(() => window.__nmd.texCache?.stats?.() || null);
-  if (stats) console.log('  cache:', JSON.stringify(stats));
+  console.log('  marks:', await marks(a));
+  console.log('  textures:', await texStats(a));
   await a.close();
   if (!SKIP.has('warm')) {
     const b = await open(ctx, 'warm');
     await firstLoad(b, 'warm');
     for (const d of [3, 5]) await jump(b, d, 'warm');
-    const s2 = await b.evaluate(() => window.__nmd.texCache?.stats?.() || null);
-    if (s2) console.log('  cache:', JSON.stringify(s2));
+    console.log('  marks:', await marks(b));
+    console.log('  textures:', await texStats(b));
     await b.close();
   }
   await ctx.close();
@@ -111,8 +114,11 @@ if (!SKIP.has('night')) {
     await jump(c, d0, 'night');
     const fr = await night(c, NIGHT_SECS);
     console.log(`  night before day ${d1}: ${fr}`);
+    console.log('  prefetch:', JSON.stringify(await c.evaluate(() => window.__nmd.prefetch || null)));
     await jump(c, d1, 'after-night');
   }
+  console.log('  marks:', await marks(c));
+  console.log('  textures:', await texStats(c));
   await ctx.close();
 }
 const perf = errors.length ? 'PAGE ERRORS:\n' + errors.slice(0, 20).join('\n') : 'no page errors';

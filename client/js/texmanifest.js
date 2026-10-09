@@ -3,3 +3,7 @@
 // `node tools/texmanifest.mjs` from real builds of every day on a few seeds; a stale list only costs
 // speed (a texture missing here is painted on the main thread when asked for, as it always was).
 export const DAY_TEXTURES = {};
+// textures whose paint clips (an OffscreenCanvas clips without antialiasing): the page paints these
+export const PAGE_ONLY = [];
+// families whose pixels depend on what was painted before them: never prepared ahead, never cached
+export const IN_ORDER = ['characters'];

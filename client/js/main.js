@@ -15,6 +15,7 @@ import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
+import * as texPrep from './texprep.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -39,7 +40,12 @@ let worldBuilding = false;
 // ---- boot ---------------------------------------------------------------------------
 
 initGfx($('canvas'));
-const physReady = initPhys().then(() => { $('loading').classList.add('hidden'); });
+const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); });
+// the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js)
+const startTexPrep = () => (window.requestIdleCallback || setTimeout)(() => texPrep.init(), { timeout: 800 });
+if (document.readyState === 'complete') startTexPrep(); else window.addEventListener('load', startTexPrep, { once: true });
+S.texCache = { idle: texPrep.idle, stats: texPrep.stats };
+S.texRecording = () => texPrep.recorded() !== null;
 rvView = new RVView(scene);
 hands = new Hands(camera, '#7CFC00');
 setTimeOfDay(9);
@@ -308,10 +314,49 @@ $('kpCancel').onclick = closeKeypad;
 
 // ---- world (re)build ----------------------------------------------------------------------
 
+// The loading screen (the boot bar, reused): shown from the world message until the new world has
+// drawn a frame; the bar follows the day's textures getting ready.
+function loadingBar(on, frac = 0, text = 'Loading the road') {
+  const el = $('loading');
+  if (!on) { el.classList.add('hidden'); return; }
+  el.classList.remove('hidden');
+  el.classList.add('day');
+  el.querySelector('span').textContent = text;
+  const b = el.querySelector('b');
+  b.style.animation = 'none';
+  b.style.width = `${Math.round(6 + 90 * Math.max(0, Math.min(1, frac)))}%`;
+}
+let buildSeq = 0, prefetched = null, recordTimer = 0;
+// Get the day's textures ready off the main thread before the build asks for them (texprep.js): from
+// the texture cache, else painted by the workers, the few that can't be painted there painted here
+// meanwhile. Never waits on a stuck worker: after 20 s without progress the build goes ahead and
+// canvasFor paints whatever is missing, as before.
+async function prepareDay(W) {
+  const names = texPrep.dayList(W.biome);
+  let last = performance.now();
+  const t0 = performance.now();
+  const p = texPrep.prepare(names, { page: true, onProgress: (d, n) => { last = performance.now(); loadingBar(true, 0.85 * d / Math.max(1, n)); } });
+  let stuck = false;
+  await Promise.race([p, new Promise(res => { const chk = () => (performance.now() - last > 20000 ? (stuck = true, res()) : setTimeout(chk, 500)); chk(); })]);
+  const r = stuck ? null : await p;
+  performance.measure?.(`textures day ${W.day}`, { start: t0, end: performance.now() });
+  if (stuck) console.warn('textures: the paint workers stalled; painting the rest here');
+  return r;
+}
+
 async function buildDay(m) {
+  const my = ++buildSeq;
   worldBuilding = true;
+  loadingBar(true, 0);
   await physReady;
-  const W = generateLeg(m.seed, m.day);
+  const pf = prefetched && prefetched.seed === m.seed && prefetched.day === m.day ? prefetched : null;
+  prefetched = null;
+  const W = pf ? pf.W : generateLeg(m.seed, m.day);
+  await prepareDay(W);
+  if (my !== buildSeq) return false;   // another world message came in meanwhile: that build takes over
+  const t0 = performance.now();
+  S.seed = m.seed;
+  texPrep.record(true, W.biome);   // learn what this biome's build asks for (next time it's ready first)
   if (S.wv) {
     scene.remove(S.wv.group);
     S.wv.terrain?.dispose?.();   // the grass clutter's instance buffers (materials are cached per biome)
@@ -334,9 +379,46 @@ async function buildDay(m) {
   S.interp.reset();
   S.dayLabel = m.day;
   zoneText(W.biomeName, `Day ${m.day} of ${C.DAYS}`);   // after the build: the fade starts on the next rendered frames
+  performance.measure?.(`build day ${m.day}`, { start: t0, end: performance.now() });
   worldBuilding = false;
   for (const fn of S.pendingAfterWorld || []) fn();
   S.pendingAfterWorld = [];
+  // the loading screen stays up until the new world has drawn; then, once things are quiet, what was
+  // painted this session goes into the texture cache (the workers encode and write it, idle slot by
+  // idle slot) and the list of what this build asked for is kept for next time
+  const f0 = S.frames || 0;
+  const afterFrames = () => {
+    if (my !== buildSeq) return;
+    if ((S.frames || 0) < f0 + 2) { requestAnimationFrame(afterFrames); return; }
+    loadingBar(false);
+    clearTimeout(recordTimer);
+    recordTimer = setTimeout(() => { if (my === buildSeq) { texPrep.record(false); texPrep.flush(); } }, 3000);
+  };
+  requestAnimationFrame(afterFrames);
+  return true;
+}
+
+// At nightfall, get tomorrow ready behind the night scene: its world data (generated once, reused by
+// the morning build) and its textures, decoded from the cache or painted by the workers. Nothing here
+// paints or builds on the main thread; the morning build only copies what's ready.
+let lastPhase = null;
+function onPhase(ph) {
+  if (ph === lastPhase) return;
+  lastPhase = ph;
+  if (ph !== 'night' || !S.W || S.seed == null) return;
+  const day = S.W.day + 1, seed = S.seed;
+  if (day > C.DAYS || (prefetched && prefetched.day === day && prefetched.seed === seed)) return;
+  const idle = window.requestIdleCallback || (f => setTimeout(f, 200));
+  idle(() => {
+    if (lastPhase !== 'night' || S.W?.day !== day - 1) return;
+    const t0 = performance.now();
+    const W = generateLeg(seed, day);
+    prefetched = { seed, day, W };
+    texPrep.prepare(texPrep.dayList(W.biome), { prio: 1, page: false }).then(r => {
+      performance.measure?.(`prefetch day ${day}`, { start: t0, end: performance.now() });
+      S.prefetch = { day, ...r };
+    });
+  }, { timeout: 3000 });
 }
 const afterWorld = fn => { if (worldBuilding || !S.W) (S.pendingAfterWorld ||= []).push(fn); else fn(); };
 
@@ -383,7 +465,7 @@ net.on('_close', () => {
 });
 net.on('world', m => {
   const newDay = S.dayLabel != null && S.dayLabel !== m.day;
-  buildDay(m).then(() => { if (newDay) { sfx.day(); flash(`DAY ${m.day}`); } });
+  buildDay(m).then(built => { if (built && newDay) { sfx.day(); flash(`DAY ${m.day}`); } });
   $('receipt').classList.add('hidden');
   $('overScreen').classList.add('hidden');
 });
@@ -416,6 +498,7 @@ net.on('s', m => {
   if (!S.W || worldBuilding) return;
   S.interp.push(m, performance.now());
   S.g = m.g;
+  onPhase(m.g.ph);
   S.door = !!m.g.door;
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
@@ -609,7 +692,9 @@ requestAnimationFrame(frame);
   lastT = now;
   time += dt;
   S.frames = (S.frames || 0) + 1;
-  if (!S.W || worldBuilding || !S.lw) { if (!S.noRender) render(); return; }
+  // while a day loads, the last frame stays up under the loading bar: re-rendering the old scene would
+  // only take time from the paint workers (and on a software GPU a night frame costs seconds)
+  if (!S.W || worldBuilding || !S.lw) { if (!S.noRender && !worldBuilding) render(); return; }
 
   const rt = S.interp.time(now);
   S.renderT = rt;
