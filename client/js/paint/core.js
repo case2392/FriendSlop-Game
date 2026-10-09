@@ -29,7 +29,8 @@ export const pick = (rnd, arr) => arr[Math.floor(rnd() * arr.length)];
 // ---- canvas & color ----------------------------------------------------------------
 
 export function makeCanvas(w, h = w) {
-  const cv = document.createElement('canvas');
+  // in a paint worker (paint/worker.js) there is no document: the same canvas, offscreen
+  const cv = typeof document !== 'undefined' ? document.createElement('canvas') : new OffscreenCanvas(w, h);
   cv.width = w; cv.height = h;
   // Paint canvases live on the CPU: textures are read back (blurTile, pixel passes) and composited
   // with each other, and mixing GPU- and CPU-backed canvases forces slow readbacks. Later
@@ -387,9 +388,35 @@ export function paintRects(g, size, rects, rnd, { colors, gap = 3, gapColor = '#
 }
 
 // ---- the registry -------------------------------------------------------------------------
+//
+// canvasFor(name) hands out one canvas per texture, painted the first time it is asked for.
+// The load-time plumbing (client/js/texprep.js) can hand over a texture's finished picture before
+// anyone asks: adopt(name, bitmap), an ImageBitmap painted by a paint worker (paint/worker.js runs
+// these same family modules on an OffscreenCanvas) or decoded from the persistent texture cache
+// (client/js/texcache.js). canvasFor then copies that picture into the texture's canvas instead of
+// painting it; the pixels are the same (tools/texhash.mjs proves it texture by texture).
+//
+// While a texture paints, every texture its paint reads (canvasFor, has, meta) is recorded as a
+// dependency, with that texture's own dependencies: the texture cache's key covers their families'
+// source too. A paint that reads another texture always gets it painted in this thread, never an
+// adopted copy, because painting one texture can leave things behind that another one's paint uses
+// (terrain.js: cliff_snow_form reads the FORM that painting cliff_snow records).
 
 const REG = new Map();
-const CACHE = new Map();
+const CACHE = new Map();     // name -> the canvas canvasFor hands out
+const READY = new Map();     // name -> an adopted ImageBitmap nobody has asked for yet
+const COPIED = new Set();    // names whose canvas is a copy of an adopted picture, not a paint in this thread
+const DEPS = new Map();      // name -> the textures its paint read (transitively), from its last paint here
+let painting = null;         // the paint in progress: { name, deps: Set }
+// texprep.js listens: requested(name) when canvasFor is first asked for a texture (outside a paint);
+// painted(name, { cv, deps, ms }) after a paint on this thread
+export const hooks = { requested: null, painted: null };
+const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+function note(name) {
+  if (!painting || name === painting.name) return;
+  painting.deps.add(name);
+  for (const d of DEPS.get(name) || []) painting.deps.add(d);
+}
 
 // paint(g, size, rnd) draws into a size×size canvas (or w×h via opts.w/opts.h).
 export function register(name, { size = 512, w = null, h = null, family = 'misc', alpha = false, paint, note = '' }) {
@@ -399,16 +426,80 @@ export function register(name, { size = 512, w = null, h = null, family = 'misc'
   REG.set(name, { name, size, w: w || size, h: h || size, family, alpha, paint, note });
 }
 export function list(family = null) { return [...REG.values()].filter(t => !family || t.family === family); }
-export function has(name) { return REG.has(name); }
-export function canvasFor(name) {
-  if (CACHE.has(name)) return CACHE.get(name);
+export function has(name) { note(name); return REG.has(name); }
+// Paint a texture onto a new canvas of its own (canvasFor's cache is not touched).
+export function paintTexture(name) {
   const t = REG.get(name);
   if (!t) throw new Error(`no texture registered as "${name}"`);
-  const cv = makeCanvas(t.w, t.h);
-  const g = cv.getContext('2d', { willReadFrequently: true });
-  if (!t.alpha) fill(g, t.w, t.h, '#7f7f7f');
-  t.paint(g, t.w, rngFrom(name), t.h, cv);
-  CACHE.set(name, cv);
-  return cv;
+  const outer = painting, mine = { name, deps: new Set() }, t0 = clock();
+  painting = mine;
+  try {
+    const cv = makeCanvas(t.w, t.h);
+    const g = cv.getContext('2d', { willReadFrequently: true });
+    if (!t.alpha) fill(g, t.w, t.h, '#7f7f7f');
+    t.paint(g, t.w, rngFrom(name), t.h, cv);
+    const deps = [...mine.deps].sort();
+    DEPS.set(name, deps);
+    return { cv, deps, ms: clock() - t0 };
+  } finally { painting = outer; }
 }
-export function meta(name) { return REG.get(name); }
+export function canvasFor(name) {
+  if (painting) {
+    // read by another texture's paint: painted here, as it always was
+    let cv = CACHE.get(name);
+    if (!cv || COPIED.has(name)) {
+      const p = paintTexture(name);
+      if (!cv) { CACHE.set(name, cv = p.cv); dropReady(name); hooks.painted?.(name, p); } else cv = p.cv;
+    }
+    note(name);
+    return cv;
+  }
+  const hit = CACHE.get(name);
+  if (hit) return hit;
+  const t = REG.get(name);
+  if (!t) throw new Error(`no texture registered as "${name}"`);
+  hooks.requested?.(name);
+  const bmp = READY.get(name);
+  if (bmp) {
+    READY.delete(name);
+    const cv = copyOf(bmp, t);
+    if (cv) { CACHE.set(name, cv); COPIED.add(name); return cv; }
+  }
+  const p = paintTexture(name);
+  CACHE.set(name, p.cv);
+  hooks.painted?.(name, p);
+  return p.cv;
+}
+export function meta(name) { note(name); return REG.get(name); }
+
+// ---- finished pictures handed over by texprep.js ----
+
+function copyOf(bmp, t) {
+  try {
+    if (bmp.width !== t.w || bmp.height !== t.h) return null;
+    const cv = makeCanvas(t.w, t.h), g = cv.getContext('2d', { willReadFrequently: true });
+    g.globalCompositeOperation = 'copy';
+    g.drawImage(bmp, 0, 0);
+    g.globalCompositeOperation = 'source-over';
+    return cv;
+  } catch { return null; } finally { try { bmp.close(); } catch {} }
+}
+function dropReady(name) { const b = READY.get(name); if (b) { READY.delete(name); try { b.close(); } catch {} } }
+// Keep a finished picture of a texture for canvasFor. False if the texture is already painted or
+// unknown, or the picture is the wrong size (the bitmap is closed then).
+export function adopt(name, bmp) {
+  const t = REG.get(name);
+  if (!t || CACHE.has(name) || bmp.width !== t.w || bmp.height !== t.h) { try { bmp.close(); } catch {} return false; }
+  dropReady(name);
+  READY.set(name, bmp);
+  return true;
+}
+// is the texture's picture here already (painted, copied, or adopted and waiting)?
+export function ready(name) { return CACHE.has(name) || READY.has(name); }
+export function painted(name) { return CACHE.has(name) && !COPIED.has(name); }
+// let adopted pictures nobody asked for go (a prefetched day that never came)
+export function release(names) { for (const n of names) dropReady(n); }
+// the dependencies recorded at this texture's last paint in this thread
+export function depsOf(name) { return DEPS.get(name) || null; }
+// forget a painted canvas (a paint worker frees what it has stored)
+export function forget(name) { CACHE.delete(name); COPIED.delete(name); }
