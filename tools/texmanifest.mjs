@@ -7,9 +7,9 @@
 //
 //   node tools/texmanifest.mjs [--seeds 777,1,2] [--check]
 //
-// Builds every day on each seed in the real game page with the paint workers and the texture cache
-// off (so every texture the build asks for is seen), reads what texprep.js recorded, then has a
-// paint worker try each texture. --check only reports whether the file on disk is current.
+// Builds every day on each seed in a fresh page (so every texture the build asks for is seen) and
+// records what canvasFor is asked for; finds the families whose paints depend on paint order; then
+// has a paint worker try each texture. --check only reports whether the file on disk is current.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,27 +32,38 @@ const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PAT
 const errors = [];
 const lists = Object.fromEntries(BIOMES.map(b => [b, []]));
 
+// one fresh page per seed and day, so the build asks for every texture it uses (nothing cached by an
+// earlier day): the world build, the paper map, every loot prop, one rendered frame
 for (const seed of SEEDS) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
-  const page = await ctx.newPage();
-  page.setDefaultTimeout(900000);
-  page.on('pageerror', e => errors.push(e.message));
-  await page.goto(`http://localhost:${PORT}/?paintWorkers=0&texcache=0`);
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
-  await page.fill('#nameInput', 'Steve');
-  await page.fill('#seedInput', seed);
-  await page.click('#hostBtn');
   for (let d = 1; d <= 5; d++) {
-    if (d > 1) await page.evaluate(d => window.__nmd.send({ t: 'dbg', op: 'day', d }), d);
-    await page.waitForFunction(d => { const S = window.__nmd; return S?.W?.day === d && S.lw && S.wv; }, d);
-    const biome = await page.evaluate(() => window.__nmd.W.biome);
-    // texprep records from the build until a few seconds after the world has drawn
-    await page.waitForFunction(b => localStorage.getItem('nmdTexDay:' + b) && !window.__nmd.texRecording?.(), biome, { polling: 500 });
-    const got = await page.evaluate(b => JSON.parse(localStorage.getItem('nmdTexDay:' + b) || '[]'), biome);
+    const page = await browser.newPage();
+    page.setDefaultTimeout(900000);
+    page.on('pageerror', e => errors.push(e.message));
+    await page.goto(`http://localhost:${PORT}/gallery.html?family=none`);
+    const { biome, got } = await page.evaluate(async ([seed, day]) => {
+      const P = await import('/js/paint/index.js');
+      const gfx = await import('/js/gfx.js');
+      const cv = document.createElement('canvas'); cv.width = 640; cv.height = 360; document.body.appendChild(cv);
+      gfx.initGfx(cv);
+      const [{ generateLeg }, { buildWorld, updateWorld }, props, { LOOT }] = await Promise.all([import('/shared/world.js'), import('/js/world3d.js'), import('/js/props3d.js'), import('/shared/loot.js')]);
+      const set = new Set();
+      P.hooks.requested = n => set.add(n);
+      const W = generateLeg(+seed, day);
+      gfx.setBiome(W.biome);
+      const wv = buildWorld(W);
+      gfx.scene.add(wv.group);
+      props.mapCanvas(W);
+      for (const k of Object.keys(LOOT)) gfx.scene.add(props.buildProp(k, W));
+      gfx.camera.position.set(-13.5, W.heightAt(-13.5, -52.5) + 1.6, -52.5); gfx.camera.lookAt(0, 2, 0);
+      updateWorld(wv, 0.016, 1, gfx.camera.position);
+      gfx.setTimeOfDay(10); gfx.updateSun(gfx.camera.position);
+      gfx.render();
+      return { biome: W.biome, got: [...set] };
+    }, [seed, d]);
     for (const n of got) if (!lists[biome].includes(n)) lists[biome].push(n);
     console.log(`seed ${seed} day ${d} (${biome}): ${got.length} textures, ${lists[biome].length} so far`);
+    await page.close();
   }
-  await ctx.close();
 }
 
 // families whose paints depend on what was painted before them (characters.js strokes through a shared

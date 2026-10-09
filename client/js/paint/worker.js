@@ -16,8 +16,11 @@
 //                                        it hasn't yet; an inexact one is refused)
 //   ← { t: 'stored', id, n, bytes, err }
 //   → { t: 'drop', names }               forget these canvases (nothing to store, memory back)
-import { canvasFor, depsOf, forget, meta, hooks } from './index.js';
-import { keyOf, put } from '../texcache.js';
+//   → { t: 'load', id, names }           read these from the texture cache: key check, decode
+//   ← { t: 'loaded', id, hits, bmps, bad, err, cache }
+//   → { t: 'prune' }                     delete records of textures that no longer exist
+import { canvasFor, depsOf, forget, meta, hooks, has } from './index.js';
+import { keyOf, put, getMany, remove, names as cachedNames, status as cacheStatus } from '../texcache.js';
 import { IN_ORDER } from '../texmanifest.js';
 
 let H = null, fresh = [];
@@ -75,6 +78,8 @@ async function store(names, bmps = null, depsList = null) {
       const deps = bmps?.[i] ? (depsList?.[i] || []) : (depsOf(name) || []);
       const key = keyOf(name, deps, H, meta);
       if (key) {
+        const had = (await getMany([name], 15000)).get(name);
+        if (had && had.key === key && had.w === cv.width && had.h === cv.height) { n++; forget(name); continue; }   // already there (another tab, an earlier session)
         const blob = await cv.convertToBlob({ type: 'image/png' });
         if (await put({ name, key, w: cv.width, h: cv.height, deps, blob, at: Date.now() })) { n++; bytes += blob.size; }
         else err = 'write failed';
@@ -92,11 +97,11 @@ self.onmessage = async ({ data: m }) => {
       const probe = new OffscreenCanvas(4, 4).getContext('2d', { willReadFrequently: true });
       if (!probe) throw new Error('no 2d context on OffscreenCanvas');
       H = m.hashes || null;
+      // test hook (tools/texfaults.mjs): storage that throws, the way a private window's can
+      if (m.breakStorage) Object.defineProperty(self, 'indexedDB', { get() { throw new DOMException('storage denied', 'SecurityError'); } });
       await loadFonts(m.fonts);
       post({ t: 'ready', ok: true });
     } catch (e) { post({ t: 'ready', ok: false, err: e.message }); }
-  } else if (m.t === 'hashes') {
-    H = m.hashes;
   } else if (m.t === 'paint') {
     try {
       fresh = []; clipped = false;
@@ -112,8 +117,35 @@ self.onmessage = async ({ data: m }) => {
       const bmp = await createImageBitmap(cv);
       post({ t: 'done', id: m.id, name: m.name, bmp, exact, fresh: got }, [bmp]);
     } catch (e) { post({ t: 'fail', id: m.id, name: m.name, err: e.message }); }
+  } else if (m.t === 'load') {
+    // cache reads happen here, not on the page: a busy page can't delay them. Each record's key must
+    // still match its texture's sources; it is decoded (off every thread that matters) and handed
+    // back; a stale or unreadable record is deleted (this session's paint replaces it)
+    const hits = [], bmps = [], bad = [];
+    let err = '';
+    try {
+      if (!H) throw new Error('no source hashes');   // can't tell good records from stale ones: read nothing, delete nothing
+      const recs = await getMany(m.names, 15000);
+      await Promise.all(m.names.map(async name => {
+        const rec = recs.get(name), t = meta(name);
+        if (!rec) return;
+        if (t && rec.w === t.w && rec.h === t.h && rec.key === keyOf(name, rec.deps, H, meta)) {
+          try {
+            const bmp = await createImageBitmap(rec.blob, { premultiplyAlpha: 'default', colorSpaceConversion: 'none' });
+            if (bmp.width === t.w && bmp.height === t.h) { hits.push(name); bmps.push(bmp); return; }
+            bmp.close();
+          } catch { /* unreadable */ }
+        }
+        bad.push(name);
+      }));
+      if (bad.length) await remove(bad);
+    } catch (e) { err = e.message; }
+    post({ t: 'loaded', id: m.id, hits, bmps, bad, err, cache: cacheStatus() }, bmps);
+  } else if (m.t === 'prune') {
+    // records of textures that no longer exist
+    try { const gone = (await cachedNames()).filter(n => !has(n)); if (gone.length) await remove(gone); } catch { /* next time */ }
   } else if (m.t === 'store') {
-    post({ t: 'stored', id: m.id, ...(await store(m.names, m.bmps, m.deps)) });
+    post({ t: 'stored', id: m.id, ...(await store(m.names, m.bmps, m.deps)), cache: cacheStatus() });
   } else if (m.t === 'drop') {
     for (const n of m.names) forget(n);
   }

@@ -1,6 +1,6 @@
 // NO MONEY DOWN — client entry.
 import * as C from '/shared/constants.js';
-import { generateLeg } from '/shared/world.js';
+import { generateLeg, BIOME_BY_DAY } from '/shared/world.js';
 import { LOOT, fmt$ } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
 import * as net from './net.js';
@@ -41,10 +41,13 @@ let worldBuilding = false;
 
 initGfx($('canvas'));
 const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); });
-// the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js)
-const startTexPrep = () => (window.requestIdleCallback || setTimeout)(() => texPrep.init(), { timeout: 800 });
+// the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js); while
+// the menu is up they get the first day's textures ready (a trip starts on day 1), all off this thread
+const startTexPrep = () => (window.requestIdleCallback || setTimeout)(() => {
+  texPrep.init().then(() => { if (S.phase === 'menu' && !S.W) texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[0]), { prio: 2, page: false }); });
+}, { timeout: 800 });
 if (document.readyState === 'complete') startTexPrep(); else window.addEventListener('load', startTexPrep, { once: true });
-S.texCache = { idle: texPrep.idle, stats: texPrep.stats };
+S.texCache = { idle: texPrep.idle, stats: texPrep.stats, pagePainted: texPrep.pagePainted };
 S.texRecording = () => texPrep.recorded() !== null;
 rvView = new RVView(scene);
 hands = new Hands(camera, '#7CFC00');
@@ -333,6 +336,7 @@ let buildSeq = 0, prefetched = null, recordTimer = 0;
 // canvasFor paints whatever is missing, as before.
 async function prepareDay(W) {
   const names = texPrep.dayList(W.biome);
+  texPrep.keepOnly(names);
   let last = performance.now();
   const t0 = performance.now();
   const p = texPrep.prepare(names, { page: true, onProgress: (d, n) => { last = performance.now(); loadingBar(true, 0.85 * d / Math.max(1, n)); } });

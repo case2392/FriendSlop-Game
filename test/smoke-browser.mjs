@@ -201,6 +201,25 @@ try {
   await host.waitForFunction(() => { const p = [...window.__nmd.voicePeers?.() || []]; return p.length === 1 && p[0].panner; }, null, { timeout: 60000 }).catch(() => {});
   const vstate = await host.evaluate(() => ({ on: window.__nmdVoice?.on, peers: window.__nmdVoice ? [...window.__nmdVoice.peers.values()].map(p => ({ state: p.pc.connectionState, spatial: !!p.panner })) : null }));
   check(vstate.on && vstate.peers?.length === 1 && vstate.peers[0].spatial, `proximity voice mesh up (${JSON.stringify(vstate.peers)})`);
+
+  // ---- painted textures: got ready off the main thread, written to the cache, read back next time ----
+  const tx = await host.evaluate(() => window.__nmd.texCache.stats());
+  check(tx.workers > 0 && !tx.fails && tx.workerPaints > 0, `paint workers painted the day's textures (${tx.workers} workers: ${tx.workerPaints} textures off the main thread, ${tx.pagePaints} on it)`);
+  await host.waitForFunction(() => window.__nmd.texCache.idle(), null, { timeout: 240000, polling: 1000 });
+  const tx2 = await host.evaluate(() => window.__nmd.texCache.stats());
+  check(tx2.stored > 0 && !tx2.storeErr && !tx2.cache.broken, `painted textures went into the texture cache (${tx2.stored} textures, ${tx2.storedKB} KB)`);
+  // a returning player: a new page in Steve's profile decodes the day's textures instead of painting them
+  const back = await host.context().newPage();
+  back.setDefaultTimeout(240000);
+  back.on('pageerror', e => errors.push(`[Steve again] ${e.message}`));
+  await back.goto(`http://localhost:${PORT}`);
+  await back.fill('#nameInput', 'Steve');
+  await back.fill('#seedInput', '777');
+  await back.click('#hostBtn');
+  await ready(back);
+  const tx3 = await back.evaluate(() => window.__nmd.texCache.stats());
+  check(tx3.cacheHits > 50 && tx3.workerPaints < 10, `a second visit decoded ${tx3.cacheHits} textures from the cache (${tx3.workerPaints} painted by workers, ${tx3.pagePaints} by the page)`);
+  await back.close();
 } catch (e) {
   fail(e.stack || e.message);
 }

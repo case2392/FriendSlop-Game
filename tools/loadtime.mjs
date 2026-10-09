@@ -2,7 +2,7 @@
 // later day takes to rebuild. One Chromium context, so the painted-texture cache (IndexedDB) carries
 // over from the cold page to the warm one exactly as it would for a returning player.
 //
-//   node tools/loadtime.mjs [--root DIR] [--seed N] [--skip cold,warm,night]
+//   node tools/loadtime.mjs [--root DIR] [--seed N] [--skip cold,warm,night] [--dwell ms] [--night s]
 //
 //   cold   a fresh profile: page load, host -> world built -> 5 frames, then days 3 and 5 (dbg jumps)
 //   warm   a second page in the same profile once the cold page's cache writes are done
@@ -21,6 +21,7 @@ const ROOT = path.resolve(arg('root', path.join(path.dirname(fileURLToPath(impor
 const SEED = arg('seed', '777');
 const SKIP = new Set(String(arg('skip', '')).split(',').filter(Boolean));
 const NIGHT_SECS = +arg('night', 12);
+const DWELL = +arg('dwell', 0);   // ms on the menu before clicking "Start a Trip" (a player types a name)
 
 const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);
 let PORT; do PORT = 9000 + Math.floor(Math.random() * 900); while (UNSAFE_PORTS.has(PORT));
@@ -49,6 +50,7 @@ async function firstLoad(page, tag) {
   await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
   await page.fill('#nameInput', 'Steve');
   await page.fill('#seedInput', SEED);
+  if (DWELL) await page.waitForTimeout(DWELL);
   t = Date.now();
   await page.click('#hostBtn');
   await built(page, 1);
@@ -84,7 +86,7 @@ async function night(page, secs) {
   return `${gaps.length} frames, median ${med.toFixed(0)} ms, worst ${(gaps[gaps.length - 1] || 0).toFixed(0)} ms`;
 }
 
-console.log(`root ${ROOT} · seed ${SEED}`);
+console.log(`root ${ROOT} · seed ${SEED}${DWELL ? ` · ${DWELL / 1000} s on the menu before hosting` : ' · host clicked as soon as the page has loaded'}`);
 if (!SKIP.has('cold') || !SKIP.has('warm')) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const a = await open(ctx, 'cold');

@@ -7,7 +7,8 @@
 // Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) boulder gate grade winch town pawn casino
 //        pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin crew hands loot night   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
-// 3 snow, 4 badlands, 5 desert.
+// 3 snow, 4 badlands, 5 desert.  PROFILE=<dir> keeps one browser profile across runs (the
+// painted-texture cache too), so a second run shows the textures as a returning player gets them.
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -26,10 +27,14 @@ const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 process.on('unhandledRejection', e => { console.log('FAILED:', e.message.split('\n')[0]); if (errors.length) console.log('page errors:\n' + errors.slice(0, 20).join('\n')); process.exit(1); });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('no server')), 60000); });
-const browser = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
+// PROFILE=<dir>: one persistent browser profile for every page (the painted-texture cache in IndexedDB
+// survives between runs: a second run shows the cached textures); default: a fresh profile per page
+const launchOpts = { executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] };
+const persistent = process.env.PROFILE ? await chromium.launchPersistentContext(process.env.PROFILE, { ...launchOpts, viewport: { width: 1280, height: 720 } }) : null;
+const browser = persistent || await chromium.launch(launchOpts);
 const errors = [];
 async function open(name) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const ctx = persistent || await browser.newContext({ viewport: { width: 1280, height: 720 } });
   const page = await ctx.newPage();
   page.setDefaultTimeout(240000);   // several agents may be rendering on swiftshader at once
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
@@ -254,5 +259,6 @@ const fps = await dave.evaluate(() => new Promise(r => { let n = 0; const t0 = p
 const calls = await dave.evaluate(() => window.__nmd.renderer?.()?.info?.render?.calls ?? null);
 console.log(`fps (swiftshader, last view): ${fps.toFixed(1)}${calls != null ? ` · draw calls ${calls}` : ''}`);
 console.log(errors.length ? 'errors:\n' + errors.slice(0, 20).join('\n') : 'no page errors');
+if (persistent) await steve.waitForFunction(() => window.__nmd.texCache?.idle?.() ?? true, null, { timeout: 180000, polling: 500 }).catch(() => console.log('(texture cache writes still going at exit)'));
 await browser.close();
 process.exit(0);

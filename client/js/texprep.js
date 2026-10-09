@@ -1,10 +1,11 @@
 // Getting painted textures ready before the world build asks for them (docs/DESIGN.md, load time).
 //
 //   init()                    start the paint workers and hash the paint sources (cache keys)
-//   prepare(names, opts)      make these textures ready: decoded from the persistent cache (texcache.js)
-//                             where a good record exists, else painted by a pool of module workers
-//                             (paint/worker.js) running the same family modules. Results go to
-//                             paint/core.js (adopt): canvasFor then copies instead of painting.
+//   prepare(names, opts)      make these textures ready: read and decoded from the persistent cache
+//                             (texcache.js, by the workers) where a good record exists, else painted
+//                             by a pool of module workers (paint/worker.js) running the same family
+//                             modules. Results go to paint/core.js (adopt): canvasFor then copies
+//                             instead of painting.
 //                             opts.page: also paint, on this thread while the workers work, the ones
 //                             a worker can't paint exactly (see PAGE_ONLY); off for a background
 //                             prefetch, which never paints here. Resolves when all are ready or failed.
@@ -12,7 +13,9 @@
 //                             list (texmanifest.js) plus what this browser saw such a build ask for
 //   record(on, biome)         learn what a build asks for
 //   flush()                   after the world is up: what was painted this session goes into the cache,
-//                             PNG-encoded and written by the workers, one texture per idle slot
+//                             PNG-encoded and written by the workers one texture at a time (the page
+//                             only hands over a snapshot); anything a build needs goes first
+//   keepOnly(names)           let go of pictures readied for a different day
 //
 // None of it is needed for correctness. With no workers, no OffscreenCanvas, no IndexedDB, or any
 // error, canvasFor paints on the main thread exactly as it always did.
@@ -25,7 +28,6 @@ const hc = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) |
 const WANT = q.has('paintWorkers') ? Math.max(0, Math.min(8, +q.get('paintWorkers') | 0)) : Math.max(0, Math.min(4, hc - 1));
 const CACHE_ON = q.get('texcache') !== '0';
 const now = () => performance.now();
-const idleCb = typeof requestIdleCallback === 'function' ? (f, ms = 2000) => requestIdleCallback(f, { timeout: ms }) : f => setTimeout(f, 50);
 const tick = () => new Promise(r => setTimeout(r, 0));
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch { return []; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode, full: fine */ } };
@@ -51,7 +53,8 @@ const S = {
   snaps: new Map(),             // name -> { deps, bmp: Promise<ImageBitmap> }: painted here, to store
   good: new Set(),              // names whose cache record is known good (decoded or written this session)
   stats: { cacheHits: 0, cacheMiss: 0, decodeMs: 0, workerPaints: 0, workerMs: 0, pagePaints: 0, pageMs: 0, inexact: 0, stored: 0, storedKB: 0, storeErr: '', fails: 0 },
-  seq: 0, rec: null, recBiome: null, flushing: false,
+  seq: 0, rec: null, recBiome: null, flushing: false, cacheOff: '',
+  pageNames: [],                // what the page painted itself, for the harness ("name ms")
 };
 
 // ---- fonts: the workers load the page's own faces; the page's paints are cached only once they're in
@@ -89,9 +92,10 @@ function fontsSettled() {
 
 P.hooks.painted = (name, p) => {
   S.stats.pagePaints++; S.stats.pageMs += p.ms;
+  if (S.pageNames.length < 400) S.pageNames.push(`${name} ${Math.round(p.ms)}`);
   // a snapshot now, before anything else draws on the canvas (rv3d repaints its body when Cinzel
   // lands); a paint made before the web fonts were in is never cached
-  if (!CACHE_ON || TC.status().broken || !fontsSettled() || S.good.has(name) || leftAlone(name) || p.deps.some(leftAlone)) return;
+  if (!CACHE_ON || S.cacheOff || !fontsSettled() || S.good.has(name) || leftAlone(name) || p.deps.some(leftAlone)) return;
   try { S.snaps.set(name, { deps: p.deps, bmp: createImageBitmap(p.cv).catch(() => null) }); } catch { /* no snapshot: not cached */ }
 };
 P.hooks.requested = name => { if (S.rec) S.rec.add(name); };
@@ -101,8 +105,8 @@ P.hooks.requested = name => { if (S.rec) S.rec.add(name); };
 let initP = null;
 export function init() {
   if (initP) return initP;
-  if (!CACHE_ON) TC.disable('off (?texcache=0)');
-  S.hashP = CACHE_ON ? TC.sourceHashes(P.FAMILIES).then(h => (S.H = h), e => { TC.disable(`hashes: ${e.message}`); return null; }) : Promise.resolve(null);
+  if (!CACHE_ON) S.cacheOff = 'off (?texcache=0)';
+  S.hashP = CACHE_ON ? TC.sourceHashes(P.FAMILIES).then(h => (S.H = h), e => { S.cacheOff = `hashes: ${e.message}`; return null; }) : Promise.resolve(null);
   initP = (async () => {
     if (!WANT || typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') { S.failed = 'no workers'; return; }
     const fonts = fontList();
@@ -111,7 +115,7 @@ export function init() {
     for (let i = 0; i < WANT; i++) {
       let w;
       try { w = new Worker(new URL('./paint/worker.js', import.meta.url), { type: 'module' }); } catch (e) { S.failed = e.message; break; }
-      const W = { w, i, busy: null, alive: false, storeCb: null };
+      const W = { w, i, busy: null, alive: false, storeCb: null, loads: new Map() };
       starts.push(new Promise(res => {
         const t = setTimeout(() => res(false), 15000);
         w.onmessage = ({ data: m }) => {
@@ -122,7 +126,7 @@ export function init() {
         };
         w.onerror = e => { clearTimeout(t); S.failed = e.message || 'a paint worker failed to start'; res(false); };
       }));
-      w.postMessage({ t: 'init', fonts, hashes: H });
+      w.postMessage({ t: 'init', fonts, hashes: H, breakStorage: q.get('texcache') === 'broken' });
       S.workers.push(W);
     }
     const ok = await Promise.all(starts);
@@ -144,6 +148,8 @@ function workerDied(W) {
   S.workers = S.workers.filter(x => x !== W);
   if (W.busy) { const j = W.busy; W.busy = null; settle(j.name, false); }
   if (W.storeCb) { const cb = W.storeCb; W.storeCb = null; cb({ n: 0, bytes: 0, err: 'worker died' }); }
+  for (const cb of W.loads.values()) cb({ hits: [], bmps: [], bad: [], err: 'worker died' });
+  W.loads.clear();
   for (const [n, wi] of S.held) if (wi === W.i) S.held.delete(n);
   if (!S.workers.length) { S.ready = false; for (const j of S.queue.splice(0)) settle(j.name, false); }
   pump();
@@ -170,7 +176,34 @@ function onMessage(W, m) {
     const cb = W.storeCb; W.storeCb = null;
     cb?.(m);
     pump();
+  } else if (m.t === 'loaded') {
+    if (m.cache?.broken) { S.cacheOff = m.cache.lastErr || 'unavailable'; }
+    const cb = W.loads.get(m.id); W.loads.delete(m.id);
+    cb?.(m);
   }
+}
+
+// Cache reads go to the workers (their event loops aren't held up by a busy page): the names split
+// across them, each reply a set of decoded bitmaps. -> Map name -> ImageBitmap
+async function loadFromCache(names) {
+  const out = new Map();
+  await init();
+  if (!S.ready || S.cacheOff || !names.length) return out;
+  const ws = S.workers.slice().sort((a, b) => (a.busy ? 1 : 0) - (b.busy ? 1 : 0));
+  const per = Math.ceil(names.length / ws.length);
+  const t0 = now();
+  await Promise.all(ws.map((W, i) => {
+    const part = names.slice(i * per, (i + 1) * per);
+    if (!part.length) return null;
+    const id = ++S.seq;
+    return new Promise(res => {
+      const t = setTimeout(() => { W.loads.delete(id); res(); }, 30000);   // a worker that never answers: paint instead
+      W.loads.set(id, m => { clearTimeout(t); m.hits.forEach((n, k) => out.set(n, m.bmps[k])); if (m.err) S.stats.storeErr = `read: ${m.err}`; res(); });
+      W.w.postMessage({ t: 'load', id, names: part });
+    });
+  }));
+  S.stats.decodeMs += now() - t0;
+  return out;
 }
 
 function settle(name, v) {
@@ -225,15 +258,6 @@ function paintHere(name) {
 
 // ---- prepare ----
 
-async function decode(rec) {
-  const t0 = now();
-  try {
-    const bmp = await createImageBitmap(rec.blob, { premultiplyAlpha: 'default', colorSpaceConversion: 'none' });
-    S.stats.decodeMs += now() - t0;
-    return bmp;
-  } catch { return null; }
-}
-
 // Make these textures ready. opts.prio: lower is sooner (a build waiting beats a prefetch);
 // opts.page: paint the page-only ones here meanwhile. Resolves to { ready, total, ms }.
 export async function prepare(names, { prio = 0, page = true, onProgress = null } = {}) {
@@ -246,19 +270,14 @@ export async function prepare(names, { prio = 0, page = true, onProgress = null 
   if (!total) return { ready: 0, total: 0, ms: 0 };
   const H = S.hashP ? await S.hashP : null;
   const lookup = want.filter(n => !S.waiting.has(n));
-  const recs = H && lookup.length ? await TC.getMany(lookup) : new Map();
-  const bad = [];
+  const hits = H ? await loadFromCache(lookup) : new Map();
   const tasks = want.map((name, k) => {
-    if (S.waiting.has(name)) return S.waiting.get(name).then(step);
-    const rec = recs.get(name), t = P.meta(name);
+    if (S.waiting.has(name)) {   // already on its way (a night prefetch, say): wait for it, then paint here if it couldn't
+      return S.waiting.get(name).then(async () => { if (!P.ready(name) && page && !ALONE.has(name)) await paintHere(name); }).then(step);
+    }
+    const bmp = hits.get(name);
     const p = (async () => {
-      if (rec) {
-        if (t && rec.w === t.w && rec.h === t.h && rec.key === TC.keyOf(name, rec.deps, H, P.meta)) {
-          const bmp = await decode(rec);
-          if (bmp && P.adopt(name, bmp)) { S.good.add(name); S.stats.cacheHits++; return true; }
-        }
-        if (!P.ready(name)) bad.push(name);
-      }
+      if (bmp && P.adopt(name, bmp)) { S.good.add(name); S.stats.cacheHits++; return true; }
       if (P.ready(name)) return true;
       S.stats.cacheMiss++;
       let r = PAGE_ONLY.has(name) ? 'page' : await paintInWorker(name, prio + k * 1e-6);
@@ -269,8 +288,14 @@ export async function prepare(names, { prio = 0, page = true, onProgress = null 
     return p.then(step);
   });
   await Promise.all(tasks);
-  if (bad.length) TC.remove(bad);   // stale or unreadable: rewritten from this session's paints
   return { ready: want.filter(n => P.ready(n)).length, total, ms: Math.round(now() - t0) };
+}
+
+// Pictures got ready for a day that isn't the one being built (the menu readied day 1, a player joined
+// on day 3): let them go, they're only memory. What this day asks for stays.
+export function keepOnly(names) {
+  const keep = new Set(names);
+  P.release(P.adopted().filter(n => !keep.has(n)));
 }
 
 // ---- which textures a day asks for ----
@@ -303,7 +328,7 @@ function maybeFlush() {
 async function runFlush() {
   if (!S.ready) { for (const s of S.snaps.values()) s.bmp.then(b => b?.close()); S.snaps.clear(); return; }
   const H = S.hashP ? await S.hashP : null;
-  const cacheOK = !!H && !TC.status().broken;
+  const cacheOK = !!H && !S.cacheOff;
   // what the workers hold: store it, or let it go
   const items = [];
   const drop = new Map();
@@ -329,7 +354,10 @@ async function runFlush() {
       flushWanted = true;
       return;
     }
-    await new Promise(r => idleCb(r));
+    // the encoding and the write happen in a worker: the page only posts a message (and hands over a
+    // snapshot), so this needn't wait for idle slots on the page; one texture at a time keeps it to
+    // one core while the game runs
+    await tick();
     if (S.queue.length || S.workers.some(W => W.busy || W.storeCb)) { i--; await tick(); continue; }   // checked again at the top
     let W = it.W && S.workers.includes(it.W) ? it.W : null, msg, tr = [];
     if (it.snap) {
@@ -342,22 +370,20 @@ async function runFlush() {
     const res = await new Promise(r => { W.storeCb = r; W.w.postMessage(msg, tr); });
     if (res.n) { S.good.add(it.name); S.stats.stored += res.n; S.stats.storedKB += Math.round(res.bytes / 1024); }
     if (res.err) S.stats.storeErr = res.err;
+    if (res.cache?.broken) { S.cacheOff = res.cache.lastErr || 'unavailable'; flushWanted = false; for (const r of items.slice(i + 1)) r.snap?.bmp.then(b => b?.close()); return; }   // full, or gone: stop writing this session
   }
-  if (cacheOK && !S.pruned) {   // records of textures that no longer exist
-    S.pruned = true;
-    const gone = (await TC.names()).filter(n => !P.has(n));
-    if (gone.length) await TC.remove(gone);
-  }
+  if (cacheOK && !S.pruned && S.workers.length) { S.pruned = true; S.workers[0].w.postMessage({ t: 'prune' }); }   // records of textures that no longer exist
 }
 
 // for the harness and the tests
 // idle: nothing being made ready, and nothing painted this session left to store (if it can be stored)
 export function idle() {
-  const unstored = S.ready && !TC.status().broken && (S.held.size || S.snaps.size);
+  const unstored = S.ready && !S.cacheOff && (S.held.size || S.snaps.size);
   return !S.flushing && !flushWanted && !unstored && !S.queue.length && !S.workers.some(W => W.busy) && !S.waiting.size && !S.pageQ.length;
 }
+export function pagePainted() { return S.pageNames.slice(); }
 export function stats() {
-  const r = { workers: S.workers.length, failed: S.failed, cache: TC.status(), pageOnly: PAGE_ONLY.size, ...S.stats };
+  const r = { workers: S.workers.length, failed: S.failed, cache: { broken: !!S.cacheOff, lastErr: S.cacheOff }, pageOnly: PAGE_ONLY.size, ...S.stats };
   for (const k of ['pageMs', 'workerMs', 'decodeMs']) r[k] = Math.round(r[k]);
   return r;
 }

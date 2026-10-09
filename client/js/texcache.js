@@ -1,5 +1,6 @@
-// The persistent painted-texture cache (IndexedDB), shared by the page (texprep.js) and the paint
-// workers (paint/worker.js). One record per texture name: { name, key, w, h, deps, blob (PNG), at }.
+// The persistent painted-texture cache (IndexedDB). The paint workers (paint/worker.js) do all the
+// reading and writing, so a busy page never holds it up; the page (texprep.js) only hashes the
+// sources the keys are made of. One record per texture name: { name, key, w, h, deps, blob (PNG), at }.
 //
 // A record is good only while its key still matches. The key hashes everything that can change the
 // pixels: the full source text of paint/core.js and of the texture's family module, the family
@@ -61,10 +62,12 @@ export function keyOf(name, deps, H, meta) {
 
 let dbp = null, broken = false;
 const withTimeout = (p, ms, what) => Promise.race([p, new Promise((_, rej) => setTimeout(() => rej(new Error(`${what}: timed out`)), ms))]);
+// Opening can take a while (the first visit creates the database; a busy page delays its events): no
+// time limit here, the reads below just stop waiting for it.
 function open() {
   if (broken) return Promise.resolve(null);
   if (dbp) return dbp;
-  dbp = withTimeout(new Promise((res, rej) => {
+  dbp = new Promise((res, rej) => {
     let req;
     try { req = indexedDB.open(DB, 1); } catch (e) { rej(e); return; }
     req.onupgradeneeded = () => { const db = req.result; if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE, { keyPath: 'name' }); };
@@ -75,13 +78,12 @@ function open() {
     };
     req.onerror = () => rej(req.error || new Error('open failed'));
     req.onblocked = () => rej(new Error('open blocked by another tab'));
-  }), 4000, 'texture cache open').catch(e => { broken = true; note('off', e); return null; });
+  }).catch(e => { broken = true; note('off', e); return null; });
   return dbp;
 }
 let lastErr = '';
 function note(what, e) { lastErr = `${what}: ${e?.message || e}`; }
 export function status() { return { broken, lastErr }; }
-export function disable(why = 'disabled') { broken = true; lastErr = why; }
 
 function tx(db, mode, fn) {
   return new Promise((res, rej) => {
@@ -95,10 +97,13 @@ function tx(db, mode, fn) {
 const reqP = r => new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 
 // The records for these names (a Map; missing and unreadable ones are left out).
-export async function getMany(names) {
+// A slow database is a miss this time (painted instead), not a broken cache.
+export async function getMany(names, waitMs = 5000) {
   const out = new Map();
-  const db = await open();
-  if (!db || !names.length) return out;
+  if (!names.length) return out;
+  let db;
+  try { db = await withTimeout(open(), waitMs, 'texture cache open'); } catch (e) { note('slow', e); return out; }
+  if (!db) return out;
   try {
     await withTimeout(tx(db, 'readonly', st => {
       for (const n of names) {
@@ -109,8 +114,9 @@ export async function getMany(names) {
   } catch (e) { note('read', e); }
   return out;
 }
+const opened = () => withTimeout(open(), 30000, 'texture cache open').catch(e => { note('slow', e); return null; });
 export async function put(rec) {
-  const db = await open();
+  const db = await opened();
   if (!db) return false;
   try { await withTimeout(tx(db, 'readwrite', st => st.put(rec)), 15000, 'texture cache write'); return true; } catch (e) {
     note('write', e);
@@ -119,12 +125,12 @@ export async function put(rec) {
   }
 }
 export async function remove(names) {
-  const db = await open();
+  const db = await opened();
   if (!db || !names.length) return;
   try { await withTimeout(tx(db, 'readwrite', st => { for (const n of names) st.delete(n); }), 8000, 'texture cache delete'); } catch (e) { note('delete', e); }
 }
 export async function names() {
-  const db = await open();
+  const db = await opened();
   if (!db) return [];
-  try { return await withTimeout(tx(db, 'readonly', st => reqP(st.getAllKeys())).then(p => p), 8000, 'texture cache keys'); } catch (e) { note('keys', e); return []; }
+  try { return await withTimeout(tx(db, 'readonly', st => reqP(st.getAllKeys())), 8000, 'texture cache keys'); } catch (e) { note('keys', e); return []; }
 }

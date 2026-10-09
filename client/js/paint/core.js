@@ -408,7 +408,7 @@ const READY = new Map();     // name -> an adopted ImageBitmap nobody has asked 
 const COPIED = new Set();    // names whose canvas is a copy of an adopted picture, not a paint in this thread
 const DEPS = new Map();      // name -> the textures its paint read (transitively), from its last paint here
 let painting = null;         // the paint in progress: { name, deps: Set }
-// texprep.js listens: requested(name) when canvasFor is first asked for a texture (outside a paint);
+// texprep.js listens: requested(name) whenever canvasFor is asked for a texture (outside a paint);
 // painted(name, { cv, deps, ms }) after a paint on this thread
 export const hooks = { requested: null, painted: null };
 const clock = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
@@ -454,11 +454,11 @@ export function canvasFor(name) {
     note(name);
     return cv;
   }
+  hooks.requested?.(name);
   const hit = CACHE.get(name);
   if (hit) return hit;
   const t = REG.get(name);
   if (!t) throw new Error(`no texture registered as "${name}"`);
-  hooks.requested?.(name);
   const bmp = READY.get(name);
   if (bmp) {
     READY.delete(name);
@@ -499,6 +499,7 @@ export function ready(name) { return CACHE.has(name) || READY.has(name); }
 export function painted(name) { return CACHE.has(name) && !COPIED.has(name); }
 // let adopted pictures nobody asked for go (a prefetched day that never came)
 export function release(names) { for (const n of names) dropReady(n); }
+export function adopted() { return [...READY.keys()]; }
 // the dependencies recorded at this texture's last paint in this thread
 export function depsOf(name) { return DEPS.get(name) || null; }
 // forget a painted canvas (a paint worker frees what it has stored)
