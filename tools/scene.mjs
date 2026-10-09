@@ -263,6 +263,7 @@ console.log(`fps (swiftshader, last view): ${fps.toFixed(1)}${calls != null ? ` 
 console.log(errors.length ? 'errors:\n' + errors.slice(0, 20).join('\n') : 'no page errors');
 const tx = await steve.evaluate(() => window.__nmd.texCache?.stats?.() || null);
 if (tx) console.log(`textures: ${tx.cacheHits} from the cache, ${tx.workerPaints} painted by workers, ${tx.pagePaints} by the page`);
-if (persistent) await steve.waitForFunction(() => window.__nmd.texCache?.idle?.() ?? true, null, { timeout: 600000, polling: 500 }).catch(() => console.log('(texture cache writes still going at exit)'));
+if (persistent) await steve.waitForFunction(() => window.__nmd.texCache?.idle?.() ?? true, null, { timeout: 600000, polling: 500 })
+  .catch(async () => console.log('(texture cache writes still going at exit: ' + JSON.stringify(await steve.evaluate(() => window.__nmd.texCache.stats().pending)) + ')'));
 await browser.close();
 process.exit(0);

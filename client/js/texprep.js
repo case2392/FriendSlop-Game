@@ -278,14 +278,14 @@ function paintIdle(name, ok) {
       while (idleQ.length && (P.ready(idleQ[0].name) || idleQ[0].ok() === null)) { const j = idleQ.shift(); j.res(P.ready(j.name)); }
       const j = idleQ[0];
       if (!j) { idleRunning = false; return; }
-      if (j.ok() && dl.timeRemaining() >= 8) {   // a paint can outlast the slot: ok() only says yes while nobody is typing
+      if (j.ok() && !dl.didTimeout && dl.timeRemaining() >= 8) {   // a paint can outlast the slot: ok() only says yes while nobody is typing
         idleQ.shift();
         try { P.canvasFor(j.name); } catch (e) { console.warn('texture', j.name, e.message); }
         j.res(P.ready(j.name));
       }
-      requestIdleCallback(step);
+      requestIdleCallback(step, { timeout: 1000 });   // a page that is never idle still gets to notice ok() giving up
     };
-    requestIdleCallback(step);
+    requestIdleCallback(step, { timeout: 1000 });
   });
 }
 function promote(name) {
@@ -449,7 +449,8 @@ export function idle() {
 }
 export function pagePainted() { return S.pageNames.slice(); }
 export function stats() {
-  const r = { workers: S.workers.length, failed: S.failed, cache: { broken: !!S.cacheOff, lastErr: S.cacheOff }, pageOnly: PAGE_ONLY.size, lastPrep: S.lastPrep || null, ...S.stats };
+  const r = { workers: S.workers.length, failed: S.failed, cache: { broken: !!S.cacheOff, lastErr: S.cacheOff }, pageOnly: PAGE_ONLY.size, lastPrep: S.lastPrep || null, ...S.stats,
+    pending: { queue: S.queue.length, busy: S.workers.filter(W => W.busy).length, waiting: S.waiting.size, pageQ: S.pageQ.length, idleQ: idleQ.length, held: S.held.size, snaps: S.snaps.size, flushing: S.flushing, flushWanted } };
   for (const k of ['pageMs', 'workerMs', 'decodeMs']) r[k] = Math.round(r[k]);
   return r;
 }

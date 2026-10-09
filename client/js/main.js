@@ -491,7 +491,11 @@ net.on('props', m => afterWorld(() => {
   for (const d of m.list) addProp(d);
 }));
 net.on('tp', m => afterWorld(() => { me.teleport(m.x, m.y, m.z, m.yaw); me.mode = 'walk'; }));
-net.on('meta', m => {
+// A roster update during a build waits for it (the build used to block it out): what it paints
+// (portraits, other players' looks, your hands in your color) comes after the town's people, as
+// before. The character painter's pixels depend on what it painted before (texmanifest IN_ORDER).
+net.on('meta', m => { if (worldBuilding) (S.pendingAfterWorld ||= []).push(() => onMeta(m)); else onMeta(m); });
+function onMeta(m) {
   S.meta = m;
   voice.syncPeers(m.players.map(p => ({ ...p, connected: true })));
   renderVoiceUI();
@@ -510,7 +514,7 @@ net.on('meta', m => {
     else v.setName(p.name, p.color);
   }
   $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
-});
+}
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
   S.interp.push(m, performance.now());

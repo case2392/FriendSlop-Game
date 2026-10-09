@@ -515,7 +515,7 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
    left: on that machine most of the wait is the software renderer building
    shader pipelines (a trace of a returning player's load shows about 28 s
    of GPU-process time in pipeline creation); a first visit still paints
-   about half the textures on the main thread, because their paints clip
+   about four textures in ten on the main thread, because their paints clip
    with antialiasing and an OffscreenCanvas clips without it; and the
    character atlases are never cached, because their pixels depend on what
    was painted before them (characters.js strokes through a shared scratch
