@@ -82,7 +82,7 @@ replay the same roads, put the same number in "trip seed".
 **The first load takes a while.** Every texture is painted and every mesh is
 built in your browser when a day starts. On a machine with no GPU (software
 rendering on 4 CPU cores) the first day takes about 35 s to appear, and each
-later day about 10–13 s. A real graphics card does the shader and texture
+later day about 9–14 s. A real graphics card does the shader and texture
 work much faster, but we haven't measured it. Use a browser with hardware
 acceleration on.
 

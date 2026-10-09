@@ -501,7 +501,7 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
 6. **Load time.** Zero assets means every texture is painted and every mesh
    built in the browser. Measured with software rendering on 4 CPU cores,
    the first day appears after about 35 s and each later day rebuilds in
-   10–13 s. It hasn't been measured on a real GPU. If players bounce off the
+   9–14 s. It hasn't been measured on a real GPU. If players bounce off the
    wait, the fixes are cheap: cache the painted canvases in IndexedDB keyed
    by texture name and version, paint in a worker with OffscreenCanvas, and
    build the next day's world during the night scene.
