@@ -4,7 +4,7 @@
 // Style: WoW Classic humans with a dash of OSRS chunk: big shoulders, a barrel chest, a leather
 // jerkin skirt with a tabard in the player's color hanging front and back, thick forearms and big
 // gloves with real thumbs and grooved fingers (arms bowed at rest, knuckles forward), knee boots with turned-down cuffs and a welted sole, a bedroll on
-// the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 23-bone
+// the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 25-bone
 // skeleton, textured with ONE hand-painted 512×768 atlas from paint/characters.js. The face is
 // modeled (a broad blunt nose, a heavy brow ridge over deep sockets, cheekbones, a square chin
 // with a flat front; a woman's is narrower and rounder, with a short nose, a small round chin and
@@ -13,8 +13,9 @@
 // tubes and thick slabs, all built here; the detail lives in the texture.
 //
 // The crew: six kits (paint/characters.js KITS, picked by player id like the hat and the face):
-// a boiled-leather dome, layered leather lames or a riveted iron dome on the shoulders, or none
-// under the hood's capelet or a fur-collared leather mantle; one embroidered sigil on the tabard
+// a boiled-leather dome, layered leather lames or a riveted iron dome sitting down on each shoulder
+// ball (rolled rim over the sleeve, buckled to the chest by a strap), or none under the hood's
+// capelet or a fur-collared leather mantle; one embroidered sigil on the tabard
 // (wheel, coin, crossed wrenches, horseshoe, boot, lion); pouches, a flask, a map case or nothing
 // on the belt; laced or plain bracers and jerkin front. The dye stays on the tabard, the cuff
 // bands and the name label, so the crew stays tellable apart at a distance.
@@ -33,7 +34,9 @@
 // = -PI/2 turns it to face +z (unchanged from the old egg people). Bones rotate
 // about local z to swing forward (legs, arms, head nod), as before. Extra bones:
 // flapF / flapB carry the front and back of the skirt and tabard (they follow the
-// forward-most / back-most thigh, so the cloth never cuts the legs), flapF2 lets the
+// forward-most / back-most thigh, so the cloth never cuts the legs), paulL / paulR (children of
+// the chest at the shoulder joints) carry the pauldrons and follow the arms' swing, damped when an
+// arm goes overhead, so the pauldrons stay on the shoulders; flapF2 lets the
 // front flap's hem hang over the knees when sitting, `hat` (a child of the head) carries a
 // brimmed hat, which tips over the face when its wearer is knocked out, and `map` (a child of
 // the chest, at zero scale unless the map is raised) carries the third-person road map.
@@ -64,7 +67,8 @@ const thOf = u => Math.PI - TAU * u;          // u .5 = front (+x), .25 = right 
 const gauss = (x, s) => Math.exp(-(x * x) / (s * s));
 
 // bone indices
-const B = { body: 0, hips: 1, spine: 2, chest: 3, neck: 4, head: 5, armL: 6, foreL: 7, handL: 8, armR: 9, foreR: 10, handR: 11, legL: 12, shinL: 13, footL: 14, legR: 15, shinR: 16, footR: 17, flapF: 18, flapB: 19, flapF2: 20, hat: 21, map: 22 };
+const B = { body: 0, hips: 1, spine: 2, chest: 3, neck: 4, head: 5, armL: 6, foreL: 7, handL: 8, armR: 9, foreR: 10, handR: 11, legL: 12, shinL: 13, footL: 14, legR: 15, shinR: 16, footR: 17, flapF: 18, flapB: 19, flapF2: 20, hat: 21, map: 22, paulL: 23, paulR: 24 };
+const PAUL = s => s < 0 ? B.paulL : B.paulR;
 const ARM = s => s < 0 ? [B.armL, B.foreL, B.handL] : [B.armR, B.foreR, B.handR];
 const LEG = s => s < 0 ? [B.legL, B.shinL, B.footL] : [B.legR, B.shinR, B.footR];
 // spine joints (meters, body space)
@@ -1121,11 +1125,11 @@ const LEG_TALL = [   // a knee boot: a wide flared turned-down cuff, a calf, a s
   [0.464, 0.12, 0.126, 0.118],
   [0.443, 0.118, 0.124, 0.116],
   [0.415, 0.106, 0.112, 0.105],
-  [0.4, 0.09, 0.096, 0.092],
-  [0.33, 0.091, 0.098, 0.097],
-  [0.22, 0.084, 0.09, 0.086],
-  [0.14, 0.079, 0.085, 0.081],
-  [0.085, 0.08, 0.085, 0.08],
+  [0.4, 0.09, 0.096, 0.093],
+  [0.33, 0.092, 0.097, 0.104],
+  [0.24, 0.086, 0.091, 0.094],
+  [0.15, 0.076, 0.083, 0.078],
+  [0.09, 0.079, 0.085, 0.08],
   [0.06, 0.056, 0.056, 0.056],
   [0.05, 0.0, 0.0, 0.0],
 ];
@@ -1199,7 +1203,7 @@ function legParts(S, F, s) {
 // bind pose would tip the dome in toward the neck and lift its outer rim off the sleeve.
 const PAUL_AB = 0.3;
 function pauldron(S, F, s, size) {
-  const [ua] = ARM(s), sh = F.shoulder(s);
+  const ua = PAUL(s), sh = F.shoulder(s);
   const R = 0.15 * size, tilt = 0.6, fmax = 1.6, DROOP = 0.3;
   const A = [0, Math.cos(tilt), s * Math.sin(tilt)], E1 = [1, 0, 0];
   const E2 = [A[1] * E1[2] - A[2] * E1[1], A[2] * E1[0] - A[0] * E1[2], A[0] * E1[1] - A[1] * E1[0]];
@@ -1236,6 +1240,7 @@ function pauldron(S, F, s, size) {
     }, 8, 26, { reg: REG.paul, uv: (u, v) => [(v * 3) % 1, 0.325 + 0.1 * (0.5 + 0.5 * Math.sin(TAU * u))], bones: ua, closed: true, inside: (u, v) => bind(at(v)) });
   };
   if (S.shoulders === 'lames') {
+    // (the cap's texture stops short of the dyed binding, so there's no bullseye on its crown)
     // three overlapping curved plates of boiled leather: a cap, then two lames, each lower one
     // a little bigger so it tucks under the one above; the lames wrap the outside and front of the arm
     const plates = [[0, 1.22, 1.0, null], [1.02, 1.42, 1.06, 3.0], [1.26, 1.66, 1.12, 2.7]];
@@ -1243,7 +1248,7 @@ function pauldron(S, F, s, size) {
       P.push(...slab((u, v) => {
         const th = span ? thOut + (u - 0.5) * span : thOf(u), f = f1 - (f1 - f0) * v;
         return pt(th, f, R * k * (1 + 0.05 * Math.cos(th)) * (1 + 0.06 * gauss(v, 0.12)));
-      }, span ? 14 : 20, 4, 0.012, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: !span, inside: inC, noInner: !!span }));
+      }, span ? 14 : 20, 4, 0.012, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * (span ? 0.68 : 0.54)], bones: ua, closed: !span, inside: inC, uvInner: innerIn(REG.paul, 0.08, 0.26) }));   // (an inner skin of plain leather: the far shoulder's lames are seen from inside)
     });
     // the cap's underside, closed by a cheap disc (you'd see the sky through the dome from below)
     P.push(surf((u, v) => pt(thOf(u), 1.18, R * (1 - v)), 8, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: under }));
@@ -1267,7 +1272,7 @@ function pauldron(S, F, s, size) {
 // The pauldron's strap: from under its front edge down across the chest to a brass buckle. Mostly on
 // the chest bone; its top end (under the rim) rides the arm with the pauldron.
 function paulStrap(S, s, sh, bind) {
-  const [ua] = ARM(s), y0 = 1.445, y1 = 1.27, wd = 0.04, P = [];
+  const ua = PAUL(s), y0 = 1.445, y1 = 1.27, wd = 0.04, P = [];
   const thAt = v => s * (0.9 - 0.36 * v), yAt = v => y0 + (y1 - y0) * v;
   const wUA = y => 0.65 * sstep(1.37, 1.44, y);
   const at = (th, y, off) => { const R = torsoRing(y, S), [x, z] = ringXZ(th, R.w + off, R.d + off, R.db + off, R.n); return [x, y, z]; };
@@ -1341,6 +1346,7 @@ function makeSkeleton(F) {
   }
   for (const f of [by.flapF, by.flapB]) { by.hips.add(f); f.position.set(0, J.hipY - J.hips, 0); }
   by.flapF.add(by.flapF2); by.flapF2.position.set(0.17, FLAP2_Y - J.hipY, 0);
+  for (const [s, b] of [[-1, by.paulL], [1, by.paulR]]) { const sh = F.shoulder(s); by.chest.add(b); b.position.set(sh[0], sh[1] - J.chest, sh[2]); }
   by.head.add(by.hat);
   by.handL.rotation.order = by.handR.rotation.order = 'XZY';
   by.chest.add(by.map); by.map.position.set(MAP_AT[0], MAP_AT[1] - J.chest, MAP_AT[2]);    // (bound at scale 1; applyPose collapses it)
@@ -1380,8 +1386,8 @@ export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, 
 
 const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', 'inL', 'inR', 'abL', 'abR', 'lean', 'bend', 'tw', 'ctw', 'head', 'headY', 'bob', 'spread', 'roll', 'wristL', 'wristR', 'wiL', 'wiR', 'wtL', 'wtR', 'hatOff', 'mapK', 'toe', 'sway'];
 // At rest the arms bow: the upper arm hangs out from the shoulder pad (the elbow juts a few cm out
-// of the torso's silhouette), the elbow bends ~15 deg forward and the forearm swings back in (inL),
-// so the big hands hang by the front of the thighs,
+// of the torso's silhouette) and a little forward, the elbow bends ~25 deg forward and the forearm
+// swings back in (inL), so the big hands hang in front of the thighs, not out to the sides like mitts,
 // turned in toward them a little more at the wrist (wiL), never stiff tubes straight down. Standing
 // or walking, a player's hands also roll knuckles-forward (wtL, a twist about the hand's own long
 // axis: HAND_ROLL), so you see the broad backs of the big gloves, not their thin edges.
@@ -1419,6 +1425,11 @@ function idlePose(ch, t) {
   P.head += 0.04 * Math.sin(t * 0.4 + k);
   return P;
 }
+// The pauldrons ride their own bones at the shoulder joints: they follow the upper arm's swing in full
+// through a walk or a carry, but an arm raised overhead only tips them up (to ~60 deg), so they stay
+// on the shoulder instead of swinging down to hang off the armpit; they take most of the abduction.
+const paulSwing = a => Math.abs(a) <= 0.6 ? a : Math.sign(a) * (0.6 + 0.45 * Math.tanh((Math.abs(a) - 0.6) / 0.5));
+const paulAb = ab => REST.ab + 0.7 * (ab - REST.ab);
 function applyPose(ch, P) {
   const b = ch.bones;
   // (the hips' sway is cancelled at the feet: the legs lean back over the planted soles)
@@ -1427,6 +1438,7 @@ function applyPose(ch, P) {
   b.shinL.rotation.set(0, 0, P.kL); b.shinR.rotation.set(0, 0, P.kR);
   b.footL.rotation.set(-P.roll, 0, P.fL); b.footR.rotation.set(-P.roll, 0, P.fR);
   b.armL.rotation.set(P.abL, 0, P.aL); b.armR.rotation.set(-P.abR, 0, P.aR);
+  b.paulL.rotation.set(paulAb(P.abL), 0, paulSwing(P.aL)); b.paulR.rotation.set(-paulAb(P.abR), 0, paulSwing(P.aR));
   b.foreL.rotation.set(-P.inL, 0, P.eL); b.foreR.rotation.set(P.inR, 0, P.eR);
   b.handL.rotation.set(-P.wiL, -P.wtL, P.wristL); b.handR.rotation.set(P.wiR, P.wtR, P.wristR);   // (order XZY: roll, then flex, then tilt in)
   b.hips.position.y = J.hips + P.bob; b.hips.position.z = P.sway;
@@ -1813,6 +1825,7 @@ export const PREVIEW = {
   mapping: () => viewIn(4, { flags: F_.HOLDING | F_.MAP }),
   seated: () => viewIn(5, { mode: M_.SEAT }),
   climbing: () => viewIn(4, { mode: M_.CLIMB }),
+  climbing2: () => viewIn(2, { mode: M_.CLIMB }),   // (with pauldrons: they tip up with the arms, staying on the shoulders)
   ko: () => viewIn(0, { mode: M_.KO }),
   jumping: () => viewIn(2, { mode: M_.AIR }),
   laughing: () => viewIn(1, {}, { emote: '😂' }),

@@ -1415,7 +1415,7 @@ function paintPauldron(g, r, S, rnd) {
     bandGrad(g, r, 0.78, 1.0, rgba('#fff0c8', 0.0), rgba('#fff0c8', 0.4));    // the cap of the dome catches the sun
     // the rolled rim: iron (or brass on steel), riveted
     if (S.shoulders !== 'lames') {
-      gradV(g, r.x, V(0.43), r.w, V(0.32) - V(0.43), [[0, lightOf(rimC, 0.8)], [0.4, rimC], [1, shadowOf(rimC, 0.6)]]);
+      gradV(g, r.x, V(0.43), r.w, V(0.32) - V(0.43), [[0, lightOf(rimC, metal ? 0.5 : 0.7)], [0.4, rimC], [1, shadowOf(rimC, 0.6)]]);
       for (let k = 0; k < 9; k++) rivet(g, U((k + 0.5) / 9), V(0.375), 2.4, metal ? '#e0c890' : '#c8ccd4');
       bandGrad(g, r, 0.43, 0.48, rgba(INK, 0.45), rgba(INK, 0));
     }
