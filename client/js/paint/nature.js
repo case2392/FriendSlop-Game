@@ -1013,7 +1013,7 @@ register('rock_granite', {
 // and the shape tell the same story. Spacing and thickness are uneven on purpose.
 export const STRATA_BEDS = {
   rock_red: [[0.03, 0.085], [0.13, 0.15], [0.33, 0.39], [0.5, 0.52], [0.565, 0.6], [0.76, 0.81]],
-  rock_sand: [[0.03, 0.062], [0.19, 0.21], [0.33, 0.372], [0.52, 0.54], [0.66, 0.694], [0.83, 0.85]],
+  rock_sand: [[0.04, 0.12], [0.33, 0.39], [0.58, 0.67], [0.84, 0.88]],   // (thick cream beds, like the Tanaris walls')
 };
 
 // Bedded rock in the canyon walls' language (it must look broken off them): soft beds that alternate
@@ -1144,26 +1144,38 @@ function bedded(g, s, rnd, cv, P) {
   // rain stains dripping from the hard beds' feet, and pale washed streaks
   layer(g, s, s, tg => {
     for (let i = 0; i < n; i++) for (let q = 0; q < (P.dripN ?? 5); q++) {
-      const x = rnd() * s, L = range(rnd, 18, 80), w = range(rnd, 3, 7), y0 = bB(i, x) + 2;
+      const x = rnd() * s, L = range(rnd, 24, 90), w = range(rnd, 8, 18), y0 = bB(i, x) + 2;   // (broad soft stains, never pen strokes)
       for (const dy of [-s, 0, s]) wrap(s, x, y0 + dy + L / 2, Math.max(w, L), (X, Y) => { tg.save(); const gr = tg.createLinearGradient(0, Y - L / 2, 0, Y + L / 2); gr.addColorStop(0, P.streak[0]); gr.addColorStop(1, 'rgba(0,0,0,0)'); tg.fillStyle = gr; tg.beginPath(); tg.ellipse(X, Y, w / 2, L / 2, 0, 0, TAU); tg.fill(); tg.restore(); });
     }
-  }, { alpha: P.dripA ?? 0.22, blur: 1.5 });
-  streaks(g, s, rnd, { colors: [P.lit], count: P.streakN ?? 14, len: [30, 110], width: [2, 5], angle: Math.PI, wobble: 0.05, alpha: 0.12 });
-  // joints: angular cracks of uneven length down a soft bed (some on through the hard bed under it):
-  // a soft shadow to one side, a dark crease, a lit lip on the other
+  }, { alpha: (P.dripA ?? 0.22) * 0.8, blur: 4 });
+  streaks(g, s, rnd, { colors: [P.lit], count: P.streakN ?? 14, len: [30, 110], width: [4, 9], angle: Math.PI, wobble: 0.05, alpha: 0.09 });
+  // joints: angular cracks of uneven length down a soft bed (some on through the hard bed under it),
+  // painted as wedges that open at the top and pinch out downward: a soft cool shadow body (falling to
+  // the right, away from the upper-left light), a darker core down its middle, and a warm lit edge on
+  // the left lip. No pen lines.
+  const wedges = [];
+  for (let q = 0; q < P.fissN; q++) {
+    const i = Math.floor(rnd() * n), x0 = rnd() * s, yA = bB(i, x0) + 1, through = rnd() < 0.3;
+    const yZ = bT(i + 1, x0) + (through ? beds[(i + 1) % n].yB - beds[(i + 1) % n].yT + 4 : 0);
+    const L = (yZ - yA) * range(rnd, 0.45, 1), o = [[x0, yA]], segs = 3 + Math.floor(rnd() * 3);
+    let x = x0, y = yA, a = range(rnd, -0.3, 0.3);
+    for (let k = 0; k < segs; k++) { a = Math.max(-0.45, Math.min(0.45, a + range(rnd, -0.4, 0.4))); const l = L / segs; x += Math.sin(a) * l; y += Math.cos(a) * l; o.push([x, y]); }
+    wedges.push({ o, W: range(rnd, 7, 15) * (P.wedgeK ?? 1) });
+  }
+  // the wedge's outline: the path offset either side by its half-width, which pinches out downward
+  const wedgePoly = (Q, W, k = 1, dx = 0) => {
+    const N = Q.length - 1, L = [], R = [];
+    Q.forEach(([u, v], j) => { const h = W * k * 0.5 * Math.pow(1 - j / N, 1.15) + 0.4; L.push([u - h + dx, v]); R.push([u + h + dx, v]); });
+    return L.concat(R.reverse());
+  };
+  layer(g, s, s, tg => { for (const { o, W } of wedges) for (const dy of [-s, 0, s]) wrapPts(s, o, 16, Q => poly(tg, wedgePoly(Q.map(([u, v]) => [u, v + dy]), W, 1.25, W * 0.25), P.under)); }, { alpha: 0.42, blur: 3 });
+  layer(g, s, s, tg => { for (const { o, W } of wedges) for (const dy of [-s, 0, s]) wrapPts(s, o, 16, Q => poly(tg, wedgePoly(Q.map(([u, v]) => [u, v + dy]), W, 0.45, W * 0.08), P.crack)); }, { alpha: 0.5, blur: 1.2 });
   layer(g, s, s, tg => {
-    for (let q = 0; q < P.fissN; q++) {
-      const i = Math.floor(rnd() * n), x0 = rnd() * s, yA = bB(i, x0) + 1, through = rnd() < 0.3;
-      const yZ = bT(i + 1, x0) + (through ? beds[(i + 1) % n].yB - beds[(i + 1) % n].yT + 4 : 0);
-      const L = (yZ - yA) * range(rnd, 0.4, 1), o = [[x0, yA]], segs = 2 + Math.floor(rnd() * 3);
-      let x = x0, y = yA, a = range(rnd, -0.35, 0.35);
-      for (let k = 0; k < segs; k++) { a = Math.max(-0.5, Math.min(0.5, a + range(rnd, -0.45, 0.45))); const l = L / segs; x += Math.sin(a) * l; y += Math.cos(a) * l; o.push([x, y]); }
-      for (const dy of [-s, 0, s]) wrapPts(s, o, 8, Q => {
-        const QQ = Q.map(([u, v]) => [u, v + dy]);
-        line(tg, QQ.map(([u, v]) => [u + 2.2, v]), 5, P.under, 0.4); line(tg, QQ, 1.7, P.crack); line(tg, QQ.map(([u, v]) => [u - 1.7, v]), 1.2, P.lit, 0.5);
-      });
-    }
-  }, { alpha: 0.55, blur: 0.7 });
+    for (const { o, W } of wedges) for (const dy of [-s, 0, s]) wrapPts(s, o, 16, Q => {
+      const N = Q.length - 1, edge = Q.map(([u, v], j) => [u - W * 0.62 * Math.pow(1 - j / N, 1.15) - 0.6, v + dy]);
+      line(tg, edge.slice(0, Math.max(2, Math.ceil(N * 0.8))), 2, P.lit);
+    });
+  }, { alpha: 0.5, blur: 0.9 });
   // chips: small angular patches lit on the upper left
   for (let q = 0; q < (P.chipN ?? 22); q++) {
     const x = rnd() * s, y = rnd() * s, r = range(rnd, 3, 7), a0 = rnd() * TAU, pts = [];
@@ -1186,11 +1198,11 @@ register('rock_red', {
 // Tanaris sandstone: the same bedded language, paler and softer: tan and honey soft beds between thin
 // cream hard beds, warm brown undercuts, wind-scoured pits in loose clusters and a few soft wind grooves.
 register('rock_sand', {
-  family: F, size: 512, note: 'Tanaris sandstone: pale tan soft beds between thin cream hard beds (lit lips, warm undercuts) at fixed heights the mounds follow; wind pits and grooves (seamless)',
+  family: F, size: 512, note: 'Tanaris sandstone in the walls\' palette: tan, rust and honey soft beds between thick cream hard beds (lit lips, warm undercuts) at fixed heights the mounds follow; wind pits and grooves (seamless)',
   paint: (g, s, rnd, h, cv) => bedded(g, s, rnd, cv, {
     beds: STRATA_BEDS.rock_sand,
-    pale: ['#e2c494', '#e8cc9e', '#dab886'], deep: ['#c09666', '#b88c5e', '#c8a070'], hard: ['#ecd4aa', '#e4c89a', '#f0dcb4'],
-    blot: ['#ead0a2', '#b08a5e', '#d8b080', '#a8805a'], streak: ['#8a6444'], under: '#6e4c44', crack: '#5a3e36', lit: '#fbeccc',
+    pale: ['#cc9f6e', '#c8965f', '#d4ab7c'], deep: ['#a87048', '#9e6844', '#b07a50'], hard: ['#e6cfa4', '#dec493', '#e9d4ab'],
+    blot: ['#e0c08c', '#9a6c4a', '#c89a6c', '#a8805a'], streak: ['#5a3c32'], under: '#7a5048', crack: '#5e4038', lit: '#f0dab0',
     underW: 10, underA: 0.42, lipA: 0.5, ledgelets: 0.3, fissN: 4, dripN: 2, dripA: 0.14, streakN: 5, chipN: 14, hardWob: 1.8, glaze: '#fff0c8',
     extra(g, s, rnd, beds, bT, bB) {
       // soft wind grooves along the soft beds (short, wavy, broken)

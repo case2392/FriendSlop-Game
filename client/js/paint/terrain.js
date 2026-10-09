@@ -7,7 +7,9 @@
 //   road_<b>      the dirt road in ROAD SPACE: x runs across the road (edge to edge, plus a
 //                 grassy shoulder), y runs along it; each biome's road is painted differently
 //   cliff_<b>     steep faces, projected from the side (y = world height, so strata stay level):
-//                 rounded granite or sandstone masses (meadow, fields, snow), strata (badlands, desert)
+//                 rounded granite masses (meadow, fields), angular fractured granite (snow; the crash
+//                 mesas keep rounded blocks in cliff_snow_mesa), strata (badlands), thick sandstone
+//                 beds (desert); cliff_snow_form / cliff_snow_mesa_form hold the granites' form
 //   clutter_<b>   4×2 alpha atlas of ground-clutter cards (tufts, flowers, wheat, twigs, drifts)
 //   sky_clouds_<b> the painted cloud band around the sky dome (alpha), its own sky per biome
 //   sky_mtn_<b>   3 rows of distant land silhouettes (far, mid, near) for the horizon rings
@@ -937,11 +939,19 @@ function worn(g, s, rnd, n, xs, color, a, w = [12, 28], l = [40, 120]) {
 // straight. Then moss or snow settles on whatever faces up, rain streaks run down, a few short
 // cracks and lichen.
 
+// A convex polygon's support function: n sides at jittered bearings, each pushed in or out a little;
+// r(lx, ly) = max over the sides of (lx, ly)·n_k / d_k is 1 on the outline (straight edges, sharp corners).
+function polySides(rnd, [n0, n1]) {
+  const n = n0 + Math.floor(rnd() * (n1 - n0 + 1)), a0 = rnd() * TAU, out = [];
+  for (let k = 0; k < n; k++) { const a = a0 + (k + range(rnd, -0.28, 0.28)) / n * TAU; out.push([Math.cos(a), Math.sin(a), range(rnd, 0.82, 1.12)]); }
+  return out;
+}
 function rockMasses(s, rnd, P) {
   const M = [];
   const add = (x, y, rx, ry, z, kind, rot = range(rnd, -P.rot, P.rot)) => {
     M.push({ id: M.length, x, y, rx, ry, c: Math.cos(rot), sn: Math.sin(rot), z, kind, tone: range(rnd, -1, 1), hue: hex(pick(rnd, P.colors)),
-      lob: ptable(rnd, 256, 5, 0.8, 2), lobA: range(rnd, 0.12, 0.24), dome: range(rnd, 0.7, 1.25), gx: range(rnd, -1, 1) * P.tilt, gy: range(rnd, -0.6, 1) * P.tilt, r2: rnd(), r3: rnd() });
+      lob: ptable(rnd, 256, 5, 0.8, 2), lobA: range(rnd, 0.12, 0.24), dome: range(rnd, 0.7, 1.25), gx: range(rnd, -1, 1) * P.tilt, gy: range(rnd, -0.6, 1) * P.tilt, r2: rnd(), r3: rnd(),
+      poly: P.poly ? polySides(rnd, P.poly) : null });
   };
   const [fx, fy] = P.fill, cw = s / fx, ch = s / fy;
   for (let j = 0; j < fy; j++) for (let i = 0; i < fx; i++) {
@@ -989,7 +999,8 @@ function massRock(g, s, rnd, P, cv) {
       const lx = (dx * m.c + dy * m.sn) / m.rx, ly = (-dx * m.sn + dy * m.c) / m.ry;
       let r = lx * lx + ly * ly;
       if (r > REACH * REACH * 1.6) continue;
-      r = Math.sqrt(r) / (1 + m.lobA * m.lob[((Math.atan2(ly, lx) / TAU + 0.5) * 255) | 0]);
+      if (m.poly) { let q = 0; for (const [cx, cy, d] of m.poly) { const t = (lx * cx + ly * cy) / d; if (t > q) q = t; } r = q; }
+      else r = Math.sqrt(r) / (1 + m.lobA * m.lob[((Math.atan2(ly, lx) / TAU + 0.5) * 255) | 0]);
       if (r > REACH) continue;
       const h = m.z * ZS + D * m.dome * (1 - Math.pow(r, ex)) + (m.gx * dx + m.gy * dy);
       if (h > h1) { acc = acc * Math.exp(K * (h1 - h)) + 1; h2 = h1; i2 = i1; h1 = h; i1 = m.id; const dd = Math.hypot(dx, dy) || 1; rim = dd / Math.max(r, 1e-3) - dd; dyn = dy / dd; }
@@ -1012,7 +1023,7 @@ function massRock(g, s, rnd, P, cv) {
   const base = g.getImageData(0, 0, s, s), B = base.data;
   const Lx = -0.5, Ly = -0.64, Lz = 0.58, Ll = Math.hypot(Lx, Ly, Lz), dif0 = Lz / Ll;
   const lit = hex(P.light), shd = hex(P.shadow), deep = hex(P.deep || shadowOf(P.shadow, 0.3)), crc = hex(P.creaseC), cast = hex(P.cast || P.shadow);
-  const rs = P.relief, UP = new Float32Array(N), LT = new Float32Array(N);
+  const rs = P.relief, UP = new Float32Array(N), LT = new Float32Array(N), UX = P.upName ? new Float32Array(N) : null;
   const SH = [[4, 0.7], [9, 0.8], [16, 0.9], [26, 1]];
   for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
     const k = y * s + x, o = k * 4;
@@ -1020,6 +1031,7 @@ function massRock(g, s, rnd, P, cv) {
     const hy = (Hs[((y + 1) % s) * s + x] - Hs[((y - 1 + s) % s) * s + x]) * 0.5 * rs;
     const nl = Math.hypot(hx, hy, 1);
     UP[k] = hy / nl;                                                // > 0: the surface faces up (the canvas top is up)
+    if (UX) UX[k] = -hx / nl;
     const dif = (-hx * Lx - hy * Ly + Lz) / (nl * Ll);              // n = (-hx, -hy, 1) / nl
     let r = B[o], gg = B[o + 1], b = B[o + 2];
     const id = TOP[k];
@@ -1052,7 +1064,7 @@ function massRock(g, s, rnd, P, cv) {
     for (let k = 0; k < N; k++) { if (Hs[k] < h0) h0 = Hs[k]; if (Hs[k] > h1) h1 = Hs[k]; }
     const Hn = new Float32Array(N);
     for (let k = 0; k < N; k++) Hn[k] = (Hs[k] - h0) / (h1 - h0 || 1);
-    FORM.set(P.upName, { up: blurField(Float32Array.from(UP), s, 2, 2), h: Hn, cr: Float32Array.from(CR) });
+    FORM.set(P.upName, { up: blurField(Float32Array.from(UP), s, 2, 2), h: Hn, cr: Float32Array.from(CR), ux: P.formUX ? blurField(UX, s, 2, 2) : null });
   }
   // -- painted details on the faces: soft chisel strokes, a few short cracks with a lit lip
   if (P.chisel) {
@@ -1879,7 +1891,22 @@ register('cliff_fields', {
   },
 });
 register('cliff_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: chunky blue-gray granite blocks (1-3 m), cream-lit tops, cool undersides, soft dark creases, a light powder; the terrain shader lays the snow shelves from its form map',
+  family: 'terrain', size: 512, note: 'Dun Morogh valley walls: angular blue-gray granite, flat fractured facets with straight edges, blocks from 1 to 3 m and long slabs, cream-lit planes, cool undersides, dark joints, a light powder; the shader lays snow shelves from its form map (10.5 m tile)',
+  paint(g, s, rnd, h, cv) {
+    massRock(g, s, rnd, {
+      fill: [3, 5], big: 7, bigR: [44, 150], asp: [1.2, 4.2], ledgeN: 2, ledgeL: [110, 220], small: 12, sx: 1, sy: 1, rot: 0.35, warp: 9, tilt: 0.32, poly: [5, 7],
+      dome: 30, zs: 26, smooth: 0.26, exp: 5.5, bulge: 5, soft: 1, relief: 0.95, contrast: 2.4, planes: 0.7, shSlope: 0.4, castA: 0.55, tone: 0.13, hueMix: 0.4,
+      crease: 0.6, creaseW: 4, creaseD: 6, creaseA: 0.7, creaseC: '#323a50',
+      colors: ['#7a8292', '#848c9c', '#8e95a4', '#727a8a', '#8a90a2'], blot: ['#6e7686', '#9aa2b2', '#7c7a8c', '#88909e'],
+      light: '#e6e0d0', shadow: '#4e5874', cast: '#535e7c', deep: '#3a425a', glaze: '#e8ecf8',
+      powder: { up: 0.42, a: 0.18 }, powderC: '#eef2f8',
+      stains: 22, stain: '#363e54', stainA: 0.13, lichen: ['#a8b0a0', '#c0c4b0', '#b8a88a'], chisel: 160, chiselA: 0.4, cracks: 24, upName: 'cliff_snow', formUX: true,
+    }, cv);
+  },
+});
+// The crash mesas keep their own granite: chunky rounded blue-gray blocks (the shader samples it smaller)
+register('cliff_snow_mesa', {
+  family: 'terrain', size: 512, note: 'Dun Morogh crash mesas: chunky blue-gray granite blocks (1-3 m), cream-lit tops, cool undersides, soft dark creases, a light powder; the terrain shader lays the snow from its form map',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
       fill: [4, 6], big: 6, bigR: [66, 120], asp: [1.0, 2.6], small: 0, sx: 1, sy: 1, rot: 0.4, warp: 18, tilt: 0.14,
@@ -1888,24 +1915,24 @@ register('cliff_snow', {
       colors: ['#7a8292', '#848c9c', '#8e95a4', '#767e8e', '#8a90a2'], blot: ['#6e7686', '#9aa2b2', '#7c7a8c', '#88909e'],
       light: '#e6e0d0', shadow: '#55607c', cast: '#5a6584', deep: '#3e465e', glaze: '#e8ecf8',
       powder: { up: 0.45, a: 0.16 }, powderC: '#eef2f8',
-      stains: 24, stain: '#363e54', stainA: 0.14, lichen: ['#a8b0a0', '#c0c4b0', '#b8a88a'], chisel: 200, cracks: 18, upName: 'cliff_snow',
+      stains: 24, stain: '#363e54', stainA: 0.14, lichen: ['#a8b0a0', '#c0c4b0', '#b8a88a'], chisel: 200, cracks: 18, upName: 'cliff_snow_mesa',
     }, cv);
   },
 });
-// Not a colour: the FORM of cliff_snow's painted granite, texel for texel (linear data for the
-// terrain shader, which lays its snow on whatever the painted rock turns up to the sky).
-// R: which way the surface faces (0.5 + 0.5 * up; > 0.5 faces up), G: height of the rock (0..1),
-// B: the creases between masses.
-register('cliff_snow_form', {
-  family: 'terrain', size: 512, note: 'data, not colour: the form of cliff_snow (R faces up, G height, B creases) for the snow shader',
+// Not colour: the FORM of a granite texture, texel for texel (linear data for the terrain shader,
+// which lays its snow on whatever the painted rock turns up to the sky). R: how far the surface faces
+// up (0.5 + 0.5 * up), G: its height (0..1), B: how far it faces right (0.5 + 0.5 * x; lets the
+// shader turn the form with a rotated sample), or the creases between masses for the mesa granite.
+for (const [name, src] of [['cliff_snow_form', 'cliff_snow'], ['cliff_snow_mesa_form', 'cliff_snow_mesa']]) register(name, {
+  family: 'terrain', size: 512, note: `data, not colour: the form of ${src} (R faces up, G height, B faces right or creases) for the snow shader`,
   paint(g, s) {
-    canvasFor('cliff_snow');
-    const F = FORM.get('cliff_snow'), img = g.getImageData(0, 0, s, s), D = img.data;
+    canvasFor(src);
+    const F = FORM.get(src), img = g.getImageData(0, 0, s, s), D = img.data;
     for (let k = 0; k < s * s; k++) {
       const o = k * 4;
       D[o] = F ? Math.max(0, Math.min(255, Math.round(127.5 + 127.5 * F.up[k]))) : 128;
       D[o + 1] = F ? Math.round(255 * F.h[k]) : 128;
-      D[o + 2] = F ? Math.round(255 * Math.min(1, F.cr[k])) : 0;
+      D[o + 2] = F ? (F.ux ? Math.max(0, Math.min(255, Math.round(127.5 + 127.5 * F.ux[k]))) : Math.round(255 * Math.min(1, F.cr[k]))) : 128;
       D[o + 3] = 255;
     }
     g.putImageData(img, 0, 0);
@@ -1926,19 +1953,181 @@ register('cliff_badlands', {
     }, cv);
   },
 });
+// Tanaris sandstone: a few thick beds (2.5-5 m on the 16 m tile) of tan, rust and honey, and lens-shaped
+// cream hard beds between them that thicken, thin and pinch out along the face. The form is a relief lit
+// from the upper left: a hard bed bulges (a lit rounded top, a shaded foot) and casts a soft warm shadow
+// into the soft bed under it, which is scooped out under the overhang and rises to the next ledge, with
+// faint sub-beds and wind flutes. Joints break the hard beds into blocks of their own tone; sand lies in
+// drifts on the ledges, dark varnish streaks run down from the hard beds' feet, wind pits gather in
+// clusters. The palette matches nature's rock_sand (the wall-foot mounds), so those read as blocks fallen
+// from these walls.
+function sandstone(g, s, rnd, cv, P) {
+  const N = s * s;
+  // -- the beds: soft and hard alternating (soft beds now and then in pairs), each its own colour
+  const th = [], hardB = [];
+  let tot = 0, h = false;
+  while (tot < s * 0.98) {
+    const t = h ? range(rnd, P.hardT[0], P.hardT[1]) : range(rnd, P.softT[0], P.softT[1]);
+    th.push(t); hardB.push(h); tot += t;
+    h = h ? false : rnd() < 0.75;
+  }
+  const n = th.length, ys = [0];
+  for (let j = 0; j < n; j++) ys.push(ys[j] + th[j] * s / tot);
+  const beds = [];
+  let lastC = '';
+  let dark = rnd() < 0.5;
+  for (let j = 0; j < n; j++) {
+    if (!hardB[j]) dark = !dark;
+    const pal = hardB[j] ? P.hardC : dark ? P.softC.slice(0, 2) : P.softC.slice(2);
+    let c; do { c = pick(rnd, pal); } while (c === lastC && pal.length > 1);
+    lastC = c;
+    beds.push({ hard: hardB[j], c: hex(jitter(c, rnd, 0.025)), c2: hex(jitter(pick(rnd, pal), rnd, 0.03)), wob: periodic(rnd, 4, 1.1, 1), wob2: periodic(rnd, 3, 0.8, 6),
+      amp: range(rnd, P.wob[0], P.wob[1]), sp: range(rnd, 16, 30), lens: periodic(rnd, 3, 0.9, 1), lensK: range(rnd, 0.15, 0.6), lip: periodic(rnd, 3, 1, 2), sand: periodic(rnd, 6, 0.8, 2), sand2: periodic(rnd, 3, 1, 1),
+      flute: periodic(rnd, 8, 0.6, 9), joints: [], tone: [], A: range(rnd, 0.75, 1.25) });
+  }
+  // the boundaries per column (top of each bed; the last is the first one tile further down). A hard
+  // bed's thickness swells and thins along the face (a lens), and now and then pinches out entirely.
+  const NB = n + 1, B = new Float32Array(s * NB);
+  for (let x = 0; x < s; x++) {
+    const u = x / s, o = x * NB;
+    for (let j = 0; j < n; j++) B[o + j] = ys[j] + beds[j].amp * beds[j].wob(u) + 1.5 * beds[j].wob2(u);
+    B[o + n] = B[o] + s;
+    for (let j = 0; j < n - 1; j++) if (beds[j].hard) {
+      const b = beds[j], lens = Math.max(0, Math.min(1.25, 0.78 + b.lensK * b.lens(u) * 1.6));
+      B[o + j + 1] = B[o + j] + (ys[j + 1] - ys[j]) * lens;
+    }
+    for (let j = 1; j < n; j++) B[o + j] = Math.max(B[o + j], B[o + j - 1] + (beds[j - 1].hard ? 0 : 3));
+    for (let j = n - 1; j >= 1; j--) B[o + j] = Math.min(B[o + j], B[o + j + 1] - (beds[j].hard ? 0 : 3));
+  }
+  // joints in the hard beds: blocks 60-200 px wide, each with its own tone; some joints only part-way
+  for (const b of beds) if (b.hard) {
+    let x = rnd() * 60;
+    const x0 = x;
+    while (x < x0 + s - 50) { b.joints.push({ x, wob: periodic(rnd, 2, 1, 1), a: range(rnd, 0.5, 1), f0: rnd() < 0.35 ? range(rnd, 0.25, 0.6) : 0, lean: range(rnd, -6, 6) }); b.tone.push(range(rnd, -1, 1)); x += range(rnd, 60, 200); }
+  }
+  const DET = fbmField(rnd, s, 2, 24, 0.5, 0.7), M1 = fbmLo(rnd, s, 3, 4, 0.55), M2 = fbmLo(rnd, s, 2, 6, 0.5, 2.5), M3 = fbmLo(rnd, s, 3, 3, 0.5), ML = fbmLo(rnd, s, 2, 8, 0.5, 0.5);
+  const H = new Float32Array(N), BED = new Int16Array(N), F = new Float32Array(N), DY = new Float32Array(N), DB = new Float32Array(N), SAND = new Float32Array(N), JT = new Float32Array(N), BLK = new Int16Array(N).fill(-1);
+  for (let x = 0; x < s; x++) {
+    const o = x * NB, u = x / s;
+    for (let y = 0; y < s; y++) {
+      const k = y * s + x;
+      let yy = y < B[o] ? y + s : y;
+      if (yy >= B[o + n]) yy -= s;
+      let j = 0; while (j < n - 1 && yy >= B[o + j + 1]) j++;
+      const b = beds[j], ab = beds[(j - 1 + n) % n], bb = beds[(j + 1) % n];
+      const y0 = B[o + j], y1 = B[o + j + 1], t = Math.max(1, y1 - y0), dy = yy - y0, db = y1 - yy, f = Math.max(0, Math.min(1, dy / t));
+      BED[k] = j; F[k] = f; DY[k] = dy; DB[k] = db;
+      let hh;
+      if (b.hard) {
+        // a rounded bulge: a short steep top, a long rounded foot; thin beds bulge less
+        const A = P.hardA * b.A * Math.min(1, 0.45 + t / 60);
+        hh = A * sst(-0.02, 0.24, f) * (1 - 0.85 * sst(0.5, 1.02, f));
+        // the joints: a groove with rounded block edges either side
+        for (let i = 0; i < b.joints.length; i++) {
+          const J = b.joints[i];
+          if (f < J.f0) continue;
+          let dx = x - (J.x + J.wob(f * 0.5) * 3 + J.lean * f); dx -= Math.round(dx / s) * s;
+          const ad = Math.abs(dx);
+          if (ad < 7) { const gq = (1 - ad / 7); hh -= A * 0.55 * gq * gq * J.a * sst(J.f0, J.f0 + 0.12, f); JT[k] = Math.max(JT[k], (ad < 1.3 ? 1 : 0) * J.a * sst(J.f0, J.f0 + 0.12, f)); }
+        }
+        let bi = -1, bd = 1e9;
+        for (let i = 0; i < b.joints.length; i++) { const d = ((x - b.joints[i].x) % s + s) % s; if (d < bd) { bd = d; bi = i; } }
+        BLK[k] = bi;
+      } else {
+        // scooped out under an overhang, rising to the ledge below; faint sub-beds and wind flutes
+        const deep = ab.hard ? 1 : 0.35;
+        hh = -P.softA * deep * Math.pow(1 - f, 1.6) - P.softA * 0.18 * (1 - deep);
+        const nL = Math.max(2, Math.round(t / b.sp)), pres = sst(-0.25, 0.35, ML[k]);
+        hh += P.softA * 0.035 * Math.sin(f * nL * TAU) * pres;
+        hh -= P.softA * 0.14 * (0.5 + 0.5 * b.flute(u + f * 0.03)) * sst(0.15, 0.6, f) * sst(-0.1, 0.4, M2[k]);
+        // a drift of sand on the ledge of the hard bed below: a ramp up against it
+        if (bb.hard) {
+          const sh = P.sandH * sst(-0.25, 0.5, b.sand(u)) * (0.5 + 0.5 * (0.5 + 0.5 * b.sand2(u)));
+          if (sh > 1.5 && db < sh + 1.5) {
+            const e = sh - db, a = sst(-1.2, 1.2, e);
+            SAND[k] = a;
+            hh = hh * (1 - a) + a * (P.sandRise * Math.min(e, sh) / sh * 0.9 - 1.5);
+          }
+        }
+      }
+      H[k] = hh + DET[k] * P.detail;
+    }
+  }
+  const Hs = blurField(Float32Array.from(H), s, 1, 2);
+  // -- colour, lit from the upper left, with the overhangs' cast shadow
+  const lit = hex(P.light), shd = hex(P.shadow), cast = hex(P.cast), crease = hex(P.crease), sand = hex(P.sand), sandLit = hex(P.sandLit), sandSh = hex(P.sandShade);
+  const Lx = -0.42, Ly = -0.72, Lz = 0.55, Ll = Math.hypot(Lx, Ly, Lz), dif0 = Lz / Ll;
+  const SH = [[3, 0.6], [6, 0.75], [10, 0.85], [15, 0.95], [22, 1]];
+  const img = g.getImageData(0, 0, s, s), D = img.data;
+  for (let y = 0; y < s; y++) for (let x = 0; x < s; x++) {
+    const k = y * s + x, p = k * 4, b = beds[BED[k]];
+    const hx = (Hs[y * s + (x + 1) % s] - Hs[y * s + (x - 1 + s) % s]) * 0.5 * P.relief;
+    const hy = (Hs[((y + 1) % s) * s + x] - Hs[((y - 1 + s) % s) * s + x]) * 0.5 * P.relief;
+    const nl = Math.hypot(hx, hy, 1), dif = (hx * Lx + hy * Ly + Lz) / (nl * Ll);
+    // (the canvas y runs down the face, so a surface whose height grows downward faces up, into the light)
+    const hm = sst(-0.35, 0.35, M3[k]) * 0.4;
+    let r = b.c.r + (b.c2.r - b.c.r) * hm, gg = b.c.g + (b.c2.g - b.c.g) * hm, bl = b.c.b + (b.c2.b - b.c.b) * hm;
+    let v = 1 + M1[k] * 0.05 + M2[k] * 0.03;
+    if (BLK[k] >= 0) v *= 1 + b.tone[BLK[k]] * 0.04;
+    r *= v; gg *= v; bl *= v;
+    const mixC = (c, a) => { r += (c.r - r) * a; gg += (c.g - gg) * a; bl += (c.b - bl) * a; };
+    const sa = SAND[k];
+    if (sa > 0) {
+      const q = Math.min(1, DB[k] / Math.max(4, P.sandH));
+      mixC({ r: sand.r + (sandSh.r - sand.r) * (1 - q) * 0.25, g: sand.g + (sandSh.g - sand.g) * (1 - q) * 0.25, b: sand.b + (sandSh.b - sand.b) * (1 - q) * 0.25 }, sa * 0.92);
+    }
+    let tl = (dif - dif0) * P.contrast;
+    tl = tl * (1 - P.planes) + P.planes * Math.round(tl * 3) / 3;
+    let occ = 0;
+    for (const [d, fk] of SH) {
+      const sx = ((x - Math.round(d * 0.5)) % s + s) % s, sy = ((y - d) % s + s) % s;
+      occ = Math.max(occ, Hs[sy * s + sx] - Hs[k] - d * P.shSlope * fk);
+    }
+    const shd2 = sst(0, P.hardA * 0.35, occ) * P.castA;
+    if (tl > 0) { const a = Math.min(P.litMax, tl) * (1 - shd2); mixC(sa > 0.5 ? sandLit : lit, a); }
+    else mixC(shd, Math.min(0.8, -tl));
+    if (shd2 > 0) mixC(cast, shd2);
+    if (JT[k] > 0) mixC(crease, JT[k] * 0.5);
+    if (DY[k] < 1.2 && !b.hard && sa < 0.3) mixC(crease, 0.3 * (1 - DY[k] / 1.2));     // the soft crease where a bed meets the one above
+    D[p] = r; D[p + 1] = gg; D[p + 2] = bl; D[p + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  const Bat = (x, j) => { const xi = ((Math.round(x) % s) + s) % s; return B[xi * NB + j]; };
+  // dark varnish streaks running down from the hard beds' feet
+  layered(g, s, P.varnishA, lg => {
+    for (let j = 0; j < n; j++) if (beds[j].hard) for (let q = 0; q < P.varnishN; q++) {
+      const x = rnd() * s, y0 = Bat(x, j + 1) + 2, L = range(rnd, 16, 80), w = range(rnd, 3, 8);
+      const pts = []; let px = 0; for (let i = 0; i <= 5; i++) { pts.push([px, L * i / 5]); px += range(rnd, -1.2, 1.2); }
+      wrap(s, x, y0 + L / 2, L, (X, Y) => stroke(lg, pts.map(([a, b2]) => [X + a, Y - L / 2 + b2]), w, w * 0.25, P.varnish, range(rnd, 0.4, 1)));
+    }
+  });
+  // wind pits in loose clusters on the soft beds (a dark hollow, a lit lower lip)
+  for (let c = 0; c < 8; c++) {
+    const cx = rnd() * s, cy = rnd() * s, m = 2 + Math.floor(rnd() * 4);
+    for (let k2 = 0; k2 < m; k2++) {
+      const x = cx + range(rnd, -30, 30), y = cy + range(rnd, -14, 14), r = range(rnd, 3, 9) * (k2 ? 0.75 : 1), ry = r * range(rnd, 0.55, 0.8);
+      const kk = ((Math.round(y) % s + s) % s) * s + ((Math.round(x) % s + s) % s);
+      if (SAND[kk] > 0.2 || beds[BED[kk]].hard) continue;
+      wrap(s, x, y, r * 2, (X, Y) => {
+        blob(g, X, Y, r, ry, 0, P.pit, 0.4, 0.55);
+        blob(g, X, Y + ry * 0.85, r * 0.95, ry * 0.32, 0, P.light, 0.35, 0.45);
+      });
+    }
+  }
+  streaks(g, s, rnd, { colors: [P.light], count: 60, len: [8, 26], width: [1.5, 3.5], angle: 0.05, wobble: 0.2, alpha: 0.06 });
+  glaze(g, s, s, P.glaze, 0.1, 'soft-light');
+  soften(cv, 0.6);
+}
 register('cliff_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: pale sandstone strata, wind-softened, pinching out, sand on the ledges',
+  family: 'terrain', size: 512, note: 'Tanaris: thick tan, rust and honey sandstone beds between lens-shaped cream hard beds (rounded lit tops, cast shadows, joints), sand on the ledges, varnish streaks (16 m tile)',
   paint(g, s, rnd, h, cv) {
-    paintRockFace(g, s, rnd, {
-      ...GRANITE, strata: true, band: [24, 64], hardP: 0.42, bandWarp: 11, ledge: 1.3, pinch: 14, faults: 3, fissures: [110, 240], fissureC: '#7a5248', lipLit: '#fff0d0', undercut: '#8a6058',
-      bandColors: ['#c09060', '#d4ab7c', '#c49a6c', '#e0bf92', '#b08058', '#cba076'],
-      facets: [{ cells: [5, 2], w: 0.5, amp: 0.4, tilt: 0.25, lean: [-0.2, 0.4] }, { cells: [12, 5], w: 0.5, amp: 0.2, tilt: 0.2, lean: [-0.3, 0.5] }],
-      warp: 18, crackFrac: 0.25, crackW: 1.8, shelfN: 0, bulge: 3.4, detail: 0.08, cavity: 0.4, contrast: 1.35, slabVar: 0.04, soft: 4,
-      colors: ['#c49a6c', '#d4ab7c', '#c09060'], blot: ['#000000', '#ffffff'],
-      light: '#fff2d4', shadow: '#7a5662', crack: '#6a4a4c', glaze: '#ffe6b8',
-      cover: { shade: '#c4a074', mid: '#e0c294', lit: '#f6e2b8', minUp: 0.25, slope: 2.5, top: 0.8, amt: 1.1, patch: [0.35, 0.75], edge: [0.25, 0.55], max: 0.8 },
-      stains: 34, stain: '#7a5a4a', stainA: 0.1,
-    }, cv);
+    sandstone(g, s, rnd, cv, {
+      softT: [80, 150], hardT: [30, 64], wob: [3, 12], hardA: 16, softA: 9, detail: 0.6, relief: 0.9, contrast: 2.2, planes: 0.25, litMax: 0.55, shSlope: 0.2, castA: 0.62,
+      softC: ['#b7895e', '#aa7c52', '#d4ab7c', '#cc9f6e'], hardC: ['#e6cfa4', '#dec493', '#e9d4ab'],
+      light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
+      sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
+      varnish: '#5a3c32', varnishA: 0.15, varnishN: 6, pit: '#946c4c', glaze: '#ffe6b8',
+    });
   },
 });
 
@@ -2255,7 +2444,7 @@ register('clutter_meadow', {
   ]),
 });
 register('clutter_fields', {
-  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: golden tuft, a dense tall wheat patch, a sparse short wheat patch, green-gold tuft, poppies, wispy golden tuft, golden seed grass, a straw clump',
+  family: 'terrain', w: 1024, h: 512, alpha: true, note: 'cells: golden tuft, a dense tall wheat patch, a sparse short wheat patch, green-gold tuft, poppies, wispy golden tuft, golden seed grass, cut stubble',
   paint: clutterAtlas([
     (g, ox, oy, rnd) => tuft(g, ox + 128, oy + 254, rnd, { n: 10, spread: 70, len: [120, 216], wid: [13, 20], cols: ['#b49a4c', '#c2a654', '#a89246', '#bca050'], tip: ['#f0dc98', '#ecd486', '#f6e4a8'], base: '#8a7a3a', fan: 0.65 }),
     (g, ox, oy, rnd) => wheatCell(g, ox, oy, rnd, { stalk: ['#b8963e', '#c8a44a', '#a8883a'], head: '#d8b05a', headLit: '#f4dc90', n: 26 }),
@@ -2268,8 +2457,19 @@ register('clutter_fields', {
       for (let i = 0; i < 7; i++) { const x = ox + 128 + range(rnd, -70, 70); const [tx, ty] = stem(g, x, oy + 250, range(rnd, 150, 230), range(rnd, -0.25, 0.25), '#b8a050', 3); for (let k = 0; k < 6; k++) { const s2 = k % 2 ? 1 : -1; ellipse(g, tx + s2 * 5, ty - k * 5, 4, 6, s2 * 0.5, k % 3 ? '#e2c87a' : '#c8a656'); } }
     },
     (g, ox, oy, rnd) => {
-      for (let i = 0; i < 40; i++) { const x = ox + 128 + range(rnd, -80, 80), y = oy + 250 - range(rnd, 0, 40); const a = range(rnd, -1.4, 1.4), L = range(rnd, 40, 90); stroke(g, [[x, y], [x + Math.sin(a) * L, y - Math.abs(Math.cos(a)) * L * 0.4]], 4, 3, pick(rnd, ['#e2c56a', '#c9a64e', '#f0dc98', '#b8963e']), 1); }
-      tuft(g, ox + 128, oy + 254, rnd, { n: 5, spread: 50, len: [60, 110], wid: [10, 15], cols: ['#c8a24a', '#bc9a44'], tip: ['#f0d888'], base: '#8a7a3a', back: 1 });
+      // cut stubble: short stiff stalks in a loose row, flat cut tops catching the light, loose straw
+      // fallen at their feet (the stubble plots' rows; elsewhere a straw clump)
+      for (let i = 0; i < 34; i++) { const x = ox + 128 + range(rnd, -100, 100), y = oy + 252 - range(rnd, 0, 26); const a = range(rnd, -1.45, 1.45), L = range(rnd, 30, 80); stroke(g, [[x, y], [x + Math.sin(a) * L, y - Math.abs(Math.cos(a)) * L * 0.35]], 4, 3, pick(rnd, ['#d8bc72', '#c4a456', '#ead494', '#b08c44']), 1); }
+      const S = [];
+      for (let i = 0; i < 34; i++) S.push({ x: ox + 128 + range(rnd, -104, 104), h: range(rnd, 60, 165), lean: range(rnd, -0.14, 0.14) });
+      S.sort((a, b) => b.h - a.h);
+      for (const st of S) {
+        const x2 = st.x + Math.sin(st.lean) * st.h, y2 = oy + 252 - st.h;
+        stroke(g, [[st.x + 1.8, oy + 253], [x2 + 1.8, y2 + 1]], 5.5, 4.5, '#8a6c34', 1);
+        stroke(g, [[st.x, oy + 253], [x2, y2]], 4.6, 3.8, pick(rnd, ['#d8bc72', '#e4cc88', '#c8a85c', '#dcc27c']), 1);
+        stroke(g, [[st.x - 0.8, oy + 240], [x2 - 0.8, y2 + 6]], 1.4, 1, '#f2e2ac', 0.6);
+        ellipse(g, x2, y2, 2.6, 1.3, st.lean, '#f8ecc0');
+      }
     },
   ]),
 });

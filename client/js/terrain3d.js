@@ -18,6 +18,12 @@
 // in smaller blocks, projected square to each face, from a lumpy drift at its foot to a snow cap
 // over its lip and a band on its bench, all set by HEIGHT, so no edge ever follows its triangles
 // (its steep sliver facets, where the heightfield folds, take the projection their own facet faces).
+// The valley walls' angular granite (cliff_snow) is crossfaded with a second sample turned 30 degrees
+// and 1.6x larger (its form turned to match), and carries two or three snow-capped ledges at world
+// heights; the mesas keep their own rounded granite (cliff_snow_mesa). Round each crash mesa the mesh
+// is drawn 4x finer (terrain_mesa.js): smooth normals, heights within 0.35 m of the physics.
+// Tanaris exposes its sandstone from ~30 degrees, its beds rising and falling along the valley; Westfall
+// paints its cultivated plots (W.fields: furrows, stubble, standing wheat in rows) into the splat.
 // Ground on slopes is projected from the side too. Explicit texture gradients with a capped
 // anisotropy keep grazing facets from washing out. Broad warm/cool and value fields and baked
 // ambient occlusion sit on top, a 1.8 m detail map crisps the ground at the camera's feet, and
@@ -29,7 +35,8 @@
 // band and the painted strata carry the detail.) Far off in the snow the road's ruts darken.
 // The terrain's skyline around the camera goes to the atmosphere, whose horizon rings haze up
 // from it. Instanced ground clutter grows in patches around the camera, never on the bare dirt of
-// a clearing, a building's lot or a code painted on the ground. terrainTintAt() gives other
+// a clearing, a building's lot, a cultivated plot (wheat stands there in rows, cut stubble in a few
+// tufts) or a code painted on the ground. terrainTintAt() gives other
 // modules the splat's tint and occlusion at a point.
 //
 // Owned by the terrain/atmosphere art pass. API: buildTerrain(W) -> { group, update(dt, t, camPos), dispose() },
@@ -40,6 +47,7 @@ import { canvasFor, has } from './paint/index.js';
 import { atmo, setSkyline } from './atmosphere.js';
 import { fbm, noise2 } from '/shared/rng.js';
 import { BIOME_BY_DAY } from '/shared/world.js';
+import { mesaRefiner } from './terrain_mesa.js';
 
 const CHUNK = 40;            // cells per terrain chunk side (100 m): few draw calls, still culls
 const SHOULDER = 1.7;        // the road texture runs this far past the driven edge on each side
@@ -55,7 +63,7 @@ const CFG = {
       cards: [[0.85, 0.6, 0.34], [0.7, 0.45, 0.22], [0.65, 0.55, 0.08], [0.65, 0.55, 0.08], [0.75, 0.85, 0.08], [0.65, 0.42, 0.1], [0.8, 0.6, 0.2], [0.6, 0.38, 0.06]] },
   },
   fields: {
-    hw: 3.0, scale: [7, 9, 6, 15], cliff: [0.34, 0.5], cliffN: [0.14, 0.04], g2: [0.6, 0.45], collar: [0.3, 0.2, 0.09], reveal: [0.38, 0.62, 0.85], ledge: [0.95, 0.95, 0.9],
+    hw: 3.0, scale: [7, 9, 6, 15], cliff: [0.34, 0.5], cliffN: [0.14, 0.04], g2: [0.6, 0.45], collar: [0.3, 0.2, 0.09], reveal: [0.38, 0.62, 0.85], ledge: [0.95, 0.95, 0.9], plots: true,
     ao: [0.55, 0.52, 0.66], tintA: [1.08, 1.0, 0.84], tintB: [0.9, 0.98, 1.0], macro: 0.36, detail: [0.7, 0.32, 0.0],
     clutter: { cell: 2.2, slots: 4, radius: 23, patch: 10, density: 0.95, spread: 0.85, flowers: 0.06, flowerCards: [4], wheat: 0.3, wheatCards: [[1, 0.95], [2, 0.72]],
       cards: [[0.85, 0.62, 0.36], [0.95, 0.95, 0.04], [0.85, 0.72, 0.04], [0.8, 0.58, 0.22], [0.65, 0.55, 0.05], [0.85, 0.72, 0.16], [0.8, 0.7, 0.08], [0.7, 0.32, 0.08]] },
@@ -73,12 +81,18 @@ const CFG = {
       cards: [[0.75, 0.5, 0.3], [0.8, 0.55, 0.12], [0.75, 0.5, 0.12], [0.7, 0.5, 0.12], [0.75, 0.5, 0.16], [0.85, 0.6, 0.06], [0.7, 0.45, 0.06], [0.5, 0.3, 0.14]] },
   },
   desert: {
-    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.36, 0.52], cliffN: [0.14, 0.05], g2: [0.62, 0.3], collar: [0.5, 0.36, 0.2], ledge: [1, 1, 1], strata: true, dunes: true, mudTex: 'mud_desert', local: 0.02, mesaK: 0.2,
+    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.1, 0.2], cliffN: [0.1, 0.04], g2: [0.62, 0.3], collar: [0.5, 0.36, 0.2], ledge: [1, 1, 1], strata: true, dunes: true, mudTex: 'mud_desert', local: 0.02, mesaK: 0.2,
+    scree: [0.1, 0.2, 0.12, 0.24], strataWarp: 3.5, farS: 0.5, rockDet: 0.5,
     ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.9], tintB: [0.94, 0.97, 1.03], macro: 0.3, detail: [0.0, 0.3, 0.38],
     clutter: { cell: 4.0, slots: 2, radius: 22, patch: 12, density: 0.3, spread: 1.0, flowers: 0,
       cards: [[0.7, 0.45, 0.34], [0.75, 0.5, 0.12], [0.7, 0.45, 0.12], [0.6, 0.45, 0.08], [0.8, 0.75, 0.12], [0.7, 0.45, 0.06], [0.6, 0.4, 0.06], [0.5, 0.3, 0.14]] },
   },
 };
+
+// Westfall's cultivated plots (W.fields), painted into the splat: at most MAX_PLOTS per leg. Their
+// colours (sRGB): furrow trough, mid, lit ridge; stubble soil, straw, lit straw; wheat gap, body, lit heads.
+const MAX_PLOTS = 10;
+const PLOT_COLORS = ['#3a281c', '#694630', '#9c6e48', '#8a6845', '#c8ae74', '#e6d29e', '#5e4a22', '#c39a3c', '#efcd6c'];
 
 const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 
@@ -125,19 +139,27 @@ function splatMaterial(biome, cfg) {
     uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(MUD_TILE, 10, cfg.macro, cfg.macro2 ?? 0.12) },
     uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uLocal: { value: cfg.local ?? -1 }, uCliffN: { value: new THREE.Vector2(...cfg.cliffN) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
     uAO: { value: new THREE.Vector3(...cfg.ao) }, uCollar: { value: new THREE.Vector3(...cfg.collar) }, uRev: { value: new THREE.Vector3(...(cfg.reveal || [0.24, 0.76, 0.5])) },
+    uPlot: { value: Array.from({ length: MAX_PLOTS }, () => new THREE.Vector4(1e5, 1e5, 0, 1)) }, uPlotB: { value: Array.from({ length: MAX_PLOTS }, () => new THREE.Vector4(0, 0, 0, 0)) },
+    uPlotC: { value: PLOT_COLORS.map(c => new THREE.Color(c)) },
+    uScree: { value: new THREE.Vector4(...(cfg.scree || [0.3, 0.5, 0.3, 0.46])) }, uSWarp: { value: cfg.strataWarp ?? 0 }, uFarS: { value: cfg.farS ?? 0.4 }, uRockDet: { value: cfg.rockDet ?? 0 },
     uMesa: { value: Array.from({ length: 8 }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaY: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uMesaK: { value: cfg.mesaK ?? 0.12 }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
-  if (cfg.snowRock) { const f = rawTex('cliff_snow_form', true); f.anisotropy = cheap ? 2 : 8; U.tForm = { value: f }; }
+  if (cfg.snowRock) {
+    // the valley walls' angular granite and its form; the crash mesas' own rounded granite and its form
+    for (const [k, n] of [['tForm', 'cliff_snow_form'], ['tFormM', 'cliff_snow_mesa_form']]) { const f = rawTex(n, true); f.anisotropy = cheap ? 2 : 8; U[k] = { value: f }; }
+    U.tCliffM = { value: T('cliff_snow_mesa') };
+  }
   m.userData.U = U;
   m.defines = {};
   if (cfg.sparkle) m.defines.TERRAIN_SPARKLE = 1;
   if (cfg.strata) m.defines.TERRAIN_STRATA = 1;
   if (cfg.dunes) m.defines.TERRAIN_DUNES = 1;
+  if (cfg.plots) m.defines.TERRAIN_PLOTS = 1;
   if (cfg.snowRock) m.defines.TERRAIN_SNOWROCK = 1;
   m.defines.TERRAIN_ANISO = cheap ? '2.0' : '3.0';
   m.defines.TERRAIN_NEARSHARP = cheap ? '0.62' : '0.82';
-  const key = 'terrain-splat-v21' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
+  const key = 'terrain-splat-v23' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.plots ? 'p' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
@@ -153,13 +175,20 @@ function splatMaterial(biome, cfg) {
       .replace('#include <common>', `#include <common>
         uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro, tSlope, tSlopeA, tDetail; uniform vec4 uGrid, uGridA; uniform vec2 uGridN, uGridAN; uniform vec3 uDetail;
         #ifdef TERRAIN_SNOWROCK
-          uniform sampler2D tForm;
+          uniform sampler2D tForm, tFormM, tCliffM;
+          // the walls' second granite sample: turned 30 degrees and 1.6x larger (its form turned to match)
+          const mat2 SR = mat2(0.866, 0.5, -0.5, 0.866);
+          const float SRS = 1.0 / 1.6;
+          vec2 formTurn(vec3 f) { return vec2(0.5 + 0.5 * (0.866 * (f.r * 2.0 - 1.0) - 0.5 * (f.b * 2.0 - 1.0)), f.g); }
         #endif
         #ifdef TERRAIN_STRATA
           uniform sampler2D tSlopeR;
         #endif
+        #ifdef TERRAIN_PLOTS
+          uniform vec4 uPlot[${MAX_PLOTS}], uPlotB[${MAX_PLOTS}]; uniform vec3 uPlotC[9];
+        #endif
         uniform vec4 uMesa[8], uMesaY[8]; uniform float uMesaK;
-        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge, uRev; uniform float uSpark, uRoadSpan, uLocal; uniform vec2 uRutFar;
+        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge, uRev; uniform float uSpark, uRoadSpan, uLocal, uSWarp, uFarS, uRockDet; uniform vec2 uRutFar; uniform vec4 uScree;
         varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv; varying vec2 vSlope;
         float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
         float tHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
@@ -174,6 +203,25 @@ function splatMaterial(biome, cfg) {
           if (ly > lm) dy *= lm / ly;
         }
         void tCap(inout vec2 dx, inout vec2 dy) { tCapK(dx, dy, TERRAIN_ANISO); }
+        // the rock's second sample (a long wall never repeats): elsewhere a 0.71 x 0.83 scale; in the
+        // Tanaris sandstone only along the wall, so its beds stay at the same heights (a bed seen
+        // through two samples at two heights would ghost into soft double lines)
+        #ifdef TERRAIN_SNOWROCK
+          #define CLIFF_M tCliffM
+        #else
+          #define CLIFF_M tCliff
+        #endif
+        #ifdef TERRAIN_DUNES
+          #define P2(p, ox, oy) vec2(p.x * 0.71 + ox, p.y)
+          #define P2K vec2(0.71, 1.0)
+          #define PF(p, ox, oy) vec2(p.x * uFarS + ox, p.y)
+          #define PFK vec2(uFarS, 1.0)
+        #else
+          #define PF(p, ox, oy) (p * uFarS + vec2(ox, oy))
+          #define PFK uFarS
+          #define P2(p, ox, oy) vec2(p.x * 0.71 + ox, p.y * 0.83 + oy)
+          #define P2K 0.77
+        #endif
         `)
       .replace('#include <map_fragment>', `
         float tSpark = 0.0;
@@ -268,6 +316,69 @@ function splatMaterial(biome, cfg) {
               col = mix(col, vec3(0.022, 0.019, 0.017), (1.0 - smoothstep(0.85, 1.75, fd)) * 0.8);                                // soot
             }
           }
+          #ifdef TERRAIN_PLOTS
+          {
+            // Westfall's cultivated plots: turned furrows, cut stubble or standing wheat, in rows that run
+            // along or across the road and wander a little; a grass margin inside a ragged, wavy edge; each
+            // plot its own tint. uPlot: centre, sin and cos of its bearing; uPlotB: half-length along the
+            // road, half-depth across, kind (0 wheat, 1 stubble, 2 furrow), rows along the road (1) or not
+            float pw = 0.0, pu = 0.0, pv = 0.0, pk = 0.0; vec4 pB = vec4(0.0);
+            for (int i = 0; i < ${MAX_PLOTS}; i++) {
+              vec4 A = uPlot[i], Bq = uPlotB[i];
+              vec2 d = xz - A.xy;
+              float u = d.x * A.z + d.y * A.w, v = d.x * A.w - d.y * A.z;
+              float m = min(Bq.x - abs(u), Bq.y - abs(v));
+              if (m <= 0.0) continue;
+              float sd = float(i) * 1.37;
+              float e = (mB.g - 0.5) * 1.1 + (nE - 0.5) * 0.6 + sin(u * 0.29 + sd * 4.1) * 0.22 + sin(v * 0.37 + sd * 2.3) * 0.2;
+              float w = smoothstep(0.75, 1.45, m + e);
+              if (w > pw) { pw = w; pu = u; pv = v; pB = Bq; pk = sd; }
+            }
+            if (pw > 0.0) {
+              float al = pB.w, kind = pB.z;
+              float a = mix(pu, pv, al), bq = mix(pv, pu, al);         // a: across the rows, bq: along them
+              a += sin(bq * 0.085 + pk * 5.0) * 0.55 + sin(bq * 0.31 + pk * 2.0) * 0.1;
+              float per = kind < 0.5 ? 0.72 : kind < 1.5 ? 0.7 : 0.8;
+              float q = a / per, fq = fract(q);
+              float fade = smoothstep(0.2, 0.55, fwidth(q));        // rows finer than a couple of pixels melt into their average
+              float tri = 1.0 - abs(fq * 2.0 - 1.0);                 // 0 down in a furrow, 1 on a ridge
+              float litF = smoothstep(0.5, 0.66, fq) * (1.0 - smoothstep(0.68, 0.86, fq));    // the ridge's sunward flank
+              // each row thickens and thins along its length (sampled per row, so rows differ)
+              float rowN = textureLod(tMacro, vec2(bq / 11.0 + pk, floor(q) * 0.173 + pk * 0.31), 0.0).g;
+              vec3 dt = texture2D(tDirt, xr / uScale.z).rgb, dA = textureLod(tDirt, vec2(0.5), 12.0).rgb;
+              vec3 dMod = clamp(dt / max(dA, vec3(0.01)), 0.65, 1.45), gMod = clamp(g1 / max(textureLod(tG1, vec2(0.5), 12.0).rgb, vec3(0.01)), 0.6, 1.5);
+              vec3 pc, pa;
+              if (kind > 1.5) {
+                // turned soil: dark cool furrows, warm lit ridges, clods along them
+                float rg = smoothstep(0.05, 0.85, tri + (rowN - 0.5) * 0.3);
+                pc = mix(uPlotC[0], uPlotC[1], rg);
+                pc = mix(pc, uPlotC[2], litF * (0.6 + 0.5 * rowN));
+                pa = mix(mix(uPlotC[0], uPlotC[1], 0.55), uPlotC[2], 0.12);
+                pc *= dMod; pa *= mix(vec3(1.0), dMod, 0.5);
+              } else if (kind > 0.5) {
+                // stubble: pale rows of cut straw over dry tilled soil, loose straw between
+                // (soft-edged, broken rows; the soil between them half hidden under loose straw)
+                float rm = smoothstep(0.3, 0.7, tri + (nE - 0.5) * 0.35) * smoothstep(0.15, 0.5, rowN + (nE - 0.5) * 0.5 + (mB.g - 0.5) * 0.3);
+                vec3 straw = mix(uPlotC[4], uPlotC[5], litF * 0.8) * gMod;
+                vec3 soil = mix(uPlotC[3] * dMod, uPlotC[4] * gMod, 0.18 + 0.32 * smoothstep(0.35, 0.85, nE + (mB.b - 0.5) * 0.4));
+                pc = mix(soil, straw, rm * 0.78);
+                pa = mix(uPlotC[3], uPlotC[4], 0.5) * mix(vec3(1.0), gMod, 0.5);
+              } else {
+                // standing wheat: dense golden rows, shaded gaps, lit heads on the sunward side
+                float rm = smoothstep(0.12, 0.42, tri + (rowN - 0.5) * 0.25);
+                pc = mix(uPlotC[6], uPlotC[7], rm) * gMod;
+                pc = mix(pc, uPlotC[8] * gMod, litF * 0.7 * rm);
+                pa = mix(uPlotC[6], uPlotC[7], 0.78) * mix(vec3(1.0), gMod, 0.5);
+              }
+              pc = mix(pc, pa, fade);
+              // each plot its own tint (warmer or cooler, lighter or darker), and broad patches in it
+              float h1 = fract(pk * 0.618 + 0.13), h2 = fract(pk * 0.377 + 0.71);
+              pc *= mix(vec3(1.07, 1.0, 0.88), vec3(0.93, 0.99, 1.06), h1) * (0.9 + 0.18 * h2) * (0.9 + 0.2 * mB.r);
+              col = mix(col, pc, pw);
+              gW *= 1.0 - pw;
+            }
+          }
+          #endif
           // the road, in road space; the ground laps over its ragged edge. A second sample of the road
           // (mirrored, a 23 m period) takes over in big patches, so the 10 m tile never repeats.
           if (vRoad.y < 2.6) {
@@ -315,6 +426,9 @@ function splatMaterial(biome, cfg) {
           #endif
           if (cB + cShift > uCliff.x - 0.01) {
             vec2 cw = vec2(mB.g - 0.5, mB.r - 0.5) * vec2(0.3, 0.14);    // ledges wander along a wall instead of repeating
+            // (strata) and the beds rise and fall along the valley by a few metres, over 30-80 m, so no
+            // bed runs laser-level down a whole wall
+            if (uSWarp > 0.0) cw.y += (texture2D(tMacro, wp.xz / 230.0 + vec2(0.71, 0.13)).r - 0.5) * uSWarp / uScale.w;
             float xb = smoothstep(0.3, 0.7, mB.r * 0.7 + vRoad.w * 0.6 - 0.15);
             float farK = smoothstep(28.0, 75.0, distance(cameraPosition, wp)) * (1.0 - mzk);   // far walls: the rock at 2.5x, bigger masses
             // (snow) a crash mesa's granite in smaller blocks, 1-2 m: a third sample at 1.75x, crossfaded
@@ -353,16 +467,21 @@ function splatMaterial(biome, cfg) {
               vec2 p = vec2(wp.z, wp.y) / uScale.w + cw;
               vec2 dx = dFdx(p), dy = dFdy(p); tCapK(dx, dy, mix(TERRAIN_ANISO, 8.0, mzk));
               vec3 c1 = vec3(0.0);
-              if (farK < 0.999 && mzk < 0.999) c1 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21), dx * 0.77, dy * 0.77).rgb, xb);
-              if (farK > 0.001) c1 = mix(c1, textureGrad(tCliff, p * 0.4 + vec2(0.13, 0.57), dx * 0.4, dy * 0.4).rgb, farK);
-              if (mzk > 0.001) c1 = mix(c1, textureGrad(tCliff, p * MS + vec2(0.31, 0.11), dx * MS, dy * MS).rgb, mzk);
+              #ifdef TERRAIN_SNOWROCK
+                vec2 pR = SR * p * SRS + vec2(0.37, 0.21), dxR = SR * dx * SRS, dyR = SR * dy * SRS;
+                if (farK < 0.999 && mzk < 0.999) c1 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, pR, dxR, dyR).rgb, xb);
+              #else
+              if (farK < 0.999 && mzk < 0.999) c1 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, P2(p, 0.37, 0.21), dx * P2K, dy * P2K).rgb, xb);
+              #endif
+              if (farK > 0.001) c1 = mix(c1, textureGrad(tCliff, PF(p, 0.13, 0.57), dx * PFK, dy * PFK).rgb, farK);
+              if (mzk > 0.001) c1 = mix(c1, textureGrad(CLIFF_M, p * MS + vec2(0.31, 0.11), dx * MS, dy * MS).rgb, mzk);
               cc += sx * c1;
               #ifdef TERRAIN_SNOWROCK
                 sN += sx * texture2D(tMacro, vec2(wp.z / 40.0, wp.y / 9.0) + vec2(0.11, 0.43)).rg;
                 vec2 f1 = vec2(0.0);
-                if (farK < 0.999 && mzk < 0.999) f1 = mix(textureGrad(tForm, p, dx, dy).rg, textureGrad(tForm, vec2(p.x * 0.71 + 0.37, p.y * 0.83 + 0.21), dx * 0.77, dy * 0.77).rg, xb);
+                if (farK < 0.999 && mzk < 0.999) f1 = mix(textureGrad(tForm, p, dx, dy).rg, formTurn(textureGrad(tForm, pR, dxR, dyR).rgb), xb);
                 if (farK > 0.001) f1 = mix(f1, textureGrad(tForm, p * 0.4 + vec2(0.13, 0.57), dx * 0.4, dy * 0.4).rg, farK);
-                if (mzk > 0.001) f1 = mix(f1, textureGrad(tForm, p * MS + vec2(0.31, 0.11), dx * MS, dy * MS).rg, mzk);
+                if (mzk > 0.001) f1 = mix(f1, textureGrad(tFormM, p * MS + vec2(0.31, 0.11), dx * MS, dy * MS).rg, mzk);
                 fm += sx * f1;
               #endif
             }
@@ -370,16 +489,21 @@ function splatMaterial(biome, cfg) {
               vec2 p = vec2(-wp.x, wp.y) / uScale.w + vec2(0.5, 0.0) + cw;
               vec2 dx = dFdx(p), dy = dFdy(p); tCapK(dx, dy, mix(TERRAIN_ANISO, 8.0, mzk));
               vec3 c2 = vec3(0.0);
-              if (farK < 0.999 && mzk < 0.999) c2 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47), dx * 0.77, dy * 0.77).rgb, xb);
-              if (farK > 0.001) c2 = mix(c2, textureGrad(tCliff, p * 0.4 + vec2(0.71, 0.29), dx * 0.4, dy * 0.4).rgb, farK);
-              if (mzk > 0.001) c2 = mix(c2, textureGrad(tCliff, p * MS + vec2(0.83, 0.39), dx * MS, dy * MS).rgb, mzk);
+              #ifdef TERRAIN_SNOWROCK
+                vec2 pR = SR * p * SRS + vec2(0.61, 0.47), dxR = SR * dx * SRS, dyR = SR * dy * SRS;
+                if (farK < 0.999 && mzk < 0.999) c2 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, pR, dxR, dyR).rgb, xb);
+              #else
+              if (farK < 0.999 && mzk < 0.999) c2 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, P2(p, 0.61, 0.47), dx * P2K, dy * P2K).rgb, xb);
+              #endif
+              if (farK > 0.001) c2 = mix(c2, textureGrad(tCliff, PF(p, 0.71, 0.29), dx * PFK, dy * PFK).rgb, farK);
+              if (mzk > 0.001) c2 = mix(c2, textureGrad(CLIFF_M, p * MS + vec2(0.83, 0.39), dx * MS, dy * MS).rgb, mzk);
               cc += (1.0 - sx) * c2;
               #ifdef TERRAIN_SNOWROCK
                 sN += (1.0 - sx) * texture2D(tMacro, vec2(-wp.x / 40.0, wp.y / 9.0) + vec2(0.61, 0.17)).rg;
                 vec2 f2 = vec2(0.0);
-                if (farK < 0.999 && mzk < 0.999) f2 = mix(textureGrad(tForm, p, dx, dy).rg, textureGrad(tForm, vec2(p.x * 0.71 + 0.61, p.y * 0.83 + 0.47), dx * 0.77, dy * 0.77).rg, xb);
+                if (farK < 0.999 && mzk < 0.999) f2 = mix(textureGrad(tForm, p, dx, dy).rg, formTurn(textureGrad(tForm, pR, dxR, dyR).rgb), xb);
                 if (farK > 0.001) f2 = mix(f2, textureGrad(tForm, p * 0.4 + vec2(0.71, 0.29), dx * 0.4, dy * 0.4).rg, farK);
-                if (mzk > 0.001) f2 = mix(f2, textureGrad(tForm, p * MS + vec2(0.83, 0.39), dx * MS, dy * MS).rg, mzk);
+                if (mzk > 0.001) f2 = mix(f2, textureGrad(tFormM, p * MS + vec2(0.83, 0.39), dx * MS, dy * MS).rg, mzk);
                 fm += (1.0 - sx) * f2;
               #endif
             }
@@ -391,8 +515,8 @@ function splatMaterial(biome, cfg) {
               // the edge into triangle teeth). At a foot (concave) the scree keeps to the smoothed
               // slope, as the grid zigzags there and the raw one would cut teeth into it.
               float rawS = mix(textureLod(tSlopeR, (gqc + 0.5) / uGridN, 0.0).r, sl.y, smoothstep(0.0, 12.0, dOut));
-              float topR = 1.0 - smoothstep(0.3, 0.46, max(rawS, sl.y - 0.16) + (wN.r - 0.5) * 0.1 + (nE - 0.5) * 0.06);
-              float topK = mix(1.0 - smoothstep(0.3, 0.5, max(slope, sl.y)), topR, smoothstep(-0.05, 0.2, vCv));
+              float topR = 1.0 - smoothstep(uScree.z, uScree.w, max(rawS, sl.y - 0.16) + (wN.r - 0.5) * 0.1 + (nE - 0.5) * 0.06);
+              float topK = mix(1.0 - smoothstep(uScree.x, uScree.y, max(slope, sl.y)), topR, smoothstep(-0.05, 0.2, vCv));
               cc = mix(cc, col * vec3(0.94, 0.9, 0.88), topK);
             #else
               // ledges and shelves inside the rock hold what the ground holds (grass, golden grass,
@@ -429,6 +553,17 @@ function splatMaterial(biome, cfg) {
               // a crash mesa: granite all round its flanks, from a lumpy drift at its foot to a snow cap
               // hanging over the lip, snow on anything that lies flat (its top, the bench); the edges
               // are set by HEIGHT (and a noise on the face), so they never follow the triangles
+              // and two or three snow-capped ledges across a wall at world heights (every ~4.6 m, wandering
+              // a couple of metres along the valley), each a lumpy band of snow hugging what the painted
+              // rock turns up, coming and going along its length, the rock right under it in shadow
+              float lh = wp.y + (texture2D(tMacro, wp.xz / 180.0 + vec2(0.23, 0.61)).g - 0.5) * 5.0 + (wN.g - 0.5) * 0.9;
+              float lq = lh / 4.6, lz = fract(lq) * 4.6;
+              float lpres = smoothstep(0.42, 0.6, textureLod(tMacro, vec2((wp.x + wp.z) / 52.0, floor(lq) * 0.37 + 0.11), 0.0).r) * zone * (1.0 - mzk);
+              float lt = 0.35 + 0.45 * sN.y;
+              float ledgeS = (1.0 - smoothstep(lt - 0.15, lt + 0.05, lz)) * lpres;
+              float lpres2 = smoothstep(0.42, 0.6, textureLod(tMacro, vec2((wp.x + wp.z) / 52.0, (floor(lq) + 1.0) * 0.37 + 0.11), 0.0).r) * zone * (1.0 - mzk);
+              float ledgeU = smoothstep(3.85, 4.55, lz) * (1.0 - smoothstep(4.55, 4.6, lz)) * lpres2;
+              rockS = max(rockS, ledgeS * 0.85 + form * 0.5);
               float S = mix(1.25, rockS, zone);
               if (mzk > 0.0) {
                 float hb = wp.y - mY.x, ht = mY.y - wp.y;
@@ -453,8 +588,8 @@ function splatMaterial(biome, cfg) {
               cc *= vec3(1.06, 1.07, 1.1);
               // (far off, the rock fades toward the snow's value so the mountains stay snowy)
               cc = mix(cc, col * vec3(0.8, 0.85, 0.93), farA * 0.25);
-              // the rock right under the snow lies in its shadow
-              float under = smoothstep(0.18, 0.5, S) * (1.0 - sn);
+              // the rock right under the snow lies in its shadow (and under a ledge, deeper)
+              float under = max(smoothstep(0.18, 0.5, S), ledgeU) * (1.0 - sn);
               cc *= mix(vec3(1.0), vec3(0.7, 0.75, 0.88), under * 0.5);
               // the snow on the rock: blue toward its edge (a soft shadow falloff), its lit body the ground's own
               vec3 snc = col * mix(vec3(0.76, 0.83, 0.97), vec3(1.0), smoothstep(0.5, 0.82, S));
@@ -491,6 +626,16 @@ function splatMaterial(biome, cfg) {
               if (n2K > 0.001) dt = mix(dt, (dt + texture2D(tDetail, xz / 0.9 + vec2(0.53, 0.29)).rgb - 0.5) * 0.72, n2K);
               float d = dt.r * uDetail.x * gW + dt.g * uDetail.y + dt.b * uDetail.z * gW;
               col *= 1.0 + 2.0 * d * nearK;
+            }
+          }
+          // (desert) up close the sandstone takes a fine grain too, laid on the face itself (its 16 m tile
+          // is soft when it fills the screen)
+          if (uRockDet > 0.0 && rockW > 0.01) {
+            float nk = (1.0 - smoothstep(10.0, 22.0, distance(cameraPosition, wp))) * rockW;
+            if (nk > 0.001) {
+              vec2 dp = useX ? vec2(wp.z, wp.y) : vec2(-wp.x, wp.y);
+              float gr = texture2D(tDetail, dp / 1.4 + vec2(0.31, 0.07)).g - 0.5;
+              col *= 1.0 + 2.0 * gr * uRockDet * nk;
             }
           }
           // broad (40-80 m) warm and cool regions and value drift, then finer drift
@@ -661,33 +806,89 @@ function vertexData(W, cfg, clearings) {
   return { nrm, road, spl, cvA, slp, slopeTex, rawTex };
 }
 
-function buildChunks(W, data, mat, group) {
+// The playable grid in chunks of CHUNK x CHUNK cells, vertex for vertex the physics heightfield, split
+// along Rapier's diagonal. Round each crash mesa (R: terrain_mesa.js) the cells are drawn S x S finer,
+// with smooth normals and heights kept within 0.35 m of the physics; a coarse cell bordering a fine one
+// splits whichever of its two triangles owns the shared edge into a fan round its centroid (which lies
+// in the triangle's own plane), so every fine vertex on that edge is a vertex of the coarse side too.
+function buildChunks(W, data, mat, group, R = null) {
   const { nx, nz, cell, X0, Z0, heights } = W;
-  const NZ1 = nz + 1;
+  const NZ1 = nz + 1, S = R ? R.S : 1;
+  const ref = (ix, iz) => !!R && R.refined(ix, iz);
   for (let cx = 0; cx < nx; cx += CHUNK) {
     for (let cz = 0; cz < nz; cz += CHUNK) {
       const ex = Math.min(nx, cx + CHUNK), ez = Math.min(nz, cz + CHUNK);
-      const vx = ex - cx + 1, vz = ez - cz + 1, n = vx * vz;
-      const pos = new Float32Array(n * 3), nor = new Float32Array(n * 3), rd = new Float32Array(n * 4), sp = new Float32Array(n * 4), cv = new Float32Array(n), sl = new Float32Array(n * 2);
-      for (let i = 0; i < vx; i++) for (let j = 0; j < vz; j++) {
-        const lv = i * vz + j, ix = cx + i, iz = cz + j, gv = ix * NZ1 + iz;
-        pos[lv * 3] = X0 + ix * cell; pos[lv * 3 + 1] = heights[gv]; pos[lv * 3 + 2] = Z0 + iz * cell;
-        for (let k = 0; k < 3; k++) nor[lv * 3 + k] = data.nrm[gv * 3 + k];
-        for (let k = 0; k < 4; k++) { sp[lv * 4 + k] = data.spl[gv * 4 + k]; rd[lv * 4 + k] = data.road[gv * 4 + k]; }
-        cv[lv] = data.cvA[gv]; sl[lv * 2] = data.slp[gv * 2]; sl[lv * 2 + 1] = data.slp[gv * 2 + 1];
-      }
-      const idx = [];
-      for (let i = 0; i < vx - 1; i++) for (let j = 0; j < vz - 1; j++) {
-        const p00 = i * vz + j, p01 = i * vz + j + 1, p10 = (i + 1) * vz + j, p11 = (i + 1) * vz + j + 1;
-        idx.push(p00, p01, p10, p10, p01, p11);    // Rapier's split: the (+x,-z)/(-x,+z) diagonal
+      const pos = [], nor = [], rd = [], sp = [], cv = [], sl = [], idx = [];
+      const coarse = new Map(), fine = new Map();
+      const push = (x, y, z, n, r4, s4, c, s2) => {
+        pos.push(x, y, z); nor.push(n[0], n[1], n[2]);
+        rd.push(r4[0], r4[1], r4[2], r4[3]); sp.push(s4[0], s4[1], s4[2], s4[3]); cv.push(c); sl.push(s2[0], s2[1]);
+        return pos.length / 3 - 1;
+      };
+      const vC = (ix, iz) => {
+        const gv = ix * NZ1 + iz;
+        let id = coarse.get(gv);
+        if (id === undefined) {
+          id = push(X0 + ix * cell, heights[gv], Z0 + iz * cell, data.nrm.subarray(gv * 3, gv * 3 + 3), data.road.subarray(gv * 4, gv * 4 + 4), data.spl.subarray(gv * 4, gv * 4 + 4), data.cvA[gv], data.slp.subarray(gv * 2, gv * 2 + 2));
+          coarse.set(gv, id);
+        }
+        return id;
+      };
+      // a fine vertex: its splat data bilinear from the coarse vertices round it, its normal eased from
+      // theirs to the smooth surface's
+      const vF = (gi, gj) => {
+        const key = gi * (NZ1 * S + 1) + gj;
+        let id = fine.get(key);
+        if (id !== undefined) return id;
+        const fx = gi / S, fz = gj / S, x = X0 + fx * cell, z = Z0 + fz * cell;
+        const i0 = Math.min(nx - 1, Math.floor(fx)), j0 = Math.min(nz - 1, Math.floor(fz)), u = fx - i0, v = fz - j0;
+        const g = [(i0) * NZ1 + j0, (i0 + 1) * NZ1 + j0, i0 * NZ1 + j0 + 1, (i0 + 1) * NZ1 + j0 + 1], wq = [(1 - u) * (1 - v), u * (1 - v), (1 - u) * v, u * v];
+        const lerpA = (A, k) => { const out = new Array(k).fill(0); for (let q = 0; q < 4; q++) for (let c = 0; c < k; c++) out[c] += A[g[q] * k + c] * wq[q]; return out; };
+        const corner = gi % S === 0 && gj % S === 0;
+        const y = corner ? heights[(gi / S) * NZ1 + gj / S] : R.height(x, z);
+        const nC = lerpA(data.nrm, 3), w = R.weight(x, z), [gx, gz] = R.gradient(x, z), gl = Math.hypot(gx, 1, gz);
+        let n = [nC[0] + (-gx / gl - nC[0]) * w, nC[1] + (1 / gl - nC[1]) * w, nC[2] + (-gz / gl - nC[2]) * w];
+        const nl = Math.hypot(n[0], n[1], n[2]) || 1; n = n.map(c => c / nl);
+        id = push(x, y, z, n, lerpA(data.road, 4), lerpA(data.spl, 4), lerpA(data.cvA, 1)[0], lerpA(data.slp, 2));
+        fine.set(key, id);
+        return id;
+      };
+      // a triangle (wound a, b, c) whose edges may carry fine vertices: fanned round its centroid
+      const fan = (ring) => {
+        const C = ring.filter(r => r.corner).map(r => r.id);
+        const avg = (A, k) => { const out = new Array(k).fill(0); for (const id of C) for (let c = 0; c < k; c++) out[c] += A[id * k + c] / C.length; return out; };
+        const P = avg(pos, 3), nn = avg(nor, 3), nl = Math.hypot(nn[0], nn[1], nn[2]) || 1;
+        const c = push(P[0], P[1], P[2], nn.map(q => q / nl), avg(rd, 4), avg(sp, 4), avg(cv, 1)[0], avg(sl, 2));
+        for (let k = 0; k < ring.length; k++) idx.push(c, ring[k].id, ring[(k + 1) % ring.length].id);
+      };
+      // the fine vertices strictly inside a coarse edge, from (gi0, gj0) towards (gi1, gj1)
+      const edgeF = (gi0, gj0, gi1, gj1) => { const out = [], di = Math.sign(gi1 - gi0), dj = Math.sign(gj1 - gj0); for (let k = 1; k < S; k++) out.push({ id: vF(gi0 + di * k, gj0 + dj * k) }); return out; };
+      for (let ix = cx; ix < ex; ix++) for (let iz = cz; iz < ez; iz++) {
+        if (ref(ix, iz)) {
+          for (let a = 0; a < S; a++) for (let b = 0; b < S; b++) {
+            const gi = ix * S + a, gj = iz * S + b;
+            const q00 = vF(gi, gj), q01 = vF(gi, gj + 1), q10 = vF(gi + 1, gj), q11 = vF(gi + 1, gj + 1);
+            idx.push(q00, q01, q10, q10, q01, q11);
+          }
+          continue;
+        }
+        const p00 = vC(ix, iz), p01 = vC(ix, iz + 1), p10 = vC(ix + 1, iz), p11 = vC(ix + 1, iz + 1);
+        const L = ref(ix - 1, iz), Rt = ref(ix + 1, iz), Bt = ref(ix, iz - 1), Tp = ref(ix, iz + 1);
+        const gi = ix * S, gj = iz * S;
+        // T1 = (p00, p01, p10) owns the left (x = ix) and bottom (z = iz) edges
+        if (!L && !Bt) idx.push(p00, p01, p10);
+        else fan([{ id: p00, corner: true }, ...(L ? edgeF(gi, gj, gi, gj + S) : []), { id: p01, corner: true }, { id: p10, corner: true }, ...(Bt ? edgeF(gi + S, gj, gi, gj) : [])]);
+        // T2 = (p10, p01, p11) owns the top (z = iz + 1) and right (x = ix + 1) edges
+        if (!Rt && !Tp) idx.push(p10, p01, p11);
+        else fan([{ id: p10, corner: true }, { id: p01, corner: true }, ...(Tp ? edgeF(gi, gj + S, gi + S, gj + S) : []), { id: p11, corner: true }, ...(Rt ? edgeF(gi + S, gj + S, gi + S, gj) : [])]);
       }
       const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('normal', new THREE.BufferAttribute(nor, 3));
-      geo.setAttribute('aRoad', new THREE.BufferAttribute(rd, 4));
-      geo.setAttribute('aSplat', new THREE.BufferAttribute(sp, 4));
-      geo.setAttribute('aCv', new THREE.BufferAttribute(cv, 1));
-      geo.setAttribute('aSlope', new THREE.BufferAttribute(sl, 2));
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.setAttribute('normal', new THREE.Float32BufferAttribute(nor, 3));
+      geo.setAttribute('aRoad', new THREE.Float32BufferAttribute(rd, 4));
+      geo.setAttribute('aSplat', new THREE.Float32BufferAttribute(sp, 4));
+      geo.setAttribute('aCv', new THREE.Float32BufferAttribute(cv, 1));
+      geo.setAttribute('aSlope', new THREE.Float32BufferAttribute(sl, 2));
       geo.setIndex(idx);
       geo.computeBoundingSphere();
       const m = new THREE.Mesh(geo, mat);
@@ -1067,6 +1268,8 @@ class Clutter {
   constructor(W, cfg, biome) {
     this.W = W; this.cfg = cfg; this.C = cfg.clutter;
     this.blocked = exclusion(W);
+    // the cultivated plots (their own row clutter comes from patches(); nothing random grows inside)
+    this.plots = cfg.plots ? (W.fields || []).slice(0, MAX_PLOTS).map((f, i) => ({ ...f, i, sn: Math.sin(f.ry), cs: Math.cos(f.ry) })) : [];
     // bare dirt clearings (camp, doorsteps, yards) stay bare; the wheat under a wheat patch is wanted
     this.clear = clearingsOf(W).filter(c => !c.wheat);
     this.cell = this.C.cell; this.K = this.C.slots;
@@ -1113,6 +1316,7 @@ class Clutter {
     if (x < W.X0 + 2 || x > W.X0 + W.nx * W.cell - 2 || z < W.Z0 + 2 || z > W.Z1 - 2) return false;
     if (Math.abs(x - W.roadX(z)) < roadHW(W, this.cfg, z) + roadPad) return false;
     if (this.blocked(x, z)) return false;
+    if (this.plots.length && this.plotDepth(x, z) > 0.9) return false;
     const e = 0.7, gx = W.heightAt(x + e, z) - W.heightAt(x - e, z), gz = W.heightAt(x, z + e) - W.heightAt(x, z - e);
     if (Math.hypot(gx, gz) / (2 * e) > 0.8) return false;        // no tufts on cliff faces
     for (const m of W.mud) if (z > m.z0 - 2 && z < m.z1 + 2 && Math.abs(x - W.roadX(z)) < 22) return false;
@@ -1121,6 +1325,45 @@ class Clutter {
       if (c > 0.25 || (c > 0.04 && r() > 0.3)) return false;
     }
     return true;
+  }
+  // how far inside a cultivated plot (m from its rectangle's edge; <= 0 outside every plot)
+  plotDepth(x, z) {
+    let best = 0;
+    for (const f of this.plots) {
+      const dx = x - f.x, dz = z - f.z, u = dx * f.sn + dz * f.cs, v = dx * f.cs - dz * f.sn;
+      best = Math.max(best, Math.min(f.hl - Math.abs(u), f.hd - Math.abs(v)));
+    }
+    return best;
+  }
+  // Rows of wheat cards along each wheat plot's ridges (where the splat paints its rows: the same
+  // spacing and the same wander), a few cut-straw tufts in the stubble, nothing on the furrows.
+  plotRows(out) {
+    const W = this.W, WC = this.C.wheatCards;
+    for (const f of this.plots) {
+      if (f.kind === 'furrow') continue;
+      const wheat = f.kind === 'wheat', per = wheat ? 0.72 : 0.7, pk = f.i * 1.37, al = f.along ? 1 : 0;
+      const A = al ? f.hd : f.hl, Bm = al ? f.hl : f.hd;
+      const r = cellRng(Math.round(f.x * 10), Math.round(f.z * 10), W.seed + 9);
+      for (let k = Math.ceil(-A / per - 1); k * per < A + 1; k++) {
+        const step = wheat ? 0.78 : 1.7;
+        for (let b = -Bm + r() * step; b < Bm; b += step * (0.8 + r() * 0.4)) {
+          if (!wheat && r() > 0.42) continue;
+          const wan = Math.sin(b * 0.085 + pk * 5) * 0.55 + Math.sin(b * 0.31 + pk * 2) * 0.1;
+          const a = (k + 0.5) * per - wan + (r() - 0.5) * 0.12;
+          const u = al ? b : a, v = al ? a : b;
+          if (Math.min(f.hl - Math.abs(u), f.hd - Math.abs(v)) < (wheat ? 1.5 : 1.7)) continue;
+          const x = f.x + u * f.sn + v * f.cs, z = f.z + u * f.cs - v * f.sn;
+          if (this.blocked(x, z)) continue;
+          if (wheat) {
+            const tall = r() < 0.8, [c, hh] = WC[tall ? 0 : 1];
+            out.push({ x, y: W.heightAt(x, z) - 0.05, z, ry: r() * 6.283, w: 1.0 + r() * 0.3, h: hh * (0.92 + r() * 0.2), card: c, fade: 125 });
+          } else {
+            out.push({ x, y: W.heightAt(x, z) - 0.03, z, ry: r() * 6.283, w: 0.55 + r() * 0.3, h: 0.24 + r() * 0.12, card: 7, fade: 70 });
+          }
+        }
+      }
+    }
+    return out;
   }
   pickCard(r, flowerish) {
     const cards = this.C.cards;
@@ -1155,7 +1398,7 @@ class Clutter {
         out.push({ x, y: W.heightAt(x, z) - 0.04, z, ry: r() * 6.283, w, h, card, fade: wheat ? 170 : 110 });
       }
     }
-    return out;
+    return this.plotRows(out);
   }
   place(s, ci, cj) {
     const W = this.W, C = this.C, K = this.K, r = cellRng(ci, cj, W.seed);
@@ -1207,7 +1450,7 @@ class Clutter {
 const prewarmed = new Set();
 function prewarmQueue(biome) {
   const cfg = CFG[biome];
-  return [`ground_${biome}`, `ground2_${biome}`, `dirt_${biome}`, `road_${biome}`, cfg?.mudTex || 'mud', `cliff_${biome}`, cfg?.snowRock ? 'cliff_snow_form' : '', `clutter_${biome}`, `sky_mtn_${biome}`, `sky_clouds_${biome}`, 'terrain_detail']
+  return [`ground_${biome}`, `ground2_${biome}`, `dirt_${biome}`, `road_${biome}`, cfg?.mudTex || 'mud', `cliff_${biome}`, cfg?.snowRock ? 'cliff_snow_form' : '', cfg?.snowRock ? 'cliff_snow_mesa' : '', cfg?.snowRock ? 'cliff_snow_mesa_form' : '', `clutter_${biome}`, `sky_mtn_${biome}`, `sky_clouds_${biome}`, 'terrain_detail']
     .filter(n => has(n) && !prewarmed.has(n));
 }
 
@@ -1289,10 +1532,14 @@ export function buildTerrain(W) {
     hs.sort((a, b) => a - b);
     v.set(hs[12], p.mesa.base + p.mesa.h, p.mesa.base + p.mesa.h * (p.mesa.benchK ?? 0.6), p.mesa.benchA ?? 0);
   });
+  // the cultivated plots (Westfall)
+  const KIND = { wheat: 0, stubble: 1, furrow: 2 };
+  mat.userData.U.uPlot.value.forEach((v, i) => { const f = cfg.plots ? (W.fields || [])[i] : null; if (f) v.set(f.x, f.z, Math.sin(f.ry), Math.cos(f.ry)); else v.set(1e5, 1e5, 0, 1); });
+  mat.userData.U.uPlotB.value.forEach((v, i) => { const f = cfg.plots ? (W.fields || [])[i] : null; if (f) v.set(f.hl, f.hd, KIND[f.kind] ?? 0, f.along ? 1 : 0); else v.set(0, 0, 0, 0); });
   const data = vertexData(W, cfg, clearingsOf(W));
   const U = mat.userData.U;
   U.tSlope.value = data.slopeTex; U.tSlopeR.value = data.rawTex; U.uGrid.value.set(W.X0, W.Z0, W.cell, 0); U.uGridN.value.set(W.nx + 1, W.nz + 1);
-  buildChunks(W, data, mat, group);
+  buildChunks(W, data, mat, group, mesaRefiner(W, 4));
   const { apronTex, lattice } = buildApron(W, cfg, data, mat, group);
   const sky = new Float32Array(128), skyAt = new THREE.Vector3(1e9, 0, 0);
   let skyT = -1e9;
