@@ -1860,8 +1860,8 @@ register('loot_dinohead', {
     // nostrils: dark rims, lit on the spine side
     for (const sd of [-1, 1]) { const nx = cx + sd * D.nostril.u * w, ny = Yz(D.nostril.z); blob(g, nx + sd * 5, ny + 2, 14, 11, 0, '#263828', 0.5, 0.35); blob(g, nx - sd * 6, ny - 2, 8, 7, 0, DH.lit, 0.35, 0.4); }
     // under the head behind the hinge: the statue's tan throat behind its scalloped edge, folds round it
-    bellyEdge(g, rnd, 0, 1, 0.19 * w, yH - 6, h + 4, 6);
-    bellyEdge(g, rnd, w, -1, 0.81 * w, yH - 6, h + 4, 6);
+    bellyEdge(g, rnd, 0, 1, 0.19 * w, yH - 6, h + 4, 3, 7);
+    bellyEdge(g, rnd, w, -1, 0.81 * w, yH - 6, h + 4, 3, 7);
     for (const x0 of [0, w]) {
       const dir = x0 ? -1 : 1;
       for (let Y = yH + range(rnd, 6, 12); Y < h; Y += range(rnd, 12, 20)) {

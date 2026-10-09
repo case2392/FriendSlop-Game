@@ -1246,6 +1246,25 @@ function buildCrash(B, p, parts, ctx, decor) {
     // the filler cap on the nose deck, exhaust stubs either side just behind the cowl (soot painted behind them)
     B.cyl('rs_brass', 0.075, 0.085, 0.05, fus.x, topY(fus.x, zJ + 0.45) + 0.012, zJ + 0.45, { seg: 10, bevel: 0.012, lod0: true });
     for (const sx of [-1, 1]) for (const dz of [0, 0.3]) B.tube('rs_iron', [V(fus.x + sx * 0.66, fy + 0.1, zH - 0.3 - dz), V(fus.x + sx * 0.8, fy + 0.02, zH - 0.5 - dz), V(fus.x + sx * 0.84, fy - 0.06, zH - 0.68 - dz)], 0.045, { seg: 6, ends: true, lod0: true });
+    // snow lying along the deck behind the cockpit and on the nose deck: a blanket draped on the hull's own section,
+    // a hand thick down the middle, its edges rolling down steeply into the canvas (a rounded drift edge, cool blue
+    // where it thins, so it reads as soft and thick rather than painted on)
+    if (ctx.snow) {
+      const PH = rnd() * 6;
+      for (const [za, zb] of [[zT + 0.75, zc - crz - 0.1], [zJ + 0.14, zH - 0.12]]) {
+        if (zb - za < 0.4) continue;
+        const nv2 = Math.max(4, Math.round((zb - za) / 0.2));
+        B.grid('rs_snow!', 12, nv2, (u, v) => {
+          const zz = lerp(za, zb, v), S = sec(zz), ac = u * 2 - 1, phi = ac * (1 + 0.14 * Math.sin(zz * 3.3 + ac * 1.7 + PH) + 0.06 * Math.sin(zz * 7.1 - PH)), [x, y] = sePt(phi, S), [x2, y2] = sePt(phi + 0.01, S);
+          let nx = y2 - y, ny = -(x2 - x); const nl = Math.hypot(nx, ny) || 1; nx /= nl; ny /= nl;
+          if (nx * x + ny * y < 0) { nx = -nx; ny = -ny; }
+          const eA = Math.sqrt(Math.max(0, 1 - Math.abs(ac) ** 4)), eL = Math.sqrt(Math.max(0, 1 - Math.abs(v * 2 - 1) ** 5));
+          const th = 0.1 * eA * eL * (0.8 + 0.3 * Math.sin(zz * 2.6 + x * 4 + PH)) - 0.015;
+          return [fus.x + x + nx * th, S.yc + y + ny * th, zz];
+        }, { flip: true, noAO: true, uv: (u, v, P) => [P[0] / 2, P[2] / 2],
+          tintFn: (u, v) => { const e = Math.min(1 - Math.abs(u * 2 - 1), 1 - Math.abs(v * 2 - 1)), b = 1 - smooth(0, 0.35, e); return [lerp(1, 0.72, b), lerp(1, 0.8, b), lerp(1, 0.98, b)]; } });
+      }
+    }
     // ---- the engine: a brass nose bowl, a seven-cylinder radial with finned barrels, a dented Townend ring round
     // the heads torn open where the nose went in, the hub and spinner and a snapped prop ----
     const zB = zH - 0.12;
