@@ -565,6 +565,49 @@ export function generateLeg(seed, day) {
   // ---- biome decor: trees, bushes, rocks, flowers, cacti... ----------------------------
   // Trees and haybales get colliders (an oak WILL stop the RV); cacti are flimsy
   // (people bump them, the RV mows them down); everything else is visual.
+  // Westfall: cultivated plots beside the road (terrain paints their strips: standing wheat, stubble or
+  // fresh furrows, running along or across the plot), each with a rail fence along its road edge and a
+  // gap for a gate; nothing else grows inside one. Plots sit on flat valley floor, clear of stops and
+  // obstacles. And a windmill on its own knoll you can see from the road (it has a collider).
+  const fields = [], clearSpots = [];
+  const inField = (f, x, z, pad = 0) => {
+    const dx = x - f.x, dz = z - f.z, sn = Math.sin(f.ry), c = Math.cos(f.ry);
+    return Math.abs(dx * sn + dz * c) < f.hl + pad && Math.abs(dx * c - dz * sn) < f.hd + pad;
+  };
+  if (biome === 'fields') {
+    for (let z = 40 + rngD() * 30; z < LEN - 70; z += 75 + rngD() * 55) {
+      const side = rngD() < 0.5 ? -1 : 1, len = 22 + rngD() * 18, off = 11 + rngD() * 4, kind = ['wheat', 'stubble', 'furrow'][Math.floor(rngD() * 3)], along = rngD() < 0.5;
+      const zc = z + len / 2, wd = wallDist(side > 0 ? 1 : 0, zc), dep = Math.min(14 + rngD() * 12, wd - 4 - off);
+      if (dep < 10) continue;
+      if (pois.some(p => Math.abs(p.z - zc) < len / 2 + 16) || obstacles.some(o => Math.abs(o.z - zc) < len / 2 + 24)) continue;
+      const ry = Math.atan2(W_roadDx(zc), 1), cx = roadX(zc) + side * (off + dep / 2);
+      const f = { x: cx, z: zc, ry, hl: len / 2, hd: dep / 2, kind, along, side };
+      let lo = Infinity, hi = -Infinity;
+      for (const [u, v] of [[-1, -1], [1, -1], [-1, 1], [1, 1], [0, 0], [0, 1], [0, -1]]) {
+        const sn = Math.sin(ry), c = Math.cos(ry), px = cx + sn * u * f.hl + c * v * f.hd, pz = zc + c * u * f.hl - sn * v * f.hd, h = heightAt(px, pz);
+        lo = Math.min(lo, h); hi = Math.max(hi, h);
+      }
+      if (hi - lo > 2.5) continue;
+      fields.push(f);
+      // the fence along the road edge, in two runs either side of a 3 m gate
+      const fx = roadX(zc) + side * (off - 0.6), runLen = len / 2 - 1.5, posts = Math.max(3, Math.round(runLen / 1.9) + 1);
+      for (const sd of [-1, 1]) {
+        const rz = zc + sd * (runLen / 2 + 1.5), rx = fx + Math.sin(ry) * sd * (runLen / 2 + 1.5);
+        decor.push({ k: 'fence', x: rx, y: heightAt(rx, rz), z: rz, s: 1, ry, len: posts, field: fields.length - 1 });
+      }
+    }
+    // the windmill: on a knoll beside the road, out where the road views look
+    for (let t = 0; t < 12; t++) {
+      const z = 140 + rngD() * 120, side = rngD() < 0.5 ? -1 : 1, off = 19 + rngD() * 6, x = roadX(z) + side * off;
+      if (pois.some(p => Math.hypot(p.x - x, p.z - z) < 22) || obstacles.some(o => Math.abs(o.z - z) < 30)) continue;
+      if (fields.some(f => inField(f, x, z, 6)) || off > wallDist(side > 0 ? 1 : 0, z) - 6) continue;
+      const y = heightAt(x, z);
+      cyls.push({ x, y: y + 6, z, r: 2.7, hh: 6, mat: 'windmill' });
+      decor.push({ k: 'windmill', x, y, z, s: 1, ry: Math.atan2(roadX(z) - x, 0) });   // ry: its sails face the road
+      clearSpots.push({ x, z, r: 7 });
+      break;
+    }
+  }
   const nDecor = Math.floor(LEN * B.density);
   const decorTotal = B.decor.reduce((a, [, w]) => a + w, 0);
   const pickDecor = () => { let r = rng() * decorTotal; for (const [k, w] of B.decor) if ((r -= w) < 0) return k; return B.decor[0][0]; };
@@ -575,6 +618,7 @@ export function generateLeg(seed, day) {
     if (obstacles.some(o => Math.abs(o.z - z) < 22 && off < 16)) return false;
     if ((inCamp || inTown) && (Math.abs(x) < 26 || (inTown && x > 8 && x < 34))) return false;   // keep the camp, street and lots clear
     if (obstacles.some(o => o.codeAt && Math.hypot(o.codeAt.x - x, o.codeAt.z - z) < 3.5)) return false;   // keep the rim code readable
+    if (fields.some(f => inField(f, x, z, 1.5)) || clearSpots.some(c => Math.hypot(c.x - x, c.z - z) < c.r)) return false;   // plots, the windmill
     return true;
   };
   // hero: the big Elwynn oak at a grove's centre (a ~1.5 m bole); other oaks are the nature pass's satellites.
@@ -694,6 +738,26 @@ export function generateLeg(seed, day) {
       rockCollide(d, steep);
     } else {
       decor.push({ k, x, y, z, s, ry });
+    }
+  }
+  // Dun Morogh and Tanaris: a big boulder (snow: granite; desert: a wind-cut sandstone mound) at the foot of
+  // the canyon wall every 40-60 m, alternating sides, so the line where the wall meets the floor breaks up.
+  // d.foot marks them for the renderer.
+  if (biome === 'snow' || biome === 'desert') {
+    let sd = rngD() < 0.5 ? -1 : 1;
+    for (let z = 30 + rngD() * 20; z < LEN - 30; z += 40 + rngD() * 20) {
+      sd = -sd;
+      const wd = wallDist(sd > 0 ? 1 : 0, z), off = wd - 0.5 + rngD() * 1.5, x = roadX(z) + sd * off;
+      const s = 1.25 + rngD() * 0.45, ry = rngD() * 6.283;
+      if (!decorOk(x, z, off) || cyls.some(c => Math.hypot(c.x - x, c.z - z) < c.r + 2.5 + s)) continue;
+      const d = { k: 'rock', x, y: heightAt(x, z), z, s, ry, foot: true };
+      const R = s * 1.1;   // the renderer's own steepness test
+      let lo = Infinity, hi = -Infinity;
+      for (const [dx, dz] of [[0, 0], [R, 0], [-R, 0], [0, R], [0, -R]]) { const h = heightAt(x + dx, z + dz); lo = Math.min(lo, h); hi = Math.max(hi, h); }
+      const steep = hi - lo > 0.8 * s;
+      if (biome === 'desert') d.variant = 'mound';
+      decor.push(d);
+      rockCollide(d, steep);
     }
   }
   // the desert road fades into the sand: stone cairns mark its edges every ~25 m, alternating sides
@@ -891,7 +955,7 @@ export function generateLeg(seed, day) {
   box(0, 80, Z1 - 1, HALF_W, 120, 1, 0, 'invisible');
 
   return {
-    seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights,
+    seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
     roadX, roadY, heightAt, townY,
     obstacles, pois, mesas, statics, cyls, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
