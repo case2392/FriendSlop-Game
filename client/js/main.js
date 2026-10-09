@@ -366,6 +366,7 @@ async function prepareDay(W) {
 async function buildDay(m) {
   const my = ++buildSeq;
   worldBuilding = true;
+  texPrep.building(true);   // no texture-cache writes competing with the build
   loadingBar(true, 0);
   await physReady;
   const pf = prefetched && prefetched.seed === m.seed && prefetched.day === m.day ? prefetched : null;
@@ -412,7 +413,7 @@ async function buildDay(m) {
     if ((S.frames || 0) < f0 + 2) { requestAnimationFrame(afterFrames); return; }
     loadingBar(false);
     clearTimeout(recordTimer);
-    recordTimer = setTimeout(() => { if (my === buildSeq) { texPrep.record(false); texPrep.flush(); } }, 3000);
+    recordTimer = setTimeout(() => { if (my === buildSeq) { texPrep.record(false); texPrep.building(false); texPrep.flush(); } }, 3000);
   };
   requestAnimationFrame(afterFrames);
   return true;

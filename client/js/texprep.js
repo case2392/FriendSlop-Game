@@ -19,6 +19,8 @@
 //                             most (the page only hands over a snapshot); anything a build needs
 //                             goes first
 //   keepOnly(names)           let go of pictures readied for a different day
+//   building(on)              a world build is under way: no cache writes until it is off (a flush
+//                             in progress hands its work back)
 //
 // None of it is needed for correctness. With no workers, no OffscreenCanvas, no IndexedDB, or any
 // error, canvasFor paints on the main thread exactly as it always did.
@@ -102,6 +104,7 @@ P.hooks.painted = (name, p) => {
   // after its paint except rv3d, which repaints its body the same way once Cinzel is in.)
   if (!CACHE_ON || S.cacheOff || !fontsSettled() || S.good.has(name) || leftAlone(name) || p.deps.some(leftAlone)) return;
   S.snaps.set(name, { deps: p.deps, cv: p.cv });
+  lateFlush();
 };
 P.hooks.requested = name => { if (S.rec) S.rec.add(name); };
 
@@ -371,10 +374,22 @@ export function recorded() { return S.rec ? [...S.rec] : null; }
 
 // ---- persisting this session's paints, in idle time ----
 
-let flushWanted = false;
-export function flush() { flushWanted = true; maybeFlush(); }
+let flushWanted = false, flushedOnce = false, lateT = 0;
+export function flush() { flushWanted = flushedOnce = true; maybeFlush(); }
+export function building(on) {
+  S.building = !!on;
+  if (!on) maybeFlush();
+}
+// a texture the page paints once the world is up (a view that asks for it late, or one painted while
+// a flush was already under way) is stored by a flush of its own a little later; a build's own paints
+// wait for the flush after the build
+function lateFlush() {
+  if (!flushedOnce || S.building) return;
+  clearTimeout(lateT);
+  lateT = setTimeout(() => { if (!S.building) flush(); }, 2000);
+}
 function maybeFlush() {
-  if (!flushWanted || S.flushing) return;
+  if (!flushWanted || S.flushing || S.building) return;
   if (S.queue.length || S.workers.some(W => W.busy)) return;   // painting for a build or a prefetch comes first
   flushWanted = false;
   S.flushing = true;
@@ -401,7 +416,7 @@ async function runFlush() {
   // In batches, a texture per worker at a time (two workers at most, so the game keeps its cores): the
   // encoding and the write happen in the workers; the page's only part is a snapshot of each of its own
   // paints, taken in an idle slot (or after a tenth of a second at most).
-  const want = () => S.queue.length || S.workers.some(W => W.busy) || !S.ready;   // a build or a prefetch needs the workers
+  const want = () => S.building || S.queue.length || S.workers.some(W => W.busy) || !S.ready;   // a build or a prefetch needs the workers
   while (items.length) {
     if (want()) {   // hand back the rest; a later flush picks it up
       for (const r of items) { if (r.W) S.held.set(r.name, r.W.i); else S.snaps.set(r.name, r.snap); }
