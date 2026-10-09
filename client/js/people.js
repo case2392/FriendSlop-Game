@@ -39,7 +39,9 @@
 // the chest, at zero scale unless the map is raised) carries the third-person road map.
 //
 // HEAD FRAME (for accessories added to `head`): +x = where the face points, +y = up,
-// +z = the character's right. The head bone has a uniform local scale of 1 head unit:
+// +z = the character's right. The head bone sits HX (4 cm) behind the neck, so the head rides
+// back over the shoulders (see torsoRing's posture); its frame and scale are unchanged by that.
+// The head bone has a uniform local scale of 1 head unit:
 // HU = 0.025 × HS / 3.5 = 0.00886 m (× the character's scale). Everything on the head
 // scales with HS, so in head units the landmarks never move: the eyes sit at about
 // (11.5, 3.5, ±4), deep under the brow ridge; the nose bridge front at x ≈ 14 at eye
@@ -1176,9 +1178,10 @@ function pauldron(S, F, s, size) {
   const R = 0.143 * size, tilt = 0.6, fmax = 1.42;
   const A = [0, Math.cos(tilt), s * Math.sin(tilt)], E1 = [1, 0, 0];
   const E2 = [A[1] * E1[2] - A[2] * E1[1], A[2] * E1[0] - A[0] * E1[2], A[0] * E1[1] - A[1] * E1[0]];
-  // (an oval dome, deeper front to back than across, swelling toward the back: from the side it spans
-  // the yoke and the shoulder blade, so the profile keeps the big shoulders the front view has, while
-  // the far one doesn't push its shadowed hollow out past the chin in a three-quarter view)
+  // (an oval dome riding high enough to frame the jaw, deeper front to back than across and swelling
+  // toward the back: from the side it spans the yoke and the shoulder blade, so the profile keeps the
+  // big shoulders the front view has, while the far one doesn't push its shadowed hollow out past the
+  // chin in a three-quarter view)
   const Cc = [sh[0] - 0.004, sh[1] + 0.032 * size, sh[2] - s * 0.006], DEEP_F = 1.0, DEEP_B = 1.22;
   const dir = (th, f) => { const c = Math.cos(th), sn = Math.sin(th), sf = Math.sin(f), cf = Math.cos(f); return [0, 1, 2].map(k => A[k] * cf * 0.74 + (E1[k] * c + E2[k] * sn) * sf); };
   const pt = (th, f, rr) => { const d = dir(th, f); return [Cc[0] + d[0] * rr * (d[0] > 0 ? DEEP_F : DEEP_B), Cc[1] + d[1] * rr, Cc[2] + d[2] * rr]; };
@@ -1737,25 +1740,16 @@ export const PREVIEW = {
   jumping: () => viewIn(2, { mode: M_.AIR }),
   laughing: () => viewIn(1, {}, { emote: '😂' }),
   crowned: () => viewIn(3, {}, { emote: '👑' }),
-  // side profiles (turned to face +x: the camera sees the left side), standing as players do in game
-  side0: () => turned(viewIn(0, {}), Math.PI / 2),
-  side1: () => turned(viewIn(1, {}), Math.PI / 2),
-  side2: () => turned(viewIn(2, {}), Math.PI / 2),
-  side3: () => turned(viewIn(3, {}), Math.PI / 2),
-  side4: () => turned(viewIn(4, {}), Math.PI / 2),
-  side5: () => turned(viewIn(5, {}), Math.PI / 2),
-  sidewalk: () => turned(viewIn(2, {}, { speed: 4.4, frames: 47 }), Math.PI / 2),
-  sideed: () => turned(buildCharacter('#c0392b', { hatIndex: 2, skinIndex: 3 }).root, Math.PI / 2),
-  siderepo: () => turned(buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }).root, Math.PI / 2),
-  sideclerk: () => turned(buildCharacter('#2e86ab', { hatIndex: 0, skinIndex: 4 }).root, Math.PI / 2),
-  sideko: () => turned(viewIn(0, { mode: M_.KO }), Math.PI / 2),
-  sidedealer: () => turned(buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }).root, Math.PI / 2),
+  // profile checks: each player standing as in game, turned to face +x (the preview camera sees the
+  // left side: sideN), from the front (standN) and the back (back0); a walker, a knocked-out player
+  // and the town folk in profile
+  ...Object.fromEntries([0, 1, 2, 3, 4, 5].flatMap(i => [[`side${i}`, () => turned(viewIn(i, {}), Math.PI / 2)], [`stand${i}`, () => viewIn(i, {})]])),
   back0: () => turned(viewIn(0, {}), Math.PI),
-  stand0: () => viewIn(0, {}),
-  stand1: () => viewIn(1, {}),
-  stand2: () => viewIn(2, {}),
-  stand3: () => viewIn(3, {}),
-  stand4: () => viewIn(4, {}),
-  stand5: () => viewIn(5, {}),
+  sidewalk: () => turned(viewIn(2, {}, { speed: 4.4, frames: 47 }), Math.PI / 2),
+  sideko: () => turned(viewIn(0, { mode: M_.KO }), Math.PI / 2),
+  sideed: () => turned(buildCharacter('#c0392b', { hatIndex: 2, skinIndex: 3 }).root, Math.PI / 2),
+  sideclerk: () => turned(buildCharacter('#2e86ab', { hatIndex: 0, skinIndex: 4 }).root, Math.PI / 2),
+  sidedealer: () => turned(buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }).root, Math.PI / 2),
+  siderepo: () => turned(buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }).root, Math.PI / 2),
   fphands: () => { const g = new THREE.Group(); const m = painted(handsAtlas('#00E5FF')); const L = new THREE.Mesh(fpHandGeometry(-1), m), R = new THREE.Mesh(fpHandGeometry(1), m); L.position.set(-0.16, 0, 0); R.position.set(0.16, 0, 0); for (const h of [L, R]) { h.rotation.x = 0.5; g.add(h); } g.rotation.y = Math.PI; g.scale.setScalar(3); return g; },
 };
