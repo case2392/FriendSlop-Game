@@ -19,8 +19,9 @@
 // Names and townsfolk titles are drawn over the world (like WoW's): a sign post, a cart or a
 // tree between you and the Repo Man never slices his plate. Buildings, big solids (semis, rocks,
 // junk heaps), the RV's walls (not its windows) and hills hide every name, and so does the wall
-// between an interior and the street; anything in your hands covers it too (the plate is pulled
-// to just past them, at the same size on screen). See "what hides a name" below.
+// between an interior and the street; a name never prints across a closer signboard's face either;
+// anything in your hands covers it too (the plate is pulled to just past them, at the same size on
+// screen). See "what hides a name" and "signboards" below.
 //
 // On import this module also (1) waits for the vendored fonts and redraws any
 // sprite drawn before they arrived, (2) paints the UI textures in paint/ui.js
@@ -812,7 +813,8 @@ const PULL = 0.7, PLATE_ORDER = 10;
 //   the RV        its walls, but not its windows, an open or missing door or a missing roof: the
 //                 Repo Man's plate shows through the windshield as you drive into town
 //   a hill        the heightfield
-// Trees, posts, signs, carts, fences and lamps never hide a name (WoW draws over them). Nothing
+//   a signboard   a closer sign's face under the lettering on screen (see "signboards" below)
+// Trees, posts, carts, fences and lamps never hide a name (WoW draws over them). Nothing
 // past NAME_FADE shows, and a name sliding off the edge of the screen fades instead of being cut.
 const SIGHT_MS = 180;
 let plateSeq = 0;
@@ -971,6 +973,96 @@ function sightBlocked(S, W, c, p, d) {
   return d > 6 && terrainHides(W, c, p, d);
 }
 
+// ---- signboards -----------------------------------------------------------------------------
+//
+// A name never prints across a closer signboard (the town's welcome board, a billboard, a shop's
+// sign, the camp's DAY sign, the rim code): each sign (world.js signs, hung the way town3d.js hangs
+// them: billboards turned to face the drivers, the gas sign up on its canopy, the rim code lying
+// flat) is its painted face (a hair over), and a plate fades when its lettering's rect on screen
+// overlaps that face and the face stands between the eye and the plate's owner. Posts, crossbars,
+// pillars, brackets, lanterns and the outer frame don't count, and a name beside a sign, under it
+// or in front of it shows. The lettering has to reach SIGN_IN px into the face to hide and be
+// SIGN_OUT px clear of it to come back, so a plate sliding along a board's edge doesn't flicker.
+const SIGN_FRAME = 0.04, SIGN_GAP = 0.3, SIGN_IN = 3, SIGN_OUT = 4;
+const SQ = new WeakMap();
+function signFaces(W) {
+  let L = SQ.get(W);
+  if (L) return L;
+  L = [];
+  const canopies = (W.decor || []).filter(d => d.k === 'canopy');
+  for (const s of W.signs || []) {
+    if (!(s.w > 0 && s.h > 0)) continue;
+    let x = s.x, y = s.y, z = s.z, yaw = s.ry || 0;
+    if (s.billboard) yaw = Math.PI - yaw;
+    else if (!s.post && !s.flat) {
+      const can = canopies.find(d => Math.hypot(d.x - s.x, d.z - s.z) < 5);
+      if (can) { x = can.x; y = can.y + 1.02 + s.h / 2 + 0.11; z = can.z; yaw = can.ry || 0; }
+    }
+    const hw = s.w / 2 + SIGN_FRAME, hh = s.h / 2 + SIGN_FRAME, c = Math.cos(yaw), sn = Math.sin(yaw);
+    // u across the face, v up it (along the ground for the rim code), n its normal
+    const u = [c * hw, 0, -sn * hw], v = s.flat ? [sn * hh, 0, c * hh] : [0, hh, 0], n = s.flat ? [0, 1, 0] : [sn, 0, c];
+    L.push({ x, y, z, u, v, n, r: Math.hypot(hw, hh), flat: !!s.flat });
+  }
+  SQ.set(W, L);
+  return L;
+}
+// the face's corners in view space, clipped just in front of the eye, then on screen (px, y down)
+const FACE = [[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]];
+function faceOnScreen(q, camera, sz) {
+  const V = camera.matrixWorldInverse.elements, P = camera.projectionMatrix.elements, near = Math.max(0.02, camera.near || 0.05);
+  for (let i = 0; i < 4; i++) {
+    const a = i === 0 || i === 3 ? -1 : 1, b = i < 2 ? -1 : 1;
+    const x = q.x + q.u[0] * a + q.v[0] * b, y = q.y + q.u[1] * a + q.v[1] * b, z = q.z + q.u[2] * a + q.v[2] * b;
+    const f = FACE[i];
+    f[0] = V[0] * x + V[4] * y + V[8] * z + V[12];
+    f[1] = V[1] * x + V[5] * y + V[9] * z + V[13];
+    f[2] = V[2] * x + V[6] * y + V[10] * z + V[14];
+  }
+  const out = [];
+  for (let i = 0; i < 4; i++) {
+    const a = FACE[i], b = FACE[(i + 1) % 4], ain = a[2] <= -near, bin = b[2] <= -near;
+    if (ain) out.push(a);
+    if (ain !== bin) { const t = (-near - a[2]) / (b[2] - a[2]); out.push([a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, -near]); }
+  }
+  return out.map(([x, y, z]) => {
+    const w = P[3] * x + P[7] * y + P[11] * z + P[15];
+    const nx = (P[0] * x + P[4] * y + P[8] * z + P[12]) / w, ny = (P[1] * x + P[5] * y + P[9] * z + P[13]) / w;
+    return [(nx + 1) / 2 * sz.x, (1 - ny) / 2 * sz.y];
+  });
+}
+// a convex polygon against a rect (separating axes: the rect's two, then the polygon's edge normals)
+function polyHitsRect(P, x0, y0, x1, y1) {
+  if (P.length < 3 || x1 <= x0 || y1 <= y0) return false;
+  let a = Infinity, b = -Infinity, c = Infinity, e = -Infinity;
+  for (const [x, y] of P) { if (x < a) a = x; if (x > b) b = x; if (y < c) c = y; if (y > e) e = y; }
+  if (b < x0 || a > x1 || e < y0 || c > y1) return false;
+  for (let i = 0; i < P.length; i++) {
+    const p = P[i], q = P[(i + 1) % P.length], nx = q[1] - p[1], ny = p[0] - q[0];
+    let pa = Infinity, pb = -Infinity;
+    for (const r of P) { const s = r[0] * nx + r[1] * ny; if (s < pa) pa = s; if (s > pb) pb = s; }
+    const r0 = x0 * nx, r1 = x1 * nx, s0 = y0 * ny, s1 = y1 * ny;
+    const ra = Math.min(r0, r1) + Math.min(s0, s1), rb = Math.max(r0, r1) + Math.max(s0, s1);
+    if (pb < ra || rb < pa) return false;
+  }
+  return true;
+}
+// Does a sign's face, between the eye c and the plate at p (d apart), cover the lettering's rect
+// (x0, y0)-(x1, y1) on screen, grown by m px?
+function signHides(W, camera, sz, c, p, d, x0, y0, x1, y1, m) {
+  const dx = p.x - c.x, dy = p.y - c.y, dz = p.z - c.z;
+  for (const q of signFaces(W)) {
+    const ox = q.x - c.x, oy = q.y - c.y, oz = q.z - c.z;
+    if (ox * ox + oy * oy + oz * oz > (d + q.r) * (d + q.r) || (q.flat && oy > 0)) continue;   // the rim code only shows from above
+    // the face's plane crosses the sight line before the owner (a sign behind him, or he in front of it, never hides him)
+    const nd = q.n[0] * dx + q.n[1] * dy + q.n[2] * dz;
+    if (Math.abs(nd) < 1e-6) continue;
+    const t = (q.n[0] * ox + q.n[1] * oy + q.n[2] * oz) / nd;
+    if (!(t > 0 && t < 1 - SIGN_GAP / d)) continue;
+    if (polyHitsRect(faceOnScreen(q, camera, sz), x0 - m, y0 - m, x1 + m, y1 + m)) return true;
+  }
+  return false;
+}
+
 export function labelSprite(text, color = '#fff', px = 40) {
   const raw0 = String(text ?? '').trim();
   const npc0 = px < 40 ? NPCS[raw0] : null;          // town3d's NPC labels (players' own names never match)
@@ -1030,10 +1122,17 @@ export function labelSprite(text, color = '#fff', px = 40) {
         alpha = 1 - THREE.MathUtils.smoothstep(d, NAME_FADE[0], NAME_FADE[1]);
         const S = typeof window !== 'undefined' ? window.__nmd : null, world = S?.W;
         const now = performance.now();
+        // the lettering's rect on screen (CSS px)
+        renderer.getSize(_sz);
+        _q.copy(_p).project(camera);
+        const ph = FIXED[kind] / 720 * _sz.y, hw = (ud.tw || 0.3) * ph * W / H / 2;
+        const x = (_q.x + 1) / 2 * _sz.x, y = (1 - _q.y) / 2 * _sz.y;
         if (alpha <= 0 || typeof world?.heightAt !== 'function') ud.sightAt = 0;   // out of range: test again the moment it's back
         else if (now >= ud.sightAt) {
           const first = ud.sightAt === 0;
-          ud.hid = sightBlocked(S, world, _c, _p, d);
+          if (first) ud.signHid = false;
+          ud.signHid = _q.z < 1 && signHides(world, camera, _sz, _c, _p, d, x - hw, y - ph * UP, x + hw, y + ph * DOWN, ud.signHid ? SIGN_OUT : -SIGN_IN);
+          ud.hid = ud.signHid || sightBlocked(S, world, _c, _p, d);
           ud.sightAt = now + SIGHT_MS + ud.jit;
           if (first) ud.vis = ud.hid ? 0 : 1;        // coming into range behind a wall: never flash up first
         }
@@ -1043,10 +1142,6 @@ export function labelSprite(text, color = '#fff', px = 40) {
         alpha *= ud.vis;
         if (alpha > 0.002) {
           // at the edge of the screen: fade out as the lettering reaches it instead of being cut in half
-          renderer.getSize(_sz);
-          _q.copy(_p).project(camera);
-          const ph = FIXED[kind] / 720 * _sz.y, hw = (ud.tw || 0.3) * ph * W / H / 2;
-          const x = (_q.x + 1) / 2 * _sz.x, y = (1 - _q.y) / 2 * _sz.y;
           const m = Math.min(x - hw, _sz.x - x - hw, y - ph * UP, _sz.y - y - ph * DOWN);
           alpha *= THREE.MathUtils.smoothstep(m, -8, 8);
         }

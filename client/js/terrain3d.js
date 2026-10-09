@@ -16,13 +16,17 @@
 // faces the edges are broken by a noise laid ON the face (the slope and macro noise are sampled by
 // x and z, so up a face they would only run in vertical bands). A crash mesa is granite all round
 // in smaller blocks, projected square to each face, from a lumpy drift at its foot to a snow cap
-// over its lip and a band on its bench, all set by HEIGHT, so no edge ever follows its triangles.
+// over its lip and a band on its bench, all set by HEIGHT, so no edge ever follows its triangles
+// (its steep sliver facets, where the heightfield folds, take the projection their own facet faces).
 // Ground on slopes is projected from the side too. Explicit texture gradients with a capped
 // anisotropy keep grazing facets from washing out. Broad warm/cool and value fields and baked
 // ambient occlusion sit on top, a 1.8 m detail map crisps the ground at the camera's feet, and
 // the snow glints in low direct sun. Beyond the playable heightfield an apron of unreachable hills
 // (stitched to the grid's rim vertex for vertex, so no crack of sky) carries the land out to the
 // horizon; at both ends the road's valley bends away behind a shoulder and closes over a saddle.
+// (In the Badlands it steps up in benches: a 2.5 m lattice near the grid, each cell split along
+// the diagonal nearer the contour, normals from 1-ring-smoothed heights, so a riser is one soft
+// band and the painted strata carry the detail.) Far off in the snow the road's ruts darken.
 // The terrain's skyline around the camera goes to the atmosphere, whose horizon rings haze up
 // from it. Instanced ground clutter grows in patches around the camera, never on the bare dirt of
 // a clearing, a building's lot or a code painted on the ground. terrainTintAt() gives other
@@ -57,13 +61,13 @@ const CFG = {
       cards: [[0.85, 0.62, 0.36], [0.95, 0.95, 0.04], [0.85, 0.72, 0.04], [0.8, 0.58, 0.22], [0.65, 0.55, 0.05], [0.85, 0.72, 0.16], [0.8, 0.7, 0.08], [0.7, 0.32, 0.08]] },
   },
   snow: {
-    hw: 3.0, scale: [8, 9, 6, 10.5], cliff: [0.27, 0.38], cliffN: [0.14, 0.04], g2: [0.67, 0.42], collar: [0.62, 0.68, 0.8], ledge: [1.0, 1.0, 1.0], snowRock: true, local: 0.02, mesaK: 0.32,
-    ao: [0.6, 0.67, 0.86], tintA: [1.03, 1.01, 0.96], tintB: [0.9, 0.95, 1.06], macro: 0.2, macro2: 0.1, mudTex: 'slush', sparkle: true, detail: [0.0, 0.12, 0.3],
+    hw: 3.0, scale: [8, 9, 6, 10.5], cliff: [0.27, 0.38], cliffN: [0.14, 0.04], g2: [0.62, 0.42], collar: [0.62, 0.68, 0.8], ledge: [1.0, 1.0, 1.0], snowRock: true, local: 0.02, mesaK: 0.32,
+    ao: [0.6, 0.67, 0.86], tintA: [1.03, 1.01, 0.96], tintB: [0.88, 0.94, 1.06], macro: 0.26, macro2: 0.1, mudTex: 'slush', sparkle: true, detail: [0.0, 0.12, 0.3], rutFar: [0.4, 0.14],
     clutter: { cell: 3.0, slots: 3, radius: 22, patch: 10, density: 0.5, spread: 1.0, flowers: 0,
       cards: [[0.8, 0.55, 0.38], [0.8, 0.6, 0.16], [0.7, 0.42, 0.04], [0.95, 0.75, 0.26], [1.1, 0.5, 0.14], [0.6, 0.38, 0.2], [0.85, 0.65, 0.08], [0.9, 0.4, 0.12]] },
   },
   badlands: {
-    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands', local: 0.06, mesaK: 0.05, terrace: [17, 0.7, 0.95],
+    hw: 3.1, scale: [7, 8, 6, 17], cliff: [0.12, 0.24], cliffN: [0.12, 0.05], g2: [0.6, 0.35], collar: [0.36, 0.16, 0.08], ledge: [1, 1, 1], strata: true, mudTex: 'mud_badlands', local: 0.06, mesaK: 0.05, terrace: [17, 0.5, 0.97],
     ao: [0.52, 0.42, 0.55], tintA: [1.07, 1.0, 0.9], tintB: [0.92, 0.95, 1.03], macro: 0.32, detail: [0.08, 0.45, 0.1],
     clutter: { cell: 3.2, slots: 3, radius: 22, patch: 12, density: 0.42, spread: 1.0, flowers: 0,
       cards: [[0.75, 0.5, 0.3], [0.8, 0.55, 0.12], [0.75, 0.5, 0.12], [0.7, 0.5, 0.12], [0.75, 0.5, 0.16], [0.85, 0.6, 0.06], [0.7, 0.45, 0.06], [0.5, 0.3, 0.14]] },
@@ -117,7 +121,7 @@ function splatMaterial(biome, cfg) {
   const U = {
     tG1: { value: T(`ground_${biome}`) }, tG2: { value: T(`ground2_${biome}`) }, tDirt: { value: T(`dirt_${biome}`) },
     tRoad: { value: T(`road_${biome}`) }, tCliff: { value: T(`cliff_${biome}`) }, tMud: { value: T(cfg.mudTex || 'mud') }, tMacro: { value: macroTex }, tDetail: { value: detailTex }, uDetail: { value: new THREE.Vector3(...(cfg.detail || [0, 0, 0])) },
-    uSpark: { value: 0 }, tSlope: { value: null }, tSlopeR: { value: null }, uGrid: { value: new THREE.Vector4(0, 0, 1, 0) }, uGridN: { value: new THREE.Vector2(2, 2) }, tSlopeA: { value: null }, uGridA: { value: new THREE.Vector4(0, 0, 1, 0) }, uGridAN: { value: new THREE.Vector2(2, 2) }, uFire: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uRoadSpan: { value: 2 * (cfg.hw + SHOULDER) },
+    uSpark: { value: 0 }, tSlope: { value: null }, tSlopeR: { value: null }, uGrid: { value: new THREE.Vector4(0, 0, 1, 0) }, uGridN: { value: new THREE.Vector2(2, 2) }, tSlopeA: { value: null }, uGridA: { value: new THREE.Vector4(0, 0, 1, 0) }, uGridAN: { value: new THREE.Vector2(2, 2) }, uFire: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uRoadSpan: { value: 2 * (cfg.hw + SHOULDER) }, uRutFar: { value: new THREE.Vector2(...(cfg.rutFar || [0, 0])) },
     uScale: { value: new THREE.Vector4(...cfg.scale) }, uMisc: { value: new THREE.Vector4(MUD_TILE, 10, cfg.macro, cfg.macro2 ?? 0.12) },
     uCliff: { value: new THREE.Vector2(...cfg.cliff) }, uLocal: { value: cfg.local ?? -1 }, uCliffN: { value: new THREE.Vector2(...cfg.cliffN) }, uG2: { value: new THREE.Vector2(...cfg.g2) },
     uAO: { value: new THREE.Vector3(...cfg.ao) }, uCollar: { value: new THREE.Vector3(...cfg.collar) }, uRev: { value: new THREE.Vector3(...(cfg.reveal || [0.24, 0.76, 0.5])) },
@@ -133,7 +137,7 @@ function splatMaterial(biome, cfg) {
   if (cfg.snowRock) m.defines.TERRAIN_SNOWROCK = 1;
   m.defines.TERRAIN_ANISO = cheap ? '2.0' : '3.0';
   m.defines.TERRAIN_NEARSHARP = cheap ? '0.62' : '0.82';
-  const key = 'terrain-splat-v19' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
+  const key = 'terrain-splat-v21' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
@@ -155,7 +159,7 @@ function splatMaterial(biome, cfg) {
           uniform sampler2D tSlopeR;
         #endif
         uniform vec4 uMesa[8], uMesaY[8]; uniform float uMesaK;
-        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge, uRev; uniform float uSpark, uRoadSpan, uLocal;
+        uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge, uRev; uniform float uSpark, uRoadSpan, uLocal; uniform vec2 uRutFar;
         varying vec4 vRoad; varying vec4 vSplat; varying vec3 vTPos; varying vec3 vTNrm; varying float vCv; varying vec2 vSlope;
         float tLum(vec3 c) { return dot(c, vec3(0.3, 0.55, 0.15)); }
         float tHash(vec3 p) { p = fract(p * 0.1031); p += dot(p, p.yzx + 33.33); return fract((p.x + p.y) * p.z); }
@@ -179,6 +183,9 @@ function splatMaterial(biome, cfg) {
           const mat2 ROT = mat2(0.8, -0.6, 0.6, 0.8);       // a rotated frame breaks the tile grid
           vec3 wp = vTPos; vec3 nr = normalize(vTNrm);
           vec2 xz = wp.xz, xr = ROT * xz;
+          #ifdef TERRAIN_SNOWROCK
+            vec3 fN = normalize(cross(dFdx(vTPos), dFdy(vTPos)));     // the facet's own normal (a crash mesa's rock, below)
+          #endif
           // large-scale noise comes per vertex (vRoad.zw, vSplat.w); one fetch gives the medium/fine noise
           vec4 mB = texture2D(tMacro, xr / 61.0 + vec2(0.31, 0.77));   // r: ~7-20 m, g: ~3-9 m, b: ~1-3 m
           float nE = mB.b;
@@ -268,6 +275,15 @@ function splatMaterial(biome, cfg) {
             vec3 rc = texture2D(tRoad, ru).rgb;
             float r2k = smoothstep(0.4, 0.6, mB.r * 0.75 + vRoad.w * 0.5 - 0.12);
             if (r2k > 0.01) rc = mix(rc, texture2D(tRoad, vec2(1.0 - ru.x, wp.z / 23.0 + 0.37)).rgb, r2k);
+            if (uRutFar.x + uRutFar.y > 0.0) {
+              // (snow) far off, the painted ruts melt into the pale packed snow and the road would vanish
+              // into the snowfield: there the wheel tracks darken (in bands widened to at least a pixel,
+              // so they never break into dashes) and the whole track greys a little
+              float fk = smoothstep(18.0, 70.0, distance(cameraPosition, wp));
+              float rdm = (vRoad.x - 0.5) * uRoadSpan, fw = max(0.35, fwidth(rdm) * 1.2);
+              float tr = 1.0 - smoothstep(0.0, fw, abs(abs(rdm) - 0.99) - 0.1);
+              rc *= 1.0 - fk * (uRutFar.x * tr * min(1.0, 0.45 / fw) + uRutFar.y);
+            }
             float edge = vRoad.y + (nE - 0.5) * 1.5 + (mB.g - 0.5) * 1.0;
             float rw = 1.0 - smoothstep(-0.35, 0.35, edge + clamp(tLum(col) - tLum(rc), -0.3, 0.3) * 1.6);
             col = mix(col, rc, rw);
@@ -314,6 +330,19 @@ function splatMaterial(biome, cfg) {
             float steepW = smoothstep(0.25, 0.5, sl.y);
             vec2 an = pow(abs(hn) + 0.001, vec2(8.0));
             float sx = smoothstep(0.32, 0.68, an.x / (an.x + an.y) + (mix(nE, wN.b, steepW) - 0.5) * 0.5 + (wN.g - 0.5) * 0.3 * steepW);
+            #ifdef TERRAIN_SNOWROCK
+              // round a crash mesa the heightfield folds into steep sliver facets (along its cut road-side
+              // flank and the corners of its lobes) whose interpolated normal faces one way while the
+              // facet itself faces the other: there the FACET picks the projection, never one that would
+              // meet it edge-on and stretch the granite into glassy streaks
+              if (mzk > 0.0) {
+                float fs = smoothstep(0.3, 0.55, length(fN.xz)) * mzk;
+                // (only facets the smooth choice would meet nearly edge-on switch, so few triangles do)
+                float fx = abs(fN.x), fz = abs(fN.z);
+                sx = mix(sx, 1.0, smoothstep(0.3, 0.15, fz) * smoothstep(0.0, 0.1, fx - fz) * fs);
+                sx = mix(sx, 0.0, smoothstep(0.3, 0.15, fx) * smoothstep(0.0, 0.1, fz - fx) * fs);
+              }
+            #endif
             vec3 cc = vec3(0.0);
             vec2 sN = vec2(0.5);      // (snow) a noise on the face, stretched along it: r ~5-13 m by 1-3 m, g ~2-6 m by 0.5-1.3 m
             vec2 fm = vec2(0.5);      // (snow) the painted rock's form under cc: x which way it faces (> 0.5 up), y its height
@@ -674,12 +703,23 @@ function buildChunks(W, data, mat, group) {
 function buildApron(W, cfg, data, mat, group) {
   const { nx, nz, cell, X0, Z0, heights } = W;
   const X1 = X0 + nx * cell, Zend = Z0 + nz * cell, NZ1 = nz + 1;
-  const OUT = 340, STEP = cfg.terrace ? 5 : 10;      // (terraced land wants a finer lattice, or its risers melt into swells)
-  const xs = [], zs = [];
-  for (let x = X0 - OUT; x <= X1 + OUT + 0.01; x += STEP) xs.push(x);
-  for (let z = Z0 - OUT; z < Z0; z += STEP) zs.push(z);
-  for (let z = Z0; z < Zend - 0.01; z += STEP) zs.push(z);
-  for (let z = Zend; z <= Zend + OUT + 0.01; z += STEP) zs.push(z);
+  const TR = cfg.terrace;
+  // (terraced land: the slope texture on a 5 m lattice, the mesh on a 2.5 m one for the first
+  // 80 m past the grid's edge (where the risers are seen up close) and 5 m beyond; elsewhere 10 m)
+  const OUT = 340, STEP = TR ? 5 : 10, FINE = TR ? 2.5 : STEP, IN = TR ? 80 : 0;
+  // one axis of the lattice: coarse far out, fine near the grid, fine across the grid (only the
+  // bands past its ends use those), fine again past its far edge, coarse beyond; it always hits
+  // the grid's edges exactly (they are the grid's own rim vertices)
+  const axis = (a0, a1) => {
+    const out = [];
+    for (let k = 0; k < Math.round((OUT - IN) / STEP); k++) out.push(a0 - OUT + k * STEP);
+    for (let k = 0; k < Math.round(IN / FINE); k++) out.push(a0 - IN + k * FINE);
+    for (let k = 0; a0 + k * FINE < a1 - 0.01; k++) out.push(a0 + k * FINE);
+    for (let k = 0; k <= Math.round(IN / FINE); k++) out.push(a1 + k * FINE);
+    for (let k = 1; k <= Math.round((OUT - IN) / STEP); k++) out.push(a1 + IN + k * STEP);
+    return out;
+  };
+  const xs = axis(X0, X1), zs = axis(Z0, Zend);
   const rx0 = W.roadX(Z0), rx1 = W.roadX(W.Z1);
   // past each end the road's valley bends away to one side behind a shoulder, then closes
   const bend0 = (W.seed & 1) ? 1 : -1, bend1 = (W.seed & 2) ? 1 : -1;
@@ -700,11 +740,13 @@ function buildApron(W, cfg, data, mat, group) {
     f = Math.max(f, sstep(110, 200, past));                                                      // ...closes over a saddle
     const bumps = fbm(x / 70, z / 70, W.seed + 901, 3) * 22 * sstep(0, 90, dOut);
     let rise = dOut * (0.03 + 0.22 * f) + sstep(180, OUT, dOut) * 70 * (0.5 + 0.5 * f) + bumps;
-    if (cfg.terrace) {
-      // (Badlands) the far land steps up in flat-topped benches with steep risers, so it reads as
-      // stepped mesas under strata, never as rolling dunes; each bench's level wanders
-      const [S, a, b] = cfg.terrace, o = (fbm(x / 160, z / 160, W.seed + 913, 2) * 0.5 + 0.5) * S;
-      const q = (Math.max(0, rise) + o) / S, fl = Math.floor(q);
+    if (TR) {
+      // (Badlands) the far land steps up in flat-topped benches with broad risers, so it reads as
+      // stepped mesas under strata, never as rolling dunes; each bench's level wanders, and each
+      // riser's line wobbles a few metres (the phase, not the levels), so no edge is ruler-straight
+      const [S, a, b] = TR, o = (fbm(x / 160, z / 160, W.seed + 913, 2) * 0.5 + 0.5) * S;
+      const wob = fbm(x / 41, z / 41, W.seed + 917, 2) * 0.1 + fbm(x / 13, z / 13, W.seed + 919, 1) * 0.025;
+      const q = (Math.max(0, rise) + o) / S + wob, fl = Math.floor(q);
       rise += (((fl + sstep(a, b, q - fl)) * S - o) - Math.max(0, rise)) * sstep(10, 45, dOut);
     }
     return base + rise;
@@ -741,19 +783,54 @@ function buildApron(W, cfg, data, mat, group) {
   const pos = [], nor = [], rd = [], sp = [], cvs = [], sls = [], idx = [];
   const vid = new Int32Array(NX * NZ).fill(-1);
   const inside = (x, z) => x > X0 && x < X1 && z > Z0 && z < Zend;
+  // (terraced) every lattice height once, and the normals from those heights smoothed over the
+  // 1-ring (a [1 2 1] tent, then central differences: ~4 m either way on the fine lattice; the
+  // coarse one's plain central differences already span 5 m), so a riser shades as one soft lit or
+  // shadowed band instead of triangle-by-triangle foil
+  let YL = null, NL = null;
+  if (TR) {
+    YL = new Float32Array(NX * NZ);
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) YL[i * NZ + j] = hA(xs[i], zs[j]);
+    const YS = new Float32Array(NX * NZ);
+    const fine = (v, k) => (k > 0 && v[k] - v[k - 1] < FINE + 0.01) && (k < v.length - 1 && v[k + 1] - v[k] < FINE + 0.01);
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      if (!fine(xs, i) || !fine(zs, j)) { YS[i * NZ + j] = YL[i * NZ + j]; continue; }
+      let a = 0, n = 0;
+      for (let di = -1; di <= 1; di++) for (let dj = -1; dj <= 1; dj++) {
+        const ii = i + di, jj = j + dj;
+        if (ii < 0 || jj < 0 || ii >= NX || jj >= NZ) continue;
+        const w = (2 - Math.abs(di)) * (2 - Math.abs(dj));
+        a += YL[ii * NZ + jj] * w; n += w;
+      }
+      YS[i * NZ + j] = a / n;
+    }
+    NL = new Float32Array(NX * NZ * 3);
+    for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
+      const i0 = Math.max(0, i - 1), i1 = Math.min(NX - 1, i + 1), j0 = Math.max(0, j - 1), j1 = Math.min(NZ - 1, j + 1);
+      const hx = (YS[i1 * NZ + j] - YS[i0 * NZ + j]) / (xs[i1] - xs[i0]), hz = (YS[i * NZ + j1] - YS[i * NZ + j0]) / (zs[j1] - zs[j0]), l = Math.hypot(hx, 1, hz);
+      const o = (i * NZ + j) * 3;
+      NL[o] = -hx / l; NL[o + 1] = 1 / l; NL[o + 2] = -hz / l;
+    }
+  }
   const vert = (i, j) => {
     const k = i * NZ + j;
     if (vid[k] >= 0) return vid[k];
-    const x = xs[i], z = zs[j], y = hA(x, z);
-    const e = cfg.terrace ? 2 : 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
+    const x = xs[i], z = zs[j];
+    let y, nX, nY, nZ;
+    if (TR) { y = YL[k]; nX = NL[k * 3]; nY = NL[k * 3 + 1]; nZ = NL[k * 3 + 2]; }
+    else {
+      y = hA(x, z);
+      const e = 1.5, hx = (hA(x + e, z) - hA(x - e, z)) / (2 * e), hz = (hA(x, z + e) - hA(x, z - e)) / (2 * e), l = Math.hypot(hx, 1, hz);
+      nX = -hx / l; nY = 1 / l; nZ = -hz / l;
+    }
     const cz = Math.max(Z0, Math.min(W.Z1, z)), hwz = roadHW(W, cfg, cz), d = x - rxA(z);
     vid[k] = pos.length / 3;
-    pos.push(x, y, z); nor.push(-hx / l, 1 / l, -hz / l);
+    pos.push(x, y, z); nor.push(nX, nY, nZ);
     const [nt, nv, n2] = lowNoise(W, x, z);
     rd.push(d / (2 * (hwz + SHOULDER)) + 0.5, Math.abs(d) - hwz + sstep(50, 150, pastOf(z)) * 12, nt, nv);   // the track peters out up the saddle
     sp.push(0, 0, 1, n2);
     cvs.push(0);
-    const sg = 1 - 1 / l; sls.push(sg, sg);
+    const sg = 1 - nY; sls.push(sg, sg);
     return vid[k];
   };
   // The apron is STITCHED to the grid: a lattice point on the grid's edge is the grid's own rim
@@ -799,7 +876,13 @@ function buildApron(W, cfg, data, mat, group) {
     else if (onEdge(xs[i], zs[j]) && onEdge(xs[i], zs[j + 1]) && Math.abs(xs[i] - X1) < 1e-4) side = [[i, j], [i, j + 1], c, d, a, b];
     else if (onEdge(xs[i], zs[j + 1]) && onEdge(xs[i + 1], zs[j + 1]) && Math.abs(zs[j + 1] - Z0) < 1e-4) side = [[i, j + 1], [i + 1, j + 1], a, c, b, d];
     else if (onEdge(xs[i], zs[j]) && onEdge(xs[i + 1], zs[j]) && Math.abs(zs[j] - Zend) < 1e-4) side = [[i, j], [i + 1, j], b, d, a, c];
-    if (!side) { tri(a, b, c); tri(c, b, d); continue; }
+    if (!side) {
+      // (terraced) each cell split along whichever diagonal lies closer to the contour, so a riser's
+      // edge runs along the triangles instead of cutting across them in teeth
+      if (TR && Math.abs(pos[a * 3 + 1] - pos[d * 3 + 1]) < Math.abs(pos[b * 3 + 1] - pos[c * 3 + 1])) { tri(a, b, d); tri(a, d, c); }
+      else { tri(a, b, c); tri(c, b, d); }
+      continue;
+    }
     const [[pi0, pj0], [pi1, pj1], q0, q1, p0, p1] = side;
     const P = [p0, ...rimBetween(xs[pi0], zs[pj0], xs[pi1], zs[pj1]), p1];
     const mid = P.length >> 1;

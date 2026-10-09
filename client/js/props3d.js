@@ -5,7 +5,7 @@
 // (shared/loot.js LOOT[type].shape). Every face that can land facing the camera is painted:
 // loot tumbles, so backs and flanks matter as much as fronts.
 //
-// Loose loot also glints (see "the loot twinkle" below): one point cloud for every piece, so a
+// Loose loot also glitters (see "the loot twinkle" below): one point cloud for every piece, so a
 // stop's grabbable things stand out from its crates and barrels.
 //
 // API: buildProp(type, W) → Object3D · mapCanvas(W) → the paper road map (canvas) · PREVIEW
@@ -1338,70 +1338,86 @@ function demoWorld() {
 
 // ---- the loot twinkle --------------------------------------------------------------------------------
 
-// A small gold glint rises off every loose piece of loot, like the glitter over a lootable quest
-// object in WoW: it winks on just over the piece, drifts up ~15 cm with a little sideways sway and
-// fades out at the top, then starts again; every piece runs its own cycle (its own phase and speed,
-// one of the four glints painted in loot_twinkle, maybe mirrored), so the glints at a stop come and go
-// unevenly instead of standing in a row. They're small (12–20 px), at full strength to 20 m and gone by
-// 30, so a stop's grabbable things stand out from the crates, barrels and tyres dressing it without
-// turning it into a mobile game. All of them are ONE THREE.Points: one draw call, no shadow. Its
-// onBeforeRender gathers the nearest pieces and hands their positions, fades, phases and glints to the
-// shader as uniform arrays, so the glints sit on this frame's poses. It hides (fading) what someone is
-// holding, anything tumbling or flying, and what rides in or on the RV. No hook in main.js: loot
-// registers itself when it's added to the scene, and the game state (window.__nmd) says who holds
-// what and where the RV is.
-const TW = { N: 40, far: 30, fade: 10, near: 0.7, lift: 0.14, rise: 0.15, sway: 0.025, flicker: 1.15, minPx: 12, maxPx: 20 };
+// Pale gold-white glitter rises off every loose piece of loot, like the motes over a lootable quest
+// object in WoW: 2 to 4 small round motes per piece (more for bigger pieces), each winking on just
+// over the piece somewhere across its top, drifting up 20–40 cm with a little sway and fading out. Each
+// mote runs its own cycle (its own speed and phase, a pause of its own between rises, a new spot each
+// time), so a piece's motes come and go unevenly and a stop never pulses in step. One mote per piece
+// may, on some of its rises, swell into a four-point twinkle as it goes up: at most one brighter flash
+// at a time per piece. The colours are painted in loot_twinkle (cream heart, soft gold rim, a faint
+// bronze edge so they still show on snow and pale sand). Small on screen (7–11 px, a flash to 24), at
+// full strength to 20 m and gone by 30, so a stop's grabbable things stand out from the crates,
+// barrels and tyres dressing it without turning it into a mobile game. All of it is ONE THREE.Points:
+// one draw call, no shadow. Its onBeforeRender gathers the nearest pieces and hands their tops, fades
+// and cycles to the shader as uniform arrays, so the motes sit on this frame's poses. It hides (fading)
+// what someone is holding, anything tumbling or flying, and what rides in or on the RV. No hook in
+// main.js: loot registers itself when it's added to the scene, and the game state (window.__nmd) says
+// who holds what and where the RV is.
+const TW = { N: 40, M: 4, far: 30, fade: 10, near: 0.7, lift: 0.05, minPx: 7, maxPx: 11, flashMin: 14, flashMax: 24 };
 const twLoose = new Set();
 let twCloud = null, twSeq = 0, twLast = 0, twDemo = false;
 const twC = new V3(), twE = [];
-// uP: xyz where the glint starts, w its strength · uQ: x phase (0..2π), y size (m), z which glint
-// (0..TWINKLE_CELLS²-1), w the cycle's rate (Hz), negative = mirrored
+const f1 = v => v.toFixed(1);
+// one point per mote: position.x the piece's slot, position.y which of its motes
+// uP: xyz the middle of the piece's top, w its strength · uQ: x phase (0..2π), y how far from the
+// middle a mote may start (m), z how many motes, w the piece's cycle rate (Hz)
 const TW_VS = `
 uniform vec4 uP[${TW.N}];
 uniform vec4 uQ[${TW.N}];
 uniform float uTime, uViewH, uPx;
 varying float vA;
-varying vec3 vRot;
+varying vec2 vRot;
+float hsh(float n) { return fract(sin(n) * 43758.5453); }
 void main() {
   int i = int(position.x + 0.5);
+  float j = position.y;
   vec4 P = uP[i], Q = uQ[i];
-  float t = fract(uTime * abs(Q.w) + Q.x * 0.159155);
-  vec3 p = P.xyz;
-  p.y += ${TW.rise.toFixed(3)} * t;
-  p.x += ${TW.sway.toFixed(3)} * sin(uTime * 1.9 + Q.x * 3.1);
-  p.z += ${TW.sway.toFixed(3)} * cos(uTime * 1.55 + Q.x * 2.3);
+  // this mote's own cycle; then this rise's own seed (a new spot, height, pause and maybe a flash)
+  float sd = Q.x * 5.31 + j * 2.17;
+  float cyc = uTime * Q.w * (0.78 + 0.5 * hsh(sd + 0.31)) + fract(Q.x * 0.159155 + j * 0.382 + 0.21 * hsh(sd + 1.13));
+  float hc = sd + mod(floor(cyc), 251.0) * 1.731;
+  float t = fract(cyc) / (0.6 + 0.32 * hsh(hc + 0.7));       // past 1: resting until the next rise
+  float fl = (j < 0.5 && hsh(hc + 5.3) < 0.6) ? 1.0 : 0.0;   // only mote 0 may flash, on some rises
+  float a = 6.2832 * hsh(hc + 2.3), r = Q.y * sqrt(hsh(hc + 3.7));
+  vec3 p = P.xyz + vec3(cos(a) * r, 0.06 * hsh(hc + 4.1), sin(a) * r);
+  p.y += (0.2 + 0.2 * hsh(hc + 2.9)) * min(t, 1.0) * (1.5 - 0.5 * min(t, 1.0));
+  p.x += 0.02 * sin(t * 5.0 + hc);
+  p.z += 0.02 * cos(t * 4.3 + hc);
   vec4 mv = viewMatrix * vec4(p, 1.0);
-  // wink on at the bottom, fade out over the top of the rise; a quick flicker on top of that
-  float env = smoothstep(0.0, 0.12, t) * (1.0 - smoothstep(0.55, 1.0, t));
-  float fl = 0.5 + 0.5 * sin(uTime * ${(2 * Math.PI * TW.flicker).toFixed(5)} * (0.8 + 0.4 * fract(Q.x * 2.7)) + Q.x * 1.7);
-  vA = P.w * env * (0.7 + 0.3 * fl);
-  vRot = vec3(0.14 * sin(uTime * 0.8 + Q.x * 1.7) + 0.2 * (fract(Q.x * 3.7) - 0.5), Q.w < 0.0 ? -1.0 : 1.0, Q.z);
-  float px = 0.5 * projectionMatrix[1][1] * uViewH * Q.y / max(0.1, -mv.z);
-  gl_PointSize = P.w > 0.0 ? clamp(px, ${TW.minPx.toFixed(1)} * uPx, ${TW.maxPx.toFixed(1)} * uPx) * (0.9 + 0.14 * fl) * (1.0 - 0.12 * t) : 0.0;
-  gl_Position = projectionMatrix * mv;
+  float env = t < 1.0 ? smoothstep(0.0, 0.14, t) * (1.0 - smoothstep(0.42, 1.0, t)) : 0.0;
+  float flash = fl * exp(-pow((t - 0.3) / 0.12, 2.0));
+  vA = P.w * env * mix(0.82 + 0.18 * sin(uTime * 9.0 + hc * 3.0), 1.25, flash);
+  // which sprite: a round mote (0, or 1 with its tiny glint) or the twinkle (2, 3); its turn
+  vRot = fl > 0.5 ? vec2(0.25 * (hsh(hc + 6.1) - 0.5), 2.0 + step(0.5, hsh(hc + 7.3))) : vec2(hsh(hc + 6.9) - 0.5, step(0.62, hsh(hc + 7.7)));
+  float sz = fl > 0.5 ? mix(0.08, 0.24, flash) : 0.085 + 0.035 * hsh(hc + 8.3);
+  float px = 0.5 * projectionMatrix[1][1] * uViewH * sz / max(0.1, -mv.z);
+  float lo = mix(${f1(TW.minPx)}, ${f1(TW.flashMin)}, flash), hi = mix(${f1(TW.maxPx)}, ${f1(TW.flashMax)}, flash);
+  bool on = P.w > 0.0 && j < Q.z && env > 0.0;
+  gl_PointSize = on ? clamp(px, lo * uPx, hi * uPx) : 1.0;
+  gl_Position = on ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);   // off: outside the clip box
 }`;
 const TW_FS = `
 uniform sampler2D map;
 varying float vA;
-varying vec3 vRot;
+varying vec2 vRot;
 void main() {
-  vec2 c = (gl_PointCoord - 0.5) * vec2(vRot.y, 1.0);
+  vec2 c = gl_PointCoord - 0.5;
   float s = sin(vRot.x), k = cos(vRot.x);
   vec2 q = vec2(k * c.x - s * c.y, s * c.x + k * c.y) + 0.5;     // in the cell: x right, y down
   if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) discard;
-  float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vRot.z + 0.5, n)), row = floor((vRot.z + 0.5) / n);
+  float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vRot.y + 0.5, n)), row = floor((vRot.y + 0.5) / n);
   vec4 t = texture2D(map, vec2((col + q.x) / n, 1.0 - (row + q.y) / n));
   if (t.a * vA < 0.004) discard;
-  // premultiplied: the bright halo mostly adds light; the glint and above all its dark umber edge cover
-  // what's behind them (so it keeps its edge on white snow and pale sand)
-  float cover = t.a * mix(1.0, t.a, smoothstep(0.35, 0.75, dot(t.rgb, vec3(0.3, 0.59, 0.11))));
-  gl_FragColor = vec4(t.rgb * t.a * vA * 1.2, cover * vA * 0.9);
+  // premultiplied, laid over what's behind (adding light would turn the pale halo lime on grass): the
+  // body and its faint bronze edge keep their edge on white snow and pale sand
+  float A = min(1.0, t.a * vA);
+  gl_FragColor = vec4(min(vec3(1.0), t.rgb * max(1.0, vA)) * A, A);     // a flash (vA > 1) burns whiter
   #include <colorspace_fragment>
 }`;
 function twinkleCloud() {
   if (twCloud) return twCloud;
-  const geo = new THREE.BufferGeometry(), idx = new Float32Array(TW.N * 3);
-  for (let i = 0; i < TW.N; i++) idx[i * 3] = i;
+  const geo = new THREE.BufferGeometry(), idx = new Float32Array(TW.N * TW.M * 3);
+  for (let i = 0; i < TW.N * TW.M; i++) { idx[i * 3] = Math.floor(i / TW.M); idx[i * 3 + 1] = i % TW.M; }
   geo.setAttribute('position', new THREE.BufferAttribute(idx, 3));
   geo.boundingBox = new THREE.Box3();                                   // empty: it never widens a bounds check
   geo.boundingSphere = new THREE.Sphere(new V3(), 1e5);
@@ -1431,12 +1447,12 @@ function twAdded(e) {
 function twRemoved(e) { twLoose.delete(e.target); }
 function twinkleOn(obj, type) {
   const sh = LOOT[type].shape, half = sh[0] === 'box' ? [sh[1], sh[2], sh[3]] : sh[0] === 'cyl' ? [sh[2], sh[1], sh[2]] : [sh[1], sh[1], sh[1]];
-  // its own cycle: phase by the golden angle, a speed of 0.3–0.42 Hz, the next of the painted glints,
-  // mirrored every other run of them
-  const k = twSeq++, cells = TWINKLE_CELLS * TWINKLE_CELLS;
+  // its own cycle: phase by the golden angle, a speed of 0.3–0.42 Hz (each mote varies it); 2 motes
+  // for a small piece, 3 for a middling one, 4 for the big ones; they start anywhere across its top
+  const k = twSeq++, hm = Math.max(...half);
   obj.userData.tw = {
-    half, phase: (k * 2.39996) % TAU, size: 0.22 + 0.16 * Math.max(...half), glint: k % cells,
-    rate: (0.3 + 0.12 * ((k * 0.618034) % 1)) * (Math.floor(k / cells) % 2 ? -1 : 1), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0,
+    half, phase: (k * 2.39996) % TAU, spread: Math.min(0.3, Math.max(0.06, 0.6 * hm)), count: hm < 0.25 ? 2 : hm < 0.45 ? 3 : 4,
+    rate: 0.3 + 0.12 * ((k * 0.618034) % 1), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0,
   };
   obj.addEventListener('added', twAdded);
   obj.addEventListener('removed', twRemoved);
@@ -1512,10 +1528,10 @@ function twUpdate(renderer, scene, camera) {
   for (let i = 0; i < n; i++) {
     const [, o, a] = twE[i], u = o.userData.tw, m = o.matrixWorld.elements;
     U.uP.value[i].set(m[12], u.top + TW.lift, m[14], a);
-    U.uQ.value[i].set(u.phase, u.size, u.glint, u.rate);
+    U.uQ.value[i].set(u.phase, u.spread, u.count, u.rate);
   }
   for (let i = n; i < TW.N; i++) U.uP.value[i].w = 0;
-  this.geometry.setDrawRange(0, n);
+  this.geometry.setDrawRange(0, n * TW.M);
 }
 
 // ---- building ------------------------------------------------------------------------------------
@@ -1603,7 +1619,7 @@ export const PREVIEW = {
     const o = buildProp(k, null), bb = new THREE.Box3().setFromObject(o), s = bb.getSize(new V3());
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); o.rotation.y = Math.PI; return g;
   }])),
-  // the glint over loose loot, with a few pieces lying about (each glint caught wherever its rise was)
+  // the glitter over loose loot, with a few pieces lying about (each mote caught wherever its rise was)
   twinkle: () => {
     twDemo = true;
     const g = new THREE.Group();

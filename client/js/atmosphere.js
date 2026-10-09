@@ -30,7 +30,7 @@ const DAY = {
     night: { top: '#0a1432', hor: '#22385e', fog: '#1c2c4c', hSky: '#5c74b0', hGnd: '#1e2638', hemiI: 1.45, sun: '#a6b8e8' } },
   fields: { top: '#5a9ee2', hor: '#e4e8dc', fog: '#d0d6cc', hSky: '#ece8dc', hGnd: '#8c8458', sun: '#fff0c4', near: 50, far: 600, light: 1, clouds: 0.04,
     night: { top: '#0e1430', hor: '#2c3456', fog: '#242a44', hSky: '#6670a6', hGnd: '#2a2830', hemiI: 1.45, sun: '#b0b8e0' } },
-  snow: { top: '#4e94dc', hor: '#e2edf4', fog: '#d9e6f0', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 35, far: 520, light: 0.8, clouds: 0.0,
+  snow: { top: '#4e94dc', hor: '#dae7f2', fog: '#c9d8e8', hSky: '#e4eef8', hGnd: '#97a6bc', sun: '#fff2dc', near: 35, far: 520, light: 0.8, clouds: 0.0,
     night: { top: '#0c1a3c', hor: '#2c4874', fog: '#24385c', hSky: '#7090cc', hGnd: '#3a4a6c', hemiI: 1.55, sun: '#b4caf4' } },
   badlands: { top: '#5492d4', hor: '#f0cfb0', fog: '#e4c4aa', hSky: '#ece4e0', hGnd: '#a8603a', sun: '#fff0d0', near: 50, far: 680, light: 1, clouds: 0.02,
     night: { top: '#120f2e', hor: '#3c2c50', fog: '#2c2236', hSky: '#7466a0', hGnd: '#2e2224', hemiI: 1.4, sun: '#b8b0e0' } },

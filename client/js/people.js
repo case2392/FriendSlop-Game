@@ -68,7 +68,10 @@ const B = { body: 0, hips: 1, spine: 2, chest: 3, neck: 4, head: 5, armL: 6, for
 const ARM = s => s < 0 ? [B.armL, B.foreL, B.handL] : [B.armR, B.foreR, B.handR];
 const LEG = s => s < 0 ? [B.legL, B.shinL, B.footL] : [B.legR, B.shinR, B.footR];
 // spine joints (meters, body space)
-const J = { hips: 0.95, spine: 1.06, chest: 1.25, neck: 1.475, head: 1.62, hipY: 0.92, upper: 0.3, fore: 0.275, thigh: 0.42, shin: 0.4 };
+// (thigh + shin = 0.82 m from the hip joint to the ankle: a long shin under a short thigh, so the
+// legs below the jerkin skirt read long, not as stubby tubes)
+const J = { hips: 0.95, spine: 1.06, chest: 1.25, neck: 1.475, head: 1.62, hipY: 0.92, upper: 0.3, fore: 0.275, thigh: 0.395, shin: 0.425 };
+const KNEE_Y = J.hipY - J.thigh;   // 0.525
 // limb joints depend on the build (s = -1 left, +1 right)
 function frameOf(S) {
   const fem = !!S.look.female, bulk = S.bulk || 1, wide = 1 + (bulk - 1) * 0.9, bare = S.pauldrons === 'none';
@@ -791,7 +794,7 @@ function skirtParts(S) {
     }, 6, 8, 0.008, {
       reg: back ? REG.flapB : REG.flap, uv: (u, v) => [back ? u : 1 - u, v],
       // the front flap's last hand's-breadth rides flapF2, so it drapes over the knees when sitting
-      bones: p => { const t = sstep(0.985, 0.88, p[1]), t2 = back ? 0 : sstep(0.56, 0.5, p[1]); return [[B.hips, 1 - t], [pn.bone, t * (1 - t2)], [B.flapF2, t * t2]]; },
+      bones: p => { const t = sstep(0.985, 0.88, p[1]), t2 = back ? 0 : sstep(KNEE_Y + 0.06, KNEE_Y, p[1]); return [[B.hips, 1 - t], [pn.bone, t * (1 - t2)], [B.flapF2, t * t2]]; },
       inside: (u, v) => [0, yOf(v), 0],
     }));
   }
@@ -1089,7 +1092,11 @@ function armParts(S, F, s) {
   return P;
 }
 
-const LEG_TOP = [   // y, half-width, front, back
+// The leg tables and the painted leg texture are laid out in TEXTURE heights (v, m above the sole),
+// for a knee at 0.5; legY() stretches the shin and squeezes the thigh to the model's knee (KNEE_Y).
+const KNEE_V = 0.5, LEG_TOP_V = 0.99;
+const legY = v => v <= 0.1 ? v : v <= KNEE_V ? 0.1 + (v - 0.1) * (KNEE_Y - 0.1) / (KNEE_V - 0.1) : KNEE_Y + (v - KNEE_V) * (LEG_TOP_V - KNEE_Y) / (LEG_TOP_V - KNEE_V);
+const LEG_TOP = [   // v, half-width, front, back (trousers: NPCs)
   [0.99, 0.0, 0.0, 0.0],
   [0.97, 0.085, 0.09, 0.09],
   [0.91, 0.114, 0.118, 0.114],
@@ -1098,16 +1105,27 @@ const LEG_TOP = [   // y, half-width, front, back
   [0.575, 0.09, 0.092, 0.088],
   [0.51, 0.084, 0.09, 0.082],
 ];
-const LEG_TALL = [   // a knee boot with a turned-down cuff
-  [0.49, 0.082, 0.088, 0.081],
-  [0.482, 0.105, 0.111, 0.105],
-  [0.455, 0.11, 0.116, 0.11],
-  [0.41, 0.105, 0.111, 0.105],
-  [0.4, 0.092, 0.098, 0.094],
-  [0.33, 0.092, 0.098, 0.096],
-  [0.22, 0.087, 0.093, 0.089],
-  [0.14, 0.084, 0.09, 0.086],
-  [0.085, 0.081, 0.086, 0.081],
+const LEG_TOP_TAPER = [   // a player's thigh: thick at the hip, tapering into a slim knee above the boot cuff
+  [0.99, 0.0, 0.0, 0.0],
+  [0.97, 0.085, 0.09, 0.09],
+  [0.91, 0.114, 0.118, 0.114],
+  [0.80, 0.109, 0.114, 0.109],
+  [0.69, 0.096, 0.101, 0.095],
+  [0.6, 0.084, 0.089, 0.082],
+  [0.535, 0.076, 0.084, 0.074],
+  [0.505, 0.074, 0.084, 0.072],
+];
+const LEG_TALL = [   // a knee boot: a wide flared turned-down cuff, a calf, a slim ankle
+  [0.477, 0.073, 0.082, 0.071],
+  [0.474, 0.108, 0.114, 0.108],
+  [0.464, 0.12, 0.126, 0.118],
+  [0.443, 0.118, 0.124, 0.116],
+  [0.415, 0.106, 0.112, 0.105],
+  [0.4, 0.09, 0.096, 0.092],
+  [0.33, 0.091, 0.098, 0.097],
+  [0.22, 0.084, 0.09, 0.086],
+  [0.14, 0.079, 0.085, 0.081],
+  [0.085, 0.08, 0.085, 0.08],
   [0.06, 0.056, 0.056, 0.056],
   [0.05, 0.0, 0.0, 0.0],
 ];
@@ -1152,15 +1170,15 @@ function legParts(S, F, s) {
     const a = y > knee[1] ? [knee, hip] : [ank, knee], t = (y - a[0][1]) / (a[1][1] - a[0][1]);
     return [a[0][0] + (a[1][0] - a[0][0]) * t, a[0][2] + (a[1][2] - a[0][2]) * t];
   };
-  const tab = [...LEG_TOP, ...(tall ? LEG_TALL : S.boots === 'work' ? LEG_WORK : LEG_PLAIN)];
+  const tab = [...(tall ? LEG_TOP_TAPER : LEG_TOP), ...(tall ? LEG_TALL : S.boots === 'work' ? LEG_WORK : LEG_PLAIN)];
   const wts = p => {
-    const y = p[1];
-    if (y > 0.56) return [[th, 1]];
-    if (y > 0.44) { const t = sstep(0.56, 0.44, y); return [[th, 1 - t], [sn, t]]; }
+    const y = p[1], k0 = KNEE_Y + 0.06, k1 = KNEE_Y - 0.06;
+    if (y > k0) return [[th, 1]];
+    if (y > k1) { const t = sstep(k0, k1, y); return [[th, 1 - t], [sn, t]]; }
     if (y > 0.13) return [[sn, 1]];
     const t = sstep(0.13, 0.07, y); return [[sn, 1 - t], [ft, t]];
   };
-  const P = [lathe(tab.map(([y, w, d, db]) => { const [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v: y }; }), { seg: 12, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s] })];
+  const P = [lathe(tab.map(([v, w, d, db]) => { const y = legY(v), [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v }; }), { seg: 12, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s] })];
   const k = shoe ? [0.86, 0.8, 0.92] : S.outfit === 'repo' ? [1.2, 1.16, 1.14] : F.fem ? [0.9, 0.92, 0.9] : [1.06, 1.06, 1.05];
   const nv = FOOT.length - 1;
   P.push(surf((u, v) => {
@@ -1172,52 +1190,108 @@ function legParts(S, F, s) {
   return P;
 }
 
-// A big domed pauldron with a rolled rim and a second lame hanging off the outside.
+// A big domed pauldron sitting ON the deltoid: an oval dome whose rim comes down past the shoulder
+// ball and overlaps the sleeve, a thick rolled rim, a hanging lame tucked under the rim on the
+// outside, and a buckled strap from its front edge down onto the chest. (Or, kit 'lames', a cap and
+// two overlapping plates.) The inner side slopes down onto the trapezius instead of hovering.
+// It is modeled as it should sit in the rest pose and turned back into the bind pose by the rest
+// abduction (PAUL_AB): the upper arm (which carries it) hangs out ~17 deg at rest, which in the
+// bind pose would tip the dome in toward the neck and lift its outer rim off the sleeve.
+const PAUL_AB = 0.3;
 function pauldron(S, F, s, size) {
   const [ua] = ARM(s), sh = F.shoulder(s);
-  const R = 0.143 * size, tilt = 0.6, fmax = 1.42;
+  const R = 0.15 * size, tilt = 0.6, fmax = 1.6, DROOP = 0.3;
   const A = [0, Math.cos(tilt), s * Math.sin(tilt)], E1 = [1, 0, 0];
   const E2 = [A[1] * E1[2] - A[2] * E1[1], A[2] * E1[0] - A[0] * E1[2], A[0] * E1[1] - A[1] * E1[0]];
-  // (an oval dome riding high enough to frame the jaw, deeper front to back than across and swelling
-  // toward the back: from the side it spans the yoke and the shoulder blade, so the profile keeps the
-  // big shoulders the front view has, while the far one doesn't push its shadowed hollow out past the
-  // chin in a three-quarter view)
-  const Cc = [sh[0] - 0.004, sh[1] + 0.032 * size, sh[2] - s * 0.006], DEEP_F = 1.0, DEEP_B = 1.22;
+  // (an oval dome, deeper toward the back so from the side it spans the shoulder blade; centered just
+  // below and outside the shoulder joint, so it rests on the shoulder ball)
+  const Cc = [sh[0] - 0.006, sh[1] - 0.008 * size, sh[2] + s * 0.016 * size], DEEP_F = 1.0, DEEP_B = 1.16;
+  // rest pose -> bind pose: undo the rest abduction about the shoulder joint (by the fraction w)
+  const bind = (p, w = 1) => {
+    const a = s * PAUL_AB * w, c = Math.cos(a), sn = Math.sin(a), y = p[1] - sh[1], z = p[2] - sh[2];
+    return [p[0], sh[1] + y * c - z * sn, sh[2] + y * sn + z * c];
+  };
   const dir = (th, f) => { const c = Math.cos(th), sn = Math.sin(th), sf = Math.sin(f), cf = Math.cos(f); return [0, 1, 2].map(k => A[k] * cf * 0.74 + (E1[k] * c + E2[k] * sn) * sf); };
-  const pt = (th, f, rr) => { const d = dir(th, f); return [Cc[0] + d[0] * rr * (d[0] > 0 ? DEEP_F : DEEP_B), Cc[1] + d[1] * rr, Cc[2] + d[2] * rr]; };
+  // a point on the dome (rest pose): the inner half slopes down onto the trapezius
+  const ptR = (th, f, rr) => {
+    const d = dir(th, f), p = [Cc[0] + d[0] * rr * (d[0] > 0 ? DEEP_F : DEEP_B), Cc[1] + d[1] * rr, Cc[2] + d[2] * rr];
+    const o = (p[2] - Cc[2]) * s / R;
+    p[1] -= DROOP * R * Math.pow(Math.max(0, -o), 1.3);
+    return p;
+  };
+  const pt = (th, f, rr) => bind(ptR(th, f, rr));
+  const inC = () => bind(Cc), under = () => bind([Cc[0] + A[0] * 0.3, Cc[1] + A[1] * 0.3, Cc[2] + A[2] * 0.3]);
   const P = [];
   const out = [0, -0.25, s]; const ol = Math.hypot(...out);
   const thOut = Math.atan2((out[0] * E2[0] + out[1] * E2[1] + out[2] * E2[2]) / ol, (out[0] * E1[0] + out[1] * E1[1] + out[2] * E1[2]) / ol);
+  // a thick rolled rim round the edge at f (rest pose), radius rr: u round the roll, v along the edge
+  // (its seam at the back); textured from the dome's riveted rim band, lit on its upper side
+  const rolledRim = (f, k, rr) => {
+    const at = v => { const th = Math.PI - TAU * v; return ptR(th, f, R * k * (1 + 0.05 * Math.cos(th))); };
+    return surf((u, v) => {
+      const c = at(v), q = [c[0] - Cc[0], c[1] - Cc[1], c[2] - Cc[2]], ax = q[0] * A[0] + q[1] * A[1] + q[2] * A[2];
+      let rd = [q[0] - A[0] * ax, q[1] - A[1] * ax, q[2] - A[2] * ax]; const l = Math.hypot(...rd) || 1; rd = rd.map(x => x / l);
+      const w = TAU * u, cw = Math.cos(w), sw = Math.sin(w);
+      return bind([c[0] + rr * (rd[0] * cw + A[0] * sw), c[1] + rr * (rd[1] * cw + A[1] * sw), c[2] + rr * (rd[2] * cw + A[2] * sw)]);
+    }, 8, 26, { reg: REG.paul, uv: (u, v) => [(v * 3) % 1, 0.325 + 0.1 * (0.5 + 0.5 * Math.sin(TAU * u))], bones: ua, closed: true, inside: (u, v) => bind(at(v)) });
+  };
   if (S.shoulders === 'lames') {
     // three overlapping curved plates of boiled leather: a cap, then two lames, each lower one
-    // a little bigger so it tucks under the one above; the lames wrap the outside of the arm
-    const plates = [[0, 0.86, 1.0, null], [0.72, 1.22, 1.06, 2.3], [1.04, 1.56, 1.12, 2.0]];
+    // a little bigger so it tucks under the one above; the lames wrap the outside and front of the arm
+    const plates = [[0, 1.22, 1.0, null], [1.02, 1.42, 1.06, 3.0], [1.26, 1.66, 1.12, 2.7]];
     plates.forEach(([f0, f1, k, span]) => {
       P.push(...slab((u, v) => {
         const th = span ? thOut + (u - 0.5) * span : thOf(u), f = f1 - (f1 - f0) * v;
         return pt(th, f, R * k * (1 + 0.05 * Math.cos(th)) * (1 + 0.06 * gauss(v, 0.12)));
-      }, span ? 12 : 18, 3, 0.012, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: !span, inside: () => Cc, noInner: !!span }));
+      }, span ? 14 : 20, 4, 0.012, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: !span, inside: inC, noInner: !!span }));
     });
     // the cap's underside, closed by a cheap disc (you'd see the sky through the dome from below)
-    P.push(surf((u, v) => pt(thOf(u), 0.82, R * (1 - v)), 8, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: () => [Cc[0] + A[0] * 0.3, Cc[1] + A[1] * 0.3, Cc[2] + A[2] * 0.3] }));
-    return P;
+    P.push(surf((u, v) => pt(thOf(u), 1.18, R * (1 - v)), 8, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: under }));
+  } else {
+    P.push(...slab((u, v) => {
+      const th = thOf(u), f = (1 - v) * fmax;
+      return pt(th, f, R * (1 + 0.05 * Math.cos(th)));
+    }, 20, 8, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.4 + v * 0.6], bones: ua, closed: true, inside: inC, noInner: true }));
+    P.push(rolledRim(fmax, 1.0, 0.015 * size));
+    // the dome's underside: a cheap disc across its rim (no inner skin: you'd only ever see it from below)
+    P.push(surf((u, v) => pt(thOf(u), fmax, R * (1 - v)), 10, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: under }));
+    // the hanging lame: tucked up under the rim on the outside, hanging down over the sleeve
+    P.push(...slab((u, v) => {
+      const th = thOut + (u - 0.5) * 2.9, f = fmax - 0.12 + 0.36 * (1 - v);
+      return pt(th, f, R * (0.97 + 0.06 * (1 - v)) * (1 + 0.05 * Math.cos(th)));
+    }, 12, 3, 0.012, { reg: REG.paul, uv: (u, v) => [u, v * 0.28], bones: ua, inside: inC }));
   }
+  P.push(...paulStrap(S, s, sh, bind));
+  return P;
+}
+// The pauldron's strap: from under its front edge down across the chest to a brass buckle. Mostly on
+// the chest bone; its top end (under the rim) rides the arm with the pauldron.
+function paulStrap(S, s, sh, bind) {
+  const [ua] = ARM(s), y0 = 1.445, y1 = 1.27, wd = 0.04, P = [];
+  const thAt = v => s * (0.9 - 0.36 * v), yAt = v => y0 + (y1 - y0) * v;
+  const wUA = y => 0.65 * sstep(1.37, 1.44, y);
+  const at = (th, y, off) => { const R = torsoRing(y, S), [x, z] = ringXZ(th, R.w + off, R.d + off, R.db + off, R.n); return [x, y, z]; };
   P.push(...slab((u, v) => {
-    const th = thOf(u), f = (1 - v) * fmax;
-    const lip = 1 + 0.075 * gauss(v, 0.07);
-    return pt(th, f, R * lip * (1 + 0.05 * Math.cos(th)));
-  }, 18, 7, 0.014, { reg: REG.paul, uv: (u, v) => [u, 0.32 + v * 0.68], bones: ua, closed: true, inside: () => Cc, noInner: true }));
-  // the dome's underside: a cheap disc across its rim (no inner skin: you'd only ever see it from below)
-  P.push(surf((u, v) => pt(thOf(u), fmax, R * 1.075 * (1 - v)), 9, 1, { reg: REG.paul, uv: () => [0.5, 0.1], bones: ua, closed: true, inside: () => [Cc[0] + A[0] * 0.3, Cc[1] + A[1] * 0.3, Cc[2] + A[2] * 0.3] }));
-  P.push(...slab((u, v) => {
-    const th = thOut + (u - 0.5) * 3.2, f = fmax * (0.9 + 0.34 * (1 - v));
-    return pt(th, f, R * 1.1);
-  }, 12, 2, 0.012, { reg: REG.paul, uv: (u, v) => [u, v * 0.28], bones: ua, inside: () => Cc }));
+    const y = yAt(v), R = torsoRing(y, S), rad = Math.max(0.1, (R.w + R.d) / 2);
+    const th = thAt(v) + (u - 0.5) * wd / rad, off = 0.011 + 0.03 * sstep(1.36, 1.445, y);
+    return bind(at(th, y, off), wUA(y));
+  }, 1, 7, 0.006, {
+    reg: REG.belt, uv: (u, v) => [0.06 + 0.88 * u, 0.28 - 0.23 * v], noInner: true,   // (the pouch leather: tan, stitched down both edges)
+    inside: (u, v) => [0, yAt(v), 0],
+    bones: p => { const w = wUA(p[1]); return [...torsoWeights(p).map(([b, x]) => [b, x * (1 - w)]), [ua, w]]; },
+  }));
+  // the buckle: a squarish brass frame on the strap's lower end
+  const th = thAt(0.86), y = yAt(0.86), c = at(th, y, 0.017), cs = Math.cos(th), sn = Math.sin(th);
+  const ks = [0, 0.92, 1, 1, 0.92, 0], ys = [-0.5, -0.44, -0.2, 0.2, 0.44, 0.5];
+  P.push(lathe(ks.map((k, i) => ({ y: ys[i] * 0.04, w: 0.024 * k, d: 0.007 * k, db: 0.003 * k, n: 4, v: i / 5 })), {
+    seg: 10, reg: REG.metal, uv: (u, v) => [u, 0.55 + v * 0.42], bones: B.chest,
+    xf: p => [c[0] + p[0] * cs - p[2] * sn, c[1] + p[1], c[2] + p[0] * sn + p[2] * cs],
+  }));
   return P;
 }
 
 // ---- assembly ------------------------------------------------------------------------------
-const FLAP2_Y = 0.53;   // where the front flap folds over the knees (a thigh's length below the hip)
+const FLAP2_Y = KNEE_Y + 0.03;   // where the front flap folds over the knees (a thigh's length below the hip)
 
 const geoCache = new Map();
 function charGeometry(S, F) {
@@ -1311,7 +1385,9 @@ const POSE_KEYS = ['lL', 'lR', 'kL', 'kR', 'fL', 'fR', 'aL', 'aR', 'eL', 'eR', '
 // turned in toward them a little more at the wrist (wiL), never stiff tubes straight down. Standing
 // or walking, a player's hands also roll knuckles-forward (wtL, a twist about the hand's own long
 // axis: HAND_ROLL), so you see the broad backs of the big gloves, not their thin edges.
-function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = 0.34; P.eL = P.eR = 0.26; P.inL = P.inR = 0.2; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
+// REST.ab must match PAUL_AB (the pauldrons are modeled for that abduction).
+const REST = { ab: 0.3, a: 0.06, e: 0.45, in: 0.42 };
+function restPose() { const P = {}; for (const k of POSE_KEYS) P[k] = 0; P.abL = P.abR = REST.ab; P.aL = P.aR = REST.a; P.eL = P.eR = REST.e; P.inL = P.inR = REST.in; P.wristL = P.wristR = 0.2; P.wiL = P.wiR = 0.16; return P; }
 // The heroic WoW idle, layered on a pose by weight w (0 = none): feet apart and turned out, knees
 // a little soft, chest up, and a slow (~4.5 s) weight shift: the hips sway and roll over one leg
 // while the opposite shoulder dips.
@@ -1432,14 +1508,15 @@ function playerPose(st, m) {
       T['k' + side] = -g * ((0.3 + 0.8 * speed) * Math.max(0, cs) ** 1.3 + 0.08);
       T['f' + side] = g * (0.35 * Math.max(0, -sn) * Math.max(0, cs) - 0.12 * Math.max(0, sn));
       const o = side === 'L' ? 'R' : 'L';
-      T['a' + o] = A * sn * (sprint ? 1.3 : 0.85);
-      T['e' + o] = 0.26 + (sprint ? 1.1 : 0.45) * g + 0.3 * g * Math.max(0, sn);
+      T['a' + o] = REST.a * (1 - g) + A * sn * (sprint ? 1.3 : 0.85);
+      T['e' + o] = REST.e - (REST.e - 0.26) * g + (sprint ? 1.1 : 0.45) * g + 0.3 * g * Math.max(0, sn);
+      T['in' + o] = REST.in - (REST.in - 0.2) * g;
     }
     T.bob = g * (0.024 + 0.012 * speed) * Math.cos(2 * ph) - 0.014 * g;
     T.tw = 0.12 * g * Math.sin(ph); T.ctw = -0.16 * g * Math.sin(ph);
     T.roll += 0.035 * g * Math.sin(ph);
     T.bend = -(sprint ? 0.22 : 0.07) * g; T.lean = (sprint ? 0.09 : 0.03) * g;
-    T.abL += 0.06 * g; T.abR += 0.06 * g;
+    T.abL += 0.1 * g; T.abR += 0.1 * g;
     T.wtL = T.wtR = HAND_ROLL;
     // idle on top: the heroic stance, breathing, a slow weight shift
     heroicIdle(T, t, id, 1 - g);
