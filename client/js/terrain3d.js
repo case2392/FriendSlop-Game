@@ -203,14 +203,16 @@ function splatMaterial(biome, cfg) {
           if (ly > lm) dy *= lm / ly;
         }
         void tCap(inout vec2 dx, inout vec2 dy) { tCapK(dx, dy, TERRAIN_ANISO); }
-        // the rock's second sample (a long wall never repeats): elsewhere a 0.71 x 0.83 scale; in the
-        // Tanaris sandstone only along the wall, so its beds stay at the same heights (a bed seen
-        // through two samples at two heights would ghost into soft double lines)
+        // the crash mesas' own granite (the snow); elsewhere the walls' rock
         #ifdef TERRAIN_SNOWROCK
           #define CLIFF_M tCliffM
         #else
           #define CLIFF_M tCliff
         #endif
+        // the rock's second sample (a long wall never repeats) and its far sample (bigger masses): a
+        // 0.71 x 0.83 and a 0.4x scale; in the Tanaris sandstone both scale only along the wall, so its
+        // beds stay at the same heights (a bed seen through two samples at two heights would ghost into
+        // soft double lines)
         #ifdef TERRAIN_DUNES
           #define P2(p, ox, oy) vec2(p.x * 0.71 + ox, p.y)
           #define P2K vec2(0.71, 1.0)
@@ -1381,6 +1383,23 @@ class Clutter {
       const r = cellRng(Math.round(d.x * 10), Math.round(d.z * 10), W.seed + 5);
       const R = (wheat ? 2.2 : 1.3) * (d.s || 1) + 0.6;
       const n = Math.round((wheat ? 30 : 14) * (d.s || 1));
+      if (wheat && this.C.wheatCards) {
+        // (Westfall) a small sown patch: short rows along the road over the tilled ground, each a few
+        // stalks wide, the patch's edge ragged, never a random scatter of tufts
+        const tz = (W.roadX(d.z + 1) - W.roadX(d.z - 1)) / 2, tl = Math.hypot(tz, 1), ax = tz / tl, az = 1 / tl;   // along the road
+        const RA = R * 1.1, RC = R * 0.75, WC = this.C.wheatCards;
+        for (let c = -RC + 0.36; c < RC; c += 0.72) {
+          for (let a = -RA + r() * 0.5; a < RA; a += 0.62 + r() * 0.16) {
+            const e = (a / RA) * (a / RA) + (c / RC) * (c / RC);
+            if (e > 0.85 + (r() - 0.5) * 0.3) continue;
+            const x = d.x + ax * a + az * c + (r() - 0.5) * 0.12, z = d.z + az * a - ax * c + (r() - 0.5) * 0.12;
+            if (!this.okAt(x, z, 0.8)) continue;
+            const [card, hh] = WC[r() < 0.7 ? 0 : 1], edge = e > 0.55 ? 0.82 : 1;
+            out.push({ x, y: W.heightAt(x, z) - 0.04, z, ry: r() * 6.283, w: 0.95 + r() * 0.3, h: hh * (0.9 + r() * 0.2) * edge, card, fade: 170 });
+          }
+        }
+        continue;
+      }
       for (let k = 0; k < n; k++) {
         const a = r() * Math.PI * 2, rr = Math.sqrt(r()) * R;
         const x = d.x + Math.cos(a) * rr, z = d.z + Math.sin(a) * rr * (wheat ? 0.8 : 1);

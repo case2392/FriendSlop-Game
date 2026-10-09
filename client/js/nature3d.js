@@ -1980,8 +1980,8 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
     const chamK = Math.min(1, thz / 1.15);
     // the base tier: the collider's footprint, its corners cut hard; the tiers above: irregular
     // rounded polygons (weathered back, no box corners left)
-    const poly = t ? roundPoly(rnd, 8 + Math.floor(rnd() * 3), thz, { jit: 0.07, sx: thx / thz, proud: 0.4 }).map(([x, z]) => [cx + x * Math.cos(trot) - z * Math.sin(trot), cz + x * Math.sin(trot) + z * Math.cos(trot)])
-      : boxPoly(rnd, thx, thz, trot, { ox, oz, cham: [0.42, 0.72].map(v => v * chamK), wob: 0.08, two: 0.9 });
+    const poly = t ? roundPoly(rnd, 9 + Math.floor(rnd() * 3), thz, { jit: 0.11, sx: thx / thz, proud: 0.4 }).map(([x, z]) => [cx + x * Math.cos(trot) - z * Math.sin(trot), cz + x * Math.sin(trot) + z * Math.cos(trot)])
+      : boxPoly(rnd, thx, thz, trot, { ox, oz, cham: [0.36, 0.6].map(v => v * chamK), wob: 0.08, two: 0.9 });
     const plan = polyRadius(poly, cx, cz), angles = poly.map(([x, z]) => Math.atan2(z - cz, x - cx));
     const tilt = range(rnd, 0.03, 0.06), ta = rnd() * TAU;
     // the cap: one or two corners knocked out of the rim (flat-bottomed bites)
@@ -1996,7 +1996,8 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
     const joints = [];
     for (let k = 0, n = (t ? 1 : 2) + Math.floor(rnd() * 2); k < n; k++) {
       const full = rnd() < 0.5, ya = full ? yLo - 0.25 : range(rnd, yLo + 0.1, yLo + (yT - yLo) * 0.5), yb = full || rnd() < 0.6 ? yT + 0.25 : range(rnd, ya + 0.35, yT - 0.08);
-      joints.push({ a: rnd() * TAU, w: range(rnd, 0.22, 0.4) * sc, d: range(rnd, 0.12, 0.2) * sc, ya, yb, ph: rnd() * 6, off: range(rnd, -0.06, 0.06) * sc, lit: rnd() < 0.5 ? 1 : -1, taper: range(rnd, 0.5, 0.75) });
+      // (a shallow notch, so the faces stay smooth across it: the soft wedge of shadow is the vertex colour's)
+      joints.push({ a: rnd() * TAU, w: range(rnd, 0.24, 0.42) * sc, d: range(rnd, 0.06, 0.1) * sc, ya, yb, ph: rnd() * 6, off: range(rnd, -0.05, 0.05) * sc, lit: rnd() < 0.5 ? 1 : -1, taper: range(rnd, 0.5, 0.75) });
     }
     const notch = a => joints.reduce((m, J) => m + (J.yb > yT ? J.d * 0.8 * Math.max(0, 1 - angDiff(a, J.a) * plan(J.a) / (J.w * 1.5)) : 0), 0);
     const ft = t ? { d: range(rnd, 0.1, 0.15) * sc, h: range(rnd, 0.12, 0.18) } : null;
@@ -2005,7 +2006,7 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
       cx, cz, plan, angles, joints, topAt, rimY: (a, x, z) => topAt(x, z) - notch(a),
       ground: t ? (x, z) => below(x, z) - 0.02 : undefined, yB: t ? yLo - 0.22 : Math.min(-0.5, gLo - 0.45),
       beds: bedsIn(bm, by, lo + 0.2, yT - 0.2), NA: t ? 34 : (solid ? 44 : 32),
-      lip: 0.085 * sc, uc: 0.11 * sc, ucH: 0.16 * sc, batter: t ? 0.09 : 0.12, batY: 0.7, chamfer: 0.07 * sc, tierAmp: 0.06 * sc, noise: 0.03,
+      lip: 0.085 * sc, uc: 0.11 * sc, ucH: 0.16 * sc, batter: t ? 0.09 : 0.12, batY: 0.7, chamfer: 0.07 * sc, tierAmp: (t ? 0.09 : 0.06) * sc, noise: 0.035,
       foot: ft, rows: ft ? [yLo + ft.h * 0.35, yLo + ft.h * 0.75, yLo + ft.h * 1.2] : [],
       capOut: cap ? (a => Math.max(0, 0.05 + 0.06 * capF(a)) + 0.12 * Math.pow(Math.max(0, Math.cos(a - trot - (su < 0 ? Math.PI : 0))), 3)) : (a => 0.035 + 0.025 * capF(a + t)),
       capY0: cap ? Math.max(yLo + 0.1, yT - 0.32) : yT - 0.16,
@@ -2419,8 +2420,6 @@ function footSandstone(ctx, d, b, col, rnd, tint, steep, piece) {
     seatRock(ctx, b, sh, x, z, R, { yaw: rnd() * TAU, tilt: range(rnd, 0.15, 0.45), tiltA: rnd() * TAU, tint, sink: R * 0.3, cos: Math.cos(30 * Math.PI / 180) });
   }
 }
-// strataRock's columns re-centred on (cx, cz) (they are already polar about it): as dustBank wants them
-const groundOutlineCols = (ctx, cols, cx, cz) => cols.map(c => ({ a: c.a, R0: c.R0, x: c.x, z: c.z, gl: c.gl }));
 
 function rock(ctx, d) {
   const rnd = rngOf(seedOf(d.x, d.z, 16)), B = ctx.bio, bm = ctx.biome;
@@ -3463,7 +3462,8 @@ export const PREVIEW = {
   ledge_box: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }, ledgeW(1.6, 6)), ledge_box2: pv('rock', { s: 1.9, variant: 'ledge', x: -1, ry: 2.1 }, ledgeW(1.9, -1, 2.1)),
   ledge_box_s: pv('rock', { s: 1.25, variant: 'ledge', x: 13, ry: 1.2 }, ledgeW(1.25, 13, 1.2)), ledge_box_col: pv('rock', { s: 1.6, variant: 'ledge', x: 6 }, { ...ledgeW(1.6, 6), wires: true }),
   footwall: ({ biome = 'snow' } = {}) => footwall(biome, false), footwall_col: ({ biome = 'snow' } = {}) => footwall(biome, true),
-  // a stretch of Westfall rim: a tiny grid with the apron's groves either side
+  // a stretch of Westfall rim: a tiny grid with the apron's groves either side (they stand on the
+  // apron's rising height, so they float over the flat preview patch: for their shapes, not their seating)
   rimgrove: ({ biome = 'fields' } = {}) => {
     const W = { biome, decor: [], cyls: [], anchors: [], seed: 11, X0: -4, nx: 2, cell: 2.5, Z0: -60, nz: 48, heightAt: () => 0 };
     const n = buildNature(W); n.update(0.016, 1.3); return n.group;

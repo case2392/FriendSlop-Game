@@ -1898,7 +1898,7 @@ register('cliff_snow', {
       dome: 30, zs: 26, smooth: 0.26, exp: 5.5, bulge: 5, soft: 1, relief: 0.95, contrast: 2.4, planes: 0.7, shSlope: 0.4, castA: 0.55, tone: 0.13, hueMix: 0.4,
       crease: 0.6, creaseW: 4, creaseD: 6, creaseA: 0.7, creaseC: '#323a50',
       colors: ['#7a8292', '#848c9c', '#8e95a4', '#727a8a', '#8a90a2'], blot: ['#6e7686', '#9aa2b2', '#7c7a8c', '#88909e'],
-      light: '#e6e0d0', shadow: '#4e5874', cast: '#535e7c', deep: '#3a425a', glaze: '#e8ecf8',
+      light: '#e6e0d0', shadow: '#5a6482', cast: '#5c6786', deep: '#444e68', glaze: '#e8ecf8',
       powder: { up: 0.42, a: 0.18 }, powderC: '#eef2f8',
       stains: 22, stain: '#363e54', stainA: 0.13, lichen: ['#a8b0a0', '#c0c4b0', '#b8a88a'], chisel: 160, chiselA: 0.4, cracks: 24, upName: 'cliff_snow', formUX: true,
     }, cv);
@@ -2122,8 +2122,8 @@ register('cliff_desert', {
   family: 'terrain', size: 512, note: 'Tanaris: thick tan, rust and honey sandstone beds between lens-shaped cream hard beds (rounded lit tops, cast shadows, joints), sand on the ledges, varnish streaks (16 m tile)',
   paint(g, s, rnd, h, cv) {
     sandstone(g, s, rnd, cv, {
-      softT: [80, 150], hardT: [30, 64], wob: [3, 12], hardA: 16, softA: 9, detail: 0.6, relief: 0.9, contrast: 2.2, planes: 0.25, litMax: 0.55, shSlope: 0.2, castA: 0.62,
-      softC: ['#b7895e', '#aa7c52', '#d4ab7c', '#cc9f6e'], hardC: ['#e6cfa4', '#dec493', '#e9d4ab'],
+      softT: [80, 150], hardT: [30, 64], wob: [3, 12], hardA: 18, softA: 10, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
+      softC: ['#a8764c', '#9e6c45', '#cc9e6c', '#c4955f'], hardC: ['#e6cea0', '#ddc290', '#e9d3a8'],
       light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
       sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
       varnish: '#5a3c32', varnishA: 0.15, varnishN: 6, pit: '#946c4c', glaze: '#ffe6b8',
