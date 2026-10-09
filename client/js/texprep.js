@@ -9,13 +9,15 @@
 //                             opts.page: also paint, on this thread while the workers work, the ones
 //                             a worker can't paint exactly (see PAGE_ONLY); 'idle': only in long idle
 //                             stretches while opts.idleOk() (the menu); false for a background
-//                             prefetch, which never paints here. Resolves when all are ready or failed.
+//                             prefetch, which never paints here. opts.prio >= 1 (a prefetch) gets one
+//                             worker at a time. Resolves when all are ready or failed.
 //   dayList(biome)            the textures a day in this biome asks for, in build order: the shipped
 //                             list (texmanifest.js) plus what this browser saw such a build ask for
 //   record(on, biome)         learn what a build asks for
-//   flush()                   after the world is up: what was painted this session goes into the cache,
-//                             PNG-encoded and written by the workers one texture at a time (the page
-//                             only hands over a snapshot); anything a build needs goes first
+//   flush()                   after the world is up (and after a prefetch): what was painted this
+//                             session goes into the cache, PNG-encoded and written by two workers at
+//                             most (the page only hands over a snapshot); anything a build needs
+//                             goes first
 //   keepOnly(names)           let go of pictures readied for a different day
 //
 // None of it is needed for correctness. With no workers, no OffscreenCanvas, no IndexedDB, or any

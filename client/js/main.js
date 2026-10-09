@@ -54,7 +54,7 @@ let texPrepStarted = false;
 const startTexPrep = () => {
   if (texPrepStarted) return;
   texPrepStarted = true;
-  texPrep.init().then(() => { if (S.phase === 'menu' && !S.W) texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[0]), { prio: 2, page: 'idle', idleOk: menuIdle }); });
+  texPrep.init().then(() => { if (S.phase === 'menu' && !S.W) texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[0]), { prio: 2, page: 'idle', idleOk: menuIdle }).then(() => texPrep.flush()); });
 };
 const t0Boot = performance.now();
 const waitTitle = () => { if (texPrepStarted) return; if (titleDone() || S.phase !== 'menu' || performance.now() - t0Boot > 2000) startTexPrep(); else setTimeout(waitTitle, 250); };
@@ -351,9 +351,12 @@ async function prepareDay(W) {
   texPrep.keepOnly(names);
   let last = performance.now();
   const t0 = performance.now();
-  const p = texPrep.prepare(names, { page: true, onProgress: (d, n) => { last = performance.now(); loadingBar(true, 0.85 * d / Math.max(1, n)); } });
-  let stuck = false;
-  await Promise.race([p, new Promise(res => { const chk = () => (performance.now() - last > 20000 ? (stuck = true, res()) : setTimeout(chk, 500)); chk(); })]);
+  // none of this is needed to build: on any failure canvasFor paints what's missing, as before
+  const p = texPrep.prepare(names, { page: true, onProgress: (d, n) => { last = performance.now(); loadingBar(true, 0.85 * d / Math.max(1, n)); } })
+    .catch(e => { console.warn('textures:', e?.message || e); return null; });
+  let stuck = false, done = false;
+  p.then(() => { done = true; });
+  await Promise.race([p, new Promise(res => { const chk = () => (done ? res() : performance.now() - last > 20000 ? (stuck = true, res()) : setTimeout(chk, 500)); chk(); })]);
   const r = stuck ? null : await p;
   performance.measure?.(`textures day ${W.day}`, { start: t0, end: performance.now() });
   if (stuck) console.warn('textures: the paint workers stalled; painting the rest here');
@@ -434,6 +437,7 @@ function onPhase(ph) {
     texPrep.prepare(texPrep.dayList(W.biome), { prio: 1, page: false }).then(r => {
       performance.measure?.(`prefetch day ${day}`, { start: t0, end: performance.now() });
       S.prefetch = { day, ...r };
+      texPrep.flush();   // and into the cache with them, in the background, while the night lasts
     });
   }, { timeout: 3000 });
 }
