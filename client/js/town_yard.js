@@ -14,7 +14,7 @@ const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 
 // ---- door aprons -----------------------------------------------------------------------------------
 
-function apronMat(style) {
+export function apronMat(style) {
   const m = mat('arch_apron_' + style, { transparent: true });
   m.depthWrite = false; m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -2;
   return m;

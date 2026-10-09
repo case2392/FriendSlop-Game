@@ -603,6 +603,7 @@ export function generateLeg(seed, day) {
       if (fields.some(f => inField(f, x, z, 6)) || off > wallDist(side > 0 ? 1 : 0, z) - 6) continue;
       const y = heightAt(x, z);
       cyls.push({ x, y: y + 6, z, r: 2.7, hh: 6, mat: 'windmill' });
+      cyls.push({ x, y: y + 13.25, z, r: 2.6, hh: 1.25, mat: 'windmill' });   // the cap's base: climbers can't stand inside the roof
       decor.push({ k: 'windmill', x, y, z, s: 1, ry: Math.atan2(roadX(z) - x, 0) });   // ry: its sails face the road
       clearSpots.push({ x, z, r: 7 });
       break;

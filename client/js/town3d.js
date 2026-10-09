@@ -19,7 +19,7 @@ import { isRoadside } from './roadside3d.js';
 import { signCanvas, muteColor } from './paint/architecture.js';
 import { Batch, ClusterBatch, Kit, mat, matrix, rng, sstep } from './town_kit.js';
 import { buildBuilding, STYLES, winMat, glassMat, lantern, barrel, flames, ITEMS } from './town_build.js';
-import { buildAprons, yardProp, YARD_PARTS, cartwheel, hayBale } from './town_yard.js';
+import { buildAprons, yardProp, YARD_PARTS, cartwheel, hayBale, apronMat } from './town_yard.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const TAU = Math.PI * 2;
@@ -1057,7 +1057,7 @@ function towTruck(t, batch = null, glows = []) {
 // collider), so nothing solid is invisible and nothing visible is walked through; the cap starts at P.H.
 // The sails go into sailsBatch in a frame centred on the hub (x across, y up the sail, z out along the
 // shaft) for buildStructures to turn. Returns { hub (world), tilt }.
-const MILL = { R: 2.7, H: 12, hubY: 12.95, hubZ: 4.0, tilt: 0.14, sail: 9.0, sailW: 2.0 };
+const MILL = { R: 2.7, H: 12, hubY: 13.0, hubZ: 4.3, tilt: 0.14, sail: 9.0, sailW: 2.1 };
 function windmill(batch, x, y, z, ry, sailsBatch, o = {}) {
   const P = { ...MILL, ...o }, H = P.H;
   // grime and a cool cast at the foot, the smock's top in the eave's shade
@@ -1093,29 +1093,34 @@ function windmill(batch, x, y, z, ry, sailsBatch, o = {}) {
   for (const yb of [7.35, H - 0.62]) ring(wd, yb - 0.13, yb + 0.13, smockIn(yb) + 0.06, smockIn(yb) + 0.06, 8, [8, 0.12], { around: true });
   // the curb the cap turns on, the eave's fascia and soffit, the kicked witch-hat cap, a finial
   ring(wd, H - 0.32, H + 0.04, 2.86, 2.86, 16, [12, 0.3], { around: true });
-  K.add(wd, new THREE.CylinderGeometry(3.88, 3.9, 0.2, 16, 1, true), { uv: 'keep', uvScale: [12, 0.2], at: matrix(0, H - 0.14, 0) });
-  K.add(wd, new THREE.RingGeometry(2.8, 3.9, 16, 1), { uv: 'keep', uvScale: [3, 3], at: matrix(0, H - 0.22, 0, 0, Math.PI / 2) });
-  const prof = [[3.9, H - 0.06], [3.55, H + 0.14], [3.18, H + 0.42], [2.75, H + 0.95], [2.25, H + 1.65], [1.7, H + 2.45], [1.15, H + 3.25], [0.62, H + 4.0], [0.24, H + 4.6], [0.02, H + 4.9]];
-  K.add(sh, new THREE.LatheGeometry(prof.map(([r, yy]) => new THREE.Vector2(r, yy)), 16), { uv: 'keep', uvScale: [10, 2.6], tint: '#e0cdb0' });
-  K.add(wd, new THREE.SphereGeometry(0.2, 8, 6), { uv: 'keep', at: matrix(0, H + 4.95, 0) });
-  K.add(wd, new THREE.ConeGeometry(0.07, 0.75, 6), { uv: 'keep', at: matrix(0, H + 5.45, 0) });
+  K.add(wd, new THREE.CylinderGeometry(4.08, 4.1, 0.22, 16, 1, true), { uv: 'keep', uvScale: [12, 0.2], at: matrix(0, H - 0.15, 0) });
+  K.add(wd, new THREE.RingGeometry(2.8, 4.1, 16, 1), { uv: 'keep', uvScale: [3, 3], at: matrix(0, H - 0.24, 0, 0, Math.PI / 2) });
+  const prof = [[4.1, H - 0.06], [3.72, H + 0.16], [3.32, H + 0.46], [2.88, H + 1.02], [2.36, H + 1.78], [1.8, H + 2.62], [1.22, H + 3.48], [0.66, H + 4.3], [0.25, H + 4.92], [0.02, H + 5.22]];
+  K.add(sh, new THREE.LatheGeometry(prof.map(([r, yy]) => new THREE.Vector2(r, yy)), 16), { uv: 'keep', uvScale: [11, 2.8], tint: '#e8d0b0' });
+  K.add(wd, new THREE.SphereGeometry(0.22, 8, 6), { uv: 'keep', at: matrix(0, H + 5.27, 0) });
+  K.add(wd, new THREE.ConeGeometry(0.07, 0.8, 6), { uv: 'keep', at: matrix(0, H + 5.8, 0) });
   // the hood over the windshaft, its little shake roof, and the shaft itself (tilted up out of the cap)
   const t = P.tilt, dir = V3(0, Math.sin(t), Math.cos(t)), hub = V3(0, P.hubY, P.hubZ);
   K.push(0, P.hubY - 0.08, 0);
-  K.prism(red, [[-0.72, -0.62], [0.72, -0.62], [0.72, 0.18], [0, 0.74], [-0.72, 0.18]], 2.1, 1.5, { tile: 2.4 });
-  for (const s of [-1, 1]) K.box(sh, 0.98, 0.08, 1.7, s * 0.37, 0.5, 2.1 + 0.8, { rz: -s * 0.64, grain: 'x', tile: 2.2 });
-  K.box(wd, 1.6, 0.14, 0.14, 0, -0.62, 3.62, { grain: 'x' });
+  K.prism(red, [[-0.72, -0.62], [0.72, -0.62], [0.72, 0.18], [0, 0.74], [-0.72, 0.18]], 2.2, 1.7, { tile: 2.4 });
+  for (const s of [-1, 1]) K.box(sh, 0.98, 0.08, 1.9, s * 0.37, 0.5, 2.2 + 0.9, { rz: -s * 0.64, grain: 'x', tile: 2.2 });
+  K.box(wd, 1.6, 0.14, 0.14, 0, -0.62, 3.92, { grain: 'x' });
   K.pop();
   K.cyl(wd, hub.clone().addScaledVector(dir, -2.4).toArray(), hub.clone().addScaledVector(dir, -0.3).toArray(), 0.3, 0.28, { sides: 8 });
   // the fantail: a little spoked rotor on a frame behind the cap that keeps the sails in the wind
-  const fy = H + 1.35, fz = -5.1;
+  const fy = H + 1.4, fz = -5.45;
   for (const s of [-1, 1]) K.beam(wd, [s * 0.95, H + 0.15, -3.3], [s * 0.2, fy - 0.1, fz + 0.1], 0.14, 0.14);
-  K.beam(wd, [0, H + 2.3, -2.2], [0, fy + 0.15, fz + 0.05], 0.14, 0.14);
+  K.beam(wd, [0, H + 2.4, -1.9], [0, fy + 0.15, fz + 0.05], 0.14, 0.14);
   K.cyl(wd, [-0.35, fy, fz], [0.35, fy, fz], 0.12, 0.12, { sides: 6 });
   for (let k = 0; k < 6; k++) { K.push(0, fy, fz, 0, k * Math.PI / 3); K.box(wd, 0.05, 0.95, 0.36, 0, 0.58, 0, { seg: [1, 1, 1], ry: 0.5 }); K.pop(); }
   // the door, framed in dark timber, at the ground in front; windows dotted up the smock (lit at night)
-  const dy0 = gy(0, baseIn(0)) - 0.05, dIn = baseIn(dy0 + 1.05);
-  K.box(mat('door_plank'), 1.1, 2.1, 0.1, 0, dy0 + 1.05, dIn + 0.02, { uv: 'keep', rx: -0.035 });
+  // (boards and straps in the mill's own timber and iron, so the door costs no draw call of its own)
+  const dy0 = gy(0, baseIn(0)) - 0.05, dIn = baseIn(dy0 + 1.05), ir = mat('iron_wrought');
+  K.push(0, dy0 + 1.05, dIn + 0.02, 0, -0.035);
+  for (let k = 0; k < 4; k++) K.box(wd, 0.265, 2.1 - (k % 2) * 0.03, 0.09, -0.41 + k * 0.275, -(k % 2) * 0.015, 0, { tint: ['#d8b898', '#c8a888', '#e0c0a0', '#c0a080'][k], tile: 1.6 });
+  for (const sy of [-0.62, 0.66]) K.box(ir, 1.0, 0.09, 0.03, -0.04, sy, 0.06, { tile: 0.6, seg: [1, 1, 1] });
+  K.add(ir, new THREE.TorusGeometry(0.07, 0.016, 4, 10), { uv: 'keep', at: matrix(0.36, -0.05, 0.07) });
+  K.pop();
   for (const s of [-1, 1]) K.box(wd, 0.2, 2.4, 0.2, s * 0.66, dy0 + 1.2, dIn + 0.04, { rx: -0.035 });
   K.box(wd, 1.75, 0.28, 0.28, 0, dy0 + 2.42, baseIn(dy0 + 2.4) + 0.06, { grain: 'x' });
   for (const [k, wy] of [[0, 5.25], [2, 6.7], [6, 8.1], [3, 9.7], [5, 4.9], [0, 9.2]]) {
@@ -1126,8 +1131,33 @@ function windmill(batch, x, y, z, ry, sailsBatch, o = {}) {
     K.box(wd, 0.96, 0.09, 0.2, 0, -0.53, r + 0.09, { grain: 'x', seg: [1, 1, 1] });
     K.pop();
   }
+  // a lantern on an iron bracket beside the door (glass and iron the roadside signs already use)
+  {
+    const a = Math.PI / 6, r = baseIn(dy0 + 2.6);
+    K.push(0, 0, 0, a);
+    K.box(ir, 0.06, 0.06, 0.62, 0, dy0 + 2.62, r + 0.29, { tile: 0.5, seg: [1, 1, 1] });
+    K.beam(ir, [0, dy0 + 2.2, r + 0.02], [0, dy0 + 2.6, r + 0.4], 0.04, 0.04, { tile: 0.5 });
+    lantern({ glows: o.glows }, [0, dy0 + 2.3, r + 0.52], 0.48, true, K);
+    K.pop();
+  }
+  // a trodden apron of flags and stepping stones out from the door, laid on the ground
+  if (o.ground) {
+    const L = 4.6, z0 = baseIn(0) - 0.12, g = new THREE.PlaneGeometry(3.0, L, 6, 10), p = g.attributes.position, uv = g.attributes.uv;
+    for (let i = 0; i < p.count; i++) { const lx = p.getX(i), lz = z0 + (L / 2 - p.getY(i)); p.setXYZ(i, lx, gy(lx, lz) + 0.03, lz); uv.setY(i, 1 - (1 - uv.getY(i)) * (L / 5)); }
+    g.computeVertexNormals();
+    K.add(apronMat('farm'), g, { uv: 'keep', cast: false, shade: () => 0.9 });
+  }
   // a cart wheel leant against the stones beside the door
-  { const a = -0.62, r = baseIn(0.6); K.push(Math.sin(a) * r, gy(Math.sin(a) * r, Math.cos(a) * r), Math.cos(a) * r, a, -0.16); cartwheel(K, 0, 0.6, 0.16, 0.58, 0.08); K.pop(); }
+  {
+    const a = -0.62, r = baseIn(0.6), wr = 0.58;
+    K.push(Math.sin(a) * r, gy(Math.sin(a) * r, Math.cos(a) * r) + 0.6, Math.cos(a) * r + 0, a, -0.16);
+    K.push(0, 0, 0.16, 0, 0, 0.3);
+    K.add(wd, new THREE.TorusGeometry(wr, 0.075, 6, 18), { uv: 'keep', uvScale: [6, 1], tint: '#d0a888' });
+    K.add(ir, new THREE.TorusGeometry(wr + 0.05, 0.03, 4, 18), { uv: 'keep', uvScale: [6, 1] });
+    for (let k = 0; k < 5; k++) { const b = k / 5 * Math.PI; K.beam(wd, [Math.cos(b) * wr, Math.sin(b) * wr, 0], [-Math.cos(b) * wr, -Math.sin(b) * wr, 0], 0.055, 0.055, { tint: '#d0a888' }); }
+    K.add(wd, new THREE.CylinderGeometry(0.14, 0.14, 0.24, 10), { uv: 'keep', at: matrix(0, 0, 0, 0, Math.PI / 2) });
+    K.pop(); K.pop();
+  }
 
   // the sails
   if (sailsBatch) windmillSails(new Kit(sailsBatch, new THREE.Matrix4(), (sx, sy) => 0.8 + 0.2 * sstep(0.2, 3, Math.hypot(sx, sy))), P);
@@ -1145,12 +1175,16 @@ function windmillSails(S, P) {
     S.push(0, 0, 0, 0, 0, k * Math.PI / 2);
     S.beam(wd, [0, 0.3, 0.02], [0, L + 0.3, 0.02], 0.28, 0.22, { tile: 2.4 });
     // canvas bowed behind the lattice (the furled one shows its lattice and a roll of cloth)
-    S.add(sail, new THREE.PlaneGeometry(w, cl, 3, 8), { uv: 'keep', uvScale: [1, cl / (d1 - d0)], at: matrix(0.16 + w / 2, d0 + cl / 2, -0.07), warp: v => { v.z -= 0.14 * Math.cos(Math.PI * v.x / w) * Math.sin(Math.PI * (v.y / cl + 0.5)); } });
-    const nb = Math.max(4, Math.round((d1 - d0) / 0.78));
-    for (let j = 0; j <= nb; j++) S.box(wd, w + 0.2, 0.09, 0.09, 0.16 + w / 2, d0 + (d1 - d0) * j / nb, 0.1, { grain: 'x', seg: [1, 1, 1] });
-    S.box(wd, 0.11, d1 - d0 + 0.12, 0.11, 0.18 + w, (d0 + d1) / 2, 0.1, { seg: [1, 2, 1] });
+    S.add(sail, new THREE.PlaneGeometry(w, cl, 3, 8), { uv: 'keep', uvScale: [1, cl / (d1 - d0)], at: matrix(0.16 + w / 2, d0 + cl / 2, -0.07), tint: '#f4dcb2', warp: v => { v.z -= 0.14 * Math.cos(Math.PI * v.x / w) * Math.sin(Math.PI * (v.y / cl + 0.5)); } });
+    const nb = Math.max(4, Math.round((d1 - d0) / 0.85));
+    for (let j = 0; j <= nb; j++) S.box(wd, w + 0.2, 0.11, 0.1, 0.16 + w / 2, d0 + (d1 - d0) * j / nb, 0.1, { grain: 'x', seg: [1, 1, 1] });
+    S.box(wd, 0.13, d1 - d0 + 0.14, 0.12, 0.18 + w, (d0 + d1) / 2, 0.1, { seg: [1, 2, 1] });
     S.box(wd, 0.36, d1 - d0 - 0.7, 0.06, -0.32, (d0 + d1) / 2 + 0.35, 0.0, { seg: [1, 2, 1] });
-    if (furl) S.cyl(sail, [0.4, d0 + cl + 0.05, 0.02], [0.32, d1 - 0.2, 0.02], 0.16, 0.08, { sides: 6, uvScale: [0.5, 3], uvOff: [0.25, 0] });
+    if (furl) {
+      const a = [0.42, d0 + cl + 0.05, 0.04], b = [0.3, d1 - 0.25, 0.04];
+      S.cyl(sail, a, b, 0.2, 0.09, { sides: 7, uvScale: [0.5, 3], uvOff: [0.25, 0], tint: '#dcc49c', warp: v => { v.x *= 1 + 0.12 * Math.sin(v.y * 4.1); } });
+      for (const f of [0.15, 0.45, 0.75]) S.box(wd, 0.46 - f * 0.2, 0.07, 0.36 - f * 0.18, a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f, 0.04, { seg: [1, 1, 1] });
+    }
     S.pop();
   }
 }
@@ -1261,9 +1295,9 @@ export function buildStructures(W) {
       while (P.sail > 6 && !clear(P.sail)) P.sail -= 0.25;
     }
     const c = Math.cos(ry), s = Math.sin(ry);
-    const m = windmill(batch, x, y, z, ry, sb, { ...P, ground: o.fit ? (lx, lz) => W.heightAt(x + lx * c + lz * s, z - lx * s + lz * c) - y : undefined });
+    const m = windmill(batch, x, y, z, ry, sb, { ...P, glows, ground: o.fit ? (lx, lz) => W.heightAt(x + lx * c + lz * s, z - lx * s + lz * c) - y : undefined });
     const g = new THREE.Group();
-    sb.build(g);
+    for (const mesh of sb.build(g)) mesh.castShadow = mesh.material.userData.paint === 'sail_canvas';   // the cloth's shadow carries the shape
     g.position.copy(m.hub);
     g.rotation.order = 'YXZ';
     g.rotation.set(-m.tilt, ry, 0);
@@ -1271,7 +1305,10 @@ export function buildStructures(W) {
     mills.push({ g, phase: mills.length * 0.9 + 0.3, c: V3(x, y + 9, z), town: parent === local });
   };
   for (const d of W.decor) if (d.k === 'windmill') {
-    const zb = d.z - 22, ry = W.roadX ? Math.atan2(W.roadX(zb) - d.x, zb - d.z) : d.ry;
+    // d.ry faces the road square on; turn it up to 40 degrees toward the road 22 m back, so the drivers
+    // coming up the valley see the sails' faces, not their edges
+    const zb = d.z - 22, aim = W.roadX ? Math.atan2(W.roadX(zb) - d.x, zb - d.z) : d.ry;
+    const dv = Math.atan2(Math.sin(aim - d.ry), Math.cos(aim - d.ry)), ry = d.ry + Math.max(-0.7, Math.min(0.7, dv));
     addMill(d.x, d.y, d.z, ry, { fit: true }, group);
   }
   if (style === 'farm' && W.Z1 !== undefined) {

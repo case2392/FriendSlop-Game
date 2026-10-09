@@ -664,12 +664,13 @@ const BUILDERS = {
     // muzzle with its nostrils up on top, friendly round eyes on the sides of the head under heavy
     // brow ridges, and a deep, stubby, round-chinned lower jaw hanging a crack open in a smile (a few
     // small blunt teeth at the front, a pink tongue). The head and neck share one painted hide
-    // (loot_dinohead: the statue's plates and colours) wrapped round them; the lower jaw and the
-    // inside of the mouth have their own cells.
+    // (loot_dinohead: the statue's paint, plates and colours) wrapped round them; the lower jaw and the
+    // inside of the mouth have their own cells, and the statue's terracotta plates run on up the neck.
     const B = new Build(), D = DINO, pw = D.pw, rnd = rngFrom('dino-head');
     const vOf = z => Math.min(1, Math.max(0, (z - D.z0) / (D.z1 - D.z0)));
-    // the small bumps (brows, lids, nostrils, spine knobs) take a plain strip of hide, lit by their normal
-    const PLAIN = sub(R.dinomouth, 2 / 3, 0, 1, 1);
+    // the small bumps (brows, lids, cheeks, nostrils) take a plain strip of hide, the spine plates a strip
+    // of the statue's terracotta plate paint, each lit by its normal
+    const PLAIN = sub(R.dinomouth, 2 / 4, 0, 3 / 4, 1), PLATE = sub(R.dinomouth, 3 / 4, 0, 1, 1);
     const hide = { uv: 'fn', fn: (x, y, z, nx, ny) => [0.5 + 0.4 * nx, Math.min(0.98, Math.max(0.02, 0.5 + 0.48 * ny))], crease: 80 };
     const head = D.head;
     B.add(loftU(head, { segs: 32, pw, v: [vOf(head[0].z), vOf(head[head.length - 1].z)] }), R.dinohead, { crease: 80 });
@@ -682,7 +683,7 @@ const BUILDERS = {
     if (open > 0.05) {
       const jawAt = z => { const zl = hz + (z - hz) / Math.cos(open), s = secAt(jaw, zl); return { y: hy + (s.top - hy) * Math.cos(open) - (zl - hz) * Math.sin(open), w: s.w }; };
       const cav = [-0.08, 0.02, 0.14, 0.26, 0.37, 0.46, 0.54].map(z => { const u = secAt(head, z), j = jawAt(z); return { z, w: Math.min(u.w, j.w) - 0.06, top: u.bot + 0.04, bot: j.y - 0.035 }; });
-      B.add(loftU(cav, { segs: 20, pw: 4, inside: true, caps: [true, false] }), sub(R.dinomouth, 0, 0, 1 / 3, 1), { crease: 80 });
+      B.add(loftU(cav, { segs: 20, pw: 4, inside: true, caps: [true, false] }), sub(R.dinomouth, 0, 0, 1 / 4, 1), { crease: 80 });
     }
     // three small blunt teeth each side at the front of the upper jaw, resting over the lower lip
     for (const sd of [-1, 1]) {
@@ -711,21 +712,21 @@ const BUILDERS = {
       B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(p[0], p[1] - 0.012, p[2], -0.5, 0, sd * -0.3, [0.045, 0.026, 0.05]) });
       B.add(sphere(1, 10, 6), R.rubber, { at: mat4(p[0] + sd * 0.004, p[1] + 0.008, p[2] + 0.014, -0.9, 0, sd * -0.3, [0.02, 0.007, 0.022]), tint: [1.1, 0.7, 0.65] });
     }
-    // round knobs down the back of the skull, as on the statue's spine
-    for (const [z, sc] of [[-0.2, 0.75], [-0.32, 0.9]]) {
-      const t = secPoint(secAt(head, z), 0.5, pw);
-      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(0, t[1] - 0.02, z, 0.4, 0, 0, [0.06 * sc, 0.055 * sc, 0.08 * sc]), tint: 0.82 });
-    }
+    // the statue's terracotta spine plates (roadside3d's plate: a flattened rounded cone standing square to
+    // the back, painted in its plate colour) run on up the neck stub and end in a small one behind the
+    // dome, shrinking toward the skull as the statue's shrink up its neck
+    const PLATE_PROF = [[1, -0.25], [1, 0], [0.93, 0.28], [0.74, 0.56], [0.46, 0.8], [0.16, 0.96], [0, 1]];
+    const spinePlate = (M, h) => B.add(lathe(PLATE_PROF, 10), PLATE, { ...hide, crease: 70, at: M.clone().multiply(mat4(0, 0, 0, 0, 0, 0, [0.022 + h * 0.3, h, h * 0.8])) });
+    { const z = -0.13, t = secPoint(secAt(head, z), 0.5, pw); spinePlate(mat4(0, t[1] - 0.012, z, -0.54, 0, 0), 0.05); }
     // the neck: a thick stub dropping steeply down and back out of the skull (it held the head up),
     // flaring a little to the break, which faces the ground
     const neck = D.neck, NL = neck[neck.length - 1].z, nS = new V3(...D.neckAt), nM = mat4(nS.x, nS.y, nS.z, D.neckTilt, Math.PI, 0);
     const nEnd = new V3(0, 0, NL).applyMatrix4(nM);
     const jag = v => { if (v.z > NL - 0.001) { const a = Math.atan2(v.y, v.x); v.z += 0.04 * Math.sin(a * 5 + 1.3) + 0.022 * Math.sin(a * 11 + 0.4) + 0.012 * Math.sin(a * 23) - 0.012; } };
-    B.add(loftU(neck, { segs: 30, pw: 2.2, v: [vOf(nS.z), vOf(nEnd.z)], caps: [false, false] }), R.dinohead, { at: nM, flipU: true, crease: 80, warp: jag });
-    for (const [lz, sc] of [[0.12, 0.95], [0.27, 0.85]]) {
-      const q = new V3(0, secAt(neck, lz).top - 0.015, lz).applyMatrix4(nM);
-      B.add(sphere(1, 12, 8), PLAIN, { ...hide, at: mat4(q.x, q.y, q.z, D.neckTilt - 0.3, 0, 0, [0.065 * sc, 0.06 * sc, 0.09 * sc]), tint: 0.82 });
-    }
+    // (its open root starts tucked inside the skull, so no edge of it shows where it leaves the head)
+    const root = { z: -0.1, w: 0.27, top: 0.2, bot: -0.26 }, nR = new V3(0, 0, root.z).applyMatrix4(nM);
+    B.add(loftU([root, ...neck], { segs: 30, pw: 2.2, v: [vOf(nR.z), vOf(nEnd.z)], caps: [false, false] }), R.dinohead, { at: nM, flipU: true, crease: 80, warp: jag });
+    for (const [lz, h] of [[0.08, 0.06], [0.24, 0.07], [0.4, 0.08]]) spinePlate(nM.clone().multiply(mat4(0, secAt(neck, lz).top - 0.012, lz)), h);
     // the break: a jagged oval of plaster round the hollow, three rusty rebar stubs
     const brk = [], ns = neck[neck.length - 1];
     for (let k = 0; k < 28; k++) { const t = k / 28 * TAU, j = range(rnd, 0.93, 1.03); brk.push([Math.cos(t) * ns.w * j, Math.sin(t) * ns.top * j]); }

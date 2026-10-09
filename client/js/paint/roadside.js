@@ -921,6 +921,289 @@ register('rs_pennant', {
     g.fillStyle = '#4a3a2c'; g.fillRect(0, 0, 5, h);
   },
 });
+// The flying machine's airframe atlas (512 x 512, fitted; roadside3d.js maps the same rects, canvas px, y down):
+//   hull   [0, 0, 512, 248]    the fuselage skin: x along the hull (0 tail .. 512 nose), y around it from the top
+//                              centre (0) down the side to the belly (248); both sides take the same image
+//   cowl   [0, 256, 512, 376]  the brass nose bowl: x around it (tiles), y from its back edge (256) to the front lip
+//   barrel [0, 384, 256, 512]  a finned cylinder barrel: x around (tiles), y from the crankcase (384) out to the head
+//   face   [256, 384, 384, 512] the crankcase's front (a fitted disc)
+//   trim   [384, 384, 512, 512] chipped red paint over metal (fitted: wing edge caps, the fin, debris)
+// The hull is red-doped canvas over ribs for its back three quarters (rib tapes with stitching, the cloth sagging
+// between them and between the deck stringers, a cream cheat line edged in chipped red, a faded roundel, a repair
+// patch, a tear showing a rib through it) and riveted painted panels for the front quarter (seams with lit lips,
+// rivet strips, louvres, an access hatch, a brass filler cap); oil and exhaust soot streak back from the cowl, the
+// belly grimy, the deck sun-bleached. Light from the upper left everywhere.
+const PLANE_R = { hull: [0, 0, 512, 248], cowl: [0, 256, 512, 376], barrel: [0, 384, 256, 512], face: [256, 384, 384, 512], trim: [384, 384, 512, 512] };
+const PLANE_JOINT = 0.78;   // fabric → metal, as a fraction of the hull's length (roadside3d.js puts its brass band there)
+// paint inside one region: clipped (with a 4 px gutter that the region's own paint spills into), origin at its corner
+function inRegion(g, R, fn) {
+  const [x0, y0, x1, y1] = R, G = 4;
+  g.save(); g.beginPath(); g.rect(x0 - G, y0 - G, x1 - x0 + 2 * G, y1 - y0 + 2 * G); g.clip(); g.translate(x0, y0);
+  fn(x1 - x0, y1 - y0);
+  g.restore();
+}
+// soft blotches over a w x h area (wrapX: tiles across x)
+function blots(g, w, h, rnd, { colors, count, rmin, rmax, alpha, hard = 0.15, stretch = 1, rot = null, wrapX: wx = false }) {
+  for (let i = 0; i < count; i++) {
+    const x = rnd() * w, y = rnd() * h, r = range(rnd, rmin, rmax), c = pick(rnd, colors), a = rot == null ? rnd() * Math.PI : rot, s = stretch * range(rnd, 0.7, 1.3), al = alpha * range(rnd, 0.6, 1);
+    for (const dx of wx ? [0, -w, w] : [0]) if (x + dx > -r * s - 4 && x + dx < w + r * s + 4) blob(g, x + dx, y, r * s, r, a, c, al, hard);
+  }
+}
+const NOWRAP = 1e6;   // pass as the tile size to the wrapping helpers (chip, dent, rustRun) so they draw once
+// paint a layer on its own canvas (with a margin), blur it soft and lay it over: oil, soot and grime as painted smears
+function softLayer(g, w, h, px, fn, alpha = 1) {
+  const P = Math.ceil(px * 3) + 4, cv = makeCanvas(w + 2 * P, h + 2 * P), g2 = cv.getContext('2d', { willReadFrequently: true });
+  g2.translate(P, P); fn(g2); blurTile(cv, px);
+  g.save(); g.globalAlpha *= alpha; g.drawImage(cv, -P, -P); g.restore();
+}
+
+function planeHull(g, w, h, rnd) {
+  const J = Math.round(w * PLANE_JOINT), RED = '#973b2c', REDL = '#b55c45', REDD = '#702c26', CREAM = '#e2d2aa', PRIMER = '#c9b48e';
+  g.fillStyle = RED; g.fillRect(-4, -4, w + 8, h + 8);
+  g.fillStyle = rgba(REDD, 0.22); g.fillRect(J, -4, w - J + 4, h + 8);
+  blots(g, w, h, rnd, { colors: [REDL, REDD, '#a8483a'], count: 9, rmin: 40, rmax: 80, alpha: 0.4, hard: 0.05, stretch: 1.8, rot: 0 });
+  blots(g, w, h, rnd, { colors: [REDL, REDD, lightOf(RED, 0.2)], count: 40, rmin: 10, rmax: 30, alpha: 0.18 });
+  // painted light: the deck sun-bleached and lit, the side mid, the belly in shade and grime
+  g.fillStyle = grad(g, 0, 0, 0, h, [[0, '#ffe2b0', 0.3], [0.12, '#ffe2b0', 0.16], [0.32, '#ffe2b0', 0.02], [0.6, '#3a2430', 0], [0.82, '#3a2430', 0.22], [1, '#2e2028', 0.45]]);
+  g.fillRect(-4, -4, w + 8, h + 8);
+  // the deck stringers: the cloth sags between them (lit on the upper half of each sag), a lit ridge on each
+  for (const y of [0.075, 0.16, 0.245].map(f => f * h)) {
+    g.fillStyle = grad(g, 0, y - 18, 0, y + 6, [[0, '#ffe8c0', 0], [0.7, '#ffe8c0', 0.1], [0.85, '#fff0d0', 0.28], [1, '#4a2a2a', 0]]); g.fillRect(-4, y - 18, J + 4, 24);
+    g.fillStyle = grad(g, 0, y, 0, y + 9, [[0, '#3a2228', 0.3], [1, '#3a2228', 0]]); g.fillRect(-4, y, J + 4, 9);
+  }
+  // rib stations every ~0.42 m along the fabric: the cloth sagging in each bay, then the rib tape with its stitching
+  const ribs = [];
+  for (let x = 16; x < J - 12; x += 35) ribs.push(x + range(rnd, -2, 2));
+  for (let i = 0; i < ribs.length; i++) {
+    const a = ribs[i], b = i + 1 < ribs.length ? ribs[i + 1] : J;
+    g.fillStyle = grad(g, a, 0, b, 0, [[0, '#2e1c24', 0.32], [0.14, '#2e1c24', 0.08], [0.45, '#ffe6bc', 0.2], [0.78, '#ffe6bc', 0.06], [0.95, '#2e1c24', 0.12], [1, '#2e1c24', 0.2]]);
+    g.fillRect(a, -4, b - a, h + 8);
+  }
+  if (ribs[0] > 4) { g.fillStyle = grad(g, 0, 0, ribs[0], 0, [[0, '#ffe6bc', 0.1], [1, '#2e1c24', 0.2]]); g.fillRect(-4, -4, ribs[0] + 4, h + 8); }
+  for (const x of ribs) {
+    g.fillStyle = rgba(REDL, 0.5); g.fillRect(x - 3, -4, 6, h + 8);
+    g.fillStyle = rgba('#fff0d0', 0.3); g.fillRect(x - 3, -4, 1.5, h + 8);
+    g.fillStyle = grad(g, x + 3, 0, x + 8, 0, [[0, '#2a1820', 0.35], [1, '#2a1820', 0]]); g.fillRect(x + 3, -4, 5, h + 8);
+    for (let y = 3; y < h; y += 7) line(g, [[x - 1.6, y], [x + 1.6, y + 1.6]], 0.8, '#5a2a22', 0.3);
+  }
+  // the cheat line: a cream stripe the length of the hull, sweeping up toward the nose, pinstriped in deep red
+  const cy = x => h * (0.4 - 0.05 * (x / w) ** 2);
+  const band = (off, wd, col, al) => { const P = []; for (let x = -4; x <= w + 4; x += 8) P.push([x, cy(x) + off]); g.save(); g.globalAlpha = al; g.strokeStyle = col; g.lineWidth = wd; g.beginPath(); P.forEach(([x, y], k) => (k ? g.lineTo(x, y) : g.moveTo(x, y))); g.stroke(); g.restore(); };
+  band(0, 15, CREAM, 0.92); band(-1, 4, '#fff4d8', 0.3); band(-10, 3, REDD, 0.9); band(10, 3, REDD, 0.9); band(12.5, 2, '#2a1820', 0.25);
+  for (let i = 0; i < 26; i++) { const x = rnd() * w, side = rnd() < 0.5 ? -1 : 1; chip(g, NOWRAP, x, cy(x) + side * range(rnd, 5, 10), range(rnd, 1.6, 3.6), x > J ? '#8c8478' : PRIMER, rnd); }
+  // the faded roundel (sun-worn, paint lifting off it)
+  {
+    const rx = 0.33 * w, ry0 = 0.64 * h, R = 40, SY = 1.12;
+    g.save(); g.translate(rx, ry0); g.scale(1, SY);
+    for (const [r, col] of [[R, '#4a3a34'], [R - 3, CREAM], [R * 0.74, '#a03c2c'], [R * 0.5, CREAM]]) { g.fillStyle = rgba(col, 0.82); g.beginPath(); g.arc(0, 0, r, 0, TAU); g.fill(); }
+    for (let i = 0; i < 8; i++) { const a = i / 8 * TAU; ellipse(g, Math.cos(a) * R * 0.4, Math.sin(a) * R * 0.4, 4.6, 4, a, '#7a5a24', 0.85); }
+    g.fillStyle = grad(g, -14, -14, 14, 14, [[0, '#e8cc80'], [1, '#6a4e22']]); g.globalAlpha = 0.85; g.beginPath(); g.arc(0, 0, R * 0.36, 0, TAU); g.fill();
+    g.globalAlpha = 1; ellipse(g, 0, 0, 4.5, 4.5, 0, '#3a2a30', 0.85);
+    g.restore();
+    // sun fade over it and the paint lifting in flakes
+    blob(g, rx - 8, ry0 - 14, R * 1.2, R * 0.9, 0.4, '#f0dcb4', 0.22, 0.2);
+    for (let i = 0; i < 14; i++) { const a = rnd() * TAU, d = range(rnd, 4, R * 0.95); chip(g, NOWRAP, rx + Math.cos(a) * d, ry0 + Math.sin(a) * d * SY, range(rnd, 1.5, 3.5), rnd() < 0.5 ? PRIMER : RED, rnd); }
+  }
+  // a doped repair patch on the deck, stitched on with pinked edges
+  {
+    const x = 0.5 * w, y = 0.13 * h, pw = 34, ph = 22;
+    g.save(); g.translate(x, y); g.rotate(-0.05);
+    g.fillStyle = rgba('#2a1820', 0.3); g.fillRect(-pw / 2 + 2, -ph / 2 + 3, pw, ph);
+    g.fillStyle = grad(g, 0, -ph / 2, 0, ph / 2, [[0, lightOf('#a8483a', 0.3)], [1, '#8a3428']]); g.fillRect(-pw / 2, -ph / 2, pw, ph);
+    g.setLineDash([2, 2.5]); g.strokeStyle = rgba('#e0c8a0', 0.7); g.lineWidth = 1; g.strokeRect(-pw / 2 + 3, -ph / 2 + 3, pw - 6, ph - 6);
+    g.restore();
+  }
+  // a tear in the cloth aft, a rib and a stringer showing through, the torn edges curling up pale
+  {
+    const x = 0.15 * w, y = 0.72 * h, r = 15;
+    const pts = []; for (let k = 0; k < 14; k++) { const a = k / 14 * TAU, rr = r * range(rnd, 0.6, 1.15); pts.push([x + Math.cos(a) * rr * 1.25, y + Math.sin(a) * rr * 0.85]); }
+    blob(g, x + 2, y + 2, r * 1.8, r * 1.3, 0, '#3a2228', 0.3, 0.2);
+    polyPath(g, pts); g.fillStyle = radial(g, x - 5, y - 4, 1, r * 1.5, [[0, '#2a1a1c'], [1, '#3e2a26']]); g.fill();
+    g.save(); polyPath(g, pts); g.clip();
+    g.fillStyle = '#8a6a44'; g.fillRect(x + 3, y - r * 1.2, 5, r * 2.4); g.fillStyle = rgba('#d8b880', 0.6); g.fillRect(x + 3, y - r * 1.2, 1.5, r * 2.4);
+    g.fillStyle = '#7a5a3a'; g.fillRect(x - r * 1.5, y + 4, r * 3, 3);
+    g.restore();
+    g.lineWidth = 2.6; g.strokeStyle = rgba('#e8d8b4', 0.85); polyPath(g, pts); g.stroke();
+    g.lineWidth = 1; g.strokeStyle = rgba('#6a3a2c', 0.8); polyPath(g, pts.map(([u, v]) => [x + (u - x) * 1.14, y + (v - y) * 1.1])); g.stroke();
+  }
+  // ---- the metal nose section ----
+  // the joint: a riveted strip over the cloth's leading edge
+  g.fillStyle = grad(g, J - 6, 0, J + 8, 0, [[0, '#2a1820', 0.4], [0.35, '#8a3428', 1], [0.55, lightOf(RED, 0.35), 1], [1, '#8a3428', 1]]); g.fillRect(J - 6, -4, 14, h + 8);
+  for (let y = 5; y < h; y += 9) { rivet(g, J - 1, y + range(rnd, -0.6, 0.6), 1.9, '#c8a050'); rivet(g, J + 5, y + 4.5, 1.9, '#c8a050'); }
+  const seam = (x0, y0, x1, y1) => {
+    line(g, [[x0 + 1.5, y0 + 1.5], [x1 + 1.5, y1 + 1.5]], 1.2, lightOf(RED, 0.55), 0.5);
+    line(g, [[x0, y0], [x1, y1]], 2.2, '#2a1820', 0.8);
+    const L = Math.hypot(x1 - x0, y1 - y0), n = Math.floor(L / 9);
+    const nx = -(y1 - y0) / L, ny = (x1 - x0) / L;
+    for (let k = 1; k < n; k++) { const t = k / n; for (const s2 of [-1, 1]) if (rnd() > 0.06) rivet(g, x0 + (x1 - x0) * t + nx * s2 * 4.5, y0 + (y1 - y0) * t + ny * s2 * 4.5, 1.7, lightOf(RED, 0.25)); }
+  };
+  const xs = [J + 0.42 * (w - J), J + 0.78 * (w - J)];
+  for (const x of xs) seam(x, 0, x + 1, h);
+  seam(J + 8, 0.27 * h, w, 0.26 * h); seam(J + 8, 0.82 * h, w, 0.84 * h);
+  // louvres: a row of slanted hoods on the side, each lit along its top lip with a dark slot under it
+  for (let k = 0; k < 5; k++) {
+    const x = xs[0] + 10 + k * 8.5, y0 = 0.47 * h, L = 0.17 * h;
+    g.save(); g.translate(x, y0); g.rotate(0.12);
+    g.fillStyle = rgba('#24161c', 0.85); g.fillRect(0, 0, 4, L);
+    g.fillStyle = rgba(lightOf(RED, 0.5), 0.9); g.fillRect(-2.2, 0, 2.2, L);
+    g.fillStyle = rgba('#24161c', 0.3); g.fillRect(4, 1, 2.5, L);
+    g.restore();
+  }
+  // an access hatch with four screws and a latch
+  {
+    const x = J + 14, y = 0.5 * h, hw = 30, hh = 0.22 * h;
+    g.lineWidth = 2; g.strokeStyle = rgba('#2a1820', 0.8); g.strokeRect(x, y, hw, hh);
+    g.lineWidth = 1; g.strokeStyle = rgba(lightOf(RED, 0.5), 0.6); g.strokeRect(x + 2, y + 2, hw - 4, hh - 4);
+    for (const [a, b] of [[4, 4], [hw - 4, 4], [4, hh - 4], [hw - 4, hh - 4]]) nail(g, x + a, y + b, 1.8);
+    g.fillStyle = '#c8a050'; g.fillRect(x + hw / 2 - 5, y + hh / 2 - 2, 10, 4); g.fillStyle = rgba('#fff0c0', 0.6); g.fillRect(x + hw / 2 - 5, y + hh / 2 - 2, 10, 1.2);
+  }
+  // wear: paint chipped off the panel edges to the metal, scuffs and a few dents
+  for (let i = 0; i < 24; i++) { const x = J + rnd() * (w - J), y = rnd() * h; chip(g, NOWRAP, x, y, range(rnd, 1.6, 4.5), rnd() < 0.6 ? '#8c8478' : '#a8843a', rnd); }
+  for (let i = 0; i < 30; i++) { const x = rnd() * J, y = rnd() * h; chip(g, NOWRAP, x, y, range(rnd, 1.4, 3.2), PRIMER, rnd); }
+  for (let i = 0; i < 4; i++) dent(g, NOWRAP, J + range(rnd, 0.1, 0.9) * (w - J), range(rnd, 0.3, 0.9) * h, range(rnd, 8, 14), RED, 0.45);
+  // oil from the engine: dark smears blown back along the lower side and belly, thinning as they go, a wet
+  // sheen on the thick ones near the nose; soot from the exhaust stubs on the side
+  softLayer(g, w, h, 2.2, q => {
+    for (let i = 0; i < 12; i++) {
+      const y0 = range(rnd, 0.45, 1.0) * h, L = range(rnd, 60, i < 4 ? 300 : 170), w0 = range(rnd, 7, 16), drift = range(rnd, 0, 0.1);
+      const P = []; for (let k = 0; k <= 8; k++) { const t = k / 8; P.push([w + 6 - L * t, y0 + L * t * drift + Math.sin(t * 4 + i) * 2]); }
+      stroke(q, P, w0, 1, pick(rnd, ['#2a1c18', '#3a2a1e', '#4a3420']), range(rnd, 0.22, 0.4));
+    }
+    for (let i = 0; i < 6; i++) {
+      const y0 = range(rnd, 0.42, 0.52) * h, L = range(rnd, 80, 210);
+      const P = []; for (let k = 0; k <= 6; k++) { const t = k / 6; P.push([w - 12 - L * t, y0 + L * t * 0.05]); }
+      stroke(q, P, range(rnd, 12, 20), 3, '#2e2a2c', 0.18);
+    }
+    blob(q, w - 14, 0.47 * h, 22, 10, 0, '#2e2a2c', 0.4, 0.2);
+  });
+  softLayer(g, w, h, 0.8, q => {
+    for (let i = 0; i < 7; i++) {
+      const y0 = range(rnd, 0.55, 0.95) * h, L = range(rnd, 30, 110), x0 = w - range(rnd, 2, 40);
+      stroke(q, [[x0, y0], [x0 - L * 0.5, y0 + 1], [x0 - L, y0 + 2]], range(rnd, 2.5, 4), 0.6, '#1e1414', 0.4);
+      stroke(q, [[x0, y0 - 1.5], [x0 - L * 0.4, y0 - 1]], 1, 0.4, '#d8c0a0', 0.35);
+    }
+  });
+  // grime and rain: dirt washed down the sides, mud thrown up along the belly, scorch near the nose
+  softLayer(g, w, h, 1.6, q => {
+    for (let i = 0; i < 14; i++) { const x = rnd() * w, y = range(rnd, 0.3, 0.7) * h, L = range(rnd, 25, 70); stroke(q, [[x, y], [x + range(rnd, -2, 2), y + L]], range(rnd, 4, 9), 1, '#4a3028', 0.18); }
+    blots(q, w, h, rnd, { colors: ['#5a4232', '#4a3628'], count: 14, rmin: 6, rmax: 16, alpha: 0.3, hard: 0.3 });
+  });
+  for (let i = 0; i < 3; i++) { const x = w - range(rnd, 10, 90), y = range(rnd, 0.75, 0.98) * h, r = range(rnd, 12, 22); blob(g, x, y, r * 1.4, r, 0, '#6a4a30', 0.3, 0.1); blob(g, x, y, r, r * 0.7, 0, '#2e2220', 0.4, 0.2); }
+  glaze(g, w, h, '#ffe2b8', 0.1, 'soft-light');
+}
+
+function planeCowl(g, w, h, rnd) {
+  const BR = '#a8843a';
+  g.fillStyle = BR; g.fillRect(-4, -4, w + 8, h + 8);
+  blots(g, w, h, rnd, { colors: ['#c8a050', '#8a6a2c', '#d8b860', '#9a7430'], count: 30, rmin: 12, rmax: 36, alpha: 0.42, hard: 0.1, stretch: 2.6, rot: 0, wrapX: true });
+  // brushed round the bowl
+  for (let i = 0; i < 70; i++) { const x = rnd() * w, y = rnd() * h, L = range(rnd, 20, 80), c = rnd() < 0.5 ? '#e8cc78' : '#7a5a24', a = range(rnd, 0.12, 0.28); for (const dx of [0, -w, w]) line(g, [[x + dx, y], [x + dx + L, y + range(rnd, -1, 1)]], range(rnd, 0.6, 1.3), c, a); }
+  // a crevice where the bowl meets the hull, soot and oil round the front lip
+  g.fillStyle = grad(g, 0, 0, 0, h, [[0, '#2a1c18', 0.5], [0.06, '#2a1c18', 0], [0.8, '#2a2224', 0], [1, '#2a2224', 0.55]]); g.fillRect(-4, -4, w + 8, h + 8);
+  // the red band round its back edge, chipped back to the brass, with a cream pinstripe
+  g.fillStyle = '#973b2c'; g.fillRect(-4, 4, w + 8, 18);
+  g.fillStyle = grad(g, 0, 4, 0, 22, [[0, '#fff0d0', 0.35], [0.25, '#fff0d0', 0], [1, '#2a1820', 0.3]]); g.fillRect(-4, 4, w + 8, 18);
+  g.fillStyle = '#e2d2aa'; g.fillRect(-4, 23, w + 8, 3);
+  for (let i = 0; i < 22; i++) { const x = rnd() * w, y = range(rnd, 6, 24); for (const dx of [0, -w, w]) if (x + dx > -8 && x + dx < w + 8) chip(g, NOWRAP, x + dx, y, range(rnd, 1.5, 4), '#b89448', rnd); }
+  // six panels: seams with a lit lip, rivet columns either side; rivet rows round the band and the lip
+  const n = 6, seams = []; for (let k = 0; k < n; k++) seams.push(k * w / n + range(rnd, -6, 6));
+  for (const x of seams) for (const dx of [0, -w, w]) {
+    const X = x + dx; if (X < -12 || X > w + 12) continue;
+    line(g, [[X + 1.5, 26], [X + 1.5, h]], 1.2, '#f0d890', 0.5); line(g, [[X, 26], [X, h]], 2.2, '#3a2a14', 0.8);
+    for (let y = 33; y < h - 6; y += 9) for (const s2 of [-4.5, 4.5]) rivet(g, X + s2, y, 1.8, '#c8a050');
+  }
+  for (const y of [30, h - 9]) for (let x = 3; x < w; x += 10) rivet(g, x + range(rnd, -0.8, 0.8), y, 1.8, '#c8a050');
+  // louvres on each panel, Dzus fasteners by the seams
+  for (let k = 0; k < n; k++) {
+    const x0 = seams[k] + w / n * 0.3;
+    for (let j = 0; j < (k % 3 === 1 ? 0 : 3); j++) {
+      const x = x0 + j * 11, y0 = 44, L = 34;
+      for (const dx of [0, -w, w]) {
+        const X = x + dx; if (X < -12 || X > w + 12) continue;
+        g.fillStyle = rgba('#2a1c14', 0.85); g.fillRect(X, y0, 4, L);
+        g.fillStyle = rgba('#f0d890', 0.85); g.fillRect(X - 2.2, y0, 2.2, L);
+        g.fillStyle = rgba('#2a1c14', 0.3); g.fillRect(X + 4, y0 + 1, 2.5, L);
+      }
+    }
+    for (const y of [56, 92]) { const X = seams[k] + 11; ellipse(g, X, y, 3.2, 3.2, 0, '#6a4e22'); line(g, [[X - 2.2, y - 1], [X + 2.2, y + 1]], 1.1, '#2a1c14', 0.9); blob(g, X - 1, y - 1.2, 1.5, 1, 0, '#fff0c0', 0.5, 0.4); }
+  }
+  for (let i = 0; i < 6; i++) dent(g, NOWRAP, 20 + rnd() * (w - 40), range(rnd, 40, h - 20), range(rnd, 8, 16), BR, 0.5);
+  // oil blown back over it from the front lip (toward its back edge), soot on the lip
+  softLayer(g, w, h, 2, q => {
+    for (let i = 0; i < 16; i++) {
+      const x = rnd() * w, L = range(rnd, 25, h * 0.85), w0 = range(rnd, 6, 13);
+      const P = []; for (let k = 0; k <= 6; k++) { const t = k / 6; P.push([x + Math.sin(t * 3 + i) * 3, h + 4 - L * t]); }
+      for (const dx of [0, -w, w]) stroke(q, P.map(([u, v]) => [u + dx, v]), w0, 1, pick(rnd, ['#2a1c14', '#3e2a18']), range(rnd, 0.2, 0.38));
+    }
+    for (let i = 0; i < 10; i++) { const x = rnd() * w; for (const dx of [0, -w, w]) blob(q, x + dx, h - 5, range(rnd, 16, 32), 9, 0, '#2a2224', 0.35, 0.2); }
+  });
+  glaze(g, w, h, '#ffe2b8', 0.08, 'soft-light');
+}
+
+function planeBarrel(g, w, h, rnd) {
+  g.fillStyle = '#5e5a5c'; g.fillRect(-4, -4, w + 8, h + 8);
+  // base flange (y 0..12) with its bolts
+  g.fillStyle = '#4a464a'; g.fillRect(-4, -4, w + 8, 16);
+  g.fillStyle = rgba('#a49a90', 0.5); g.fillRect(-4, 0, w + 8, 2);
+  for (let x = 8; x < w; x += 21) nail(g, x, 6, 2.6);
+  // seven cooling fins between y 14 and 119 (roadside3d.js ridges the barrel's profile to match: a crest a quarter
+  // of the way into each, the gap three quarters in): the lit fin face with a bright crest, the dark gap; then
+  // heat-bluing toward the head
+  const FP = (119 - 14) / 7;
+  for (let k = 0; k < 7; k++) {
+    const y0 = 14 + k * FP;
+    g.fillStyle = grad(g, 0, y0, 0, y0 + FP, [[0, '#3a3640', 0.5], [0.08, '#8a8486', 0.45], [0.25, '#c8beb2', 0.8], [0.42, '#8a8486', 0.45], [0.6, '#24202a', 0.75], [0.78, '#1c1820', 0.85], [1, '#3a3640', 0.5]]);
+    g.fillRect(-4, y0, w + 8, FP);
+  }
+  g.fillStyle = grad(g, 0, h * 0.45, 0, h, [[0, '#6a5a8a', 0], [0.6, '#7a5a7a', 0.22], [1, '#a07a4a', 0.3]]); g.fillRect(-4, h * 0.45, w + 8, h * 0.55 + 4);
+  // oil weeping down from the head and rust in the gaps
+  for (let i = 0; i < 16; i++) { const x = rnd() * w, L = range(rnd, 20, 90); for (const dx of [0, -w, w]) if (x + dx > -6 && x + dx < w + 6) stroke(g, [[x + dx, h], [x + dx + range(rnd, -1, 1), h - L]], range(rnd, 2, 4), 0.5, '#2a1c18', range(rnd, 0.2, 0.4)); }
+  for (let i = 0; i < 30; i++) { const x = rnd() * w, y = 14 + (Math.floor(rnd() * 7) + 0.75) * FP; for (const dx of [0, -w, w]) if (x + dx > -6 && x + dx < w + 6) blob(g, x + dx, y, range(rnd, 2, 6), 1.5, 0, '#9a5a2c', 0.45, 0.3); }
+  // the head joint: a lighter machined ring
+  g.fillStyle = '#7a7270'; g.fillRect(-4, 119, w + 8, h - 119 + 4); g.fillStyle = rgba('#d8ccb8', 0.5); g.fillRect(-4, 119, w + 8, 1.5);
+  glaze(g, w, h, '#ffe2b8', 0.08, 'soft-light');
+}
+
+function planeFace(g, w, h, rnd) {
+  const c = w / 2;
+  g.fillStyle = '#4e4a4e'; g.fillRect(-4, -4, w + 8, h + 8);
+  // a domed iron cover lit from the upper left, a raised rim, seven bolts, a brass boss with oil weeping from it
+  g.fillStyle = radial(g, c - 18, c - 20, 4, c, [[0, '#8a827e'], [0.6, '#5e5a5c'], [1, '#3e3a40']]); g.beginPath(); g.arc(c, c, c - 2, 0, TAU); g.fill();
+  g.lineWidth = 5; g.strokeStyle = rgba('#2a2630', 0.7); g.beginPath(); g.arc(c + 1, c + 1, c - 12, 0, TAU); g.stroke();
+  g.lineWidth = 2; g.strokeStyle = rgba('#c8bcae', 0.55); g.beginPath(); g.arc(c - 1, c - 1, c - 12, Math.PI * 0.9, Math.PI * 1.7); g.stroke();
+  for (let k = 0; k < 7; k++) { const a = k / 7 * TAU + 0.2; nail(g, c + Math.cos(a) * (c - 22), c + Math.sin(a) * (c - 22), 4); }
+  g.fillStyle = radial(g, c - 6, c - 7, 1, 22, [[0, '#f0d890'], [0.6, '#b08a3c'], [1, '#6a4e22']]); g.beginPath(); g.arc(c, c, 20, 0, TAU); g.fill();
+  for (let k = 0; k < 6; k++) { const a = k / 6 * TAU; ellipse(g, c + Math.cos(a) * 13, c + Math.sin(a) * 13, 2.4, 2.4, 0, '#5a4018'); }
+  ellipse(g, c, c, 5, 5, 0, '#2a2026');
+  for (let i = 0; i < 6; i++) { const a = range(rnd, 0.3, 2.8), x = c + Math.cos(a) * 18, y = c + Math.sin(a) * 18; stroke(g, [[x, y], [x + range(rnd, -3, 3), y + range(rnd, 14, 34)]], range(rnd, 2, 4), 0.6, '#2a1c18', 0.4); }
+  for (let i = 0; i < 8; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 3, 8), range(rnd, 2, 5), rnd() * 3, '#8a5634', 0.35, 0.3);
+}
+
+function planeTrim(g, w, h, rnd) {
+  const RED = '#973b2c';
+  g.fillStyle = RED; g.fillRect(-4, -4, w + 8, h + 8);
+  blots(g, w, h, rnd, { colors: ['#b55c45', '#702c26', '#a8483a'], count: 18, rmin: 10, rmax: 30, alpha: 0.35, hard: 0.1 });
+  g.fillStyle = grad(g, 0, 0, 0, h, [[0, '#ffe2b0', 0.25], [0.2, '#ffe2b0', 0], [0.8, '#2e2028', 0], [1, '#2e2028', 0.35]]); g.fillRect(-4, -4, w + 8, h + 8);
+  g.fillStyle = '#e2d2aa'; g.fillRect(-4, h * 0.3, w + 8, 4); g.fillStyle = rgba('#702c26', 0.9); g.fillRect(-4, h * 0.3 + 4, w + 8, 1.5);
+  for (let y = 7; y < h; y += 30) for (let x = 6; x < w; x += 12) rivet(g, x, y, 1.8, lightOf(RED, 0.25));
+  for (let i = 0; i < 16; i++) chip(g, NOWRAP, rnd() * w, rnd() * h, range(rnd, 1.6, 4.5), rnd() < 0.6 ? '#8c8478' : '#c9b48e', rnd);
+  for (let i = 0; i < 10; i++) { const x = rnd() * w, y = rnd() * h * 0.6; stroke(g, [[x, y], [x + range(rnd, -2, 2), y + range(rnd, 14, 40)]], range(rnd, 2, 4), 0.5, '#5a3020', 0.25); }
+  glaze(g, w, h, '#ffe2b8', 0.08, 'soft-light');
+}
+
+register('rs_plane', {
+  family: F, size: 512, note: 'the flying machine\'s airframe atlas (fitted rects: hull 0,0-512,248 · cowl 0,256-512,376 · barrel 0,384-256,512 · face 256,384-384,512 · trim 384,384-512,512): red-doped canvas over rib tapes and a riveted nose, cheat line, faded roundel, oil and soot; a brass cowl in six riveted panels with louvres and a chipped red band; finned cylinder barrels; the crankcase face; chipped red trim',
+  paint(g, s, rnd, h, cv) {
+    g.fillStyle = '#973b2c'; g.fillRect(0, 0, s, s);
+    inRegion(g, PLANE_R.hull, (w, hh) => planeHull(g, w, hh, rnd));
+    inRegion(g, PLANE_R.cowl, (w, hh) => planeCowl(g, w, hh, rnd));
+    inRegion(g, PLANE_R.barrel, (w, hh) => planeBarrel(g, w, hh, rnd));
+    inRegion(g, PLANE_R.face, (w, hh) => planeFace(g, w, hh, rnd));
+    inRegion(g, PLANE_R.trim, (w, hh) => planeTrim(g, w, hh, rnd));
+    blurTile(cv, 0.45);
+  },
+});
+
 // The gas bag's torn envelope, dragged over the mesa rim (alpha, fitted: u across, v from the gathered top
 // edge down to the hem). Weathered off-white doped canvas in six gores, every other one a bold faded-red
 // stripe (sun-bleached in blotches, the cream showing through where the dope wore off), stitched welts

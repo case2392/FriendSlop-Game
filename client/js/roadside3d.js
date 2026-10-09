@@ -83,17 +83,17 @@ const DENS = {
 const FIT = new Set(['rs_blanket', 'rs_hub', 'rs_hub_cream', 'rs_glass', 'rs_grille', 'rs_crate_a', 'rs_crate_b', 'rs_crate_c', 'rs_barrel', 'rs_barrel_lid', 'rs_drum',
   'rs_drum_red', 'rs_drum_lid', 'rs_pump_face', 'rs_keypad', 'rs_logend', 'rs_rv_window', 'rs_boards', 'rs_headlamp', 'rs_ice', 'rs_decal_freight', 'rs_ranger_board',
   'rs_plaque', 'rs_roundel', 'rs_warn', 'rs_stop', 'rs_chevband', 'rs_pennant', 'rs_gasboard', 'rs_bunting', 'rs_tuft', 'rs_tuft_dry', 'rs_scorch', 'rs_shield', 'rs_rune', 'rs_glow', 'rs_gatelabels',
-  'rs_gasbag', 'rs_junkboard']);
+  'rs_gasbag', 'rs_junkboard', 'rs_plane']);
 // flags on a material name: ! no top cover, * glows, ~ double-sided, # alpha-tested decal (no shadow, no LOD),
 // % soft transparent decal lying on the ground (no shadow, no LOD), ^ alpha-tested cut-out (keeps its shadow and LOD)
 const baseName = m => m.replace(/[!*~#%^]+$/, '');
 const densOf = m => { const b = baseName(m); return b.startsWith('rs_steel_') ? 2 : (DENS[b] || 1); };
 const NO_SHADOW = /^(ground_\w+|dirt_\w+|rs_gatelabels|rs_glow|rs_tuft|rs_tuft_dry|rs_scorch|rs_bunting|rs_shield|rs_gasboard|rs_blanket|rs_glass|rs_headlamp|rs_keypad|rs_decal_freight|rs_ice|rs_logend|rs_hub|rs_hub_cream|rs_pump_face|rs_rv_window|rs_boards|rs_plaque|rs_roundel|rs_grille|rs_ranger_board|rs_barrel_lid|rs_drum_lid|rs_chevband|rs_rope|rs_bone|rs_pennant|rs_stop|rs_junkboard)$/;
 // the most weather any one material takes (glass and wing fabric stay readable under the dust)
-const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_canvas_plain: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6, rs_gasbag: 0.5 };
+const COVER_CAP = { rs_dino: 0.3, rs_wing: 0.35, rs_plane: 0.5, rs_glass: 0.25, rs_rv_window: 0.25, rs_canvas: 0.5, rs_canvas_blue: 0.5, rs_canvas_plain: 0.5, rs_hide: 0.6, rs_gingham: 0.6, rs_burlap: 0.6, rs_gasbag: 0.5 };
 // Material classes for the cover: curved things (logs, barrels, the dino) only take it right along the top;
 // cloth keeps most of its pattern (the cover breaks up hard on it); stone stays stone under the sand.
-const CURVED = new Set(['rs_bark', 'rs_barrel', 'rs_drum', 'rs_drum_red', 'rs_dino', 'rs_tire', 'rs_rope', 'rs_hay', 'rs_bone', 'rs_bleach']);
+const CURVED = new Set(['rs_bark', 'rs_barrel', 'rs_drum', 'rs_drum_red', 'rs_dino', 'rs_tire', 'rs_rope', 'rs_hay', 'rs_bone', 'rs_bleach', 'rs_plane']);
 const CLOTH = new Set(['rs_gingham', 'rs_burlap', 'rs_plaid', 'rs_hide', 'rs_canvas', 'rs_canvas_blue', 'rs_canvas_plain', 'rs_blanket', 'rs_wing', 'rs_thatch', 'rs_gasbag']);
 const MASONRY = new Set(['rs_stone', 'rs_adobe', 'rs_rock']);
 function coverOf(base, ctx) {
@@ -102,12 +102,13 @@ function coverOf(base, ctx) {
   if (CURVED.has(base)) { lo = 0.72; hi = 0.9; cap = Math.min(cap, 0.45); }
   if (CLOTH.has(base)) { cap = Math.min(cap, ctx.snow ? 0.55 : 0.2); brk = 1.4; }
   if (MASONRY.has(base) && !ctx.snow) cap = Math.min(cap, 0.3);
-  return { lo, hi, noise: C.noise, scale: C.scale, brk, low, amt: Math.min(amt, cap), cap };
+  return { lo, hi, noise: C.noise, scale: C.scale, brk, low, amt: Math.min(amt, cap), cap, edge: C.edge || 0, rim: C.rim || 0 };
 }
 
 // Per-biome: ground grime (vertex AO tint), drifts, the top cover, paint schemes and the construction kit.
 //   cover: lo/hi = up-facing threshold, noise = how much the breakup alpha moves it, scale = world → cover uv,
-//          amt = the most it covers, brk = how much the breakup noise thins it out, low = extra cover on low tops
+//          amt = the most it covers, brk = how much the breakup noise thins it out, low = extra cover on low tops,
+//          edge = the cool shadow a thick layer casts just under where it ends on a curved surface, rim = blue on its rolled rim
 const BIO = {
   meadow: { ao: [0.6, 0.6, 0.48], ground: 'dirt_meadow!', drift: null, tuft: 'rs_tuft#~', cover: null,
     semi: [['rs_steel_red', 'rs_steel_blue'], ['rs_steel_cream', 'rs_steel_green']], dino: [1, 1, 1],
@@ -115,7 +116,7 @@ const BIO = {
   fields: { ao: [0.74, 0.66, 0.5], ground: 'dirt_fields!', drift: null, tuft: 'rs_tuft_dry#~', cover: { tex: 'rs_cover_sand', lo: 0.7, hi: 0.95, noise: 0.8, scale: 0.4, amt: 0.25, brk: 1, low: 0.2 },
     semi: [['rs_steel_red', 'rs_steel_mustard'], ['rs_steel_cream', 'rs_steel_green']], dino: [1, 0.97, 0.9],
     kit: 'barn', pump: 'rs_steel_green', canopy: 'rs_tin', cloth: 'rs_burlap~', umbrella: 'rs_canvas~', seat: 'hay', bark: [0.95, 0.92, 0.85] },
-  snow: { ao: [0.68, 0.76, 0.92], ground: 'ground_snow!', drift: 'ground_snow!', tuft: null, cover: { tex: 'rs_cover_snow', lo: 0.42, hi: 0.66, noise: 1.0, scale: 0.45, amt: 1, brk: 0.25, low: 0 },
+  snow: { ao: [0.68, 0.76, 0.92], ground: 'ground_snow!', drift: 'ground_snow!', tuft: null, cover: { tex: 'rs_cover_snow', lo: 0.42, hi: 0.66, noise: 1.0, scale: 0.45, amt: 1, brk: 0.25, low: 0, edge: 0.55, rim: 0.5 },
     semi: [['rs_steel_blue', 'rs_steel_red'], ['rs_steel_cream', 'rs_steel_teal']], dino: [0.92, 0.96, 1],
     kit: 'dwarf', pump: 'rs_steel_blue', canopy: 'rs_slate', cloth: 'rs_plaid~', umbrella: 'rs_canvas_blue~', seat: 'log', bark: [0.82, 0.82, 0.9] },
   badlands: { ao: [0.9, 0.56, 0.4], ground: 'ground_badlands!', drift: 'ground_badlands!', tuft: null, cover: { tex: 'rs_cover_dust', lo: 0.6, hi: 0.92, noise: 0.9, scale: 0.4, amt: 0.5, brk: 1, low: 0.2 },
@@ -136,6 +137,16 @@ const KIT = {
 const STONE_TINT = { dwarf: [0.8, 0.88, 1.02] };
 // where each label sits in the rs_gatelabels atlas (uv rects)
 const LBL = { ranger: [0, 2 / 3, 1, 1], warn0: [0, 0.5, 0.5, 2 / 3], warn1: [0, 1 / 3, 0.5, 0.5], stop: [0.5, 5 / 12, 1, 2 / 3], keypad: [0.5, 0, 0.75, 5 / 12] };
+// The flying machine's airframe atlas (paint/roadside.js rs_plane, 512 x 512): rects in canvas px, y down (the barrel
+// and trim rects are pulled in off their edges so mipmaps don't bleed the neighbours in). PLANE_JOINT is where the
+// hull's canvas meets its metal nose (a fraction of its length); BAR_FIN0..1 is the finned stretch of a cylinder
+// barrel (its radius along it), painted as seven fins on the barrel rect between y 14 and 119 of its 128.
+const PL = 'rs_plane';
+const PLR = { hull: [0, 0, 512, 248], cowl: [0, 256, 512, 376], barrel: [2, 384, 254, 512], face: [258, 386, 382, 510], trim: [390, 390, 506, 506] };
+const PLANE_JOINT = 0.78, BAR_FIN0 = 0.33, BAR_FIN1 = 0.59;
+const plUV = (R, u, vd) => [(R[0] + u * (R[2] - R[0])) / 512, 1 - (R[1] + vd * (R[3] - R[1])) / 512];
+// a fitted face's uvRect: a sub-rect [u0, v0, u1, v1] (fractions of R, v down) of R
+const plRect = (R, f = [0, 0, 1, 1]) => [(R[0] + f[0] * (R[2] - R[0])) / 512, 1 - (R[1] + f[3] * (R[3] - R[1])) / 512, (R[0] + f[2] * (R[2] - R[0])) / 512, 1 - (R[1] + f[1] * (R[3] - R[1])) / 512];
 
 const MATS = new Map();
 function rsMat(name, ctx) {
@@ -158,6 +169,7 @@ function rsMat(name, ctx) {
       sh.uniforms.uCoverMap = { value: tex(C.tex) };
       sh.uniforms.uCover = { value: new THREE.Vector4(P.lo, P.hi, P.noise, P.scale) };
       sh.uniforms.uCover2 = { value: new THREE.Vector4(P.brk, P.low, P.amt, P.cap) };
+      sh.uniforms.uCover3 = { value: new THREE.Vector4(P.edge, P.rim, 0, 0) };
       sh.vertexShader = sh.vertexShader
         .replace('#include <common>', '#include <common>\nattribute vec2 rsx; varying vec3 vRsW; varying vec3 vRsN; varying vec2 vRsX;')
         .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
@@ -165,19 +177,25 @@ function rsMat(name, ctx) {
           vRsN = normalize(mat3(modelMatrix) * objectNormal);
           vRsX = rsx;`);
       sh.fragmentShader = sh.fragmentShader
-        .replace('#include <common>', '#include <common>\nvarying vec3 vRsW; varying vec3 vRsN; varying vec2 vRsX; uniform sampler2D uCoverMap; uniform vec4 uCover; uniform vec4 uCover2;')
+        .replace('#include <common>', '#include <common>\nvarying vec3 vRsW; varying vec3 vRsN; varying vec2 vRsX; uniform sampler2D uCoverMap; uniform vec4 uCover; uniform vec4 uCover2; uniform vec4 uCover3;')
         .replace('#include <lights_lambert_fragment>', `{
           vec4 cv = texture2D(uCoverMap, vRsW.xz * uCover.w);
           float up = normalize(vRsN).y;
-          float k = smoothstep(uCover.x, uCover.y, up + (cv.a - 0.6) * uCover.z);
-          k *= max(0.0, mix(1.0, smoothstep(0.35, 0.75, cv.a), uCover2.x));
-          k *= min(uCover2.w, uCover2.z + uCover2.y * (1.0 - smoothstep(0.4, 1.6, vRsX.x)));
-          k *= vRsX.y;
-          diffuseColor.rgb = mix(diffuseColor.rgb, cv.rgb, k);
+          float kr = smoothstep(uCover.x, uCover.y, up + (cv.a - 0.6) * uCover.z);
+          float amt = max(0.0, mix(1.0, smoothstep(0.35, 0.75, cv.a), uCover2.x));
+          amt *= min(uCover2.w, uCover2.z + uCover2.y * (1.0 - smoothstep(0.4, 1.6, vRsX.x)));
+          amt *= vRsX.y;
+          float k = kr * amt;
+          // snow lies thick: on a curved surface a cool shadow just under where it ends, and its rolled rim
+          // (where the breakup thins it) a little blue
+          float sh = smoothstep(uCover.x - 0.28, uCover.x, up) * (1.0 - smoothstep(uCover.x, uCover.y, up)) * amt * uCover3.x;
+          diffuseColor.rgb *= mix(vec3(1.0), vec3(0.7, 0.76, 0.92), sh);
+          vec3 cc = cv.rgb * mix(vec3(1.0), vec3(0.8, 0.86, 1.0), uCover3.y * 4.0 * kr * (1.0 - kr));
+          diffuseColor.rgb = mix(diffuseColor.rgb, cc, k);
         }
         #include <lights_lambert_fragment>`);
     };
-    m.customProgramCacheKey = () => 'rs-cover2';
+    m.customProgramCacheKey = () => 'rs-cover3';
   }
   MATS.set(key, m);
   return m;
@@ -478,12 +496,15 @@ class Builder {
   // texture on it matches the ground round it.
   mound(mat, rx, h, rz, x, y, z, o = {}) {
     const prof = [[1.5, -0.12], [1.25, 0.02], [1.0, 0.12], [0.7, 0.55], [0.35, 0.88], [0, 1]];
-    const seg = o.seg || 22, ry = o.ry || 0, c = Math.cos(ry), sn = Math.sin(ry), S = densOf(mat);
+    const seg = o.seg || 26, ry = o.ry || 0, c = Math.cos(ry), sn = Math.sin(ry), S = densOf(mat);
     const ph1 = hash3(x, z, 1.3) * TAU, ph2 = hash3(z, x, 2.7) * TAU, nl = 2 + Math.floor(hash3(x, 1.1, z) * 2);
     const n = prof.length - 1;
-    this.grid(mat, seg, n, (u, v) => {
+    // two rings per profile step on a Catmull-Rom curve through it, so a heap seen up close is a soft swell, not facets
+    const cr = (i, t, q) => { const a = prof[Math.max(0, i - 1)][q], b = prof[i][q], c2 = prof[i + 1][q], d = prof[Math.min(n, i + 2)][q];
+      return 0.5 * (2 * b + (c2 - a) * t + (2 * a - 5 * b + 4 * c2 - d) * t * t + (3 * b - a - 3 * c2 + d) * t * t * t); };
+    this.grid(mat, seg, n * 2, (u, v) => {
       const th = u * TAU, k = v * n, i = Math.min(n - 1, Math.floor(k)), t = k - i;
-      const pr = prof[i][0] + (prof[i + 1][0] - prof[i][0]) * t, py = prof[i][1] + (prof[i + 1][1] - prof[i][1]) * t;
+      const pr = Math.max(0, cr(i, t, 0)), py = cr(i, t, 1);
       const lobe = 1 + 0.2 * (0.6 * Math.sin(nl * th + ph1) + 0.4 * Math.sin((nl + 1) * th + ph2));
       const lx = Math.sin(th) * rx * pr * lobe, lz = Math.cos(th) * rz * pr * lobe;
       const X = x + lx * c + lz * sn, Z = z - lx * sn + lz * c;
@@ -678,20 +699,49 @@ function barrel(B, kind, r, h, x, y, z, o = {}) {
     B.cyl(kind, r, r, h, x, y, z, { ...o, seg, caps: 'rs_drum_lid', bevel: 0.03 });
   }
 }
-// A snow cap: a lumpy slab, wider than what it sits on, its rim hanging a few centimetres over the eave.
-// o.dy(lx, lz) bends it to follow a bowed roof.
+// A snow cap: a pillow of snow, wider than what it sits on, its crown lumpy, its edge rolled over in a bullnose
+// that curls a few centimetres down over the eave and tucks under; the roll and the underside cool blue, so it reads
+// as a soft thick layer rather than a slab. The plan is a rounded rectangle; each ring of the grid is that outline
+// inset (corners tighten, the innermost ring is the middle line). o.dy(lx, lz) bends it to follow a bowed roof.
 function snowCap(B, w, d, x, y, z, o = {}) {
   const t = o.t ?? 0.14, lip = o.lip ?? 0.07, ext = o.ext ?? 0.06;
-  const W = w + ext * 2, D = d + ext * 2, H = t + lip;
-  const nx = Math.max(1, Math.min(10, Math.round(W / 0.5))), nz = Math.max(1, Math.min(10, Math.round(D / 0.5)));
-  const ph = x * 3.1 + z * 1.7;
-  B.box('rs_snow!', W, H, D, x, y + H / 2 - lip, z, {
-    r: Math.min(t * 0.48 + lip * 0.4, 0.12), rx: o.rx || 0, ry: o.ry || 0, rz: o.rz || 0, S: 2, noAO: true, div: [nx, 1, nz], smoothN: true, lod0: o.lod0,
-    deform: p => {
-      if (p[1] > 0) p[1] += (Math.sin(p[0] * 2.3 + ph) * 0.5 + Math.sin(p[2] * 3.1 + p[0] * 1.3 + ph) * 0.5) * t * 0.3;
-      if (o.dy) p[1] += o.dy(p[0], p[2]);
-    },
-  });
+  const hw = w / 2 + ext, hd = d / 2 + ext, R = Math.min(hw, hd), rc = Math.min(R * 0.7, 0.22);
+  const Rh = Math.min(R * 0.8, Math.max(0.025, (t + lip) * 1.2));
+  // rings: [inset, height above the support, blue]: under the rim, the curl, the bullnose up to the crown, then in
+  const rings = [[Math.min(R * 0.9, 0.04 + lip * 0.5), -lip + 0.006, 1], [Math.min(R * 0.5, lip * 0.2), -lip, 1], [0, -lip * 0.45, 0.8]];
+  const nb = R < 0.12 ? 2 : 3;
+  for (let k = 1; k <= nb; k++) { const ph = k / nb * Math.PI / 2; rings.push([Rh * (1 - Math.cos(ph)), -lip * 0.45 + (t + lip * 0.45) * Math.sin(ph), 0.8 * (1 - k / nb) ** 1.5]); }
+  const nIn = Math.max(1, Math.min(5, Math.round((R - Rh) / 0.18)));
+  for (let k = 1; k <= nIn; k++) rings.push([Rh + (R - Rh) * k / nIn, t, 0]);
+  // the outline, walked once round from the middle of the +z side: [kind, sx, sz, f or angle]
+  const step = Math.max(0.2, 2 * (hw + hd) / 24), O = [];
+  const nX = Math.max(1, Math.ceil((hw - rc) / step)), nZ = Math.max(1, Math.ceil(2 * (hd - rc) / step)), nC = R < 0.12 ? 2 : 3;
+  for (let i = 0; i < nX; i++) O.push(['z', 0, 1, i / nX]);
+  for (let i = 0; i < nC; i++) O.push(['c', 1, 1, Math.PI / 2 * (1 - i / nC)]);
+  for (let i = 0; i < nZ; i++) O.push(['x', 1, 0, 1 - 2 * i / nZ]);
+  for (let i = 0; i < nC; i++) O.push(['c', 1, -1, -Math.PI / 2 * i / nC]);
+  for (let i = 0; i < 2 * nX; i++) O.push(['z', 0, -1, 1 - i / nX]);
+  for (let i = 0; i < nC; i++) O.push(['c', -1, -1, -Math.PI / 2 - Math.PI / 2 * i / nC]);
+  for (let i = 0; i < nZ; i++) O.push(['x', -1, 0, -1 + 2 * i / nZ]);
+  for (let i = 0; i < nC; i++) O.push(['c', -1, 1, -Math.PI - Math.PI / 2 * i / nC]);
+  for (let i = 0; i < nX; i++) O.push(['z', 0, 1, -1 + i / nX]);
+  const at = (q, s) => {
+    const A = hw - s, D = hd - s, r = Math.max(0, rc - s);
+    if (q[0] === 'z') return [q[3] * (A - r), q[2] * D];
+    if (q[0] === 'x') return [q[1] * A, q[3] * (D - r)];
+    return [q[1] * (A - r) + r * Math.cos(q[3]), q[2] * (D - r) + r * Math.sin(q[3])];
+  };
+  const ph = x * 3.1 + z * 1.7, nu = O.length, nv = rings.length - 1, BLUE = [0.72, 0.8, 0.98];
+  B.push(M4(x, y, z, o.rx || 0, o.ry || 0, o.rz || 0));
+  B.grid('rs_snow!', nu, nv, (u, v) => {
+    const q = O[Math.round(u * nu) % nu], [s, hh] = rings[Math.round(v * nv)], [px, pz] = at(q, s);
+    const crown = smooth(Rh * 0.5, Rh * 1.6, s);
+    let py = hh + (Math.sin(px * 2.3 + ph) * 0.5 + Math.sin(pz * 3.1 + px * 1.3 + ph) * 0.5) * t * 0.3 * crown;
+    if (o.dy) py += o.dy(px, pz);
+    return [px, py, pz];
+  }, { wrapU: true, noAO: true, lod0: o.lod0, uv: (u, v, P) => [P[0] / 2 + x * 0.37, P[2] / 2 + z * 0.37],
+    tintFn: (u, v) => { const b = rings[Math.round(v * nv)][2]; return [lerp(1, BLUE[0], b), lerp(1, BLUE[1], b), lerp(1, BLUE[2], b)]; } });
+  B.pop();
 }
 // Icicles in clusters of 3-6 (the long one in the middle), with gaps between clusters. o.skip(x, z) keeps
 // them off something (the trailer's lettering).
@@ -1150,43 +1200,118 @@ function buildCrash(B, p, parts, ctx, decor) {
   const L = parts.map(s => B.loc(s));
   const fus = L.find(s => s.part === 'fuselage'), wing = L.find(s => s.part === 'wing');
   const rnd = rngOf(seedOf(p.x, p.z, 9));
-  const RED = 'rs_steel_red', WING_RED = [0.78, 0.34, 0.27];
+  const WING_RED = [0.78, 0.34, 0.27];
+  // red-doped trim fitted to the atlas's trim rect (wing edge caps, debris)
+  const TRIM = { fit: true, uvRect: plRect(PLR.trim) };
   if (fus) {
     const fy = fus.y, fh = fus.hy, fz0 = fus.z, fhz = fus.hz, zN = fz0 + fhz, zT = fz0 - fhz;
     // the whole airframe pitched seven degrees nose-down about the middle of its box: the nose dug in
     const PITCH = 0.12;
     B.push(new THREE.Matrix4().makeTranslation(fus.x, fy, fz0).multiply(new THREE.Matrix4().makeRotationX(PITCH)).multiply(new THREE.Matrix4().makeTranslation(-fus.x, -fy, -fz0)));
-    // the fuselage: a rounded riveted hull, tapering a little toward the broken tail
-    const taperK = zz => 1 - 0.14 * smooth(-0.8, -fhz, zz);
-    B.box(RED, fus.hx * 2, fh * 2, fhz * 2, fus.x, fy, fz0, { r: 0.32, div: [2, 2, 5], smoothN: true, fit: 'v', S: 2.5, faces: { ny: 'rs_iron' }, off: [0.3, 0.1],
-      deform: q => { const k = taperK(q[2] + fz0); q[0] *= k; q[1] = q[1] * k + (1 - k) * fh * 0.4; } });
-    for (const zz of [2.3, 0.9, -0.6]) B.box('rs_brass', fus.hx * 2 + 0.06, fh * 2 + 0.06, 0.14, fus.x, fy, fz0 + zz * fhz / 3.2, { r: 0.33 });
-    // cockpit: brass coaming, dark well, leather seat back, windscreen
+    // The hull: a loft of rounded sections (a round-shouldered turtle deck, flatter sides and belly) narrowing and
+    // rising toward the tail and rounding off into the cowl at the nose, closed off behind the tail post. Skinned
+    // with the atlas's hull (red-doped canvas over ribs, a riveted metal nose quarter), both sides the same image
+    // folded at the deck and the belly.
+    const zH = zN - 0.2, zJ = zT + PLANE_JOINT * (zH - zT);
+    const sec = zz => {
+      const k = 1 - 0.3 * smooth(fz0 - 0.6, zT, zz), nose = smooth(zH - 0.6, zH, zz);
+      return { a: fus.hx * k, b: fh * k, yc: fy + (1 - k) * fh * 0.4, eT: lerp(2.5, 2.15, nose), eB: lerp(3.4, 2.15, nose) };
+    };
+    // a point on a section: phi from the top centre (0) round over the +x side (pi/2) to the belly (pi)
+    const sePt = (phi, S) => { const sn = Math.sin(phi), cs = Math.cos(phi), e = lerp(S.eB, S.eT, smooth(-0.35, 0.35, cs)); return [S.a * sp(sn, e), S.b * sp(cs, e)]; };
+    const topY = (lx, zz) => { const S = sec(zz), e = S.eT; return S.yc + S.b * Math.pow(Math.max(0, 1 - Math.pow(Math.min(1, Math.abs(lx - fus.x) / S.a), e)), 1 / e); };
+    const ST = [[zT - 0.16, 0.03], [zT - 0.13, 0.5], [zT - 0.07, 0.84], [zT - 0.02, 0.97]];
+    for (let i = 0; i <= 24; i++) ST.push([zT + (zH - zT) * i / 24, 1]);
+    const NS = ST.length - 1, fold = u => (u <= 0.5 ? 2 * u : 2 - 2 * u), sAt = zz => clamp01((zz - zT) / (zH - zT));
+    B.grid(PL, 28, NS, (u, v) => {
+      const [zz, sc] = ST[Math.round(v * NS)], S = sec(zz), [x, y] = sePt(u * TAU, S);
+      return [fus.x + x * sc, S.yc + y * sc, zz];
+    }, { wrapU: true, flip: true, uv: (u, v) => plUV(PLR.hull, sAt(ST[Math.round(v * NS)][0]), fold(u)) });
+    // brass bands: over the fabric's leading edge where the metal nose begins, and round the tail post
+    const band = (zc, hw2, grow) => B.grid('rs_brass', 28, 3, (u, v) => {
+      const j = Math.round(v * 3), zz = zc + (j / 3 * 2 - 1) * hw2, S = sec(zz), [x, y] = sePt(u * TAU, S), g = 1 + [0.25, 1, 1, 0.25][j] * grow / Math.max(S.a, S.b);
+      return [fus.x + x * g, S.yc + y * g, zz];
+    }, { wrapU: true, flip: true, uv: (u, v) => [u * 5, v * 0.13] });
+    band(zJ, 0.065, 0.03); band(zT + 0.22, 0.05, 0.024);
+    // the cockpit: a dark well laid on the deck's curve, a padded leather coaming round it, the seat back, the windscreen
+    const zc = fz0 + 0.75, crx = 0.33, crz = 0.55;
+    B.grid('rs_iron', 16, 2, (u, v) => { const a = u * TAU, X = fus.x + Math.sin(a) * crx * v, Z = zc + Math.cos(a) * crz * v; return [X, topY(X, Z) + 0.008, Z]; },
+      { wrapU: true, flip: true, tint: [0.26, 0.24, 0.28], uv: (u, v, P) => [P[0] * 2, P[2] * 2] });
+    const rim = []; for (let k = 0; k <= 20; k++) { const a = k / 20 * TAU, X = fus.x + Math.sin(a) * (crx + 0.035), Z = zc + Math.cos(a) * (crz + 0.035); rim.push(V(X, topY(X, Z) + 0.03, Z)); }
+    B.tube('rs_timber', rim, 0.05, { seg: 6, tint: [0.62, 0.4, 0.3], lod0: false });
+    B.box('rs_timber', 0.5, 0.42, 0.1, fus.x, topY(fus.x, zc - 0.42) + 0.17, zc - 0.42, { tint: [0.62, 0.4, 0.32], r: 0.045, rx: -0.15 });
     const ct = fy + fh;
-    B.box('rs_brass', 0.92, 0.06, 1.25, fus.x, ct + 0.02, fz0 + 0.75, { r: 0.025 });
-    B.box('rs_iron', 0.72, 0.03, 1.02, fus.x, ct + 0.05, fz0 + 0.75, { tint: [0.32, 0.3, 0.34] });
-    B.box('rs_timber', 0.55, 0.42, 0.1, fus.x, ct + 0.24, fz0 + 0.33, { tint: [0.85, 0.5, 0.4], r: 0.04 });
     B.box('rs_glass', 0.66, 0.34, 0.03, fus.x, ct + 0.22, fz0 + 1.42, { rx: -0.4, r: 0.01, uvRect: [0.5, 0, 1, 1] });
-    // the nose: crumpled brass cowling, a radial engine, a snapped propeller
-    B.lathe('rs_brass', [[0.62, 0], [0.7, 0.16], [0.68, 0.36], [0.52, 0.5], [0.24, 0.56]], fus.x, fy, zN - 0.08, { rx: Math.PI / 2, seg: 12, jit: 0.07 });
-    B.cyl('rs_iron', 0.24, 0.24, 0.05, fus.x, fy, zN + 0.48, { rx: Math.PI / 2, seg: 10, tint: [0.5, 0.48, 0.5] });
+    B.box('rs_brass', 0.7, 0.045, 0.06, fus.x, ct + 0.06, fz0 + 1.36, { r: 0.015 });
+    // the filler cap on the nose deck, exhaust stubs either side just behind the cowl (soot painted behind them)
+    B.cyl('rs_brass', 0.075, 0.085, 0.05, fus.x, topY(fus.x, zJ + 0.45) + 0.012, zJ + 0.45, { seg: 10, bevel: 0.012, lod0: true });
+    for (const sx of [-1, 1]) for (const dz of [0, 0.3]) B.tube('rs_iron', [V(fus.x + sx * 0.66, fy + 0.1, zH - 0.3 - dz), V(fus.x + sx * 0.8, fy + 0.02, zH - 0.5 - dz), V(fus.x + sx * 0.84, fy - 0.06, zH - 0.68 - dz)], 0.045, { seg: 6, ends: true, lod0: true });
+    // ---- the engine: a brass nose bowl, a seven-cylinder radial with finned barrels, a dented Townend ring round
+    // the heads torn open where the nose went in, the hub and spinner and a snapped prop ----
+    const zB = zH - 0.12;
+    B.lathe(PL, [[0.745, 0], [0.772, 0.09], [0.768, 0.19], [0.73, 0.28], [0.645, 0.35], [0.5, 0.395], [0.3, 0.41]], fus.x, fy, zB, { rx: Math.PI / 2, seg: 18, jit: 0.035, uvFn: (pl, nl, v) => plUV(PLR.cowl, v.uv[0], v.uv[1]) });
+    const zK = zB + 0.35;
+    B.lathe(PL, [[0.3, 0], [0.31, 0.03], [0.31, 0.2], [0.29, 0.26], [0.22, 0.305], [0.1, 0.33], [0, 0.335]], fus.x, fy, zK, { rx: Math.PI / 2, seg: 14, uvFn: (pl, nl, v) => plUV(PLR.face, 0.5 + v.p[0] / 0.64, 0.5 + v.p[2] / 0.64) });
+    // a barrel: a flange, seven fins (a ridged profile whose crests and gaps line up with the painted fin bands),
+    // the head joint; the atlas's v follows the barrel's length, not its arc
+    const zCy = zK + 0.12, FP = (BAR_FIN1 - BAR_FIN0) / 7;
+    const finR = yy => 0.095 + 0.02 * (0.5 + 0.5 * Math.cos(TAU * (((yy - BAR_FIN0) / FP) % 1 - 0.25)));
+    const barProf = [[0.118, 0.28], [0.121, 0.3], [0.1, 0.315], [finR(BAR_FIN0), BAR_FIN0]];
+    for (let y2 = BAR_FIN0 + FP / 4; y2 < BAR_FIN1 - 1e-6; y2 += FP / 4) barProf.push([finR(y2), y2]);
+    barProf.push([finR(BAR_FIN1), BAR_FIN1], [0.104, 0.62]);
+    const barV = yy => (yy < BAR_FIN0 ? lerp(0, 14 / 128, (yy - 0.28) / (BAR_FIN0 - 0.28)) : yy <= BAR_FIN1 ? lerp(14 / 128, 119 / 128, (yy - BAR_FIN0) / (BAR_FIN1 - BAR_FIN0)) : lerp(119 / 128, 1, (yy - BAR_FIN1) / (0.62 - BAR_FIN1)));
     for (let k = 0; k < 7; k++) {
       const a = TAU * k / 7 + 0.2;
-      B.cyl('rs_iron', 0.085, 0.1, 0.3, fus.x + Math.cos(a) * 0.74, fy + Math.sin(a) * 0.74, zN + 0.22, { rz: a - Math.PI / 2, seg: 8, caps: 'rs_iron', bevel: 0.02, lod0: false });
+      B.push(M4(fus.x, fy, zCy, 0, 0, a - Math.PI / 2));
+      B.lathe(PL, barProf, 0, 0, 0, { seg: 9, uvFn: (pl, nl, v) => plUV(PLR.barrel, v.uv[0], barV(v.p[1])), lod0: false });
+      // the head: a rounded iron block, a rocker box either side, the brass head bolt and its nut, the plug lead
+      // (all kept clear of the weather cover: under it they'd read as blobs of snow)
+      B.shelter = true;
+      B.lathe('rs_iron', [[0.104, 0.615], [0.13, 0.63], [0.134, 0.68], [0.126, 0.73], [0.1, 0.77], [0.056, 0.79], [0, 0.795]], 0, 0, 0, { seg: 9, tint: [1.1, 1.02, 0.95], lod0: false });
+      for (const sz of [-1, 1]) B.box('rs_iron', 0.075, 0.065, 0.09, 0, 0.762, sz * 0.078, { r: 0.016, rx: sz * 0.5, tint: [0.92, 0.88, 0.86], lod0: true });
+      B.cyl('rs_brass', 0.03, 0.03, 0.065, 0, 0.82, 0, { seg: 8, bevel: 0.007, lod0: true });
+      B.cyl('rs_brass', 0.046, 0.046, 0.024, 0, 0.795, 0, { seg: 6, lod0: true });
+      B.tube('rs_brass', [V(0, 0.34, 0.17), V(0.02, 0.6, 0.17), V(0.07, 0.72, 0.08)], 0.008, { seg: 3, lod0: true });
+      // pushrods back down to the crankcase, an intake pipe curling back into the bowl
+      for (const sx of [-0.035, 0.035]) B.tube('rs_iron', [V(sx, 0.3, 0.13), V(sx * 1.3, 0.72, 0.1)], 0.011, { seg: 4, lod0: true });
+      B.tube('rs_brass', [V(0, 0.66, -0.09), V(0, 0.6, -0.17), V(0, 0.48, -0.21)], 0.026, { seg: 6, lod0: true });
+      B.shelter = false;
+      B.pop();
     }
-    B.cyl('rs_brass', 0, 0.17, 0.32, fus.x, fy, zN + 0.68, { rx: Math.PI / 2, seg: 10 });
-    B.push(M4(fus.x, fy, zN + 0.62, 0, 0, 0.55));
-    B.box('rs_timber', 0.2, 1.15, 0.06, 0, 0.62, 0, { r: 0.025, taper: 0.55, rx: 0.3, deform: q => { q[2] += q[1] * q[1] * 0.25; } });
-    B.box('rs_timber', 0.2, 0.36, 0.06, 0, -0.22, 0, { r: 0.025, jit: 0.04 });
+    B.torus('rs_brass', 0.34, 0.017, fus.x, fy, zCy + 0.17, { seg: 18, tseg: 4, lod0: true, shelter: true });
+    {
+      // painted like the cowl's back edge (the atlas's red band chipped to the brass, the cream pinstripe and the
+      // rivet row round its outer face, bare brass inside)
+      const a0 = -Math.PI / 2 + 0.78, al = TAU - 1.56, zr = zCy + 0.02, aL = al * 0.875 / 4.4;
+      B.grid(PL, 8, 28, (u, v) => {
+        const a = a0 + al * v, th = u * TAU, dent = 0.022 * Math.sin(a * 3 + 1.3) + 0.014 * Math.sin(a * 7 + 0.4);
+        const r = 0.875 + dent + 0.028 * Math.cos(th) - 0.03 * Math.sin(th), zz = zr + 0.14 * Math.sin(th) + 0.03 * Math.sin(a * 2 + 0.7);
+        return [fus.x + Math.cos(a) * r, fy + Math.sin(a) * r, zz];
+      }, { wrapU: true, flip: true, uv: (u, v) => plUV(PLR.cowl, 0.03 + v * aL, 0.04 + 0.3 * (1 - Math.cos(u * TAU)) / 2), lod0: false });
+    }
+    const zP = zK + 0.335;
+    B.cyl('rs_brass', 0.12, 0.13, 0.1, fus.x, fy, zP + 0.04, { rx: Math.PI / 2, seg: 10, bevel: 0.015 });
+    B.lathe('rs_brass', [[0.165, 0], [0.16, 0.08], [0.13, 0.17], [0.07, 0.25], [0, 0.29]], fus.x, fy, zP + 0.1, { rx: Math.PI / 2, seg: 12, jit: 0.02 });
+    // the prop: laminated honey wood, twisted, the long blade driven down into the dirt and bent back by it, its
+    // brass tip sheath buried, the upper one snapped off short in splinters
+    B.push(M4(fus.x, fy, zP + 0.1, 0, 0, Math.PI + 0.42));
+    const HONEY = [1.18, 1.0, 0.78];
+    B.box('rs_timber', 0.22, 1.2, 0.075, 0, 0.66, 0, { r: 0.03, taper: 0.6, div: [1, 5, 1], smoothN: true, tint: HONEY, deform: q => {
+      const t = (q[1] + 0.6) / 1.2, c = Math.cos(0.5 * t), s2 = Math.sin(0.5 * t), x = q[0], z = q[2];
+      q[0] = x * c - z * s2; q[2] = x * s2 + z * c - 0.3 * t * t;
+    } });
+    B.box('rs_brass', 0.15, 0.2, 0.085, 0, 1.18, -0.27, { r: 0.02, rx: -0.46, ry: 0.5, taper: 0.8 });
+    B.box('rs_timber', 0.22, 0.34, 0.075, 0, -0.23, 0, { r: 0.025, jit: 0.035, tint: HONEY });
+    for (const [ox, len, rz] of [[-0.06, 0.12, 0.2], [0.02, 0.17, -0.1], [0.07, 0.1, 0.35]]) B.box('rs_timber', 0.035, len, 0.03, ox, -0.4 - len / 2, 0, { rz, r: 0.008, tint: HONEY, lod0: true });
     B.pop();
     // the tail broke its back on landing: the boom snapped up at forty degrees, the fin standing high
     // over the wreck with the gnomish roundel on it (this is what you see from the road below the mesa)
     const pitch = 0.7, bl = 2.5, b0 = V(fus.x, fy + 0.15, zT + 0.35);
     const dir = V(0, Math.sin(pitch), -Math.cos(pitch)), b1 = b0.clone().add(dir.clone().multiplyScalar(bl));
-    B.lathe('rs_brass', [[0.6, -0.05], [0.66, 0.04], [0.56, 0.14], [0.5, 0.2]], b0.x, b0.y, b0.z, { rx: pitch - Math.PI / 2, seg: 10, jit: 0.12 });
-    B.tube(RED, [b0, b0.clone().lerp(b1, 0.45), b1], [0.5, 0.4, 0.26], { seg: 10, off: [0.2, 0] });
+    B.lathe(PL, [[0.6, -0.05], [0.66, 0.04], [0.63, 0.1], [0.56, 0.15], [0.5, 0.2]], b0.x, b0.y, b0.z, { rx: pitch - Math.PI / 2, seg: 12, jit: 0.06, uvFn: (pl, nl, v) => plUV(PLR.cowl, v.uv[0] * 0.85, 0.02 + 0.3 * v.uv[1]) });
+    B.tube(PL, [b0, b0.clone().lerp(b1, 0.45), b1], [0.5, 0.4, 0.26], { seg: 12, fit: true, S: bl, uvFn: (pl, nl, v) => plUV(PLR.hull, 0.03 + v.uv[1] * 0.2, fold(v.uv[0])) });
     B.push(new THREE.Matrix4().compose(b1, new THREE.Quaternion().setFromEuler(new THREE.Euler(pitch * 0.8, 0, 0, 'YXZ')), new V3(1, 1, 1)));
-    B.box(RED, 0.1, 1.6, 1.15, 0, 0.76, -0.15, { r: 0.04, taper: 0.62, div: [1, 2, 2], fit: 'v', deform: q => { q[2] -= (q[1] + 0.8) * 0.3; } });
+    B.box(PL, 0.1, 1.6, 1.15, 0, 0.76, -0.15, { r: 0.04, taper: 0.62, div: [1, 2, 2], fit: true, uvRect: plRect(PLR.hull, [0.02, 0.5, 0.24, 0.96]), deform: q => { q[2] -= (q[1] + 0.8) * 0.3; } });
     B.box('rs_brass', 0.12, 0.08, 0.66, 0, 1.56, -0.62, { r: 0.025 });
     for (const sx of [-1, 1]) B.quad('rs_roundel#', 0.82, 0.82, sx * 0.058, 0.68, -0.28, { ry: sx * Math.PI / 2 });
     B.box('rs_wing', 2.6, 0.07, 0.72, 0, 0.02, -0.05, { r: 0.025, rz: 0.1, tint: WING_RED });
@@ -1221,18 +1346,18 @@ function buildCrash(B, p, parts, ctx, decor) {
     for (const sx of [-1, 1]) B.box('rs_wing', 0.5, wing.hy * 2 + 0.02, wing.hz * 2 + 0.02, wing.x + sx * (wing.hx - 0.75), wing.y - (sx > 0 ? 0.02 : 0), wing.z, { r: 0.05, tint: WING_RED, rz: sx > 0 ? -0.04 : 0 });
     B.quad('rs_roundel#', 0.95, 0.95, wing.x - wing.hx + 1.6, wing.y + wing.hy + 0.02, wing.z, { rx: -Math.PI / 2 });
     B.cyl('rs_brass', 0.055, 0.055, 6.75, wing.x - 0.78, wing.y, wing.z + wing.hz, { rz: Math.PI / 2, seg: 6, caps: false });
-    B.box(RED, 0.12, wing.hy * 2 + 0.06, wing.hz * 2 + 0.04, wing.x - wing.hx, wing.y, wing.z, { r: 0.04 });
+    B.box(PL, 0.12, wing.hy * 2 + 0.06, wing.hz * 2 + 0.04, wing.x - wing.hx, wing.y, wing.z, { r: 0.04, ...TRIM });
     // the upper wing: left half still up on its struts; the right half snapped off its root and
     // flung up and outward, a bent strut still hanging off it trailing a tattered pennant
     const uy = 2.05, uz = wing.z + 0.1;
     B.box('rs_wing', 6.4, 0.14, 1.5, wing.x - 1.0, uy, uz, { r: 0.05, off: [0.7, 0.2], div: [6, 1, 1] });
     B.box('rs_wing', 0.6, 0.15, 1.52, wing.x - 3.75, uy, uz, { r: 0.05, tint: WING_RED });
-    B.box(RED, 0.12, 0.2, 1.54, wing.x - 4.2, uy, uz, { r: 0.04 });
+    B.box(PL, 0.12, 0.2, 1.54, wing.x - 4.2, uy, uz, { r: 0.04, ...TRIM });
     B.quad('rs_roundel#', 1.0, 1.0, wing.x - 2.9, uy + 0.08, uz, { rx: -Math.PI / 2 });
     B.push(M4(wing.x + 2.25, uy - 0.05, uz, 0, -0.1, 0.72));
     B.box('rs_wing', 2.1, 0.13, 1.45, 1.05, 0, 0, { r: 0.05, jit: 0.04, off: [0.1, 0.9], div: [3, 1, 1] });
     B.box('rs_wing', 0.5, 0.14, 1.47, 1.8, 0, 0, { r: 0.05, tint: WING_RED, jit: 0.03 });
-    B.box(RED, 0.12, 0.19, 1.5, 2.1, 0, 0, { r: 0.04 });
+    B.box(PL, 0.12, 0.19, 1.5, 2.1, 0, 0, { r: 0.04, ...TRIM });
     // the bent strut and the pennant
     const s0 = V(1.6, -0.1, 0.4), s1 = V(1.75, -0.75, 0.48), s2 = V(2.1, -1.2, 0.46);
     B.tube('rs_timber', [s0, s1, s2], 0.045, { seg: 6, lod0: false });
@@ -1256,10 +1381,11 @@ function buildCrash(B, p, parts, ctx, decor) {
     }
   }
   // debris scattered round the wreck (kept off the loot, which lies behind it)
-  const debris = [RED, 'rs_wing', 'rs_brass', 'rs_iron', RED, 'rs_timber'];
+  const debris = [PL, 'rs_wing', 'rs_brass', 'rs_iron', PL, 'rs_timber'];
   for (let i = 0; i < 12; i++) {
     let x, z; do { const a = rnd() * TAU, rr = range(rnd, 2.6, 4.8); x = Math.cos(a) * rr; z = Math.sin(a) * rr; } while (z < -2.5 && Math.abs(x) < 3.5);
-    B.box(debris[i % debris.length], range(rnd, 0.3, 0.7), 0.04, range(rnd, 0.25, 0.5), x, B.ground(x, z) + 0.04, z, { ry: rnd() * 3, rx: range(rnd, -0.25, 0.25), rz: range(rnd, -0.25, 0.25), jit: 0.05 });
+    const m = debris[i % debris.length];
+    B.box(m, range(rnd, 0.3, 0.7), 0.04, range(rnd, 0.25, 0.5), x, B.ground(x, z) + 0.04, z, { ry: rnd() * 3, rx: range(rnd, -0.25, 0.25), rz: range(rnd, -0.25, 0.25), jit: 0.05, ...(m === PL ? TRIM : {}) });
   }
   B.box('rs_timber', 0.2, 0.85, 0.06, -1.8, B.ground(-1.8, 3.6) + 0.04, 3.6, { rx: -Math.PI / 2 + 0.05, ry: 0.7, taper: 0.6, r: 0.02 });
   // the big pieces: a crumpled cowling panel, a broken strut still trailing its fabric, the other prop blade
@@ -1400,7 +1526,7 @@ function buildCrash(B, p, parts, ctx, decor) {
       B.push(M4(0, 0.02, 0.02, 1.15, 0, 0.06));
       B.box('rs_wing', 1.3, 0.09, 2.1, 0, 0.0, 1.06, { r: 0.03, jit: 0.04, div: [2, 1, 4], off: [0.7, 0.4] });
       B.box('rs_wing', 1.32, 0.095, 0.5, 0, 0.0, 1.9, { r: 0.03, tint: WING_RED });
-      B.box(RED, 0.14, 0.12, 2.12, -0.66, 0.0, 1.06, { r: 0.03 });
+      B.box(PL, 0.14, 0.12, 2.12, -0.66, 0.0, 1.06, { r: 0.03, ...TRIM });
       B.cyl('rs_brass', 0.05, 0.05, 2.15, 0.68, 0.0, 1.06, { rx: Math.PI / 2, seg: 6, caps: false });
       B.quad('rs_roundel#', 0.8, 0.8, 0.0, 0.05, 1.05, { rx: -Math.PI / 2, rz: 0.3 });
       B.pop();
