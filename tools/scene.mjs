@@ -42,7 +42,13 @@ async function open(name) {
 const ready = p => p.waitForFunction(() => window.__nmd?.W && window.__nmd?.rv && (window.__nmd.frames || 0) > 20, null, { timeout: 400000 });
 const quiet = p => p.evaluate(() => { const S = window.__nmd; S.noRender = true; S.forceLock = true; document.getElementById('clickToPlay').classList.add('hidden'); document.getElementById('toasts').style.display = 'none'; });
 const ev = (p, fn, arg) => p.evaluate(fn, arg);
-const wait = (p, ms) => p.waitForTimeout(ms);
+// wait at least `ms` AND at least `n` game frames: on software GL a page can run under 1 fps and only draws a
+// teleport, an aim or another player's new pose on its next frame
+const wait = async (p, ms, n = 3) => {
+  const f0 = await p.evaluate(() => window.__nmd?.frames || 0);
+  await p.waitForTimeout(ms);
+  await p.waitForFunction(f => (window.__nmd?.frames || 0) >= f, f0 + n, { timeout: 180000 });
+};
 
 const steve = await open('Steve');
 await steve.fill('#seedInput', seed);
@@ -78,7 +84,7 @@ await setClock(HOUR);
 
 async function shot(p, name, { hud = true, settle = 1400 } = {}) {
   await p.evaluate(h => { window.__nmd.noRender = false; for (const id of ['hud', 'roster', 'prompt', 'voiceDock', 'heldLabel', 'stamina']) { const e = document.getElementById(id); if (e) e.style.visibility = h ? '' : 'hidden'; } }, hud);
-  await p.waitForTimeout(settle);
+  await wait(p, settle, 3);   // fresh frames drawn after the last teleport (a fixed wait could shoot a stale frame)
   const file = `${OUT}/${name}-d${DAY}.png`;
   await p.screenshot({ path: file });
   await p.evaluate(() => { window.__nmd.noRender = true; });

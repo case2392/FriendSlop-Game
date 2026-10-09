@@ -249,7 +249,7 @@ export function generateLeg(seed, day) {
       // clearance): any sharper and
       // the heightfield draws them as a few huge facets with snow teeth at their feet
       const ff = smoothstep(R + 1.5, R - 1.75, dm);
-      const benchSide = smoothstep(0.5, 0.87, Math.cos(a - M.benchA));
+      const benchSide = smoothstep(0.2, 0.9, Math.cos(a - M.benchA));   // its ends ease out over ~50 degrees (no short diagonal ramp)
       const bR = Math.min(R + 3 * benchSide, lim), fb = smoothstep(bR + 1.5, bR - 1.75, dm) * benchSide;
       const top = M.base + M.h + fbm(x / 6, z / 6, S + 61, 2) * 0.35 * smoothstep(M.r * 0.6, M.r, d0);
       const keep = smoothstep(6.4, 8.9, ad);   // where the road bends toward a mesa, its foot still stops at the ditch
