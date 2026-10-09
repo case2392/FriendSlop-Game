@@ -43,6 +43,11 @@ async function open(ctx, tag) {
 const built = (page, d) => page.waitForFunction(d => { const S = window.__nmd; return S?.W && S.lw && S.wv && (d == null || S.W.day === d); }, d);
 const frames = (page, n) => page.waitForFunction(n => (window.__nmd.frames || 0) > n, n);
 const send = (page, m) => page.evaluate(m => window.__nmd.send(m), m);
+// Times are taken in the page (performance.now()): t0 just before the click or the day jump, the end
+// of the build from main.js (S.builtAt), frames from the frame loop (S.frameAt). Waiting from here
+// polls the page, and a long first frame would otherwise blur when the build really ended.
+const pnow = page => page.evaluate(() => performance.now());
+const at = (page, k) => page.evaluate(k => window.__nmd[k], k);
 async function firstLoad(page, tag) {
   let t = Date.now();
   await page.goto(`http://localhost:${PORT}`);
@@ -51,21 +56,22 @@ async function firstLoad(page, tag) {
   await page.fill('#nameInput', 'Steve');
   await page.fill('#seedInput', SEED);
   if (DWELL) await page.waitForTimeout(DWELL);
-  t = Date.now();
+  const t0 = await pnow(page);
   await page.click('#hostBtn');
   await built(page, 1);
-  log(`${tag} host -> world built`, Date.now() - t);
+  log(`${tag} host -> world built`, (await at(page, 'builtAt')) - t0);
   const f0 = await page.evaluate(() => window.__nmd.frames || 0);
   await frames(page, f0 + 5);
-  log(`${tag} host -> 5 frames`, Date.now() - t);
+  log(`${tag} host -> 5 frames`, (await at(page, 'frameAt')) - t0);
 }
 async function jump(page, d, tag) {
-  const t = Date.now();
+  const t0 = await pnow(page);
   await send(page, { t: 'dbg', op: 'day', d });
   await built(page, d);
   const f0 = await page.evaluate(() => window.__nmd.frames || 0);
   await frames(page, f0 + 2);
-  log(`${tag} day ${d} rebuild`, Date.now() - t);
+  log(`${tag} day ${d} rebuild`, (await at(page, 'frameAt')) - t0);
+  log(`${tag} day ${d} built`, (await at(page, 'builtAt')) - t0);
 }
 // the texture cache writes in idle time after the world is up: wait for it to drain (no-op on old code)
 const cacheIdle = page => page.waitForFunction(() => { const c = window.__nmd?.texCache; return !c || c.idle(); }, null, { timeout: 600000, polling: 500 }).catch(() => console.log('  (cache never went idle)'));

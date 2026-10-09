@@ -43,10 +43,22 @@ initGfx($('canvas'));
 const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); });
 // the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js); while
 // the menu is up they get the first day's textures ready (a trip starts on day 1), all off this thread
-const startTexPrep = () => (window.requestIdleCallback || setTimeout)(() => {
-  texPrep.init().then(() => { if (S.phase === 'menu' && !S.W) texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[0]), { prio: 2, page: false }); });
-}, { timeout: 800 });
-if (document.readyState === 'complete') startTexPrep(); else window.addEventListener('load', startTexPrep, { once: true });
+// (the few the page must paint itself only in long idle stretches while nobody is typing)
+let lastInput = 0;
+for (const ev of ['keydown', 'pointerdown']) window.addEventListener(ev, () => { lastInput = performance.now(); }, { capture: true, passive: true });
+const menuIdle = () => (S.phase !== 'menu' || S.W ? null : !document.hidden && performance.now() - lastInput > 2000);
+// Started once the title screen has finished painting (labels.js marks it with data-menu-art), so the
+// workers don't slow it down; at the latest 10 s after load, or as soon as a trip starts (prepare()
+// starts them itself).
+let texPrepStarted = false;
+const startTexPrep = () => {
+  if (texPrepStarted) return;
+  texPrepStarted = true;
+  texPrep.init().then(() => { if (S.phase === 'menu' && !S.W) texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[0]), { prio: 2, page: 'idle', idleOk: menuIdle }); });
+};
+const t0Boot = performance.now();
+const waitTitle = () => { if (texPrepStarted) return; if (document.documentElement.dataset.menuArt || S.phase !== 'menu' || performance.now() - t0Boot > 10000) startTexPrep(); else setTimeout(waitTitle, 400); };
+if (document.readyState === 'complete') waitTitle(); else window.addEventListener('load', waitTitle, { once: true });
 S.texCache = { idle: texPrep.idle, stats: texPrep.stats, pagePainted: texPrep.pagePainted };
 S.texRecording = () => texPrep.recorded() !== null;
 rvView = new RVView(scene);
@@ -387,9 +399,10 @@ async function buildDay(m) {
   worldBuilding = false;
   for (const fn of S.pendingAfterWorld || []) fn();
   S.pendingAfterWorld = [];
+  S.builtAt = performance.now();   // tools/loadtime.mjs: the world (and its loot) is in
   // the loading screen stays up until the new world has drawn; then, once things are quiet, what was
-  // painted this session goes into the texture cache (the workers encode and write it, idle slot by
-  // idle slot) and the list of what this build asked for is kept for next time
+  // painted this session goes into the texture cache (the workers encode and write it in the
+  // background) and the list of what this build asked for is kept for next time
   const f0 = S.frames || 0;
   const afterFrames = () => {
     if (my !== buildSeq) return;
@@ -696,6 +709,7 @@ requestAnimationFrame(frame);
   lastT = now;
   time += dt;
   S.frames = (S.frames || 0) + 1;
+  S.frameAt = now;
   // while a day loads, the last frame stays up under the loading bar: re-rendering the old scene would
   // only take time from the paint workers (and on a software GPU a night frame costs seconds)
   if (!S.W || worldBuilding || !S.lw) { if (!S.noRender && !worldBuilding) render(); return; }

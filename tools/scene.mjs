@@ -8,7 +8,8 @@
 //        pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin crew hands loot night   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3 snow, 4 badlands, 5 desert.  PROFILE=<dir> keeps one browser profile across runs (the
-// painted-texture cache too), so a second run shows the textures as a returning player gets them.
+// painted-texture cache too), so a second run shows the textures as a returning player gets them;
+// give it SCENE_PORT=<port> as well (storage belongs to an origin, and the port is part of it).
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
@@ -23,6 +24,7 @@ fs.mkdirSync(OUT, { recursive: true });
 
 const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
 let PORT; do PORT = 8000 + Math.floor(Math.random() * 900); while (UNSAFE_PORTS.has(PORT));
+if (process.env.SCENE_PORT) PORT = +process.env.SCENE_PORT;   // with PROFILE: the same origin each run, so its storage carries over
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 process.on('unhandledRejection', e => { console.log('FAILED:', e.message.split('\n')[0]); if (errors.length) console.log('page errors:\n' + errors.slice(0, 20).join('\n')); process.exit(1); });
@@ -259,6 +261,8 @@ const fps = await dave.evaluate(() => new Promise(r => { let n = 0; const t0 = p
 const calls = await dave.evaluate(() => window.__nmd.renderer?.()?.info?.render?.calls ?? null);
 console.log(`fps (swiftshader, last view): ${fps.toFixed(1)}${calls != null ? ` · draw calls ${calls}` : ''}`);
 console.log(errors.length ? 'errors:\n' + errors.slice(0, 20).join('\n') : 'no page errors');
+const tx = await steve.evaluate(() => window.__nmd.texCache?.stats?.() || null);
+if (tx) console.log(`textures: ${tx.cacheHits} from the cache, ${tx.workerPaints} painted by workers, ${tx.pagePaints} by the page`);
 if (persistent) await steve.waitForFunction(() => window.__nmd.texCache?.idle?.() ?? true, null, { timeout: 180000, polling: 500 }).catch(() => console.log('(texture cache writes still going at exit)'));
 await browser.close();
 process.exit(0);
