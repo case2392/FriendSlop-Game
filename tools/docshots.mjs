@@ -123,38 +123,6 @@ if (want('carrying')) { // 4. carrying a TV down the road
 }
 
 }
-if (want('climbing')) { // 5. climbing the canyon wall
-{
-  await send({ t: 'dbg', op: 'clock', h: 8 });
-  const wall = await steve.evaluate(() => {
-    const W = window.__nmd.W;
-    // the steepest face (it paints as bare rock) that still rises 6 m, left of the road: every biome's walls differ
-    let best = null;
-    for (let z = 200; z < 520; z += 5) {
-      if (W.obstacles.some(o => Math.abs(o.z - z) < 30) || W.pois.some(p => Math.abs(p.z - z) < 25)) continue;   // gates, stops: props in the way
-      const rx = W.roadX(z);
-      for (let d = 10; d < 60; d += 0.5) { const x = rx + d, h = W.heightAt(x, z), s1 = W.heightAt(x + 1, z) - h; if (W.heightAt(x + 12, z) - h > 6 && (!best || s1 > best.s1)) best = { x: x - 0.9, z, base: h, s1 }; }
-    }
-    return best;
-  });
-  await ev(steve, w => { const S = window.__nmd; S.me.teleport(w.x, w.base + 0.2, w.z, Math.PI / 2); S.me.pitch = -0.25; S.me.stamina = 100; }, wall);
-  await wait(steve, 600);
-  await steve.mouse.down(); await steve.keyboard.down('w');
-  await wait(steve, 2800);
-  await steve.waitForFunction(b => window.__nmd.me.pos.y > b + 2.5, wall.base, { timeout: 240000 }).catch(() => console.log('  (Steve did not get 2.5 m up the wall)'));
-  await steve.keyboard.up('w');
-  // Dave watches from the valley floor (nobody can stand on the face itself: he'd slide down it)
-  await ev(dave, w => { const S = window.__nmd; const W = S.W; const x = w.x - 10, z = w.z - 7; S.me.teleport(x, W.heightAt(x, z) + 0.1, z, 0); }, wall);
-  await wait(dave, 600);
-  await daveSeesSteve();
-  await ev(dave, () => { const S = window.__nmd; const v = [...S.views.values()][0]; S.aimAt(v.group.position.x, v.group.position.y + 1.4, v.group.position.z); S.me.pitch -= 0.08; });
-  await shot(dave, 'climbing');
-  await ev(steve, () => { window.__nmd.me.pitch = 0.95; window.__nmd.me.yaw += Math.PI; });
-  await shot(steve, '_climbing-fp');
-  await steve.mouse.up();
-}
-
-}
 if (want('rim-code')) { // 6. the ranger gate, and the code painted up on the rim
 {
   const gate = W.obstacles.find(o => o.type === 'gate');
@@ -246,8 +214,40 @@ await ev(steve, () => document.getElementById('receipt').classList.remove('hidde
 await shot(steve, '_receipt');
 
 }
-if (want('biomes')) { // 10. one road view per biome after the first: days 2 (fields), 3 (snow), 4 (badlands), 5 (desert)
+// 5. climbing a canyon wall: shot on day 4, where the badlands walls are steep banded rock (day 1's meadow walls
+// are grassy hills, and a climb up one doesn't read)
+async function climbShot() {
+  const wall = await steve.evaluate(() => {
+    const W = window.__nmd.W;
+    // the steepest face (it paints as bare rock) that still rises 6 m, left of the road: every biome's walls differ
+    let best = null;
+    for (let z = 200; z < 520; z += 5) {
+      if (W.obstacles.some(o => Math.abs(o.z - z) < 30) || W.pois.some(p => Math.abs(p.z - z) < 25)) continue;   // gates, stops: props in the way
+      const rx = W.roadX(z);
+      for (let d = 10; d < 60; d += 0.5) { const x = rx + d, h = W.heightAt(x, z), s1 = W.heightAt(x + 1, z) - h; if (W.heightAt(x + 12, z) - h > 6 && (!best || s1 > best.s1)) best = { x: x - 0.9, z, base: h, s1 }; }
+    }
+    return best;
+  });
+  await ev(steve, w => { const S = window.__nmd; S.me.teleport(w.x, w.base + 0.2, w.z, Math.PI / 2); S.me.pitch = -0.25; S.me.stamina = 100; }, wall);
+  await wait(steve, 600);
+  await steve.mouse.down(); await steve.keyboard.down('w');
+  await wait(steve, 2800);
+  await steve.waitForFunction(b => window.__nmd.me.pos.y > b + 2.5, wall.base, { timeout: 240000 }).catch(() => console.log('  (Steve did not get 2.5 m up the wall)'));
+  await steve.keyboard.up('w');
+  // Dave watches from the valley floor (nobody can stand on the face itself: he'd slide down it)
+  await ev(dave, w => { const S = window.__nmd; const W = S.W; const x = w.x - 10, z = w.z - 7; S.me.teleport(x, W.heightAt(x, z) + 0.1, z, 0); }, wall);
+  await wait(dave, 600);
+  await daveSeesSteve();
+  await ev(dave, () => { const S = window.__nmd; const v = [...S.views.values()][0]; S.aimAt(v.group.position.x, v.group.position.y + 1.4, v.group.position.z); S.me.pitch -= 0.08; });
+  await shot(dave, 'climbing');
+  await ev(steve, () => { window.__nmd.me.pitch = 0.95; window.__nmd.me.yaw += Math.PI; });
+  await shot(steve, '_climbing-fp');
+  await steve.mouse.up();
+}
+
+if (want('biomes') || want('climbing')) { // 10. one road view per biome after the first: days 2 (fields), 3 (snow), 4 (badlands), 5 (desert); the climb on day 4
   for (const [day, name] of [[2, 'fields'], [3, 'snow'], [4, 'badlands'], [5, 'desert']]) {
+    if (!want('biomes') && day !== 4) continue;
     await send({ t: 'dbg', op: 'day', d: day });
     for (const p of [steve, dave]) await p.waitForFunction(d => window.__nmd.W?.day === d && window.__nmd.lw, day, { timeout: 180000 });
     await send({ t: 'dbg', op: 'clock', h: 10.5 });
@@ -256,7 +256,8 @@ if (want('biomes')) { // 10. one road view per biome after the first: days 2 (fi
     const tz = z + 55, tx = await roadX(tz);
     await ev(steve, ([x, z]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, Math.PI); }, [x + 2.6, z + 8]);
     await ev(dave, ([x, z, tx, ty, tz]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, 0); S.aimAt(tx, ty, tz); }, [x, z, tx, (await hAt(tx, tz)) + 1.8, tz]);
-    await shot(dave, `biome-${name}`, { hud: false });
+    if (want('biomes')) await shot(dave, `biome-${name}`, { hud: false });
+    if (day === 4 && want('climbing')) await climbShot();
   }
 }
 console.log('dave KOs', JSON.stringify(await dave.evaluate(() => ({ log: window.__nmd.me.koLog, fall: window.__nmd.me.lastFall, crash: window.__nmd.me.lastCrash }))));
