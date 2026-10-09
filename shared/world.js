@@ -243,7 +243,9 @@ export function generateLeg(seed, day) {
       // and on the side facing the road, the foot (bench included) stops at the end of the ditch, 6.4 m from
       // the road's centre
       const toRoad = -p.side * Math.cos(a), lim = toRoad > 0.05 ? (p.off - 6.4) / toRoad - 1.5 : Infinity;
-      const R = Math.min(Math.max(M.r * (d0 < M.r * 0.6 ? 1 : lobe), 6.95), lim);
+      // (a smooth min over 1.5 m: a hard corner where the cut meets the round body makes steep sliver triangles)
+      const R0 = Math.max(M.r * (d0 < M.r * 0.6 ? 1 : lobe), 6.95), hk = Math.max(1.5 - Math.abs(R0 - lim), 0) / 1.5;
+      const R = Math.min(R0, lim) - hk * hk * 1.5 * 0.25;
       const dm = d0 + noise2(x / 3, z / 3, S + 51) * 0.5;
       // the flanks fall over 3.25 m (more than a grid cell, inside the old footprint, so the road keeps its
       // clearance): any sharper and
@@ -652,6 +654,14 @@ export function generateLeg(seed, day) {
       }
     } else if (k === 'oak' || k === 'pine' || k === 'palm') {
       tree(k, x, z, s, ry);
+      // Dun Morogh: valley-floor pines often stand in dark clumps of three (they give the white long views their darks)
+      if (k === 'pine' && biome === 'snow' && off < wd - 4 && rngD() < 0.3) {
+        for (let j = 0; j < 2; j++) {
+          const a = rngD() * 6.283, dd = 2.4 + rngD() * 2.2, gx = x + Math.cos(a) * dd, gz = z + Math.sin(a) * dd;
+          if (!decorOk(gx, gz, Math.abs(gx - roadX(gz))) || cyls.some(c => c.mat === 'tree' && Math.hypot(c.x - gx, c.z - gz) < 2.2)) continue;
+          tree('pine', gx, gz, (0.7 + rngD() * 0.5) * s, rngD() * 6.283);
+        }
+      }
     } else if (k === 'cactus') {
       const hh = 0.9 + rng() * 0.9;
       cyls.push({ x, y: y + hh, z, r: biome === 'badlands' ? 0.45 : 0.24, hh, mat: 'cactus' });   // badlands cacti are organ-pipe clumps
