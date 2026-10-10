@@ -506,21 +506,25 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
    the day's textures while the loading bar is up. At nightfall the next
    day's world data and textures get ready behind the night scene.
    `tools/texhash.mjs` checks every texture comes out pixel-identical all
-   three ways; `tools/loadtime.mjs` measures. With software rendering on 4 CPU
-   cores, from "Start a Trip" (median of two runs, before → after): a first
-   visit's world is built in 13.3 → 14.6 s and draws its first frames at
-   38 → 32 s; a returning player's world is built in 12.5 → 7.7 s and draws at
-   37 → 30.5 s; a new day draws in 17–22 s → 15–21 s the first time,
-   13–14.5 s once its textures are cached, NIGHT_AFTER after a night. What's
-   left: on that machine most of the wait is the software renderer building
-   shader pipelines (a trace of a returning player's load shows about 28 s
-   of GPU-process time in pipeline creation); a first visit still paints
-   about four textures in ten on the main thread, because their paints clip
-   with antialiasing and an OffscreenCanvas clips without it; and the
-   character atlases are never cached, because their pixels depend on what
-   was painted before them (characters.js strokes through a shared scratch
-   canvas whose size depends on history), so they're painted in game order
-   as before. None of it has been measured on a real GPU.
+   three ways, `tools/texgame.mjs` checks every texture a running game holds
+   against an older checkout, and `tools/loadtime.mjs` measures. With
+   software rendering on 4 CPU cores, from "Start a Trip" (median of three
+   runs, before → after): a first visit's world is built in 9.4 → 9.5 s and
+   draws its first frames at 27.5 → 22.9 s; a returning player's world is
+   built in 8.6 → 5.8 s and draws at 25.1 → 22.1 s; a new day draws in
+   12.3–15.5 → 13.0–13.3 s the first time, 13.0–15.5 → 9.0–9.2 s once its
+   textures are cached, and 10.0–13.4 → 9.8 s after a night. What's left: on
+   that machine most of the wait is the software renderer's first frames
+   after the build (about 16 s for a returning player; a trace of that load
+   shows the GPU process busy for 28 of its 37 s, most of it waiting for
+   SwiftShader to finish drawing, with the page's main thread blocked on it
+   for 16 s); a first visit still paints about a third of the day's textures
+   on the main thread, because their paints clip with antialiasing and an
+   OffscreenCanvas clips without it, so its world isn't built any sooner;
+   and the character atlases are never cached, because their pixels depend
+   on what was painted before them (characters.js strokes through a shared
+   scratch canvas whose size depends on history), so they're painted in game
+   order as before. None of it has been measured on a real GPU.
 
 ---
 

@@ -84,11 +84,12 @@ built in your browser. Background workers paint what they can while the
 loading bar is up, your browser keeps the painted textures (IndexedDB) so
 the next visit decodes them instead, and the next day gets ready during the
 night. On a machine with no GPU (software rendering on 4 CPU cores), from
-"Start a Trip": the first visit draws its first frames after about 32 s, a
-returning visit after about 30 s (its world is built in about 8 s), and a
-later day takes 13–21 s. Most of the rest on that machine is software shader
-compiling; a real graphics card does that much faster, but we haven't
-measured it. Use a browser with hardware acceleration on.
+"Start a Trip": the first visit draws its first frames after about 23 s, a
+returning visit after about 22 s (its world is built in about 6 s), and a
+later day takes 9–14 s. Most of the rest on that machine is the software
+renderer drawing its first frames; a real graphics card does that much
+faster, but we haven't measured it. Use a browser with hardware acceleration
+on.
 
 | | |
 |---|---|
@@ -136,6 +137,8 @@ client/   player.js    first-person controller: walk/sprint/jump, stamina climbi
           paint/       the texture painter: core.js (brushes, blotches, strokes, seamless blur)
                        plus one family per domain (terrain, nature, architecture, vehicle,
                        characters, props, roadside, ui)
+          texprep.js · texcache.js · paint/worker.js   textures ready before a day builds: paint
+                       workers, the browser's texture cache (IndexedDB), the night's prefetch
           gfx.js · atmosphere.js     lights, sky, fog, clouds, horizon rings, day/night per biome
           terrain3d.js               splatted painted ground, cliffs, ground clutter
           nature3d.js                oaks, pines, palms, hoodoos, buttes, arches, boulders, cacti
@@ -146,6 +149,8 @@ client/   player.js    first-person controller: walk/sprint/jump, stamina climbi
 tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewpoints per day
           gallery.mjs   every texture, tiled to show seams · preview.mjs  single 3D assets
           drive-test.mjs  headless autopilot down a leg (RV handling)
+          loadtime.mjs  load-time numbers · texhash.mjs · texgame.mjs · texfaults.mjs  the
+                       texture cache and paint workers give the same pixels, under faults too
 ```
 
 - **Server-authoritative world, client-authoritative bodies.** The server

@@ -11,12 +11,30 @@
 //
 // --root runs another checkout's server and client (e.g. a pre-change copy) for before/after numbers.
 // Software GL (swiftshader) like every other tool here, so absolute numbers are a CPU-only worst case.
+//
+//   node tools/loadtime.mjs --summary before1.log before2.log -- after1.log after2.log
+//          medians (and ranges) of saved runs' output, before -> after, for each number
+import fs from 'node:fs';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
 const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : d; };
+if (process.argv.includes('--summary')) {
+  const files = process.argv.slice(process.argv.indexOf('--summary') + 1), k = files.indexOf('--');
+  const runs = list => list.map(f => fs.readFileSync(f, 'utf8').split('\n').find(l => l.startsWith('JSON '))).filter(Boolean).map(l => JSON.parse(l.slice(5)));
+  const A = runs(k < 0 ? files : files.slice(0, k)), B = k < 0 ? [] : runs(files.slice(k + 1));
+  const med = v => { const s = [...v].sort((a, b) => a - b), n = s.length; return n % 2 ? s[n >> 1] : (s[n / 2 - 1] + s[n / 2]) / 2; };
+  const s1 = v => (v / 1000).toFixed(1), cell = v => (v.length ? `${s1(med(v))} s [${s1(Math.min(...v))}-${s1(Math.max(...v))}]` : '-');
+  console.log(`median [range] of ${A.length} run(s)${B.length ? ` -> ${B.length} run(s)` : ''}`);
+  for (const key of [...new Set([...A, ...B].flatMap(Object.keys))]) {
+    const a = A.map(r => r[key]).filter(x => x != null), b = B.map(r => r[key]).filter(x => x != null);
+    const d = a.length && b.length ? `  (${med(b) >= med(a) ? '+' : ''}${s1(med(b) - med(a))} s)` : '';
+    console.log(`${key}: ${cell(a)}${B.length ? ` -> ${cell(b)}${d}` : ''}`);
+  }
+  process.exit(0);
+}
 const ROOT = path.resolve(arg('root', path.join(path.dirname(fileURLToPath(import.meta.url)), '..')));
 const SEED = arg('seed', '777');
 const SKIP = new Set(String(arg('skip', '')).split(',').filter(Boolean));
