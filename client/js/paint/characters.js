@@ -262,7 +262,7 @@ export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, sc
 
 // (the game's sun is warm and bright: browns paint darker and cooler than they read on screen)
 const LEATHER = '#5a3c26', LEATHER_D = '#3a2518', SUEDE = '#7a5636', TRIM = '#d6b46c', LINEN = '#ddcfb0', BRASS = '#b58c3c', IRON = '#7d8088';
-const TROUSER = '#43362e';
+const TROUSER = '#4a392c';
 const INK = '#24192a';    // the darkest thing we ever paint (soft violet-brown, not black)
 
 const sstepJS = (a, b, x) => { const t = Math.max(0, Math.min(1, (x - a) / (b - a))); return t * t * (3 - 2 * t); };
@@ -1223,7 +1223,27 @@ function paintLeg(g, r, S, rnd) {
     gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(INK, 0.15)], [0.35, rgba('#fff1c4', 0.1)], [0.5, rgba('#fff1c4', 0.14)], [0.75, rgba(INK, 0.3)], [1, rgba(INK, 0.15)]]);
     for (const u of [0.25, 0.75]) stitches(g, [[U(u), V(0.47)], [U(u), V(1)]], S.legs === 'overalls' ? '#e0c890' : INK, 0.5);
     blob(g, U(0.5), V(0.53), r.w * 0.12, 11, 0, lightOf(pants, 0.45), 0.35, 0.2);   // knee
-    if (S.legs === 'trousers') {
+    if (S.legs === 'trousers' && S.boots === 'tall') {
+      // a padded leather knee guard over the kneecap (people.js swells the knee under it), strapped
+      // round the leg above the knee: its top lit cream, a stitched border and quilting, a rivet, a
+      // cool shadow under its lower edge
+      const KG = '#7a5232';
+      band(g, r, 0.598, 0.62, '#2e1d14', 1);
+      bandGrad(g, r, 0.612, 0.62, rgba(lightOf('#2e1d14', 0.7), 0.6), rgba('#2e1d14', 0));
+      hstitch(g, r, 0.609, '#c8a070', 0.4);
+      bandGrad(g, r, 0.585, 0.598, rgba(INK, 0), rgba(INK, 0.4));
+      blob(g, U(0.5), V(0.488), r.w * 0.15, 5, 0, mix(INK, COOL, 0.4), 0.55, 0.3);
+      g.save(); g.beginPath(); g.roundRect(U(0.37), V(0.63), r.w * 0.26, V(0.492) - V(0.63), 6); g.clip();
+      leather(g, r, U(0.37), V(0.63), r.w * 0.26, V(0.492) - V(0.63), KG, rnd, { creases: 2, scuffs: 4, light: 0.36 });
+      gradV(g, U(0.37), V(0.63), r.w * 0.26, V(0.492) - V(0.63), [[0, rgba('#ffe2a8', 0.5)], [0.18, rgba(lightOf(KG, 0.3), 0.2)], [0.55, rgba(KG, 0)], [1, rgba(mix(shadowOf(KG, 0.5), COOL, 0.3), 0.6)]]);
+      gradH(g, U(0.37), V(0.63), r.w * 0.26, V(0.492) - V(0.63), [[0, rgba(INK, 0.3)], [0.4, rgba('#ffe8b8', 0.12)], [1, rgba(INK, 0.32)]]);
+      for (const v of [0.565, 0.53]) sfold(g, curve(U(0.39), V(v), U(0.61), V(v), -2, 4), 3.2, KG, 0.7, { dark: 0.6, ridge: 1.1 });
+      g.restore();
+      const kg = [[U(0.385), V(0.618)], [U(0.615), V(0.618)], [U(0.615), V(0.505)], [U(0.385), V(0.505)], [U(0.385), V(0.618)]];
+      stitches(g, kg, '#e0c090', 0.55, 2, 2, 1);
+      wear(g, along(U(0.38), V(0.627), U(0.62), V(0.627), 5), KG, 1.4, 0.45, rnd);
+      rivet(g, U(0.5), V(0.6), 2.2, BRASS);
+    } else if (S.legs === 'trousers') {
       g.save(); g.beginPath(); g.roundRect(U(0.4), V(0.6), r.w * 0.2, V(0.49) - V(0.6), 3); g.clip();
       leather(g, r, U(0.4), V(0.6), r.w * 0.2, V(0.49) - V(0.6), '#6e5038', rnd, { creases: 2, scuffs: 4 });
       g.restore();
@@ -1233,13 +1253,14 @@ function paintLeg(g, r, S, rnd) {
     bandGrad(g, r, 0.84, 1.0, rgba(INK, 0), rgba(INK, 0.55));        // in the skirt's shade
     blob(g, U(0.75), V(0.85), r.w * 0.12, 30, 0, INK, 0.3, 0.1);       // inner thigh
     // boots
-    const boot = S.outfit === 'repo' ? '#3a2b22' : S.boots === 'shoe' ? '#2d2428' : LEATHER_D;
+    const boot = bootColor(S);
     const top = S.boots === 'tall' ? 0.48 : S.boots === 'short' ? 0.3 : S.boots === 'work' ? 0.278 : 0.16;
     if (S.boots === 'work') {   // the trouser legs bunch over the boot tops
       for (let i = 0; i < 8; i++) { const u = (i + rnd() * 0.6) / 8; sfold(g, curve(U(u), V(0.37), U(u + range(rnd, -0.06, 0.06)), V(0.29), range(rnd, -3, 3), 3), 6, pants, 0.95, { dark: 0.6 }); }
       for (let i = 0; i < 3; i++) { const y = V(0.3 + i * 0.025); sfold(g, curve(r.x, y, r.x + r.w, y + range(rnd, -2, 2), 2, 6), 5, pants, 0.8); }
       wear(g, along(r.x, V(0.284), r.x + r.w, V(0.284), 12), pants, 2, 0.4, rnd);
     }
+    if (S.boots === 'tall') { paintTallBoot(g, r, boot, rnd); return; }
     clipRect(g, r.x, V(top), r.w, r.y + r.h - V(top), () => {
       leather(g, r, r.x, V(top), r.w, r.y + r.h - V(top), boot, rnd, { creases: 6, scuffs: 10, wrap: true, light: 0.4 });
       for (let i = 0; i < 6; i++) sfold(g, curve(U(0.32 + rnd() * 0.36), V(0.1 + rnd() * 0.05), U(0.32 + rnd() * 0.36), V(0.14 + rnd() * 0.06), 2), 5, boot, 0.85, { dark: 0.6 });   // ankle creases
@@ -1247,43 +1268,142 @@ function paintLeg(g, r, S, rnd) {
       gradH(g, r.x, V(top), r.w, r.y + r.h - V(top), [[0, rgba(INK, 0.2)], [0.4, rgba('#fff1c4', 0.08)], [0.75, rgba(INK, 0.28)], [1, rgba(INK, 0.2)]]);
     });
     bandGrad(g, r, top, top + 0.03, rgba(INK, 0.0), rgba(INK, 0.45));
-    if (S.boots === 'tall') {
-      // the turned-down suede cuff (lit on its rolled top, dark under), a strap and buckle round the ankle
-      const cuff = SUEDE;
-      clipRect(g, r.x, V(0.478), r.w, V(0.4) - V(0.478), () => leather(g, r, r.x, V(0.478), r.w, V(0.4) - V(0.478), cuff, rnd, { creases: 3, scuffs: 6, wrap: true, light: 0.45 }));
-      bandGrad(g, r, 0.455, 0.48, rgba(lightOf(cuff, 0.6), 0.8), rgba(lightOf(cuff, 0.6), 0));
-      for (let i = 0; i < 6; i++) { const u = (i + rnd() * 0.5) / 6; sfold(g, [[U(u), V(0.47)], [U(u + 0.02), V(0.41)]], 5, cuff, 0.8); }
-      wear(g, along(r.x, V(0.476), r.x + r.w, V(0.476), 10), cuff, 1.6, 0.45, rnd);
-      hstitch(g, r, 0.41, '#e8d0a0', 0.5);
-      bandGrad(g, r, 0.375, 0.4, rgba(INK, 0.0), rgba(INK, 0.6));
-      band(g, r, 0.19, 0.225, '#3a261a', 1); hstitch(g, r, 0.207, '#c8a070', 0.4);
-      buckle(g, U(0.25), V(0.207), 6, 7);
-    }
     if (S.boots === 'work') { band(g, r, 0.06, 0.09, '#2a1e18', 0.8); for (let k = 0; k < 4; k++) { const y = V(0.13 + k * 0.035); stroke(g, [[U(0.44), y], [U(0.56), y - 3]], 1.4, 1.4, '#b8a080', 0.8); stroke(g, [[U(0.56), y], [U(0.44), y - 3]], 1.4, 1.4, '#b8a080', 0.8); } }
     bandGrad(g, r, 0.0, 0.08, rgba(INK, 0.4), rgba(INK, 0));
   });
 }
 
-function paintFoot(g, r, S, rnd) {
+const bootColor = S => S.outfit === 'repo' ? '#3a2b22' : S.boots === 'shoe' ? '#2d2428' : S.boots === 'tall' ? BOOT : LEATHER_D;
+const BOOT = '#4a2b1a', CUFF = '#a06a3c', LACE = '#c9a676';
+const COOL = '#3a3656';   // the cool violet the undersides of things go to
+const warmLit = (c, k) => mix(shade(c, 1 + k), '#d8985a', k * 0.35);   // a leather highlight: lighter and warmer, not toward grey
+// A player's knee boot (people.js LEG_TALL; v = height above the sole): the shaft laced up the
+// front over a dark tongue, raised stitched seams down each side and the back, a buckled strap
+// round the ankle (the buckle on the outside, u .25); a turned-down cuff of the leather's lighter
+// flesh side, its rolled top catching the light, a stitched hem, a rivet on each pointed tab (front,
+// outside, back), and a deep cool shadow in the undercut beneath it.
+function paintTallBoot(g, r, boot, rnd) {
   const U = u => RX(r, u), V = v => RY(r, v);
-  const boot = S.outfit === 'repo' ? '#3a2b22' : S.boots === 'shoe' ? '#2d2428' : LEATHER_D;
+  // the shaft
+  clipRect(g, r.x, V(0.398), r.w, r.y + r.h - V(0.398), () => {
+    leather(g, r, r.x, V(0.398), r.w, r.y + r.h - V(0.398), boot, rnd, { creases: 5, scuffs: 9, wrap: true, light: 0.42, sheen: 0.26 });
+    gradV(g, r.x, V(0.39), r.w, V(0.08) - V(0.39), [[0, rgba(lightOf(boot, 0.4), 0.0)], [0.15, rgba(lightOf(boot, 0.35), 0.2)], [0.6, rgba(boot, 0)], [1, rgba(COOL, 0.26)]]);
+    // the shin catches the light from the upper left, the back and the inner side fall into shadow
+    blob(g, U(0.44), V(0.3), r.w * 0.1, 26, 0, warmLit(boot, 0.6), 0.34, 0.15);
+    gradH(g, r.x, V(0.4), r.w, V(0.06) - V(0.4), [[0, rgba(COOL, 0.2)], [0.2, rgba(INK, 0.06)], [0.4, rgba('#ffe0a8', 0.1)], [0.55, rgba('#ffe0a8', 0.06)], [0.78, rgba(COOL, 0.24)], [1, rgba(COOL, 0.2)]]);
+    // the tongue under the laces, a shade darker, and the lacing: brass eyelets either side and
+    // crossed laces, each crossing lit on top with a dark slot under it
+    g.save(); g.fillStyle = shadowOf(boot, 0.35); g.globalAlpha = 0.85; g.beginPath(); g.roundRect(U(0.45), V(0.388), r.w * 0.1, V(0.15) - V(0.388), 3); g.fill(); g.restore();
+    for (const u of [0.445, 0.555]) stroke(g, [[U(u), V(0.39)], [U(u), V(0.15)]], 1.6, 1.6, shadowOf(boot, 0.6), 0.55);
+    const ys = []; for (let k = 0; k < 7; k++) ys.push(0.165 + k * 0.033);
+    for (const y of ys) for (const u of [0.452, 0.548]) rivet(g, U(u), V(y), 1.3, BRASS);
+    for (let k = 0; k < ys.length - 1; k++) {
+      const y0 = V(ys[k]), y1 = V(ys[k + 1]);
+      for (const [a, b] of [[0.452, 0.548], [0.548, 0.452]]) {
+        stroke(g, [[U(a) + 0.6, y0 + 1.2], [U(b) + 0.6, y1 + 1.2]], 1.6, 1.6, INK, 0.45);
+        stroke(g, [[U(a), y0], [U(b), y1]], 1.5, 1.5, LACE, 0.95);
+        stroke(g, [[U(a) - 0.3, y0 - 0.5], [U((a + b) / 2), (y0 + y1) / 2 - 0.5]], 0.8, 0.5, '#f4e2b8', 0.6);
+      }
+    }
+    // the lace ends tied off under the cuff
+    stroke(g, [[U(0.5), V(0.375)], [U(0.47), V(0.33)], [U(0.475), V(0.3)]], 1.4, 1, LACE, 0.8);
+    // raised stitched seams: the panels' edges either side of the shin and down the back
+    for (const u of [0.31, 0.69, 0.0, 1.0]) {
+      stroke(g, [[U(u) + 1, V(0.39)], [U(u) + 1, V(0.1)]], 2, 1.6, shadowOf(boot, 0.55), 0.6);
+      stroke(g, [[U(u) - 1, V(0.39)], [U(u) - 1, V(0.1)]], 1.4, 1.2, lightOf(boot, 0.45), 0.45);
+      stitches(g, [[U(u) - 2.6, V(0.385)], [U(u) - 2.6, V(0.11)]], '#d8b888', 0.5, 2, 2, 1);
+    }
+    // the heel counter: a stitched panel cupping the back of the ankle
+    for (const x0 of [0, 1]) {
+      const cx = U(x0);
+      g.save(); g.globalAlpha = 0.5; g.fillStyle = shadowOf(boot, 0.25); g.beginPath(); g.ellipse(cx, V(0.09), r.w * 0.14, V(0.09) - V(0.2), 0, 0, TAU); g.fill(); g.restore();
+      stitches(g, Array.from({ length: 9 }, (_, i) => { const t = i / 4 - 1; return [cx + t * r.w * 0.13, V(0.09) - (1 - t * t) * (V(0.09) - V(0.19))]; }), '#d8b888', 0.4, 2, 2, 1);
+    }
+    // ankle creases where the boot bends
+    for (let i = 0; i < 6; i++) { const u = 0.3 + rnd() * 0.4; sfold(g, curve(U(u - 0.08), V(0.15 + rnd() * 0.03), U(u + 0.08), V(0.14 + rnd() * 0.03), 2), 4, boot, 0.7, { dark: 0.6 }); }
+    // the ankle strap and its buckle on the outside
+    band(g, r, 0.185, 0.222, '#2e1d14', 1);
+    bandGrad(g, r, 0.21, 0.222, rgba(lightOf('#2e1d14', 0.7), 0.7), rgba('#2e1d14', 0));
+    bandGrad(g, r, 0.18, 0.19, rgba(INK, 0), rgba(INK, 0.5));
+    hstitch(g, r, 0.2035, '#c8a070', 0.45);
+    stroke(g, [[U(0.25) + 4, V(0.2)], [U(0.25) + 11, V(0.198)]], 3.2, 3, '#2e1d14', 1);   // the strap's tongue
+    buckle(g, U(0.25), V(0.2035), 7, 8);
+    // into the foot: dark and cool
+    bandGrad(g, r, 0.06, 0.12, rgba(mix(COOL, INK, 0.5), 0.35), rgba(COOL, 0));
+  });
+  bandGrad(g, r, 0.484, 0.51, rgba(INK, 0), rgba(INK, 0.5));   // the trousers in the fold above the cuff
+  // the undercut beneath the cuff: deep cool shade, a soft violet-brown, never black
+  bandGrad(g, r, 0.35, 0.398, rgba(mix(INK, COOL, 0.4), 0), rgba(mix(INK, COOL, 0.4), 0.85));
+  // the cuff
+  const c0 = V(0.484), c1 = V(0.39);
+  clipRect(g, r.x, c0, r.w, c1 - c0, () => {
+    leather(g, r, r.x, c0, r.w, c1 - c0, CUFF, rnd, { creases: 3, scuffs: 7, wrap: true, light: 0.3, sheen: 0.2 });
+    gradV(g, r.x, c0, r.w, c1 - c0, [[0, rgba('#f6d29a', 0.5)], [0.1, rgba(lightOf(CUFF, 0.4), 0.4)], [0.22, rgba(CUFF, 0)], [0.7, rgba(CUFF, 0)], [0.9, rgba(shadowOf(CUFF, 0.4), 0.5)], [1, rgba(mix(shadowOf(CUFF, 0.6), COOL, 0.3), 0.8)]]);
+    gradH(g, r.x, c0, r.w, c1 - c0, [[0, rgba(COOL, 0.18)], [0.2, rgba(INK, 0.04)], [0.4, rgba('#ffe0a8', 0.12)], [0.6, rgba('#ffe0a8', 0.04)], [0.78, rgba(COOL, 0.2)], [1, rgba(COOL, 0.18)]]);
+    // the turned leather bunches in soft vertical folds
+    for (let i = 0; i < 8; i++) { const u = (i + 0.2 + rnd() * 0.6) / 8; sfold(g, [[U(u), V(0.474)], [U(u + range(rnd, -0.015, 0.015)), V(0.43)]], 5, CUFF, 0.75, { dark: 0.5 }); }
+    wear(g, along(r.x, V(0.481), r.x + r.w, V(0.481), 12), CUFF, 1.8, 0.55, rnd);
+    hstitch(g, r, 0.413, '#3a2418', 0.55);
+    // the hem's dark edge, lit along its lip
+    band(g, r, 0.392, 0.401, shadowOf(CUFF, 0.55), 0.85);
+    bandGrad(g, r, 0.401, 0.406, rgba(lightOf(CUFF, 0.4), 0.5), rgba(lightOf(CUFF, 0.4), 0));
+    for (const u of [0.0, 0.25, 0.5, 1.0]) rivet(g, U(u), V(0.425), 2.4, BRASS);
+  });
+  bandGrad(g, r, 0.0, 0.07, rgba(INK, 0.4), rgba(INK, 0));
+}
+
+// The foot (people.js FOOT / SOLE): u .2-1 the upper (u around its cross-section: .2 under the
+// sole, .4 the outside, .6 the top of the foot, .8 the inside; v from the heel to the toe), u 0-.17 the
+// sole's edge (its welt at 0, the tread at .17).
+function paintFoot(g, r, S, rnd) {
+  const boot = bootColor(S), tall = S.boots === 'tall', shoe = S.boots === 'shoe', repo = S.outfit === 'repo';
+  const U0 = 0.2, U = u => RX(r, U0 + (1 - U0) * u), V = v => RY(r, v);
+  const sole = repo ? '#2a1e18' : shoe ? '#241c1e' : '#33221a', welt = repo ? '#6a5a48' : shoe ? '#5a4a42' : '#7a5636';
   clip(g, r, () => {
-    leather(g, r, r.x, r.y, r.w, r.h, boot, rnd, { creases: 5, scuffs: 10, light: 0.3, wrap: true });
-    gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(INK, 0.5)], [0.3, rgba(INK, 0)], [0.5, rgba('#fff0c8', 0.14)], [0.7, rgba(INK, 0)], [1, rgba(INK, 0.5)]]);
-    blob(g, U(0.5), V(0.86), r.w * 0.26, r.h * 0.1, 0, S.outfit === 'repo' ? '#9a9aa2' : lightOf(boot, 0.6), S.outfit === 'repo' ? 0.55 : 0.5, 0.2);   // the toe cap
-    for (let i = 0; i < 3; i++) { const y = V(0.3 + i * 0.07); sfold(g, curve(U(0.3), y, U(0.7), y - 2, 3, 4), 7, boot, 0.85, { dark: 0.6, ridge: 1.2 }); }   // creases across the ankle and instep, lit ridges
-    for (let i = 0; i < 6; i++) blob(g, U(0.4 + rnd() * 0.2), V(0.82 + rnd() * 0.12), range(rnd, 2, 4), range(rnd, 1.5, 3), rnd() * 3, '#b08a64', 0.35, 0.3);   // the toe cap scuffed pale
-    if (S.boots === 'shoe') blob(g, U(0.42), V(0.8), r.w * 0.08, r.h * 0.05, 0, '#fff0d0', 0.45, 0.3);
-    blob(g, U(0.5), V(0.08), r.w * 0.35, r.h * 0.1, 0, INK, 0.3, 0.2);
-    if (S.boots !== 'tall') for (let k = 0; k < 3; k++) { const y = V(0.42 + k * 0.08); stroke(g, [[U(0.42), y], [U(0.58), y - 4]], 1.3, 1.3, '#b8a080', 0.8); stroke(g, [[U(0.58), y], [U(0.42), y - 4]], 1.3, 1.3, '#b8a080', 0.8); }
-    else { band(g, r, 0.36, 0.43, '#3a261a', 0.9); buckle(g, U(0.5), V(0.395), 5, 6); }
-    // the sole: a dark band round the bottom with a lit welt and stitching
-    g.save(); g.fillStyle = '#2b1e18';
-    g.fillRect(r.x, r.y, r.w * 0.14, r.h); g.fillRect(RX(r, 0.86), r.y, r.w * 0.14 + 1, r.h);
-    g.globalAlpha = 0.75; g.fillStyle = '#9a7650'; g.fillRect(RX(r, 0.14), r.y, 1.6, r.h); g.fillRect(RX(r, 0.86) - 1.6, r.y, 1.6, r.h);
-    g.restore();
-    stitches(g, [[U(0.17), V(0)], [U(0.17), V(1)]], '#c8a878', 0.45, 2, 2);
-    stitches(g, [[U(0.83), V(0)], [U(0.83), V(1)]], '#c8a878', 0.45, 2, 2);
+    // the sole's edge: a lit welt on top with its stitching, the dark edge, the tread underneath
+    gradH(g, r.x, r.y, RX(r, U0) - r.x, r.h, [[0, lightOf(welt, 0.35)], [0.16, welt], [0.26, shadowOf(welt, 0.3)], [0.34, lightOf(sole, 0.25)], [0.62, sole], [0.82, mix(shadowOf(sole, 0.4), COOL, 0.25)], [1, mix(shadowOf(sole, 0.5), COOL, 0.3)]]);
+    stitches(g, [[RX(r, 0.04), r.y], [RX(r, 0.04), r.y + r.h]], '#e0c8a0', 0.55, 1.6, 1.6, 0.9);
+    if (repo) for (let k = 0; k < 9; k++) band(g, { x: RX(r, 0.09), w: r.w * 0.08, y: r.y, h: r.h }, k / 9, k / 9 + 0.05, INK, 0.45);   // lug soles
+    // the heel block's front edge: a dark step under the arch
+    g.save(); g.globalAlpha = 0.5; g.fillStyle = INK; g.fillRect(RX(r, 0.05), V(0.29), r.w * 0.12, V(0.23) - V(0.29)); g.restore();
+    // the upper
+    clipRect(g, RX(r, U0), r.y, r.w * (1 - U0) + 1, r.h, () => {
+      const x0 = RX(r, U0), w = r.w * (1 - U0);
+      leather(g, null, x0, r.y, w, r.h, boot, rnd, { creases: 5, scuffs: 9, light: 0.3, sheen: 0.24 });
+      // lit along the top of the foot, cool down the sides into the sole
+      gradH(g, x0, r.y, w, r.h, [[0, rgba(mix(INK, COOL, 0.4), 0.7)], [0.14, rgba(COOL, 0.2)], [0.3, rgba(INK, 0)], [0.5, rgba('#e8a868', 0.12)], [0.7, rgba(INK, 0.04)], [0.86, rgba(COOL, 0.24)], [1, rgba(mix(INK, COOL, 0.4), 0.7)]]);
+      // the toe cap: a stitched panel over the toe box, its top lit, scuffed pale
+      const capV = shoe ? 0.78 : 0.72;
+      g.save(); g.beginPath(); g.moveTo(U(0.12), V(1)); g.lineTo(U(0.12), V(capV + 0.06)); g.quadraticCurveTo(U(0.5), V(capV - 0.08), U(0.88), V(capV + 0.06)); g.lineTo(U(0.88), V(1)); g.closePath(); g.clip();
+      gradV(g, x0, V(1), w, V(capV - 0.05) - V(1), [[0, rgba(warmLit(boot, 0.4), 0.36)], [1, rgba(warmLit(boot, 0.2), 0.18)]]);
+      g.restore();
+      const capLine = [[U(0.12), V(capV + 0.06)], [U(0.3), V(capV - 0.01)], [U(0.5), V(capV - 0.035)], [U(0.7), V(capV - 0.01)], [U(0.88), V(capV + 0.06)]];
+      stroke(g, capLine.map(([x, y]) => [x + 0.6, y + 1.2]), 1.6, 1.6, shadowOf(boot, 0.6), 0.7);
+      stroke(g, capLine, 1.2, 1.2, lightOf(boot, 0.45), 0.5);
+      if (!shoe) stitches(g, capLine.map(([x, y]) => [x, y - 2.4]), '#d8b888', 0.5, 1.8, 1.8, 0.9);
+      blob(g, U(0.47), V(0.86), w * 0.2, r.h * 0.07, 0, repo ? '#9a9aa2' : warmLit(boot, 0.8), repo ? 0.55 : 0.42, 0.2);   // the toe catches the light (the Repo Man's steel toe)
+      for (let i = 0; i < 6; i++) blob(g, U(0.38 + rnd() * 0.24), V(0.84 + rnd() * 0.12), range(rnd, 1.6, 3.2), range(rnd, 1.2, 2.4), rnd() * 3, '#b4824c', 0.32, 0.3);
+      if (shoe) blob(g, U(0.44), V(0.82), w * 0.08, r.h * 0.05, 0, '#fff0d0', 0.45, 0.3);   // polished
+      // creases across the instep where it bends, lit ridges
+      for (let i = 0; i < 3; i++) { const y = V(0.48 + i * 0.05); sfold(g, curve(U(0.3), y, U(0.7), y - 2, 3, 4), 6, boot, 0.8, { dark: 0.6, ridge: 1.2 }); }
+      // the heel counter: a darker stitched panel round the back
+      g.save(); g.globalAlpha = 0.5; g.fillStyle = shadowOf(boot, 0.3); g.fillRect(x0, V(0.24), w, V(0) - V(0.24)); g.restore();
+      stitches(g, [[x0, V(0.24)], [x0 + w, V(0.24)]], '#d8b888', 0.45, 1.8, 1.8, 0.9);
+      bandGrad(g, r, 0.24, 0.27, rgba(INK, 0.35), rgba(INK, 0));
+      if (tall) {
+        // a buckled strap over the instep, the buckle toward the outside
+        g.save(); g.fillStyle = '#2e1d14'; g.fillRect(x0, V(0.42), w, V(0.35) - V(0.42)); g.restore();
+        stitches(g, [[x0, V(0.385)], [x0 + w, V(0.385)]], '#c8a070', 0.4, 1.6, 1.6, 0.8);
+        bandGrad(g, r, 0.41, 0.42, rgba(lightOf('#2e1d14', 0.7), 0.6), rgba('#2e1d14', 0));
+        bandGrad(g, r, 0.335, 0.35, rgba(INK, 0), rgba(INK, 0.45));
+        buckle(g, U(0.4), V(0.385), 6, 6);
+      } else if (!shoe) {
+        // laces up the instep
+        for (let k = 0; k < 3; k++) { const y = V(0.36 + k * 0.07); stroke(g, [[U(0.43), y], [U(0.57), y - 4]], 1.3, 1.3, '#b8a080', 0.8); stroke(g, [[U(0.57), y], [U(0.43), y - 4]], 1.3, 1.3, '#b8a080', 0.8); }
+      }
+      // where the upper meets the sole: a dark seam, then the welt's lit lip
+      for (const e of [0, 1]) { const ex = e ? x0 + w : x0; gradH(g, e ? ex - 5 : ex, r.y, 5, r.h, e ? [[0, rgba(INK, 0)], [1, rgba(INK, 0.6)]] : [[0, rgba(INK, 0.6)], [1, rgba(INK, 0)]]); }
+    });
   });
 }
 

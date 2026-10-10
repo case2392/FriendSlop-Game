@@ -691,9 +691,9 @@ function finish(B, ctx, parent, clusters, track = null) {
 // height of its top at a point of the current builder space (for decals and snow laid on it; unrotated panels only).
 const WING_S = 6.4, WING_RIBS = 16;
 const wingProf = c => (c < 0.3 ? Math.sin(c / 0.3 * Math.PI / 2) : Math.cos((c - 0.3) / 0.7 * Math.PI / 2));
-const wingCamber = chord => Math.min(0.06, chord * 0.035);
+const wingCamber = chord => Math.min(0.065, chord * 0.04);
 function wingPanel(B, span, th, chord, x, y, z, o = {}) {
-  const off = o.off || 0, cam = o.camber ?? wingCamber(chord), sag = o.sag ?? 0.4, user = o.deform, hc = chord / 2, ht = th / 2;
+  const off = o.off || 0, cam = o.camber ?? wingCamber(chord), sag = o.sag ?? 0.7, user = o.deform, hc = chord / 2, ht = th / 2;
   const r = Math.min(o.r ?? 0.05, th * 0.4), nose = cam > 0 ? (o.nose ?? th * 0.2) : 0;
   const deform = q => {
     if (q[1] > 0 && cam > 0) {

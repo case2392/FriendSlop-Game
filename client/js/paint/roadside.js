@@ -878,12 +878,12 @@ function ragged(rnd, n, rx, ry, lo = 0.72, hi = 1.08) {
   return P;
 }
 function wingSkin(g, w, h, rnd) {
-  const CREAM = '#d4c39a', RED = '#973b2c', REDL = '#b55c45', REDD = '#702c26', PRIMER = '#9a948a';
+  const CREAM = '#cbb68c', RED = '#973b2c', REDL = '#b55c45', REDD = '#702c26', PRIMER = '#9a948a';
   const COOL = '#3a2c44', WARM = '#fff0cc', BAY = w / WING_RIBS;
   const LE = 30, TE = 226, FS = 70, RS = 168;   // the leading-edge band's end, the trailing band's start, the spars
   const per = (k, ph) => x => Math.sin(TAU * k * x / w + ph);   // a wobble that tiles across the span
   g.fillStyle = CREAM; g.fillRect(0, 0, w, h);
-  blots(g, w, h, rnd, { colors: ['#e0d0a8', '#c4b088', '#cdb990', '#bba982', '#dacaa2'], count: 34, rmin: 34, rmax: 80, alpha: 0.42, hard: 0.05, stretch: 2.2, rot: 0, wrapX: true });
+  blots(g, w, h, rnd, { colors: ['#e6d6ae', '#b89c6a', '#cdb990', '#a89c86', '#e2d0a4', '#c0a46e'], count: 44, rmin: 30, rmax: 90, alpha: 0.5, hard: 0.05, stretch: 2.2, rot: 0, wrapX: true });
   blots(g, w, h, rnd, { colors: ['#e8dab4', '#bca882', '#c9b68c', '#d8c49a'], count: 110, rmin: 6, rmax: 20, alpha: 0.2, hard: 0.1, wrapX: true });
   // the airfoil's light: the nose and the hump a fifth of the way back lit, the cloth cooling toward the trailing edge
   g.fillStyle = grad(g, 0, 0, 0, h, [[0, WARM, 0.2], [0.1, WARM, 0.08], [0.22, WARM, 0.22], [0.38, WARM, 0.06], [0.55, COOL, 0], [0.8, COOL, 0.12], [1, COOL, 0.24]]);
@@ -896,27 +896,20 @@ function wingSkin(g, w, h, rnd) {
     g.fillRect(0, y - 12, w, 26);
   }
   // the cloth in each bay: cool where it falls away to the right of a rib, warm where it climbs to the next; deepest
-  // between the spars, shallow over the sheeted nose and toward the trailing edge; soft wrinkles off the stitching
-  const wrinkles = [];
-  for (let i = 0; i < WING_RIBS; i++) for (let k = 0; k < 3; k++) wrinkles.push([i, range(rnd, FS, TE - 12), range(rnd, 10, 22)]);
+  // between the spars, shallow over the sheeted nose and toward the trailing edge
   const tones = []; for (let i = 0; i < WING_RIBS; i++) tones.push([pick(rnd, ['#e8dab2', '#b8a47e', '#d6c08e', '#c8b896', '#e0cca0']), range(rnd, 0.05, 0.2)]);
   for (let i = 0; i < WING_RIBS; i++) { const a = ribAt(i), b = ribAt(i + 1); g.fillStyle = rgba(tones[i][0], tones[i][1]); g.fillRect(a, 0, b - a, h); }
   chordMask(g, w, h, [[0, 0.25], [LE / h, 0.3], [FS / h, 0.75], [0.5, 1], [RS / h, 0.95], [TE / h, 0.7], [1, 0.4]], q => {
     for (let i = 0; i < WING_RIBS; i++) {
       const a = ribAt(i), b = ribAt(i + 1);
-      q.fillStyle = grad(q, a, 0, b, 0, [[0, COOL, 0.52], [0.1, COOL, 0.34], [0.38, COOL, 0.07], [0.6, WARM, 0.07], [0.84, WARM, 0.32], [0.95, WARM, 0.16], [1, COOL, 0.1]]);
+      q.fillStyle = grad(q, a, 0, b, 0, [[0, COOL, 0.56], [0.12, COOL, 0.36], [0.4, COOL, 0.08], [0.6, WARM, 0.06], [0.84, WARM, 0.3], [0.95, WARM, 0.16], [1, COOL, 0.1]]);
       q.fillRect(a, 0, b - a, h);
-    }
-    for (const [i, y, L] of wrinkles) {
-      const a = ribAt(i) + 5;
-      q.save(); q.globalAlpha = 0.16; q.strokeStyle = COOL; q.lineWidth = 1.4;
-      q.beginPath(); q.moveTo(a, y); q.quadraticCurveTo(a + L * 0.6, y + 3, a + L, y + 6); q.stroke(); q.restore();
     }
   });
   // nose ribs: short ones between the main ribs, from the sheeting back to the front spar
   for (let i = 0; i < WING_RIBS; i++) {
     const x = (ribAt(i) + ribAt(i + 1)) / 2;
-    g.fillStyle = grad(g, x - 6, 0, x + 8, 0, [[0, WARM, 0], [0.4, WARM, 0.24], [0.5, '#e6d6ae', 0.5], [0.6, COOL, 0.22], [1, COOL, 0]]);
+    g.fillStyle = grad(g, x - 6, 0, x + 8, 0, [[0, WARM, 0], [0.4, WARM, 0.24], [0.5, '#c4a878', 0.55], [0.6, COOL, 0.26], [1, COOL, 0]]);
     g.fillRect(x - 6, LE, 14, FS - LE + 2);
   }
   // ---- the red-doped edges ----
@@ -962,19 +955,20 @@ function wingSkin(g, w, h, rnd) {
   for (let i = 0; i < WING_RIBS; i++) {
     const x = ribs[i], ph = rnd() * 9, kn = []; for (let k = 0; k < 30; k++) kn.push(range(rnd, -0.5, 0.5));
     wrapX(w, x, 16, X => {
-      g.fillStyle = grad(g, X + 2, 0, X + 14, 0, [[0, COOL, 0.34], [1, COOL, 0]]); g.fillRect(X + 2, -4, 12, h + 8);
-      g.fillStyle = grad(g, X - 10, 0, X - 2, 0, [[0, WARM, 0], [1, WARM, 0.3]]); g.fillRect(X - 10, -4, 8, h + 8);
+      g.fillStyle = grad(g, X + 3, 0, X + 22, 0, [[0, COOL, 0.58], [0.3, COOL, 0.32], [1, COOL, 0]]); g.fillRect(X + 3, -4, 19, h + 8);
+      g.fillStyle = grad(g, X - 14, 0, X - 3, 0, [[0, WARM, 0], [1, WARM, 0.36]]); g.fillRect(X - 14, -4, 11, h + 8);
       line(g, [[X - 1.5, -4], [X - 1.5, leY(X) - 1]], 1.6, REDL, 0.55);
       line(g, [[X - 1.5, teY(X) + 1], [X - 1.5, h + 4]], 1.6, REDL, 0.5);
       const y0 = leY(X) + 5, y1 = teY(X) - 5, L = [], R = [];
-      for (let y = y0, k = 0; y <= y1; y += 2.6, k++) { L.push([X - 4.2 - (k % 2) * 1.1, y]); R.push([X + 4.2 + (k % 2) * 1.1, y]); }
-      polyPath(g, [...L, ...R.reverse()]); g.fillStyle = rgba('#e2d2a8', 0.82); g.fill();
-      line(g, [[X - 2.6, y0], [X - 2.6, y1]], 2.6, '#f8eed6', 0.42);
-      line(g, [[X + 3.2, y0], [X + 3.2, y1]], 1.6, '#86704f', 0.38);
+      for (let y = y0, k = 0; y <= y1; y += 2.6, k++) { L.push([X - 5.2 - (k % 2) * 1.1, y]); R.push([X + 5.2 + (k % 2) * 1.1, y]); }
+      polyPath(g, [...L, ...R.reverse()]); g.fillStyle = rgba('#b89a6a', 0.9); g.fill();
+      g.fillStyle = grad(g, X - 6, 0, X + 6, 0, [[0, '#f0e0b8', 0.45], [0.45, '#d8bc88', 0.2], [1, '#5e4a3a', 0.25]]); g.fillRect(X - 6, y0, 12, y1 - y0);
+      line(g, [[X - 3.6, y0], [X - 3.6, y1]], 2.2, '#f6ead0', 0.55);
+      line(g, [[X + 4.6, y0], [X + 4.6, y1]], 2, '#5e4a3a', 0.6);
       let k = 0;
       for (let y = y0 + ph; y < y1 - 2; y += 9, k++) {
-        line(g, [[X - 3.2, y], [X + 3.2, y + 1.8 + kn[k % 30]]], 0.9, '#6a5038', 0.4);
-        ellipse(g, X + 3.5, y + 2, 0.85, 0.85, 0, '#5a4030', 0.42);
+        line(g, [[X - 4, y], [X + 4, y + 1.8 + kn[k % 30]]], 0.9, '#6a5038', 0.4);
+        ellipse(g, X + 4.3, y + 2, 0.85, 0.85, 0, '#5a4030', 0.42);
       }
     });
   }
@@ -1066,9 +1060,13 @@ function wingSkin(g, w, h, rnd) {
     chip(g, w, x, y, range(rnd, 1.3, edge ? 2.6 : 3.4), rnd() < 0.6 ? '#c2ad86' : PRIMER, rnd);
   }
   // rain and oil blown back across the chord, mildew blooms toward the trailing edge
+  softLayer(g, w, h, 6, q => {
+    for (let i = 0; i < 16; i++) { const x = rnd() * w, y = range(rnd, RS - 20, TE + 6), r = range(rnd, 20, 46), c = pick(rnd, ['#7a6244', '#8a7050', '#6a5a44']); for (const ox of [0, -w, w]) blob(q, x + ox, y, r * 1.8, r, 0, c, 0.32, 0.15); }
+    for (let i = 0; i < 8; i++) { const x = rnd() * w, y = range(rnd, LE + 10, FS + 30), r = range(rnd, 18, 40); for (const ox of [0, -w, w]) blob(q, x + ox, y, r * 1.8, r, 0, '#f2e6c4', 0.22, 0.15); }
+  });
   softLayer(g, w, h, 1.4, q => {
     for (let i = 0; i < 28; i++) {
-      const x = rnd() * w, y0 = range(rnd, 4, TE - 40), L = range(rnd, 30, 130), wd = range(rnd, 2, 6), dx = range(rnd, -4, 4), c = pick(rnd, ['#6a5640', '#5a4a3a', '#7a6248']), al = range(rnd, 0.08, 0.18);
+      const x = rnd() * w, y0 = range(rnd, 4, TE - 40), L = range(rnd, 30, 130), wd = range(rnd, 2, 6), dx = range(rnd, -4, 4), c = pick(rnd, ['#6a5640', '#5a4a3a', '#7a6248', '#3e3028']), al = range(rnd, 0.08, i < 5 ? 0.3 : 0.18);
       for (const ox of [0, -w, w]) stroke(q, [[x + ox, y0], [x + ox + dx * 0.5, y0 + L * 0.5], [x + ox + dx, y0 + L]], wd, wd * 0.3, c, al);
     }
     for (let i = 0; i < 14; i++) { const x = rnd() * w, y = range(rnd, RS, h - 6), r = range(rnd, 6, 16), c = pick(rnd, ['#7a6a4a', '#6a6a4a']); for (const ox of [0, -w, w]) blob(q, x + ox, y, r * 1.4, r, 0, c, 0.22, 0.2); }

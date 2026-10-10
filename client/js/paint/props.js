@@ -1589,7 +1589,7 @@ register('loot_paintback', {
     stencil(g, 'FRAGILE', w / 2 + 2, 97, 34, '#8e2c1c', rnd, { maxW: w * 0.64, rot: -0.025, alpha: 0.82, track: 3 });
     stencil(g, 'THIS SIDE UP', w / 2, 163, 15, '#2c1c12', rnd, { maxW: w * 0.5, rot: 0.015, alpha: 0.74, track: 1.5, bridges: false });
     for (const x of [w * 0.19, w * 0.81]) {
-      const y0 = 178, y1 = 146;
+      const y0 = 173, y1 = 146;
       g.save(); g.globalAlpha = 0.72; g.fillStyle = '#2c1c12';
       g.fillRect(x - 2.6, y1 + 8, 5.2, y0 - y1 - 8);
       poly(g, [[x - 8, y1 + 10], [x + 8, y1 + 10], [x, y1]]); g.fill(); g.restore();
@@ -2414,15 +2414,16 @@ for (const b of Object.keys(BOULDER)) {
 
 // ---- the loot twinkle -----------------------------------------------------------------------------------
 
-// The glitter over every loose piece of loot (props3d draws it all as one point cloud), painted like
+// The beacon over every loose piece of loot (props3d draws them all as one mesh of quads), painted like
 // the motes that rise off a lootable quest object in 2004: pale gold-white specks of light, not little
 // stars on sticks and never orange (a warm teardrop over a piece reads as a candle flame). Four sprites
 // share the texture, one per 128 px cell (TWINKLE_CELLS):
 //   0, 1  round motes: a cream-white heart (#fff3c4), a soft gold rim, a faint bronze edge (so a mote
-//         still shows on white snow and pale sand) and a soft pale halo; 1 has a tiny four-point glint.
+//         still shows on white snow and pale sand) and a faint pale halo (kept faint so the motes of a
+//         column stand apart instead of running together); 1 has a tiny four-point glint.
 //   2, 3  the twinkle: a four-point star, slim concave rays (the vertical pair a bit longer, the two of a
-//         pair not quite equal, 3 tipped a few degrees), a round pale heart, a white centre; props3d
-//         flashes one of these on one mote at a time per piece.
+//         pair not quite equal, 3 tipped a few degrees), a round pale heart, a white centre: the one
+//         star that hovers in each piece's column (props3d), a size up from the motes.
 // Everything sits in the middle of its cell with at least 10 px of clear alpha round it, so the mips
 // don't bleed between cells.
 export const TWINKLE_CELLS = 2;    // the sprite is TWINKLE_CELLS × TWINKLE_CELLS motes

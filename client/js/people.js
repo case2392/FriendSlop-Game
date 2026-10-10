@@ -3,7 +3,7 @@
 //
 // Style: WoW Classic humans with a dash of OSRS chunk: big shoulders, a barrel chest, a leather
 // jerkin skirt with a tabard in the player's color hanging front and back, thick forearms and big
-// gloves with real thumbs and grooved fingers (arms bowed at rest, knuckles forward), knee boots with turned-down cuffs and a welted sole, a bedroll on
+// gloves with real thumbs and grooved fingers (arms bowed at rest, knuckles forward), laced knee boots with a flared turned-down cuff cut into riveted tabs on a heavy separate sole with a heel block, padded knee guards, a bedroll on
 // the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 25-bone
 // skeleton, textured with ONE hand-painted 512×768 atlas from paint/characters.js. The face is
 // modeled (a broad blunt nose, a heavy brow ridge over deep sockets, cheekbones, a square chin
@@ -724,8 +724,9 @@ function beltParts(S) {
     { seg: 10, reg: REG.metal, uv: (u, v) => [u, 0.55 + v * 0.42], bones: B.hips, xf: p => [fr.d + off + 0.006 + p[0], 0.99 + p[1], p[2]] }));
   if (player) {
     // the kit's belt gear: pouches (a big one on the right hip, a small one round the back on the
-    // left), or a leather-wrapped flask in a loop, or a map case hanging at the back, or nothing
-    const pouches = { pouch: [[1.05, 1], [-2.3, 0.75]], flask: [[1.05, 1]], mapcase: [[-1.1, 0.85]], none: [] }[S.beltX || 'pouch'];
+    // left), or a leather-wrapped flask in a loop, or a map case hanging at the back, or just a
+    // small purse; every kit has at least one pouch to break the waistline
+    const pouches = { pouch: [[1.05, 1], [-2.3, 0.75]], flask: [[1.05, 1]], mapcase: [[-1.1, 0.85], [1.1, 0.8]], none: [[1.0, 0.72]] }[S.beltX || 'pouch'];
     const hipW = th => () => [[B.hips, 0.6], [Math.sin(th) > 0 ? B.legR : B.legL, 0.4]];
     const onHip = (th, y, lift = 0) => { const pr = torsoRing(0.95, S), [px, pz] = ringXZ(th, pr.w + off + lift, pr.d + off + lift, pr.db + off + lift, pr.n); return [px, y, pz]; };
     if (S.beltX === 'flask') {
@@ -1109,30 +1110,42 @@ const LEG_TOP = [   // v, half-width, front, back (trousers: NPCs)
   [0.575, 0.09, 0.092, 0.088],
   [0.51, 0.084, 0.09, 0.082],
 ];
-const LEG_TOP_TAPER = [   // a player's thigh: thick at the hip, tapering into a slim knee above the boot cuff
+const LEG_TOP_TAPER = [   // a player's thigh: thick at the hip, a muscled taper to the knee, the kneecap standing out in front above the boot cuff
   [0.99, 0.0, 0.0, 0.0],
   [0.97, 0.085, 0.09, 0.09],
-  [0.91, 0.114, 0.118, 0.114],
-  [0.80, 0.109, 0.114, 0.109],
-  [0.69, 0.096, 0.101, 0.095],
-  [0.6, 0.084, 0.089, 0.082],
-  [0.535, 0.076, 0.084, 0.074],
-  [0.505, 0.074, 0.084, 0.072],
+  [0.91, 0.116, 0.12, 0.116],
+  [0.80, 0.112, 0.118, 0.11],
+  [0.70, 0.1, 0.106, 0.097],
+  [0.63, 0.088, 0.094, 0.085],
+  [0.59, 0.083, 0.1, 0.079],
+  [0.55, 0.082, 0.107, 0.075],
+  [0.505, 0.077, 0.094, 0.072],
 ];
-const LEG_TALL = [   // a knee boot: a wide flared turned-down cuff, a calf, a slim ankle
-  [0.477, 0.073, 0.082, 0.071],
-  [0.474, 0.108, 0.114, 0.108],
-  [0.464, 0.12, 0.126, 0.118],
-  [0.443, 0.118, 0.124, 0.116],
-  [0.415, 0.106, 0.112, 0.105],
-  [0.4, 0.09, 0.096, 0.093],
-  [0.33, 0.092, 0.097, 0.104],
-  [0.24, 0.086, 0.091, 0.094],
-  [0.15, 0.076, 0.083, 0.078],
-  [0.09, 0.079, 0.085, 0.08],
+// A knee boot (v, half-width, front, back, tab): a turned-down cuff rolls over at the top, flares out
+// to a hem cut into three pointed tabs (front, outside, back: cuffTab) and tucks back in under it, so
+// it stands proud of the shaft with a dark undercut; a calf, a slim ankle, the ankle bones and heel
+// counter swelling into the foot.
+const LEG_TALL = [
+  [0.478, 0.074, 0.086, 0.072],
+  [0.483, 0.094, 0.102, 0.092],
+  [0.481, 0.107, 0.114, 0.105],
+  [0.47, 0.113, 0.12, 0.111],
+  [0.44, 0.119, 0.126, 0.117],
+  [0.412, 0.126, 0.133, 0.124, 1],
+  [0.398, 0.13, 0.137, 0.128, 1],
+  [0.391, 0.112, 0.117, 0.112, 1],
+  [0.38, 0.097, 0.1, 0.104, 0.65],
+  [0.33, 0.096, 0.099, 0.111],
+  [0.25, 0.088, 0.093, 0.1],
+  [0.17, 0.077, 0.083, 0.08],
+  [0.125, 0.081, 0.088, 0.085],
+  [0.09, 0.082, 0.09, 0.086],
   [0.06, 0.056, 0.056, 0.056],
   [0.05, 0.0, 0.0, 0.0],
 ];
+// how far the cuff's hem drops at angle th (0 = front, +PI/2 = outside on either leg, PI = back)
+const CUFF_TABS = [[0, 0.03], [Math.PI / 2, 0.036], [Math.PI, 0.028]];
+const cuffTab = th => Math.max(0, ...CUFF_TABS.map(([c, d]) => { let a = Math.abs(th - c) % TAU; a = Math.min(a, TAU - a); return d * Math.max(0, 1 - a / 0.5); }));
 const LEG_WORK = [   // work trousers flaring a little and bunching over a short work boot
   [0.49, 0.084, 0.09, 0.082],
   [0.42, 0.084, 0.09, 0.084],
@@ -1155,17 +1168,40 @@ const LEG_PLAIN = [   // (a straight, full trouser leg down into the shoe: no pe
   [0.07, 0.058, 0.058, 0.058],
   [0.05, 0.0, 0.0, 0.0],
 ];
-const FOOT = [ // x, half-width, up, down, center y, squareness, v  (a squarer, flatter toe than a clown's bulb)
-  [-0.095, 0.0, 0.0, 0.0, 0.055, 2, 0.0],
-  [-0.086, 0.05, 0.046, 0.05, 0.055, 2.4, 0.05],
-  [-0.056, 0.062, 0.066, 0.054, 0.06, 2.6, 0.16],
-  [0.0, 0.066, 0.08, 0.06, 0.066, 2.6, 0.33],
-  [0.06, 0.068, 0.058, 0.053, 0.053, 2.8, 0.52],
-  [0.13, 0.07, 0.045, 0.048, 0.048, 3.0, 0.70],
-  [0.195, 0.066, 0.04, 0.043, 0.045, 3.0, 0.86],
-  [0.234, 0.052, 0.033, 0.036, 0.044, 2.6, 0.95],
-  [0.248, 0.0, 0.0, 0.0, 0.045, 2, 1.0],
+// The boot's foot: a chunky upper (x, half-width, up, down, center y, squareness, v) with a wide
+// square toe box, standing on a separate heavy sole (SOLE: x, half-width, bottom, top, v) that sticks
+// out a finger's width all round: a heel block, a raised waist under the arch, and a toe that turns
+// up a little. The upper's texture fills u .2-1 of REG.foot; the sole's edge is painted in the strip
+// at u 0-.17 (FOOT_UPPER_U / soleU, matched by paint/characters.js paintFoot).
+const FOOT = [
+  [-0.1, 0.0, 0.0, 0.0, 0.078, 2, 0.0],
+  [-0.095, 0.05, 0.05, 0.044, 0.078, 2.4, 0.05],
+  [-0.076, 0.064, 0.062, 0.046, 0.078, 2.6, 0.15],
+  [-0.03, 0.07, 0.07, 0.048, 0.08, 2.8, 0.28],
+  [0.03, 0.073, 0.058, 0.05, 0.08, 3.0, 0.45],
+  [0.1, 0.079, 0.045, 0.042, 0.072, 3.2, 0.62],
+  [0.17, 0.081, 0.039, 0.036, 0.068, 3.6, 0.78],
+  [0.215, 0.077, 0.035, 0.033, 0.07, 3.6, 0.9],
+  [0.24, 0.06, 0.029, 0.028, 0.072, 3.0, 0.97],
+  [0.248, 0.0, 0.0, 0.0, 0.072, 2, 1.0],
 ];
+const SOLE = [
+  [-0.106, 0.0, 0.0, 0.036, 0.0],
+  [-0.103, 0.05, 0.0, 0.036, 0.03],
+  [-0.092, 0.068, 0.0, 0.036, 0.08],
+  [-0.062, 0.077, 0.0, 0.036, 0.16],
+  [-0.03, 0.079, 0.0, 0.036, 0.24],
+  [-0.022, 0.078, 0.013, 0.034, 0.27],
+  [0.03, 0.081, 0.013, 0.032, 0.42],
+  [0.058, 0.085, 0.0, 0.032, 0.52],
+  [0.12, 0.09, 0.0, 0.032, 0.66],
+  [0.18, 0.091, 0.0, 0.033, 0.8],
+  [0.226, 0.085, 0.004, 0.038, 0.9],
+  [0.25, 0.066, 0.012, 0.044, 0.96],
+  [0.262, 0.0, 0.018, 0.046, 1.0],
+];
+const FOOT_UPPER_U = 0.2;
+const soleU = u => 0.17 * Math.abs(1 - 2 * u);   // the sole's top (welt) at 0, its sides, its tread at .17
 function legParts(S, F, s) {
   const [th, sn, ft] = LEG(s), hip = F.hip(s), knee = F.knee(s), ank = F.ankle(s);
   const tall = S.boots === 'tall', shoe = S.boots === 'shoe';
@@ -1182,15 +1218,28 @@ function legParts(S, F, s) {
     if (y > 0.13) return [[sn, 1]];
     const t = sstep(0.13, 0.07, y); return [[sn, 1 - t], [ft, t]];
   };
-  const P = [lathe(tab.map(([v, w, d, db]) => { const y = legY(v), [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v }; }), { seg: 12, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s] })];
-  const k = shoe ? [0.86, 0.8, 0.92] : S.outfit === 'repo' ? [1.2, 1.16, 1.14] : F.fem ? [0.9, 0.92, 0.9] : [1.06, 1.06, 1.05];
+  const P = [lathe(tab.map(([v, w, d, db, tb = 0]) => { const y = legY(v), [ax, az] = axis(y); return { y, w: w * lk, d: d * lk, db: db * lk, cx: ax, cz: az * s, v, tab: tb }; }), {
+    seg: 16, reg: REG.leg, bones: wts, xf: p => [p[0], p[1], p[2] * s],
+    deform: (p, a, r) => r.tab ? [p[0], p[1] - r.tab * cuffTab(a) * lk, p[2]] : p,   // the cuff's pointed tabs
+  })];
+  const k = shoe ? [0.86, 0.8, 0.92] : S.outfit === 'repo' ? [1.1, 1.12, 1.1] : F.fem ? [0.9, 0.92, 0.9] : [1.06, 1.06, 1.05];
+  const soleH = shoe ? 0.6 : S.outfit === 'repo' ? 1.15 : 1;   // a dress shoe's thin sole, the Repo Man's lug soles
+  const lift = shoe ? 0.85 : 1;
+  const zOf = X => s * Math.abs(ank[2]) + s * 0.05 * Math.max(0, X);   // (the toes turn out a little)
   const nv = FOOT.length - 1;
   P.push(surf((u, v) => {
     const i = Math.round(v * nv), [x, w, up, dn, cy, n] = FOOT[i];
     const [a, b] = ringXZ(thOf(u), w * k[0], up * k[1], dn, n);
-    const X = x * k[2], welt = 1 + 0.09 * sstep(-0.55, -0.85, a / Math.max(1e-4, dn));    // the sole's welt stands out round the bottom
-    return [X * (1 + 0.04 * (welt - 1)), Math.max(0.002, cy * (shoe ? 0.85 : 1) + a), s * (Math.abs(ank[2]) + b * welt + 0.05 * Math.max(0, X))];
-  }, 12, nv, { reg: REG.foot, uv: (u, v) => [u, FOOT[Math.round(v * nv)][6]], bones: p => p[0] < -0.03 && p[1] > 0.09 ? [[ft, 0.7], [sn, 0.3]] : [[ft, 1]], closed: true, inside: (u, v) => { const r = FOOT[Math.round(v * nv)]; return [r[0] * k[2], r[4], ank[2]]; } }));
+    const X = x * k[2];
+    return [X, cy * lift * (soleH > 1 ? 1.04 : 1) + a, zOf(X) + s * b];
+  }, 12, nv, { reg: REG.foot, uv: (u, v) => [FOOT_UPPER_U + (1 - FOOT_UPPER_U) * u, FOOT[Math.round(v * nv)][6]], bones: p => p[0] < -0.03 && p[1] > 0.09 ? [[ft, 0.7], [sn, 0.3]] : [[ft, 1]], closed: true, inside: (u, v) => { const r = FOOT[Math.round(v * nv)]; return [r[0] * k[2], r[4] * lift, zOf(r[0] * k[2])]; } }));
+  const ns = SOLE.length - 1;
+  P.push(surf((u, v) => {
+    const [x, w, y0, y1] = SOLE[Math.round(v * ns)], h = (y1 - y0) * soleH / 2;
+    const [a, b] = ringXZ(thOf(u), w * k[0], h, h, 4);
+    const X = x * k[2];
+    return [X, y0 * soleH + h + a, zOf(X) + s * b];
+  }, 12, ns, { reg: REG.foot, uv: (u, v) => [soleU(u), SOLE[Math.round(v * ns)][4]], bones: ft, closed: true, inside: (u, v) => { const [x, , y0, y1] = SOLE[Math.round(v * ns)]; return [x * k[2], (y0 + y1) / 2 * soleH, zOf(x * k[2])]; } }));
   return P;
 }
 
@@ -1468,7 +1517,7 @@ function kneeFor(thigh, drop) {
 }
 // How far below the ground a posed foot's sole (heel or toe) would reach, in the body's
 // sagittal plane, with the body leaning by `lean`: > 0 means lift the hips by that much.
-const HEEL = [-0.1, -0.096], TOE = [0.25, -0.09];
+const HEEL = [-0.11, -0.1], TOE = [0.24, -0.096];
 function soleDip(P, drop) {
   let low = Infinity;
   const cl = Math.cos(P.lean), sl = Math.sin(P.lean);
@@ -1841,5 +1890,9 @@ export const PREVIEW = {
   sideclerk: () => turned(buildCharacter('#2e86ab', { hatIndex: 0, skinIndex: 4 }).root, Math.PI / 2),
   sidedealer: () => turned(buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }).root, Math.PI / 2),
   siderepo: () => turned(buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }).root, Math.PI / 2),
+  // a close look at the legs and boots: three players at twice size (front, left side, back three-quarter)
+  legs: () => { const g = new THREE.Group(); [viewIn(0, {}), turned(viewIn(2, {}), Math.PI / 2), turned(viewIn(1, {}), Math.PI * 0.8)].forEach((o, i) => { const w = new THREE.Group(); w.add(o); w.scale.setScalar(2); w.position.x = (i - 1) * 1.6; g.add(w); }); return g; },
+  // ...and in motion, side on: walking, running, crouching, seated
+  legposes: () => { const g = new THREE.Group(); [viewIn(2, {}, { speed: 4.4, frames: 47 }), viewIn(0, { flags: F_.SPRINT }, { speed: 7, frames: 52 }), viewIn(1, { flags: F_.CROUCH }), viewIn(5, { mode: M_.SEAT })].forEach((o, i) => { const w = new THREE.Group(); w.add(turned(o, Math.PI / 2)); w.scale.setScalar(2); w.position.x = (i - 1.5) * 2.0; g.add(w); }); return g; },
   fphands: () => { const g = new THREE.Group(); const m = painted(handsAtlas('#00E5FF')); const L = new THREE.Mesh(fpHandGeometry(-1), m), R = new THREE.Mesh(fpHandGeometry(1), m); L.position.set(-0.16, 0, 0); R.position.set(0.16, 0, 0); for (const h of [L, R]) { h.rotation.x = 0.5; g.add(h); } g.rotation.y = Math.PI; g.scale.setScalar(3); return g; },
 };

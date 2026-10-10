@@ -1347,9 +1347,10 @@ function demoWorld() {
 
 // Every loose piece of loot carries a small "pick me up" beacon, like the glitter over a lootable quest
 // object in WoW Classic, gathered so it reads as one deliberate thing (not fireflies, not confetti):
-//   * a soft rising column: 5 to 7 pale gold-white motes (more for bigger pieces) climb from the middle
-//     of the piece's top in a narrow, slowly turning helix, half a metre or so up, evenly staggered so
-//     the column is always full; each swells in low, shrinks a little as it climbs and fades at the top;
+//   * a soft rising column: 5 or 6 pale gold-white motes (6 for bigger pieces) climb from the middle of
+//     the piece's top in a narrow, slowly turning helix, 0.8 to 0.9 m up, evenly staggered so the column
+//     is always full but every mote stands clear of the next (packed tight they'd merge into a candle
+//     flame); each swells in low, shrinks a little as it climbs and fades out above;
 //   * one four-point twinkle star, a size up from the motes, hovering in the column a hand above the
 //     piece: it bobs, rocks and breathes, and every few seconds it flares whiter;
 //   * a faint warm ring on the ground under it: a soft cream-gold band with a painterly wobble, a fainter
@@ -1380,7 +1381,7 @@ uniform vec4 uP[${TW.N}];
 uniform vec4 uQ[${TW.N}];
 uniform vec4 uG[${TW.N}];
 uniform float uTime, uViewH, uPx;
-varying float vA;
+varying float vA, vSm;
 varying vec3 vK;
 varying vec2 vUv;
 float hsh(float n) { return fract(sin(n) * 43758.5453); }
@@ -1399,6 +1400,7 @@ void main() {
     mv.xyz *= 0.995;
     vA = P.w * (0.86 + 0.14 * sin(uTime * 1.6 + Q.x));
     vK = vec3(Q.x + uTime * 0.22, 0.0, 1.0);
+    vSm = 0.0;
     gl_Position = P.w > 0.0 && G.y > 0.0 ? projectionMatrix * mv : OFF;
     return;
   }
@@ -1407,7 +1409,7 @@ void main() {
   if (j > ${f1(TW.MOTES - 0.5)}) {
     // the star: hovers in the column, bobbing and rocking; breathes; flares now and then
     float tw = sin(uTime * 2.3 + Q.x * 3.0), fl = pow(max(0.0, sin(uTime * 0.83 + Q.x * 1.7)), 30.0);
-    p = P.xyz + vec3(0.016 * cos(uTime * 0.7 + Q.x), H * 0.42 + 0.03 * sin(uTime * 1.2 + Q.x), 0.016 * sin(uTime * 0.7 + Q.x));
+    p = P.xyz + vec3(0.016 * cos(uTime * 0.7 + Q.x), H * 0.3 + 0.03 * sin(uTime * 1.2 + Q.x), 0.016 * sin(uTime * 0.7 + Q.x));
     env = 0.84 + 0.12 * tw + 0.45 * fl;
     sz = 0.26 * (0.92 + 0.08 * tw + 0.4 * fl);
     lo = mix(${f1(TW.star[0])}, ${f1(TW.flare * 0.6)}, fl); hi = mix(${f1(TW.star[1])}, ${f1(TW.flare)}, fl);
@@ -1426,13 +1428,14 @@ void main() {
   }
   vA = P.w * env;
   vec4 mv = viewMatrix * vec4(p, 1.0);
-  float d = max(0.1, -mv.z), px = 0.5 * projectionMatrix[1][1] * uViewH * sz / d;
-  mv.xy += cn * clamp(px, lo * uPx, hi * uPx) * d / (projectionMatrix[1][1] * uViewH);
+  float d = max(0.1, -mv.z), px = clamp(0.5 * projectionMatrix[1][1] * uViewH * sz / d, lo * uPx, hi * uPx);
+  mv.xy += cn * px * d / (projectionMatrix[1][1] * uViewH);
+  vSm = 1.0 - smoothstep(9.0, 24.0, px / uPx);
   gl_Position = P.w > 0.0 && env > 0.0 ? projectionMatrix * mv : OFF;
 }`;
 const TW_FS = `
 uniform sampler2D map;
-varying float vA;
+varying float vA, vSm;
 varying vec3 vK;
 varying vec2 vUv;
 vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
@@ -1462,6 +1465,9 @@ void main() {
     float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vK.y + 0.5, n)), row = floor((vK.y + 0.5) / n);
     vec4 t = texture2D(map, vec2((col + q.x) / n, 1.0 - (row + q.y) / n));
     if (t.a * vA < 0.004) discard;
+    // a sprite only a few pixels across samples a far mip, where the gold rim, the bronze edge and the
+    // transparent texels round it average to tan-orange: a small one is lit pale gold-white instead
+    t.rgb = mix(t.rgb, lin(vec3(1.0, 0.95, 0.8)), 0.85 * vSm);
     // premultiplied, laid over what's behind (adding light would turn the pale halo lime on grass): the
     // body and its faint bronze edge keep their edge on white snow and pale sand
     float A = min(1.0, t.a * vA);
@@ -1507,7 +1513,7 @@ function twRemoved(e) { twLoose.delete(e.target); }
 function twinkleOn(obj, type) {
   const sh = LOOT[type].shape, half = sh[0] === 'box' ? [sh[1], sh[2], sh[3]] : sh[0] === 'cyl' ? [sh[2], sh[1], sh[2]] : [sh[1], sh[1], sh[1]];
   // its own phase (the golden angle) and a rate of 0.3 to 0.36 Hz (a mote climbs the column in about 3 s);
-  // a narrow column for a small piece, a little wider for the big ones; 5, 6 or 7 motes
+  // a narrow column (7 cm) for a small piece, a little wider (to 14 cm) for the big ones; 5 or 6 motes
   const k = twSeq++, hm = Math.max(...half);
   obj.userData.tw = {
     half, phase: (k * 2.39996) % TAU, spread: Math.min(0.14, Math.max(0.07, 0.2 * hm)), count: hm < 0.25 ? 5 : 6,
