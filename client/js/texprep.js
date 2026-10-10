@@ -150,21 +150,23 @@ export function init() {
       let w;
       try { w = new Worker(new URL('./paint/worker.js', import.meta.url), { type: 'module' }); } catch (e) { S.failed = e.message; break; }
       const W = { w, i, busy: null, alive: false, storeCb: null, loads: new Map() };
+      // a worker that isn't up in 15 s doesn't hold up this build (the page paints instead), but it isn't
+      // thrown away either: on a machine busy enough to be that slow it joins the pool when it is ready
       starts.push(new Promise(res => {
-        const t = setTimeout(() => res(false), 15000);
+        const t = setTimeout(() => { W.late = true; if (!S.failed) S.failed = 'paint workers slow to start'; res(false); }, 15000);
         w.onmessage = ({ data: m }) => {
           if (m.t !== 'ready') return;
           clearTimeout(t); W.alive = !!m.ok; if (!m.ok) S.failed = m.err;
           w.onmessage = e => onMessage(W, e.data);
-          res(W.alive);
+          if (W.late) lateWorker(W); else res(W.alive);
         };
-        w.onerror = e => { clearTimeout(t); S.failed = e.message || 'a paint worker failed to start'; res(false); };
+        w.onerror = e => { clearTimeout(t); S.failed = e.message || 'a paint worker failed to start'; if (W.late) { W.late = false; try { w.terminate(); } catch {} } else res(false); };
       }));
       w.postMessage({ t: 'init', fonts, hashes: H, breakStorage: q.get('texcache') === 'broken', fullStorage: q.get('texcache') === 'full' });
       S.workers.push(W);
     }
     const ok = await Promise.all(starts);
-    S.workers = S.workers.filter((W, k) => { if (!ok[k]) { try { W.w.terminate(); } catch {} } return ok[k]; });
+    S.workers = S.workers.filter((W, k) => { if (!ok[k] && !W.late) { try { W.w.terminate(); } catch {} } return ok[k]; });
     for (const W of S.workers) { W.w.onerror = () => workerDied(W); W.w.onmessageerror = () => workerDied(W); }
     S.ready = S.workers.length > 0;
   })().catch(e => { S.failed = e.message; }).finally(() => {
@@ -173,6 +175,17 @@ export function init() {
     pump();
   });
   return initP;
+}
+
+// a worker that missed the start-up wait reports ready: it takes work from now on
+function lateWorker(W) {
+  W.late = false;
+  if (!W.alive) { try { W.w.terminate(); } catch {} return; }
+  W.w.onerror = () => workerDied(W); W.w.onmessageerror = () => workerDied(W);
+  S.workers.push(W);
+  S.ready = true;
+  if (S.failed === 'paint workers slow to start') S.failed = '';
+  pump();
 }
 
 function workerDied(W) {

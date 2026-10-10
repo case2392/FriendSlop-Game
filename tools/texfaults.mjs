@@ -14,6 +14,8 @@
 //   two-tabs    two pages fill the cache at the same time, a third reads it
 //   learned     what a browser learned under other paint code (textures a worker can't paint
 //               exactly, ones left alone) is forgotten: they go to the workers again
+//   slow        workers that miss the 15 s start-up wait: the page paints meanwhile, and they join the
+//               pool when they are up
 //   fonts       a worker that couldn't load a web font: a paint that sets text in it comes back
 //               inexact (the page paints it), one that doesn't still comes back exact
 import { spawn } from 'node:child_process';
@@ -118,6 +120,34 @@ const learned = await run(ctx4, 'learned', { init: () => { if (!localStorage.get
 const stale = ['ground_meadow', 'leaves_oak', 'bark_oak'];
 if (stale.some(n => learned.page.includes(n)) || learned.ls.nmdTexLearnedFor === 'older paint code' || stale.some(n => String(learned.ls.nmdTexPageOnly).includes(n) || String(learned.ls.nmdTexAlone).includes(n))) fail(`learned: expected the older lists forgotten and those textures painted by the workers (page painted: ${learned.page.join(' ')}; ${JSON.stringify(learned.ls)})`);
 await ctx4.close();
+
+// workers that take longer than the 15 s start-up wait (here: their script held back 22 s): the page
+// paints meanwhile, and they join the pool when they are up, so later work goes to them
+{
+  const ctx5 = await browser.newContext();
+  await ctx5.route('**/js/paint/worker.js', async r => { await new Promise(x => setTimeout(x, 22000)); await r.continue(); });
+  const slow = await run(ctx5, 'slow workers (page paints)');
+  if (!(slow.stats.workerPaints === 0 && slow.stats.pagePaints > 0)) fail('slow workers: expected the page to paint while the workers were not up');
+  const page = await ctx5.newPage();
+  page.setDefaultTimeout(300000);
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/gallery.html?family=none&texcache=0`);
+  const r = await page.evaluate(async () => {
+    const T = await import('/js/texprep.js'), P = await import('/js/paint/index.js');
+    const t0 = performance.now();
+    await T.init();
+    const atInit = T.stats().workers;
+    while (!T.stats().workers && performance.now() - t0 < 180000) await new Promise(x => setTimeout(x, 250));
+    const prep = await T.prepare(['ground_meadow', 'mud', 'bark_oak'].filter(n => P.has(n)));
+    return { atInit, joined: T.stats().workers, prep, workerPaints: T.stats().workerPaints };
+  });
+  await page.close();
+  await ctx5.close();
+  const line = `slow workers (later): ${r.atInit} up after the wait, ${r.joined} joined later, then ${r.workerPaints} worker paints for ${r.prep.ready}/${r.prep.total}`;
+  if (r.atInit === 0 && r.joined > 0 && r.workerPaints > 0 && r.prep.ready === r.prep.total && !errors.length) ok(line);
+  else fail(`${line}; errors: ${errors.join(' | ') || 'none'}`);
+}
 
 // a worker whose web font didn't load (here: "Georgia" pointed at a missing file) must not paint text
 // in it: slot_face sets Georgia text, ground_meadow sets none
