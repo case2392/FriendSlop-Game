@@ -194,10 +194,15 @@ function splatMaterial(biome, cfg) {
           const mat2 SR = mat2(0.866, 0.5, -0.5, 0.866);
           const float SRS = 1.0 / 1.6;
           vec2 formTurn(vec3 f) { return vec2(0.5 + 0.5 * (0.866 * (f.r * 2.0 - 1.0) - 0.5 * (f.b * 2.0 - 1.0)), f.g); }
-          // (a crash mesa's other face turns the granite the other way, -24 degrees)
-          const mat2 SRM = mat2(0.9135, -0.4067, 0.4067, 0.9135);
-          vec2 formTurnM(vec3 f) { return vec2(0.5 + 0.5 * (0.9135 * (f.r * 2.0 - 1.0) + 0.4067 * (f.b * 2.0 - 1.0)), f.g); }
+          // (a crash mesa wraps the granite round itself turned atan(1/2) = 26.6 degrees, 7.96 m a tile: once
+          // round its 8.5 m cylinder is 3 sqrt(5) tiles along the turned axis, i.e. (6, 3) whole tiles, so
+          // the wrap closes without a seam)
+          const mat2 SRC = mat2(0.894427, 0.447214, -0.447214, 0.894427);
+          const float SRCS = 0.125613;
+          vec2 formTurnC(vec3 f) { return vec2(0.5 + 0.5 * (0.894427 * (f.r * 2.0 - 1.0) - 0.447214 * (f.b * 2.0 - 1.0)), f.g); }
         #endif
+        // a crash mesa's rock is wrapped round a cylinder of this radius about its centre (m)
+        #define MESA_RC 8.5
         #ifdef TERRAIN_STRATA
           uniform sampler2D tSlopeR;
         #endif
@@ -251,8 +256,9 @@ function splatMaterial(biome, cfg) {
           const mat2 ROT = mat2(0.8, -0.6, 0.6, 0.8);       // a rotated frame breaks the tile grid
           vec3 wp = vTPos; vec3 nr = normalize(vTNrm);
           vec2 xz = wp.xz, xr = ROT * xz;
+          vec3 wpX = dFdx(vTPos), wpY = dFdy(vTPos);     // (taken here, in uniform control flow)
           #ifdef TERRAIN_SNOWROCK
-            vec3 fN = normalize(cross(dFdx(vTPos), dFdy(vTPos)));     // the facet's own normal (a crash mesa's rock, below)
+            vec3 fN = normalize(cross(wpX, wpY));     // the facet's own normal (a crash mesa's rock, below)
           #endif
           // large-scale noise comes per vertex (vRoad.zw, vSplat.w); one fetch gives the medium/fine noise
           vec4 mB = texture2D(tMacro, xr / 61.0 + vec2(0.31, 0.77));   // r: ~7-20 m, g: ~3-9 m, b: ~1-3 m
@@ -377,17 +383,25 @@ function splatMaterial(biome, cfg) {
               float wm = smoothstep(-0.25, 0.45, mr);
               if (wm > pm) {
                 // (the crop's own edge is crisper and ragged in the small: tufts and gaps of ~0.2-0.5 m)
-                float fe = mr < 2.2 ? texture2D(tMacro, xz / 9.0 + vec2(0.71, 0.37)).b : 0.5;
-                pm = wm; pw = smoothstep(1.22, 1.42, mr + (fe - 0.5) * 0.7); pu = u; pv = v; pB = Bq; pk = sd; pA = A.zw; pmr = mr + (fe - 0.5) * 0.7;
+                float fe = mr < 3.2 ? texture2D(tMacro, xz / 9.0 + vec2(0.71, 0.37)).b : 0.5;
+                pm = wm; pu = u; pv = v; pB = Bq; pk = sd; pA = A.zw; pmr = mr + (fe - 0.5) * 0.7;
               }
             }
+            // (a stubble field's headland is a wider, darker trodden track, so the plot reads from the road)
+            float stubK = pB.z > 0.5 && pB.z < 1.5 ? 1.0 : 0.0;
+            float pe0 = mix(1.22, 2.25, stubK);
+            pw = pm > 0.0 ? smoothstep(pe0, pe0 + 0.2, pmr) : 0.0;
             vec3 dt = vec3(0.5), dA = vec3(0.5);
             if (pm > 0.0) {
               dt = texture2D(tDirt, xr / uScale.z).rgb; dA = textureLod(tDirt, vec2(0.5), 12.0).rgb;
               // the headland: packed dirt half under flattened, sun-bleached straw
               float tr = smoothstep(0.38, 0.62, nE + (mB.g - 0.5) * 0.5 + (pm - 0.5) * 0.3);
               vec3 hc = mix(col * vec3(1.02, 0.94, 0.8), dt * vec3(0.92, 0.88, 0.84), tr * 0.8);
-              col = mix(col, hc, pm * 0.9);
+              // (round stubble: packed earth worn by the carts, two darker wheel tracks in it, loose straw at its edges)
+              float hm = pmr - 1.15, wt = 1.0 - smoothstep(0.12, 0.3, abs(abs(hm) - 0.55) + (nE - 0.5) * 0.12);
+              vec3 hs2 = mix(col * vec3(0.86, 0.78, 0.64), dt * vec3(0.8, 0.74, 0.68), 0.55 + 0.4 * tr) * (1.0 - 0.14 * wt * smoothstep(-0.2, 0.3, pmr));
+              hc = mix(hc, hs2, stubK);
+              col = mix(col, hc, pm * mix(0.9, 0.97, stubK));
               gW *= 1.0 - pm * 0.6;
             }
             if (pw > 0.0) {
@@ -429,10 +443,17 @@ function splatMaterial(biome, cfg) {
                 // (each row a hatch of short cut stalks: a fine stroke texture laid in row space, the
                 // stalks crowding on the row and thinning out into the soil between; loose straw there)
                 vec3 hs = texture2D(tDetail, vec2(bq * 0.6, a * 1.6) / 0.9 + vec2(pk * 0.37, 0.19)).rgb;
-                float stub = smoothstep(0.4, 0.62, hs.r * 0.9 + 0.05 + (ridge - 0.5) * 0.62 + (rowN - 0.5) * 0.25 + (nE - 0.5) * 0.2);
-                vec3 soil = mix(uPlotC[3] * vec3(0.94, 0.9, 0.86), uPlotC[4] * 0.86, smoothstep(0.42, 0.75, nE + (mB.b - 0.5) * 0.3 + (hs.g - 0.5) * 0.6) * 0.55) * dMod;
-                vec3 straw = mix(uPlotC[4], uPlotC[5], smoothstep(0.55, 0.85, hs.b + ridge * 0.3) * 0.7) * gMod * (0.82 + 0.36 * hs.r);
-                pc = mix(soil, straw, stub * 0.92);
+                // each row breaks up along its length (1-3 m): where the cut stalks thin into gaps and where
+                // they crowd into clumps (the same field stands the straw cards in plotRows)
+                float brk = textureLod(tMacro, vec2(bq / 61.0 + pk * 0.13, floor(q) * 0.173 + pk * 0.31), 0.0).b;
+                float dens = smoothstep(0.25, 0.62, brk + (rowN - 0.5) * 0.3 + (hs.g - 0.5) * 0.2);
+                float stub = smoothstep(0.4, 0.62, hs.r * 0.9 + 0.05 + (ridge - 0.5) * 0.62 + (nE - 0.5) * 0.2) * (0.3 + 0.7 * dens);
+                // warm gold straw (never a pale cream stripe) over straw-brown soil: about half the old contrast
+                vec3 gold = mix(uPlotC[4], uPlotC[7], 0.55);
+                vec3 soil = mix(uPlotC[3] * vec3(0.96, 0.9, 0.84), gold * 0.66, 0.42 + 0.25 * smoothstep(0.42, 0.75, nE + (mB.b - 0.5) * 0.3 + (hs.g - 0.5) * 0.6)) * dMod;
+                vec3 straw = gold * gMod * (0.7 + 0.28 * hs.r + 0.14 * (dens - 0.5));
+                straw = mix(straw, uPlotC[5] * vec3(0.86, 0.82, 0.72), smoothstep(0.62, 0.92, hs.b + ridge * 0.25) * 0.28);   // a few lit cut tops
+                pc = mix(soil, straw, stub * 0.9);
                 pa = mix(soil, straw, 0.5);
                 if (h1 > 0.3) {
                   // (lumpy: the windrow swells, thins and breaks along its length; golden cut straw, a little
@@ -444,7 +465,7 @@ function splatMaterial(biome, cfg) {
                   float wi = smoothstep(1.0, 0.65, abs(wx) + (nE - 0.5) * 0.6) * smoothstep(0.22, 0.5, wl + (mB.g - 0.5) * 0.5);
                   float s = -0.9 * sin(clamp(wx, -1.0, 1.0) * 1.5708) * wi;
                   float lit = clamp((Ly - s * sunA) / sqrt(1.0 + s * s) / Ly - 1.0, -0.6, 0.4);
-                  vec3 wc = mix(uPlotC[4], uPlotC[7], 0.4) * 0.92 * gMod * (0.88 + 0.24 * nE);
+                  vec3 wc = mix(uPlotC[4], uPlotC[7], 0.55) * 0.86 * gMod * (0.88 + 0.24 * nE);
                   wc = mix(wc, uPlotC[5] * vec3(1.0, 0.97, 0.88), max(lit, 0.0) * 1.1);
                   wc = mix(wc, uPlotC[6] * 1.1, clamp(-lit, 0.0, 0.6));
                   float sl0 = 0.32 * length(L.xz) / Ly;                                   // shadow length of a ~0.32 m windrow
@@ -464,7 +485,7 @@ function splatMaterial(biome, cfg) {
                 gold = mix(gold, uPlotC[8], smoothstep(0.7, 1.0, ridge) * 0.4);
                 float farW = smoothstep(55.0, 105.0, dist);
                 // (the crop's shade only where the stalks stand thick: along the thinning edge, tilled soil)
-                under = mix(mix(uPlotC[3], uPlotC[1], 0.4) * dMod, under, smoothstep(1.5, 2.4, pmr));
+                under = mix(mix(uPlotC[3], uPlotC[1], 0.4) * dMod, under, smoothstep(1.4, 3.0, pmr));
                 pc = mix(under, gold, farW);
                 pa = mix(mix(uPlotC[6], uPlotC[7], 0.3), mix(uPlotC[6], uPlotC[7], 0.72), farW);
               }
@@ -1508,9 +1529,8 @@ class Clutter {
       const r = cellRng(Math.round(f.x * 10), Math.round(f.z * 10), W.seed + 9);
       const windA = r() * 6.283;
       for (let k = Math.floor(-A / per - 3); k * per < A + 3; k++) {
-        const step = wheat ? 0.5 : 1.7;
+        const step = wheat ? 0.5 : 0.9;
         for (let b = -Bm - 1 + r() * step; b < Bm + 1; b += step * (0.8 + r() * 0.4)) {
-          if (!wheat && r() > 0.42) continue;
           const wan = Math.sin(b * 0.085 + pk * 5) * 0.55 + Math.sin(b * 0.31 + pk * 2) * 0.1;
           const a0 = (k + 0.5) * per;
           let aw = a0;
@@ -1518,19 +1538,56 @@ class Clutter {
           const a = aw - wan + (r() - 0.5) * 0.12;
           const u = al ? b : a, v = al ? a : b;
           const m = plotM(f, u, v);
-          if (m < (wheat ? 1.4 + r() * 0.25 : 1.7)) continue;
           const x = f.x + u * f.sn + v * f.cs, z = f.z + u * f.cs - v * f.sn;
-          if (this.blocked(x, z)) continue;
           if (wheat) {
-            if (m < 2.3 && r() > 0.45 + 0.55 * sstep(1.5, 2.3, m)) continue;   // a ragged, thinning edge
+            // a few bent stragglers 0.3-1 m out past the crop's edge, leaning out over the headland
+            if (m < 1.2) {
+              if (m < 0.3 || r() > 0.09 || this.blocked(x, z)) continue;
+              const [c, hh] = WC[r() < 0.5 ? 0 : 1];
+              out.push({ x, y: W.heightAt(x, z) - 0.05, z, ry: r() * 6.283, w: 0.8 + r() * 0.3, h: hh * (0.7 + r() * 0.2), card: c, fade: 125,
+                lean: 0.22 + r() * 0.25, leanA: windA + (r() - 0.5) * 2.4, tone: 0.35 + r() * 0.35 });
+              continue;
+            }
+            if (m < 1.2 + r() * 0.2 || this.blocked(x, z)) continue;
+            const ek = sstep(1.2, 3.2, m);                                     // 0 at the crop's edge, 1 well inside
+            if (m < 3.2 && r() > 0.32 + 0.68 * ek) continue;                   // a ragged, thinning edge (1.2-3.2 m)
             const tall = r() < 0.8, [c, hh] = WC[tall ? 0 : 1];
             const n1 = noise2(x / 4.5, z / 4.5, W.seed + 71), n2 = noise2(x / 9, z / 9, W.seed + 75);
-            const patch = 1 + 0.14 * n1 + 0.06 * noise2(x / 1.7, z / 1.7, W.seed + 73);
-            const edge = 0.85 + 0.15 * sstep(1.4, 2.6, m);         // a little shorter along the crop's edge
+            // heights vary in patches (4-5 m and 6-10 m), with now and then a taller clump, so the crop's top
+            // rolls instead of reading as a trimmed hedge
+            const patch = 1 + 0.25 * n1 + 0.12 * noise2(x / 8, z / 8, W.seed + 77) + 0.06 * noise2(x / 1.7, z / 1.7, W.seed + 73)
+              + 0.2 * sstep(0.42, 0.62, noise2(x / 2.3, z / 2.3, W.seed + 79));
+            const edge = 0.78 + 0.22 * ek;                                     // shorter along the crop's edge
             out.push({ x, y: W.heightAt(x, z) - 0.05, z, ry: r() * 6.283, w: 0.95 + r() * 0.3, h: hh * (0.9 + r() * 0.22) * patch * edge * 1.08, card: c, fade: 125,
-              lean: 0.05 + r() * 0.09, leanA: windA + (r() - 0.5) * 1.6, tone: 0.5 + 0.3 * n2 + 0.18 * n1 + (r() - 0.5) * 0.2 });
+              lean: 0.05 + r() * 0.09 + (1 - ek) * r() * 0.16, leanA: windA + (r() - 0.5) * (1.6 + (1 - ek) * 1.6), tone: 0.5 + 0.3 * n2 + 0.18 * n1 + (r() - 0.5) * 0.2 });
           } else {
-            out.push({ x, y: W.heightAt(x, z) - 0.03, z, ry: r() * 6.283, w: 0.55 + r() * 0.3, h: 0.24 + r() * 0.12, card: 7, fade: 70 });
+            // cut straw along every stubble row, thinning into the gaps the splat paints (its break field)
+            if (m < 2.45 || this.blocked(x, z)) continue;
+            const brk = macroAt(b / 61 + pk * 0.13, k * 0.173 + pk * 0.31)[2];
+            if (r() > 0.18 + 0.82 * sstep(0.25, 0.62, brk)) continue;
+            out.push({ x, y: W.heightAt(x, z) - 0.03, z, ry: r() * 6.283, w: 0.55 + r() * 0.3, h: 0.22 + r() * 0.12, card: 7, fade: 70, tone: 0.32 + r() * 0.3 });
+          }
+        }
+      }
+      // (stubble) the raked windrows the splat paints every fifth row (on most plots): a low, lumpy roll
+      // of loose straw in 3D, swelling and breaking where the splat's does, so the plot reads from the road
+      if (!wheat && (pk * 0.618 + 0.13) % 1 > 0.3) {
+        for (let n = Math.floor(-A / (5 * per) - 1); n * 5 * per < A + 5; n++) {
+          const q0 = 5 * n + 2, a0 = q0 * per;
+          let aw = a0;
+          for (let it = 0; it < 4; it++) aw = a0 - per * rowJ(aw / per, pk);
+          for (let b = -Bm - 1 + r() * 0.45; b < Bm + 1; b += 0.38 + r() * 0.16) {
+            const wl = macroAt(b / 9 + pk, n * 0.29 + pk * 0.7)[2];
+            if (r() > sstep(0.3, 0.55, wl)) continue;
+            const wan = Math.sin(b * 0.085 + pk * 5) * 0.55 + Math.sin(b * 0.31 + pk * 2) * 0.1;
+            const a = aw - wan + (r() - 0.5) * 0.14;
+            const u = al ? b : a, v = al ? a : b;
+            if (plotM(f, u, v) < 2.6) continue;
+            const x = f.x + u * f.sn + v * f.cs, z = f.z + u * f.cs - v * f.sn;
+            if (this.blocked(x, z)) continue;
+            const sw = 0.55 + 0.45 * sstep(0.3, 0.7, wl);
+            if (r() < 0.6) out.push({ x, y: W.heightAt(x, z) - 0.04, z, ry: r() * 6.283, w: (0.85 + r() * 0.3) * sw + 0.2, h: (0.2 + r() * 0.1) * sw + 0.06, card: 0, fade: 80, tone: 0.3 + r() * 0.3 });
+            else out.push({ x, y: W.heightAt(x, z) - 0.03, z, ry: r() * 6.283, w: 0.7 + r() * 0.3, h: 0.26 + r() * 0.1, card: 7, fade: 80, tone: 0.28 + r() * 0.25 });
           }
         }
       }

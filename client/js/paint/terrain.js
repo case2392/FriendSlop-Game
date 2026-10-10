@@ -2469,16 +2469,16 @@ register('clutter_fields', {
     (g, ox, oy, rnd) => {
       // cut stubble: short stiff stalks in a loose row, flat cut tops catching the light, loose straw
       // fallen at their feet (the stubble plots' rows; elsewhere a straw clump)
-      for (let i = 0; i < 34; i++) { const x = ox + 128 + range(rnd, -100, 100), y = oy + 252 - range(rnd, 0, 26); const a = range(rnd, -1.45, 1.45), L = range(rnd, 30, 80); stroke(g, [[x, y], [x + Math.sin(a) * L, y - Math.abs(Math.cos(a)) * L * 0.35]], 4, 3, pick(rnd, ['#d8bc72', '#c4a456', '#ead494', '#b08c44']), 1); }
+      for (let i = 0; i < 34; i++) { const x = ox + 128 + range(rnd, -100, 100), y = oy + 252 - range(rnd, 0, 26); const a = range(rnd, -1.45, 1.45), L = range(rnd, 30, 80); stroke(g, [[x, y], [x + Math.sin(a) * L, y - Math.abs(Math.cos(a)) * L * 0.35]], 4, 3, pick(rnd, ['#c8a456', '#b8963e', '#d8bc6c', '#a07e3c']), 1); }
       const S = [];
       for (let i = 0; i < 34; i++) S.push({ x: ox + 128 + range(rnd, -104, 104), h: range(rnd, 60, 165), lean: range(rnd, -0.14, 0.14) });
       S.sort((a, b) => b.h - a.h);
       for (const st of S) {
         const x2 = st.x + Math.sin(st.lean) * st.h, y2 = oy + 252 - st.h;
         stroke(g, [[st.x + 1.8, oy + 253], [x2 + 1.8, y2 + 1]], 5.5, 4.5, '#8a6c34', 1);
-        stroke(g, [[st.x, oy + 253], [x2, y2]], 4.6, 3.8, pick(rnd, ['#d8bc72', '#e4cc88', '#c8a85c', '#dcc27c']), 1);
-        stroke(g, [[st.x - 0.8, oy + 240], [x2 - 0.8, y2 + 6]], 1.4, 1, '#f2e2ac', 0.6);
-        ellipse(g, x2, y2, 2.6, 1.3, st.lean, '#f8ecc0');
+        stroke(g, [[st.x, oy + 253], [x2, y2]], 4.6, 3.8, pick(rnd, ['#c8a250', '#d4b05e', '#b8923e', '#ccaa5a']), 1);
+        stroke(g, [[st.x - 0.8, oy + 240], [x2 - 0.8, y2 + 6]], 1.4, 1, '#ecd490', 0.6);
+        ellipse(g, x2, y2, 2.6, 1.3, st.lean, '#f4dc9c');
       }
     },
   ]),
