@@ -84,9 +84,16 @@ await wait(steve, 7000);
 await ev(dave, () => { const S = window.__nmd; const q = S.rv.q; S.me.yaw = Math.atan2(2 * (q.w * q.y + q.x * q.z), 1 - 2 * (q.x * q.x + q.y * q.y)) - 0.12; S.me.pitch = 0.12; });
 await shot(dave, 'riding');
 await steve.keyboard.up('w');
-await steve.keyboard.down(' '); await wait(steve, 1500); await steve.keyboard.up(' ');
+// brake to a standstill before getting up: the RV keeps rolling without a driver, and on software GL
+// the throttle is held long enough that a fixed brake time left it coasting down the road into the
+// later shots (Dave was teleported onto it at the gate and knocked out)
+await steve.keyboard.down(' ');
+await wait(steve, 1500);
+await steve.waitForFunction(() => { const r = window.__nmd.rv; return r && Math.hypot(r.v.x, r.v.z) < 0.3; }, null, { timeout: 120000, polling: 250 }).catch(() => console.log('  (the RV never came to a stop)'));
+await steve.keyboard.up(' ');
 await ev(steve, () => window.__nmd.press('use'));
 await wait(steve, 600);
+console.log('after riding: rv', JSON.stringify(await steve.evaluate(() => ({ z: window.__nmd.rv.p.z, v: Math.hypot(window.__nmd.rv.v.x, window.__nmd.rv.v.z) }))));
 
 }
 if (want('map')) { // 3. the map, from the passenger side
@@ -137,7 +144,7 @@ if (want('rim-code')) { // 6. the ranger gate, and the code painted up on the ri
   }
 }
 
-console.log('before winch: dave', JSON.stringify(await dave.evaluate(() => ({ par: window.__nmd.me.par, pos: window.__nmd.me.pos, ko: window.__nmd.me.koLog?.length || 0 }))));
+console.log('before winch: dave', JSON.stringify(await dave.evaluate(() => ({ par: window.__nmd.me.par, pos: window.__nmd.me.pos, ko: window.__nmd.me.koLog?.length || 0, rv: window.__nmd.rv && { z: window.__nmd.rv.p.z, v: Math.hypot(window.__nmd.rv.v.x, window.__nmd.rv.v.z) } }))));
 }
 if (want('winch')) { // 7. the winch: RV at the foot of the grade, hook up top, cable taut
 {
