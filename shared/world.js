@@ -589,6 +589,25 @@ export function generateLeg(seed, day) {
       }
       if (hi - lo > 2.5) continue;
       fields.push(f);
+      // round bales left lying on a stubble plot, and a scarecrow in some wheat and furrow plots facing the
+      // road (so a plot reads as a farm from the road, not just a strip of paint). They draw from their own
+      // random stream: adding them moves nothing else on the leg.
+      const rf = mulberry32((seed ^ Math.imul(day * 131 + fields.length, 0x27D4EB2F)) >>> 0);
+      const fsn = Math.sin(ry), fc = Math.cos(ry), inPlot = (u, v) => [cx + fsn * u + fc * v, zc + fc * u - fsn * v];
+      if (kind === 'stubble') {
+        const n = 3 + Math.floor(rf() * 4);
+        for (let i = 0, t = 0; i < n && t < 40; t++) {
+          const [bx, bz] = inPlot((rf() * 2 - 1) * (f.hl - 3), (rf() * 2 - 1) * (f.hd - 3));
+          if (cyls.some(q => Math.hypot(q.x - bx, q.z - bz) < q.r + 2.4)) continue;
+          const by = heightAt(bx, bz);
+          cyls.push({ x: bx, y: by + 0.6, z: bz, r: 0.75, hh: 0.6, mat: 'haybale' });
+          decor.push({ k: 'haybale', x: bx, y: by, z: bz, s: 1, ry: ry + (along ? Math.PI / 2 : 0) + (rf() - 0.5) * 0.6, variant: 0, field: fields.length - 1 });
+          i++;
+        }
+      } else if (rf() < 0.6) {
+        const [sx, sz] = inPlot((rf() * 2 - 1) * f.hl * 0.5, -side * f.hd * (0.15 + rf() * 0.3));
+        decor.push({ k: 'scarecrow', x: sx, y: heightAt(sx, sz), z: sz, s: 1, ry: Math.atan2(roadX(sz) - sx, 0) + (rf() - 0.5) * 0.5, field: fields.length - 1 });
+      }
       // the fence along the road edge, in two runs either side of a 3 m gate
       const fx = roadX(zc) + side * (off - 0.6), runLen = len / 2 - 1.5, posts = Math.max(3, Math.round(runLen / 1.9) + 1);
       for (const sd of [-1, 1]) {
