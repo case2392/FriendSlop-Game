@@ -10,7 +10,7 @@
 // Pieces (props3d.js maps geometry onto these through REGIONS):
 //   wood turned iron safe safeback porcelain leather sign slot slotback slotside bulbs
 //   dinohead dinojaw dinomouth eye plaster (the dino head: hide, jaw, mouth / tongue / plain bumps / spine plates)
-//   gnomehat gnomecoat gnomebeard gnomeface gnomefur portrait gold rosette glass brass bronze gilt
+//   gnomehat gnomecoat gnomebeard gnomeface gnomefur portrait paintback gold rosette glass brass bronze gilt
 //   tire rim screen steel bakelite toastplate red regdeck crest till plaque keys tvfront tvback
 //   strap fret guitar honey ball ivory rubber parchment lantern skin boot toast bulb tag
 // Boulders (not in the atlas, they're 4 m wide): loot_boulder_<biome> (512×256, u wraps round
@@ -39,7 +39,7 @@ const PIECES = {
   wood: [256, 256], iron: [256, 256], safe: [256, 256], safeback: [192, 192], porcelain: [256, 256, 'wrap'], leather: [256, 256],
   dinohead: [512, 256, 'wrap'], dinojaw: [256, 128, 'wrap'], dinomouth: [256, 64], sign: [512, 288], slot: [256, 512], slotback: [192, 384], slotside: [96, 192], bulbs: [512, 48],
   gnomehat: [128, 128, 'wrap'], gnomecoat: [256, 128, 'wrap'], gnomebeard: [128, 128, 'wrap'], gnomeface: [256, 128, 'wrap'], gnomefur: [128, 32, 'wrap'],
-  portrait: [384, 288], gold: [1008, 64], rosette: [64, 64], glass: [512, 128, 'wrap'],
+  portrait: [384, 288], paintback: [240, 192], gold: [1008, 64], rosette: [64, 64], glass: [512, 128, 'wrap'],
   brass: [256, 128, 'wrap'], bronze: [256, 128, 'wrap'], gilt: [256, 128, 'wrap'], tire: [512, 128, 'wrap'], turned: [128, 128, 'wrap'],
   rim: [128, 128], screen: [128, 128], steel: [128, 192], bakelite: [64, 64, 'wrap'], toastplate: [128, 40], red: [128, 128], regdeck: [256, 128], crest: [192, 96],
   till: [256, 64], plaque: [256, 64], keys: [256, 64], tvfront: [256, 176], tvback: [256, 176],
@@ -324,7 +324,7 @@ function letters(g, text, x, y, size, { fill: fc = ['#f4d47a', '#cf9f42', '#8a5a
   return { size, width: tot };
 }
 // Sprayed stencil lettering: blocky glyphs with bridges cut through the round ones, overspray, worn flecks.
-function stencil(g, text, x, y, size, color, rnd, { alpha = 0.8, track = 2, maxW = 1e9, rot = 0 } = {}) {
+function stencil(g, text, x, y, size, color, rnd, { alpha = 0.8, track = 2, maxW = 1e9, rot = 0, bridges = true } = {}) {
   const mk = makeCanvas(4, 4).getContext('2d');
   mk.font = `bold ${size}px ${SANS}`;
   let tot = mk.measureText(text).width + track * (text.length - 1);
@@ -334,7 +334,7 @@ function stencil(g, text, x, y, size, color, rnd, { alpha = 0.8, track = 2, maxW
   mg.font = `bold ${size}px ${SANS}`; mg.textBaseline = 'middle'; mg.textAlign = 'left'; mg.fillStyle = '#fff';
   let cx = pad;
   const cuts = [];
-  for (const ch of text) { const w = mg.measureText(ch).width; mg.fillText(ch, cx, MH / 2); if ('OQDBPRAG0689C'.includes(ch)) cuts.push(cx + w * 0.5); cx += w + track; }
+  for (const ch of text) { const w = mg.measureText(ch).width; mg.fillText(ch, cx, MH / 2); if (bridges && 'OQDBPRAG0689C'.includes(ch)) cuts.push(cx + w * 0.5); cx += w + track; }
   mg.globalCompositeOperation = 'destination-out';
   for (const c of cuts) mg.fillRect(c - Math.max(1, size * 0.04), MH / 2 - size * 0.7, Math.max(2, size * 0.08), size * 0.5);
   for (let i = 0; i < text.length * 5; i++) ellipse(mg, rnd() * MW, MH / 2 + (rnd() - 0.5) * size, range(rnd, 0.6, 1.8), range(rnd, 0.5, 1.4), rnd() * 3, '#000');
@@ -1560,6 +1560,85 @@ register('loot_portrait', {
   },
 });
 
+// The portrait's back, as seen from behind (props3d mirrors u on the back face): the dust board it
+// travels in, three pine planks nailed across with dark gaps, every edge grimed dark with handling and
+// scuffed to raw wood at the corners, an iron strap bent round each corner (nailed, rust running), a
+// red FRAGILE sprayed through a stencil and THIS SIDE UP between two arrows, the brass screw eyes for its
+// hanging wire (geometry) with the wire's soft shadow, and the pawn ticket.
+export const PAINTBACK = { eyeX: 0.3, eyeY: 0.2, sagY: 0.105 };   // the hanging wire, in meters from the board's center (props3d)
+register('loot_paintback', {
+  family: F, w: 240, h: 192, note: "the Velvet Elvis's back: a nailed pine dust board, dark worn edges, iron corner straps, FRAGILE / THIS SIDE UP stencils, a pawn ticket",
+  paint(g, w, rnd, h, cv) {
+    const BW = 0.88, BH = 0.7, X = m => w / 2 + m / BW * w, Y = m => h / 2 - m / BH * h;
+    // the planks: a dark gap between each, a lit upper edge, grain along the plank
+    rect(g, 0, 0, w, h, '#2e1e14');
+    const cuts = [0, 63, 129, h], PL = ['#94704a', '#88643f', '#9a764c'];
+    for (let k = 0; k < 3; k++) {
+      const y0 = cuts[k] + (k ? 1.6 : 0), y1 = cuts[k + 1] - (k < 2 ? 1.6 : 0), c = PL[k];
+      rect(g, 0, y0, w, y1 - y0, c);
+      for (let i = 0; i < 9; i++) blob(g, rnd() * w, range(rnd, y0, y1), range(rnd, 24, 60), range(rnd, 5, 12), 0, pick(rnd, ['#a47e54', '#7a5634', '#86603c', '#ac885c']), 0.32, 0.15);
+      grain(g, 0, y0, w, y1 - y0, rnd, { dark: ['#5a3c22', '#664428', '#4e321c'], lite: ['#b8926a', '#c49e70'], n: 15, amp: 1.5, knots: k === 2 ? 1 : 0, alpha: 0.42, wid: [0.6, 1.6] });
+      g.fillStyle = lin(g, 0, y0, 0, y1, [[0, '#f4dcb0', 0.3], [0.18, '#f4dcb0', 0], [0.7, '#2a1810', 0], [1, '#2a1810', 0.4]]); g.fillRect(0, y0, w, y1 - y0);
+      if (k < 2) line(g, [[0, y1 + 1.2], [w, y1 + 1.2]], 1.4, '#1c120c', 0.7);
+    }
+    // the wire's soft shadow and its screw eyes
+    const wire = []; for (let i = 0; i <= 16; i++) { const t = i / 16 * 2 - 1; wire.push([X(t * PAINTBACK.eyeX), Y(PAINTBACK.sagY + (PAINTBACK.eyeY - PAINTBACK.sagY) * t * t)]); }
+    g.save(); g.filter = 'blur(1.6px)'; line(g, wire.map(([x, y]) => [x + 1.5, y + 3]), 2.4, '#20140c', 0.3); g.restore();
+    for (const sx of [-1, 1]) { const x = X(sx * PAINTBACK.eyeX), y = Y(PAINTBACK.eyeY); ellipse(g, x + 1, y + 1.5, 4.2, 4.2, 0, '#20140c', 0.45); ellipse(g, x, y, 3.6, 3.6, 0, '#7a5a24'); ellipse(g, x, y, 1.8, 1.8, 0, '#3a2810'); blob(g, x - 1.2, y - 1.2, 1.6, 1.2, 0, '#f0d488', 0.9, 0.4); }
+    // the stencils: FRAGILE in oxide red across the middle plank, THIS SIDE UP between two arrows below
+    stencil(g, 'FRAGILE', w / 2 + 2, 97, 34, '#8e2c1c', rnd, { maxW: w * 0.64, rot: -0.025, alpha: 0.82, track: 3 });
+    stencil(g, 'THIS SIDE UP', w / 2, 163, 15, '#2c1c12', rnd, { maxW: w * 0.5, rot: 0.015, alpha: 0.74, track: 1.5, bridges: false });
+    for (const x of [w * 0.19, w * 0.81]) {
+      const y0 = 178, y1 = 146;
+      g.save(); g.globalAlpha = 0.72; g.fillStyle = '#2c1c12';
+      g.fillRect(x - 2.6, y1 + 8, 5.2, y0 - y1 - 8);
+      poly(g, [[x - 8, y1 + 10], [x + 8, y1 + 10], [x, y1]]); g.fill(); g.restore();
+    }
+    // the pawn ticket, tacked on: parchment, a torn corner, the price struck out in ink
+    g.save(); g.translate(X(-0.27), 26); g.rotate(-0.07);
+    rect(g, -26 + 1.5, -12 + 2, 52, 24, '#20140c', 0.4);
+    poly(g, [[-26, -12], [26, -12], [26, 7], [21, 12], [-26, 12]]); g.fillStyle = '#e6d2a4'; g.fill();
+    for (let i = 0; i < 6; i++) blob(g, range(rnd, -22, 22), range(rnd, -9, 9), range(rnd, 4, 10), range(rnd, 3, 6), 0, pick(rnd, ['#d4bc88', '#f0e0b8', '#c8ac78']), 0.45, 0.2);
+    line(g, [[-26, -12], [26, -12]], 1, '#fff6dc', 0.7);
+    letters(g, 'No. 47', -4, -3, 10, { rnd, jit: 0.06, shadow: 0, fill: ['#3a2a28', '#2a1c1c', '#1a1010'], rim: '#2a1c1c', lit: '#e6d2a4', chip: 0, rough: 0.4 });
+    line(g, [[-18, 6], [12, 4]], 1.3, '#7a2418', 0.85); line(g, [[-14, 8.5], [-2, 2]], 1.1, '#7a2418', 0.8);
+    rivet(g, 20, -6, 2.2, '#9a8a70');
+    g.restore();
+    // nails: down each end of every plank, and in pairs along the top and bottom between the straps
+    const nail = (x, y) => { ellipse(g, x + 0.7, y + 1, 2.4, 2.2, 0, '#1a100a', 0.5); ellipse(g, x, y, 2.1, 2.1, 0, '#3e3c40'); blob(g, x - 0.6, y - 0.7, 1.2, 1, 0, '#a8a8a8', 0.85, 0.4); run(g, x, y + 2, range(rnd, 4, 9), 1.6, '#6a3418', 0.3, rnd); };
+    for (let k = 0; k < 3; k++) for (const x of [7, w - 7]) { const yc = (cuts[k] + cuts[k + 1]) / 2; if (k === 1) { nail(x + range(rnd, -1, 1), yc - 12); nail(x + range(rnd, -1, 1), yc + 12); } }
+    for (const y of [6.5, h - 6.5]) for (const x of [w * 0.36, w * 0.5, w * 0.64]) nail(x + range(rnd, -3, 3), y + range(rnd, -0.8, 0.8));
+    // the dark worn edge: grime gathered along every border, rubbed through to raw wood at the corners
+    const G = [[0, '#1e120a', 0.62], [0.45, '#2a1a10', 0.26], [1, '#2a1a10', 0]], E = 14;
+    g.fillStyle = lin(g, 0, 0, 0, E, G); g.fillRect(0, 0, w, E);
+    g.fillStyle = lin(g, 0, h, 0, h - E, G); g.fillRect(0, h - E, w, E);
+    g.fillStyle = lin(g, 0, 0, E, 0, G); g.fillRect(0, 0, E, h);
+    g.fillStyle = lin(g, w, 0, w - E, 0, G); g.fillRect(w - E, 0, E, h);
+    for (let i = 0; i < 26; i++) {
+      const side = Math.floor(rnd() * 4), t = rnd(), b = range(rnd, 1, 7);
+      const x = side < 2 ? t * w : side === 2 ? b : w - b, y = side < 2 ? (side ? h - b : b) : t * h;
+      blob(g, x, y, range(rnd, 6, 16), range(rnd, 2, 5), side < 2 ? 0 : Math.PI / 2, '#1a0e08', 0.28, 0.3);
+    }
+    edgeWear(g, 0, 0, w, h, rnd, '#c49c6a', 18, 5);
+    // iron straps bent round each corner: a drop shadow, a lit upper-left edge, three nails, rust running
+    const SW = 13, LA = 50, LB = 40;
+    for (const [cx, cy, sx, sy] of [[0, 0, 1, 1], [w, 0, -1, 1], [0, h, 1, -1], [w, h, -1, -1]]) {
+      const P = (a, b) => [cx + sx * a, cy + sy * b];
+      const pts = [P(0, 0), P(LA, 0), P(LA, SW - 3), P(LA - 3, SW), P(SW, SW), P(SW, LB - 3), P(SW - 3, LB), P(0, LB)];
+      poly(g, pts.map(([x, y]) => [x + 2, y + 2.5])); g.save(); g.globalAlpha = 0.5; g.fillStyle = '#140c08'; g.fill(); g.restore();
+      poly(g, pts); g.fillStyle = lin(g, cx, cy, cx + sx * LA, cy + sy * LB, [[0, '#6a6c70'], [0.45, '#4a4a50'], [1, '#34343a']]); g.fill();
+      for (let i = 0; i < 5; i++) { const a = range(rnd, 2, LA - 4), b = range(rnd, 2, SW - 2); blob(g, ...P(a, b), range(rnd, 3, 7), range(rnd, 2, 4), 0, pick(rnd, ['#7a7c80', '#2e2e34', '#5e4a3a']), 0.35, 0.3); }
+      line(g, [P(0, LB), P(0, 0), P(LA, 0)].map(([x, y]) => [x + sx * 0.8, y + sy * 0.8]), 1.2, '#c8c4bc', 0.55);
+      line(g, [P(LA, SW - 3), P(LA - 3, SW), P(SW, SW), P(SW, LB - 3), P(SW - 3, LB)], 1.3, '#1a1416', 0.6);
+      for (const [a, b] of [[SW / 2, SW / 2], [LA - 8, SW / 2], [SW / 2, LB - 8]]) { const [x, y] = P(a, b); rivet(g, x, y, 2.6, '#6e6a66'); }
+      for (let i = 0; i < 2; i++) { const [x, y] = P(range(rnd, 8, LA - 6), SW - 1); if (sy > 0) rustStain(g, x, y, range(rnd, 4, 7), range(rnd, 8, 18), rnd, 0.7); }
+      const [ex, ey] = P(SW / 2, LB - 1); if (sy > 0) rustStain(g, ex, ey, 5, range(rnd, 8, 14), rnd, 0.6);
+    }
+    glaze(g, w, h, '#ffe0b0', 0.08);
+    blurTile(cv, 0.4);
+  },
+});
+
 // The gilded frame's molding: u along the bar (one cell covers the long side, mitred corners cut
 // it on the diagonal), v across the profile, top = the outer edge. Bands: outer roll with acanthus
 // (y 2–29), fillet (29–32), cove (32–44), beads (44–56), the sight edge (56–64).
@@ -2370,8 +2449,8 @@ const STAR_LAYERS = [[3.5, 1, 1, TW_EDGE, 0.42], [0, 1, 1, TW_GOLD, 1], [0, 0.94
 // white toward a heart a hair up and left of the middle
 function mote(g, x, y, r, rnd) {
   const sq = range(rnd, 0.94, 0.99), rot = range(rnd, -0.6, 0.6);
-  g.fillStyle = radial(g, x, y, 0, r * 2.1, [[0, '#fff6d6', 0.62], [0.35, '#fff0c0', 0.32], [0.7, '#f8e0a0', 0.09], [1, '#f2d080', 0]]);
-  g.fillRect(x - r * 2.2, y - r * 2.2, r * 4.4, r * 4.4);
+  g.fillStyle = radial(g, x, y, 0, r * 1.85, [[0, '#fff8e4', 0.5], [0.4, '#fff4d0', 0.22], [0.72, '#f8e6b0', 0.06], [1, '#f2d080', 0]]);
+  g.fillRect(x - r * 1.9, y - r * 1.9, r * 3.8, r * 3.8);
   ellipse(g, x + 0.3, y + 0.5, r + 3.2, (r + 3.2) * sq, rot, TW_EDGE, 0.42);
   g.fillStyle = radial(g, x - r * 0.08, y - r * 0.1, 0, r * 1.04, [[0, TW_WHITE], [0.3, '#fffbea'], [0.52, TW_CREAM], [0.7, '#fae6a4'], [0.86, '#f0ca68'], [1, '#d6a644']]);
   g.beginPath(); g.ellipse(x, y, r, r * sq, rot, 0, TAU); g.fill();
@@ -2383,7 +2462,7 @@ register('loot_twinkle', {
     for (let k = 0; k < 4; k++) {
       const x = (k % TWINKLE_CELLS) * S + S / 2, y = Math.floor(k / TWINKLE_CELLS) * S + S / 2;
       if (k < 2) {
-        mote(g, x, y, S * (k ? 0.17 : 0.2), rnd);
+        mote(g, x, y, S * (k ? 0.2 : 0.23), rnd);
         // the second one catches the light: a tiny four-point glint across it
         if (k === 1) star(g, x - 1, y - 1, [[0, S * 0.3], [180, S * 0.27], [92, S * 0.25], [272, S * 0.23]], S * 0.03, STAR_LAYERS.slice(2));
         continue;

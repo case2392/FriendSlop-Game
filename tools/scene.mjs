@@ -4,8 +4,9 @@
 //
 //   node tools/scene.mjs camp,road,town [outdir] [day 1-5] [hour] [seed]
 //
-// Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) boulder gate grade winch town pawn casino
-//        pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin crew hands loot night   (or "all")
+// Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) mesa(crash mesas from the road)
+//        boulder gate grade winch town pawn casino pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin
+//        crew hands loot night fields fclose(day 2: each plot from the road edge / from inside it)   (or "all")
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3 snow, 4 badlands, 5 desert.  PROFILE=<dir> keeps one browser profile across runs (the
 // painted-texture cache too), so a second run shows the textures as a returning player gets them;
@@ -15,7 +16,7 @@ import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 import { LOOT } from '../shared/loot.js';
 
-const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'crash', 'boulder', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night'];
+const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'crash', 'mesa', 'boulder', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night', 'fields', 'fclose'];
 const [viewArg = 'camp,road,town', OUT = 'test/screenshots/scene', dayArg = '1', hourArg = '10', seed = '777'] = process.argv.slice(2);
 const views = viewArg === 'all' ? ALL : viewArg.split(',').filter(Boolean);
 const DAY = Math.max(1, Math.min(5, +dayArg | 0)), HOUR = +hourArg;
@@ -108,7 +109,41 @@ const T = W.town;
 
 for (const v of views) {
   try {
-    if (v === 'camp') {
+    if (v === 'fields') {
+      // each Westfall plot (W.fields, day 2) from the road edge, as a driver sees it
+      const F = await steve.evaluate(() => (window.__nmd.W.fields || []).map(f => ({ ...f })));
+      console.log('fields', F.length, JSON.stringify(F.map(f => [f.kind, Math.round(f.z), f.along])));
+      for (const [i, f] of F.slice(0, +(process.env.NF || 3)).entries()) {
+        const cs = Math.cos(f.ry);
+        const z0 = f.z - cs * f.hl * 0.9, rxx = await rx(z0);
+        await camAt(rxx - f.side * 1.5, z0 - 4, f.x, (await hy(f.x, f.z)) + 0.2, f.z + 4);
+        await ev(dave, () => { window.__nmd.me.pitch -= 0.08; });
+        await shot(dave, `field${i}-${f.kind}`);
+      }
+    } else if (v === 'fclose') {
+      // each plot from just past its far corner, low, looking along its rows
+      const F = await steve.evaluate(() => (window.__nmd.W.fields || []).map(f => ({ ...f })));
+      for (const [i, f] of F.slice(0, +(process.env.NF || 3)).entries()) {
+        const sn = Math.sin(f.ry), cs = Math.cos(f.ry);
+        // plot frame: u along road (sn, cs), v across (cs, -sn); side>0 means plot at +x
+        const P = (u, v) => [f.x + u * sn + v * cs, f.z + u * cs - v * sn];
+        const [cx, cz] = P(-f.hl - 2.5, -f.side * f.hd * 0.9);
+        const [tx, tz] = P(f.hl * 0.2, f.side * f.hd * 0.1);
+        await camAt(cx, cz, tx, (await hy(tx, tz)) + 0.3, tz);
+        await shot(dave, `fclose${i}-${f.kind}`);
+      }
+    } else if (v === 'mesa') {
+      // each crash mesa from the road, a bit back, and from the side
+      const M = await steve.evaluate(() => window.__nmd.W.pois.filter(p => p.type === 'crash').map(p => ({ x: p.x, z: p.z, side: p.side, h: p.mesa.h, base: p.mesa.base })));
+      for (const [i, p] of M.slice(0, 2).entries()) {
+        const z = p.z - 22, x = (await rx(z)) - p.side * 3;
+        await camAt(x, z, p.x, p.base + p.h * 0.55, p.z);
+        await shot(dave, `mesa${i}a`);
+        const z2 = p.z + 4, x2 = (await rx(z2)) - p.side * 4;
+        await camAt(x2, z2, p.x, p.base + p.h * 0.6, p.z);
+        await shot(dave, `mesa${i}b`);
+      }
+    } else if (v === 'camp') {
       await steveAt(-4.2, -45.5, 2.4);
       await camAt(-13.5, -52.5, -3, (await hy(-3, -42)) + 1.4, -42);
       await shot(dave, v);

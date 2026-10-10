@@ -74,7 +74,7 @@ const sp = (c, e) => Math.sign(c) * Math.pow(Math.abs(c), 2 / e);   // superelli
 // meters per texture repeat (world-mapped UVs) and the textures that are fitted one-per-face
 const DENS = {
   rs_tin: 2, rs_tin_red: 2, rs_planks: 1, rs_planks_gray: 1, rs_timber: 1.5, rs_iron: 0.5, rs_brass: 1, rs_scrap: 1.5, rs_stone: 1.6,
-  rs_wing: 1.6, rs_gingham: 0.6, rs_bark: 1.2, rs_rv: 3, rs_snow: 2, rs_dust: 2, rs_sand: 2, rs_dirt: 2, rs_tire: 0.6,
+  rs_wing: 6.4, rs_gingham: 0.6, rs_bark: 1.2, rs_rv: 3, rs_snow: 2, rs_dust: 2, rs_sand: 2, rs_dirt: 2, rs_tire: 0.6,
   rs_fascia: 4, rs_shingles: 1.2, rs_slats: 2, rs_dino: 6, rs_canvas: 3, rs_canvas_blue: 3, rs_canvas_plain: 3, rs_slate: 1.4, rs_hide: 1.6,
   rs_adobe: 2, rs_burlap: 0.9, rs_plaid: 0.9, rs_rope: 0.4, rs_rock: 1.4, rs_hay: 1, rs_bone: 0.6,
   rs_bleach: 1.5, rs_plaster: 1.8, rs_shingles_red: 1.2, rs_thatch: 1.3, rs_rv_green: 3, rs_rv_rust: 3, rs_rv_blue: 3, rs_rv_skins: 3,
@@ -681,6 +681,43 @@ function finish(B, ctx, parent, clusters, track = null) {
 }
 
 // ---- reusable pieces ---------------------------------------------------------------------------------
+
+// The flying machine's wings. rs_wing's u runs along the span (WING_S m a repeat, WING_RIBS rib bays: paint/roadside.js
+// paints the ribs on the same pitch), its v is fitted to the chord with the leading edge's red dope at the canvas top.
+// A wing panel is a slab with the span along x and the chord along z (+z the leading edge). Its top is cambered (a
+// hump a third of the way back) and sags between the ribs, so the painted rib tapes sit on real ridges and the bays
+// catch the light; the nose is rounded forward; the bottom stays flat (so nothing dips inside a collider). The leading
+// and trailing edge faces take the red bands, the tips the airframe atlas's chipped red trim. Returns top(x, z): the
+// height of its top at a point of the current builder space (for decals and snow laid on it; unrotated panels only).
+const WING_S = 6.4, WING_RIBS = 16;
+const wingProf = c => (c < 0.3 ? Math.sin(c / 0.3 * Math.PI / 2) : Math.cos((c - 0.3) / 0.7 * Math.PI / 2));
+const wingCamber = chord => Math.min(0.06, chord * 0.035);
+function wingPanel(B, span, th, chord, x, y, z, o = {}) {
+  const off = o.off || 0, cam = o.camber ?? wingCamber(chord), sag = o.sag ?? 0.4, user = o.deform, hc = chord / 2, ht = th / 2;
+  const r = Math.min(o.r ?? 0.05, th * 0.4), nose = cam > 0 ? (o.nose ?? th * 0.2) : 0;
+  const deform = q => {
+    if (q[1] > 0 && cam > 0) {
+      const c = clamp01((hc - q[2]) / chord), ph = (q[0] / WING_S + off) * WING_RIBS;
+      q[1] += cam * wingProf(c) * (1 - sag * Math.sin(Math.PI * (ph - Math.floor(ph))));
+    }
+    if (nose && q[2] > hc - r * 1.01) q[2] += nose * Math.max(0, 1 - (q[1] / ht) ** 2);
+    if (user) user(q);
+  };
+  const TRIMF = { m: PL, fit: true, uvRect: plRect(PLR.trim) };
+  B.box('rs_wing', span, th, chord, x, y, z, {
+    div: [cam > 0 ? Math.max(1, Math.round(span / 0.1)) : 1, nose ? 2 : 1, cam > 0 ? 4 : 1], smoothN: cam > 0, ...o, r, deform, off: [off, 0], fit: 'v',
+    faces: { py: { uvRect: [0, 0.996, 1, 0.004] }, ny: { uvRect: [0, 0.004, 1, 0.996] }, pz: { uvRect: [0, 0.93, 1, 0.985] }, nz: { uvRect: [0, 0.015, 1, 0.07] }, px: TRIMF, nx: TRIMF, ...(o.faces || {}) },
+  });
+  return (X, Z) => { const q = [X - x, ht, Z - z]; deform(q); return y + q[1]; };
+}
+// a wingtip bow or a strip laid across the wing's chord: the camber's crest without the sag
+const wingCap = (chord, cam = wingCamber(chord)) => q => { if (q[1] > 0) q[1] += cam * wingProf(clamp01((chord / 2 - q[2]) / chord)); };
+// a decal (roundel) draped over a surface y = top(x, z) of the current builder space, centred at (cx, cz), turned by rot
+function drape(B, mat, size, cx, cz, top, rot = 0, lift = 0.014) {
+  const c = Math.cos(rot), s = Math.sin(rot);
+  B.grid(mat, 14, 14, (u, v) => { const a = (u - 0.5) * size, b = (v - 0.5) * size, X = cx + a * c - b * s, Z = cz + a * s + b * c; return [X, top(X, Z) + lift, Z]; },
+    { flip: true, noAO: true, lod0: true, uv: (u, v) => [u, v] });
+}
 
 // a wheel with its axle along local x
 function wheel(B, x, y, z, r, w, o = {}) {
@@ -1333,8 +1370,8 @@ function buildCrash(B, p, parts, ctx, decor) {
     B.box(PL, 0.1, 1.6, 1.15, 0, 0.76, -0.15, { r: 0.04, taper: 0.62, div: [1, 2, 2], fit: true, uvRect: plRect(PLR.hull, [0.02, 0.5, 0.24, 0.96]), deform: q => { q[2] -= (q[1] + 0.8) * 0.3; } });
     B.box('rs_brass', 0.12, 0.08, 0.66, 0, 1.56, -0.62, { r: 0.025 });
     for (const sx of [-1, 1]) B.quad('rs_roundel#', 0.82, 0.82, sx * 0.058, 0.68, -0.28, { ry: sx * Math.PI / 2 });
-    B.box('rs_wing', 2.6, 0.07, 0.72, 0, 0.02, -0.05, { r: 0.025, rz: 0.1, tint: WING_RED });
-    B.box('rs_wing', 0.9, 0.06, 0.6, 1.1, 0.03, -0.1, { r: 0.02, rz: -0.35, ry: 0.3, jit: 0.04 });
+    wingPanel(B, 2.6, 0.07, 0.72, 0, 0.02, -0.05, { r: 0.025, rz: 0.1, tint: WING_RED, camber: 0.018, off: 0.35 });
+    wingPanel(B, 0.9, 0.06, 0.6, 1.1, 0.03, -0.1, { r: 0.02, rz: -0.35, ry: 0.3, jit: 0.04, camber: 0.015, off: 0.62 });
     B.pop();
     B.pop();
     // landing gear: one leg snapped out sideways, a wheel lying in the dirt
@@ -1359,26 +1396,55 @@ function buildCrash(B, p, parts, ctx, decor) {
     B.sheet('rs_scorch%', 3.2, flen + 1.6, fus.x, (zN + zBack) / 2 + 0.5, { nx: 4, nz: 10, lift: 0.05 });
   }
   if (wing) {
-    const droop = q => { const xx = q[0] + wing.x; if (xx > 2.6) { const k2 = xx - 2.6; q[1] -= k2 * k2 * 0.02; } };
-    B.box('rs_wing', wing.hx * 2, wing.hy * 2, wing.hz * 2, wing.x, wing.y, wing.z, { r: 0.05, div: [6, 1, 1], deform: droop, off: [0.2, 0.5] });
-    // red-doped bands near the tips, the leading-edge spar, the wingtip bows
-    for (const sx of [-1, 1]) B.box('rs_wing', 0.5, wing.hy * 2 + 0.02, wing.hz * 2 + 0.02, wing.x + sx * (wing.hx - 0.75), wing.y - (sx > 0 ? 0.02 : 0), wing.z, { r: 0.05, tint: WING_RED, rz: sx > 0 ? -0.04 : 0 });
-    B.quad('rs_roundel#', 0.95, 0.95, wing.x - wing.hx + 1.6, wing.y + wing.hy + 0.02, wing.z, { rx: -Math.PI / 2 });
-    B.cyl('rs_brass', 0.055, 0.055, 6.75, wing.x - 0.78, wing.y, wing.z + wing.hz, { rz: Math.PI / 2, seg: 6, caps: false });
-    B.box(PL, 0.12, wing.hy * 2 + 0.06, wing.hz * 2 + 0.04, wing.x - wing.hx, wing.y, wing.z, { r: 0.04, ...TRIM });
-    // the upper wing: left half still up on its struts; the right half snapped off its root and
-    // flung up and outward, a bent strut still hanging off it trailing a tattered pennant
-    const uy = 2.05, uz = wing.z + 0.1;
-    B.box('rs_wing', 6.4, 0.14, 1.5, wing.x - 1.0, uy, uz, { r: 0.05, off: [0.7, 0.2], div: [6, 1, 1] });
-    B.box('rs_wing', 0.6, 0.15, 1.52, wing.x - 3.75, uy, uz, { r: 0.05, tint: WING_RED });
-    B.box(PL, 0.12, 0.2, 1.54, wing.x - 4.2, uy, uz, { r: 0.04, ...TRIM });
-    B.quad('rs_roundel#', 1.0, 1.0, wing.x - 2.9, uy + 0.08, uz, { rx: -Math.PI / 2 });
+    // The lower wing fills its collider's box: canvas over ribs, red-doped edges, the roundel draped over its camber,
+    // the starboard end drooping a hand where its spar cracked (render only: the collider stays flat); red-doped
+    // bands near the tips (on the same ribs), a chipped bow on the port tip.
+    const droopAt = cx => q => { const xx = q[0] + cx; if (xx > 2.5) { const k2 = xx - 2.5; q[1] -= k2 * k2 * 0.024; } };
+    const LC = wing.hz * 2, lowTop = wingPanel(B, wing.hx * 2, wing.hy * 2, LC, wing.x, wing.y, wing.z, { off: 0.2, deform: droopAt(wing.x) });
+    for (const sx of [-1, 1]) {
+      const bx = wing.x + sx * (wing.hx - 0.75);
+      wingPanel(B, 0.5, wing.hy * 2 + 0.02, LC + 0.02, bx, wing.y, wing.z, { off: 0.2 + (bx - wing.x) / WING_S, tint: WING_RED, deform: droopAt(bx) });
+    }
+    drape(B, 'rs_roundel#', 0.95, wing.x - wing.hx + 1.6, wing.z - 0.05, lowTop);
+    B.box(PL, 0.12, wing.hy * 2 + 0.06, LC + 0.07, wing.x - wing.hx, wing.y, wing.z + 0.015, { r: 0.04, ...TRIM, div: [1, 1, 4], deform: wingCap(LC + 0.07, wingCamber(LC) + 0.008) });
+    // The upper wing: its port half still up on its struts. The starboard half snapped off at the root and was flung
+    // up and outward; its spar cracked again halfway, so the outer end droops and twists, a bent strut still hanging
+    // off it. Splintered spar ends stick out of both sides of the break, a tongue of torn skin hangs off the root.
+    const uy = 2.05, uz = wing.z + 0.1, UC = 1.5, ux = wing.x - 1.0;
+    const upTop = wingPanel(B, 6.4, 0.14, UC, ux, uy, uz, { off: 0.7 });
+    { const bx = wing.x - 3.75; wingPanel(B, 0.6, 0.16, UC + 0.02, bx, uy, uz, { off: 0.7 + (bx - ux) / WING_S, tint: WING_RED }); }
+    B.box(PL, 0.12, 0.2, UC + 0.07, wing.x - 4.2, uy, uz + 0.015, { r: 0.04, ...TRIM, div: [1, 1, 4], deform: wingCap(UC + 0.07, wingCamber(UC) + 0.008) });
+    drape(B, 'rs_roundel#', 1.0, wing.x - 2.9, uz - 0.05, upTop);
+    // the spars' broken ends and a few rib splinters (front spar a quarter of the chord back, rear spar two thirds)
+    const SPARS = c => [c / 2 - 0.273 * c, c / 2 - 0.656 * c];
+    const splinters = (x0, y0, dir, chord, P = (X, Y, Z) => [X, Y, Z]) => {
+      for (const [k, zz] of SPARS(chord).entries()) {
+        const L = k ? 0.2 : 0.3, c = P(x0 + dir * (L / 2 - 0.04), y0, zz);
+        B.box('rs_timber', L, 0.075, 0.055, c[0], c[1], c[2], { r: 0.012, jit: 0.02, tint: [1.12, 0.98, 0.8], ry: dir * (k ? -0.12 : 0.1) });
+        for (let j = 0; j < 3; j++) {
+          const l2 = 0.1 + 0.05 * j, q = P(x0 + dir * (L - 0.04 + l2 / 2 - 0.03), y0 + (j - 1) * 0.022, zz + (j - 1) * 0.016);
+          B.box('rs_timber', l2, 0.018, 0.016, q[0], q[1], q[2], { rz: dir * (j - 1) * 0.3, ry: (j - 1) * 0.35, r: 0.004, tint: [1.22, 1.06, 0.84] });
+        }
+      }
+    };
+    splinters(ux + 3.2, uy, 1, UC, (X, Y, Z) => [X, Y, Z + uz]);
+    B.push(M4(wing.x + 2.18, uy - 0.065, uz - 0.28, 0, 0.25, -1.3));
+    wingPanel(B, 0.55, 0.012, 0.42, 0.27, 0, 0, { camber: 0, r: 0.004, div: [4, 1, 3], smoothN: true, jit: 0.02, off: 0.27,
+      faces: { py: { uvRect: [0, 0.68, 1, 0.38] }, ny: { uvRect: [0, 0.38, 1, 0.68] } },
+      deform: q => { const t = q[0] / 0.55 + 0.5; q[1] += 0.05 * Math.sin(t * 5.5) + 0.07 * t * t; q[2] *= 1 - 0.35 * t; } });
+    B.pop();
+    // the snapped half, in its own frame: root at x 0, tip at 2.1; BEND sags it and twists it toward the tip
     B.push(M4(wing.x + 2.25, uy - 0.05, uz, 0, -0.1, 0.72));
-    B.box('rs_wing', 2.1, 0.13, 1.45, 1.05, 0, 0, { r: 0.05, jit: 0.04, off: [0.1, 0.9], div: [3, 1, 1] });
-    B.box('rs_wing', 0.5, 0.14, 1.47, 1.8, 0, 0, { r: 0.05, tint: WING_RED, jit: 0.03 });
-    B.box(PL, 0.12, 0.19, 1.5, 2.1, 0, 0, { r: 0.04, ...TRIM });
-    // the bent strut and the pennant
-    const s0 = V(1.6, -0.1, 0.4), s1 = V(1.75, -0.75, 0.48), s2 = V(2.1, -1.2, 0.46);
+    const BEND = (X, Y, Z) => { const t = clamp01(X / 2.2), tw = 0.24 * t * t, c = Math.cos(tw), s = Math.sin(tw); return [X, Y * c - Z * s - 0.34 * t * t, Y * s + Z * c]; };
+    const bend = cx => q => { const p = BEND(q[0] + cx, q[1], q[2]); q[1] = p[1]; q[2] = p[2]; };
+    const SC = 1.45;
+    wingPanel(B, 2.1, 0.13, SC, 1.05, 0, 0, { off: 0.1, jit: 0.04, deform: bend(1.05) });
+    wingPanel(B, 0.5, 0.15, SC + 0.02, 1.8, 0, 0, { off: 0.1 + 0.75 / WING_S, tint: WING_RED, jit: 0.03, deform: bend(1.8) });
+    { const cap = wingCap(SC + 0.07, wingCamber(SC) + 0.008), bd = bend(2.1); B.box(PL, 0.12, 0.19, SC + 0.07, 2.1, 0, 0.015, { r: 0.04, ...TRIM, div: [1, 1, 4], deform: q => { cap(q); bd(q); } }); }
+    splinters(0, 0, -1, SC);
+    // the bent strut, still hanging off it
+    const sb = BEND(1.6, -0.1, 0.4), sd = V(sb[0] - 1.6, sb[1] + 0.1, sb[2] - 0.4);
+    const s0 = V(1.6, -0.1, 0.4).add(sd), s1 = V(1.75, -0.75, 0.48).add(sd), s2 = V(2.1, -1.2, 0.46).add(sd);
     B.tube('rs_timber', [s0, s1, s2], 0.045, { seg: 6, lod0: false });
     B.pop();
     // a tall bent pole jammed in the left wingtip carrying a pennant: one more thing that shows over the rim
@@ -1395,7 +1461,7 @@ function buildCrash(B, p, parts, ctx, decor) {
       B.tube('rs_iron', [V(wing.x + x1, wing.y + 0.08, uz), V(wing.x + x0, uy - 0.07, uz)], 0.01, { seg: 3 });
     }
     if (ctx.snow) {
-      snowCap(B, 6.2, 1.45, wing.x - 1.0, uy + 0.07, uz, { t: 0.12 });
+      snowCap(B, 6.2, 1.45, ux, uy + 0.07, uz, { t: 0.12, dy: (px2, pz2) => wingCamber(UC) * wingProf(clamp01((UC / 2 - pz2) / UC)) });
       icicles(B, wing.x - 4.1, uz + 0.75, wing.x + 2.1, uz + 0.75, uy - 0.07, rnd, { max: 0.25 });
     }
   }
@@ -1404,7 +1470,7 @@ function buildCrash(B, p, parts, ctx, decor) {
   for (let i = 0; i < 12; i++) {
     let x, z; do { const a = rnd() * TAU, rr = range(rnd, 2.6, 4.8); x = Math.cos(a) * rr; z = Math.sin(a) * rr; } while (z < -2.5 && Math.abs(x) < 3.5);
     const m = debris[i % debris.length];
-    B.box(m, range(rnd, 0.3, 0.7), 0.04, range(rnd, 0.25, 0.5), x, B.ground(x, z) + 0.04, z, { ry: rnd() * 3, rx: range(rnd, -0.25, 0.25), rz: range(rnd, -0.25, 0.25), jit: 0.05, ...(m === PL ? TRIM : {}) });
+    B.box(m, range(rnd, 0.3, 0.7), 0.04, range(rnd, 0.25, 0.5), x, B.ground(x, z) + 0.04, z, { ry: rnd() * 3, rx: range(rnd, -0.25, 0.25), rz: range(rnd, -0.25, 0.25), jit: 0.05, ...(m === PL ? TRIM : {}), ...(m === 'rs_wing' ? { fit: 'v', uvRect: [0, 0.12 + 0.5 * ((i * 0.37) % 1), 1, 0.47 + 0.5 * ((i * 0.37) % 1)] } : {}) });
   }
   B.box('rs_timber', 0.2, 0.85, 0.06, -1.8, B.ground(-1.8, 3.6) + 0.04, 3.6, { rx: -Math.PI / 2 + 0.05, ry: 0.7, taper: 0.6, r: 0.02 });
   // the big pieces: a crumpled cowling panel, a broken strut still trailing its fabric, the other prop blade
@@ -1415,8 +1481,8 @@ function buildCrash(B, p, parts, ctx, decor) {
     const [cx2, cz2, a2] = spots[1], gy2 = B.ground(cx2, cz2);
     B.push(M4(cx2, gy2 + 0.1, cz2, 0, a2, 0.12));
     B.cyl('rs_timber', 0.05, 0.05, 1.5, 0, 0, 0, { rz: Math.PI / 2, seg: 6, caps: false, lod0: false });
-    B.box('rs_wing', 1.1, 0.03, 0.75, 0.15, 0.08, 0.36, { rx: -0.35, r: 0.01, div: [3, 1, 2], jit: 0.05, tint: [0.95, 0.9, 0.85] });
-    B.box('rs_wing', 0.36, 0.035, 0.76, 0.52, 0.09, 0.36, { rx: -0.35, r: 0.01, tint: WING_RED });
+    wingPanel(B, 1.1, 0.03, 0.75, 0.15, 0.08, 0.36, { rx: -0.35, r: 0.01, div: [3, 1, 2], jit: 0.05, tint: [0.95, 0.9, 0.85], camber: 0, off: 0.35 });
+    wingPanel(B, 0.36, 0.035, 0.76, 0.52, 0.09, 0.36, { rx: -0.35, r: 0.01, tint: WING_RED, camber: 0, off: 0.35 + 0.37 / WING_S });
     B.pop();
     const [cx3, cz3, a3] = spots[2], gy3 = B.ground(cx3, cz3);
     B.box('rs_timber', 0.2, 1.05, 0.06, cx3, gy3 + 0.05, cz3, { rx: -Math.PI / 2 + 0.06, ry: a3, taper: 0.55, r: 0.025 });
@@ -1540,13 +1606,11 @@ function buildCrash(B, p, parts, ctx, decor) {
     {
       const wx = -(hw + 1.9), wp = profile(wx), q = wp.at(wp.sL - 0.05), ry2 = range(rnd, -0.25, 0.1);
       B.push(M4(wx, q.y + 0.06, q.z, 0, ry2, range(rnd, -0.08, 0.08)));
-      B.box('rs_wing', 1.3, 0.09, 1.2, 0, 0.03, -0.58, { r: 0.03, rx: -0.05, jit: 0.03, div: [2, 1, 2], off: [0.3, 0.1] });
-      B.box('rs_wing', 0.08, 0.12, 1.25, 0.66, 0.03, -0.58, { r: 0.02, tint: [0.85, 0.8, 0.7] });
+      // (each panel turned a quarter: its chord runs along x here, the leading edge at +x)
+      wingPanel(B, 1.2, 0.09, 1.3, 0, 0.03, -0.58, { ry: Math.PI / 2, rz: -0.05, r: 0.03, jit: 0.03, div: [2, 1, 2], camber: 0, off: 0.3 });
       B.push(M4(0, 0.02, 0.02, 1.15, 0, 0.06));
-      B.box('rs_wing', 1.3, 0.09, 2.1, 0, 0.0, 1.06, { r: 0.03, jit: 0.04, div: [2, 1, 4], off: [0.7, 0.4] });
-      B.box('rs_wing', 1.32, 0.095, 0.5, 0, 0.0, 1.9, { r: 0.03, tint: WING_RED });
-      B.box(PL, 0.14, 0.12, 2.12, -0.66, 0.0, 1.06, { r: 0.03, ...TRIM });
-      B.cyl('rs_brass', 0.05, 0.05, 2.15, 0.68, 0.0, 1.06, { rx: Math.PI / 2, seg: 6, caps: false });
+      wingPanel(B, 2.1, 0.09, 1.3, 0, 0.0, 1.06, { ry: Math.PI / 2, r: 0.03, jit: 0.04, div: [4, 1, 2], camber: 0, off: 0.7 });
+      wingPanel(B, 0.5, 0.095, 1.32, 0, 0.0, 1.9, { ry: Math.PI / 2, r: 0.03, tint: WING_RED, camber: 0, off: 0.7 - 0.84 / WING_S });
       B.quad('rs_roundel#', 0.8, 0.8, 0.0, 0.05, 1.05, { rx: -Math.PI / 2, rz: 0.3 });
       B.pop();
       // the snapped spar and rib ends sticking out of the inner end
@@ -1824,7 +1888,8 @@ function buildJunk(B, p, parts, ctx) {
           B.pop(); B.pop();
         } else if (it === 'fin') {
           B.push(M4(ox, top + 0.2, oz, range(rnd, -0.4, 0.4), a, range(rnd, 0.3, 0.6)));
-          B.box('rs_wing', 0.06, 1.0, 0.7, 0, 0.3, 0, { r: 0.02, taper: 0.35, tint: [1.0, 0.95, 0.85], deform: q => { q[2] -= (q[1] + 0.5) * 0.35; } });
+          B.box('rs_wing', 0.06, 1.0, 0.7, 0, 0.3, 0, { r: 0.02, taper: 0.35, tint: [1.0, 0.95, 0.85], S: 3.2, deform: q => { q[2] -= (q[1] + 0.5) * 0.35; },
+            faces: { px: { rot: true, fit: 'v', uvRect: [-0.996, 0, -0.004, 1] }, nx: { rot: true, fit: 'v', uvRect: [-0.004, 0, -0.996, 1] } } });
           B.box('rs_steel_red', 0.07, 0.18, 0.62, 0, 0.0, 0.03, { r: 0.02, taper: 0.9 });
           B.pop();
         } else if (it === 'ladder') {

@@ -23,8 +23,9 @@
 //   rock_red (badlands) / rock_sand (desert): bedded rock in the canyon walls' language: soft beds pale
 //     and deep by turns (wandering sub-beds, a few broken ledgelets) between hard beds at the fixed
 //     heights in STRATA_BEDS (exported: nature3d puts its ledges' lips on them), each with a lit lip, a
-//     purple-brown undercut and rain stains; joints, vertical washes; the sand one paler and softer,
-//     with wind pits and grooves. Both seamless in both directions
+//     purple-brown undercut and rain stains; joints, vertical washes; the sand one in thin beds (soft
+//     beds each its own hue: tan, rose, ochre, honey; hard beds of varied strength told by their lips
+//     and undercuts more than their colour), cross-bedding, wind pits and grooves. Both seamless
 // Top cover (tile; alpha = thickness mask, blended on up-facing surfaces by the nature shader):
 //   cover_moss cover_lichen cover_snow cover_dust cover_sand · snow_pack (opaque snow for snow caps)
 // Props: cactus_skin / cactus_dusty (tiles, 4 ribs), hay (tiles), hay_end (disc), stump_top (disc), bone_bleached (tiles),
@@ -1221,8 +1222,8 @@ register('rock_sand', {
   family: F, size: 512, note: 'Tanaris sandstone: thin beds of tan, rose, ochre and honey between thin hard beds (crisp lit lips, cool undercuts) at fixed heights the mounds follow; wind pits and grooves (seamless)',
   paint: (g, s, rnd, h, cv) => bedded(g, s, rnd, cv, {
     beds: STRATA_BEDS.rock_sand,
-    softs: ['#d0a472', '#c8927c', '#d49e56', '#dab284', '#b98068', '#b88658', '#d4a28a', '#d8aa68'],
-    pale: ['#dab284', '#d4a28a', '#d8aa68'], deep: ['#b98068', '#b88658'], hard: ['#e4c496', '#e0be9a', '#e8ca9a', '#ddb990'],
+    softs: ['#d0a472', '#c99680', '#d49e56', '#dab284', '#c08a72', '#c08f62', '#d2a48e', '#d8aa68'],
+    pale: ['#dab284', '#d2a48e', '#d8aa68'], deep: ['#c08a72', '#c08f62'], hard: ['#e4c496', '#e0be9a', '#e8ca9a', '#ddb990'],
     blot: ['#d8b07c', '#a87050', '#c88e70', '#b88a58'], streak: ['#5a3c3a'], under: '#6a4850', crack: '#523840', lit: '#f4deb6',
     underW: 9, underA: 0.5, underBlur: 0.45, crackA: 0.12, creaseA: 0.06, lipA: 0.6, ledgelets: 0, fissN: 6, dripN: 2, dripA: 0.14, streakN: 4, chipN: 18, hardWob: 2.4, hardMix: 0.72, blotA: 0.24, glaze: '#fff0c8',
     extra(g, s, rnd, beds, bT, bB) {

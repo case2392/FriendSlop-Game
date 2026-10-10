@@ -235,7 +235,7 @@ function splatMaterial(biome, cfg) {
           #define P2(p, ox, oy) vec2(p.x * 0.71 + ox, p.y)
           #define P2K vec2(0.71, 1.0)
           #define PF(p, ox, oy) vec2(p.x * uFarS + ox, p.y)
-          #define PFK (vec2(uFarS, 1.0) * 2.0)          // (and a mip softer: far off, only the big beds)
+          #define PFK (vec2(uFarS, 1.0) * farMip)       // (and softer with distance: far off, only the big beds)
         #else
           #define PF(p, ox, oy) (p * uFarS + vec2(ox, oy))
           #define PFK uFarS
@@ -562,6 +562,11 @@ function splatMaterial(biome, cfg) {
               }
             #endif
             vec3 cc = vec3(0.0);
+            #ifdef TERRAIN_DUNES
+              // (the far sandstone a mip softer, and softer still across the valley, so its thin hard beds
+              // never thin into ruled lines on the distant walls: only the broad beds' colours remain)
+              float farMip = 2.0 * exp2(2.0 * smoothstep(100.0, 230.0, distance(cameraPosition, wp)));
+            #endif
             vec2 sN = vec2(0.5);      // (snow) a noise on the face, stretched along it: r ~5-13 m by 1-3 m, g ~2-6 m by 0.5-1.3 m
             vec2 fm = vec2(0.5);      // (snow) the painted rock's form under cc: x which way it faces (> 0.5 up), y its height
             #ifdef TERRAIN_SNOWROCK
@@ -726,7 +731,7 @@ function splatMaterial(biome, cfg) {
               // dune crests stay sand (but not a wall's steep convex shoulder: the sandstone runs up to
               // where its lip lies back under ~30 degrees, so a wall is rock under a sand cap, never one
               // thin band of rock between sand above and sand below)
-              wk *= 1.0 - smoothstep(-0.05, 0.35, vCv) * (1.0 - mesaK) * (1.0 - smoothstep(0.16, 0.28, sl.y));
+              wk *= 1.0 - smoothstep(-0.05, 0.35, vCv) * (1.0 - mesaK) * (1.0 - smoothstep(0.19, 0.33, sl.y));
               if (mesaK > 0.0) {
                 // a crash mesa is a sandstone butte: rock all round its flanks under a cap of drifted sand
                 // hanging over its lip, above a drift at its foot, with sand lying on its bench and a lit

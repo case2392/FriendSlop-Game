@@ -14,7 +14,7 @@
 //   rs_shingles, rs_shingles_red (1.2 m)  rs_slate (1.4 m)  rs_thatch (1.3 m; up the roof = up the texture)
 //   rs_hide (1.6 m)  rs_adobe (2 m)  rs_dirt (2 m)  rs_rock (1.4 m, faceted)  rs_hay (1 m)
 //   rs_iron (0.5 m)  rs_brass (1 m)  rs_tire (tread, u around)  rs_gingham (0.6 m)  rs_burlap  rs_plaid  rs_canvas (stripes along u)
-//   rs_wing (doped canvas, ribs along v, 1.6 m)  rs_scrap (junk soil, world-planar 1 m)  rs_stone (1.6 m)  rs_rope  rs_bone
+//   rs_wing (wing skin: u along the span, 6.4 m, a rib every 0.4 m; v fitted to the chord)  rs_scrap (junk soil, world-planar 1 m)  rs_stone (1.6 m)  rs_rope  rs_bone
 //   rs_bark (u around, v along)  rs_dino (u along the body, one tile per 6 m; v = 0 belly .. 1 back, from the normal)
 //   rs_rv_green|rust|blue (u 3 m, v fitted; atlas rs_rv_skins stacks all three over rs_rv_names)  rs_fascia (u 4 m, v fitted)
 //   rs_snow, rs_dust, rs_sand (caps)   rs_cover_snow|dust|sand (alpha = breakup noise, for the world-space
@@ -853,57 +853,231 @@ register('rs_rope', {
 
 // ---- the crashed flying machine -------------------------------------------------------------------------
 
+// The flying machine's wing skin (1024 x 256). u runs along the span and tiles: 6.4 m a repeat, sixteen rib bays of
+// 64 px, so a rib every 0.4 m (roadside3d.js sags the wing's top between them to match). v is fitted to the chord: the
+// leading edge at the top (y 0), the trailing edge at the bottom. Sun-faded cream linen doped over the ribs, light
+// from the upper left: the cloth falls away cool to the right of each rib and climbs warm to the next, the rib tapes
+// stand up as lit ridges with pinked edges and rib-stitching, short nose ribs between them ahead of the front spar,
+// both spars faint ridges along the span. A red-doped leading edge (its nose rubbed pale) and trailing-edge band
+// (scalloped between the ribs, drain grommets), both chipped back to the linen and to silver primer; two repair
+// patches, ringworm cracks in the old dope, rain and oil blown back across the chord, a scorch, one bay torn open
+// (the rear spar, a bracing wire and the far skin showing inside, flaps peeled back), a long split and a small hole.
+const WING_RIBS = 16;
+// paint a layer on a canvas of its own, fade it across y by alpha stops [[t, a]], then lay it on
+function chordMask(g, w, h, stops, fn) {
+  const cv = makeCanvas(w, h), q = cv.getContext('2d', { willReadFrequently: true });
+  fn(q);
+  q.globalCompositeOperation = 'destination-in';
+  q.fillStyle = grad(q, 0, 0, 0, h, stops.map(([t, a]) => [t, '#000000', a])); q.fillRect(0, 0, w, h);
+  g.drawImage(cv, 0, 0);
+}
+// a ragged closed outline round (0, 0): n points on an ellipse rx x ry, radius jittered
+function ragged(rnd, n, rx, ry, lo = 0.72, hi = 1.08) {
+  const P = [];
+  for (let k = 0; k < n; k++) { const a = k / n * TAU, r = range(rnd, lo, hi); P.push([Math.cos(a) * rx * r, Math.sin(a) * ry * r]); }
+  return P;
+}
+function wingSkin(g, w, h, rnd) {
+  const CREAM = '#d4c39a', RED = '#973b2c', REDL = '#b55c45', REDD = '#702c26', PRIMER = '#9a948a';
+  const COOL = '#3a2c44', WARM = '#fff0cc', BAY = w / WING_RIBS;
+  const LE = 30, TE = 226, FS = 70, RS = 168;   // the leading-edge band's end, the trailing band's start, the spars
+  const per = (k, ph) => x => Math.sin(TAU * k * x / w + ph);   // a wobble that tiles across the span
+  g.fillStyle = CREAM; g.fillRect(0, 0, w, h);
+  blots(g, w, h, rnd, { colors: ['#e0d0a8', '#c4b088', '#cdb990', '#bba982', '#dacaa2'], count: 34, rmin: 34, rmax: 80, alpha: 0.42, hard: 0.05, stretch: 2.2, rot: 0, wrapX: true });
+  blots(g, w, h, rnd, { colors: ['#e8dab4', '#bca882', '#c9b68c', '#d8c49a'], count: 110, rmin: 6, rmax: 20, alpha: 0.2, hard: 0.1, wrapX: true });
+  // the airfoil's light: the nose and the hump a fifth of the way back lit, the cloth cooling toward the trailing edge
+  g.fillStyle = grad(g, 0, 0, 0, h, [[0, WARM, 0.2], [0.1, WARM, 0.08], [0.22, WARM, 0.22], [0.38, WARM, 0.06], [0.55, COOL, 0], [0.8, COOL, 0.12], [1, COOL, 0.24]]);
+  g.fillRect(0, 0, w, h);
+  const ribs = []; for (let i = 0; i < WING_RIBS; i++) ribs.push(i * BAY + (i ? range(rnd, -1.5, 1.5) : 0));
+  const ribAt = i => (i < WING_RIBS ? ribs[i] : w + ribs[i - WING_RIBS]);
+  // the spars: the cloth drawn taut over them, a lit crest and a cool fall behind
+  for (const y of [FS, RS]) {
+    g.fillStyle = grad(g, 0, y - 12, 0, y + 14, [[0, WARM, 0], [0.42, WARM, 0.2], [0.5, '#fff6dc', 0.3], [0.58, COOL, 0.14], [1, COOL, 0]]);
+    g.fillRect(0, y - 12, w, 26);
+  }
+  // the cloth in each bay: cool where it falls away to the right of a rib, warm where it climbs to the next; deepest
+  // between the spars, shallow over the sheeted nose and toward the trailing edge; soft wrinkles off the stitching
+  const wrinkles = [];
+  for (let i = 0; i < WING_RIBS; i++) for (let k = 0; k < 3; k++) wrinkles.push([i, range(rnd, FS, TE - 12), range(rnd, 10, 22)]);
+  const tones = []; for (let i = 0; i < WING_RIBS; i++) tones.push([pick(rnd, ['#e8dab2', '#b8a47e', '#d6c08e', '#c8b896', '#e0cca0']), range(rnd, 0.05, 0.2)]);
+  for (let i = 0; i < WING_RIBS; i++) { const a = ribAt(i), b = ribAt(i + 1); g.fillStyle = rgba(tones[i][0], tones[i][1]); g.fillRect(a, 0, b - a, h); }
+  chordMask(g, w, h, [[0, 0.25], [LE / h, 0.3], [FS / h, 0.75], [0.5, 1], [RS / h, 0.95], [TE / h, 0.7], [1, 0.4]], q => {
+    for (let i = 0; i < WING_RIBS; i++) {
+      const a = ribAt(i), b = ribAt(i + 1);
+      q.fillStyle = grad(q, a, 0, b, 0, [[0, COOL, 0.52], [0.1, COOL, 0.34], [0.38, COOL, 0.07], [0.6, WARM, 0.07], [0.84, WARM, 0.32], [0.95, WARM, 0.16], [1, COOL, 0.1]]);
+      q.fillRect(a, 0, b - a, h);
+    }
+    for (const [i, y, L] of wrinkles) {
+      const a = ribAt(i) + 5;
+      q.save(); q.globalAlpha = 0.16; q.strokeStyle = COOL; q.lineWidth = 1.4;
+      q.beginPath(); q.moveTo(a, y); q.quadraticCurveTo(a + L * 0.6, y + 3, a + L, y + 6); q.stroke(); q.restore();
+    }
+  });
+  // nose ribs: short ones between the main ribs, from the sheeting back to the front spar
+  for (let i = 0; i < WING_RIBS; i++) {
+    const x = (ribAt(i) + ribAt(i + 1)) / 2;
+    g.fillStyle = grad(g, x - 6, 0, x + 8, 0, [[0, WARM, 0], [0.4, WARM, 0.24], [0.5, '#e6d6ae', 0.5], [0.6, COOL, 0.22], [1, COOL, 0]]);
+    g.fillRect(x - 6, LE, 14, FS - LE + 2);
+  }
+  // ---- the red-doped edges ----
+  const leA = per(5, rnd() * TAU), leB = per(13, rnd() * TAU), teA = per(4, rnd() * TAU), teB = per(11, rnd() * TAU);
+  const leY = x => LE + 1.2 * leA(x) + 0.5 * leB(x), teY = x => TE + 1.2 * teA(x) + 0.5 * teB(x);
+  const along = (fy, off) => { const P = []; for (let x = -8; x <= w + 8; x += 8) P.push([x, fy(x) + off]); return P; };
+  const band = (fa, fb) => { g.beginPath(); for (const [x, y] of along(fa, 0)) g.lineTo(x, y); for (const [x, y] of along(fb, 0).reverse()) g.lineTo(x, y); g.closePath(); };
+  // the leading edge: sheeted and doped red, lit along the curve of the nose, its very front rubbed pale by the air
+  const rubs = []; for (let i = 0; i < 44; i++) rubs.push([rnd() * w, range(rnd, 0, 9), range(rnd, 12, 50), range(rnd, -0.6, 0.6), range(rnd, 0.8, 2.2), range(rnd, 0.12, 0.3)]);
+  g.save(); band(() => -6, leY); g.clip();
+  g.fillStyle = grad(g, 0, 0, 0, LE + 2, [[0, REDD], [0.12, RED], [0.32, lightOf(RED, 0.3)], [0.55, RED], [1, shadowOf(RED, 0.12)]]); g.fillRect(-4, -6, w + 8, LE + 10);
+  blots(g, w, LE + 4, rnd, { colors: [REDL, REDD, '#a8483a'], count: 34, rmin: 8, rmax: 26, alpha: 0.3, hard: 0.1, stretch: 2.5, rot: 0, wrapX: true });
+  for (const [x, y, L, dy, lw, a] of rubs) wrapX(w, x, L, X => line(g, [[X, y], [X + L, y + dy]], lw, '#e2bca4', a));
+  g.restore();
+  line(g, along(leY, 7), 9, COOL, 0.14);                // the sheeting's edge throws a soft shadow back
+  line(g, along(leY, 1.4), 2.8, '#ead9b0', 0.9);        // cream pinstripe
+  line(g, along(leY, 3.7), 1.1, REDD, 0.75);
+  // the trailing edge: a red band, lit where it leaves the linen; between the ribs its cloth curls under (a cool
+  // crescent mid-bay: the scallops), drain grommets just ahead of it
+  g.save(); band(teY, () => h + 6); g.clip();
+  g.fillStyle = grad(g, 0, TE - 2, 0, h, [[0, lightOf(RED, 0.18)], [0.35, RED], [1, REDD]]); g.fillRect(-4, TE - 6, w + 8, h - TE + 12);
+  g.save(); g.translate(0, TE - 2);
+  blots(g, w, h - TE + 4, rnd, { colors: [REDL, REDD, '#a8483a'], count: 30, rmin: 8, rmax: 24, alpha: 0.3, hard: 0.1, stretch: 2.5, rot: 0, wrapX: true });
+  g.restore();
+  for (let i = 0; i < WING_RIBS; i++) {
+    const a = ribAt(i), b = ribAt(i + 1), m = (a + b) / 2;
+    blob(g, m, h + 5, (b - a) * 0.44, 13, 0, '#2a1820', 0.45, 0.25);
+    blob(g, m, h - 13, (b - a) * 0.34, 3.5, 0, '#d87a60', 0.22, 0.3);
+  }
+  g.restore();
+  line(g, along(teY, -2), 2.4, '#ead9b0', 0.85);
+  line(g, along(teY, -4.2), 1, REDD, 0.7);
+  for (let i = 0; i < WING_RIBS; i++) {
+    if (i % 3 === 1) continue;
+    const x = ribAt(i) + BAY * range(rnd, 0.35, 0.65), y = TE - 11 + range(rnd, -1.5, 1.5);
+    blob(g, x + 1, y + 1.4, 4.2, 3.4, 0, COOL, 0.35, 0.3);
+    ellipse(g, x, y, 3.1, 2.6, 0, '#7a5e2c'); ellipse(g, x - 0.4, y - 0.4, 2.5, 2.1, 0, '#b89448');
+    ellipse(g, x + 0.2, y + 0.2, 1.2, 1, 0, '#2e2226');
+    blob(g, x - 1.3, y - 1.2, 1.1, 0.8, 0, '#fff0c0', 0.7, 0.4);
+  }
+  // ---- the ribs: a lit ridge and the cool shadow it throws to the right, the whole chord (under the red dope too);
+  // over the linen the pinked tape, lit on its left, rib-stitched every few centimetres ----
+  for (let i = 0; i < WING_RIBS; i++) {
+    const x = ribs[i], ph = rnd() * 9, kn = []; for (let k = 0; k < 30; k++) kn.push(range(rnd, -0.5, 0.5));
+    wrapX(w, x, 16, X => {
+      g.fillStyle = grad(g, X + 2, 0, X + 14, 0, [[0, COOL, 0.34], [1, COOL, 0]]); g.fillRect(X + 2, -4, 12, h + 8);
+      g.fillStyle = grad(g, X - 10, 0, X - 2, 0, [[0, WARM, 0], [1, WARM, 0.3]]); g.fillRect(X - 10, -4, 8, h + 8);
+      line(g, [[X - 1.5, -4], [X - 1.5, leY(X) - 1]], 1.6, REDL, 0.55);
+      line(g, [[X - 1.5, teY(X) + 1], [X - 1.5, h + 4]], 1.6, REDL, 0.5);
+      const y0 = leY(X) + 5, y1 = teY(X) - 5, L = [], R = [];
+      for (let y = y0, k = 0; y <= y1; y += 2.6, k++) { L.push([X - 4.2 - (k % 2) * 1.1, y]); R.push([X + 4.2 + (k % 2) * 1.1, y]); }
+      polyPath(g, [...L, ...R.reverse()]); g.fillStyle = rgba('#e2d2a8', 0.82); g.fill();
+      line(g, [[X - 2.6, y0], [X - 2.6, y1]], 2.6, '#f8eed6', 0.42);
+      line(g, [[X + 3.2, y0], [X + 3.2, y1]], 1.6, '#86704f', 0.38);
+      let k = 0;
+      for (let y = y0 + ph; y < y1 - 2; y += 9, k++) {
+        line(g, [[X - 3.2, y], [X + 3.2, y + 1.8 + kn[k % 30]]], 1, '#6a5038', 0.55);
+        ellipse(g, X + 3.5, y + 2, 0.9, 0.9, 0, '#5a4030', 0.6);
+      }
+    });
+  }
+  // ---- wear on the linen ----
+  // two repair patches, pinked, doped over and stitched round
+  const patch = (cx, cy, pw, ph, col, rot) => {
+    const P = [], st = 2.4;
+    const edge = (x0, y0, x1, y1) => { const n = Math.max(2, Math.round(Math.hypot(x1 - x0, y1 - y0) / st)); for (let k = 0; k < n; k++) { const t = k / n, o = (k % 2) * 1.1; const nx = (y1 - y0) / Math.hypot(x1 - x0, y1 - y0), ny = -(x1 - x0) / Math.hypot(x1 - x0, y1 - y0); P.push([x0 + (x1 - x0) * t - nx * o, y0 + (y1 - y0) * t - ny * o]); } };
+    const a = pw / 2, b = ph / 2;
+    edge(-a, -b, a, -b); edge(a, -b, a, b); edge(a, b, -a, b); edge(-a, b, -a, -b);
+    wrapX(w, cx, pw, X => {
+      g.save(); g.translate(X, cy); g.rotate(rot);
+      polyPath(g, P.map(([u, v]) => [u + 1.6, v + 2.4])); g.fillStyle = rgba(COOL, 0.3); g.fill();
+      polyPath(g, P); g.fillStyle = grad(g, -a, -b, a, b, [[0, lightOf(col, 0.25)], [1, shadowOf(col, 0.12)]]); g.fill();
+      g.fillStyle = grad(g, -a, 0, a, 0, [[0, WARM, 0.15], [1, COOL, 0.1]]); g.fill();
+      g.setLineDash([2.5, 2.5]); g.strokeStyle = rgba('#5a4430', 0.6); g.lineWidth = 1; g.strokeRect(-a + 3, -b + 3, pw - 6, ph - 6); g.setLineDash([]);
+      g.restore();
+    });
+  };
+  patch(ribs[2] + BAY * 0.5, range(rnd, FS + 20, RS - 10), 34, 26, '#e6d8b2', range(rnd, -0.08, 0.08));
+  patch(ribs[11] + BAY * 0.48, range(rnd, RS + 6, TE - 26), 30, 22, '#c9b388', range(rnd, -0.1, 0.1));
+  // ringworm cracks in the old dope
+  for (let i = 0; i < 5; i++) {
+    const cx = rnd() * w, cy = range(rnd, LE + 14, TE - 14), arcs = [];
+    for (let k = 0, n = 3 + Math.floor(rnd() * 3); k < n; k++) arcs.push([range(rnd, 2.6, 4) * (k + 1), rnd() * TAU, range(rnd, 1.6, 4.5)]);
+    wrapX(w, cx, 26, X => { for (const [r, a0, al] of arcs) { g.beginPath(); g.arc(X, cy, r, a0, a0 + al); g.strokeStyle = rgba('#6e5a40', 0.32); g.lineWidth = 0.8; g.stroke(); } });
+  }
+  // a scorch bloom: soft brown-black with a warm singed rim
+  {
+    const x = ribs[14] + BAY * 0.4, y = range(rnd, RS - 30, RS + 10), r = 20, a1 = rnd() * 3, a2 = rnd() * 3;
+    wrapX(w, x, r * 2, X => { blob(g, X, y, r * 1.5, r * 1.1, a1, '#8a6a40', 0.3, 0.1); blob(g, X, y, r, r * 0.75, a2, '#4a3424', 0.42, 0.15); blob(g, X + 2, y, r * 0.5, r * 0.35, 0, '#2e2420', 0.4, 0.25); });
+  }
+  // ---- one bay torn open: the rear spar, a bracing wire and the far skin inside, the rib's web at the side;
+  // the torn edge lit and fraying, three flaps peeled back over the cloth with their shadows under them ----
+  {
+    const a = ribs[6], b = ribs[7], cx = (a + b) / 2 + 2, cy = (FS + TE) / 2 + 10, hw = (b - a) / 2 - 9, hh = 50;
+    const O = ragged(rnd, 24, hw, hh, 0.7, 1.05).map(([u, v]) => [cx + u, cy + v]);
+    for (const k of [5, 13, 19]) { const [u, v] = O[k]; O[k] = [cx + (u - cx) * 0.55, cy + (v - cy) * 0.6]; }   // deep notches
+    blob(g, cx + 2, cy + 3, hw * 1.6, hh * 1.25, 0, COOL, 0.22, 0.2);
+    g.save(); polyPath(g, O); g.clip();
+    g.fillStyle = radial(g, cx - hw * 0.4, cy - hh * 0.5, 2, hh * 1.4, [[0, '#46362c'], [0.6, '#2c2024'], [1, '#1e161c']]); g.fillRect(cx - hw - 6, cy - hh - 6, 2 * hw + 12, 2 * hh + 12);
+    blob(g, cx + hw * 0.3, cy + hh * 0.55, hw * 1.1, hh * 0.35, 0, '#6a5a48', 0.55, 0.2);      // the far skin, lit through the hole
+    g.fillStyle = grad(g, cx + hw - 6, 0, cx + hw + 2, 0, [[0, '#6a5034'], [1, '#a88458']]); g.fillRect(cx + hw - 6, cy - hh - 6, 10, 2 * hh + 12);   // the next rib's web, lit
+    for (let k = 0; k < 4; k++) line(g, [[cx + hw - 6, cy - hh + k * 28], [cx + hw - 1, cy - hh + k * 28 + 14]], 1.6, '#c8a070', 0.7);
+    g.fillStyle = rgba('#140e12', 0.5); g.fillRect(cx - hw - 6, cy - hh - 6, 7, 2 * hh + 12);                                                    // the near rib, in shadow
+    const sy = RS + 2;
+    g.fillStyle = '#7a5a3a'; g.fillRect(cx - hw - 6, sy - 5, 2 * hw + 12, 10);                                                                     // the rear spar
+    g.fillStyle = rgba('#d8b47c', 0.85); g.fillRect(cx - hw - 6, sy - 5, 2 * hw + 12, 2);
+    g.fillStyle = rgba('#2a1e1c', 0.6); g.fillRect(cx - hw - 6, sy + 5, 2 * hw + 12, 3);
+    line(g, [[cx - hw - 4, cy - hh * 0.8 + 2], [cx + hw + 4, cy + hh * 0.35 + 2]], 1.6, '#140e12', 0.5);                                        // a bracing wire
+    line(g, [[cx - hw - 4, cy - hh * 0.8], [cx + hw + 4, cy + hh * 0.35]], 1.3, '#c8c0b4', 0.85);
+    g.restore();
+    polyPath(g, O.map(([u, v]) => [u + 1.4, v + 1.8])); g.lineWidth = 3; g.strokeStyle = rgba('#2a1e22', 0.35); g.stroke();
+    polyPath(g, O); g.lineWidth = 2; g.strokeStyle = rgba('#f4e8c8', 0.8); g.stroke();
+    for (let k = 0; k < 30; k++) {
+      const i = Math.floor(rnd() * O.length), [px, py] = O[i], dx = px - cx, dy = py - cy, l = Math.hypot(dx, dy) || 1, L = range(rnd, 3, 7), tw = range(rnd, -0.5, 0.5);
+      line(g, [[px, py], [px + (dx / l + tw * dy / l) * L, py + (dy / l - tw * dx / l) * L]], 0.8, '#efe2c2', 0.6);
+    }
+    // the flaps, hinged on the edge and folded back out over the cloth: pale unpainted linen on their undersides
+    for (const [i, L] of [[2, 22], [10, 30], [16, 18]]) {
+      const [x0, y0] = O[i], [x1, y1] = O[(i + 2) % O.length], mx = (x0 + x1) / 2, my = (y0 + y1) / 2, dx = mx - cx, dy = my - cy, l = Math.hypot(dx, dy) || 1;
+      const tip = [mx + dx / l * L + range(rnd, -5, 5), my + dy / l * L * 0.8 + range(rnd, -4, 4)];
+      polyPath(g, [[x0 + 3, y0 + 4], [tip[0] + 4, tip[1] + 5], [x1 + 3, y1 + 4]]); g.fillStyle = rgba(COOL, 0.32); g.fill();
+      polyPath(g, [[x0, y0], tip, [x1, y1]]); g.fillStyle = grad(g, x0, y0, tip[0], tip[1], [[0, '#c8b896'], [0.5, '#efe4c8'], [1, '#f6ecd4']]); g.fill();
+      line(g, [[x0, y0], [x1, y1]], 1.4, '#8a7656', 0.6);
+      line(g, [[x0, y0], tip], 1, '#fff6e0', 0.6);
+    }
+  }
+  // a split along a bay with curled lips (the right lip catching the light), and a small ragged hole
+  {
+    const x0 = ribs[12] + BAY * 0.55, y0 = range(rnd, FS + 8, FS + 30), len = 54, P = [];
+    for (let k = 0; k <= 10; k++) P.push([x0 + Math.sin(k * 1.7) * 2.2 + k * 0.6, y0 + len * k / 10]);
+    const wd = k => 1.2 + 2.6 * Math.sin(Math.PI * k / 10);
+    const Lp = P.map(([x, y], k) => [x - wd(k), y]), Rp = P.map(([x, y], k) => [x + wd(k), y]);
+    polyPath(g, [...Lp, ...Rp.slice().reverse()]); g.fillStyle = '#2a1e1c'; g.fill();
+    line(g, Lp, 1.4, '#5a4634', 0.7);
+    line(g, Rp, 1.8, '#f4e8c8', 0.8);
+    line(g, Rp.map(([x, y]) => [x + 2.4, y + 1]), 3, COOL, 0.18);
+  }
+  {
+    const x = ribs[9] + BAY * range(rnd, 0.3, 0.7), y = range(rnd, LE + 20, FS - 4), O = ragged(rnd, 10, 5, 4.5, 0.6, 1.1).map(([u, v]) => [x + u, y + v]);
+    polyPath(g, O.map(([u, v]) => [u + 1, v + 1.4])); g.fillStyle = rgba(COOL, 0.3); g.fill();
+    polyPath(g, O); g.fillStyle = '#2a1e1c'; g.fill(); g.lineWidth = 1.2; g.strokeStyle = rgba('#f0e2c0', 0.75); g.stroke();
+  }
+  // ---- paint chipped off the red edges back to the linen and the silver primer, thickest along the band's edge ----
+  for (let i = 0; i < 40; i++) {
+    const lead = i < 24, x = rnd() * w, edge = rnd() < 0.65;
+    const y = lead ? (edge ? leY(x) - range(rnd, 0.5, 3.5) : range(rnd, 4, LE - 4)) : (edge ? teY(x) + range(rnd, 0.5, 3.5) : range(rnd, TE + 5, h - 6));
+    chip(g, w, x, y, range(rnd, 1.3, edge ? 2.6 : 3.4), rnd() < 0.6 ? '#c2ad86' : PRIMER, rnd);
+  }
+  // rain and oil blown back across the chord, mildew blooms toward the trailing edge
+  softLayer(g, w, h, 1.4, q => {
+    for (let i = 0; i < 28; i++) {
+      const x = rnd() * w, y0 = range(rnd, 4, TE - 40), L = range(rnd, 30, 130), wd = range(rnd, 2, 6), dx = range(rnd, -4, 4), c = pick(rnd, ['#6a5640', '#5a4a3a', '#7a6248']), al = range(rnd, 0.08, 0.18);
+      for (const ox of [0, -w, w]) stroke(q, [[x + ox, y0], [x + ox + dx * 0.5, y0 + L * 0.5], [x + ox + dx, y0 + L]], wd, wd * 0.3, c, al);
+    }
+    for (let i = 0; i < 14; i++) { const x = rnd() * w, y = range(rnd, RS, h - 6), r = range(rnd, 6, 16), c = pick(rnd, ['#7a6a4a', '#6a6a4a']); for (const ox of [0, -w, w]) blob(q, x + ox, y, r * 1.4, r, 0, c, 0.22, 0.2); }
+  });
+  glaze(g, w, h, '#ffe2b8', 0.1, 'soft-light');
+}
 register('rs_wing', {
-  family: F, size: 256, note: 'doped canvas over wing ribs (ribs along v, 3 per tile): sagging lit bays, shadow under each rib, patches, scorch blooms, ragged tears',
-  paint(g, s, rnd, h, cv) {
-    fill(g, s, s, '#d9c9a0');
-    mottle(g, s, rnd, { colors: ['#e2d4ae', '#c8b68a', '#d4c296'], count: 30, rmin: 18, rmax: 56, alpha: 0.3, hard: 0.08 });
-    const n = 3, W = s / n;
-    for (let i = 0; i < n; i++) {
-      const x = i * W;
-      // the fabric sags between the ribs: a light swell in the middle of the bay, darker beside the ribs
-      g.fillStyle = grad(g, x, 0, x + W, 0, [[0, '#9c8866', 0.5], [0.12, '#9c8866', 0.1], [0.45, '#efe2c0', 0.55], [0.75, '#efe2c0', 0.15], [0.95, '#9c8866', 0.25], [1, '#9c8866', 0.35]]);
-      g.fillRect(x, 0, W, s);
-    }
-    for (let i = 0; i <= n; i++) {
-      const x = i * W;
-      g.fillStyle = grad(g, x - 5, 0, x + 5, 0, [[0, '#efe2c0', 0.85], [0.5, '#e2d2a8', 0.9], [1, '#a89068', 0.9]]); g.fillRect(x - 5, 0, 10, s);
-      g.fillStyle = grad(g, x + 5, 0, x + 12, 0, [[0, '#9c8866', 0.55], [1, '#9c8866', 0]]); g.fillRect(x + 5, 0, 7, s);
-      g.save(); g.setLineDash([3, 5]); line(g, [[x - 3, 0], [x - 3, s]], 0.9, '#7a6040', 0.4); line(g, [[x + 3, 0], [x + 3, s]], 0.9, '#7a6040', 0.4); g.restore();
-    }
-    // repair patches
-    for (let i = 0; i < 2; i++) {
-      const x = rnd() * s, y = rnd() * s, w = range(rnd, 24, 40), hh = range(rnd, 18, 32), c = pick(rnd, ['#c8a878', '#e2d6b0', '#b89870']), rot = range(rnd, -0.15, 0.15);
-      wrapRect(s, x, y, w, hh, (dx, dy) => {
-        g.save(); g.translate(x + dx, y + dy); g.rotate(rot);
-        g.fillStyle = INK; g.globalAlpha = 0.25; g.fillRect(2, 3, w, hh);
-        g.globalAlpha = 1; g.fillStyle = grad(g, 0, 0, w, hh, [[0, lightOf(c, 0.25)], [1, shadowOf(c, 0.15)]]); g.fillRect(0, 0, w, hh);
-        g.setLineDash([3, 3]); g.strokeStyle = rgba('#5a4430', 0.6); g.lineWidth = 1; g.strokeRect(3, 3, w - 6, hh - 6);
-        g.restore();
-      });
-    }
-    // scorch: soft brown-black blooms with a warm singed rim
-    for (let i = 0; i < 3; i++) {
-      const x = rnd() * s, y = rnd() * s, r = range(rnd, 18, 36);
-      wrap(s, x, y, r * 1.6, (X, Y) => { blob(g, X, Y, r * 1.4, r, rnd() * 3, '#8a6a40', 0.3, 0.1); blob(g, X, Y, r, r * 0.75, rnd() * 3, '#4a3424', 0.42, 0.15); blob(g, X + r * 0.1, Y, r * 0.5, r * 0.35, 0, '#2e2420', 0.4, 0.25); });
-    }
-    streaks(g, s, rnd, { colors: ['#6a5640'], count: 8, len: [20, 70], width: [2, 5], angle: Math.PI / 2, wobble: 0.15, alpha: 0.14 });
-    // a tear: a dark soft hole, the torn fabric edges curling up and catching the light
-    for (let i = 0; i < 1; i++) {
-      const x = range(rnd, 0.25, 0.75) * s, y = rnd() * s, r = range(rnd, 16, 22);
-      const pts = []; for (let k = 0; k < 14; k++) { const a = k / 14 * TAU, rr = r * range(rnd, 0.55, 1.15); pts.push([Math.cos(a) * rr * 0.7, Math.sin(a) * rr * 1.3]); }
-      wrap(s, x, y, r * 2, (X, Y) => {
-        g.save(); g.translate(X, Y);
-        blob(g, 0, 0, r * 1.5, r * 1.8, 0, '#6a5640', 0.35, 0.2);
-        polyPath(g, pts); g.fillStyle = radial(g, -r * 0.2, -r * 0.3, 1, r * 1.3, [[0, '#2e221a'], [1, '#4e3c2a']]); g.fill();
-        g.lineWidth = 3; g.strokeStyle = rgba('#f4e8c8', 0.75); g.stroke();
-        g.lineWidth = 1.2; g.strokeStyle = rgba('#8a7050', 0.7); polyPath(g, pts.map(([u, v]) => [u * 1.12, v * 1.08])); g.stroke();
-        g.restore();
-      });
-    }
-    glaze(g, s, s, '#ffe0b0', 0.1, 'soft-light');
-    blurTile(cv, 0.5);
-  },
+  family: F, w: 1024, h: 256, note: 'the flying machine\'s wing skin (u tiles along the span, 6.4 m, a rib every 64 px; v fitted to the chord, leading edge at the top): cream doped linen sagging between lit rib tapes with pinked edges and stitching, nose ribs, spar ridges, red-doped leading and scalloped trailing edges chipped to linen and primer, drain grommets, patches, ringworm cracks, streaks, a scorch, a bay torn open on its spar and bracing wire, a split, a hole',
+  paint(g, w, rnd, h, cv) { wingSkin(g, w, h, rnd); blurTile(cv, 0.5); },
 });
 register('rs_pennant', {
   family: F, w: 128, h: 64, alpha: true, note: 'a tattered red pennant with a cream stripe (alpha, fitted): swallowtail, frayed holes',

@@ -153,8 +153,8 @@ export function buildTalus(W) {
         if (d == null) continue;
         const x = p.x + Math.cos(a) * (d + 0.2), z = p.z + Math.sin(a) * (d + 0.2);
         if (!clear(x, z, 1.2)) continue;
-        const s = [1.7 + r() * 0.8, 0.6 + r() * 0.2, 1.3 + r() * 0.4];
-        add(r, x, top - 0.5 - r() * 0.12, z, s, -a + Math.PI / 2 + (r() - 0.5) * 0.4, [(r() - 0.5) * 0.12, (r() - 0.5) * 0.12], 4, 1);
+        const s = [1.4 + r() * 0.6, 0.8 + r() * 0.15, 1.1 + r() * 0.3];
+        add(r, x, top - 0.75 - r() * 0.12, z, s, -a + Math.PI / 2 + (r() - 0.5) * 0.4, [(r() - 0.5) * 0.12, (r() - 0.5) * 0.12], 9, 1);
       }
     }
     // rim blocks: hanging over the lip, so the skyline of the top is never level

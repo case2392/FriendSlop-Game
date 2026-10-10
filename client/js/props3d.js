@@ -5,7 +5,7 @@
 // (shared/loot.js LOOT[type].shape). Every face that can land facing the camera is painted:
 // loot tumbles, so backs and flanks matter as much as fronts.
 //
-// Loose loot also glitters (see "the loot twinkle" below): one point cloud for every piece, so a
+// Loose loot carries a beacon (see "the loot beacon" below): one mesh for every piece, so a
 // stop's grabbable things stand out from its crates and barrels.
 //
 // API: buildProp(type, W) → Object3D · mapCanvas(W) → the paper road map (canvas) · PREVIEW
@@ -14,7 +14,7 @@ import { THREE, tex, painted, canvasTex, shadowy } from './gfx.js';
 import { LOOT } from '/shared/loot.js';
 import { RV_DIM, toWorld, toLocal, qYaw } from '/shared/rv.js';
 import { FLAG, PLAYER, GRAB } from '/shared/constants.js';
-import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS, DINO, BOULDER_BANDS, TWINKLE_CELLS } from './paint/props.js';
+import { REGIONS as R, sub, VASE_PROFILE, GUITAR_OUTLINE, TV_LAYOUT, TIRE_V, SIGN, GNOME, SLOT_CROWN, KEY_LABELS, DINO, BOULDER_BANDS, TWINKLE_CELLS, PAINTBACK } from './paint/props.js';
 import { mergeGeometries, mergeVertices } from '/vendor/BufferGeometryUtils.js';
 import { rngFrom, rgba, blob, ellipse, range, pick, makeCanvas } from './paint/core.js';
 
@@ -574,6 +574,12 @@ const BUILDERS = {
       const g = new THREE.BufferGeometry(); g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); g.setIndex(idx); return g;
     })();
     for (const sx of [-1, 1]) for (const sy of [-1, 1]) B.add(ros, R.rosette, { at: mat4(sx * (ax + 0.056), sy * (ay + 0.056), 0.026, 0, 0, Math.atan2(sy, sx)), crease: 70 });
+    // the back: the dust board it travels in (nailed planks, iron corner straps, the FRAGILE stencil: loot_paintback),
+    // a hair inside the frame's outline, and the brass hanging wire sagging between its two screw eyes
+    B.add(rbox(0.88, 0.7, 0.008, 0.003, 1), R.wood, { uv: 'box', faces: { nz: R.paintback }, at: mat4(0, 0, -0.035), tint: 0.8 });
+    const wire = []; for (let i = 0; i <= 12; i++) { const t = i / 12 * 2 - 1; wire.push([t * PAINTBACK.eyeX, PAINTBACK.sagY + (PAINTBACK.eyeY - PAINTBACK.sagY) * t * t, -0.0412]); }
+    B.add(tube(wire, 0.0022, 16, 5), R.brass, { tint: GOLD });
+    for (const sx of [-1, 1]) B.add(new THREE.TorusGeometry(0.0065, 0.002, 4, 8), R.brass, { at: mat4(sx * PAINTBACK.eyeX, PAINTBACK.eyeY, -0.041, 0, 0, 0), tint: GOLD });
     return B.done({ ao: 0.1, aoH: 0.1 });
   },
 
@@ -1337,89 +1343,140 @@ function demoWorld() {
   };
 }
 
-// ---- the loot twinkle --------------------------------------------------------------------------------
+// ---- the loot beacon -------------------------------------------------------------------------------
 
-// Pale gold-white glitter rises off every loose piece of loot, like the motes over a lootable quest
-// object in WoW: 2 to 4 small round motes per piece (more for bigger pieces), each winking on just
-// over the piece somewhere across its top, drifting up 20–40 cm with a little sway and fading out. Each
-// mote runs its own cycle (its own speed and phase, a pause of its own between rises, a new spot each
-// time), so a piece's motes come and go unevenly and a stop never pulses in step. One mote per piece
-// may, on some of its rises, swell into a four-point twinkle as it goes up: at most one brighter flash
-// at a time per piece. The colours are painted in loot_twinkle (cream heart, soft gold rim, a faint
-// bronze edge so they still show on snow and pale sand). Small on screen (7–11 px, a flash to 24), at
-// full strength to 20 m and gone by 30, so a stop's grabbable things stand out from the crates,
-// barrels and tyres dressing it without turning it into a mobile game. All of it is ONE THREE.Points:
-// one draw call, no shadow. Its onBeforeRender gathers the nearest pieces and hands their tops, fades
-// and cycles to the shader as uniform arrays, so the motes sit on this frame's poses. It hides (fading)
-// what someone is holding, anything tumbling or flying, and what rides in or on the RV. No hook in
-// main.js: loot registers itself when it's added to the scene, and the game state (window.__nmd) says
-// who holds what and where the RV is.
-const TW = { N: 40, M: 4, far: 30, fade: 10, near: 0.7, lift: 0.05, minPx: 7, maxPx: 11, flashMin: 14, flashMax: 24 };
+// Every loose piece of loot carries a small "pick me up" beacon, like the glitter over a lootable quest
+// object in WoW Classic, gathered so it reads as one deliberate thing (not fireflies, not confetti):
+//   * a soft rising column: 5 to 7 pale gold-white motes (more for bigger pieces) climb from the middle
+//     of the piece's top in a narrow, slowly turning helix, half a metre or so up, evenly staggered so
+//     the column is always full; each swells in low, shrinks a little as it climbs and fades at the top;
+//   * one four-point twinkle star, a size up from the motes, hovering in the column a hand above the
+//     piece: it bobs, rocks and breathes, and every few seconds it flares whiter;
+//   * a faint warm ring on the ground under it: a soft cream-gold band with a painterly wobble, a fainter
+//     inner ring, a pale pool inside and a thin bronze outer edge (so it still shows on snow and pale
+//     sand), lying on the terrain's slope. Off the terrain (a table, a shelf, a stack) it shrinks to hug
+//     the piece instead of overhanging into the air.
+// The sprites are painted in loot_twinkle (cream heart, soft gold rim, faint bronze edge); the ring is
+// drawn in the shader. Full strength to 20 m, gone by 30. All of it is ONE mesh (camera-facing quads for
+// the sprites, flat quads for the rings): one draw call, no shadow. Its onBeforeRender gathers the
+// nearest pieces and hands their tops, footprints, ground and cycles to the shader as uniform arrays,
+// so the beacon sits on this frame's poses. It fades away from what someone is holding, anything
+// tumbling or flying, and what rides in or on the RV. No hook in main.js: loot registers itself when it's
+// added to the scene, and the game state (window.__nmd) says who holds what, where the RV is and how
+// high the ground is.
+const TW = { N: 40, MOTES: 6, far: 30, fade: 10, near: 0.7, lift: 0.04, mote: [8, 15], star: [16, 26], flare: 34 };
+TW.Q = TW.MOTES + 2;                      // quads per piece: the motes, the star, the ring
 const twLoose = new Set();
 let twCloud = null, twSeq = 0, twLast = 0, twDemo = false;
 const twC = new V3(), twE = [];
 const f1 = v => v.toFixed(1);
-// one point per mote: position.x the piece's slot, position.y which of its motes
-// uP: xyz the middle of the piece's top, w its strength · uQ: x phase (0..2π), y how far from the
-// middle a mote may start (m), z how many motes, w the piece's cycle rate (Hz)
+// one quad per sprite: position.x the piece's slot, .y which sprite (motes, then the star, then the ring),
+// .z the corner (0..3)
+// uP: xyz the middle of the piece's top, w its strength · uQ: x phase (0..2π), y the column's radius (m),
+// z how many motes, w the column's rate (Hz) · uG: x the ground's height under it, y the ring's radius
+// (m), zw the ground normal's x and z
 const TW_VS = `
 uniform vec4 uP[${TW.N}];
 uniform vec4 uQ[${TW.N}];
+uniform vec4 uG[${TW.N}];
 uniform float uTime, uViewH, uPx;
 varying float vA;
-varying vec2 vRot;
+varying vec3 vK;
+varying vec2 vUv;
 float hsh(float n) { return fract(sin(n) * 43758.5453); }
 void main() {
   int i = int(position.x + 0.5);
-  float j = position.y;
-  vec4 P = uP[i], Q = uQ[i];
-  // this mote's own cycle; then this rise's own seed (a new spot, height, pause and maybe a flash)
-  float sd = Q.x * 5.31 + j * 2.17;
-  float cyc = uTime * Q.w * (0.78 + 0.5 * hsh(sd + 0.31)) + fract(Q.x * 0.159155 + j * 0.382 + 0.21 * hsh(sd + 1.13));
-  float hc = sd + mod(floor(cyc), 251.0) * 1.731;
-  float t = fract(cyc) / (0.6 + 0.32 * hsh(hc + 0.7));       // past 1: resting until the next rise
-  float fl = (j < 0.5 && hsh(hc + 5.3) < 0.6) ? 1.0 : 0.0;   // only mote 0 may flash, on some rises
-  float a = 6.2832 * hsh(hc + 2.3), r = Q.y * sqrt(hsh(hc + 3.7));
-  vec3 p = P.xyz + vec3(cos(a) * r, 0.06 * hsh(hc + 4.1), sin(a) * r);
-  p.y += (0.2 + 0.2 * hsh(hc + 2.9)) * min(t, 1.0) * (1.5 - 0.5 * min(t, 1.0));
-  p.x += 0.02 * sin(t * 5.0 + hc);
-  p.z += 0.02 * cos(t * 4.3 + hc);
+  float j = position.y, k = position.z;
+  vec2 cn = vec2(mod(k, 2.0) * 2.0 - 1.0, k > 1.5 ? 1.0 : -1.0);
+  vUv = vec2(cn.x, -cn.y) * 0.5 + 0.5;                     // y down, like gl_PointCoord
+  vec4 P = uP[i], Q = uQ[i], G = uG[i];
+  vec4 OFF = vec4(2.0, 2.0, 2.0, 1.0);                     // off: outside the clip box
+  if (j > ${f1(TW.MOTES + 0.5)}) {
+    // the ring, flat on the ground's plane, a hair up and nudged toward the eye so it never fights it
+    vec3 n = vec3(G.z, sqrt(max(0.05, 1.0 - G.z * G.z - G.w * G.w)), G.w);
+    vec3 t = normalize(cross(vec3(0.0, 0.0, 1.0), n)), b = cross(n, t);
+    vec4 mv = viewMatrix * vec4(vec3(P.x, G.x, P.z) + n * 0.03 + (t * cn.x + b * cn.y) * G.y, 1.0);
+    mv.xyz *= 0.995;
+    vA = P.w * (0.86 + 0.14 * sin(uTime * 1.6 + Q.x));
+    vK = vec3(Q.x + uTime * 0.22, 0.0, 1.0);
+    gl_Position = P.w > 0.0 && G.y > 0.0 ? projectionMatrix * mv : OFF;
+    return;
+  }
+  float cnt = Q.z, H = 0.62 + 2.2 * Q.y, sd = Q.x * 5.31 + j * 2.17, env, sz, lo, hi;
+  vec3 p;
+  if (j > ${f1(TW.MOTES - 0.5)}) {
+    // the star: hovers in the column, bobbing and rocking; breathes; flares now and then
+    float tw = sin(uTime * 2.3 + Q.x * 3.0), fl = pow(max(0.0, sin(uTime * 0.83 + Q.x * 1.7)), 30.0);
+    p = P.xyz + vec3(0.016 * cos(uTime * 0.7 + Q.x), H * 0.42 + 0.03 * sin(uTime * 1.2 + Q.x), 0.016 * sin(uTime * 0.7 + Q.x));
+    env = 0.84 + 0.12 * tw + 0.45 * fl;
+    sz = 0.26 * (0.92 + 0.08 * tw + 0.4 * fl);
+    lo = mix(${f1(TW.star[0])}, ${f1(TW.flare * 0.6)}, fl); hi = mix(${f1(TW.star[1])}, ${f1(TW.flare)}, fl);
+    vK = vec3(0.2 * sin(uTime * 0.45 + Q.x), 2.0 + step(0.5, hsh(Q.x + 0.7)), 0.0);
+  } else {
+    // a mote: up the column in a narrow helix, evenly staggered with its fellows; a new turn each rise
+    float rate = Q.w * (0.95 + 0.1 * hsh(sd + 0.31));
+    float cyc = uTime * rate + (j + 0.3 * (hsh(sd + 1.13) - 0.5)) / max(cnt, 1.0);
+    float t = fract(cyc), hc = sd + mod(floor(cyc), 251.0) * 1.731;
+    float a = Q.x + j * 2.39996 + 1.4 * hsh(hc + 2.3) + t * 2.4, r = Q.y * (0.6 + 0.4 * hsh(hc + 3.7)) * (1.0 - 0.3 * t);
+    p = P.xyz + vec3(cos(a) * r, H * t, sin(a) * r);
+    env = j < cnt ? smoothstep(0.0, 0.1, t) * (1.0 - smoothstep(0.45, 1.0, t)) * (0.82 + 0.18 * sin(uTime * 8.0 + hc * 3.0)) : 0.0;
+    sz = (0.1 + 0.025 * hsh(hc + 8.3)) * (1.12 - 0.4 * t);
+    lo = ${f1(TW.mote[0])} * (1.1 - 0.35 * t); hi = ${f1(TW.mote[1])};
+    vK = vec3(hsh(hc + 6.9) - 0.5, step(0.5, hsh(hc + 7.7)), 0.0);
+  }
+  vA = P.w * env;
   vec4 mv = viewMatrix * vec4(p, 1.0);
-  float env = t < 1.0 ? smoothstep(0.0, 0.14, t) * (1.0 - smoothstep(0.42, 1.0, t)) : 0.0;
-  float flash = fl * exp(-pow((t - 0.3) / 0.12, 2.0));
-  vA = P.w * env * mix(0.82 + 0.18 * sin(uTime * 9.0 + hc * 3.0), 1.25, flash);
-  // which sprite: a round mote (0, or 1 with its tiny glint) or the twinkle (2, 3); its turn
-  vRot = fl > 0.5 ? vec2(0.25 * (hsh(hc + 6.1) - 0.5), 2.0 + step(0.5, hsh(hc + 7.3))) : vec2(hsh(hc + 6.9) - 0.5, step(0.62, hsh(hc + 7.7)));
-  float sz = fl > 0.5 ? mix(0.08, 0.24, flash) : 0.085 + 0.035 * hsh(hc + 8.3);
-  float px = 0.5 * projectionMatrix[1][1] * uViewH * sz / max(0.1, -mv.z);
-  float lo = mix(${f1(TW.minPx)}, ${f1(TW.flashMin)}, flash), hi = mix(${f1(TW.maxPx)}, ${f1(TW.flashMax)}, flash);
-  bool on = P.w > 0.0 && j < Q.z && env > 0.0;
-  gl_PointSize = on ? clamp(px, lo * uPx, hi * uPx) : 1.0;
-  gl_Position = on ? projectionMatrix * mv : vec4(2.0, 2.0, 2.0, 1.0);   // off: outside the clip box
+  float d = max(0.1, -mv.z), px = 0.5 * projectionMatrix[1][1] * uViewH * sz / d;
+  mv.xy += cn * clamp(px, lo * uPx, hi * uPx) * d / (projectionMatrix[1][1] * uViewH);
+  gl_Position = P.w > 0.0 && env > 0.0 ? projectionMatrix * mv : OFF;
 }`;
 const TW_FS = `
 uniform sampler2D map;
 varying float vA;
-varying vec2 vRot;
+varying vec3 vK;
+varying vec2 vUv;
+vec3 lin(vec3 c) { return pow(c, vec3(2.2)); }
 void main() {
-  vec2 c = gl_PointCoord - 0.5;
-  float s = sin(vRot.x), k = cos(vRot.x);
-  vec2 q = vec2(k * c.x - s * c.y, s * c.x + k * c.y) + 0.5;     // in the cell: x right, y down
-  if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) discard;
-  float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vRot.y + 0.5, n)), row = floor((vRot.y + 0.5) / n);
-  vec4 t = texture2D(map, vec2((col + q.x) / n, 1.0 - (row + q.y) / n));
-  if (t.a * vA < 0.004) discard;
-  // premultiplied, laid over what's behind (adding light would turn the pale halo lime on grass): the
-  // body and its faint bronze edge keep their edge on white snow and pale sand
-  float A = min(1.0, t.a * vA);
-  gl_FragColor = vec4(min(vec3(1.0), t.rgb * max(1.0, vA)) * A, A);     // a flash (vA > 1) burns whiter
+  vec4 o;
+  if (vK.z > 0.5) {
+    // the ground ring: a cream-gold band (wobbling, dabbed), a fainter inner ring, a pale pool, a bronze edge
+    vec2 c = vUv * 2.0 - 1.0;
+    float d = length(c);
+    if (d > 1.0) discard;
+    float th = atan(c.y, c.x), ph = vK.x;
+    float dd = d * (1.0 + 0.028 * sin(5.0 * th + ph) + 0.018 * sin(9.0 * th - 1.7 * ph));
+    float band = exp(-pow((dd - 0.72) / 0.075, 2.0)) * (0.8 + 0.2 * sin(13.0 * th + 2.0 * ph) * sin(4.0 * th - ph));
+    float inner = exp(-pow((dd - 0.55) / 0.045, 2.0));
+    float pool = 1.0 - smoothstep(0.12, 0.7, dd);
+    float edge = exp(-pow((dd - 0.835) / 0.04, 2.0));
+    float aG = vA * min(1.0, 0.3 * band + 0.11 * inner + 0.06 * pool), aE = vA * 0.17 * edge;
+    vec3 cG = mix(lin(vec3(1.0, 0.8, 0.44)), lin(vec3(1.0, 0.93, 0.72)), min(1.0, band * 1.2));
+    float A = aG + aE * (1.0 - aG);
+    if (A < 0.004) discard;
+    o = vec4(cG * aG + lin(vec3(0.5, 0.36, 0.15)) * aE * (1.0 - aG), A);
+  } else {
+    vec2 c = vUv - 0.5;
+    float s = sin(vK.x), k = cos(vK.x);
+    vec2 q = vec2(k * c.x - s * c.y, s * c.x + k * c.y) + 0.5;     // in the cell: x right, y down
+    if (q.x < 0.0 || q.y < 0.0 || q.x > 1.0 || q.y > 1.0) discard;
+    float n = ${TWINKLE_CELLS.toFixed(1)}, col = floor(mod(vK.y + 0.5, n)), row = floor((vK.y + 0.5) / n);
+    vec4 t = texture2D(map, vec2((col + q.x) / n, 1.0 - (row + q.y) / n));
+    if (t.a * vA < 0.004) discard;
+    // premultiplied, laid over what's behind (adding light would turn the pale halo lime on grass): the
+    // body and its faint bronze edge keep their edge on white snow and pale sand
+    float A = min(1.0, t.a * vA);
+    o = vec4(min(vec3(1.0), t.rgb * max(1.0, vA)) * A, A);     // a flare (vA > 1) burns whiter
+  }
+  gl_FragColor = o;
   #include <colorspace_fragment>
 }`;
 function twinkleCloud() {
   if (twCloud) return twCloud;
-  const geo = new THREE.BufferGeometry(), idx = new Float32Array(TW.N * TW.M * 3);
-  for (let i = 0; i < TW.N * TW.M; i++) { idx[i * 3] = Math.floor(i / TW.M); idx[i * 3 + 1] = i % TW.M; }
-  geo.setAttribute('position', new THREE.BufferAttribute(idx, 3));
+  const geo = new THREE.BufferGeometry(), V = TW.N * TW.Q * 4, pos = new Float32Array(V * 3), idx = new Uint16Array(TW.N * TW.Q * 6);
+  for (let v = 0; v < V; v++) { const q = Math.floor(v / 4); pos[v * 3] = Math.floor(q / TW.Q); pos[v * 3 + 1] = q % TW.Q; pos[v * 3 + 2] = v % 4; }
+  for (let q = 0; q < TW.N * TW.Q; q++) idx.set([q * 4, q * 4 + 1, q * 4 + 2, q * 4 + 2, q * 4 + 1, q * 4 + 3], q * 6);
+  geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+  geo.setIndex(new THREE.BufferAttribute(idx, 1));
   geo.boundingBox = new THREE.Box3();                                   // empty: it never widens a bounds check
   geo.boundingSphere = new THREE.Sphere(new V3(), 1e5);
   geo.setDrawRange(0, 0);
@@ -1427,12 +1484,13 @@ function twinkleCloud() {
     uniforms: {
       map: { value: tex('loot_twinkle') }, uTime: { value: 0 }, uViewH: { value: 720 }, uPx: { value: 1 },
       uP: { value: Array.from({ length: TW.N }, () => new THREE.Vector4()) }, uQ: { value: Array.from({ length: TW.N }, () => new THREE.Vector4()) },
+      uG: { value: Array.from({ length: TW.N }, () => new THREE.Vector4()) },
     },
-    vertexShader: TW_VS, fragmentShader: TW_FS, transparent: true, depthWrite: false, depthTest: true, fog: false,
+    vertexShader: TW_VS, fragmentShader: TW_FS, transparent: true, depthWrite: false, depthTest: true, fog: false, side: THREE.DoubleSide,
     blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
   });
   mat.name = 'loot_twinkle';
-  twCloud = new THREE.Points(geo, mat);
+  twCloud = new THREE.Mesh(geo, mat);
   twCloud.name = 'loot_twinkle';
   twCloud.frustumCulled = false; twCloud.castShadow = false; twCloud.receiveShadow = false;
   twCloud.renderOrder = 6;
@@ -1448,16 +1506,36 @@ function twAdded(e) {
 function twRemoved(e) { twLoose.delete(e.target); }
 function twinkleOn(obj, type) {
   const sh = LOOT[type].shape, half = sh[0] === 'box' ? [sh[1], sh[2], sh[3]] : sh[0] === 'cyl' ? [sh[2], sh[1], sh[2]] : [sh[1], sh[1], sh[1]];
-  // its own cycle: phase by the golden angle, a speed of 0.3–0.42 Hz (each mote varies it); 2 motes
-  // for a small piece, 3 for a middling one, 4 for the big ones; they start anywhere across its top
+  // its own phase (the golden angle) and a rate of 0.3 to 0.36 Hz (a mote climbs the column in about 3 s);
+  // a narrow column for a small piece, a little wider for the big ones; 5, 6 or 7 motes
   const k = twSeq++, hm = Math.max(...half);
   obj.userData.tw = {
-    half, phase: (k * 2.39996) % TAU, spread: Math.min(0.3, Math.max(0.06, 0.6 * hm)), count: hm < 0.25 ? 2 : hm < 0.45 ? 3 : 4,
-    rate: 0.3 + 0.12 * ((k * 0.618034) % 1), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0,
+    half, phase: (k * 2.39996) % TAU, spread: Math.min(0.14, Math.max(0.07, 0.2 * hm)), count: hm < 0.25 ? 5 : 6,
+    rate: 0.3 + 0.06 * ((k * 0.618034) % 1), vis: 0, px: NaN, py: 0, pz: 0, d: 0, top: 0,
+    gx: NaN, gy: 0, gz: 0, gb: 0, gq: 0, gr: 0, gnx: 0, gnz: 0,
   };
   obj.addEventListener('added', twAdded);
   obj.addEventListener('removed', twRemoved);
   return obj;
+}
+// the ring under a piece: on the terrain (its bottom within 30 cm of it) a generous ring lying on the
+// slope; anywhere else (a table, a shelf, a stack) a tight one, level, at its bottom. Recomputed only
+// when the piece has moved.
+function twGround(u, m, W) {
+  const h = u.half, x = m[12], z = m[14];
+  const ex = Math.abs(m[0]) * h[0] + Math.abs(m[4]) * h[1] + Math.abs(m[8]) * h[2];
+  const ez = Math.abs(m[2]) * h[0] + Math.abs(m[6]) * h[1] + Math.abs(m[10]) * h[2];
+  const bot = m[13] - (Math.abs(m[1]) * h[0] + Math.abs(m[5]) * h[1] + Math.abs(m[9]) * h[2]);
+  const q = Math.abs(m[0]) + Math.abs(m[5]) + Math.abs(m[10]);
+  if (Math.abs(x - u.gx) < 0.01 && Math.abs(z - u.gz) < 0.01 && Math.abs(bot - u.gb) < 0.01 && Math.abs(q - u.gq) < 0.01) return;
+  u.gx = x; u.gz = z; u.gb = bot; u.gq = q;
+  const wide = Math.min(1.15, Math.max(0.3, Math.max(ex, ez) * 1.2 + 0.12));
+  u.gy = bot; u.gr = wide; u.gnx = 0; u.gnz = 0;
+  if (!W?.heightAt) return;
+  const h0 = W.heightAt(x, z);
+  if (Math.abs(bot - h0) > 0.3) { u.gr = Math.max(ex, ez) + 0.06; return; }
+  const dx = W.heightAt(x + 0.5, z) - W.heightAt(x - 0.5, z), dz = W.heightAt(x, z + 0.5) - W.heightAt(x, z - 0.5), L = Math.hypot(dx, 1, dz);
+  u.gy = h0; u.gnx = -dx / L; u.gnz = -dz / L;
 }
 // what someone is holding: mine by id; for each other player whose pose says they're holding something
 // (and it isn't the map), the piece within arm's reach that sits closest to their aim (a heavy piece being
@@ -1528,11 +1606,13 @@ function twUpdate(renderer, scene, camera) {
   const n = Math.min(TW.N, twE.length);
   for (let i = 0; i < n; i++) {
     const [, o, a] = twE[i], u = o.userData.tw, m = o.matrixWorld.elements;
+    twGround(u, m, S?.W);
     U.uP.value[i].set(m[12], u.top + TW.lift, m[14], a);
     U.uQ.value[i].set(u.phase, u.spread, u.count, u.rate);
+    U.uG.value[i].set(u.gy, u.gr, u.gnx, u.gnz);
   }
   for (let i = n; i < TW.N; i++) U.uP.value[i].w = 0;
-  this.geometry.setDrawRange(0, n * TW.M);
+  this.geometry.setDrawRange(0, n * TW.Q * 6);
 }
 
 // ---- building ------------------------------------------------------------------------------------

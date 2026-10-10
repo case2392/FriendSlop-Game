@@ -2167,24 +2167,58 @@ register('rug_desert', {
 });
 
 register('sail_canvas', {
-  family: F, w: 128, h: 512, alpha: true, note: 'windmill sail cloth: weathered cream canvas, seams, patches, dirt runs, frayed edges (alpha)',
-  paint(g, s, rnd, H) {
-    const W = 128;
+  family: F, w: 128, h: 512, alpha: true, note: 'windmill sail cloth: four bay panels down the sheet (one per lattice bay, tiles in v), each a warm lit pillow with the bar\'s cool shadow at its head and a cool foot; lengthwise seams, patches, grease runs from the whip',
+  paint(g, W, rnd, H) {
+    const B = 128, nB = Math.round(H / B);
     g.clearRect(0, 0, W, H);
-    const pts = [[3, 2]];
-    for (let y = 2; y <= H - 2; y += 16) pts.push([W - 3 - rnd() * 4, y]);
-    for (let y = H - 2; y >= 2; y -= 16) pts.push([3 + rnd() * 4, y]);
+    // the cloth's outline: a hair of fray at the outer edge (under the hemlath), periodic down the sheet so it tiles
+    const fray = []; for (let y = 0; y <= H; y += 16) fray.push(y === 0 || y === H ? 0 : rnd() * 2);
+    const pts = [[0, 0], ...fray.map((f, i) => [W - f, i * 16]), [0, H]];
     clipped(g, () => polyPath(g, pts), () => {
-      g.fillStyle = grad(g, 0, 0, W, 0, [[0, '#e8dcc0'], [0.5, '#d6c9aa'], [1, '#b8a888']]); g.fillRect(0, 0, W, H);
-      mottle(g, W, rnd, { colors: ['#e8dec4', '#c4b494', '#cfc2a2'], count: 30, rmin: 10, rmax: 40, alpha: 0.35, hard: 0.1 });
-      for (let k = 1; k < 4; k++) { const y = H * k / 4; line(g, [[0, y], [W, y]], 3, '#9a8a6a', 0.55); line(g, [[0, y + 3], [W, y + 3]], 1, '#f0e8d0', 0.4); }
-      for (let k = 0; k < 3; k++) {
-        const x = range(rnd, 14, W - 50), y = range(rnd, 20, H - 70), w = range(rnd, 26, 44), h = range(rnd, 30, 60), c = pick(rnd, ['#c8b48c', '#b8a07a', '#d8ccb0']);
-        g.fillStyle = c; g.fillRect(x, y, w, h);
-        g.save(); g.setLineDash([3, 3]); g.strokeStyle = '#6a5a40'; g.lineWidth = 1.2; g.strokeRect(x + 2, y + 2, w - 4, h - 4); g.restore();
+      for (let b = 0; b < nB; b++) {
+        const y0 = b * B, y1 = y0 + B, base = jitter('#dec496', rnd, 0.05);
+        g.save(); g.beginPath(); g.rect(0, y0, W, B); g.clip();
+        g.fillStyle = base; g.fillRect(0, y0, W, B);
+        // soft blotches of sun-bleach and old damp (the cloth is stretched 1.7x across, so marks are wide)
+        for (let i = 0; i < 9; i++) blob(g, rnd() * W, y0 + range(rnd, 14, B - 14), range(rnd, 18, 40), range(rnd, 10, 22), (rnd() - 0.5) * 0.4, pick(rnd, ['#ecd8a8', '#c8b088', '#d6bc90', '#e8cc98']), range(rnd, 0.25, 0.45), 0.1);
+        // the bay's billow: the bar above throws a cool shadow on its head, the cloth swells into the light,
+        // then turns away into a cool foot just over the next bar
+        const hl = range(rnd, 0.26, 0.34), ft = range(rnd, 0.8, 0.88);
+        g.fillStyle = grad(g, 0, y0, 0, y1, [[0, '#6c5e7c', 0.78], [0.06, '#887a96', 0.5], [0.15, '#dcc496', 0.12], [hl, '#fff0c4', 0.78], [0.5, '#f4dcaa', 0.18], [0.62, '#e8d0a0', 0], [ft, '#9a8896', 0.42], [1, '#6c5e7c', 0.64]]);
+        g.fillRect(0, y0, W, B);
+        // lit toward the whip (the stock side, upper left), cooler to the outer edge
+        g.fillStyle = grad(g, 0, 0, W, 0, [[0, '#fff0c0', 0.24], [0.45, '#fff0c0', 0], [0.7, '#5a4c6c', 0], [1, '#5a4c6c', 0.3]]);
+        g.fillRect(0, y0, W, B);
+        // the pillow's warm crown
+        blob(g, W * range(rnd, 0.36, 0.46), y0 + B * (hl + 0.08), range(rnd, 44, 56), range(rnd, 22, 28), (rnd() - 0.5) * 0.2, '#fff4d0', 0.6, 0.05);
+        // a cool crease or two pulled from the corners
+        for (let k = 0; k < 2; k++) { const x = k ? range(rnd, W * 0.7, W - 10) : range(rnd, 10, W * 0.28), up = rnd() < 0.5, a = (k ? -1 : 1) * (up ? 1 : -1) * range(rnd, 0.5, 0.8); blob(g, x, up ? y0 + B * 0.24 : y1 - B * 0.24, range(rnd, 26, 36), range(rnd, 4, 6), Math.PI / 2 + a, '#8a7c92', 0.2, 0); }
+        // a patch in some bays: its own cloth, a lit head, a shadowed foot, stitched round
+        if (rnd() < 0.6) {
+          const pw = range(rnd, 28, 46), ph = range(rnd, 22, 38), px = range(rnd, 10, W - pw - 10), py = y0 + range(rnd, 18, B - ph - 16);
+          const pc = pick(rnd, ['#e0c896', '#d8ccb0', '#ecd6a4', '#d4c098']);
+          g.save(); g.globalAlpha = 0.85;
+          g.fillStyle = grad(g, 0, py, 0, py + ph, [[0, lightOf(pc, 0.25)], [0.4, pc], [1, shadowOf(pc, 0.14)]]);
+          g.fillRect(px, py, pw, ph); g.restore();
+          line(g, [[px + 1, py + ph + 1], [px + pw, py + ph + 1]], 1.6, '#7a6e7c', 0.25);
+          g.save(); g.setLineDash([3, 3]); g.strokeStyle = '#7a6a50'; g.globalAlpha = 0.5; g.lineWidth = 1; g.strokeRect(px + 2.5, py + 2.5, pw - 5, ph - 5); g.restore();
+        }
+        g.restore();
       }
-      streaks(g, W, rnd, { colors: ['#8a7a5a', '#7a6a4a'], count: 14, len: [40, 160], width: [3, 8], angle: Math.PI, wobble: 0.05, alpha: 0.15 });
-      g.fillStyle = grad(g, 0, 0, W, 0, [[0, INK, 0.25], [0.1, INK, 0], [0.9, INK, 0], [1, INK, 0.3]]); g.fillRect(0, 0, W, H);
+      // lengthwise seams where the cloths are sewn (a dark fold and a lit lip), down the whole sheet
+      for (const sx of [W * 0.34, W * 0.68]) {
+        const p = []; for (let y = 0; y <= H; y += 32) p.push([sx + (y === 0 || y === H ? 0 : (rnd() - 0.5) * 2), y]);
+        line(g, p, 2.2, '#8a7a62', 0.55);
+        line(g, p.map(([x, y]) => [x - 2, y]), 1.2, '#fbf0d2', 0.45);
+      }
+      // grease and weather run out along the cloth from the whip, and dirt in from the outer edge
+      for (let i = 0; i < 10; i++) {
+        const inner = i < 7, x = inner ? range(rnd, 2, 16) : range(rnd, W - 18, W - 4), y = rnd() * H, len = range(rnd, 60, 150), wd = range(rnd, 12, 20);
+        const c = pick(rnd, ['#7a6a52', '#6e6050', '#8a7a5a']);
+        for (const dy of [0, -H, H]) if (y + dy < H && y + dy + len > 0) blob(g, x, y + dy + len / 2, len / 2, wd / 2, Math.PI / 2, c, 0.13, 0);
+      }
+      // the edges, darker where they are laced to the whip and the hemlath
+      g.fillStyle = grad(g, 0, 0, W, 0, [[0, INK, 0.32], [0.08, INK, 0], [0.92, INK, 0], [1, INK, 0.36]]); g.fillRect(0, 0, W, H);
     });
   },
 });

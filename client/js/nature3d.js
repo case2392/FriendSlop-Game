@@ -5,10 +5,13 @@
 // warm boles on flared roots, gnarled limbs into wide domed crowns of big leaf lobes with ragged hanging
 // skirts; Westfall's the same oak, smaller, a round lumpy olive-gold ball; stacked drooping pine tiers;
 // Badlands hoodoos lofted as one eroded column under a caprock; Badlands ledges as little stepped
-// buttes (tiers 5-12% smaller, set toward one side, undercut, uneven in height, under a broken caprock)
-// and Tanaris mounds as layered rock (strataRock: the day's hard beds jut as lit lips over undercuts at
-// the same world heights the painted strata use, joints as soft cool wedges, a stepped skyline, a bank
-// of the ground's own dust or sand round the foot that fades into the terrain); Tanaris slab arches on
+// buttes (angular tiers of about a half, three tenths and a fifth of the height, set toward one side,
+// each ending in a caprock that juts over a cool undercut band, cracks, a talus skirt) and Tanaris
+// mounds as wind-cut sandstone (strataRock: the day's thin hard beds jut as lit lips over cool undercuts
+// at the same world heights the painted strata use; joints split an outcrop into blocks standing to
+// different beds, a broken stepped skyline; a ramp of the desert's sand buries one side; on every
+// layered rock a bank of the ground's own dust or sand round the foot that fades into the terrain, and
+// the dust creeping up the wall); Tanaris slab arches on
 // blocky stepped legs; the wall-foot rocks of Dun Morogh and Tanaris as big blocks of the walls' own
 // rock lodged at the wall's toe, snowed on or drifted with sand), smooth shading, and the detail
 // painted into textures (paint/nature.js). A canopy lobe is a ring of alpha
@@ -479,8 +482,8 @@ const vertBody = o => `
 //   alpha (cutout cards, alpha-to-coverage), wind (sway by aWind), bill (camera-facing cards), noFlip
 //   (both faces keep the card's own normal: volumetric canopies), backShift (a card's underside shows
 //   the atlas cell `backShift` to the right: bare boughs under snowy ones), cover (world-space
-//   moss/snow/... on up-facing surfaces, plus where aCov says so; covY: its noise shifted with height,
-//   so on a wall it breaks into patches rather than vertical streaks), tri (triplanar world mapping).
+//   moss/snow/... on up-facing surfaces, plus where aCov says so; covY: on walls the cover is mapped
+//   across the wall, so it breaks into patches rather than vertical streaks), tri (triplanar mapping).
 const MAT = new Map();
 function natMat(texName, o = {}) {
   const key = texName + '|' + JSON.stringify(o);
@@ -537,7 +540,7 @@ function natMat(texName, o = {}) {
       vec3 normal = normalize(vNormal);
       vec3 nonPerturbedNormal = normal;`);
     if (C) fs = fs.replace('#include <lights_lambert_fragment>', `{
-        vec4 cv = texture2D(uCoverMap, (vNatW.xz${o.covY ? ' + vec2(0.71, -0.53) * vNatW.y' : ''}) * uCover.w);
+        vec4 cv = texture2D(uCoverMap, ${o.covY ? 'mix(vNatW.xz, vec2(vNatW.x + vNatW.z, vNatW.y * 1.7), smoothstep(0.75, 0.35, abs(normalize(vNatN).y)))' : 'vNatW.xz'} * uCover.w);
         float up = normalize(vNatN).y${o.frontOnly ? ' * faceDirection' : ''};
         float k = smoothstep(uCover.x, uCover.y, up + (cv.a - 0.55) * uCover.z);
         float ao = clamp(dot(vColor.rgb, vec3(0.3333)) * 1.3, 0.0, 1.0);
@@ -1762,7 +1765,8 @@ function roundPoly(rnd, N, r, { jit = 0.04, sx = 1, ox = 0, oz = 0, proud = 1 } 
 //      footFade [h0, h1] (no lips or undercuts in the bottom h0 above the ground: the rock meets the
 //      ground in one piece); foot {d, h, sharp}; chamfer; angles (extra columns: the plan's corners);
 //      NA; ground(x, z); tint, aoLo, aoH, lipK, cool (cool shadows under the lips and the cap); shade(p, n);
-//      dustFoot (how high the ground's dust or sand creeps up the wall)
+//      dustFoot (how high the ground's dust or sand creeps up the wall); dustTo (and up to this height
+//      anywhere: on a slope, the downhill wall under the uphill ground's level is dusted over)
 // Returns the columns { a, R0, gl, x, z } (for the dust bank round the foot).
 function strataRock(ctx, b, o) {
   const cx = o.cx || 0, cz = o.cz || 0, gnd = o.ground || ((x, z) => ctx.gh(x, z));
@@ -1889,7 +1893,7 @@ function strataRock(ctx, b, o) {
   // dustFoot: the day's dust (or sand) creeping up the bottom of the wall (the cover shader's per-vertex
   // amount), its edge broken by the cover's own noise: the rock and the ground meet without a line
   const cf0 = b.cf;
-  if (o.dustFoot) b.cf = p => clamp01(1 - (p.y - gnd(p.x, p.z)) / o.dustFoot);
+  if (o.dustFoot) b.cf = p => clamp01(Math.max(1 - (p.y - gnd(p.x, p.z)) / o.dustFoot, o.dustTo != null ? (o.dustTo - p.y) / 0.3 : 0));
   creasedShared(b, P, idx, (p, n, vi) => {
     const j = colOf[vi], g = j >= 0 ? cols[j].gl : gMin;
     let k = aoLo + (1 - aoLo) * smooth(-0.1, o.aoH ?? 1.2, p.y - g), cool = 0;
@@ -1938,7 +1942,7 @@ function dustBank(ctx, cols, hIn, wOut, cx = 0, cz = 0, { aoK = 1, flat = false 
   for (const [f, hk, ao, op] of RINGS) {
     for (const c of cols) {
       const w = wOut(c.a), R = c.R0 + f * w, x = cx + Math.cos(c.a) * R, z = cz + Math.sin(c.a) * R;
-      const g = f <= 0 ? Math.max(c.gl, ctx.gh(x, z)) : ctx.gh(x, z);
+      const g = f <= 0 ? c.gl : ctx.gh(x, z);           // (inside the wall: the ground at the wall itself, so on a slope the bank never climbs the downhill wall)
       // flat: the bank lies only where the ground is gentle (none smeared up a wall)
       const fk = flat ? smooth(0.95, 0.4, Math.hypot(ctx.gh(x + 0.5, z) - ctx.gh(x - 0.5, z), ctx.gh(x, z + 0.5) - ctx.gh(x, z - 0.5))) : 1;
       const y = g + hk * hIn(c.a) * fk;
@@ -1979,7 +1983,7 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
   else if (col.cyl) { hx = col.cyl.r * 1.12; hz = col.cyl.r * 0.88; rot = rnd() * TAU; top = col.cyl.top; }
   else { hx = S * range(rnd, 0.95, 1.15); hz = hx * range(rnd, 0.5, 0.7); rot = rnd() * TAU; top = S * range(rnd, 0.6, 0.9); }
   const solid = !!(col.box || col.cyl), sc = Math.min(1, Math.max(0.6, S / 2));
-  const [gLo] = ctx.foot(Math.max(hx, hz), 0, 0, 9), g0 = ctx.gh(0, 0);
+  const [gLo, gHi] = ctx.foot(Math.max(hx, hz), 0, 0, 9), g0 = ctx.gh(0, 0);
   // the tiers' tops
   const H = top - g0, nT = H > 2.25 ? 3 : H > 1.45 ? 2 : 1;
   const fr = nT === 3 ? [range(rnd, 0.47, 0.53), range(rnd, 0.77, 0.83)] : nT === 2 ? [range(rnd, 0.6, 0.68)] : [];
@@ -2038,12 +2042,14 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
     const cols = strataRock(ctx, b, {
       cx, cz, plan, angles, joints, topAt, rimY: (a, x, z) => topAt(x, z) - notch(a),
       ground: t ? (x, z) => below(x, z) - 0.02 : undefined, yB: t ? yLo - 0.22 : Math.min(-0.5, gLo - 0.45),
-      beds: bedsIn(bm, by, lo + 0.25, yT - capD - 0.12), NA: t ? 34 : (solid ? 44 : 32),
+      // (on a slope no lip runs below the uphill ground's level: there it would read as the rock's foot
+      // with a slit under it; the downhill wall under that level is dusted over instead)
+      beds: bedsIn(bm, by, t ? lo + 0.25 : Math.max(lo + 0.25, Math.min(gHi, lo + 0.8) + 0.3), yT - capD - 0.12), NA: t ? 34 : (solid ? 44 : 32),
       lip: 0.075 * sc, lipVar: 1.1, uc: 0.1 * sc, ucH: 0.14 * sc, batter: t ? 0.02 : 0.06, batY: 0.7, chamfer: 0.025, tierAmp: (t ? 0.06 : 0.045) * sc, noise: 0.03,
       foot: ft,
       capD, capW: 0.04, capUc: (cap ? 0.1 : t ? 0.08 : 0.04) * sc, topRows: [capD + 0.16, capD + 0.06, capD + 0.012, capD - 0.045, 0.04],
       capOut: cap ? (a => Math.max(0.02, 0.07 + 0.05 * capF(a)) * sc + 0.1 * sc * Math.pow(Math.max(0, Math.cos(a - trot - (su < 0 ? Math.PI : 0))), 3)) : (a => Math.max(0.005, (t ? 0.055 : 0.02) + (t ? 0.035 : 0.02) * capF(a + t)) * sc),
-      footFade: [0.15, 0.42], tint: mul3(tint, tTint[Math.min(t, 2)]), aoLo: t ? 0.74 : 0.64, aoH: t ? 1.0 : 0.9, lipK: 1.12, jShade: true, cool: true, dustFoot: t ? 0.28 : 0.62,
+      footFade: [0.15, 0.42], tint: mul3(tint, tTint[Math.min(t, 2)]), aoLo: t ? 0.8 : 0.7, aoH: t ? 0.38 : 0.6, lipK: 1.12, jShade: true, cool: true, dustFoot: t ? 0.28 : 0.62, dustTo: t ? null : Math.min(gHi, gLo + 0.8),
     });
     if (t === 0) cols0 = cols;
     below = topAt; px = ox; pz = oz; phx = thx; phz = thz; prot = trot;
@@ -2086,10 +2092,10 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
   // the talus skirt: broken blocks fallen under the walls and at the ends (under the step height), some
   // slabs leaning back on the base, and scree
   const plan0 = a => Math.hypot(Math.cos(a - rot) * hx, Math.sin(a - rot) * hz) * 0.9;
-  const nB = 5 + Math.floor(rnd() * 4);
+  const nB = 6 + Math.floor(rnd() * 4);
   for (let k = 0; k < nB; k++) {
     const a = k === 0 ? rot + (su > 0 ? 0 : Math.PI) + range(rnd, -0.4, 0.4) : rot + (k % 2 ? 1 : -1) * Math.PI / 2 + range(rnd, -1.1, 1.1) + (k > 3 ? Math.PI / 2 : 0);
-    const lean = k % 3 === 2, R = (lean ? range(rnd, 0.24, 0.34) : range(rnd, 0.16, 0.36)) * sc, dd = plan0(a) + (lean ? R * 0.25 : R * 0.6 + range(rnd, 0.05, 0.8));
+    const lean = k % 3 === 2, R = (lean ? range(rnd, 0.28, 0.38) : range(rnd, 0.2, 0.44)) * sc, dd = plan0(a) + (lean ? R * 0.25 : R * 0.6 + range(rnd, 0.05, 0.8));
     const x = Math.cos(a) * dd, z = Math.sin(a) * dd;
     const sh = lean ? rockShape(rnd, { sx: range(rnd, 0.9, 1.2), sy: range(rnd, 1.0, 1.25), sz: 0.45, sides: 4, oblique: 2, topCut: [0.55, 0.7], topTilt: 0.3, noise: 0.08, detail: 1 })
       : rockShape(rnd, { sx: range(rnd, 1.1, 1.6), sy: range(rnd, 0.5, 0.7), sides: 4, oblique: 2, topCut: [0.5, 0.7], topTilt: 0.25, noise: 0.1, detail: 1 });
@@ -2131,15 +2137,16 @@ function sandBlock(ctx, b, rnd, o) {
   const capD = Math.max(0.1, Math.min(range(rnd, 0.1, 0.17), H * 0.3)), capF = periodicA(rnd, 3), capK = range(rnd, 0.03, 0.05) * sc;
   // a wind-scoured foot only on level ground (on a slope it would read as a hull)
   const gs = o.poly.map(([x, z]) => (o.ground || ((u, v) => ctx.gh(u, v)))(x, z)), flatG = Math.max(...gs) - Math.min(...gs) < 0.3;
+  const gHi = Math.min(Math.max(...gs), Math.min(...gs) + 0.7);        // (the uphill ground's level, as far as it matters)
   const cols = strataRock(ctx, b, {
     cx, cz, plan, angles, joints, topAt, rimY: (a, x, z) => topAt(x, z) - notch(a),
     ground: o.ground, yB: o.yB, NA: o.NA ?? 36,
-    beds: bedsIn(bm, by, lo + 0.2, top - capD - 0.12).filter(q => q.k >= 0.8),
+    beds: bedsIn(bm, by, Math.max(lo + 0.2, gHi + 0.25), top - capD - 0.12).filter(q => q.k >= 0.8),
     lip: 0.075 * sc, lipVar: 1.1, uc: 0.12 * sc, ucH: 0.14, setback: range(rnd, 0.02, 0.05) * sc, batter: 0.04, batY: 0.5, chamfer: 0.025, tierAmp: range(rnd, 0.05, 0.08) * sc, noise: 0.03,
     capD, capOut: a => capK * 1.6 * Math.max(0, capF(a) + 0.1), capW: 0.035, capUc: (H > 0.6 ? 0.045 : 0.025) * sc,
     topRows: [capD + 0.15, capD + 0.06, capD + 0.012, capD - 0.045, 0.04],
-    foot: o.foot === undefined ? (flatG ? { d: 0.09 * sc, h: Math.min(0.42, H * 0.3) } : null) : o.foot, footFade: [0.12, 0.38], tint: o.tint, aoLo: o.aoLo ?? 0.7, aoH: 0.9, lipK: 1.14, jShade: true, cool: true, shade: o.shade,
-    dustFoot: o.dustFoot ?? (o.ground ? 0.22 : 0.42),
+    foot: o.foot === undefined ? (flatG ? { d: 0.09 * sc, h: Math.min(0.42, H * 0.3) } : null) : o.foot, footFade: [0.12, 0.38], tint: o.tint, aoLo: o.aoLo ?? 0.7, aoH: 0.6, lipK: 1.14, jShade: true, cool: true, shade: o.shade,
+    dustFoot: o.dustFoot ?? (o.ground ? 0.15 : 0.26), dustTo: o.ground ? null : gHi,
   });
   return { cols, topAt, plan };
 }
@@ -2198,7 +2205,7 @@ const jointShade = cuts => (p, n) => {
 // Returns { segs: [{ cols, topAt, top }], outline (columns round (ox, oz) for dustBank) }.
 function sandOutcrop(ctx, b, rnd, { poly, ox = 0, oz = 0, rot, len, want, spread, floor = null, lo, yB, tint, sc = 1, nCut, terrace = 0.5, terraceDir = null, NA = 34, biteMax = 0.26 }) {
   const bm = ctx.biome, by = ctx.base.y;
-  const n = nCut ?? (len > 2.6 ? (rnd() < 0.5 ? 2 : 1) : len > 1.4 ? (rnd() < 0.75 ? 1 : 0) : 0);
+  const n = nCut ?? (len > 2.6 ? (rnd() < 0.5 ? 2 : 1) : len > 1.5 ? (rnd() < 0.85 ? 1 : 0) : 0);
   const ts = n === 2 ? [range(rnd, 0.28, 0.4), range(rnd, 0.6, 0.72)] : n === 1 ? [range(rnd, 0.35, 0.65)] : [];
   const segs = splitPlan(rnd, poly, rot, ox, oz, ts, range(rnd, 0.06, 0.1));
   let T, steps;
@@ -2220,8 +2227,8 @@ function sandOutcrop(ctx, b, rnd, { poly, ox = 0, oz = 0, rot, len, want, spread
   });
   // the terrace: a smaller block of the next strong bed on the tallest, pushed toward one side
   const S0 = out.find(q => q.sg === segs[tallest]);
-  const T3 = bedTops(bm, by, T + 0.2, T + 0.6, 0.8)[0];
-  if (S0 && T3 && rnd() < terrace) {
+  const T3 = bedTops(bm, by, T + 0.2, T + 0.6, 0.8)[0] ?? T + range(rnd, 0.24, 0.38);
+  if (S0 && rnd() < terrace) {
     const sg = S0.sg, R0 = Math.max(...sg.poly.map(([x, z]) => Math.hypot(x - sg.cx, z - sg.cz))), f = range(rnd, 0.5, 0.72);
     const ua = terraceDir ?? rnd() * TAU, sh = R0 * (1 - f) * range(rnd, 0.5, 0.85), c2x = sg.cx + Math.cos(ua) * sh, c2z = sg.cz + Math.sin(ua) * sh;
     const poly2 = sg.poly.map(([x, z]) => [c2x + (x - sg.cx) * f * range(rnd, 0.92, 1.06), c2z + (z - sg.cz) * f * range(rnd, 0.92, 1.06)]);
@@ -2532,7 +2539,7 @@ function footSandstone(ctx, d, b, col, rnd, tint, steep, piece) {
   const plan = polyRadius(poly, cx, cz);
   let gF = Infinity;
   for (let k = 0; k < 16; k++) { const a = k / 16 * TAU; gF = Math.min(gF, ctx.gh(cx + Math.cos(a) * plan(a), cz + Math.sin(a) * plan(a))); }
-  const oc = sandOutcrop(ctx, b, rnd, { poly, ox: cx, oz: cz, rot, len: 2 * RB * sxB, want: gF + H, spread: Math.min(0.9, H * 0.45), lo: gF, yB: gF - 0.6, tint: mulc(tint, 1.02), sc: 1.05, terrace: 0.55, terraceDir: Math.atan2(uz, ux) + range(rnd, -0.5, 0.5), NA: 44 });
+  const oc = sandOutcrop(ctx, b, rnd, { poly, ox: cx, oz: cz, rot, len: 2 * RB * sxB, want: gF + H, spread: Math.min(0.9, H * 0.45), lo: gF, yB: gF - 0.6, tint: mulc(tint, 1.02), sc: 1.05, terrace: 0.8, terraceDir: Math.atan2(uz, ux) + range(rnd, -0.5, 0.5), NA: 44 });
   // the drift: a ramp heaped by the wind against one end and the front, deepest there (about half the
   // lowest block's height), thin round the rest; nothing smeared up the wall's slope
   const aD = Math.atan2(-uz, -ux), dp = rnd() * TAU, wa = aD + (rnd() < 0.5 ? -1 : 1) * range(rnd, 0.6, 1.2);
@@ -3493,6 +3500,9 @@ function auditColliders(biome) {
         for (const h of d.k === 'cairn' ? [0.15, 0.4] : [0.3, 0.6, 1.0, 1.5]) {
           if (g + h > top - 0.1) continue;
           const ext = sliceExtents(ctx.batches, d.k === 'oak' ? ['bark_oak'] : ['rock'], c.x, c.z, g + h, d.k === 'rock' ? c.r + 0.45 : c.r * 2 + 0.6, 16, W.heightAt);
+          // (a bearing where the collider's edge is under the slope can't be reached: what the slice finds
+          // there is an inner face, a joint between two blocks, not the rock's outside)
+          ext.forEach((e, k) => { const th = k / 16 * TAU - Math.PI; if (W.heightAt(c.x + Math.cos(th) * c.r * 0.9, c.z + Math.sin(th) * c.r * 0.9) > g + h + 0.05) ext[k] = -1; });
           const has = ext.filter(e => e >= 0);
           if (has.length < 12) { add((d.k === 'oak' ? 'oak' : kind) + ' (open slice)', 0, 0); continue; }
           const mn = Math.min(...has), mx = Math.max(...has);
@@ -3598,14 +3608,4 @@ export const PREVIEW = {
   },
   campfire: pv('fire'),
   audit: ({ biome = 'meadow' } = {}) => auditColliders(biome),
-  auditdbg: ({ biome = 'desert' } = {}) => {   // DEBUG (temporary)
-    const W = generateLeg(777, BIOME_BY_DAY.indexOf(biome) + 1); let n = 0;
-    for (const d of W.decor) {
-      if (d.k !== 'rock' || d.s <= 1.2 || n >= 8 || (n >= 3 && !d.foot)) continue; n++;
-      const ctx = new Ctx(W); rock(ctx, d);
-      const cs = W.cyls.filter(c => c.mat === 'rock' && Math.hypot(c.x - d.x, c.z - d.z) < 0.05);
-      for (const c of cs) { const g = W.heightAt(c.x, c.z); for (const h of [0.3, 0.6, 1.0]) { const ext = sliceExtents(ctx.batches, ['rock'], c.x, c.z, g + h, c.r + 0.45, 16, W.heightAt); console.error(`DBG foot=${!!d.foot} s ${d.s.toFixed(2)} r ${c.r.toFixed(2)} top ${(c.y + c.hh - g).toFixed(2)} @${h}: ${ext.map(e => e < 0 ? '--' : (e - c.r).toFixed(2)).join(' ')}`); } }
-    }
-    return new THREE.Group();
-  },
 };
