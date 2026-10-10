@@ -216,7 +216,7 @@ style (details in [ART.md](ART.md)):
 | Day | Road | Biome | Town |
 |---|---|---|---|
 | 1 | The Westmeadow Road | meadow: oak groves, gray outcrops | Paydirt (timber-framed) |
-| 2 | Goldenfield Pike | fields: golden grass, haybales, a windmill | Busted Flats (farmsteads) |
+| 2 | Goldenfield Pike | fields: golden grass, fenced crop plots (standing wheat, stubble with round bales, furrows, scarecrows), a windmill | Busted Flats (farmsteads) |
 | 3 | Frostpeak Pass | snow: pines, granite, snow on every ledge | Last Chance (alpine stone halls) |
 | 4 | The Redrock Badlands | badlands: red strata, hoodoos, buttes | Snake Eyes (frontier outpost) |
 | 5 | The Lost Wages Flats | desert: dunes, sandstone arches, palms | Lost Wages (adobe) |
@@ -513,6 +513,9 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
    after the world message; `tools/joinrace.mjs` checks a joining player and
    a new day against the server's props and parts, and `tools/dayrace.mjs`
    a day that changes again mid-load (what came for the old day is dropped).
+   A paint worker that is slow to start (a starved machine) doesn't hold the
+   build up: the page paints meanwhile, and the worker joins the pool when it
+   is up and stores what the page painted (`tools/texfaults.mjs`, 'slow').
    `tools/texhash.mjs` checks every texture comes out pixel-identical all
    three ways, `tools/texgame.mjs` checks every texture a running game holds
    against an older checkout, and `tools/loadtime.mjs` measures. With
