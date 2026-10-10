@@ -99,11 +99,12 @@ async function shot(p, name, { hud = true, settle = 1400 } = {}) {
   console.log('📸', file);
 }
 // stand Dave at (x,z) on the ground, look at (tx,ty,tz)
-const camAt = (x, z, tx, ty, tz, who = dave) => ev(who, ([x, z, tx, ty, tz]) => { const S = window.__nmd; const y = S.W.heightAt(x, z); S.me.teleport(x, y + 0.05, z, 0); S.aimAt(tx, ty, tz); }, [x, z, tx, ty, tz]);
+// (topAt: the ground, or a butte's flat top where one stands)
+const camAt = (x, z, tx, ty, tz, who = dave) => ev(who, ([x, z, tx, ty, tz]) => { const S = window.__nmd; const y = (S.W.topAt || S.W.heightAt)(x, z); S.me.teleport(x, y + 0.05, z, 0); S.aimAt(tx, ty, tz); }, [x, z, tx, ty, tz]);
 const steveAt = (x, z, yaw) => SOLO ? Promise.resolve() : ev(steve, ([x, z, yaw]) => { const S = window.__nmd; S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, yaw); }, [x, z, yaw]);
 const W = await steve.evaluate(() => { const W = window.__nmd.W; return { LEN: W.LEN, town: W.town, pois: W.pois.map(p => ({ type: p.type, x: p.x, z: p.z, side: p.side })), obstacles: W.obstacles, anchors: W.anchors, camp: W.camp, biome: W.biome }; });
 const rx = z => steve.evaluate(z => window.__nmd.W.roadX(z), z);
-const hy = (x, z) => steve.evaluate(([x, z]) => window.__nmd.W.heightAt(x, z), [x, z]);
+const hy = (x, z) => steve.evaluate(([x, z]) => (window.__nmd.W.topAt || window.__nmd.W.heightAt)(x, z), [x, z]);
 console.log(`day ${DAY} · biome ${W.biome} · hour ${HOUR}`);
 const T = W.town;
 
@@ -180,14 +181,14 @@ for (const v of views) {
       // and the loot (searching outward from the road-facing side: a fixed offset put the camera inside the
       // wing on some days, and teleporting onto a piece of loot flings it off the mesa and breaks it)
       const spot = await ev(dave, () => {
-        const W = window.__nmd.W, p = W.pois.find(q => q.type === 'crash'), top = W.heightAt(p.x, p.z);
+        const W = window.__nmd.W, p = W.pois.find(q => q.type === 'crash'), at = W.topAt || W.heightAt, top = at(p.x, p.z);
         const boxes = W.statics.filter(s => s.poi === p.id && (s.part === 'fuselage' || s.part === 'wing'));
         const loot = (W.props || []).filter(q => Math.hypot(q.x - p.x, q.z - p.z) < 9);
         const inside = (x, z, s, pad) => { const dx = x - s.x, dz = z - s.z, c = Math.cos(s.ry), sn = Math.sin(s.ry); return Math.abs(dx * c - dz * sn) < s.hx + pad && Math.abs(dx * sn + dz * c) < s.hz + pad; };
         const a0 = Math.atan2(-3.0, -p.side * 3.2);
         for (const r of [4.0, 4.5, 3.5]) for (let k = 0; k < 24; k++) {
           const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12), x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
-          if (Math.abs(W.heightAt(x, z) - top) < 0.35 && !boxes.some(s => inside(x, z, s, 1.2)) && !loot.some(q => Math.hypot(q.x - x, q.z - z) < 1.6)) return { x, z };
+          if (Math.abs(at(x, z) - top) < 0.35 && !boxes.some(s => inside(x, z, s, 1.2)) && !loot.some(q => Math.hypot(q.x - x, q.z - z) < 1.6)) return { x, z };
         }
         return { x: p.x - p.side * 3.2, z: p.z - 3.0 };
       });

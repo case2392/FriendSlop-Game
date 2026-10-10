@@ -57,6 +57,7 @@ import { fbm, noise2 } from '/shared/rng.js';
 import { BIOME_BY_DAY } from '/shared/world.js';
 import { mesaRefiner } from './terrain_mesa.js';
 import { buildTalus } from './terrain_talus.js';
+import { buildButtes } from './terrain_butte.js';
 
 const CHUNK = 40;            // cells per terrain chunk side (100 m): few draw calls, still culls
 const SHOULDER = 1.7;        // the road texture runs this far past the driven edge on each side
@@ -90,7 +91,9 @@ const CFG = {
       cards: [[0.75, 0.5, 0.3], [0.8, 0.55, 0.12], [0.75, 0.5, 0.12], [0.7, 0.5, 0.12], [0.75, 0.5, 0.16], [0.85, 0.6, 0.06], [0.7, 0.45, 0.06], [0.5, 0.3, 0.14]] },
   },
   desert: {
-    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.1, 0.2], cliffN: [0.1, 0.04], g2: [0.62, 0.3], collar: [0.5, 0.36, 0.2], ledge: [1, 1, 1], strata: true, dunes: true, mudTex: 'mud_desert', local: 0.02, mesaK: 0.2,
+    // (an erg: dunes and their banks stay under ~33 degrees and are all sand; sandstone only on true faces,
+    // the narrows' walls and the crash mesas)
+    hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.2, 0.28], cliffN: [0.1, 0.04], g2: [0.62, 0.3], collar: [0.5, 0.36, 0.2], ledge: [1, 1, 1], strata: true, dunes: true, mudTex: 'mud_desert', local: 0.02, mesaK: 0.2,
     scree: [0.12, 0.19, 0.12, 0.24], strataWarp: 3.5, farS: 0.5, rockDet: 0.5,
     ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.9], tintB: [0.94, 0.97, 1.03], macro: 0.3, detail: [0.0, 0.3, 0.38],
     clutter: { cell: 4.0, slots: 2, radius: 22, patch: 12, density: 0.3, spread: 1.0, flowers: 0,
@@ -1954,6 +1957,9 @@ export function buildTerrain(W) {
   // (Dun Morogh, Tanaris) the crash mesas' broken silhouettes: shoulders, rim blocks or caprock, talus (render only)
   const talus = cfg.snowRock || cfg.dunes ? buildTalus(W, { form: mat.userData.U.tForm?.value }) : null;
   if (talus) group.add(talus);
+  // the crash mesas' bodies: rock columns on world gen's butte cylinders (every biome)
+  const buttes = buildButtes(W);
+  if (buttes) group.add(buttes);
   for (const n of prewarmQueue(biome)) prewarmed.add(n);
   // tomorrow's textures are painted one at a time while the night lasts (no stall at dawn)
   const next = BIOME_BY_DAY[W.day] || null;

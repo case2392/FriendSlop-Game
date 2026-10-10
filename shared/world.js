@@ -56,8 +56,10 @@ export const BIOMES = {
     density: 1 / 7,
   },
   desert: {
-    name: 'The Lost Wages Flats', town: 'adobe',
-    wallSoft: 10, wallH: [9, 6], wallDist: [44, 14], bumps: 2.6,
+    // an open erg, not a canyon (erg: dunes on the floor, broad dune banks for walls, bigger dunes beyond;
+    // sheer sandstone only where an obstacle's narrows pinch the valley)
+    name: 'The Lost Wages Flats', town: 'adobe', erg: true,
+    wallSoft: 38, wallH: [10, 4], wallDist: [60, 14], bumps: 0.7,
     decor: [['cactus', 30], ['palm', 8], ['rock', 26], ['bones', 12], ['bush', 10]],
     density: 1 / 8,
   },
@@ -173,6 +175,26 @@ export function generateLeg(seed, day) {
     for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 6.2, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
     return lerp(wd, 85, flatZone(z));
   }
+  // Tanaris's dunes (B.erg): transverse dunes across the wind, each with a long gentle windward back and a
+  // short lee face near sand's angle of repose (~30 degrees, so they paint as sand, not rock), crest and
+  // trough rounded over a few metres (the 2.5 m grid draws a sharp crest as a row of teeth), crest lines
+  // that wander and break up into separate dunes
+  const WIND = 0.62, cwd = Math.cos(WIND), swd = Math.sin(WIND);
+  function dune(x, z, lam, amp, k) {
+    const u = (x * swd + z * cwd) / lam + 0.35 * fbm(x / (lam * 3), z / (lam * 3), S + k, 2);
+    const p = u - Math.floor(u), C = 0.72;
+    const prof = p < C ? smoothstep(0, C, p) : 1 - smoothstep(C, 1, p);
+    const along = (x * cwd - z * swd) / (lam * 1.6);
+    return amp * prof * (0.5 + 0.5 * smoothstep(-0.4, 0.4, noise2(along, Math.floor(u) * 1.93, S + k + 1)));
+  }
+  // the road, the narrows and the camp and town pads stay clear; small dunes on the floor fade up the
+  // banks, where the big ones (draa) take over
+  function ergDunes(x, z, ad, wd) {
+    const open = (1 - narrowK(z)) * smoothstep(11, 26, ad);
+    if (open <= 0) return 0;
+    const bank = smoothstep(wd + 12, wd + 48, ad);   // the big dunes start past the bank's brow, not on its face
+    return open * (dune(x, z, 44, 2.8, 81) * (1 - 0.6 * bank) + dune(x, z, 96, 7, 91) * bank);
+  }
   function wallH(side, z) {
     let wh = lerp(B.wallH[0] + B.wallH[1] * fbm(z / 90, side * 3.1 + 40, S + 9, 2), 15 + 6 * fbm(z / 90, side * 3.1 + 40, S + 9, 2), narrowK(z));
     for (const o of narrows) if (o.type === 'gate') wh = lerp(wh, 9.5, 1 - smoothstep(20, 45, Math.abs(z - o.z)));
@@ -213,17 +235,18 @@ export function generateLeg(seed, day) {
     h -= 0.22 * smoothstep(4.6, 6.4, ad) * (1 - smoothstep(8, 12, ad)) * (1 - flat);
     // valley floor bumps
     h += fbm(x / 34, z / 34, S + 11, 3) * B.bumps * smoothstep(7, 22, ad) * (1 - flat);
-    // canyon walls
+    // canyon walls (Tanaris: dune banks)
     const side = d >= 0 ? 1 : 0;
     const wd = wallDist(side, z);
-    const jag = fbm(x / 9, z / 9, S + 21, 2) * 2.4;
+    if (B.erg) h += ergDunes(x, z, ad, wd) * (1 - flat);
+    const jag = fbm(x / 9, z / 9, S + 21, 2) * (B.erg ? 0.8 : 2.4);   // (a dune bank's foot is smooth, a cliff's is broken)
     // the face, then a rounded shoulder easing over the lip (a crease sharper than the 2.5 m grid would
     // show as a sawtooth of triangle teeth along the rim)
     const ws = wallSoft(z), q = ad + jag;
     const t = 0.85 * smoothstep(wd, wd + 0.85 * ws, q) + 0.15 * smoothstep(wd + 0.6 * ws, wd + ws + 5, q);   // face as steep as ever
-    h += t * (wallH(side, z) + fbm(x / 22, z / 22, S + 31, 2) * 3.2);
-    // beyond the rim: rolling plateau, then the world's edge rises
-    h += smoothstep(wd + 8, wd + 60, ad) * 6 * (fbm(x / 60, z / 60, S + 41, 2) + 0.6);
+    h += t * (wallH(side, z) + fbm(x / 22, z / 22, S + 31, 2) * (B.erg ? 1.2 : 3.2));
+    // beyond the rim: rolling plateau (Tanaris: more dunes), then the world's edge rises
+    if (!B.erg) h += smoothstep(wd + 8, wd + 60, ad) * 6 * (fbm(x / 60, z / 60, S + 41, 2) + 0.6);
     h += smoothstep(HALF_W - 22, HALF_W - 2, Math.abs(x)) * 30;
     // flat pads under the stops
     for (const p of pois) {
@@ -231,45 +254,36 @@ export function generateLeg(seed, day) {
       const dp = Math.hypot(x - p.x, z - p.z);
       if (dp < 15) h = lerp(h, p.padY, smoothstep(15, 9.5, dp));
     }
-    // mesas: a lobed, irregular footprint with steep sides (they paint as cliff), a bench part-way up on
-    // one side, and a flat top round the wreck (it sits at base + h)
+    // crash mesas are buttes: their bodies are solid cylinders (W.cyls, mat 'mesa': a flat top and sheer
+    // walls, which the 2.5 m heightfield could only draw as a cone), standing on a gentle talus mound here
+    // (under ~25 degrees: you walk up to the wall's foot). Where the road bends toward one, the mound
+    // still stops at the ditch.
     for (const p of mesas) {
-      const M = p.mesa, mx = p.x, mz = p.z, dx = x - mx, dz = z - mz, d0 = Math.hypot(dx, dz);
-      if (d0 > M.r * 1.4 + 6) continue;
-      const a = Math.atan2(dz, dx);
-      const lobe = 1 + 0.25 * (0.65 * Math.sin(a * M.lobes + M.ph) + 0.35 * Math.sin(a * (M.lobes + 2) + M.ph * 1.7));
-      // (notches never cut inside 6.95 m, so the wreck, its wings and the loot keep a flat top out to 5.2 m;
-      // the bulges, which set how close the foot comes to the road, are unchanged)
-      // and on the side facing the road, the foot (bench included) stops at the end of the ditch, 6.4 m from
-      // the road's centre
-      const toRoad = -p.side * Math.cos(a), lim = toRoad > 0.05 ? (p.off - 6.4) / toRoad - 1.5 : Infinity;
-      // (a smooth min over 1.5 m: a hard corner where the cut meets the round body makes steep sliver triangles)
-      const R0 = Math.max(M.r * (d0 < M.r * 0.6 ? 1 : lobe), 6.95), hk = Math.max(1.5 - Math.abs(R0 - lim), 0) / 1.5;
-      const R = Math.min(R0, lim) - hk * hk * 1.5 * 0.25;
-      const dm = d0 + noise2(x / 3, z / 3, S + 51) * 0.5;
-      // the flanks fall over 3.25 m (more than a grid cell, inside the old footprint, so the road keeps its
-      // clearance): any sharper and
-      // the heightfield draws them as a few huge facets with snow teeth at their feet
-      const ff = smoothstep(R + 1.5, R - 1.75, dm);
-      const benchSide = smoothstep(0.2, 0.9, Math.cos(a - M.benchA));   // its ends ease out over ~50 degrees (no short diagonal ramp)
-      const bR = Math.min(R + 3 * benchSide, lim), fb = smoothstep(bR + 1.5, bR - 1.75, dm) * benchSide;
-      const top = M.base + M.h + fbm(x / 6, z / 6, S + 61, 2) * 0.35 * smoothstep(M.r * 0.6, M.r, d0);
-      const keep = smoothstep(6.4, 8.9, ad);   // where the road bends toward a mesa, its foot still stops at the ditch
-      if (fb > 0) h = Math.max(h, lerp(h, M.base + M.h * M.benchK, fb * keep));
-      if (ff > 0) h = Math.max(h, lerp(h, top, ff * keep));
+      const M = p.mesa, d0 = Math.hypot(x - p.x, z - p.z), reach = M.R + 7;
+      if (d0 > reach + 1.5) continue;
+      const dm = d0 + noise2(x / 3, z / 3, S + 51) * 0.6;
+      const mound = M.base + M.talus * smoothstep(reach, M.R - 1, dm);
+      h = Math.max(h, lerp(h, mound, smoothstep(6.4, 8.9, ad)));
     }
     return h;
   }
   // POI pads are flattened so buildings sit on the ground; mesa centers need roadX
   for (const p of pois) { p.x = roadX(p.z) + p.side * p.off; p.padY = roadY(p.z) + 0.05; }
   for (const p of mesas) {
-    p.mesa.base = roadY(p.z) - 0.2;
+    const M = p.mesa;
+    M.base = roadY(p.z) - 0.2;
     // shape from a hash of the stop's z (no rng: the layout stays put)
     const hz = Math.abs(Math.sin(p.z * 12.9898) * 43758.5453) % 1, hz2 = Math.abs(Math.sin(p.z * 78.233) * 12543.123) % 1;
-    p.mesa.lobes = 3 + Math.floor(hz * 3);
-    p.mesa.ph = hz2 * 6.283;
-    p.mesa.benchA = hz * 6.283;
-    p.mesa.benchK = 0.55 + hz2 * 0.15;
+    M.lobes = 3 + Math.floor(hz * 3);          // (outline noise for the renderers: the colliders are round)
+    M.ph = hz2 * 6.283;
+    // the top's radius (the wreck and its loot need ~5 m), its wall kept a metre clear of the road's ditch
+    M.r = M.R = Math.min(M.r, p.off - 7.6);
+    M.talus = 1.6 + hz * 0.8;
+    // a lower tier (the bench) on one end, along the road so it shows side-on from it, turned a little
+    // away from the road; it is where a climber rests half-way up
+    M.benchA = hz < 0.5 ? Math.PI / 2 - p.side * 0.35 : -Math.PI / 2 + p.side * 0.35;   // (x: cos, z: sin; the road is at -side)
+    M.benchK = 0.55 + hz2 * 0.15;
+    M.bench = { x: p.x + Math.cos(M.benchA) * 0.8 * M.R, z: p.z + Math.sin(M.benchA) * 0.8 * M.R, r: 0.55 * M.R, top: M.base + M.h * M.benchK };
   }
 
   // ---- the heightfield ------------------------------------------------------------
@@ -493,14 +507,18 @@ export function generateLeg(seed, day) {
       signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.2, h: 0.9, lines: ['YARD SALE', 'EVERYTHING MUST GO'], bg: '#ffffff', fg: '#d0342c', post: true });
       decor.push({ k: 'umbrella', x: F(4.5, 0, -1).x, y: y0, z: F(4.5, 0, -1).z, ry });
     } else if (p.type === 'crash') {
-      const y0 = p.mesa.base + p.mesa.h; p.y = y0;
+      const M = p.mesa, y0 = M.base + M.h; p.y = y0;
+      // the butte's body and its bench tier (sunk 0.6 m below the foot, so no gap shows under the mound)
+      const bot = M.base - 0.6;
+      cyls.push({ x: p.x, y: (y0 + bot) / 2, z: p.z, r: M.R, hh: (y0 - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte' });
+      cyls.push({ x: M.bench.x, y: (M.bench.top + bot) / 2, z: M.bench.z, r: M.bench.r, hh: (M.bench.top - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte_bench' });
       const F = frame(px, y0, p.z, ry + 0.8);
       decor.push({ k: 'plane', x: px, y: y0, z: p.z, ry: ry + 0.8 });
       lbox(F, ry + 0.8, 0, 0.7, 0, 0.7, 0.7, 3.2, 'metal', '#f1f1f1', 'fuselage');
       lbox(F, ry + 0.8, 0, 0.7, 0.4, 4.2, 0.08, 0.8, 'metal', '#d83a3a', 'wing');
       for (let i = 0; i < 3; i++) {
         const w = F(-2 + i * 2, 0, -3.5 - rng());
-        placeLoot(POI_LOOT.crash[Math.floor(rng() * POI_LOOT.crash.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6, 1.15);
+        placeLoot(POI_LOOT.crash[Math.floor(rng() * POI_LOOT.crash.length)], w.x, y0, w.z, rng() * 6, 1.15);   // on the flat top
       }
     } else if (p.type === 'junk') {
       const y0 = heightAt(px, p.z); p.y = y0;
@@ -974,9 +992,20 @@ export function generateLeg(seed, day) {
   box(0, 80, Z0 + 1, HALF_W, 120, 1, 0, 'invisible');
   box(0, 80, Z1 - 1, HALF_W, 120, 1, 0, 'invisible');
 
+  // the walkable top at (x, z): the ground, or a butte's flat top where one stands
+  function topAt(x, z) {
+    let y = heightAt(x, z);
+    for (const p of mesas) {
+      const M = p.mesa;
+      if (Math.hypot(x - p.x, z - p.z) < M.R) y = Math.max(y, M.base + M.h);
+      else if (Math.hypot(x - M.bench.x, z - M.bench.z) < M.bench.r) y = Math.max(y, M.bench.top);
+    }
+    return y;
+  }
+
   return {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
-    roadX, roadY, heightAt, townY,
+    roadX, roadY, heightAt, topAt, townY,
     obstacles, pois, mesas, statics, cyls, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
   };
