@@ -141,8 +141,20 @@ for (const v of views) {
     } else if (v === 'crash') {
       const p = W.pois.find(p => p.type === 'crash');
       if (!p) { console.log('  (no crash site on this day)'); continue; }
-      // stand on the mesa top, a few metres from the wreck (the flat top reaches about 5.2 m out)
-      await camAt(p.x - p.side * 3.2, p.z - 3.0, p.x, (await hy(p.x, p.z)) + 0.9, p.z);
+      // stand on the mesa top 3.5-4.5 m from the wreck, on flat ground and clear of the fuselage and wing
+      // (searching outward from the road-facing side: a fixed offset put the camera inside the wing on some days)
+      const spot = await ev(dave, () => {
+        const W = window.__nmd.W, p = W.pois.find(q => q.type === 'crash'), top = W.heightAt(p.x, p.z);
+        const boxes = W.statics.filter(s => s.poi === p.id && (s.part === 'fuselage' || s.part === 'wing'));
+        const inside = (x, z, s, pad) => { const dx = x - s.x, dz = z - s.z, c = Math.cos(s.ry), sn = Math.sin(s.ry); return Math.abs(dx * c - dz * sn) < s.hx + pad && Math.abs(dx * sn + dz * c) < s.hz + pad; };
+        const a0 = Math.atan2(-3.0, -p.side * 3.2);
+        for (const r of [4.0, 4.5, 3.5]) for (let k = 0; k < 24; k++) {
+          const a = a0 + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * (Math.PI / 12), x = p.x + Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+          if (Math.abs(W.heightAt(x, z) - top) < 0.35 && !boxes.some(s => inside(x, z, s, 1.2))) return { x, z };
+        }
+        return { x: p.x - p.side * 3.2, z: p.z - 3.0 };
+      });
+      await camAt(spot.x, spot.z, p.x, (await hy(p.x, p.z)) + 0.9, p.z);
       await shot(dave, v);
     } else if (v === 'boulder') {
       const b = W.obstacles.find(o => o.type === 'boulder');
