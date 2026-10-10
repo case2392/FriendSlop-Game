@@ -312,11 +312,11 @@ function strip(b, rows, us, vs, nfn, cfn, wfn, faceN = null) {
 function disc(b, C, nrm, R, seg, uv, color = WHITE) {
   const e1 = new V3().crossVectors(nrm, Math.abs(nrm.y) < 0.9 ? UP : XAX).normalize();
   const e2 = new V3().crossVectors(nrm, e1).normalize();
-  const base = b.n;
-  b.v(C, nrm, ...uv(0, 0), color, 0);
+  const base = b.n, col = typeof color === 'function' ? color : () => color;   // (color: a colour, or one per vertex from its position)
+  b.v(C, nrm, ...uv(0, 0), col(C), 0);
   for (let j = 0; j <= seg; j++) {
-    const a = j / seg * TAU, ca = Math.cos(a), sa = Math.sin(a);
-    b.v(new V3().copy(C).addScaledVector(e1, ca * R).addScaledVector(e2, sa * R), nrm, ...uv(ca, sa), color, 0);
+    const a = j / seg * TAU, ca = Math.cos(a), sa = Math.sin(a), p = new V3().copy(C).addScaledVector(e1, ca * R).addScaledVector(e2, sa * R);
+    b.v(p, nrm, ...uv(ca, sa), col(p), 0);
   }
   for (let j = 0; j < seg; j++) b.t(base, base + 1 + j, base + 2 + j);
 }
@@ -1766,7 +1766,8 @@ function roundPoly(rnd, N, r, { jit = 0.04, sx = 1, ox = 0, oz = 0, proud = 1 } 
 //      ground in one piece); foot {d, h, sharp}; chamfer; angles (extra columns: the plan's corners);
 //      NA; ground(x, z); tint, aoLo, aoH, lipK, cool (cool shadows under the lips and the cap); shade(p, n);
 //      dustFoot (how high the ground's dust or sand creeps up the wall); dustTo (and up to this height
-//      anywhere: on a slope, the downhill wall under the uphill ground's level is dusted over)
+//      anywhere: on a slope, the downhill wall under the uphill ground's level is dusted over);
+//      remap (one row layout for every column, stretched between its foot and rim: for a thin block)
 // Returns the columns { a, R0, gl, x, z } (for the dust bank round the foot).
 function strataRock(ctx, b, o) {
   const cx = o.cx || 0, cz = o.cz || 0, gnd = o.ground || ((x, z) => ctx.gh(x, z));
@@ -1795,7 +1796,7 @@ function strataRock(ctx, b, o) {
   }
   L.sort((p, q) => p - q);
   const fRows = o.foot?.sharp ? [o.foot.h * 0.55, o.foot.h * 0.8, o.foot.h * 1.05] : [];
-  const rowYs = c => {
+  const rowYs0 = c => {
     const a = c.gl + 0.06, z = Math.max(a, c.yt - zTop);
     const ys = [o.yB ?? Math.min(-0.5, gMin - 0.45), c.gl - 0.14, c.gl + 0.03, ...L.map(y => Math.max(a, Math.min(z, y))), ...fRows.map(h => Math.max(a, Math.min(z, c.gl + h))), ...TR.map(d => Math.max(a, c.yt - d)), c.yt];
     if (fRows.length) ys.sort((p, q) => p - q);
@@ -1804,6 +1805,22 @@ function strataRock(ctx, b, o) {
     if (c.yt < c.gl + 0.3) for (let i = 0; i < ys.length; i++) ys[i] = Math.min(ys[i], c.yt - 0.002 * (ys.length - 1 - i));
     return ys;
   };
+  // remap (a thin tier whose foot and rim don't run parallel): rows set column by column would clamp and
+  // swap places where the wall is shorter and fold it into diagonal creases, so every column takes one
+  // row layout (the average column's), stretched between its own foot and rim
+  let rowYs = rowYs0;
+  if (o.remap) {
+    let g = 0, t = 0;
+    for (const c of cols) { g += c.gl; t += c.yt; }
+    g /= cols.length; t /= cols.length;
+    const ref = { gl: g, yt: Math.max(t, g + 0.3) }, tpl = rowYs0(ref), y0 = tpl[0], rest = tpl.slice(1).sort((p, q) => p - q);
+    rowYs = c => {
+      const k = Math.max(0.05, (c.yt - c.gl) / (ref.yt - ref.gl));
+      const ys = [y0, ...rest.map(y => c.gl + (y - ref.gl) * k)];
+      if (c.yt < c.gl + 0.3) for (let i = 0; i < ys.length; i++) ys[i] = Math.min(ys[i], c.yt - 0.002 * (ys.length - 1 - i));
+      return ys;
+    };
+  }
   // every stratum (between two hard beds) has its own outline, a few centimetres in or out of the
   // plan here and there (the strata weather back unevenly: the walls step, never one sheer box), and
   // every lip comes and goes along its length
@@ -1970,9 +1987,10 @@ function dustBank(ctx, cols, hIn, wOut, cx = 0, cz = 0, { aoK = 1, flat = false 
 // height (about half, three tenths and a fifth of the whole, snapped onto the painted hard beds when one
 // lies near) and angular (a few big facets, a small bevel on every edge, never a rounded cushion), each
 // turned a few degrees from the one under it; every tier ends in a caprock that juts over a cool undercut
-// band, the top one furthest. The cap has a corner or two knocked out of its rim, notches where joints
-// cut it, and a block of the next bed still standing on it (the skyline steps). Joints are narrow
-// vertical cracks (cool wedges with a warm lit edge, the faces either side a little out of line). Round
+// band, the top one furthest. The cap has an end corner or two knocked out of its rim (crisp breaks) and
+// a block of the next bed still standing on it (the skyline steps). Joints are narrow vertical cracks
+// (cool wedges with a warm lit edge, the faces either side a little out of line; on the lower tiers they
+// notch the rim, on the thin top tier they are clean gaps and its rows run with its foot and rim). Round
 // the foot: a bank of ochre dust in the ground's own texture (the rock meets the ground in one piece: no
 // lip or undercut in its bottom 0.4 m), and a talus skirt of broken blocks, slabs leaning on the walls,
 // and scree.
@@ -2021,8 +2039,17 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
     const tilt = range(rnd, 0.03, 0.06), ta = rnd() * TAU;
     // the cap: one or two corners knocked out of the rim (flat-bottomed bites)
     const bites = [];
-    if (cap) for (let k = 0; k < 1 + (rnd() < 0.55 ? 1 : 0); k++) bites.push({ a: angles[Math.floor(rnd() * angles.length)] + range(rnd, -0.15, 0.15), w: range(rnd, 0.24, 0.42), d: range(rnd, 0.2, 0.36) * Math.min(1, (yT - yLo) / 0.8) });
-    const bite = a => bites.reduce((m, q) => Math.max(m, q.d * smooth(q.w + 0.06, q.w - 0.06, angDiff(a, q.a))), 0);
+    // (on the top tier always an end corner: a bite out of the middle of a face leaves the corner
+    // standing as a horn)
+    const far = t ? poly.map(([x, z], k) => [Math.hypot(x - cx, z - cz), k]).sort((p, q) => q[0] - p[0]) : null;
+    if (cap) for (let k = 0; k < 1 + (rnd() < 0.55 ? 1 : 0); k++) {
+      const i = Math.floor(rnd() * angles.length), a = (far ? angles[far[(i + k) % 2][1]] : angles[i]) + range(rnd, -0.15, 0.15);
+      bites.push({ a, w: range(rnd, 0.24, 0.42), d: Math.min(range(rnd, 0.2, 0.36) * Math.min(1, (yT - yLo) / 0.8), (yT - yLo) * (t ? 0.3 : 1)) });
+    }
+    // (on the top tier the bites' ends are crisp near-vertical breaks, a column on either side of each:
+    // a ramp there would drag the caprock band down into a fold)
+    const bE = t ? 0.015 : 0.06, angs = t && bites.length ? [...angles, ...bites.flatMap(q => [-1, 1].flatMap(sd => [q.a + sd * (q.w + bE), q.a + sd * (q.w - bE)]))] : angles;
+    const bite = a => bites.reduce((m, q) => Math.max(m, q.d * smooth(q.w + bE, q.w - bE, angDiff(a, q.a))), 0);
     const topAt = (x, z) => {
       const a = Math.atan2(z - cz, x - cx), rr = Math.hypot(x - cx, z - cz) / Math.max(0.3, plan(a));
       return yT + 0.01 + tilt * ((x - cx) * Math.cos(ta) + (z - cz) * Math.sin(ta)) + 0.03 * noise3(x * 0.9, 1.3 + t, z * 0.9, hx) - bite(a) * smooth(0.45, 0.85, rr);
@@ -2033,18 +2060,29 @@ function ledgeRock(ctx, b, S, rnd, tint, col, steep, piece) {
       const full = rnd() < 0.65, ya = full ? yLo - 0.25 : range(rnd, yLo + 0.1, yLo + (yT - yLo) * 0.5), yb = full || rnd() < 0.6 ? yT + 0.25 : range(rnd, ya + 0.35, yT - 0.08);
       joints.push({ a: rnd() * TAU, w: range(rnd, 0.13, 0.22) * sc, d: range(rnd, 0.1, 0.16) * sc, ya, yb, ph: rnd() * 6, off: range(rnd, -0.06, 0.06) * sc, lit: rnd() < 0.5 ? 1 : -1, taper: range(rnd, 0.35, 0.6) });
     }
-    const notch = a => joints.reduce((m, J) => m + (J.yb > yT ? J.d * 0.8 * Math.max(0, 1 - angDiff(a, J.a) * plan(J.a) / (J.w * 1.5)) : 0), 0);
+    // the top tier is thin: there a rim notch drags the whole caprock band down into a V (a crumpled
+    // fold, not a joint). Its joints are clean near-vertical gaps the full height of the tier instead,
+    // never deeper than a third of it, the blocks either side out of line (one stands a little proud),
+    // and the rim is not notched. (Same random draws: nothing else moves.)
+    if (cap && t > 0) for (const J of joints) {
+      J.ya = yLo - 0.25; J.yb = yT + 0.25; J.w *= 0.7; J.taper *= 0.25;
+      J.d = Math.min(J.d, (yT - yLo) * 0.3);
+      J.off = (J.off < 0 ? -1 : 1) * Math.max(Math.abs(J.off), 0.045 * sc);
+      J.clean = true;
+    }
+    const notch = a => joints.reduce((m, J) => m + (J.clean ? 0 : J.yb > yT ? J.d * 0.8 * Math.max(0, 1 - angDiff(a, J.a) * plan(J.a) / (J.w * 1.5)) : 0), 0);
     const ft = t ? { d: range(rnd, 0.08, 0.12) * sc, h: range(rnd, 0.11, 0.16), sharp: true } : null;
     const lo = t ? yLo : gLo, th = yT - yLo;
     // the caprock: a hard band under the rim jutting over a cool undercut (the top tier's furthest,
     // furthest of all on the sheer side)
     const capD = Math.max(0.12, Math.min(cap ? 0.32 : 0.26, th * (cap ? 0.42 : 0.24)));
     const cols = strataRock(ctx, b, {
-      cx, cz, plan, angles, joints, topAt, rimY: (a, x, z) => topAt(x, z) - notch(a),
+      cx, cz, plan, angles: angs, joints, topAt, rimY: (a, x, z) => topAt(x, z) - notch(a),
       ground: t ? (x, z) => below(x, z) - 0.02 : undefined, yB: t ? yLo - 0.22 : Math.min(-0.5, gLo - 0.45),
       // (on a slope no lip runs below the uphill ground's level: there it would read as the rock's foot
       // with a slit under it; the downhill wall under that level is dusted over instead)
-      beds: bedsIn(bm, by, t ? lo + 0.25 : Math.max(lo + 0.25, Math.min(gHi, lo + 0.8) + 0.3), yT - capD - 0.12), NA: t ? 34 : (solid ? 44 : 32),
+      // (the top tier: its caprock is its only lip, and its rows run with its foot and rim: no folds)
+      beds: cap && t ? [] : bedsIn(bm, by, t ? lo + 0.25 : Math.max(lo + 0.25, Math.min(gHi, lo + 0.8) + 0.3), yT - capD - 0.12), remap: !!(cap && t), NA: t ? 34 : (solid ? 44 : 32),
       lip: 0.075 * sc, lipVar: 1.1, uc: 0.1 * sc, ucH: 0.14 * sc, batter: t ? 0.02 : 0.06, batY: 0.7, chamfer: 0.025, tierAmp: (t ? 0.06 : 0.045) * sc, noise: 0.03,
       foot: ft,
       capD, capW: 0.04, capUc: (cap ? 0.1 : t ? 0.08 : 0.04) * sc, topRows: [capD + 0.16, capD + 0.06, capD + 0.012, capD - 0.045, 0.04],
@@ -2728,10 +2766,12 @@ function haybale(ctx, d) {
   if (!stack) {
     const [lo] = ctx.foot(0.7);
     const y0 = lo + 0.66, xs = [-0.6, -0.57, -0.45, 0, 0.45, 0.57, 0.6], rs = [0.56, 0.67, 0.72, 0.73, 0.72, 0.67, 0.56];
-    const ao = p => { const k = 0.55 + 0.5 * smooth(y0 - 0.75, y0 + 0.6, p.y); return [k * (p.y > y0 + 0.4 ? 1.06 : 1), k, k * 0.95]; };
+    // the light painted in: a warm sunlit crown, a cool brown shadowed belly down to the ground
+    const SH = [0.46, 0.41, 0.42], MID = [0.92, 0.88, 0.8], LIT = [1.16, 1.07, 0.86];
+    const ao = p => { const t = smooth(y0 - 0.74, y0 + 0.66, p.y); return t < 0.55 ? mixc(SH, MID, t / 0.55) : mixc(MID, LIT, (t - 0.55) / 0.45); };
     tube(hay, xs.map(x => new V3(x, y0, 0)), rs, { sides: 16, uRep: 3, vLen: 0.6, color: ao, lobes: (dir, t, i, j) => 1 + 0.025 * Math.sin(j * 2.7 + i) });
     const he = ctx.b('hay_end');
-    for (const sd of [-1, 1]) disc(he, new V3(0.6 * sd, y0, 0), new V3(sd, 0, 0), 0.57, 18, (c, sn) => [0.5 + c * 0.47, 0.5 + sn * 0.47 * sd], [0.92, 0.9, 0.86]);
+    for (const sd of [-1, 1]) disc(he, new V3(0.6 * sd, y0, 0), new V3(sd, 0, 0), 0.57, 18, (c, sn) => [0.5 + c * 0.47, 0.5 + sn * 0.47 * sd], p => mixc([0.6, 0.55, 0.56], [1.02, 0.97, 0.86], smooth(y0 - 0.6, y0 + 0.5, p.y)));
     const tw = lin('#7a5e38');
     for (const tx of [-0.24, 0.24]) {
       const loop = []; for (let k = 0; k <= 18; k++) { const a = k / 18 * TAU; loop.push(new V3(tx + Math.sin(a * 2) * 0.01, y0 + Math.cos(a) * 0.74, Math.sin(a) * 0.74)); }
@@ -2745,6 +2785,12 @@ function haybale(ctx, d) {
       if (B.y < ctx.gh(B.x, B.z) + 0.05) continue;
       const nrmv = new V3(sd * 0.7, cy * 0.7, cz * 0.7);
       card(st, B, 0.34, 0.24, nrmv, inset(cellOf(2)), (c) => mulc(WHITE, c > 0 ? 1 : 0.75), { lean: -1.1, wind: 0.2 });
+    }
+    // loose straw shed round its foot, lying out over the stubble (the bale sits in it, not on it)
+    for (let k = 0; k < 9; k++) {
+      const end = k >= 6, sd = k % 2 ? 1 : -1, x = end ? sd * range(rnd, 0.62, 0.75) : range(rnd, -0.55, 0.55), z = end ? range(rnd, -0.35, 0.35) : sd * range(rnd, 0.38, 0.5);
+      const B = new V3(x, ctx.gh(x, z) - 0.02, z), o = end ? new V3(sd, 0, z * 0.6) : new V3(x * 0.4, 0, sd);
+      card(st, B, range(rnd, 0.34, 0.46), range(rnd, 0.2, 0.28), o.normalize(), inset(cellOf(pick(rnd, [0, 1]))), (c) => c > 0 ? [0.98, 0.88, 0.64] : [0.48, 0.42, 0.37], { lean: -range(rnd, 0.6, 0.9), wind: 0.1 });
     }
   } else {
     const [lo] = ctx.foot(0.95);
