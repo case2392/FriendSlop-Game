@@ -70,7 +70,7 @@ function expireLearned(H) {
 }
 
 const S = {
-  workers: [], ready: false, initDone: false, failed: '', H: null, hashP: null,
+  workers: [], ready: false, initDone: false, failed: '', H: null, hashP: null, lateN: 0,
   queue: [],                    // [{ name, prio, seq }] waiting for a worker
   jobs: new Map(),              // name -> { resolve, promise }: queued or in-flight worker paints
   waiting: new Map(),           // name -> promise: being made ready by some prepare()
@@ -153,14 +153,17 @@ export function init() {
       // a worker that isn't up in 15 s doesn't hold up this build (the page paints instead), but it isn't
       // thrown away either: on a machine busy enough to be that slow it joins the pool when it is ready
       starts.push(new Promise(res => {
-        const t = setTimeout(() => { W.late = true; if (!S.failed) S.failed = 'paint workers slow to start'; res(false); }, 15000);
+        const t = setTimeout(() => {
+          W.late = true; S.lateN++; if (!S.failed) S.failed = 'paint workers slow to start'; res(false);
+          W.giveUp = setTimeout(() => lateWorker(W, true), 120000);   // still not up 2 minutes on: never mind
+        }, 15000);
         w.onmessage = ({ data: m }) => {
           if (m.t !== 'ready') return;
           clearTimeout(t); W.alive = !!m.ok; if (!m.ok) S.failed = m.err;
           w.onmessage = e => onMessage(W, e.data);
           if (W.late) lateWorker(W); else res(W.alive);
         };
-        w.onerror = e => { clearTimeout(t); S.failed = e.message || 'a paint worker failed to start'; if (W.late) { W.late = false; try { w.terminate(); } catch {} } else res(false); };
+        w.onerror = e => { clearTimeout(t); S.failed = e.message || 'a paint worker failed to start'; if (W.late) lateWorker(W, true); else res(false); };
       }));
       w.postMessage({ t: 'init', fonts, hashes: H, breakStorage: q.get('texcache') === 'broken', fullStorage: q.get('texcache') === 'full' });
       S.workers.push(W);
@@ -177,15 +180,22 @@ export function init() {
   return initP;
 }
 
-// a worker that missed the start-up wait reports ready: it takes work from now on
-function lateWorker(W) {
-  W.late = false;
-  if (!W.alive) { try { W.w.terminate(); } catch {} return; }
+// a worker that missed the start-up wait reports ready (it takes work from now on, and stores what the
+// page painted meanwhile), fails, or is given up on
+function lateWorker(W, fail = false) {
+  if (!W.late) return;
+  W.late = false; S.lateN--; clearTimeout(W.giveUp);
+  if (fail || !W.alive) {
+    try { W.w.terminate(); } catch {}
+    if (!S.lateN && !S.ready) { S.snaps.clear(); flushWanted = false; }
+    return;
+  }
   W.w.onerror = () => workerDied(W); W.w.onmessageerror = () => workerDied(W);
   S.workers.push(W);
   S.ready = true;
   if (S.failed === 'paint workers slow to start') S.failed = '';
   pump();
+  if (flushWanted) maybeFlush();
 }
 
 function workerDied(W) {
@@ -457,7 +467,7 @@ function maybeFlush() {
   runFlush().catch(e => { S.stats.storeErr = e.message; }).finally(() => { S.flushing = false; if (flushWanted) maybeFlush(); });
 }
 async function runFlush() {
-  if (!S.ready) { S.snaps.clear(); return; }
+  if (!S.ready) { if (S.lateN) flushWanted = true; else S.snaps.clear(); return; }   // late workers store it when they're up
   const H = S.hashP ? await S.hashP : null;
   const cacheOK = !!H && !S.cacheOff && !S.writesOff;
   // what the workers hold: store it, or let it go

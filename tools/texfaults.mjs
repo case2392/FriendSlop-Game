@@ -14,8 +14,8 @@
 //   two-tabs    two pages fill the cache at the same time, a third reads it
 //   learned     what a browser learned under other paint code (textures a worker can't paint
 //               exactly, ones left alone) is forgotten: they go to the workers again
-//   slow        workers that miss the 15 s start-up wait: the page paints meanwhile, and they join the
-//               pool when they are up
+//   slow        workers that miss the 15 s start-up wait: the page paints meanwhile; they join the pool
+//               when they are up and store what the page painted
 //   fonts       a worker that couldn't load a web font: a paint that sets text in it comes back
 //               inexact (the page paints it), one that doesn't still comes back exact
 import { spawn } from 'node:child_process';
@@ -122,12 +122,13 @@ if (stale.some(n => learned.page.includes(n)) || learned.ls.nmdTexLearnedFor ===
 await ctx4.close();
 
 // workers that take longer than the 15 s start-up wait (here: their script held back 22 s): the page
-// paints meanwhile, and they join the pool when they are up, so later work goes to them
+// paints meanwhile, and they join the pool when they are up: they store what the page painted, and later
+// work goes to them
 {
   const ctx5 = await browser.newContext();
   await ctx5.route('**/js/paint/worker.js', async r => { await new Promise(x => setTimeout(x, 22000)); await r.continue(); });
   const slow = await run(ctx5, 'slow workers (page paints)');
-  if (!(slow.stats.workerPaints === 0 && slow.stats.pagePaints > 0)) fail('slow workers: expected the page to paint while the workers were not up');
+  if (!(slow.stats.workerPaints === 0 && slow.stats.pagePaints > 0 && slow.stats.stored > 0)) fail('slow workers: expected the page to paint while the workers were not up, and the late workers to store it');
   const page = await ctx5.newPage();
   page.setDefaultTimeout(300000);
   const errors = [];
