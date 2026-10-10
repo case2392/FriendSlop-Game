@@ -2119,7 +2119,7 @@ function sandstone(g, s, rnd, cv, P) {
   if (P.scourN) layered(g, s, P.scourA, lg => {
     const bands = []; for (let i = 0; i < 4; i++) bands.push(rnd() * s);
     for (let q = 0; q < P.scourN; q++) {
-      const x = pick(rnd, bands) + range(rnd, -40, 40), y0 = rnd() * s, L = range(rnd, 60, 220), w = range(rnd, 4, 14);
+      const x = pick(rnd, bands) + range(rnd, -40, 40), y0 = rnd() * s, L = range(rnd, ...(P.scourL || [60, 220])), w = range(rnd, 4, 14);
       const pts = []; let px = 0; for (let i = 0; i <= 6; i++) { pts.push([px, L * i / 6]); px += range(rnd, -1.5, 1.5); }
       wrap(s, x, y0 + L / 2, L + w, (X, Y) => stroke(lg, pts.map(([a, b2]) => [X + a, Y - L / 2 + b2]), w, w * 0.2, pick(rnd, P.scour), range(rnd, 0.35, 1)));
     }
@@ -2136,7 +2136,7 @@ register('cliff_desert', {
       softC: ['#a8764c', '#9e6c45', '#cc9e6c', '#c4955f'], hardC: ['#e6cea0', '#ddc290', '#e9d3a8'],
       light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
       sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
-      varnish: '#5a3c32', varnishA: 0.2, varnishN: 9, pit: '#946c4c', glaze: '#ffe6b8', scour: ['#f2dcb0', '#ecd2a2'], scourA: 0.16, scourN: 46,
+      varnish: '#5a3c32', varnishA: 0.2, varnishN: 9, pit: '#946c4c', glaze: '#ffe6b8', scour: ['#f2dcb0', '#ecd2a2'], scourA: 0.09, scourN: 40, scourL: [40, 150],
     });
   },
 });

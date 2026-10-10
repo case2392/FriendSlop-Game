@@ -3,16 +3,19 @@
 // A crash mesa is part of the physics heightfield: a lobed drum with steep flanks, a bench on one side
 // and a flat top. Painted alone it reads as a built tower or a sand cone (a level rim, an even flank, a
 // clean foot). Here it gets the broken silhouette of a butte, all of it outside the walkable surface:
-//   - (snow) one or two SHOULDERS: big angular granite blocks half sunk into a flank at mid height,
-//     standing out a metre or more, on the sides seen in profile from the road (never the bench or the
+//   - (snow) one or two SHOULDERS: wide, flat granite ledge slabs sunk deep into a flank at mid height,
+//     stepping out a metre or so, on the sides seen in profile from the road (never the bench or the
 //     road side), and two or three RIM blocks hanging over the lip, so the rim is never level;
-//   - (desert) a broken CAPROCK: flat sandstone slabs along the rim, overhanging the flank, with gaps,
-//     so the top reads as the hard bed that keeps a butte standing;
-//   - a TALUS apron: fallen blocks half buried round the foot (not on the road side).
+//   - (desert) a CAPROCK: overlapping flat sandstone slabs right round the rim (a gap or two where one has
+//     fallen, none over the bench, where the climb comes up), overhanging the flank, so the top reads as
+//     the thick hard bed that keeps a butte standing, square-shouldered over its walls;
+//   - a TALUS apron: fallen blocks half buried round the foot (not on the road side); on the desert more
+//     of them, tabular slabs of the banded rock tipped every way.
 // Every block is an icosphere cut by a few random planes (flat fractured faces, creased normals), its
 // top flattened; all of them are one merged mesh with one material: the valley walls' rock (cliff_snow's
-// granite, cliff_desert's sandstone beds) projected on three axes, snow or sand on whatever faces up,
-// dark where buried. Clear of the wreck and the loot; no colliders: the blocks lie outside the walkable
+// granite at the mesa flank's own scale and 26.6-degree turn, cliff_desert's sandstone beds) projected on
+// three axes, snow or sand on whatever faces up (in the snow also on what the painted granite turns to
+// the light), cool where buried. Clear of the wreck and the loot; no colliders: the blocks lie outside the walkable
 // top and stand on the flanks and the foot.
 //
 //   buildTalus(W) -> THREE.Mesh | null    (null unless a snow or desert day has crash mesas)
@@ -50,8 +53,10 @@ function blockGeo(r, cuts = 5) {
 }
 
 const STYLE = {
-  snow: { rock: 'cliff_snow', cover: 'ground_snow', rs: 5.0, tint: [1.06, 1.07, 1.1], up: [0.5, 0.66], coverMax: 1.0, under: [0.72, 0.78, 0.9], buried: [0.62, 0.68, 0.82], drift: [0.9, 0.94, 1.02] },
-  desert: { rock: 'cliff_desert', cover: 'ground2_desert', rs: 8.0, capC: [0.78, 0.62, 0.42], tint: [1.0, 1.0, 1.0], up: [0.8, 0.95], coverMax: 0.6, under: [0.8, 0.74, 0.78], buried: [0.72, 0.64, 0.62], drift: [1.0, 0.98, 0.95] },
+  // (snow: the granite at the mesa flank's own scale and turn, 7.96 m a tile turned 26.6 degrees, so a shoulder
+  // reads as an outcrop of the same rock; snow on every top and ledge; undersides in the flank's cool blue)
+  snow: { rock: 'cliff_snow', cover: 'ground_snow', rs: 7.96, turn: true, tint: [1.06, 1.07, 1.1], up: [0.22, 0.42], coverMax: 1.0, lumUp: 0.7, under: [0.84, 0.88, 0.98], buried: [0.8, 0.85, 0.96], drift: [0.9, 0.94, 1.02] },
+  desert: { rock: 'cliff_desert', cover: 'ground2_desert', rs: 8.0, capC: [0.78, 0.62, 0.42], tint: [1.0, 1.0, 1.0], up: [0.8, 0.95], coverMax: 0.6, lumUp: 0, under: [0.8, 0.74, 0.78], buried: [0.72, 0.64, 0.62], drift: [1.0, 0.98, 0.95] },
 };
 const mats = new Map();
 function talusMaterial(biome) {
@@ -60,7 +65,7 @@ function talusMaterial(biome) {
   const U = { tRock: { value: tex(S.rock) }, tSnow: { value: tex(S.cover) } };
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mats.set(biome, mat);
-  mat.customProgramCacheKey = () => 'terrain-talus-v4-' + biome;
+  mat.customProgramCacheKey = () => 'terrain-talus-v5-' + biome;
   mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
@@ -75,11 +80,13 @@ function talusMaterial(biome) {
         {
           // the walls' rock on three axes (its beds level on the sides), snow or sand on what faces up
           vec3 n = normalize(vTN), b = pow(abs(n), vec3(4.0)); b /= b.x + b.y + b.z;
-          vec3 rk = texture2D(tRock, vec2(vTW.z, vTW.y) / ${S.rs.toFixed(1)} + 0.31).rgb * b.x + texture2D(tRock, vTW.xz / ${S.rs.toFixed(1)} + 0.57).rgb * b.y + texture2D(tRock, vec2(-vTW.x, vTW.y) / ${S.rs.toFixed(1)} + 0.13).rgb * b.z;
+          ${S.turn ? 'const mat2 TR = mat2(0.894427, 0.447214, -0.447214, 0.894427);' : 'const mat2 TR = mat2(1.0, 0.0, 0.0, 1.0);'}
+          vec3 rk = texture2D(tRock, TR * vec2(vTW.z, vTW.y) / ${S.rs.toFixed(2)} + 0.31).rgb * b.x + texture2D(tRock, vTW.xz / ${S.rs.toFixed(2)} + 0.57).rgb * b.y + texture2D(tRock, TR * vec2(-vTW.x, vTW.y) / ${S.rs.toFixed(2)} + 0.13).rgb * b.z;
           rk *= vec3(${f(S.tint)});
           vec3 sn = texture2D(tSnow, vTW.xz / 8.0).rgb;
           float nz = texture2D(tSnow, vTW.xz / 2.3 + vec2(0.4, 0.7)).g - 0.5;
-          float s = smoothstep(${f(S.up)}, n.y + nz * 0.5) * ${S.coverMax.toFixed(2)};
+          // (snow: also on whatever the painted granite turns up to the light, as on the flank)
+          float s = smoothstep(${f(S.up)}, n.y + nz * 0.5 + (dot(rk, vec3(0.3, 0.55, 0.15)) - 0.42) * ${S.lumUp.toFixed(2)} * smoothstep(-0.2, 0.2, n.y)) * ${S.coverMax.toFixed(2)};
           vec3 c = mix(rk * mix(vec3(1.0), vec3(${f(S.under)}), smoothstep(${(S.up[1] - 0.04).toFixed(2)}, ${(S.up[0] - 0.08).toFixed(2)}, n.y + nz * 0.5) * smoothstep(0.25, 0.45, n.y)), sn, s);
           // (a caprock slab: the pale hard bed that keeps a butte standing)
           float cap = step(5.0, vSink), sk = vSink - cap * 10.0;
@@ -135,26 +142,30 @@ export function buildTalus(W) {
         if (ang(a, M.benchA ?? 0) < 0.9) continue;
         const y = M.base + M.h * (0.38 + r() * 0.25), d = surfR(a, y);
         if (d == null) continue;
-        const s = [2.0 + r() * 0.9, 1.4 + r() * 0.6, 1.6 + r() * 0.7];
-        add(r, p.x + Math.cos(a) * (d - 0.15), y - s[1] * 0.25, p.z + Math.sin(a) * (d - 0.15), s, -a + (r() - 0.5) * 0.6, [(r() - 0.5) * 0.3, (r() - 0.5) * 0.3], 6);
+        // (a ledge slab: wide along the flank, flat, sunk well into it, so it reads as the rock stepping out)
+        const s = [1.8 + r() * 0.5, 0.95 + r() * 0.3, 2.3 + r() * 0.8];
+        add(r, p.x + Math.cos(a) * (d - 0.75), y - s[1] * 0.2, p.z + Math.sin(a) * (d - 0.75), s, -a + (r() - 0.5) * 0.35, [(r() - 0.5) * 0.14, (r() - 0.5) * 0.14], 6);
         // a smaller block wedged under it
         const a2 = a + (r() - 0.5) * 0.35, y2 = y - s[1] * 0.9, d2 = surfR(a2, y2);
-        if (d2 != null) add(r, p.x + Math.cos(a2) * (d2 - 0.1), y2 - 0.3, p.z + Math.sin(a2) * (d2 - 0.1), [0.9 + r() * 0.4, 0.8 + r() * 0.3, 0.9 + r() * 0.4], r() * 6.28, [(r() - 0.5) * 0.4, (r() - 0.5) * 0.4], 5);
+        if (d2 != null) add(r, p.x + Math.cos(a2) * (d2 - 0.35), y2 - 0.3, p.z + Math.sin(a2) * (d2 - 0.35), [0.9 + r() * 0.4, 0.6 + r() * 0.2, 1.1 + r() * 0.4], -a2 + (r() - 0.5) * 0.5, [(r() - 0.5) * 0.25, (r() - 0.5) * 0.25], 5);
         break;
       }
     }
     // (desert) the caprock: flat slabs round the rim, overhanging the flank, gaps between them
     if (desert) {
-      const nC = 8 + Math.floor(r() * 3), a0 = r() * Math.PI * 2;
+      // (the slabs overlap into one thick hard bed round the rim, so the top reads square-shouldered over the
+      // flank; one or two gaps where a slab has fallen; none over the bench, where the climb comes up)
+      const nC = 12 + Math.floor(r() * 3), a0 = r() * Math.PI * 2;
       for (let k = 0; k < nC; k++) {
-        if (r() < 0.18) continue;                                       // a gap where a slab has fallen
-        const a = a0 + (k + (r() - 0.5) * 0.4) / nC * Math.PI * 2;
+        const a = a0 + (k + (r() - 0.5) * 0.25) / nC * Math.PI * 2;
+        if (ang(a, M.benchA ?? 0) < 0.6) continue;
+        if (r() < 0.1) continue;
         const d = surfR(a, top - 0.3);
         if (d == null) continue;
-        const x = p.x + Math.cos(a) * (d + 0.2), z = p.z + Math.sin(a) * (d + 0.2);
+        const x = p.x + Math.cos(a) * (d + 0.15), z = p.z + Math.sin(a) * (d + 0.15);
         if (!clear(x, z, 1.2)) continue;
-        const s = [1.4 + r() * 0.6, 0.8 + r() * 0.15, 1.1 + r() * 0.3];
-        add(r, x, top - 0.75 - r() * 0.12, z, s, -a + Math.PI / 2 + (r() - 0.5) * 0.4, [(r() - 0.5) * 0.12, (r() - 0.5) * 0.12], 9, 1);
+        const s = [1.6 + r() * 0.5, 0.95 + r() * 0.15, 1.15 + r() * 0.25];
+        add(r, x, top - 0.82 - r() * 0.1, z, s, -a + Math.PI / 2 + (r() - 0.5) * 0.25, [(r() - 0.5) * 0.08, (r() - 0.5) * 0.08], 9, 1);
       }
     }
     // rim blocks: hanging over the lip, so the skyline of the top is never level
@@ -172,17 +183,18 @@ export function buildTalus(W) {
       k++;
     }
     // the talus: fallen blocks half buried round the foot
-    const nT = 7 + Math.floor(r() * 4);
+    const nT = desert ? 13 + Math.floor(r() * 4) : 7 + Math.floor(r() * 4);
     for (let k = 0; k < nT; k++) {
       const a = (k + r() * 0.8) / nT * Math.PI * 2;
       if (ang(a, roadA) < 0.8) continue;
       const d = surfR(a, foot + 0.9);
       if (d == null) continue;
-      const dd = d + 0.2 + r() * 1.6, x = p.x + Math.cos(a) * dd, z = p.z + Math.sin(a) * dd;
+      const dd = d + 0.2 + r() * (desert ? 2.4 : 1.6), x = p.x + Math.cos(a) * dd, z = p.z + Math.sin(a) * dd;
       if (!clear(x, z, 0.6) || Math.abs(x - W.roadX(z)) < 6.5) continue;      // (never on the road or its shoulder)
-      const big = r() < (desert ? 0.5 : 0.35), k0 = big ? 1.0 + r() * 0.6 : 0.45 + r() * 0.4;
-      const s = [k0 * (0.9 + r() * 0.4), k0 * (0.6 + r() * 0.3), k0 * (0.9 + r() * 0.4)];
-      add(r, x, W.heightAt(x, z) + s[1] * 0.1, z, s, r() * 6.28, [(r() - 0.5) * 0.5, (r() - 0.5) * 0.5], 5);
+      const big = r() < (desert ? 0.55 : 0.35), k0 = big ? (desert ? 1.15 + r() * 0.6 : 1.0 + r() * 0.6) : 0.45 + r() * 0.4;
+      // (Tanaris: tabular slabs, fallen from the beds and the caprock, tipped every way)
+      const s = desert ? [k0 * (1.0 + r() * 0.4), k0 * (0.42 + r() * 0.25), k0 * (0.8 + r() * 0.35)] : [k0 * (0.9 + r() * 0.4), k0 * (0.6 + r() * 0.3), k0 * (0.9 + r() * 0.4)];
+      add(r, x, W.heightAt(x, z) + s[1] * 0.1, z, s, r() * 6.28, [(r() - 0.5) * (desert ? 0.8 : 0.5), (r() - 0.5) * (desert ? 0.8 : 0.5)], desert ? 8 : 5);
     }
   }
   if (!parts.length) return null;
