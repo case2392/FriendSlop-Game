@@ -1864,7 +1864,8 @@ function buildJunk(B, p, parts, ctx) {
           const P = shapeAt(((u % 1) + 1) % 1, v), th = u * TAU, a = range(rnd, aMin, aMax);
           const w = range(rnd, 0.5, 0.95), dd = range(rnd, 0.34, 0.66), bend = range(rnd, -0.12, 0.12), [m, mt] = pick(rnd, steel);
           B.push(M4(P[0] + Math.sin(th) * 0.06, P[1] + 0.03, P[2] + Math.cos(th) * 0.06, a, onTop ? rnd() * TAU : th + range(rnd, -0.45, 0.45), range(rnd, -0.3, 0.3)));
-          B.box(m, w, 0.035, dd, 0, 0, 0, { r: 0.012, div: [3, 1, 2], smoothN: true, jit: 0.02, off: [rnd() * 3, rnd() * 3], tint: mt, deform: q => { q[1] += bend * (q[0] / w * 2) ** 2 - 0.04 * (q[2] / dd * 2) ** 2; } });
+          B.box(m, w, 0.035, dd, 0, 0, 0, { r: 0.012, div: [3, 1, 2], smoothN: true, jit: 0.02, off: [rnd() * 3, rnd() * 3], tint: mt, deform: q => { q[1] += bend * (q[0] / w * 2) ** 2 - 0.04 * (q[2] / dd * 2) ** 2; },
+            ...(m === 'rs_wing' ? { fit: 'v', uvRect: [0, 0.22, 1, 0.62] } : {}) });
           B.pop();
         }
       }
