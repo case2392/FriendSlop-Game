@@ -232,6 +232,22 @@ const FACES = [
 ];
 const axisOf = v => (v[0] ? 0 : v[1] ? 1 : 2);
 const hash3 = (x, y, z) => { const h = Math.sin(x * 127.1 + y * 311.7 + z * 74.7) * 43758.5453; return h - Math.floor(h); };
+// a mound's profile (radius fraction, height fraction), outer rim first; and the height a mound built by
+// B.mound(_, rx, h, rz, x, _, z, { ry }) stands above the ground at frame point (X, Z) (its lobes included, the
+// profile read straight between its points), so a decal can be draped over the heap instead of cut by it
+const MOUND_PROF = [[1.5, -0.12], [1.25, 0.02], [1.0, 0.12], [0.7, 0.55], [0.35, 0.88], [0, 1]];
+function moundRise(rx, h, rz, x, z, ry, X, Z) {
+  const c = Math.cos(ry), sn = Math.sin(ry), dx = X - x, dz = Z - z;
+  const ux = (dx * c - dz * sn) / rx, uz = (dx * sn + dz * c) / rz, th = Math.atan2(ux, uz);
+  const ph1 = hash3(x, z, 1.3) * TAU, ph2 = hash3(z, x, 2.7) * TAU, nl = 2 + Math.floor(hash3(x, 1.1, z) * 2);
+  const pr = Math.hypot(ux, uz) / (1 + 0.2 * (0.6 * Math.sin(nl * th + ph1) + 0.4 * Math.sin((nl + 1) * th + ph2)));
+  if (pr >= MOUND_PROF[1][0]) return 0;
+  for (let i = 1; i < MOUND_PROF.length - 1; i++) {
+    const [r0, y0] = MOUND_PROF[i], [r1, y1] = MOUND_PROF[i + 1];
+    if (pr >= r1) return h * lerp(y0, y1, (r0 - pr) / (r0 - r1));
+  }
+  return h;
+}
 
 class Builder {
   constructor(ctx) {
@@ -495,7 +511,7 @@ class Builder {
   // under ten degrees, a lobed outline (never an ellipse), world-mapped like the terrain so a terrain
   // texture on it matches the ground round it.
   mound(mat, rx, h, rz, x, y, z, o = {}) {
-    const prof = [[1.5, -0.12], [1.25, 0.02], [1.0, 0.12], [0.7, 0.55], [0.35, 0.88], [0, 1]];
+    const prof = MOUND_PROF;
     const seg = o.seg || 26, ry = o.ry || 0, c = Math.cos(ry), sn = Math.sin(ry), S = densOf(mat);
     const ph1 = hash3(x, z, 1.3) * TAU, ph2 = hash3(z, x, 2.7) * TAU, nl = 2 + Math.floor(hash3(x, 1.1, z) * 2);
     const n = prof.length - 1;
@@ -594,7 +610,8 @@ class Builder {
     for (let j = 0; j < nv; j++) for (let i = 0; i < nu; i++) T.push(vt(i, j), vt(i + 1, j), vt(i + 1, j + 1), vt(i, j), vt(i + 1, j + 1), vt(i, j + 1));
     this.emit(mat, T, this.M.clone(), o);
   }
-  // a cloth sheet lying on the ground (rugs): a grid draped over the terrain, fitted UVs
+  // a cloth sheet lying on the ground (rugs): a grid draped over the terrain, fitted UVs (o.over(x, z): extra
+  // height to drape it over, e.g. heaps standing on the ground)
   sheet(mat, w, d, x, z, o = {}) {
     const nx = o.nx || 6, nz = o.nz || 4, ry = o.ry || 0, c = Math.cos(ry), sn = Math.sin(ry), lift = o.lift ?? 0.03;
     const P = [];
@@ -602,7 +619,7 @@ class Builder {
       const u = i / nx, v = j / nz, lx = (u - 0.5) * w, lz = (v - 0.5) * d;
       const px = x + lx * c + lz * sn, pz = z - lx * sn + lz * c;
       const wob = Math.sin(i * 2.1 + j * 1.3) * 0.012;
-      P.push({ p: [px, this.ground(px, pz) + lift + wob, pz], n: [0, 1, 0], uv: [u, v] });
+      P.push({ p: [px, this.ground(px, pz) + (o.over ? o.over(px, pz) : 0) + lift + wob, pz], n: [0, 1, 0], uv: [u, v] });
     }
     const T = [], at = (i, j) => P[j * (nx + 1) + i];
     for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) T.push(at(i, j), at(i + 1, j), at(i + 1, j + 1), at(i, j), at(i + 1, j + 1), at(i, j + 1));
@@ -1390,10 +1407,16 @@ function buildCrash(B, p, parts, ctx, decor) {
     if (ctx.smokes) ctx.smokes.push(B.world(fus.x, fy + 0.05, zN - 0.2));
     // the earth heaped up in front of the nose, and the furrow it ploughed coming in: two ragged ridges of
     // turned earth either side of the fuselage, the ground between them scorched
-    earth(B, ctx, fus.x, zN + 0.6, 1.4, 0.45, 0.9, 0, 7);
     const zBack = -Math.max(4, (p.mesa ? p.mesa.r : 7) - 1.3), flen = zN - zBack;
-    for (const sx of [-1, 1]) earth(B, ctx, fus.x + sx * 1.18, (zN + zBack) / 2 - 0.2, 0.4, 0.24, flen * 0.4, sx * 0.03, 9);
-    B.sheet('rs_scorch%', 3.2, flen + 1.6, fus.x, (zN + zBack) / 2 + 0.5, { nx: 4, nz: 10, lift: 0.05 });
+    const heaps = [[1.4, 0.45, 0.9, fus.x, zN + 0.6, 0, 7]];
+    for (const sx of [-1, 1]) heaps.push([0.4, 0.24, flen * 0.4, fus.x + sx * 1.18, (zN + zBack) / 2 - 0.2, sx * 0.03, 9]);
+    for (const [rx, h, rz, x, z, ry, n] of heaps) earth(B, ctx, x, z, rx, h, rz, ry, n);
+    // the furrow's floor scorched, the soot running up the ridges' inner slopes and onto the heap: a long decal
+    // painted to its own proportions (round ash, a ragged outline gone before the ridges' crests) draped over the
+    // heaps, so no heap cuts a line through it, on a grid fine enough to follow them
+    const sl = flen + 1.6;
+    B.sheet('rs_scorch%', 2.2, sl, fus.x, (zN + zBack) / 2 + 0.5, { nx: 12, nz: Math.ceil(sl / 0.3), lift: 0.05,
+      over: (X, Z) => Math.max(...heaps.map(([rx, h, rz, x, z, ry]) => moundRise(rx, h, rz, x, z, ry, X, Z))) });
   }
   if (wing) {
     // The lower wing fills its collider's box: canvas over ribs, red-doped edges, the roundel draped over its camber,

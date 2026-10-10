@@ -2211,15 +2211,71 @@ function tuft(g, s, rnd, cols) {
 }
 register('rs_tuft', { family: F, size: 128, alpha: true, note: 'a grass tuft card (alpha): lush painted blades, lit tips, cool roots', paint(g, s, rnd) { tuft(g, s, rnd, ['#5e8a34', '#6e9a3a', '#4e7a2e', '#7aa842', '#8ab04a']); } });
 register('rs_tuft_dry', { family: F, size: 128, alpha: true, note: 'a dry golden grass tuft card (Westfall)', paint(g, s, rnd) { tuft(g, s, rnd, ['#a89040', '#c8a850', '#8a8a3a', '#d8b860', '#7a7a34']); } });
+// The crash furrow's scorch (alpha, fitted to the 2.2 m x ~10.7 m sheet draped down the furrow and over its ridges'
+// inner slopes: u across, v along it, v = 1 at the nose end). A canvas pixel is 0.82 as wide on the ground as it is
+// long, so every round thing here is drawn squashed to 0.82 of its width in y and comes out round. Colour fills the
+// whole canvas (a warm umber singe, brown-black soot down the middle, a few round ash clumps scattered off its line,
+// charred clods with a lit upper-left lip); the alpha comes from a separate ragged mask that is zero on every canvas
+// edge, so the sheet never shows a straight side, and breaks up toward the tail end where the machine first touched down.
 register('rs_scorch', {
-  family: F, size: 256, alpha: true, note: 'a scorch and soot decal (alpha) for the crash furrow: sooty core, ash flecks, a ragged fading edge',
-  paint(g, s, rnd) {
-    const c = s / 2;
-    for (let i = 0; i < 14; i++) { const a = rnd() * TAU, d = range(rnd, 0, s * 0.22); blob(g, c + Math.cos(a) * d, c + Math.sin(a) * d * 1.4, range(rnd, s * 0.14, s * 0.26), range(rnd, s * 0.1, s * 0.2), rnd() * 3, '#3a2a20', 0.35, 0.2); }
-    for (let i = 0; i < 6; i++) { const a = rnd() * TAU, d = range(rnd, 0, s * 0.12); blob(g, c + Math.cos(a) * d, c + Math.sin(a) * d * 1.3, range(rnd, s * 0.06, s * 0.12), range(rnd, s * 0.05, s * 0.1), rnd() * 3, '#1e1618', 0.4, 0.3); }
-    for (let i = 0; i < 40; i++) { const a = rnd() * TAU, d = range(rnd, 0, s * 0.3); blob(g, c + Math.cos(a) * d, c + Math.sin(a) * d * 1.4, range(rnd, 2, 5), range(rnd, 1.5, 3), rnd() * 3, pick(rnd, ['#8a8478', '#a89c8a', '#5a4a3c']), 0.6, 0.5); }
+  family: F, w: 128, h: 512, alpha: true, note: 'the crash furrow\'s scorch (alpha, fitted: u across the 2.2 m furrow sheet, v along it, nose end at the top): warm umber singe, brown-black soot down a wandering middle, a few round ash clumps off its line, charred clods, a ragged outline breaking up toward the tail end',
+  paint(g, w, rnd, h) {
+    const SQ = 0.82, c = w / 2;
+    const ph = rnd() * TAU, ph2 = rnd() * TAU;
+    // the furrow's middle and its half-width (px) at t (0 = nose end, 1 = tail end)
+    const mid = t => c + w * (0.03 * Math.sin(t * 6.3 + ph) + 0.015 * Math.sin(t * 17 + ph2));
+    const half = t => w * (0.41 - 0.08 * t) * (1 - 0.35 * Math.max(0, (t - 0.8) / 0.2));
+    const dot = (x, y, r, col, a, hard = 0.3) => blob(g, x, y, r, r * SQ, 0, col, a, hard);
+    // colour: a warm singe everywhere, darkening into soot toward the middle and the nose
+    fill(g, w, h, '#6a4428');
+    for (let i = 0; i < 70; i++) { const t = rnd(), r = half(t) * range(rnd, 0.7, 1.1); dot(mid(t) + range(rnd, -0.25, 0.25) * half(t), t * h, r, pick(rnd, ['#4a2e1a', '#56361e', '#3e2818']), 0.45, 0.2); }
+    for (let i = 0; i < 130; i++) { const t = Math.pow(rnd(), 1.2), r = half(t) * range(rnd, 0.35, 0.65); dot(mid(t) + range(rnd, -0.3, 0.3) * half(t), t * h, r, pick(rnd, ['#2a1a10', '#24160e', '#301e12']), 0.5, 0.25); }
+    for (let i = 0; i < 44; i++) { const t = Math.pow(rnd(), 1.5) * 0.85, r = half(t) * range(rnd, 0.18, 0.38); dot(mid(t) + range(rnd, -0.25, 0.25) * half(t), t * h, r, '#160e0a', 0.55, 0.3); }
+    // charred clods thrown up by the furrow: dark lumps with a lit upper-left lip and a cool shadow under them
+    for (let i = 0; i < 30; i++) {
+      const t = rnd() * 0.95, x = mid(t) + range(rnd, -0.85, 0.85) * half(t), y = t * h, r = range(rnd, 1.8, 3.8);
+      dot(x + 1, y + 1, r * 1.1, '#120a0a', 0.5, 0.4);
+      dot(x, y, r, pick(rnd, ['#3a2416', '#2e1c12', '#4a3020']), 0.95, 0.6);
+      dot(x - r * 0.35, y - r * 0.3, r * 0.45, '#8a6440', 0.55, 0.3);
+    }
+    // ash: a handful of soft round clumps, two to four puffs each, swapping sides of the middle so they never line up
+    let side = rnd() < 0.5 ? -1 : 1, t = range(rnd, 0.08, 0.16);
+    while (t < 0.86) {
+      const x = mid(t) + side * range(rnd, 0.22, 0.62) * half(t), y = t * h, n = 2 + Math.floor(rnd() * 3), r0 = range(rnd, 4.5, 7.5);
+      for (let k = 0; k < n; k++) {
+        const ax = x + range(rnd, -0.7, 0.7) * r0, ay = y + range(rnd, -0.7, 0.7) * r0 * SQ, r = r0 * range(rnd, 0.5, 0.85);
+        dot(ax, ay, r, pick(rnd, ['#7a6e62', '#86796a', '#6e6458']), 0.5, 0.35);
+        dot(ax - r * 0.25, ay - r * 0.2 * SQ, r * 0.5, '#a89a86', 0.3, 0.3);
+      }
+      if (rnd() < 0.8) side = -side;
+      t += range(rnd, 0.09, 0.17);
+    }
+    // the alpha: a ragged band along the middle (its two edges wander on their own), soot splashed past them in a
+    // few satellite splotches, holes punched through it toward the tail end, then softened
+    const M = makeCanvas(w, h), m = M.getContext('2d', { willReadFrequently: true });
+    const mdot = (x, y, r, a, hard) => blob(m, x, y, r, r * SQ, 0, '#ffffff', a, hard);
+    const wob = () => { const p1 = rnd() * TAU, p2 = rnd() * TAU, f1 = range(rnd, 9, 14), f2 = range(rnd, 23, 31); return t => 0.1 * Math.sin(t * f1 + p1) + 0.06 * Math.sin(t * f2 + p2); };
+    const wl = wob(), wr = wob(), L = [], R = [];
+    for (let y = -8; y <= h + 8; y += 5) {
+      const t = Math.min(1, Math.max(0, y / h)), hw = half(t);
+      L.push([mid(t) - hw * (0.86 + wl(t) + range(rnd, -0.04, 0.04)), y]);
+      R.push([mid(t) + hw * (0.86 + wr(t) + range(rnd, -0.04, 0.04)), y]);
+    }
+    polyPath(m, [...L, ...R.reverse()]); m.fillStyle = '#ffffff'; m.fill();
+    for (let i = 0; i < 16; i++) { const t = rnd() * 0.8, sd = rnd() < 0.5 ? -1 : 1; mdot(mid(t) + sd * half(t) * range(rnd, 0.72, 0.9), t * h, half(t) * range(rnd, 0.14, 0.26), 0.9, 0.55); }
+    for (let i = 0; i < 26; i++) { const t = rnd() * 0.9, sd = rnd() < 0.5 ? -1 : 1; mdot(mid(t) + sd * half(t) * range(rnd, 0.9, 1.06), t * h, range(rnd, 1.5, 3), 0.8, 0.6); }
+    m.globalCompositeOperation = 'destination-out';
+    for (let i = 0; i < 40; i++) { const t = range(rnd, 0.6, 1); mdot(mid(t) + range(rnd, -0.9, 0.9) * half(t), t * h, half(t) * range(rnd, 0.15, 0.4) * (0.6 + (t - 0.6) * 2), 0.5 + (t - 0.6), 0.45); }
+    // fade the ends (the nose end on the heap, the tail end where it touched down) and clear a margin all round
+    m.globalCompositeOperation = 'destination-in';
+    m.fillStyle = grad(m, 0, 0, 0, h, [[0, '#ffffff', 0], [0.04, '#ffffff', 1], [0.7, '#ffffff', 0.95], [0.96, '#ffffff', 0], [1, '#ffffff', 0]]);
+    m.fillRect(0, 0, w, h);
+    m.fillStyle = grad(m, 0, 0, w, 0, [[0, '#ffffff', 0], [0.05, '#ffffff', 1], [0.95, '#ffffff', 1], [1, '#ffffff', 0]]);
+    m.fillRect(0, 0, w, h);
+    m.globalCompositeOperation = 'source-over';
+    blurTile(M, 1.6);
     g.globalCompositeOperation = 'destination-in';
-    g.fillStyle = radial(g, c, c, s * 0.08, s * 0.48, [[0, '#ffffff', 1], [0.6, '#ffffff', 0.8], [1, '#ffffff', 0]]); g.fillRect(0, 0, s, s);
+    g.drawImage(M, 0, 0);
     g.globalCompositeOperation = 'source-over';
   },
 });

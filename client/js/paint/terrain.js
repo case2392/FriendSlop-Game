@@ -2141,6 +2141,21 @@ register('cliff_desert', {
   },
 });
 
+// (a crash mesa's sandstone, wrapped round the butte: the same rock, but its beds lie flat and keep their
+// thickness, no wavy bed and no lens pinching out, which seen from below on a round face bowed into arches)
+register('cliff_desert_mesa', {
+  family: 'terrain', size: 512, note: 'Tanaris crash mesa: the valley walls\' tan, rust and honey sandstone with flat-lying beds of even thickness (no wavy or pinching hard beds), joints, sand on the ledges, varnish and wind-scour streaks (wrapped round the butte, 16 m tall)',
+  paint(g, s, rnd, h, cv) {
+    sandstone(g, s, rnd, cv, {
+      softT: [36, 230], hardT: [18, 84], wob: [2, 7], wavy: 0, lensK: [0.06, 0.26], subA: 0.01, hardA: 20, softA: 11, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
+      softC: ['#a8764c', '#9e6c45', '#cc9e6c', '#c4955f'], hardC: ['#e6cea0', '#ddc290', '#e9d3a8'],
+      light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
+      sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
+      varnish: '#5a3c32', varnishA: 0.2, varnishN: 9, pit: '#946c4c', glaze: '#ffe6b8', scour: ['#f2dcb0', '#ecd2a2'], scourA: 0.09, scourN: 40, scourL: [40, 150],
+    });
+  },
+});
+
 // ---- mud and slush (road space: x across the road, 10 m; y along it) ---------------------------
 // Puddles are cut from a domain-warped noise field by a threshold (so no outline is a union of
 // circles), drawn to the wheel tracks and stretched along the road. The water reflects the sky at
