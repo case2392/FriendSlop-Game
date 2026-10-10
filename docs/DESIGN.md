@@ -504,7 +504,12 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
    that made them), so a returning player decodes them instead of painting.
    A pool of paint workers (the same family modules on OffscreenCanvas) paints
    the day's textures while the loading bar is up. At nightfall the next
-   day's world data and textures get ready behind the night scene.
+   day's world data and textures get ready behind the night scene. Since a
+   day now loads for seconds, the messages that come in meanwhile (loot
+   breaking or pawned, the Repo Man's parts, toasts, your seat) wait for the
+   new world and run in the order they came, as when the build ran straight
+   after the world message; `tools/joinrace.mjs` checks a joining player and
+   a new day against the server's props and parts.
    `tools/texhash.mjs` checks every texture comes out pixel-identical all
    three ways, `tools/texgame.mjs` checks every texture a running game holds
    against an older checkout, and `tools/loadtime.mjs` measures. With

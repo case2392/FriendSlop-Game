@@ -151,6 +151,7 @@ tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewp
           drive-test.mjs  headless autopilot down a leg (RV handling)
           loadtime.mjs  load-time numbers · texhash.mjs · texgame.mjs · texfaults.mjs  the
                        texture cache and paint workers give the same pixels, under faults too
+          joinrace.mjs  loot that breaks while a day loads: clients still match the server
 ```
 
 - **Server-authoritative world, client-authoritative bodies.** The server

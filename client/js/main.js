@@ -255,7 +255,9 @@ function computeTarget() {
   return null;
 }
 
+// while a day loads, what the crosshair was on belongs to the old world (or none): nothing to grab, use or ping
 function onGrabPress() {
+  if (worldBuilding) return;
   if (me.mode === 'seat' || me.mode === 'ko' || me.holding || me.hasHook) return;
   const t = target;
   if (t?.kind === 'prop') {
@@ -284,12 +286,14 @@ function onDrop() {
   else if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; }
 }
 function onPing() {
+  if (worldBuilding) return;
   const eye = me.eye(S.rv), l = me.look();
   const hit = S.lw?.ray(eye, l, 300, G.WORLD | G.RV | G.PROP | G.PLAYER, excludeSet(), false);
   if (hit) net.send({ t: 'ping', pt: [hit.point.x, hit.point.y, hit.point.z] });
 }
 function onUse() {
   initAudio();
+  if (worldBuilding) return;
   if (me.mode === 'seat') { net.send({ t: 'use', kind: 'unseat' }); return; }
   const t = target;
   if (!t) return;
@@ -401,8 +405,11 @@ async function buildDay(m) {
   zoneText(W.biomeName, `Day ${m.day} of ${C.DAYS}`);   // after the build: the fade starts on the next rendered frames
   performance.measure?.(`build day ${m.day}`, { start: t0, end: performance.now() });
   worldBuilding = false;
-  for (const fn of S.pendingAfterWorld || []) fn();
+  // the messages that came while the day loaded, in order (afterWorld); one that throws mustn't take
+  // the rest, or the end of the build (the loading screen stays up), with it
+  const queued = S.pendingAfterWorld || [];
   S.pendingAfterWorld = [];
+  for (const fn of queued) { try { fn(); } catch (e) { (window.reportError || console.error)(e); } }
   S.builtAt = performance.now();   // tools/loadtime.mjs: the world (and its loot) is in
   // the loading screen stays up until the new world has drawn; then, once things are quiet, what was
   // painted this session goes into the texture cache (the workers encode and write it in the
@@ -442,7 +449,15 @@ function onPhase(ph) {
     });
   }, { timeout: 3000 });
 }
+// While a day loads (prepareDay waits seconds for its textures), the messages after the world message
+// wait for the new world and are then handled in the order they came, as when the build ran straight
+// after the world message. A prop that breaks or is pawned meanwhile must not be taken out of the old
+// world (or out of none, on a joiner) and then come back with the queued props list as a ghost with
+// a collider; a 'dmg' must not be lost; the parts in the world message must not overwrite a newer
+// 'parts'; a toast must not run out under the loading screen.
 const afterWorld = fn => { if (worldBuilding || !S.W) (S.pendingAfterWorld ||= []).push(fn); else fn(); };
+// the same for a message that needs no world, only its place in the order (roster, toasts, your seat)
+const inOrder = fn => m => { if (worldBuilding) (S.pendingAfterWorld ||= []).push(() => fn(m)); else fn(m); };
 
 function addProp(d) {
   if (S.props.has(d.id)) return;
@@ -499,7 +514,7 @@ net.on('tp', m => afterWorld(() => { me.teleport(m.x, m.y, m.z, m.yaw); me.mode 
 // A roster update during a build waits for it (the build used to block it out): what it paints
 // (portraits, other players' looks, your hands in your color) comes after the town's people, as
 // before. The character painter's pixels depend on what it painted before (texmanifest IN_ORDER).
-net.on('meta', m => { if (worldBuilding) (S.pendingAfterWorld ||= []).push(() => onMeta(m)); else onMeta(m); });
+net.on('meta', inOrder(onMeta));
 function onMeta(m) {
   S.meta = m;
   voice.syncPeers(m.players.map(p => ({ ...p, connected: true })));
@@ -528,22 +543,23 @@ net.on('s', m => {
   S.door = !!m.g.door;
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
-net.on('toast', m => toast(m.text, m.color, m.secs));
-net.on('knock', m => { me.knock(m.v, m.ko); sfx.knock(); shake(0.6); });
-net.on('seat', m => {
+net.on('toast', inOrder(m => toast(m.text, m.color, m.secs)));
+net.on('knock', inOrder(m => { me.knock(m.v, m.ko); sfx.knock(); shake(0.6); }));
+net.on('seat', inOrder(m => {
   if (m.seat == null) { me.unsit(m.exit); }
   else { if (me.holding) onGrabRelease(); me.sit(m.seat); }
-});
-net.on('grabbed', m => { if (!m.ok && me.holding?.id === m.id) me.holding = null; });
-net.on('hooked', m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); });
-net.on('drink', () => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); });
-net.on('revived', () => { me.revive(); sfx.wake(); });
-net.on('parts', m => { S.parts = m.parts; rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door); });
-net.on('emote', m => { const v = S.views.get(m.id); if (v) v.emote = { e: m.e, t: 3 }; if (m.id === S.selfId) toast(`you: ${m.e}`, '#fff', 1.5); });
-net.on('ping', m => addPing(m));
-net.on('receipt', m => showReceipt(m));
-net.on('over', m => showOver(m));
-net.on('ev', m => { for (const e of m.list) onEvent(e); });
+}));
+net.on('grabbed', inOrder(m => { if (!m.ok && me.holding?.id === m.id) me.holding = null; }));
+net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));
+net.on('drink', inOrder(() => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); }));
+net.on('revived', inOrder(() => { me.revive(); sfx.wake(); }));
+// a 'parts' that came before a newer world message is older than the parts that message brought
+net.on('parts', m => { const seq = buildSeq; afterWorld(() => { if (seq === buildSeq) { S.parts = m.parts; rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door); } }); });
+net.on('emote', inOrder(m => { const v = S.views.get(m.id); if (v) v.emote = { e: m.e, t: 3 }; if (m.id === S.selfId) toast(`you: ${m.e}`, '#fff', 1.5); }));
+net.on('ping', inOrder(addPing));
+net.on('receipt', inOrder(showReceipt));
+net.on('over', inOrder(showOver));
+net.on('ev', m => afterWorld(() => { for (const e of m.list) onEvent(e); }));
 
 function onEvent(e) {
   switch (e.k) {

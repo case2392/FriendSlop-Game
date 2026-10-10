@@ -57,10 +57,34 @@ try {
   check(/^[A-Z0-9]{4}$/.test(code), `hosted a trip (code ${code})`);
   const joiner = await open('Dave');
   await joiner.fill('#codeInput', code);
+  // note when a prop smashes on Dave's side (his socket opens on the join click)
+  await joiner.evaluate(() => { const WS = window.WebSocket; window.__breakAt = []; window.WebSocket = class extends WS { constructor(...a) { super(...a); this.addEventListener('message', e => { if (String(e.data).includes('"k":"break"')) window.__breakAt.push(performance.now()); }); } }; });
   await joiner.click('#joinBtn');
+  // while Dave's day loads (it waits seconds for its textures), Steve drops a vase that smashes and a
+  // safe that takes a dent, out past the camp: Dave must end up with Steve's props, no ghost of the vase
+  await joiner.waitForFunction(() => window.__nmd?.selfId != null, null, { polling: 50 });
+  const dropped = await host.evaluate(() => {
+    const S = window.__nmd, W = S.W, had = new Set(S.props.keys());
+    for (const [type, z, h, value] of [['vase', 30, 25, 520], ['safe', 36, 10, 1300]]) { const x = W.roadX(z) + 6; S.send({ t: 'dbg', op: 'spawn', type, x, y: W.heightAt(x, z) + h, z, value }); }
+    return [...had];
+  });
   await ready(joiner);
   ok('second player joined through the menu');
   await quiet(host); await quiet(joiner);
+  {
+    const propsOf = p => p.evaluate(() => [...window.__nmd.props.values()].map(p => [p.id, p.type, Math.round(p.value)]).sort((a, b) => a[0] - b[0]));
+    let hp, jp;
+    for (let i = 0; i < 12; i++) {
+      [hp, jp] = await Promise.all([propsOf(host), propsOf(joiner)]);
+      if (JSON.stringify(hp) === JSON.stringify(jp) && !hp.some(([id, type]) => type === 'vase' && !dropped.includes(id))) break;
+      await joiner.waitForTimeout(1500);
+    }
+    const hIds = hp.map(p => p[0]), ghosts = jp.filter(p => !hIds.includes(p[0])).map(p => `${p[0]} ${p[1]}`);
+    const hv = new Map(hp.map(p => [p[0], p[2]])), stale = jp.filter(p => hv.has(p[0]) && hv.get(p[0]) !== p[2]).map(p => `${p[0]} ${p[1]} ${p[2]} (Steve ${hv.get(p[0])})`);
+    const raced = await joiner.evaluate(() => window.__breakAt.some(t => t < (window.__nmd.builtAt ?? 0)));
+    const smashed = !hp.some(([id, type]) => type === 'vase' && !dropped.includes(id));
+    check(!ghosts.length && !stale.length && hp.length === jp.length, `${!smashed ? 'the vase did not smash (no race)' : raced ? 'a vase smashed while Dave\'s day loaded' : 'a vase smashed (after Dave\'s day loaded: no race this time)'}; Dave has Steve's ${hp.length} props and values${ghosts.length ? `; ghosts: ${ghosts.join(', ')}` : ''}${stale.length ? `; stale: ${stale.join(', ')}` : ''}`);
+  }
   await host.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
   await joiner.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
   ok('each client renders the other player');
