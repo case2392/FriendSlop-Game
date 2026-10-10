@@ -43,9 +43,10 @@ initGfx($('canvas'));
 const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); });
 // the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js); while
 // the menu is up they get the first day's textures ready (a trip starts on day 1), all off this thread
-// (the few the page must paint itself only in long idle stretches while nobody is typing)
+// (the few the page must paint itself only in long idle stretches while nobody is typing or moving the
+// mouse: a mouse on the move is on its way to a button, and a paint started then could hold up the click)
 let lastInput = 0;
-for (const ev of ['keydown', 'pointerdown']) window.addEventListener(ev, () => { lastInput = performance.now(); }, { capture: true, passive: true });
+for (const ev of ['keydown', 'pointerdown', 'pointermove', 'wheel']) window.addEventListener(ev, () => { lastInput = performance.now(); }, { capture: true, passive: true });
 const titleDone = () => !!document.documentElement.dataset.menuArt;   // labels.js: the title screen is painted
 const menuIdle = () => (S.phase !== 'menu' || S.W ? null : titleDone() && !document.hidden && performance.now() - lastInput > 2000);
 // Started once the title screen has finished painting (labels.js marks it with data-menu-art) or 2 s
@@ -370,12 +371,15 @@ async function prepareDay(W) {
 async function buildDay(m) {
   const my = ++buildSeq;
   worldBuilding = true;
+  // the build before this one may still be learning what its biome asks for (see below): what this
+  // one paints belongs to another day
+  clearTimeout(recordTimer);
+  texPrep.record(false);
   texPrep.building(true);   // no texture-cache writes competing with the build
   loadingBar(true, 0);
   await physReady;
-  const pf = prefetched && prefetched.seed === m.seed && prefetched.day === m.day ? prefetched : null;
   prefetched = null;
-  const W = pf ? pf.W : generateLeg(m.seed, m.day);
+  const W = generateLeg(m.seed, m.day);
   await prepareDay(W);
   if (my !== buildSeq) return false;   // another world message came in meanwhile: that build takes over
   const t0 = performance.now();
@@ -406,10 +410,16 @@ async function buildDay(m) {
   performance.measure?.(`build day ${m.day}`, { start: t0, end: performance.now() });
   worldBuilding = false;
   // the messages that came while the day loaded, in order (afterWorld); one that throws mustn't take
-  // the rest, or the end of the build (the loading screen stays up), with it
+  // the rest, or the end of the build (the loading screen stays up), with it (it is still a page error:
+  // the browser tests fail on it). What came for a world whose build was superseded (another world
+  // message came in mid-build) is dropped: its props list, events, teleport or parts were that world's,
+  // and the newer world's own came after it.
   const queued = S.pendingAfterWorld || [];
   S.pendingAfterWorld = [];
-  for (const fn of queued) { try { fn(); } catch (e) { (window.reportError || console.error)(e); } }
+  for (const q of queued) {
+    if (q.seq && q.seq < my) { S.staleDropped = (S.staleDropped || 0) + 1; continue; }
+    try { q.fn(); } catch (e) { (window.reportError || console.error)(e); }
+  }
   S.builtAt = performance.now();   // tools/loadtime.mjs: the world (and its loot) is in
   // the loading screen stays up until the new world has drawn; then, once things are quiet, what was
   // painted this session goes into the texture cache (the workers encode and write it in the
@@ -426,9 +436,10 @@ async function buildDay(m) {
   return true;
 }
 
-// At nightfall, get tomorrow ready behind the night scene: its world data (generated once, reused by
-// the morning build) and its textures, decoded from the cache or painted by the workers. Nothing here
-// paints or builds on the main thread; the morning build only copies what's ready.
+// At nightfall, get tomorrow's textures ready behind the night scene, decoded from the cache or painted
+// by the workers. Nothing here paints or builds on the main thread (not even tomorrow's world data: its
+// biome is all the list needs, and generating the leg is one long task, a visible hitch on a fast GPU;
+// the morning build does it under the loading bar); the morning build only copies what's ready.
 let lastPhase = null;
 function onPhase(ph) {
   if (ph === lastPhase) return;
@@ -440,9 +451,8 @@ function onPhase(ph) {
   idle(() => {
     if (lastPhase !== 'night' || S.W?.day !== day - 1) return;
     const t0 = performance.now();
-    const W = generateLeg(seed, day);
-    prefetched = { seed, day, W };
-    texPrep.prepare(texPrep.dayList(W.biome), { prio: 1, page: false }).then(r => {
+    prefetched = { seed, day };
+    texPrep.prepare(texPrep.dayList(BIOME_BY_DAY[Math.min(day, BIOME_BY_DAY.length) - 1]), { prio: 1, page: false }).then(r => {
       performance.measure?.(`prefetch day ${day}`, { start: t0, end: performance.now() });
       S.prefetch = { day, ...r };
       texPrep.flush();   // and into the cache with them, in the background, while the night lasts
@@ -455,9 +465,11 @@ function onPhase(ph) {
 // world (or out of none, on a joiner) and then come back with the queued props list as a ghost with
 // a collider; a 'dmg' must not be lost; the parts in the world message must not overwrite a newer
 // 'parts'; a toast must not run out under the loading screen.
-const afterWorld = fn => { if (worldBuilding || !S.W) (S.pendingAfterWorld ||= []).push(fn); else fn(); };
+// Each waits with the build it came during (seq), so a build that is superseded doesn't hand its
+// world's messages to the next world.
+const afterWorld = fn => { if (worldBuilding || !S.W) (S.pendingAfterWorld ||= []).push({ fn, seq: buildSeq }); else fn(); };
 // the same for a message that needs no world, only its place in the order (roster, toasts, your seat)
-const inOrder = fn => m => { if (worldBuilding) (S.pendingAfterWorld ||= []).push(() => fn(m)); else fn(m); };
+const inOrder = fn => m => { if (worldBuilding) (S.pendingAfterWorld ||= []).push({ fn: () => fn(m) }); else fn(m); };
 
 function addProp(d) {
   if (S.props.has(d.id)) return;
@@ -553,8 +565,9 @@ net.on('grabbed', inOrder(m => { if (!m.ok && me.holding?.id === m.id) me.holdin
 net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));
 net.on('drink', inOrder(() => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); }));
 net.on('revived', inOrder(() => { me.revive(); sfx.wake(); }));
-// a 'parts' that came before a newer world message is older than the parts that message brought
-net.on('parts', m => { const seq = buildSeq; afterWorld(() => { if (seq === buildSeq) { S.parts = m.parts; rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door); } }); });
+// (a 'parts' that came before a newer world message is older than the parts that message brought:
+// afterWorld drops it)
+net.on('parts', m => afterWorld(() => { S.parts = m.parts; rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door); }));
 net.on('emote', inOrder(m => { const v = S.views.get(m.id); if (v) v.emote = { e: m.e, t: 3 }; if (m.id === S.selfId) toast(`you: ${m.e}`, '#fff', 1.5); }));
 net.on('ping', inOrder(addPing));
 net.on('receipt', inOrder(showReceipt));

@@ -18,7 +18,8 @@
 //                             session goes into the cache, PNG-encoded and written by two workers at
 //                             most (the page only hands over a snapshot); anything a build needs
 //                             goes first
-//   keepOnly(names)           let go of pictures readied for a different day
+//   keepOnly(names)           a new build: let go of pictures readied for a different day, and of
+//                             the work an older build (or another day's prefetch) still has queued
 //   building(on)              a world build is under way: no cache writes until it is off (a flush
 //                             in progress hands its work back)
 //
@@ -33,7 +34,16 @@ const hc = (typeof navigator !== 'undefined' && navigator.hardwareConcurrency) |
 const WANT = q.has('paintWorkers') ? Math.max(0, Math.min(8, +q.get('paintWorkers') | 0)) : Math.max(0, Math.min(4, hc - 1));
 const CACHE_ON = q.get('texcache') !== '0';
 const now = () => performance.now();
-const tick = () => new Promise(r => setTimeout(r, 0));
+// a yield to the event loop (worker results land, the loading bar moves) that a background tab
+// doesn't throttle: a hidden tab runs a setTimeout(0) at most once a second, or once a minute under
+// intensive throttling, which would make a day that changes while the player is tabbed out wait that
+// long for each texture the page paints. A message to ourselves isn't throttled.
+const tick = (() => {
+  if (typeof MessageChannel === 'undefined') return () => new Promise(r => setTimeout(r, 0));
+  const ch = new MessageChannel(), waiting = [];
+  ch.port1.onmessage = () => waiting.shift()?.();
+  return () => new Promise(r => { waiting.push(r); ch.port2.postMessage(0); });
+})();
 const lsGet = k => { try { return JSON.parse(localStorage.getItem(k) || '[]'); } catch { return []; } };
 const lsSet = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch { /* private mode, full: fine */ } };
 
@@ -47,6 +57,17 @@ const PAGE_ONLY = new Set([...(SHIPPED_PAGE_ONLY || []), ...lsGet('nmdTexPageOnl
 // (families texcache doesn't hash) are left alone too.
 const ALONE = new Set(lsGet('nmdTexAlone'));   // ...and what reads them (learned from the workers)
 const leftAlone = name => { const f = P.meta(name)?.family; return !f || (IN_ORDER || []).includes(f) || !P.FAMILIES.includes(f) || ALONE.has(name); };
+// What was learned holds for the paint code it was learned from: once the source hashes are in, a
+// browser that learned it under other code starts over (else a texture that stopped clipping would be
+// painted on the main thread for good).
+function expireLearned(H) {
+  const stamp = TC.hash53(JSON.stringify(H));
+  try { if (localStorage.getItem('nmdTexLearnedFor') === stamp) return; } catch { return; }
+  const shipped = new Set(SHIPPED_PAGE_ONLY || []);
+  for (const n of lsGet('nmdTexPageOnly')) if (!shipped.has(n)) PAGE_ONLY.delete(n);
+  for (const n of lsGet('nmdTexAlone')) ALONE.delete(n);
+  try { localStorage.removeItem('nmdTexPageOnly'); localStorage.removeItem('nmdTexAlone'); localStorage.setItem('nmdTexLearnedFor', stamp); } catch { /* fine */ }
+}
 
 const S = {
   workers: [], ready: false, initDone: false, failed: '', H: null, hashP: null,
@@ -58,9 +79,14 @@ const S = {
   snaps: new Map(),             // name -> { deps, cv }: painted here, to store
   good: new Set(),              // names whose cache record is known good (decoded or written this session)
   stats: { cacheHits: 0, cacheMiss: 0, decodeMs: 0, workerPaints: 0, workerMs: 0, pagePaints: 0, pageMs: 0, inexact: 0, stored: 0, storedKB: 0, storeErr: '', fails: 0 },
-  seq: 0, rec: null, recBiome: null, flushing: false, cacheOff: '',
+  seq: 0, rec: null, recBiome: null, flushing: false,
+  cacheOff: '',                 // why the cache is off this session (no reads, no writes)
+  writesOff: '',                // why writes stopped (the quota ran out): reads go on
+  gen: 0, keep: new Set(),      // keepOnly(): a new build's generation and what its day wants
   pageNames: [],                // what the page painted itself, for the harness ("name ms")
 };
+// work a prepare() of an older generation queued that the current build's day doesn't want
+const unwanted = (gen, name) => gen < S.gen && !S.keep.has(name);
 
 // ---- fonts: the workers load the page's own faces; the page's paints are cached only once they're in
 
@@ -102,7 +128,7 @@ P.hooks.painted = (name, p) => {
   // now (a snapshot makes the canvas finish rasterizing, which the first frames would do anyway). A
   // paint made before the web fonts were in is never cached. (Nothing draws on a texture's canvas
   // after its paint except rv3d, which repaints its body the same way once Cinzel is in.)
-  if (!CACHE_ON || S.cacheOff || !fontsSettled() || S.good.has(name) || leftAlone(name) || p.deps.some(leftAlone)) return;
+  if (!CACHE_ON || S.cacheOff || S.writesOff || !fontsSettled() || S.good.has(name) || leftAlone(name) || p.deps.some(leftAlone)) return;
   S.snaps.set(name, { deps: p.deps, cv: p.cv });
   lateFlush();
 };
@@ -114,7 +140,7 @@ let initP = null;
 export function init() {
   if (initP) return initP;
   if (!CACHE_ON) S.cacheOff = 'off (?texcache=0)';
-  S.hashP = CACHE_ON ? TC.sourceHashes(P.FAMILIES).then(h => (S.H = h), e => { S.cacheOff = `hashes: ${e.message}`; return null; }) : Promise.resolve(null);
+  S.hashP = CACHE_ON ? TC.sourceHashes(P.FAMILIES, fontList()).then(h => { S.H = h; expireLearned(h); return h; }, e => { S.cacheOff = `hashes: ${e.message}`; return null; }) : Promise.resolve(null);
   initP = (async () => {
     if (!WANT || typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined' || typeof createImageBitmap === 'undefined') { S.failed = 'no workers'; return; }
     const fonts = fontList();
@@ -134,7 +160,7 @@ export function init() {
         };
         w.onerror = e => { clearTimeout(t); S.failed = e.message || 'a paint worker failed to start'; res(false); };
       }));
-      w.postMessage({ t: 'init', fonts, hashes: H, breakStorage: q.get('texcache') === 'broken' });
+      w.postMessage({ t: 'init', fonts, hashes: H, breakStorage: q.get('texcache') === 'broken', fullStorage: q.get('texcache') === 'full' });
       S.workers.push(W);
     }
     const ok = await Promise.all(starts);
@@ -175,9 +201,15 @@ function onMessage(W, m) {
       if (!PAGE_ONLY.has(m.name)) { PAGE_ONLY.add(m.name); lsSet('nmdTexPageOnly', [...PAGE_ONLY]); }
       settle(m.name, 'page');
     } else {
-      for (const f of m.fresh || []) { S.held.set(f.name, W.i); S.stats.workerPaints++; S.stats.workerMs += f.ms; }
-      P.adopt(m.name, m.bmp);
-      settle(m.name, true);
+      for (const f of m.fresh || []) {
+        // painted before by another worker (as something else's dependency): one copy to store is enough
+        const was = S.held.get(f.name);
+        if (was != null && was !== W.i) S.workers.find(x => x.i === was)?.w.postMessage({ t: 'drop', names: [f.name] });
+        S.held.set(f.name, W.i); S.stats.workerPaints++; S.stats.workerMs += f.ms;
+      }
+      // for a build that has been superseded, and the day being built doesn't want it: not kept
+      if (unwanted(S.jobs.get(m.name)?.gen ?? S.gen, m.name)) { try { m.bmp.close(); } catch {} settle(m.name, false); }
+      else { P.adopt(m.name, m.bmp); settle(m.name, true); }
     }
     pump();
   } else if (m.t === 'stored') {
@@ -187,7 +219,8 @@ function onMessage(W, m) {
   } else if (m.t === 'loaded') {
     if (m.cache?.broken) { S.cacheOff = m.cache.lastErr || 'unavailable'; }
     const cb = W.loads.get(m.id); W.loads.delete(m.id);
-    cb?.(m);
+    if (cb) cb(m);
+    else for (const b of m.bmps || []) { try { b.close(); } catch {} }   // came after the wait gave up
   }
 }
 
@@ -237,28 +270,30 @@ function pump() {
   if (!S.queue.length && !S.workers.some(W => W.busy)) maybeFlush();
 }
 
-// -> true (adopted), 'page' (a worker can't paint it exactly), false (failed, or no workers)
-function paintInWorker(name, prio) {
+// -> true (adopted), 'page' (a worker can't paint it exactly), false (failed, no workers, or no
+// longer wanted). gen: the generation of the prepare() that wants it.
+function paintInWorker(name, prio, gen) {
   if (S.initDone && !S.ready) return Promise.resolve(false);
   const had = S.jobs.get(name);
-  if (had) { const qd = S.queue.find(j => j.name === name); if (qd && prio < qd.prio) qd.prio = prio; return had.promise; }
+  if (had) { had.gen = Math.max(had.gen, gen); const qd = S.queue.find(j => j.name === name); if (qd && prio < qd.prio) qd.prio = prio; return had.promise; }
   let resolve;
   const promise = new Promise(r => (resolve = r));
-  S.jobs.set(name, { resolve, promise });
+  S.jobs.set(name, { resolve, promise, gen });
   S.queue.push({ name, prio, seq: ++S.seq });
   pump();
   return promise;
 }
 
 // the page's own paints while it waits on the workers: one texture per task, so worker results land
-function paintHere(name) {
+function paintHere(name, gen = S.gen) {
   return new Promise(res => {
-    S.pageQ.push({ name, res });
+    S.pageQ.push({ name, res, gen });
     if (S.pageRunning) return;
     S.pageRunning = true;
     (async () => {
       while (S.pageQ.length) {
         const j = S.pageQ.shift();
+        if (unwanted(j.gen, j.name)) { j.res(P.ready(j.name)); continue; }   // a superseded build's
         try { if (!P.ready(j.name)) P.canvasFor(j.name); } catch (e) { console.warn('texture', j.name, e.message); }
         j.res(P.ready(j.name));
         await tick();
@@ -305,20 +340,23 @@ function promote(name) {
 // Make these textures ready. opts.prio: lower is sooner (a build waiting beats a prefetch);
 // opts.page: paint the page-only ones here meanwhile. Resolves to { ready, total, ms }.
 export async function prepare(names, { prio = 0, page = true, idleOk = () => true, onProgress = null } = {}) {
-  const t0 = now();
+  const t0 = now(), gen = S.gen;
   init();
-  const want = [...new Set(names)].filter(n => P.has(n) && !P.ready(n) && !leftAlone(n));
+  const H = S.hashP ? await S.hashP : null;   // (and what was learned under other paint code is gone)
+  const want = [...new Set(names)].filter(n => P.has(n) && !P.ready(n) && !leftAlone(n) && !unwanted(gen, n));
   const total = want.length;
   let done = 0;
   const step = () => { done++; onProgress?.(done, total); };
   if (!total) return { ready: 0, total: 0, ms: 0 };
-  const H = S.hashP ? await S.hashP : null;
   const lookup = want.filter(n => !S.waiting.has(n));
   // what the cache has goes in as it arrives. A browser that has stored textures before waits for the
   // lookup (it will have most of them); a first visit doesn't: painting starts at once, and anything
   // the cache does turn up just saves that paint.
   const loaded = (H ? loadFromCache(lookup) : Promise.resolve(new Map())).then(hits => {
-    for (const [name, bmp] of hits) if (P.adopt(name, bmp)) { S.good.add(name); S.stats.cacheHits++; }
+    for (const [name, bmp] of hits) {
+      if (unwanted(gen, name)) { try { bmp.close(); } catch {} continue; }
+      if (P.adopt(name, bmp)) { S.good.add(name); S.stats.cacheHits++; }
+    }
   });
   let warm = false, tw = t0, tp = t0, bumped = false;
   try { warm = !!localStorage.getItem('nmdTexStored'); } catch { warm = false; }
@@ -326,16 +364,20 @@ export async function prepare(names, { prio = 0, page = true, idleOk = () => tru
   const tasks = want.map((name, k) => {
     if (S.waiting.has(name)) {   // already on its way (a night prefetch, say): wait for it, then paint here if it couldn't
       if (page === true) promote(name);
+      const jb = S.jobs.get(name);
+      if (jb) jb.gen = Math.max(jb.gen, gen);
       const qd = S.queue.find(j => j.name === name);   // still queued at a background priority: it's wanted now
       if (qd && prio + k * 1e-6 < qd.prio) { qd.prio = prio + k * 1e-6; bumped = true; }
-      return S.waiting.get(name).then(async () => { if (!P.ready(name) && page === true && !ALONE.has(name)) await paintHere(name); }).then(step);
+      return S.waiting.get(name).then(async () => { if (!P.ready(name) && page === true && !ALONE.has(name)) await paintHere(name, gen); }).then(step);
     }
     const p = (async () => {
       if (P.ready(name)) return true;
+      if (unwanted(gen, name)) return false;   // a newer build started meanwhile, for a day without it
       S.stats.cacheMiss++;
-      let r = PAGE_ONLY.has(name) ? 'page' : await paintInWorker(name, prio + k * 1e-6);
+      let r = PAGE_ONLY.has(name) ? 'page' : await paintInWorker(name, prio + k * 1e-6, gen);
       if (r === true) tw = now();
-      if (r === 'page' || (r === false && page && !ALONE.has(name))) { r = page === 'idle' ? await paintIdle(name, idleOk) : page ? await paintHere(name) : false; tp = now(); }
+      if (unwanted(gen, name)) return P.ready(name);
+      if (r === 'page' || (r === false && page && !ALONE.has(name))) { r = page === 'idle' ? await paintIdle(name, idleOk) : page ? await paintHere(name, gen) : false; tp = now(); }
       return r === true;
     })().finally(() => S.waiting.delete(name));
     S.waiting.set(name, p);
@@ -350,11 +392,16 @@ export async function prepare(names, { prio = 0, page = true, idleOk = () => tru
   return r;
 }
 
-// Pictures got ready for a day that isn't the one being built (the menu readied day 1, a player joined
-// on day 3): let them go, they're only memory. What this day asks for stays.
+// A build starts. Pictures got ready for a day that isn't the one being built (the menu readied day 1,
+// a player joined on day 3, another world message came in mid-build): let them go, they're only
+// memory. So does the work still queued for them, the worker jobs here and the page paints in
+// paintHere, so they don't compete with this day's; and what an older prepare() gets ready later
+// is let go when it comes in. What this day asks for stays.
 export function keepOnly(names) {
-  const keep = new Set(names);
-  P.release(P.adopted().filter(n => !keep.has(n)));
+  S.keep = new Set(names);
+  S.gen++;
+  P.release(P.adopted().filter(n => !S.keep.has(n)));
+  S.queue = S.queue.filter(j => S.keep.has(j.name) || (settle(j.name, false), false));
 }
 
 // ---- which textures a day asks for ----
@@ -399,7 +446,7 @@ function maybeFlush() {
 async function runFlush() {
   if (!S.ready) { S.snaps.clear(); return; }
   const H = S.hashP ? await S.hashP : null;
-  const cacheOK = !!H && !S.cacheOff;
+  const cacheOK = !!H && !S.cacheOff && !S.writesOff;
   // what the workers hold: store it, or let it go
   const items = [];
   const drop = new Map();
@@ -440,6 +487,7 @@ async function runFlush() {
           let bmp = null;
           try { bmp = await createImageBitmap(it.snap.cv); } catch { /* gone: not cached */ }
           if (!bmp) return;
+          if (!S.workers.includes(W)) { bmp.close(); items.push(it); return; }   // its worker died meanwhile: another one takes it
           msg = { t: 'store', id: 0, names: [it.name], bmps: [bmp], deps: [it.snap.deps] }; tr = [bmp];
         } else msg = { t: 'store', id: 0, names: [it.name] };
         const res = await new Promise(r => { W.storeCb = r; W.w.postMessage(msg, tr); });
@@ -449,10 +497,15 @@ async function runFlush() {
         }
         if (res.err) S.stats.storeErr = res.err;
         if (res.cache?.broken) S.cacheOff = res.cache.lastErr || 'unavailable';
+        else if (res.cache?.full) S.writesOff = res.cache.lastErr || 'full';
       })());
     }
     await Promise.all(jobs);
-    if (S.cacheOff) { flushWanted = false; return; }   // full, or gone: stop writing this session
+    if (S.cacheOff || S.writesOff) {   // gone, or full: stop writing this session (a full one still reads)
+      for (const r of items) if (r.W) r.W.w.postMessage({ t: 'drop', names: [r.name] });
+      flushWanted = false;
+      return;
+    }
     if (!jobs.length) await tick();
   }
   if (cacheOK && !S.pruned && S.workers.length) { S.pruned = true; S.workers[0].w.postMessage({ t: 'prune' }); }   // records of textures that no longer exist
@@ -462,12 +515,12 @@ async function runFlush() {
 // idle: nothing being made ready, and nothing painted this session left to store (if it can be stored)
 export function idle() {
   if (idleQ.length) return false;
-  const unstored = S.ready && !S.cacheOff && (S.held.size || S.snaps.size);
+  const unstored = S.ready && !S.cacheOff && !S.writesOff && (S.held.size || S.snaps.size);
   return !S.flushing && !flushWanted && !unstored && !S.queue.length && !S.workers.some(W => W.busy) && !S.waiting.size && !S.pageQ.length;
 }
 export function pagePainted() { return S.pageNames.slice(); }
 export function stats() {
-  const r = { workers: S.workers.length, failed: S.failed, cache: { broken: !!S.cacheOff, lastErr: S.cacheOff }, pageOnly: PAGE_ONLY.size, lastPrep: S.lastPrep || null, ...S.stats,
+  const r = { workers: S.workers.length, failed: S.failed, cache: { broken: !!S.cacheOff, full: !!S.writesOff, lastErr: S.cacheOff || S.writesOff }, pageOnly: PAGE_ONLY.size, lastPrep: S.lastPrep || null, ...S.stats,
     pending: { queue: S.queue.length, busy: S.workers.filter(W => W.busy).length, waiting: S.waiting.size, pageQ: S.pageQ.length, idleQ: idleQ.length, held: S.held.size, snaps: S.snaps.size, flushing: S.flushing, flushWanted } };
   for (const k of ['pageMs', 'workerMs', 'decodeMs']) r[k] = Math.round(r[k]);
   return r;

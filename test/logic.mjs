@@ -66,7 +66,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(xPaints === 1, "textures: a paint that reads an adopted texture gets it painted (whatever painting it leaves behind)");
   check(!P.adopt('lt_y', bmp(8, 8)) && closed === 3, 'textures: a picture for an already painted texture is refused');
   check(TC.hash53('core.js v1') !== TC.hash53('core.js v2') && TC.hash53('x') === TC.hash53('x'), 'textures: source hash');
+  check(TC.hash53(new TextEncoder().encode('font bytes')) === TC.hash53('font bytes'), 'textures: byte arrays hash like their text');
   if (!hadOC) delete globalThis.OffscreenCanvas;
+  // The key covers a family's own source and core.js only: a helper module a family imported would be
+  // edited without the key noticing, and cached textures would come back stale. So each family module
+  // imports ./core.js and nothing else, and core.js imports nothing.
+  const fs = await import('node:fs');
+  const fams = fs.readFileSync(new URL('../client/js/paint/index.js', import.meta.url), 'utf8').match(/FAMILIES = \[([^\]]*)\]/)[1].match(/'([^']+)'/g).map(s => s.slice(1, -1));
+  const importsOf = src => [...src.matchAll(/\bimport\s*(?:[\w*{}\s,$]*?\bfrom\s*)?['"]([^'"]+)['"]|\bimport\s*\(\s*([^)]*)\)|\bexport\s+[*{][^;]*?\bfrom\s*['"]([^'"]+)['"]/g)].map(m => m[1] || m[2] || m[3]);
+  const bad = fams.map(f => [f, importsOf(fs.readFileSync(new URL(`../client/js/paint/${f}.js`, import.meta.url), 'utf8'))]).filter(([, im]) => im.length !== 1 || im[0] !== './core.js');
+  const coreIm = importsOf(fs.readFileSync(new URL('../client/js/paint/core.js', import.meta.url), 'utf8'));
+  check(fams.length >= 8 && !bad.length && !coreIm.length, `textures: each of the ${fams.length} family modules imports only ./core.js, and core.js nothing (the cache key covers no other module)${bad.length ? `; ${bad.map(([f, im]) => `${f}: ${im.join(', ')}`).join('; ')}` : ''}${coreIm.length ? `; core.js: ${coreIm.join(', ')}` : ''}`);
+  const faces = TC.systemFaces(fams.map(f => fs.readFileSync(new URL(`../client/js/paint/${f}.js`, import.meta.url), 'utf8')).join('\n'));
+  check(['Georgia', 'Liberation Serif', 'DejaVu Sans', 'Arial Black', 'serif', 'sans-serif'].every(n => faces.includes(n)) && !faces.some(n => /px|\$|\{/.test(n)), `textures: the system font faces the families name are found for the cache key (${faces.length}: ${faces.join(', ')})`);
 }
 
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });

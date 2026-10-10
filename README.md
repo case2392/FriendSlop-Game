@@ -152,6 +152,8 @@ tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewp
           loadtime.mjs  load-time numbers · texhash.mjs · texgame.mjs · texfaults.mjs  the
                        texture cache and paint workers give the same pixels, under faults too
           joinrace.mjs  loot that breaks while a day loads: clients still match the server
+          dayrace.mjs   a day that changes again mid-load: nothing of the old day leaks into
+                       the new one (npm run test:race runs both)
 ```
 
 - **Server-authoritative world, client-authoritative bodies.** The server

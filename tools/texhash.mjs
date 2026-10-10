@@ -67,7 +67,7 @@ const res = await page.evaluate(async ({ only, fam, every }) => {
   // 2. a paint worker, reverse order; each texture stored to the cache right after. One that clips comes
   //    back inexact (OffscreenCanvas clips without antialiasing): the page paints it, and the page's
   //    snapshot is what gets stored
-  const H = await TC.sourceHashes(P.FAMILIES);
+  const H = await TC.sourceHashes(P.FAMILIES, fontList());
   const w = new Worker('/js/paint/worker.js', { type: 'module' });
   const call = (m, want) => new Promise((res, rej) => { w.onmessage = ({ data }) => { if (data.t === want || data.t === 'fail') res(data); }; w.onerror = e => rej(new Error(e.message)); w.postMessage(m); });
   const rd = await call({ t: 'init', fonts: fontList(), hashes: H }, 'ready');

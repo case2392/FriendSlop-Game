@@ -72,6 +72,7 @@ async function store(names, bmps = null, depsList = null) {
   let n = 0, bytes = 0, err = '';
   for (const [i, name] of names.entries()) {
     try {
+      if (cacheStatus().full) { bmps?.[i]?.close(); err = 'cache full'; forget(name); continue; }   // the quota ran out: no more writes
       let cv;
       if (bmps?.[i]) {   // the page's own paint, snapshotted right after it was painted
         const b = bmps[i];
@@ -105,16 +106,19 @@ self.onmessage = async ({ data: m }) => {
       const probe = new OffscreenCanvas(4, 4).getContext('2d', { willReadFrequently: true });
       if (!probe) throw new Error('no 2d context on OffscreenCanvas');
       H = m.hashes || null;
-      // test hook (tools/texfaults.mjs): storage that throws, the way a private window's can
+      // test hooks (tools/texfaults.mjs): storage that throws, the way a private window's can; or a
+      // full one, whose writes fail on quota
       if (m.breakStorage) Object.defineProperty(self, 'indexedDB', { get() { throw new DOMException('storage denied', 'SecurityError'); } });
+      if (m.fullStorage) IDBObjectStore.prototype.put = () => { throw new DOMException('quota exceeded', 'QuotaExceededError'); };
       await loadFonts(m.fonts);
       post({ t: 'ready', ok: true });
     } catch (e) { post({ t: 'ready', ok: false, err: e.message }); }
   } else if (m.t === 'paint') {
+    let got = [];
     try {
       fresh = []; clipped = false;
       const cv = canvasFor(m.name);
-      const got = fresh; fresh = [];
+      got = fresh; fresh = [];
       if (clipped) for (const f of got) INEXACT.add(f.name);
       // a paint that read a texture whose pixels depend on paint order (texmanifest IN_ORDER) is left to
       // the game to paint in its own order (alone)
@@ -124,7 +128,11 @@ self.onmessage = async ({ data: m }) => {
       if (!exact) { for (const f of got) forget(f.name); post({ t: 'done', id: m.id, name: m.name, bmp: null, exact, alone, fresh: [] }); return; }
       const bmp = await createImageBitmap(cv);
       post({ t: 'done', id: m.id, name: m.name, bmp, exact, fresh: got }, [bmp]);
-    } catch (e) { post({ t: 'fail', id: m.id, name: m.name, err: e.message }); }
+    } catch (e) {
+      for (const f of [...got, ...fresh]) forget(f.name);   // what it painted on the way: the page never hears of it
+      fresh = [];
+      post({ t: 'fail', id: m.id, name: m.name, err: e.message });
+    }
   } else if (m.t === 'load') {
     // cache reads happen here, not on the page: a busy page can't delay them. Each record's key must
     // still match its texture's sources; it is decoded (off every thread that matters) and handed
@@ -137,13 +145,13 @@ self.onmessage = async ({ data: m }) => {
       await Promise.all(m.names.map(async name => {
         const rec = recs.get(name), t = meta(name);
         if (!rec) return;
-        if (t && rec.w === t.w && rec.h === t.h && rec.key === keyOf(name, rec.deps, H, meta)) {
-          try {
+        try {   // one malformed record (deps not a list, say) is just bad, not the whole batch
+          if (t && rec.w === t.w && rec.h === t.h && Array.isArray(rec.deps) && rec.key === keyOf(name, rec.deps, H, meta)) {
             const bmp = await createImageBitmap(rec.blob, { premultiplyAlpha: 'default', colorSpaceConversion: 'none' });
             if (bmp.width === t.w && bmp.height === t.h) { hits.push(name); bmps.push(bmp); return; }
             bmp.close();
-          } catch { /* unreadable */ }
-        }
+          }
+        } catch { /* unreadable */ }
         bad.push(name);
       }));
       if (bad.length) await remove(bad);
