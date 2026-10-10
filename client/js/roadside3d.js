@@ -163,6 +163,9 @@ function rsMat(name, ctx) {
   if (flags.includes('*')) { m.emissive = new THREE.Color('#ffcf88'); m.emissiveMap = m.map; m.emissiveIntensity = 0.55; }
   if (flags.includes('#') || flags.includes('%')) { m.polygonOffset = true; m.polygonOffsetFactor = -2; m.polygonOffsetUnits = -4; }
   if (flags.includes('%')) { m.transparent = true; m.depthWrite = false; }
+  // the crash furrow's scorch is draped clear of the ground and the heaps by its own lift: a slope-scaled offset
+  // would pull it through a ridge's crest where you look across the ridge at a grazing angle
+  if (base === 'rs_scorch') m.polygonOffsetFactor = 0;
   if (useCover) {
     const P = coverOf(base, ctx);
     m.onBeforeCompile = sh => {
@@ -1409,7 +1412,12 @@ function buildCrash(B, p, parts, ctx, decor) {
     // turned earth either side of the fuselage, the ground between them scorched
     const zBack = -Math.max(4, (p.mesa ? p.mesa.r : 7) - 1.3), flen = zN - zBack;
     const heaps = [[1.4, 0.45, 0.9, fus.x, zN + 0.6, 0, 7]];
-    for (const sx of [-1, 1]) heaps.push([0.4, 0.24, flen * 0.4, fus.x + sx * 1.18, (zN + zBack) / 2 - 0.2, sx * 0.03, 9]);
+    // each ridge three overlapping heaps of its own height and set, so its crest is lumpy, never one straight line
+    const rr = rngOf(seedOf(p.x, p.z, 23));
+    for (const sx of [-1, 1]) for (const f of [0.2, 0.5, 0.8]) {
+      heaps.push([range(rr, 0.36, 0.46), range(rr, 0.19, 0.3), flen * range(rr, 0.19, 0.24), fus.x + sx * (1.18 + range(rr, -0.07, 0.09)),
+        zBack + flen * (f + range(rr, -0.04, 0.04)) - 0.2, sx * range(rr, -0.03, 0.08), 3]);
+    }
     for (const [rx, h, rz, x, z, ry, n] of heaps) earth(B, ctx, x, z, rx, h, rz, ry, n);
     // the furrow's floor scorched, the soot running up the ridges' inner slopes and onto the heap: a long decal
     // painted to its own proportions (round ash, a ragged outline gone before the ridges' crests) draped over the

@@ -2266,14 +2266,17 @@ register('rs_scorch', {
     for (let i = 0; i < 26; i++) { const t = rnd() * 0.9, sd = rnd() < 0.5 ? -1 : 1; mdot(mid(t) + sd * half(t) * range(rnd, 0.9, 1.06), t * h, range(rnd, 1.5, 3), 0.8, 0.6); }
     m.globalCompositeOperation = 'destination-out';
     for (let i = 0; i < 40; i++) { const t = range(rnd, 0.6, 1); mdot(mid(t) + range(rnd, -0.9, 0.9) * half(t), t * h, half(t) * range(rnd, 0.15, 0.4) * (0.6 + (t - 0.6) * 2), 0.5 + (t - 0.6), 0.45); }
-    // fade the ends (the nose end on the heap, the tail end where it touched down) and clear a margin all round
+    m.globalCompositeOperation = 'source-over';
+    blurTile(M, 1.6);
+    // then fade the ends (the nose end on the heap, the tail end where it touched down) and clear a margin all
+    // round, after the blur so nothing bleeds back into it: the sheet's rim is exactly clear where it meets a heap
     m.globalCompositeOperation = 'destination-in';
     m.fillStyle = grad(m, 0, 0, 0, h, [[0, '#ffffff', 0], [0.04, '#ffffff', 1], [0.7, '#ffffff', 0.95], [0.96, '#ffffff', 0], [1, '#ffffff', 0]]);
     m.fillRect(0, 0, w, h);
-    m.fillStyle = grad(m, 0, 0, w, 0, [[0, '#ffffff', 0], [0.05, '#ffffff', 1], [0.95, '#ffffff', 1], [1, '#ffffff', 0]]);
+    m.fillStyle = grad(m, 0, 0, w, 0, [[0, '#ffffff', 0], [0.04, '#ffffff', 0], [0.1, '#ffffff', 1], [0.9, '#ffffff', 1], [0.96, '#ffffff', 0], [1, '#ffffff', 0]]);
     m.fillRect(0, 0, w, h);
+    m.clearRect(0, 0, w, 3); m.clearRect(0, h - 3, w, 3);
     m.globalCompositeOperation = 'source-over';
-    blurTile(M, 1.6);
     g.globalCompositeOperation = 'destination-in';
     g.drawImage(M, 0, 0);
     g.globalCompositeOperation = 'source-over';

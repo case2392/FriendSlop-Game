@@ -836,7 +836,7 @@ function splatMaterial(biome, cfg) {
                   vec2 sq = vec2(dot(xz, vec2(-fl.y, fl.x)), wp.y + dot(xz, fl) * 0.3);
                   float sk1 = texture2D(tMacro, vec2(sq.x / 11.0, sq.y / 40.0) + vec2(0.43, 0.19)).g;
                   float sk2 = texture2D(tDetail, vec2(sq.x / 2.2, sq.y / 9.0) + vec2(0.07, 0.61)).r;
-                  col *= 1.0 + ((sk1 - 0.5) * 0.24 + (sk2 - 0.5) * 0.12 * (1.0 - smoothstep(15.0, 35.0, dC))) * ws;
+                  col *= 1.0 + ((sk1 - 0.5) * 0.32 + (sk2 - 0.5) * 0.17 * (1.0 - smoothstep(15.0, 35.0, dC))) * ws;
                 }
               }
               if (mesaK > 0.0) {

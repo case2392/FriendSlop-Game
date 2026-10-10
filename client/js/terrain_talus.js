@@ -62,7 +62,7 @@ function blockGeo(r, cuts = 5) {
 // (the outline, for a snow cap to follow)
 function slabGeo(r, n = 6 + Math.floor(r() * 3)) {
   const ang = [], rad = [];
-  for (let k = 0; k < n; k++) { ang.push((k + (r() - 0.5) * 0.6) / n * Math.PI * 2); rad.push(0.8 + r() * 0.3); }
+  for (let k = 0; k < n; k++) { ang.push((k + (r() - 0.5) * 0.7) / n * Math.PI * 2); rad.push(0.74 + r() * 0.36); }
   const ox = (r() - 0.5) * 0.12, oz = (r() - 0.5) * 0.12, cy = 0.27 + r() * 0.08;
   // rings, bottom to top: [y, scale, shift]; the chamfer ring's height wanders a little per corner
   const rings = [[-1.0, 0.86, 0], [-0.3, 0.95, 0.4], [cy, 1.0, 0.8], [0.5, 0.82 - r() * 0.06, 1]];
@@ -94,7 +94,7 @@ function capGeo(r, S) {
     const a0 = S.ang[k], a1 = S.ang[(k + 1) % n] + (k === n - 1 ? Math.PI * 2 : 0), r0 = S.rad[k], r1 = S.rad[(k + 1) % n];
     for (let j = 0; j < m; j++) {
       const t = j / m, x0 = Math.cos(a0) * r0, z0 = Math.sin(a0) * r0, x1 = Math.cos(a1) * r1, z1 = Math.sin(a1) * r1;
-      pts.push({ x: x0 + (x1 - x0) * t, z: z0 + (z1 - z0) * t, o: 1.05 + r() * 0.09, d: 0.08 + r() * r() * 0.22 });
+      pts.push({ x: x0 + (x1 - x0) * t, z: z0 + (z1 - z0) * t, o: 1.04 + r() * 0.12, d: 0.07 + r() * r() * 0.3 });
     }
   }
   // rings, inside out: [scale of the outline, y, which per-point term] (the first sits hidden in the rock)
@@ -121,9 +121,10 @@ function capGeo(r, S) {
 }
 
 const STYLE = {
-  // (snow: the granite at the mesa flank's own scale and turn, 7.96 m a tile turned 26.6 degrees, so a shoulder
-  // reads as an outcrop of the same rock; snow on every top and ledge; undersides in the flank's cool blue)
-  snow: { rock: 'cliff_snow', cover: 'ground_snow', rs: 7.96, turn: true, form: true, slab: true, tint: [1.06, 1.07, 1.1], up: [0.22, 0.42], coverMax: 1.0, lumUp: 0.7, under: [0.84, 0.88, 0.98], buried: [0.8, 0.85, 0.96], drift: [0.9, 0.94, 1.02] },
+  // (snow: the granite at the mesa flank's own turn, 26.6 degrees, a little finer than its 7.96 m tile so a
+  // 2-5 m slab still shows its fractures, an outcrop of the same rock; snow on every top and ledge;
+  // undersides in the flank's cool blue)
+  snow: { rock: 'cliff_snow', cover: 'ground_snow', rs: 5.3, turn: true, form: true, slab: true, tint: [1.06, 1.07, 1.1], up: [0.22, 0.42], coverMax: 1.0, lumUp: 0.7, under: [0.84, 0.88, 0.98], buried: [0.8, 0.85, 0.96], drift: [0.9, 0.94, 1.02] },
   desert: { rock: 'cliff_desert', cover: 'ground2_desert', rs: 8.0, capC: [0.78, 0.62, 0.42], tint: [1.0, 1.0, 1.0], up: [0.8, 0.95], coverMax: 0.6, lumUp: 0, under: [0.8, 0.74, 0.78], buried: [0.72, 0.64, 0.62], drift: [1.0, 0.98, 0.95] },
 };
 const mats = new Map();
