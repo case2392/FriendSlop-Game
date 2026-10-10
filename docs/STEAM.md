@@ -1,4 +1,4 @@
-# Shipping FRIENDSLOP on Steam
+# Shipping NO MONEY DOWN on Steam
 
 This is the practical, start-to-finish path from this repo to a Steam store page.
 Games built exactly this way (HTML5 + Electron) ship on Steam all the time —
@@ -31,13 +31,15 @@ Vampire Survivors launched like this.
 
 1. Create a [Steamworks partner account](https://partner.steamgames.com) and pay the
    $100 app fee (recouped at $1,000 revenue).
-2. You'll get an **App ID**. Fill in the store page: name (FRIENDSLOP), capsule art,
+2. You'll get an **App ID**. Fill in the store page: name (NO MONEY DOWN), capsule art,
    screenshots (there are real gameplay shots in `test/screenshots/` to start from),
-   trailer, tags: *Multiplayer, Party Game, Casual, Funny, PvP*.
+   trailer, tags: *Co-op, Online Co-Op, Physics, Funny, Driving, First-Person, Proximity Chat*.
 3. In **Steamworks → App → Installation**, define a launch option per OS pointing at
    the packaged binary (see step 2).
-4. Store screenshots: real captures live in `docs/screenshots/` — the Den, all four
-   chambers, the blackjack table, and the celebration.
+4. Store screenshots: real captures live in `docs/screenshots/` — the camp, riding in
+   the RV, the winch on the grade, climbing, the ranger gate, the casino, the pawn
+   shop, the Repo Man, night at the campfire. Regenerate them with
+   `node tools/docshots.mjs`.
 
 ## 2. Package the desktop build
 
@@ -72,9 +74,10 @@ const client = steamworks.init(YOUR_APP_ID);
 // rich presence, overlay, friend invites → see steamworks.js docs
 ```
 
-Good first achievements: *win a round while ALL IN*, *win the jackpot*,
-*explode holding the tater 3 times in one match*, *win a match without winning
-a single minigame (pure gambling)*.
+Good first achievements: *own the RV* (win a run), *pay day 5 entirely with
+casino money*, *finish a day with zero medical bills*, *get run over by your own
+RV*, *deliver the vase to the pawn shop at full value*, *lose the doors AND the
+roof and still win*.
 
 Enable the Steam Overlay by launching with `--in-process-gpu` on Windows if it
 doesn't hook automatically.
@@ -91,8 +94,8 @@ doesn't hook automatically.
 
 - [ ] Public game server deployed + WebSocket URL updated (or SDR integrated)
 - [ ] `FRIENDSLOP_FAST` **not** set in production
-- [ ] Playtest with 8 real humans (the game supports it; the chaos scales)
-- [ ] Store page assets: 6+ screenshots, a 30s trailer of the sumo ring shrinking
+- [ ] Playtest with 2, 4 and 6 real humans — tune the quotas (docs/DESIGN.md §8) on the results
+- [ ] Store page assets: 6+ screenshots, a 30s trailer (the winch up the grade, the coin flip at 23:58, the Repo Man taking the doors)
 - [ ] Price point: friend-slop games live at $4.99 (or F2P + cosmetic DLC later)
 - [ ] Steam Deck: it runs (WebGL canvas); add gamepad support — left stick →
       movement vector, right stick → camera yaw, A → dash (~40 lines in
