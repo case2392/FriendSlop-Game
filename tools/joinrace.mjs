@@ -3,7 +3,7 @@
 //  1. a second player joins; while the joiner's day loads, a vase smashes, a safe takes a dent and
 //     the clock runs into midnight broke, so the Repo Man takes the RV's doors;
 //  2. a new day starts (day 3: not the day the night got ready, so it loads in full); while both
-//     clients load it, a vase smashes and a safe takes a dent.
+//     clients load it, a vase and a safe dropped past the camp take dents (on snow the vase lives).
 // After each round, both clients must match the server (a probe socket joins and reads its props list
 // and parts): the same props (no ghost of the vase with a local collider), the same values, the same
 // parts. And the toasts that came during a load must go up after it, not run out under the loading
@@ -174,7 +174,7 @@ ids = await drop(probe, W3);
 t0 = await w;
 await smashed(probe, ids, from, 'round 2', t0);
 await Promise.all([built(host, 3, mark[0]), built(joiner, 3, mark[1])]);
-await compare('round 2 (day 3)', [['joiner', joiner], ['host', host]], code, { joiner: ['ev:break'], host: ['ev:break'] });
+await compare('round 2 (day 3)', [['joiner', joiner], ['host', host]], code, { joiner: ['ev:dmg'], host: ['ev:dmg'] });
 
 check(errors.length === 0, `page errors: ${errors.join(' | ') || 'none'}`);
 probe.ws.close();
