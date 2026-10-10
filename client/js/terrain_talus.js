@@ -58,9 +58,10 @@ function blockGeo(r, cuts = 5) {
 
 // One cut granite slab, unit-ish (radius ~1 in x and z, y from -1 to its flat top at 0.5): an irregular
 // n-sided outline, faces leaning out a little toward the top, a chamfer round the top edge, the top
-// rings shifted a little so it never stands square. Flat facets (non-indexed). -> { geo, ang, rad, top }
-// (the outline, for a snow cap to follow)
-function slabGeo(r, n = 6 + Math.floor(r() * 3)) {
+// rings shifted a little so it never stands square. Flat facets (non-indexed). knock: how many top corners
+// are knocked off (a plane cut through the corner, down and in), so its top outline is never a clean ring.
+// -> { geo, ang, rad, top, ox, oz, cuts } (the outline and the cut planes, for a snow cap to follow)
+function slabGeo(r, n = 6 + Math.floor(r() * 3), knock = 0) {
   const ang = [], rad = [];
   for (let k = 0; k < n; k++) { ang.push((k + (r() - 0.5) * 0.7) / n * Math.PI * 2); rad.push(0.74 + r() * 0.36); }
   const ox = (r() - 0.5) * 0.12, oz = (r() - 0.5) * 0.12, cy = 0.27 + r() * 0.08;
@@ -78,10 +79,35 @@ function slabGeo(r, n = 6 + Math.floor(r() * 3)) {
   }
   const T = rings.length - 1, ct = [ox, 0.5, oz], cb = [0, -1.0, 0];
   for (let k = 0; k < n; k++) { pos.push(...ct, ...P(T, k + 1), ...P(T, k)); pos.push(...cb, ...P(0, k), ...P(0, k + 1)); }
+  // knocked corners: a plane through the top a little inside the corner and the side well below the
+  // chamfer, leaning out and up; whatever lies beyond it is pushed back onto it (a flat broken facet)
+  const cuts = [];
+  if (knock > 0) {
+    const k0 = Math.floor(r() * n);
+    for (let j = 0; j < knock; j++) {
+      const k = (k0 + j * Math.max(2, Math.floor(n / 2))) % n, a = ang[k], rr = rad[k];
+      const r0 = (0.38 + r() * 0.1) * rr, r1 = 1.05 * rr, y1 = cy - 0.4 - r() * 0.15;
+      let nr = 0.5 - y1, ny = r1 - r0; const L = Math.hypot(nr, ny); nr /= L; ny /= L;
+      const nx = Math.cos(a) * nr, nz = Math.sin(a) * nr;
+      cuts.push([nx, ny, nz, nx * (Math.cos(a) * r0 + ox) + ny * 0.5 + nz * (Math.sin(a) * r0 + oz)]);
+    }
+    cutBy(pos, cuts, 0);
+  }
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.computeVertexNormals();
-  return { geo: g, ang, rad, top: rings[T][1], ox, oz };
+  return { geo: g, ang, rad, top: rings[T][1], ox, oz, cuts };
+}
+
+// push every point beyond a cut plane [nx, ny, nz, d] (offset by off) back onto it
+function cutBy(pos, cuts, off) {
+  for (const [nx, ny, nz, d0] of cuts) {
+    const d = d0 + off;
+    for (let i = 0; i < pos.length; i += 3) {
+      const t = pos[i] * nx + pos[i + 1] * ny + pos[i + 2] * nz - d;
+      if (t > 0) { pos[i] -= nx * t; pos[i + 1] -= ny * t; pos[i + 2] -= nz * t; }
+    }
+  }
 }
 
 // A soft snow cap over a slab's top (in the slab's own frame): it follows the outline, a little wider, so
@@ -113,6 +139,9 @@ function capGeo(r, S) {
   }
   const ci = pos.length / 3; pos.push(S.ox, 0.73, S.oz);
   for (let k = 0; k < N; k++) idx.push(ci, (R - 1) * N + (k + 1) % N, (R - 1) * N + k);
+  // (over a knocked corner the snow stops at the break: the cap is cut just inside the broken facet, so
+  // the facet shows bare rock and the cap's edge meets it in a clean line)
+  if (S.cuts && S.cuts.length) cutBy(pos, S.cuts, -0.03);
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setIndex(idx);
@@ -124,7 +153,7 @@ const STYLE = {
   // (snow: the granite at the mesa flank's own turn, 26.6 degrees, a little finer than its 7.96 m tile so a
   // 2-5 m slab still shows its fractures, an outcrop of the same rock; snow on every top and ledge;
   // undersides in the flank's cool blue)
-  snow: { rock: 'cliff_snow', cover: 'ground_snow', rs: 5.3, turn: true, form: true, slab: true, tint: [1.06, 1.07, 1.1], up: [0.22, 0.42], coverMax: 1.0, lumUp: 0.7, under: [0.84, 0.88, 0.98], buried: [0.8, 0.85, 0.96], drift: [0.9, 0.94, 1.02] },
+  snow: { rock: 'cliff_snow', cover: 'ground_snow', rs: 5.3, turn: true, form: true, slab: true, tint: [1.06, 1.07, 1.1], lift: true, up: [0.22, 0.42], coverMax: 1.0, lumUp: 0.7, under: [0.9, 0.92, 0.98], buried: [0.84, 0.88, 0.96], drift: [0.9, 0.94, 1.02] },
   desert: { rock: 'cliff_desert', cover: 'ground2_desert', rs: 8.0, capC: [0.78, 0.62, 0.42], tint: [1.0, 1.0, 1.0], up: [0.8, 0.95], coverMax: 0.6, lumUp: 0, under: [0.8, 0.74, 0.78], buried: [0.72, 0.64, 0.62], drift: [1.0, 0.98, 0.95] },
 };
 const mats = new Map();
@@ -137,7 +166,7 @@ function talusMaterial(biome, form) {
   const mat = new THREE.MeshLambertMaterial({ color: 0xffffff });
   mat.userData.U = U;
   mats.set(biome, mat);
-  mat.customProgramCacheKey = () => 'terrain-talus-v6-' + biome + (useForm ? 'f' : '');
+  mat.customProgramCacheKey = () => 'terrain-talus-v7-' + biome + (useForm ? 'f' : '');
   mat.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
     sh.vertexShader = sh.vertexShader
@@ -157,6 +186,10 @@ function talusMaterial(biome, form) {
           vec2 pX = TR * vec2(vTW.z, vTW.y) / ${S.rs.toFixed(2)} + 0.31, pY = vTW.xz / ${S.rs.toFixed(2)} + 0.57, pZ = TR * vec2(-vTW.x, vTW.y) / ${S.rs.toFixed(2)} + 0.13;
           vec3 rk = texture2D(tRock, pX).rgb * b.x + texture2D(tRock, pY).rgb * b.y + texture2D(tRock, pZ).rgb * b.z;
           rk *= vec3(${f(S.tint)});
+          ${S.lift ? `// (as the flank does it: never darker than the granite's own palette; then a tenth of the way to its
+          // mean and a little lighter, so a slab reads as the flank's own rock stepping out, not a darker stone)
+          rk += max(vec3(0.0), vec3(0.11, 0.125, 0.165) - rk) * 0.6;
+          rk = mix(rk, textureLod(tRock, vec2(0.5), 12.0).rgb * vec3(${f(S.tint)}), 0.15) * vec3(1.12, 1.13, 1.16);` : ''}
           vec3 sn = texture2D(tSnow, vTW.xz / 8.0).rgb;
           float nz = texture2D(tSnow, vTW.xz / 2.3 + vec2(0.4, 0.7)).g - 0.5;
           // (a snow cap: snow all over, cool blue where it turns down over the lip)
@@ -190,14 +223,16 @@ export function buildTalus(W, { form = null } = {}) {
   if (!mesas.length) return null;
   const parts = [], m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), e = new THREE.Euler(), sc = new THREE.Vector3(), tp = new THREE.Vector3();
   // (snowCap: a granite slab with a snow cap hanging over its edge; in the snow every block is a cut slab)
-  const add = (r, x, y, z, s, yaw, tilt, cuts, cap = 0, snowCap = false) => {
+  // (tilt: [x, z] Euler angles after the yaw, or a quaternion used as it is; knock: corners knocked off a slab)
+  const add = (r, x, y, z, s, yaw, tilt, cuts, cap = 0, snowCap = false, knock = 0) => {
     const geos = [];
     if (slab) {
-      const S = slabGeo(r);
+      const S = knock ? slabGeo(r, undefined, knock) : slabGeo(r);
       geos.push([S.geo, cap]);
       if (snowCap) geos.push([capGeo(r, S), 2]);
     } else geos.push([toCreasedNormals(blockGeo(r, cuts), 0.75), cap]);
-    e.set(tilt[0], yaw, tilt[1]); q.setFromEuler(e); m4.compose(tp.set(x, y, z), q, sc.set(s[0], s[1], s[2]));
+    if (Array.isArray(tilt)) { e.set(tilt[0], yaw, tilt[1]); q.setFromEuler(e); } else q.copy(tilt);
+    m4.compose(tp.set(x, y, z), q, sc.set(s[0], s[1], s[2]));
     for (const [g, flag] of geos) {
       // the sink attribute: block-local height (0 at the ground line given by y, 1 at its top), + 10 on
       // a caprock slab, + 20 on a snow cap
@@ -259,18 +294,26 @@ export function buildTalus(W, { form = null } = {}) {
         add(r, x, top - 0.82 - r() * 0.1, z, s, -a + Math.PI / 2 + (r() - 0.5) * 0.25, [(r() - 0.5) * 0.08, (r() - 0.5) * 0.08], 9, 1);
       }
     }
-    // rim blocks: hanging over the lip, so the skyline of the top is never level
+    // rim blocks: hanging over the lip, so the skyline of the top is never level. Each a broad, low slab
+    // (never a cube) with a corner or two knocked off its top, tipped 8-15 degrees out over the lip and
+    // a little sideways, about 40% of its height sunk below the lip, as if the rim were breaking away
     const nRim = desert ? 0 : 3 + (r() < 0.5 ? 1 : 0), hiA = r() * Math.PI * 2;      // (bigger toward one side: the top seems to lean)
+    const qY = new THREE.Quaternion(), qT = new THREE.Quaternion(), qS = new THREE.Quaternion(), ax = new THREE.Vector3();
     for (let k = 0, t = 0; k < nRim && t < 30; t++) {
       const a = r() * Math.PI * 2;
       if (ang(a, roadA) < 0.7) continue;
       const d = surfR(a, top - 0.3);
       if (d == null) continue;
-      const x = p.x + Math.cos(a) * (d + 0.25), z = p.z + Math.sin(a) * (d + 0.25);
+      const x = p.x + Math.cos(a) * (d + 0.35), z = p.z + Math.sin(a) * (d + 0.35);
       if (!clear(x, z, 1.4)) continue;
       const hk = 0.75 + 0.5 * (0.5 + 0.5 * Math.cos(a - hiA));
-      const s = [(1.0 + r() * 0.6) * hk, (0.85 + r() * 0.5) * hk, (0.95 + r() * 0.5) * hk];
-      add(r, x, top - 0.55 + s[1] * 0.35, z, s, -a + (r() - 0.5) * 0.8, [(r() - 0.5) * 0.5, (r() - 0.5) * 0.5], 5, 0, true);
+      const s = [(1.15 + r() * 0.55) * hk, (0.72 + r() * 0.3) * hk, (1.05 + r() * 0.5) * hk];
+      qY.setFromAxisAngle(ax.set(0, 1, 0), -a + (r() - 0.5) * 0.8);
+      qT.setFromAxisAngle(ax.set(Math.sin(a), 0, -Math.cos(a)), (8 + r() * 7) * Math.PI / 180);      // (out over the lip)
+      qS.setFromAxisAngle(ax.set(Math.cos(a), 0, Math.sin(a)), (r() - 0.5) * 0.14);                   // (and a little sideways)
+      const qR = new THREE.Quaternion().multiplyQuaternions(qS, qT).multiply(qY);
+      // (its local y runs -1..0.5: the lip's ground line 40% of the way up)
+      add(r, x, top - 0.3 + s[1] * 0.4, z, s, 0, qR, 5, 0, true, 1 + (r() < 0.55 ? 1 : 0));
       k++;
     }
     // the talus: fallen blocks half buried round the foot

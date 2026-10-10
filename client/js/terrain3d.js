@@ -336,8 +336,8 @@ function splatMaterial(biome, cfg) {
             // slopes count as part of the face, keeps its ripples and stays sand)
             float rawD = mix(textureLod(tSlopeR, (gqc + 0.5) / uGridN, 0.0).r, sl.y, smoothstep(0.0, 12.0, dOut));
             float rippleK = 1.0 - smoothstep(0.06, 0.13, min(sl.y, rawD + 0.03) + (nE - 0.5) * 0.04 + (mB.g - 0.5) * 0.03);
-            // (up close only ~3.5 mips: the ripples a soft swell, the slope never one flat tone)
-            sBias *= exp2(mix(3.5, 5.0, smoothstep(15.0, 40.0, distance(cameraPosition, wp))) * (1.0 - rippleK * (1.0 - smoothstep(50.0, 140.0, distance(cameraPosition, wp)))));
+            // (up close only ~2.5 mips: the ripples a soft swell, the slope never one flat tone)
+            sBias *= exp2(mix(2.5, 5.0, smoothstep(12.0, 40.0, distance(cameraPosition, wp))) * (1.0 - rippleK * (1.0 - smoothstep(50.0, 140.0, distance(cameraPosition, wp)))));
           #endif
           vec3 g1 = textureGrad(tG1, gp / uScale.x, gdx / uScale.x * gB * sBias, gdy / uScale.x * gB * sBias).rgb;
           vec3 g1b = textureGrad(tG1, gpr / (uScale.x * 2.3) + 0.37, gdxr / (uScale.x * 2.3) * gB * sBias, gdyr / (uScale.x * 2.3) * gB * sBias).rgb;
@@ -351,6 +351,7 @@ function splatMaterial(biome, cfg) {
             float w2 = smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y);
             col = mix(g1, g2, w2);
           }
+          float sDet = 1.0;           // (Tanaris: the sand slope's small detail, for the face's half-buried rock too)
           #ifdef TERRAIN_DUNES
           if (rippleK < 0.999) {
             // sand sliding down a slope: soft streaks along its fall line (across it ~0.4-1.2 m, down it several m)
@@ -359,7 +360,25 @@ function splatMaterial(biome, cfg) {
             float stk = texture2D(tMacro, vec2(sc.x / 22.0, sc.y / 140.0) + vec2(0.17, 0.53)).b;
             float stk2 = texture2D(tDetail, vec2(sc.x / 1.3, sc.y / 7.0) + vec2(0.61, 0.23)).g;
             float stkN = 1.0 - smoothstep(12.0, 30.0, distance(cameraPosition, wp));     // (the fine streaks stronger up close)
-            col *= mix(1.0, 0.9 + 0.2 * stk + (stk2 - 0.5) * (0.14 + 0.1 * stkN), (1.0 - rippleK) * (1.0 - 0.85 * mesaK));   // (a crash mesa's foot drift: hardly streaked, never a curtain)
+            col *= mix(1.0, 0.9 + 0.2 * stk + (stk2 - 0.5) * (0.14 + 0.16 * stkN), (1.0 - rippleK) * (1.0 - 0.85 * mesaK));   // (a crash mesa's foot drift: hardly streaked, never a curtain)
+            // and within ~20 m a sand slope carries the floor's small detail as well (it would read blank
+            // beside the crisp floor): some of the floor's own painted ripples (the sand fetched sharp over
+            // its softened fetch), small wind ripples across the fall line (~0.3 m apart, coming and going
+            // in patches) and a sand grain, all laid in the face's own frame (unstretched)
+            float sN = (1.0 - rippleK) * (1.0 - mesaK) * (1.0 - smoothstep(14.0, 24.0, distance(cameraPosition, wp)));
+            if (sN > 0.001) {
+              float fcs = clamp(1.0 - sl.y, 0.4, 1.0), fsn = sqrt(1.0 - fcs * fcs);
+              vec2 pf = vec2(-fall.y, fall.x);
+              vec2 fc = vec2(dot(xz, pf), dot(xz, fall) * fcs - wp.y * fsn);
+              vec2 fx = vec2(dot(wpX.xz, pf), dot(wpX.xz, fall) * fcs - wpX.y * fsn), fy = vec2(dot(wpY.xz, pf), dot(wpY.xz, fall) * fcs - wpY.y * fsn);
+              vec2 gs = gp / uScale.x, gdS = gdx / uScale.x * gB, gdT = gdy / uScale.x * gB;
+              float rS = tLum(textureGrad(tG1, gs, gdS, gdT).rgb), rB = tLum(textureGrad(tG1, gs, gdS * 8.0, gdT * 8.0).rgb);
+              float fr = textureGrad(tDetail, fc / 4.6 + vec2(0.37, 0.11), fx / 4.6, fy / 4.6).b - 0.5;
+              float fp = smoothstep(0.25, 0.6, textureGrad(tMacro, fc / 23.0 + vec2(0.29, 0.83), fx / 23.0, fy / 23.0).g);
+              float fg = textureGrad(tDetail, fc / 1.5 + vec2(0.71, 0.43), fx / 1.5, fy / 1.5).g - 0.5;
+              sDet = 1.0 + (clamp(rS / max(rB, 1e-3) - 1.0, -0.35, 0.35) * 0.45 + fr * 0.75 * fp + fg * 0.38) * sN;
+              col *= sDet;
+            }
           }
           #endif
           // clearings: bare packed dirt; scorched and ashy round the fires
@@ -386,7 +405,7 @@ function splatMaterial(biome, cfg) {
             // Furrows and windrows are lit by the real sun (their slope against uSun), so the lit flank
             // is the one facing it; rows finer than a few pixels (far off, or at a grazing angle) melt
             // into the plot's average tone instead of aliasing into bars.
-            float pw = 0.0, pm = 0.0, pu = 0.0, pv = 0.0, pk = 0.0, pmr = 0.0; vec4 pB = vec4(0.0); vec2 pA = vec2(0.0, 1.0);
+            float pw = 0.0, pm = 0.0, pu = 0.0, pv = 0.0, pk = 0.0, pmr = 0.0; vec4 pB = vec4(0.0); vec2 pA = vec2(0.0, 1.0), pC = vec2(0.0);
             for (int i = 0; i < ${MAX_PLOTS}; i++) {
               vec4 A = uPlot[i], Bq = uPlotB[i];
               vec2 d = xz - A.xy;
@@ -399,7 +418,7 @@ function splatMaterial(biome, cfg) {
               if (wm > pm) {
                 // (the crop's own edge is crisper and ragged in the small: tufts and gaps of ~0.2-0.5 m)
                 float fe = mr < 3.2 ? texture2D(tMacro, xz / 9.0 + vec2(0.71, 0.37)).b : 0.5;
-                pm = wm; pu = u; pv = v; pB = Bq; pk = sd; pA = A.zw; pmr = mr + (fe - 0.5) * 0.7;
+                pm = wm; pu = u; pv = v; pB = Bq; pk = sd; pA = A.zw; pC = A.xy; pmr = mr + (fe - 0.5) * 0.7;
               }
             }
             // (a stubble field's headland is a wider, darker trodden track, so the plot reads from the road)
@@ -444,7 +463,11 @@ function splatMaterial(biome, cfg) {
                 // shadowed), clods along them, rows that thicken and thin and, every few metres, slump
                 // low or break (so they never run on like the rungs of a ladder)
                 float brk = textureLod(tMacro, vec2(bq / 7.0 + pk * 0.21, floor(q) * 0.173 + pk * 0.31), 0.0).b;
-                float relief = mix(0.4, 1.1, smoothstep(0.25, 0.7, brk + (rowN - 0.5) * 0.3));
+                // and along its length each row goes lighter and darker in 3-6 m patches (half its own, half
+                // shared with the rows beside it: drier and damper ground), slumping where it is lighter
+                float tb = mix(textureLod(tMacro, vec2(bq / 24.0 + pk * 0.13, floor(q) * 0.173 + pk * 0.53), 0.0).g,
+                  textureLod(tMacro, xz / 27.0 + vec2(pk * 0.21, 0.37), 0.0).g, 0.45);
+                float relief = mix(0.4, 1.1, smoothstep(0.25, 0.7, brk + (rowN - 0.5) * 0.3)) * mix(1.1, 0.6, smoothstep(0.4, 0.75, tb));
                 float s = 0.55 * sn * (0.8 + 0.4 * rowN) * relief;
                 float lit = clamp((Ly - s * sunA) / sqrt(1.0 + s * s) / Ly - 1.0, -0.6, 0.4);
                 float occ = smoothstep(0.45, 0.0, ridge) * relief;      // the furrow bottom: a soft cool shadow
@@ -466,6 +489,8 @@ function splatMaterial(biome, cfg) {
                 vec3 wc = vec3(0.13, 0.15, 0.035) * gMod * (0.8 + 0.5 * wq.r);
                 pc = mix(pc, wc, weed * 0.85);
                 pa = mix(pa, wc, weed * 0.6);
+                float tbk = 1.0 + (tb - 0.5) * 0.3;
+                pc *= tbk; pa *= tbk;
               } else if (kind > 0.5) {
                 // stubble: rows of pale cut stalks over darker soil with loose straw in it and, on most
                 // plots, a raked windrow of straw every five rows (lit on its sunward side)
@@ -518,14 +543,20 @@ function splatMaterial(biome, cfg) {
                 pc = mix(under, gold, farW);
                 pa = mix(mix(uPlotC[6], uPlotC[7], 0.3), mix(uPlotC[6], uPlotC[7], 0.72), farW);
               }
-              // (furrows) seen low from the road, rows running across the view stack up into bars (a ladder,
-              // sleepers): there they melt into the plot's tone a few metres out, whatever their pixel size
+              // (furrows) the rows melt only once they are ~2 px apart (they keep their relief right up to
+              // there, so the plot reads as tilled soil, not one flat sheet). Seen low from off the plot (from
+              // the road, past its headland and fence), rows running across the view would stack into bars (a
+              // ladder, sleepers): there they keep about half their contrast from ~6 m; from in or beside the
+              // plot, full contrast out to ~20 m
               float rung = 0.0;
               if (kind > 1.5) {
+                fade = smoothstep(0.24, 0.5, fw);
                 vec3 vd = cameraPosition - wp;
+                vec2 cq = cameraPosition.xz - pC;
+                float off = max(abs(cq.x * pA.x + cq.y * pA.y) - pB.x, abs(cq.x * pA.y - cq.y * pA.x) - pB.y);
                 float graze = 1.0 - smoothstep(0.1, 0.35, vd.y / max(length(vd), 1e-3));
                 float align = abs(dot(acr, normalize(-vd.xz + vec2(1e-4, 0.0))));
-                rung = graze * smoothstep(0.3, 0.75, align) * smoothstep(4.0, 12.0, dist) * 0.85;
+                rung = graze * smoothstep(0.3, 0.75, align) * mix(smoothstep(20.0, 34.0, dist) * 0.5, smoothstep(6.0, 14.0, dist) * 0.5, smoothstep(4.0, 8.0, off));
               }
               pc = mix(pc, pa, max(fade, rung));
               // each plot its own tint (warmer or cooler, lighter or darker), broad patches in it, and
@@ -823,7 +854,8 @@ function splatMaterial(biome, cfg) {
                 // soft beds, the hard beds stand out of it at half their contrast, and the whole face lifts
                 // toward the floor's sand; the full sandstone only from ~55 degrees, above the eye or far off
                 // (the valley walls seen from the floor keep their beds)
-                float ws = (1.0 - smoothstep(0.4, 0.47, rawD + (wN.r - 0.5) * 0.08 + (nE - 0.5) * 0.04))
+                // (the mask over a wide slope band, so its edge never lines up with one triangle)
+                float ws = (1.0 - smoothstep(0.38, 0.5, rawD + (wN.r - 0.5) * 0.08 + (nE - 0.5) * 0.04))
                   * (1.0 - smoothstep(35.0, 70.0, dC)) * smoothstep(-6.0, -1.5, cameraPosition.y - wp.y) * (1.0 - mesaK);
                 if (ws > 0.001) {
                   vec3 rA = textureLod(tCliff, vec2(0.5), 10.0).rgb;
@@ -836,7 +868,10 @@ function splatMaterial(biome, cfg) {
                   vec2 sq = vec2(dot(xz, vec2(-fl.y, fl.x)), wp.y + dot(xz, fl) * 0.3);
                   float sk1 = texture2D(tMacro, vec2(sq.x / 11.0, sq.y / 40.0) + vec2(0.43, 0.19)).g;
                   float sk2 = texture2D(tDetail, vec2(sq.x / 2.2, sq.y / 9.0) + vec2(0.07, 0.61)).r;
-                  col *= 1.0 + ((sk1 - 0.5) * 0.32 + (sk2 - 0.5) * 0.17 * (1.0 - smoothstep(15.0, 35.0, dC))) * ws;
+                  float skF = 1.0 + ((sk1 - 0.5) * 0.32 + (sk2 - 0.5) * 0.3 * (1.0 - smoothstep(15.0, 35.0, dC))) * ws;
+                  col *= skF;
+                  // (the sand lying in the rock's soft beds carries the slope's ripples, grain and streaks too)
+                  cc *= mix(1.0, sDet * mix(1.0, skF, 0.6), ws);
                 }
               }
               if (mesaK > 0.0) {
