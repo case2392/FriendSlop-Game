@@ -70,7 +70,7 @@ function expireLearned(H) {
 }
 
 const S = {
-  workers: [], ready: false, initDone: false, failed: '', H: null, hashP: null, lateN: 0,
+  workers: [], ready: false, initDone: false, failed: '', H: null, hashP: null, lateN: 0, flushLate: false,
   queue: [],                    // [{ name, prio, seq }] waiting for a worker
   jobs: new Map(),              // name -> { resolve, promise }: queued or in-flight worker paints
   waiting: new Map(),           // name -> promise: being made ready by some prepare()
@@ -187,7 +187,7 @@ function lateWorker(W, fail = false) {
   W.late = false; S.lateN--; clearTimeout(W.giveUp);
   if (fail || !W.alive) {
     try { W.w.terminate(); } catch {}
-    if (!S.lateN && !S.ready) { S.snaps.clear(); flushWanted = false; }
+    if (!S.lateN && !S.ready) { S.snaps.clear(); S.flushLate = false; }
     return;
   }
   W.w.onerror = () => workerDied(W); W.w.onmessageerror = () => workerDied(W);
@@ -195,7 +195,7 @@ function lateWorker(W, fail = false) {
   S.ready = true;
   if (S.failed === 'paint workers slow to start') S.failed = '';
   pump();
-  if (flushWanted) maybeFlush();
+  if (S.flushLate) { S.flushLate = false; flushWanted = true; maybeFlush(); }
 }
 
 function workerDied(W) {
@@ -467,7 +467,7 @@ function maybeFlush() {
   runFlush().catch(e => { S.stats.storeErr = e.message; }).finally(() => { S.flushing = false; if (flushWanted) maybeFlush(); });
 }
 async function runFlush() {
-  if (!S.ready) { if (S.lateN) flushWanted = true; else S.snaps.clear(); return; }   // late workers store it when they're up
+  if (!S.ready) { if (S.lateN) S.flushLate = true; else S.snaps.clear(); return; }   // late workers store it when they're up
   const H = S.hashP ? await S.hashP : null;
   const cacheOK = !!H && !S.cacheOff && !S.writesOff;
   // what the workers hold: store it, or let it go
@@ -539,7 +539,7 @@ async function runFlush() {
 export function idle() {
   if (idleQ.length) return false;
   const unstored = S.ready && !S.cacheOff && !S.writesOff && (S.held.size || S.snaps.size);
-  return !S.flushing && !flushWanted && !unstored && !S.queue.length && !S.workers.some(W => W.busy) && !S.waiting.size && !S.pageQ.length;
+  return !S.flushing && !flushWanted && !S.flushLate && !unstored && !S.queue.length && !S.workers.some(W => W.busy) && !S.waiting.size && !S.pageQ.length;
 }
 export function pagePainted() { return S.pageNames.slice(); }
 export function stats() {
