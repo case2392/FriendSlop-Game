@@ -11,6 +11,8 @@
 //               workers still paint, nothing is cached
 //   no-workers  ?paintWorkers=0: prepare() is a no-op, canvasFor paints as it always did
 //   two-tabs    two pages fill the cache at the same time, a third reads it
+//   fonts       a worker that couldn't load a web font: a paint that sets text in it comes back
+//               inexact (the page paints it), one that doesn't still comes back exact
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -98,6 +100,35 @@ await Promise.all([run(ctx3, 'two tabs (1)'), run(ctx3, 'two tabs (2)')]);
 const third = await run(ctx3, 'two tabs, then a third');
 if (third.stats.cacheHits < third.prep.total) fail(`two tabs: expected the third page to read everything (${third.stats.cacheHits}/${third.prep.total})`);
 await ctx3.close();
+
+// a worker whose web font didn't load (here: "Georgia" pointed at a missing file) must not paint text
+// in it: slot_face sets Georgia text, ground_meadow sets none
+{
+  const page = await browser.newPage();
+  const errors = [];
+  page.on('pageerror', e => errors.push(e.message));
+  await page.goto(`http://localhost:${PORT}/gallery.html?family=none`);
+  const r = await page.evaluate(async () => {
+    const { fontList } = await import('/js/texprep.js');
+    const run = async (fonts, names) => {
+      const w = new Worker('/js/paint/worker.js', { type: 'module' });
+      const call = (m, want) => new Promise(res => { w.onmessage = ({ data }) => { if (data.t === want || data.t === 'fail') res(data); }; w.postMessage(m); });
+      await call({ t: 'init', fonts, hashes: null }, 'ready');
+      const out = {};
+      for (const n of names) { const d = await call({ t: 'paint', id: 1, name: n }, 'done'); out[n] = d.t === 'fail' ? 'fail' : d.exact ? 'exact' : 'inexact'; d.bmp?.close?.(); }
+      w.terminate();
+      return out;
+    };
+    return {
+      loaded: await run(fontList(), ['slot_face', 'ground_meadow']),
+      missing: await run([{ family: 'Georgia', url: new URL('/fonts/missing.woff2', location.href).href }], ['slot_face', 'ground_meadow']),
+    };
+  });
+  await page.close();
+  const line = `fonts: with the page's fonts ${JSON.stringify(r.loaded)}; with Georgia missing ${JSON.stringify(r.missing)}`;
+  if (r.loaded.slot_face === 'exact' && r.loaded.ground_meadow === 'exact' && r.missing.slot_face === 'inexact' && r.missing.ground_meadow === 'exact' && !errors.length) ok(line);
+  else fail(`${line}; errors: ${errors.join(' | ') || 'none'}`);
+}
 
 await browser.close();
 console.log(failed ? '\nTEXTURE CACHE FAULTS: FAILED' : '\nTEXTURE CACHE FAULTS: all scenarios end with the right pixels');

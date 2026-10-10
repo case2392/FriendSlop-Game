@@ -343,8 +343,9 @@ export async function prepare(names, { prio = 0, page = true, idleOk = () => tru
   });
   if (bumped) pump();
   await Promise.all(tasks);
-  await loaded;
-  const r = { ready: want.filter(n => P.ready(n)).length, total, ms: Math.round(now() - t0), workersDone: Math.round(Math.max(0, tw - t0)), pageDone: Math.round(Math.max(0, tp - t0)) };
+  // everything is ready: a first visit's lookup still under way (a slow IndexedDB, say) can only turn
+  // up what is painted already, so the build doesn't wait for it
+  const r ={ ready: want.filter(n => P.ready(n)).length, total, ms: Math.round(now() - t0), workersDone: Math.round(Math.max(0, tw - t0)), pageDone: Math.round(Math.max(0, tp - t0)) };
   S.lastPrep = r;
   return r;
 }

@@ -46,17 +46,25 @@ if (C2D?.clip) {
   });
   for (const k of ['moveTo', 'lineTo', 'arc', 'arcTo', 'bezierCurveTo', 'quadraticCurveTo', 'ellipse', 'roundRect']) wrap(k, ctx => aligned.set(ctx, false));
   wrap('clip', (ctx, a) => { if ((a.length && typeof a[0] === 'object') || aligned.get(ctx) === false) clipped = true; });
+  // Text set in one of the page's web fonts that this worker couldn't load (a failed fetch, or a
+  // browser without fonts in workers) would come out in a fallback face, and be cached that way: a
+  // paint that sets such text is inexact too, and the page paints it.
+  for (const k of ['fillText', 'strokeText', 'measureText']) wrap(k, ctx => { if (NOFONT.size && NOFONT.has(fontFamily(ctx.font))) clipped = true; });
 }
 const post = (m, tr) => self.postMessage(m, tr || []);
 
+// the families of the page's web fonts that didn't load here (lower case)
+const NOFONT = new Set();
+const fontFamily = f => String(f).replace(/^.*?\d[\d.]*px(\/\S+)?\s+/, '').split(',')[0].replace(/["']/g, '').trim().toLowerCase();
 async function loadFonts(list) {
-  if (!list?.length || !self.fonts || typeof FontFace === 'undefined') return;
+  if (!list?.length) return;
+  if (!self.fonts || typeof FontFace === 'undefined') { for (const f of list) NOFONT.add(f.family.toLowerCase()); return; }
   await Promise.all(list.map(async f => {
     try {
       const ff = new FontFace(f.family, `url(${f.url})`, { weight: f.weight || 'normal', style: f.style || 'normal', unicodeRange: f.unicodeRange || 'U+0-10FFFF' });
       self.fonts.add(ff);
       await ff.load();
-    } catch { /* a font that won't load here: the texture texprep paints with it is checked by texhash */ }
+    } catch { NOFONT.add(f.family.toLowerCase()); }
   }));
 }
 
