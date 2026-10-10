@@ -209,6 +209,13 @@ export class Sim {
   rvToLocal(w) { return toLocal(this.rv.translation(), this.rv.rotation(), w); }
   rvSpeed() { return this.vehicle.currentVehicleSpeed(); }
 
+  // give the physics world's WASM memory back (a new day builds a new Sim)
+  free() {
+    try { this.world.removeVehicleController(this.vehicle); } catch {}
+    try { this.eq.free(); } catch {}
+    try { this.world.free(); } catch {}
+  }
+
   setDoor(open) {
     if (!this.parts.doors) return;
     this.doorOpen = open;
@@ -327,16 +334,21 @@ export class Sim {
     }
   }
 
-  push(pid, m) {
+  // A body pushing into the RV or a prop. The contact point comes from the client, so it has to be where
+  // the pusher actually is and on the thing pushed: a point far off would give the force a huge lever arm
+  // (rolling the RV over from across the map, and billing the crew for the tow).
+  push(pid, m, pl = null) {
     const pt = v3(Number(m.pt?.[0]) || 0, Number(m.pt?.[1]) || 0, Number(m.pt?.[2]) || 0);
     const d = v3(Number(m.dir?.[0]) || 0, 0, Number(m.dir?.[2]) || 0);
     const n = len(d);
     if (n < 0.1) return;
+    if (!pl?.pos || len(sub(pt, v3(pl.pos.x, pl.pos.y + 0.9, pl.pos.z))) > 2) return;
     if (m.kind === 'rv') {
+      if (len(sub(pt, this.rv.translation())) > 7) return;
       this.pushes.push({ body: this.rv, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
     } else if (m.kind === 'prop') {
       const p = this.props.get(Number(m.id));
-      if (!p) return;
+      if (!p || len(sub(pt, p.body.translation())) > 3) return;
       const f = p.type === 'boulder' ? C.PUSH_FORCE_RV : C.PUSH_FORCE_PROP;
       this.pushes.push({ body: p.body, pt, f: mul(d, f / n), until: this.t + 0.16 });
     }
@@ -538,9 +550,8 @@ export class Sim {
     const { th, st, hb } = this.drive;
     let engine = 0, brake = 0.6;
     if (th > 0.05) {
-      if (sp < -0.6) brake = C.RV.BRAKE;
-      else engine = th * C.RV.ENGINE * (1 - Math.max(0, Math.min(1, sp / C.RV.TOP_SPEED)) ** 2);
-      brake = sp < -0.6 ? C.RV.BRAKE : 0;
+      if (sp < -0.6) brake = C.RV.BRAKE;   // still rolling backwards: brake first
+      else { engine = th * C.RV.ENGINE * (1 - Math.max(0, Math.min(1, sp / C.RV.TOP_SPEED)) ** 2); brake = 0; }
     } else if (th < -0.05) {
       if (sp > 0.6) { brake = C.RV.BRAKE; }
       else { engine = th * C.RV.REVERSE * (1 - Math.max(0, Math.min(1, -sp / 6))); brake = 0; }

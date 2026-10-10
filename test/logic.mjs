@@ -5,6 +5,9 @@ import WebSocket from 'ws';
 import { generateLeg } from '../shared/world.js';
 import { QUOTAS, medBill } from '../shared/constants.js';
 import { Blackjack, handTotal } from '../server/blackjack.js';
+import { BJTable } from '../server/casino.js';
+import http from 'node:http';
+import { mulberry32 } from '../shared/rng.js';
 
 const PORT = 4100 + Math.floor(Math.random() * 500);
 const SEED = 4242;
@@ -25,6 +28,37 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     if (h.outcome === 'win' && handTotal(h.dealer) <= 21 && handTotal(h.squad) <= handTotal(h.dealer)) bad++;
   }
   check(bad === 0 && tally.lose > tally.win, `blackjack engine: 3000 hands consistent ${JSON.stringify(tally)}`);
+}
+
+// --- body-vote blackjack: votes left standing after a hit wait for the timer (pure logic) ---
+// (a crew still on the HIT pad, reading its new card, used to be dealt another every 1.2 s until it bust)
+{
+  const spot = { hit: { x: 0, z: 0, r: 1 }, stand: { x: 5, z: 0, r: 1 } };
+  // one hand, a lone player on HIT from the deal; leave = walk to STAND 0.3 s after the first hit
+  const play = (seed, leave) => {
+    const T = new BJTable(spot, mulberry32(seed));
+    T.bet = 100;
+    if (T.deal(0, 1000)?.outcome) return null;   // a natural: no voting
+    const me = [{ id: 1, pos: { x: 0, y: 0, z: 0 } }];
+    const hitsAt = [];
+    let endAt = null;
+    for (let t = 0; t < 30 && endAt == null; t += 0.05) {
+      if (leave && hitsAt.length && t > hitsAt[0] + 0.3) me[0].pos = { x: 5, y: 0, z: 0 };
+      const n0 = T.hand.squad.length, r = T.tick(t, me, me);
+      if (T.hand.squad.length > n0) hitsAt.push(t);
+      if (r?.outcome) endAt = t;
+    }
+    return { hitsAt, endAt };
+  };
+  let held = null, moved = null;
+  for (let seed = 1; seed < 500 && (held === null || moved === null); seed++) {
+    const a = play(seed, false), b = play(seed, true);
+    // only hands that went on after the first card tell us anything
+    if (held === null && a && a.hitsAt.length >= 2) held = a.hitsAt[1] - a.hitsAt[0];
+    if (moved === null && b && b.hitsAt.length === 1 && b.endAt != null && b.endAt > b.hitsAt[0]) moved = b.endAt - b.hitsAt[0];
+  }
+  check(held !== null && held > 9, `blackjack: a vote left on HIT waits out the timer before the next card (${held?.toFixed(1)} s after the first)`);
+  check(moved !== null && moved < 4, `blackjack: stepping onto STAND after a hit still decides early (${moved?.toFixed(1)} s)`);
 }
 
 // --- painted textures: dependency tracking, adopted pictures, cache keys (pure logic) ---
@@ -84,6 +118,25 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server did not start')), 8000); });
+
+// --- the static file server: bad paths get an error, never a crash and never a file outside client/ or shared/ ---
+{
+  const get = path => new Promise(res => {
+    const r = http.request({ host: 'localhost', port: PORT, path, method: 'GET' }, rs => { let n = 0; rs.on('data', d => { n += d.length; }); rs.on('end', () => res({ code: rs.statusCode, n })); });
+    r.on('error', e => res({ code: 0, err: e.message }));
+    r.end();
+  });
+  const bad = await get('/%E0%A4%A');
+  const nul = await get('/%00');
+  const up1 = await get('/shared/../server/room.js');
+  const up2 = await get('/shared/%2e%2e/package.json');
+  const up3 = await get('/../server/room.js');
+  const okShared = await get('/shared/world.js');
+  const okRoot = await get('/');
+  check(bad.code === 400 && nul.code === 400, `server: a malformed URL escape and a NUL byte get 400 (${bad.code}, ${nul.code})`);
+  check([up1, up2, up3].every(r => r.code === 403 || r.code === 404), `server: '..' out of shared/ or client/ is refused (${up1.code}, ${up2.code}, ${up3.code})`);
+  check(okShared.code === 200 && okShared.n > 1000 && okRoot.code === 200, 'server: still serves /shared/world.js and / (alive after the bad requests)');
+}
 
 class Player {
   constructor(name) { this.name = name; this.q = []; this.waiters = []; this.snap = null; this.events = []; this.meta = null; this.pos = { x: 0, y: 0, z: 0 }; this.yaw = 0; this.pitch = 0; this.par = 0; }
@@ -394,6 +447,38 @@ try {
   A.send({ t: 'use', id: pay5.id });
   const win = await A.wait(m => m.t === 'over', 6000, 'win');
   check(win.won === true, `paid the $${QUOTAS[4]} balloon on day 5 → YOU OWN THE RV`);
+
+  // ---- missing the balloon on day 5 loses the RV, whatever the strikes --------------------------------------
+  const run2 = await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run after the win');
+  A.send({ t: 'dbg', op: 'day', d: 5 });
+  await A.wait(m => m.t === 'world' && m.day === 5, 6000, 'day 5 (run 2)');
+  await A.until(g => g.day === 5, 3000, 'day 5 state (run 2)');
+  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
+  A.send({ t: 'dbg', op: 'bank', v: 0 });
+  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
+  const lost = await A.wait(m => m.t === 'over', 6000, 'over (missed balloon)');
+  check(lost.won === false && lost.strikes === 1, `short on the day-5 balloon with no strikes yet → the RV is gone (won=${lost.won}, strikes=${lost.strikes})`);
+
+  // ---- after midnight's repo the Pay button can't take today's payment any more -----------------------------
+  const run3 = await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run after the loss');
+  A.send({ t: 'dbg', op: 'day', d: 2 });
+  await A.wait(m => m.t === 'world' && m.day === 2, 6000, 'day 2 (run 3)');
+  await A.until(g => g.day === 2, 3000, 'day 2 state (run 3)');
+  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
+  A.send({ t: 'dbg', op: 'bank', v: 0 });
+  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
+  await A.until(g => g.str === 1 && g.ph === 'night', 6000, 'strike 1 (run 3)');
+  const W2 = generateLeg(run3.seed, 2), pay2 = W2.uses.find(u => u.kind === 'pay');
+  A.send({ t: 'dbg', op: 'bank', v: 50000 });
+  await A.until(g => g.bank === 50000, 3000, 'bank 50000');
+  await sleep(300);
+  A.at(pay2.x + 1, W2.townY + 0.05, pay2.z, 0, 0, 0);
+  await sleep(300);
+  A.drain();
+  A.send({ t: 'use', id: pay2.id });
+  const late = await A.wait(m => m.t === 'toast' && /Too late/.test(m.text), 3000, 'too-late toast').catch(() => null);
+  await sleep(400);
+  check(!!late && A.g().bank === 50000 && !A.g().paid, `paying after the Repo Man came at midnight is refused (bank $${A.g().bank}, paid ${A.g().paid})`);
 
   // ---- disconnect -----------------------------------------------------------------------------------------------
   B.ws.close();

@@ -43,6 +43,9 @@ export class Room {
   }
 
   startDay(carry) {
+    // the old day's physics world lives in WASM memory that garbage collection gives back late or
+    // never: free it, once the tick that replaced it (which may still hold it) has finished
+    if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
     this.W = generateLeg(this.seed, this.day);
     this.sim = new Sim(this.W, { parts: this.parts, carry });
     this.phase = 'camp';
@@ -64,7 +67,7 @@ export class Room {
     const carry = this.sim.carryOver();
     // who's riding along? their RV-local pose survives the teleport
     this.day++;
-    if (this.day > C.DAYS) return this.finish(true);
+    if (this.day > C.DAYS) return this.finish(this.paid);   // (a paid last day has already ended the run)
     this.startDay(carry);
     this.broadcast(this.worldMsg());
     this.broadcast({ t: 'props', list: this.sim.allProps() });
@@ -175,7 +178,7 @@ export class Room {
       case 'grab': if (!p.ko && p.seat == null) { const ok = this.sim.grab(p.id, p, m); this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id }); } return;
       case 'rel': this.sim.release(p.id, m.thr ? m.dir : null, p); return;
       case 'hd': this.sim.holdDist(p.id, m.d); return;
-      case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m); } return;
+      case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
       case 'drv': if (p.seat === 0) this.sim.setDrive(m); return;
       case 'horn': if (p.seat === 0) this.broadcast({ t: 'ev', list: [{ k: 'horn' }] }); return;
       case 'use': return this.onUse(p, m);
@@ -378,6 +381,8 @@ export class Room {
       if (what === 'drink') { this.send(p, { t: 'drink' }); this.toast(`${p.name} chugged an energy drink.`, p.color, 3); }
     } else if (u.kind === 'pay') {
       if (this.paid) return this.toast('Already paid. He\'s just... watching you now.', '#fff', 3, p);
+      // past midnight he has already taken what he came for: today's payment can't be made any more
+      if (this.phase === 'night' || this.phase === 'over') return this.toast('Too late. He already came at midnight. Next payment is tomorrow.', '#ff8a80', 4, p);
       if (this.bank < this.due) return this.toast(`The Repo Man wants ${fmt$(this.due)}. You have ${fmt$(this.bank)}.`, '#ff8a80', 4, p);
       this.pay(p);
     }
@@ -463,8 +468,9 @@ export class Room {
     const took = Math.max(0, this.bank);
     this.bank = Math.min(0, this.bank);
     this.broadcast({ t: 'ev', list: [{ k: 'repo', part, took }] });
-    if (part === 'rv' || this.strikes >= C.STRIKES_TO_LOSE) {
-      this.toast('The Repo Man hooks the RV. It\'s over.', '#ff5252', 8);
+    // the last day's balloon payment is all or nothing: short on it, the RV goes whatever the strikes
+    if (part === 'rv' || this.strikes >= C.STRIKES_TO_LOSE || this.day >= C.DAYS) {
+      this.toast(this.day >= C.DAYS && part !== 'rv' ? 'Short on the balloon payment. The Repo Man hooks the RV. It\'s over.' : 'The Repo Man hooks the RV. It\'s over.', '#ff5252', 8);
       return this.finish(false);
     }
     this.parts[part] = false;

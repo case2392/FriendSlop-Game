@@ -28,6 +28,7 @@ export class BJTable {
     this.until = 0;
     this.outcome = null;
     this.votes = { hit: [], stand: [] };
+    this.heldKey = null;        // the votes a hit was dealt on (they wait for the timer next time)
   }
 
   adjust(arg, bank) {
@@ -44,6 +45,7 @@ export class BJTable {
     this.stake = this.bet;
     this.hand = new Blackjack(this.rng);
     this.outcome = null;
+    this.heldKey = null;
     if (this.hand.state === 'done') return this.settle(t, -this.stake);
     this.state = 'vote';
     this.until = t + VOTE_TIME;
@@ -64,7 +66,6 @@ export class BJTable {
     if (this.state === 'result' && t >= this.until) {
       this.state = 'bet';
       this.hand = null;
-      if (this.bet === 0) this.bet = 0;
       return null;
     }
     if (this.state !== 'vote') return null;
@@ -73,12 +74,19 @@ export class BJTable {
     this.votes.stand = players.filter(p => p.pos && on(p, this.spot.stand)).map(p => p.id);
     const voters = this.votes.hit.length + this.votes.stand.length;
     const everyone = inCasino.length > 0 && voters >= inCasino.length;
-    if (t < this.until && !(everyone && t > this.until - VOTE_TIME + 1.2)) return null;
+    // Everyone on a pad decides early. But after a hit, the same votes still standing where they stood
+    // only count when the timer runs out: otherwise a crew left on the HIT pad (reading the new card)
+    // would be dealt another every 1.2 s until it bust. Any change of vote re-arms the early decision.
+    const key = `${this.votes.hit.join(',')}|${this.votes.stand.join(',')}`;
+    if (this.heldKey != null && key !== this.heldKey) this.heldKey = null;
+    const early = everyone && this.heldKey == null && t > this.until - VOTE_TIME + 1.2;
+    if (t < this.until && !early) return null;
     // nobody voted = stand. ties hit, because of course they do.
     const choice = voters === 0 ? 'stand' : this.votes.hit.length >= this.votes.stand.length ? 'hit' : 'stand';
     const done = this.hand.act(choice);
-    if (done) return this.settle(t);
+    if (done) { this.heldKey = null; return this.settle(t); }
     this.until = t + VOTE_TIME;
+    this.heldKey = key;
     return { delta: 0, msg: choice === 'hit' ? `HIT → ${this.hand.squadTotal()}` : null };
   }
 

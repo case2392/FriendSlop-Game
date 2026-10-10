@@ -199,6 +199,7 @@ A run is **5 days**, about 60–90 minutes. Each day has three phases:
   the money *and* a piece of the RV. On the third miss he takes the whole RV
   and the run is over.
 - **Day 5 is the balloon payment in Lost Wages.** Pay it and you own the RV.
+  Short on it at midnight and he takes the RV, strikes or not: there's no day 6.
   Credits roll as you drive into the sunset, over a recap: total medical
   bills, loot broken, the biggest bet, who lost it.
 

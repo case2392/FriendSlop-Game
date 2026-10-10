@@ -23,14 +23,21 @@ const MIME = {
 };
 
 const server = http.createServer((req, res) => {
-  let urlPath = decodeURIComponent((req.url || '/').split('?')[0]);
+  // a malformed escape (decodeURIComponent throws) or a NUL byte (fs throws) must never reach the
+  // file system: either one, thrown here, would take the whole server and every room down with it
+  let urlPath;
+  try { urlPath = decodeURIComponent((req.url || '/').split('?')[0]); } catch { urlPath = null; }
+  if (!urlPath || urlPath.includes('\0')) { res.writeHead(400); res.end('bad request'); return; }
   if (urlPath === '/') urlPath = '/index.html';
   let filePath;
   if (urlPath === '/vendor/rapier.mjs') filePath = RAPIER_ESM;
   else {
-    const base = urlPath.startsWith('/shared/') ? ROOT : path.join(ROOT, 'client');
-    filePath = path.normalize(path.join(base, urlPath));
-    if (!filePath.startsWith(base)) { res.writeHead(403); res.end(); return; }
+    // /shared/* is the repo's shared/ folder (the client runs the same world gen), everything else is
+    // client/; a path has to stay inside its own folder ('..' escapes, encoded or not, get a 403)
+    const shared = urlPath.startsWith('/shared/');
+    const base = path.join(ROOT, shared ? 'shared' : 'client');
+    filePath = path.normalize(path.join(base, shared ? urlPath.slice('/shared'.length) : urlPath));
+    if (!filePath.startsWith(base + path.sep)) { res.writeHead(403); res.end(); return; }
   }
   fs.readFile(filePath, (err, data) => {
     if (err) { res.writeHead(404); res.end('not found'); return; }
@@ -98,7 +105,7 @@ setInterval(() => {
   while (acc >= STEP) {
     acc -= STEP;
     for (const [code, room] of rooms) {
-      if (room.closed) { rooms.delete(code); continue; }
+      if (room.closed) { rooms.delete(code); room.sim?.free(); continue; }
       try { room.tick(STEP); } catch (e) { console.error(`room ${code} tick error:`, e); }
     }
   }

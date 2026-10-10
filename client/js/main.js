@@ -513,6 +513,7 @@ net.on('_close', () => {
   if (S.phase !== 'menu') { location.reload(); }
 });
 net.on('world', m => {
+  me.hasHook = false;   // a new world comes with the hook on its winch
   const newDay = S.dayLabel != null && S.dayLabel !== m.day;
   buildDay(m).then(built => { if (built && newDay) { sfx.day(); flash(`DAY ${m.day}`); } });
   $('receipt').classList.add('hidden');
@@ -593,8 +594,16 @@ function onEvent(e) {
     case 'bill': sfx.bill(); break;
     case 'horn': sfx.horn(); break;
     case 'door': S.door = e.open; sfx.door(); break;
-    case 'hook': sfx.hook(); if (e.what === 'yanked' && e.by === S.selfId) { me.hasHook = false; toast('The cable ran out — the hook got yanked out of your hands.', '#ffb4a2'); } break;
-    case 'reel': toast(e.on ? 'Winch reeling in…' : 'Winch stopped.', '#f2c14e', 2); break;
+    case 'hook':
+      sfx.hook();
+      if (e.what === 'yanked' && e.by === S.selfId) { me.hasHook = false; toast('The cable ran out — the hook got yanked out of your hands.', '#ffb4a2'); }
+      if (e.what === 'stowed') me.hasHook = false;   // back on the winch (nightfall, a tow): nobody holds it
+      break;
+    case 'reel':
+      // the server rips the hook out of whoever holds it when the winch starts reeling
+      if (e.on && me.hasHook) { me.hasHook = false; toast('The winch ripped the hook out of your hands.', '#ffb4a2'); }
+      else toast(e.on ? 'Winch reeling in…' : 'Winch stopped.', '#f2c14e', 2);
+      break;
     case 'creak': sfx.creak(); break;
     case 'gate': sfx.gate(); break;
     case 'buzz': sfx.buzz(); break;
@@ -647,9 +656,10 @@ function showOver(m) {
 // ---- little fx -------------------------------------------------------------------------------
 
 const particles = [];
+const chipGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);   // one shared shape (flat() caches the materials)
 function burst(at, color, n = 12, speed = 4) {
   for (let i = 0; i < n; i++) {
-    const m = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.06), flat(color));
+    const m = new THREE.Mesh(chipGeo, flat(color));
     m.position.copy(at);
     scene.add(m);
     particles.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed, (Math.random() - 0.5) * speed), life: 1.2 });
@@ -885,7 +895,7 @@ requestAnimationFrame(frame);
     f.life -= dt;
     if (!f.ping) f.s.position.y += dt * 0.6;
     f.s.material.opacity = Math.min(1, f.life);
-    if (f.life <= 0) { scene.remove(f.s); floaters.splice(i, 1); }
+    if (f.life <= 0) { scene.remove(f.s); f.s.material.map?.dispose(); f.s.material.dispose(); floaters.splice(i, 1); }   // each label has its own canvas texture
   }
 
   // audio
@@ -948,6 +958,12 @@ function cardTexture(code) {
   cardTex.set(code, t);
   return t;
 }
+// one card shape and one material per card face, shared by every deal (a hand is re-laid on each change)
+const cardGeo = new THREE.PlaneGeometry(0.32, 0.44), cardMats = new Map();
+function cardMaterial(code) {
+  if (!cardMats.has(code)) cardMats.set(code, new THREE.MeshStandardMaterial({ map: cardTexture(code), roughness: 0.6 }));
+  return cardMats.get(code);
+}
 let lastCards = '';
 function updateCasino(dt) {
   const w = S.wv, g = S.g;
@@ -959,7 +975,7 @@ function updateCasino(dt) {
     lastCards = key;
     while (w.cardGroup.children.length) w.cardGroup.remove(w.cardGroup.children[0]);
     const place = (codes, row) => codes.forEach((c, i) => {
-      const m = new THREE.Mesh(new THREE.PlaneGeometry(0.32, 0.44), new THREE.MeshStandardMaterial({ map: cardTexture(c), roughness: 0.6 }));
+      const m = new THREE.Mesh(cardGeo, cardMaterial(c));
       m.rotation.x = -Math.PI / 2;
       const off = (i - (codes.length - 1) / 2) * 0.36;
       const s = Math.sin(T.bj.ry), co = Math.cos(T.bj.ry);

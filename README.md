@@ -105,7 +105,8 @@ on.
 what's broken (winch up the grade, push out of the mud, shove or winch the
 boulder, crack the ranger gate) → detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.
-Five days. Pay the $15,000 balloon on day 5 and you own the RV.
+Five days. Pay the $15,000 balloon on day 5 and you own the RV; come up short
+on it and he takes the RV, however many strikes you had left.
 
 ## Voice
 
