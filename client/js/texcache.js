@@ -47,8 +47,13 @@ export async function sourceHashes(families, fonts = []) {
   };
   const h = s => hash53(s) + s.length.toString(16);
   const urls = [...new Set(fonts.map(f => f.url))].sort();
-  const [core, worker, ...rest] = await Promise.all(['core', 'worker', ...families].map(f => get(new URL(`${f}.js`, base))));
-  const faces = await Promise.all(urls.map(u => get(u, true).then(b => `${u}:${h(b)}`, () => `${u}:missing`)));
+  // one round trip for all of it: the paint workers start once this is done, and a page that is busy
+  // booting takes a while to come back to each await
+  const [core, worker, ...rest] = await Promise.all([
+    ...['core', 'worker', ...families].map(f => get(new URL(`${f}.js`, base))),
+    ...urls.map(u => get(u, true).then(b => `${u}:${h(b)}`, () => `${u}:missing`)),
+  ]);
+  const faces = rest.splice(families.length);
   const fam = {};
   families.forEach((f, i) => { fam[f] = h(rest[i]); });
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
@@ -61,7 +66,11 @@ export async function sourceHashes(families, fonts = []) {
 // every comma list that ends in a generic family, plus the generic families themselves
 export function systemFaces(src) {
   const out = new Set(['serif', 'sans-serif', 'monospace']);
-  for (const m of src.matchAll(/((?:(?:'[^'\n]+'|"[^"\n]+"|[A-Za-z][\w -]*?)\s*,\s*)+)(?:sans-serif|serif|monospace)\b/g)) {
+  // only the lines that end a stack, each with the line before it (a stack split in two): the whole
+  // source is a megabyte
+  const lines = src.split('\n'), near = [];
+  lines.forEach((l, i) => { if (/serif|monospace/.test(l)) near.push(lines[i - 1] || '', l); });
+  for (const m of near.join('\n').matchAll(/((?:(?:'[^'\n]+'|"[^"\n]+"|[A-Za-z][\w -]*?)\s*,\s*)+)(?:sans-serif|serif|monospace)\b/g)) {
     for (const part of m[1].split(',')) { const n = part.trim().replace(/^.*px\s+/, '').replace(/^['"]|['"]$/g, '').trim(); if (n) out.add(n); }
   }
   return [...out].sort();
