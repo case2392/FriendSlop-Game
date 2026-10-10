@@ -14,16 +14,22 @@
 // hollows (cliff_snow_form, a companion map of the texture's form), in long lumpy shelves, with
 // every edge antialiased: gentle granite holds a lot of it, a sheer face only its ledges. On steep
 // faces the edges are broken by a noise laid ON the face (the slope and macro noise are sampled by
-// x and z, so up a face they would only run in vertical bands). A crash mesa is granite all round
-// in smaller blocks, projected square to each face, from a lumpy drift at its foot to a snow cap
-// over its lip and a band on its bench, all set by HEIGHT, so no edge ever follows its triangles
-// (its steep sliver facets, where the heightfield folds, take the projection their own facet faces).
-// The valley walls' angular granite (cliff_snow) is crossfaded with a second sample turned 30 degrees
-// and 1.6x larger (its form turned to match), and carries two or three snow-capped ledges at world
-// heights; the mesas keep their own rounded granite (cliff_snow_mesa). Round each crash mesa the mesh
-// is drawn 4x finer (terrain_mesa.js): smooth normals, heights within 0.35 m of the physics.
-// Tanaris exposes its sandstone from ~30 degrees, its beds rising and falling along the valley; Westfall
-// paints its cultivated plots (W.fields: furrows, stubble, standing wheat in rows) into the splat.
+// x and z, so up a face they would only run in vertical bands). A crash mesa is granite all round,
+// projected square to each face, from a lumpy drift at its foot to a snow cap over its lip and a band
+// on its bench, all set by HEIGHT, so no edge ever follows its triangles (its steep sliver facets,
+// where the heightfield folds, take the projection their own facet faces). The valley walls' angular
+// granite (cliff_snow) is crossfaded with a second sample turned 30 degrees and 1.6x larger (its form
+// turned to match), and carries two or three snow-capped ledges at world heights; the mesas wear the
+// same granite turned +30 / -24 degrees (diagonal fracture planes, no row of blocks), and terrain_talus.js
+// breaks their silhouettes (shoulders, rim blocks, talus). Round each crash mesa the mesh is drawn 4x
+// finer (terrain_mesa.js): smooth normals, heights within 0.35 m of the physics.
+// Tanaris keeps its wind ripples to the dune floor (they smooth away from ~20 degrees and far off),
+// streaks its sand slopes down their fall line and exposes its sandstone from ~35 degrees, its beds
+// rising and falling along the valley; its crash mesa is a sandstone butte (rock all round under a sand
+// cap, a lit ledge at its bench, a broken caprock and talus from terrain_talus.js). Westfall paints its
+// cultivated plots (W.fields) into the splat: turned furrows lit by the real sun, cut stubble with raked
+// windrows, standing wheat (a thicket of cards along every row), each inside a trodden headland and a
+// wandering, ragged edge; rows finer than a few pixels melt into the plot's own average tone.
 // Ground on slopes is projected from the side too. Explicit texture gradients with a capped
 // anisotropy keep grazing facets from washing out. Broad warm/cool and value fields and baked
 // ambient occlusion sit on top, a 1.8 m detail map crisps the ground at the camera's feet, and
@@ -48,6 +54,7 @@ import { atmo, setSkyline } from './atmosphere.js';
 import { fbm, noise2 } from '/shared/rng.js';
 import { BIOME_BY_DAY } from '/shared/world.js';
 import { mesaRefiner } from './terrain_mesa.js';
+import { buildTalus } from './terrain_talus.js';
 
 const CHUNK = 40;            // cells per terrain chunk side (100 m): few draw calls, still culls
 const SHOULDER = 1.7;        // the road texture runs this far past the driven edge on each side
@@ -82,7 +89,7 @@ const CFG = {
   },
   desert: {
     hw: 3.1, scale: [8, 8, 6, 16], cliff: [0.1, 0.2], cliffN: [0.1, 0.04], g2: [0.62, 0.3], collar: [0.5, 0.36, 0.2], ledge: [1, 1, 1], strata: true, dunes: true, mudTex: 'mud_desert', local: 0.02, mesaK: 0.2,
-    scree: [0.1, 0.2, 0.12, 0.24], strataWarp: 3.5, farS: 0.5, rockDet: 0.5,
+    scree: [0.12, 0.19, 0.12, 0.24], strataWarp: 3.5, farS: 0.5, rockDet: 0.5,
     ao: [0.6, 0.5, 0.58], tintA: [1.05, 1.0, 0.9], tintB: [0.94, 0.97, 1.03], macro: 0.3, detail: [0.0, 0.3, 0.38],
     clutter: { cell: 4.0, slots: 2, radius: 22, patch: 12, density: 0.3, spread: 1.0, flowers: 0,
       cards: [[0.7, 0.45, 0.34], [0.75, 0.5, 0.12], [0.7, 0.45, 0.12], [0.6, 0.45, 0.08], [0.8, 0.75, 0.12], [0.7, 0.45, 0.06], [0.6, 0.4, 0.06], [0.5, 0.3, 0.14]] },
@@ -92,7 +99,14 @@ const CFG = {
 // Westfall's cultivated plots (W.fields), painted into the splat: at most MAX_PLOTS per leg. Their
 // colours (sRGB): furrow trough, mid, lit ridge; stubble soil, straw, lit straw; wheat gap, body, lit heads.
 const MAX_PLOTS = 10;
-const PLOT_COLORS = ['#3a281c', '#694630', '#9c6e48', '#8a6845', '#c8ae74', '#e6d29e', '#5e4a22', '#c39a3c', '#efcd6c'];
+const PLOT_COLORS = ['#3e2b1e', '#6c4a32', '#a47a50', '#8a6c4a', '#cdb47e', '#e4d29e', '#5e4a22', '#c39a3c', '#efcd6c'];
+
+// A plot edge's wander along its length and the rows' jittered spacing: the same functions as the
+// splat's plotWarp() and rowJ(), so the wheat cards stand where the splat paints the crop.
+const plotWarp = (s, ph) => 0.42 * Math.sin(s * 0.31 + ph * 2) + 0.24 * Math.sin(s * 0.83 + ph * 5) + 0.12 * Math.sin(s * 2.3 + ph * 7);
+const rowJ = (x, pk) => 0.05 * Math.sin(x * 1.9 + pk) + 0.0125 * Math.sin(x * 4.3 + pk * 3);
+// how far (u, v) in a plot's frame lies inside its wandering edge (m)
+const plotM = (f, u, v) => { const pk = f.i * 1.37; return Math.min(f.hl - Math.abs(u) + plotWarp(v, pk + (u > 0 ? 0 : 3.1)), f.hd - Math.abs(v) + plotWarp(u, pk + (v > 0 ? 1.7 : 4.9))); };
 
 const sstep = (e0, e1, x) => { const t = Math.max(0, Math.min(1, (x - e0) / (e1 - e0))); return t * t * (3 - 2 * t); };
 
@@ -141,14 +155,14 @@ function splatMaterial(biome, cfg) {
     uAO: { value: new THREE.Vector3(...cfg.ao) }, uCollar: { value: new THREE.Vector3(...cfg.collar) }, uRev: { value: new THREE.Vector3(...(cfg.reveal || [0.24, 0.76, 0.5])) },
     uPlot: { value: Array.from({ length: MAX_PLOTS }, () => new THREE.Vector4(1e5, 1e5, 0, 1)) }, uPlotB: { value: Array.from({ length: MAX_PLOTS }, () => new THREE.Vector4(0, 0, 0, 0)) },
     uPlotC: { value: PLOT_COLORS.map(c => new THREE.Color(c)) },
+    uSun: { value: new THREE.Vector3(0.57, 0.74, -0.36) },
     uScree: { value: new THREE.Vector4(...(cfg.scree || [0.3, 0.5, 0.3, 0.46])) }, uSWarp: { value: cfg.strataWarp ?? 0 }, uFarS: { value: cfg.farS ?? 0.4 }, uRockDet: { value: cfg.rockDet ?? 0 },
     uMesa: { value: Array.from({ length: 8 }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaY: { value: Array.from({ length: 8 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uMesaK: { value: cfg.mesaK ?? 0.12 }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   if (cfg.snowRock) {
-    // the valley walls' angular granite and its form; the crash mesas' own rounded granite and its form
-    for (const [k, n] of [['tForm', 'cliff_snow_form'], ['tFormM', 'cliff_snow_mesa_form']]) { const f = rawTex(n, true); f.anisotropy = cheap ? 2 : 8; U[k] = { value: f }; }
-    U.tCliffM = { value: T('cliff_snow_mesa') };
+    // the angular granite's form (the valley walls and the crash mesas share the granite)
+    const f = rawTex('cliff_snow_form', true); f.anisotropy = cheap ? 2 : 8; U.tForm = { value: f };
   }
   m.userData.U = U;
   m.defines = {};
@@ -159,7 +173,7 @@ function splatMaterial(biome, cfg) {
   if (cfg.snowRock) m.defines.TERRAIN_SNOWROCK = 1;
   m.defines.TERRAIN_ANISO = cheap ? '2.0' : '3.0';
   m.defines.TERRAIN_NEARSHARP = cheap ? '0.62' : '0.82';
-  const key = 'terrain-splat-v23' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.plots ? 'p' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
+  const key = 'terrain-splat-v25' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.plots ? 'p' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
@@ -175,17 +189,25 @@ function splatMaterial(biome, cfg) {
       .replace('#include <common>', `#include <common>
         uniform sampler2D tG1, tG2, tDirt, tRoad, tCliff, tMud, tMacro, tSlope, tSlopeA, tDetail; uniform vec4 uGrid, uGridA; uniform vec2 uGridN, uGridAN; uniform vec3 uDetail;
         #ifdef TERRAIN_SNOWROCK
-          uniform sampler2D tForm, tFormM, tCliffM;
+          uniform sampler2D tForm;
           // the walls' second granite sample: turned 30 degrees and 1.6x larger (its form turned to match)
           const mat2 SR = mat2(0.866, 0.5, -0.5, 0.866);
           const float SRS = 1.0 / 1.6;
           vec2 formTurn(vec3 f) { return vec2(0.5 + 0.5 * (0.866 * (f.r * 2.0 - 1.0) - 0.5 * (f.b * 2.0 - 1.0)), f.g); }
+          // (a crash mesa's other face turns the granite the other way, -24 degrees)
+          const mat2 SRM = mat2(0.9135, -0.4067, 0.4067, 0.9135);
+          vec2 formTurnM(vec3 f) { return vec2(0.5 + 0.5 * (0.9135 * (f.r * 2.0 - 1.0) + 0.4067 * (f.b * 2.0 - 1.0)), f.g); }
         #endif
         #ifdef TERRAIN_STRATA
           uniform sampler2D tSlopeR;
         #endif
         #ifdef TERRAIN_PLOTS
           uniform vec4 uPlot[${MAX_PLOTS}], uPlotB[${MAX_PLOTS}]; uniform vec3 uPlotC[9];
+          uniform vec3 uSun;
+          // a plot edge's wander along its length (+-0.8 m over 3-20 m; plotWarp() in JS is the same)
+          float plotWarp(float s, float ph) { return 0.42 * sin(s * 0.31 + ph * 2.0) + 0.24 * sin(s * 0.83 + ph * 5.0) + 0.12 * sin(s * 2.3 + ph * 7.0); }
+          // the rows' spacing, jittered +-15% (a monotone warp; rowJ() in JS is the same)
+          float rowJ(float x, float pk) { return 0.05 * sin(x * 1.9 + pk) + 0.0125 * sin(x * 4.3 + pk * 3.0); }
         #endif
         uniform vec4 uMesa[8], uMesaY[8]; uniform float uMesaK;
         uniform vec4 uScale, uMisc, uFire; uniform vec2 uCliff, uCliffN, uG2; uniform vec3 uAO, uTintA, uTintB, uCollar, uLedge, uRev; uniform float uSpark, uRoadSpan, uLocal, uSWarp, uFarS, uRockDet; uniform vec2 uRutFar; uniform vec4 uScree;
@@ -203,12 +225,8 @@ function splatMaterial(biome, cfg) {
           if (ly > lm) dy *= lm / ly;
         }
         void tCap(inout vec2 dx, inout vec2 dy) { tCapK(dx, dy, TERRAIN_ANISO); }
-        // the crash mesas' own granite (the snow); elsewhere the walls' rock
-        #ifdef TERRAIN_SNOWROCK
-          #define CLIFF_M tCliffM
-        #else
-          #define CLIFF_M tCliff
-        #endif
+        // the crash mesas' rock: the walls' own (in the snow it is turned, below)
+        #define CLIFF_M tCliff
         // the rock's second sample (a long wall never repeats) and its far sample (bigger masses): a
         // 0.71 x 0.83 and a 0.4x scale; in the Tanaris sandstone both scale only along the wall, so its
         // beds stay at the same heights (a bed seen through two samples at two heights would ghost into
@@ -217,7 +235,7 @@ function splatMaterial(biome, cfg) {
           #define P2(p, ox, oy) vec2(p.x * 0.71 + ox, p.y)
           #define P2K vec2(0.71, 1.0)
           #define PF(p, ox, oy) vec2(p.x * uFarS + ox, p.y)
-          #define PFK vec2(uFarS, 1.0)
+          #define PFK (vec2(uFarS, 1.0) * 2.0)          // (and a mip softer: far off, only the big beds)
         #else
           #define PF(p, ox, oy) (p * uFarS + vec2(ox, oy))
           #define PFK uFarS
@@ -261,7 +279,7 @@ function splatMaterial(biome, cfg) {
           #ifndef TERRAIN_SNOWROCK
             if (sl.y <= 0.1) mesaK = 0.0;          // (elsewhere only the flanks shift the rock)
           #endif
-          #ifdef TERRAIN_SNOWROCK
+          #if defined(TERRAIN_SNOWROCK) || defined(TERRAIN_DUNES)
             // round a crash mesa everything is projected square to the face's own facing (the smoothed
             // facing averages over the whole small form, and its lobes and bench ends face sideways,
             // so either would project them edge-on, smeared into chevrons)
@@ -293,6 +311,14 @@ function splatMaterial(biome, cfg) {
           vec2 gdxr = ROT * gdx, gdyr = ROT * gdy;
           if (side) { gdxr = vec2(gdx.x * 0.8 - gdx.y * 0.6, gdx.x * 0.6 + gdx.y * 0.8); gdyr = vec2(gdy.x * 0.8 - gdy.y * 0.6, gdy.x * 0.6 + gdy.y * 0.8); }
           float sBias = side ? 1.0 : exp2(smoothstep(0.12, 0.45, 1.0 - nr.y) * 2.0 * smoothstep(8.0, 30.0, distance(cameraPosition, wp)));   // (never blurred at your feet)
+          #ifdef TERRAIN_DUNES
+            // (Tanaris) wind ripples lie only on the dune floor: from ~20 degrees they smooth away (the sand
+            // fetched ~5 mips softer, its broad mottles kept) and by ~30 a slope is plain sand, streaked
+            // down its fall line (below)
+            // (and far off, where they would only alias into corduroy on the dunes and the walls)
+            float rippleK = 1.0 - smoothstep(0.06, 0.13, sl.y + (nE - 0.5) * 0.04 + (mB.g - 0.5) * 0.03);
+            sBias *= exp2(5.0 * (1.0 - rippleK * (1.0 - smoothstep(50.0, 140.0, distance(cameraPosition, wp)))));
+          #endif
           vec3 g1 = textureGrad(tG1, gp / uScale.x, gdx / uScale.x * gB * sBias, gdy / uScale.x * gB * sBias).rgb;
           vec3 g1b = textureGrad(tG1, gpr / (uScale.x * 2.3) + 0.37, gdxr / (uScale.x * 2.3) * gB * sBias, gdyr / (uScale.x * 2.3) * gB * sBias).rgb;
           g1 = mix(g1, g1b, smoothstep(0.36, 0.64, mB.g + (nE - 0.5) * 0.4) * 0.85);
@@ -305,6 +331,16 @@ function splatMaterial(biome, cfg) {
             float w2 = smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y);
             col = mix(g1, g2, w2);
           }
+          #ifdef TERRAIN_DUNES
+          if (rippleK < 0.999) {
+            // sand sliding down a slope: soft streaks along its fall line (across it ~0.4-1.2 m, down it several m)
+            vec2 fall = normalize(hn + vec2(1e-4, 0.0));
+            vec2 sc = vec2(dot(xz, vec2(-fall.y, fall.x)), dot(xz, fall) * 0.5 + wp.y);
+            float stk = texture2D(tMacro, vec2(sc.x / 22.0, sc.y / 140.0) + vec2(0.17, 0.53)).b;
+            float stk2 = texture2D(tDetail, vec2(sc.x / 1.3, sc.y / 7.0) + vec2(0.61, 0.23)).g;
+            col *= mix(1.0, 0.9 + 0.2 * stk + (stk2 - 0.5) * 0.14, 1.0 - rippleK);
+          }
+          #endif
           // clearings: bare packed dirt; scorched and ashy round the fires
           if (vSplat.y > 0.005) {
             vec3 dt = texture2D(tDirt, xr / uScale.z).rgb;
@@ -321,61 +357,122 @@ function splatMaterial(biome, cfg) {
           #ifdef TERRAIN_PLOTS
           {
             // Westfall's cultivated plots: turned furrows, cut stubble or standing wheat, in rows that run
-            // along or across the road and wander a little; a grass margin inside a ragged, wavy edge; each
-            // plot its own tint. uPlot: centre, sin and cos of its bearing; uPlotB: half-length along the
-            // road, half-depth across, kind (0 wheat, 1 stubble, 2 furrow), rows along the road (1) or not
-            float pw = 0.0, pu = 0.0, pv = 0.0, pk = 0.0; vec4 pB = vec4(0.0);
+            // along or across the road, wander a little and are never evenly spaced (+-15%); a trodden
+            // headland of packed dirt and flattened straw rings each one, and every edge wanders on its
+            // own (+-0.8 m over 3-20 m, the same function the wheat cards are placed by) and is ragged
+            // in the small. uPlot: centre, sin and cos of its bearing; uPlotB: half-length along the road,
+            // half-depth across, kind (0 wheat, 1 stubble, 2 furrow), rows along the road (1) or not.
+            // Furrows and windrows are lit by the real sun (their slope against uSun), so the lit flank
+            // is the one facing it; rows finer than a few pixels (far off, or at a grazing angle) melt
+            // into the plot's average tone instead of aliasing into bars.
+            float pw = 0.0, pm = 0.0, pu = 0.0, pv = 0.0, pk = 0.0, pmr = 0.0; vec4 pB = vec4(0.0); vec2 pA = vec2(0.0, 1.0);
             for (int i = 0; i < ${MAX_PLOTS}; i++) {
               vec4 A = uPlot[i], Bq = uPlotB[i];
               vec2 d = xz - A.xy;
               float u = d.x * A.z + d.y * A.w, v = d.x * A.w - d.y * A.z;
-              float m = min(Bq.x - abs(u), Bq.y - abs(v));
-              if (m <= 0.0) continue;
+              if (abs(u) > Bq.x + 1.6 || abs(v) > Bq.y + 1.6) continue;
               float sd = float(i) * 1.37;
-              float e = (mB.g - 0.5) * 1.1 + (nE - 0.5) * 0.6 + sin(u * 0.29 + sd * 4.1) * 0.22 + sin(v * 0.37 + sd * 2.3) * 0.2;
-              float w = smoothstep(0.75, 1.45, m + e);
-              if (w > pw) { pw = w; pu = u; pv = v; pB = Bq; pk = sd; }
+              float m = min(Bq.x - abs(u) + plotWarp(v, sd + (u > 0.0 ? 0.0 : 3.1)), Bq.y - abs(v) + plotWarp(u, sd + (v > 0.0 ? 1.7 : 4.9)));
+              float mr = m + (nE - 0.5) * 0.6 + (mB.g - 0.5) * 0.4;
+              float wm = smoothstep(-0.25, 0.45, mr);
+              if (wm > pm) {
+                // (the crop's own edge is crisper and ragged in the small: tufts and gaps of ~0.2-0.5 m)
+                float fe = mr < 2.2 ? texture2D(tMacro, xz / 9.0 + vec2(0.71, 0.37)).b : 0.5;
+                pm = wm; pw = smoothstep(1.22, 1.42, mr + (fe - 0.5) * 0.7); pu = u; pv = v; pB = Bq; pk = sd; pA = A.zw; pmr = mr + (fe - 0.5) * 0.7;
+              }
+            }
+            vec3 dt = vec3(0.5), dA = vec3(0.5);
+            if (pm > 0.0) {
+              dt = texture2D(tDirt, xr / uScale.z).rgb; dA = textureLod(tDirt, vec2(0.5), 12.0).rgb;
+              // the headland: packed dirt half under flattened, sun-bleached straw
+              float tr = smoothstep(0.38, 0.62, nE + (mB.g - 0.5) * 0.5 + (pm - 0.5) * 0.3);
+              vec3 hc = mix(col * vec3(1.02, 0.94, 0.8), dt * vec3(0.92, 0.88, 0.84), tr * 0.8);
+              col = mix(col, hc, pm * 0.9);
+              gW *= 1.0 - pm * 0.6;
             }
             if (pw > 0.0) {
               float al = pB.w, kind = pB.z;
               float a = mix(pu, pv, al), bq = mix(pv, pu, al);         // a: across the rows, bq: along them
+              vec2 acr = al > 0.5 ? vec2(pA.y, -pA.x) : pA;            // the across-row direction, world xz
               a += sin(bq * 0.085 + pk * 5.0) * 0.55 + sin(bq * 0.31 + pk * 2.0) * 0.1;
               float per = kind < 0.5 ? 0.72 : kind < 1.5 ? 0.7 : 0.8;
-              float q = a / per, fq = fract(q);
-              float fade = smoothstep(0.2, 0.55, fwidth(q));        // rows finer than a couple of pixels melt into their average
-              float tri = 1.0 - abs(fq * 2.0 - 1.0);                 // 0 down in a furrow, 1 on a ridge
-              float litF = smoothstep(0.5, 0.66, fq) * (1.0 - smoothstep(0.68, 0.86, fq));    // the ridge's sunward flank
-              // each row thickens and thins along its length (sampled per row, so rows differ)
+              float q = (a + per * rowJ(a / per, pk)) / per, fq = fract(q);
+              float fw = fwidth(q);
+              float fade = smoothstep(0.07, 0.3, fw);                  // ~4 px a row and finer: the average tone
+              float dist = distance(cameraPosition, wp);
               float rowN = textureLod(tMacro, vec2(bq / 11.0 + pk, floor(q) * 0.173 + pk * 0.31), 0.0).g;
-              vec3 dt = texture2D(tDirt, xr / uScale.z).rgb, dA = textureLod(tDirt, vec2(0.5), 12.0).rgb;
-              vec3 dMod = clamp(dt / max(dA, vec3(0.01)), 0.65, 1.45), gMod = clamp(g1 / max(textureLod(tG1, vec2(0.5), 12.0).rgb, vec3(0.01)), 0.6, 1.5);
+              float cs = cos(fq * 6.2832), sn = sin(fq * 6.2832);
+              float ridge = 0.5 - 0.5 * cs;                           // 0 down in a furrow, 1 on a crest
+              // the sun on a slope across the rows: + on the flank that faces it, - on the other
+              vec3 L = normalize(uSun);
+              float sunA = dot(acr, L.xz), Ly = max(L.y, 0.2);
+              vec3 dMod = clamp(dt / max(dA, vec3(0.01)), 0.75, 1.3);
+              vec3 gMod = clamp(g1 / max(textureLod(tG1, vec2(0.5), 12.0).rgb, vec3(0.01)), 0.85, 1.18);
               vec3 pc, pa;
+              float h1 = fract(pk * 0.618 + 0.13), h2 = fract(pk * 0.377 + 0.71);
               if (kind > 1.5) {
-                // turned soil: dark cool furrows, warm lit ridges, clods along them
-                float rg = smoothstep(0.05, 0.85, tri + (rowN - 0.5) * 0.3);
-                pc = mix(uPlotC[0], uPlotC[1], rg);
-                pc = mix(pc, uPlotC[2], litF * (0.6 + 0.5 * rowN));
-                pa = mix(mix(uPlotC[0], uPlotC[1], 0.55), uPlotC[2], 0.12);
-                pc *= dMod; pa *= mix(vec3(1.0), dMod, 0.5);
+                // turned soil: rounded ridges (a warm lit crest, the far flank and the furrow cool and
+                // shadowed), clods along them, rows that thicken and thin
+                float s = 0.55 * sn * (0.8 + 0.4 * rowN);
+                float lit = clamp((Ly - s * sunA) / sqrt(1.0 + s * s) / Ly - 1.0, -0.6, 0.4);
+                float occ = smoothstep(0.45, 0.0, ridge);               // the furrow bottom: a soft cool shadow
+                pc = mix(uPlotC[1], uPlotC[2], smoothstep(0.55, 1.0, ridge) * 0.55);
+                pc = mix(pc, uPlotC[2] * vec3(1.08, 1.0, 0.86), max(lit, 0.0) * 1.6);
+                pc = mix(pc, uPlotC[0], clamp(-lit * 1.2, 0.0, 0.75) + occ * 0.35);
+                // clods and grit along the rows (gone by the time the rows themselves melt)
+                float cl = texture2D(tDetail, vec2(dot(xz, acr), dot(xz, vec2(-acr.y, acr.x)) * 0.6) / 1.3 + vec2(0.41, 0.17)).g - 0.5;
+                pc *= mix(vec3(1.0), dMod, 0.8 + 0.4 * ridge) * (1.0 + cl * 0.7 * (1.0 - smoothstep(10.0, 30.0, dist)));
+                pa = mix(uPlotC[1], uPlotC[2], 0.22) * mix(vec3(1.0), dMod, 0.6);
               } else if (kind > 0.5) {
-                // stubble: pale rows of cut straw over dry tilled soil, loose straw between
-                // (soft-edged, broken rows; the soil between them half hidden under loose straw)
-                float rm = smoothstep(0.3, 0.7, tri + (nE - 0.5) * 0.35) * smoothstep(0.15, 0.5, rowN + (nE - 0.5) * 0.5 + (mB.g - 0.5) * 0.3);
-                vec3 straw = mix(uPlotC[4], uPlotC[5], litF * 0.8) * gMod;
-                vec3 soil = mix(uPlotC[3] * dMod, uPlotC[4] * gMod, 0.18 + 0.32 * smoothstep(0.35, 0.85, nE + (mB.b - 0.5) * 0.4));
-                pc = mix(soil, straw, rm * 0.78);
-                pa = mix(uPlotC[3], uPlotC[4], 0.5) * mix(vec3(1.0), gMod, 0.5);
+                // stubble: rows of pale cut stalks over darker soil with loose straw in it and, on most
+                // plots, a raked windrow of straw every five rows (lit on its sunward side)
+                // (each row a hatch of short cut stalks: a fine stroke texture laid in row space, the
+                // stalks crowding on the row and thinning out into the soil between; loose straw there)
+                vec3 hs = texture2D(tDetail, vec2(bq * 0.6, a * 1.6) / 0.9 + vec2(pk * 0.37, 0.19)).rgb;
+                float stub = smoothstep(0.4, 0.62, hs.r * 0.9 + 0.05 + (ridge - 0.5) * 0.62 + (rowN - 0.5) * 0.25 + (nE - 0.5) * 0.2);
+                vec3 soil = mix(uPlotC[3] * vec3(0.94, 0.9, 0.86), uPlotC[4] * 0.86, smoothstep(0.42, 0.75, nE + (mB.b - 0.5) * 0.3 + (hs.g - 0.5) * 0.6) * 0.55) * dMod;
+                vec3 straw = mix(uPlotC[4], uPlotC[5], smoothstep(0.55, 0.85, hs.b + ridge * 0.3) * 0.7) * gMod * (0.82 + 0.36 * hs.r);
+                pc = mix(soil, straw, stub * 0.92);
+                pa = mix(soil, straw, 0.5);
+                if (h1 > 0.3) {
+                  // (lumpy: the windrow swells, thins and breaks along its length; golden cut straw, a little
+                  // darker than the stubble, lit along its sunward side, and its short shadow on the stubble)
+                  float wl = textureLod(tMacro, vec2(bq / 9.0 + pk, floor(q / 5.0 + 0.1) * 0.29 + pk * 0.7), 0.0).b;
+                  float ww = (0.055 + 0.04 * wl) * 5.0 * per;                              // its half-width, m
+                  float wd = (fract(q / 5.0 + 0.1) - 0.5) * 5.0 * per;                    // m from its middle
+                  float wx = wd / ww;
+                  float wi = smoothstep(1.0, 0.65, abs(wx) + (nE - 0.5) * 0.6) * smoothstep(0.22, 0.5, wl + (mB.g - 0.5) * 0.5);
+                  float s = -0.9 * sin(clamp(wx, -1.0, 1.0) * 1.5708) * wi;
+                  float lit = clamp((Ly - s * sunA) / sqrt(1.0 + s * s) / Ly - 1.0, -0.6, 0.4);
+                  vec3 wc = mix(uPlotC[4], uPlotC[7], 0.4) * 0.92 * gMod * (0.88 + 0.24 * nE);
+                  wc = mix(wc, uPlotC[5] * vec3(1.0, 0.97, 0.88), max(lit, 0.0) * 1.1);
+                  wc = mix(wc, uPlotC[6] * 1.1, clamp(-lit, 0.0, 0.6));
+                  float sl0 = 0.32 * length(L.xz) / Ly;                                   // shadow length of a ~0.32 m windrow
+                  float sh = -sign(sunA) * wd - ww;                                       // m beyond its shaded side
+                  float wCast = smoothstep(-0.05, 0.08, sh) * (1.0 - smoothstep(sl0 * abs(sunA) * 0.6, sl0 * abs(sunA) + 0.05, sh)) * smoothstep(0.22, 0.5, wl + (mB.g - 0.5) * 0.5);
+                  float wf = smoothstep(0.03, 0.12, fwidth(q / 5.0));
+                  pc *= 1.0 - 0.35 * wCast * (1.0 - wf);
+                  pc = mix(pc, wc, wi * (1.0 - wf * 0.6));
+                  pa = mix(pa, mix(uPlotC[4], uPlotC[7], 0.4), 0.12);
+                }
               } else {
-                // standing wheat: dense golden rows, shaded gaps, lit heads on the sunward side
-                float rm = smoothstep(0.12, 0.42, tri + (rowN - 0.5) * 0.25);
-                pc = mix(uPlotC[6], uPlotC[7], rm) * gMod;
-                pc = mix(pc, uPlotC[8] * gMod, litF * 0.7 * rm);
-                pa = mix(uPlotC[6], uPlotC[7], 0.78) * mix(vec3(1.0), gMod, 0.5);
+                // standing wheat: the cards stand in the rows, so under them the ground is the crop's own
+                // shade (dark straw, the rows faint); far off, where the cards shrink away, golden rows
+                float rm = smoothstep(0.15, 0.6, ridge + (rowN - 0.5) * 0.3);
+                vec3 under = mix(uPlotC[6], mix(uPlotC[6], uPlotC[7], 0.45), rm) * dMod;
+                vec3 gold = mix(mix(uPlotC[6], uPlotC[7], 0.5), uPlotC[7], rm) * gMod;
+                gold = mix(gold, uPlotC[8], smoothstep(0.7, 1.0, ridge) * 0.4);
+                float farW = smoothstep(55.0, 105.0, dist);
+                // (the crop's shade only where the stalks stand thick: along the thinning edge, tilled soil)
+                under = mix(mix(uPlotC[3], uPlotC[1], 0.4) * dMod, under, smoothstep(1.5, 2.4, pmr));
+                pc = mix(under, gold, farW);
+                pa = mix(mix(uPlotC[6], uPlotC[7], 0.3), mix(uPlotC[6], uPlotC[7], 0.72), farW);
               }
               pc = mix(pc, pa, fade);
-              // each plot its own tint (warmer or cooler, lighter or darker), and broad patches in it
-              float h1 = fract(pk * 0.618 + 0.13), h2 = fract(pk * 0.377 + 0.71);
-              pc *= mix(vec3(1.07, 1.0, 0.88), vec3(0.93, 0.99, 1.06), h1) * (0.9 + 0.18 * h2) * (0.9 + 0.2 * mB.r);
+              // each plot its own tint (warmer or cooler, lighter or darker), broad patches in it, and
+              // never brighter or more saturated than its palette
+              pc *= mix(vec3(1.05, 1.0, 0.92), vec3(0.95, 0.99, 1.04), h1) * (0.93 + 0.12 * h2) * (0.94 + 0.12 * mB.r);
+              pc *= min(1.0, 0.62 / max(tLum(pc), 1e-3));       // (a value cap: never a hot, saturated rim)
               col = mix(col, pc, pw);
               gW *= 1.0 - pw;
             }
@@ -418,6 +515,11 @@ function splatMaterial(biome, cfg) {
           // (only where the 3 x 3 slope stands well above the wide one: a small form, not a long wall)
           float locK = smoothstep(0.08, 0.16, sl.y - sl.x);
           if (uLocal >= 0.0) cB = max(cB, mix(cB, sl.y - uLocal + (nE - 0.5) * 0.1 + (mB.g - 0.5) * 0.06, locK));
+          #ifdef TERRAIN_DUNES
+            // (Tanaris) the sandstone shows wherever the slope itself passes ~35 degrees (the 3 x 3 slope:
+            // the wide average would keep a 9 m wall half sand, and the sand there would be rippled)
+            cB = max(cB, sl.y - 0.03 + (nE - 0.5) * 0.06 + (mB.g - 0.5) * 0.05);
+          #endif
           // (snow: far off the granite comes out on gentler slopes than near)
           // and the flanks of a crash mesa show their rock on gentler slopes than a valley wall
           float farA = 0.0, cShift = uMesaK * mesaK, mzk = 0.0;
@@ -476,14 +578,21 @@ function splatMaterial(biome, cfg) {
               if (farK < 0.999 && mzk < 0.999) c1 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, P2(p, 0.37, 0.21), dx * P2K, dy * P2K).rgb, xb);
               #endif
               if (farK > 0.001) c1 = mix(c1, textureGrad(tCliff, PF(p, 0.13, 0.57), dx * PFK, dy * PFK).rgb, farK);
+              #ifdef TERRAIN_SNOWROCK
+                // (a crash mesa: the walls' own angular granite, turned 30 degrees, so its fracture planes
+                // run diagonally across the face and no row of blocks lines up)
+                vec2 pM = SR * p * 1.1 + vec2(0.31, 0.11), dxM = SR * dx * 1.1, dyM = SR * dy * 1.1;
+                if (mzk > 0.001) c1 = mix(c1, textureGrad(tCliff, pM, dxM, dyM).rgb, mzk);
+              #else
               if (mzk > 0.001) c1 = mix(c1, textureGrad(CLIFF_M, p * MS + vec2(0.31, 0.11), dx * MS, dy * MS).rgb, mzk);
+              #endif
               cc += sx * c1;
               #ifdef TERRAIN_SNOWROCK
                 sN += sx * texture2D(tMacro, vec2(wp.z / 40.0, wp.y / 9.0) + vec2(0.11, 0.43)).rg;
                 vec2 f1 = vec2(0.0);
                 if (farK < 0.999 && mzk < 0.999) f1 = mix(textureGrad(tForm, p, dx, dy).rg, formTurn(textureGrad(tForm, pR, dxR, dyR).rgb), xb);
                 if (farK > 0.001) f1 = mix(f1, textureGrad(tForm, p * 0.4 + vec2(0.13, 0.57), dx * 0.4, dy * 0.4).rg, farK);
-                if (mzk > 0.001) f1 = mix(f1, textureGrad(tFormM, p * MS + vec2(0.31, 0.11), dx * MS, dy * MS).rg, mzk);
+                if (mzk > 0.001) f1 = mix(f1, formTurn(textureGrad(tForm, pM, dxM, dyM).rgb), mzk);
                 fm += sx * f1;
               #endif
             }
@@ -498,14 +607,19 @@ function splatMaterial(biome, cfg) {
               if (farK < 0.999 && mzk < 0.999) c2 = mix(textureGrad(tCliff, p, dx, dy).rgb, textureGrad(tCliff, P2(p, 0.61, 0.47), dx * P2K, dy * P2K).rgb, xb);
               #endif
               if (farK > 0.001) c2 = mix(c2, textureGrad(tCliff, PF(p, 0.71, 0.29), dx * PFK, dy * PFK).rgb, farK);
+              #ifdef TERRAIN_SNOWROCK
+                vec2 pM = SRM * p * 1.1 + vec2(0.83, 0.39), dxM = SRM * dx * 1.1, dyM = SRM * dy * 1.1;
+                if (mzk > 0.001) c2 = mix(c2, textureGrad(tCliff, pM, dxM, dyM).rgb, mzk);
+              #else
               if (mzk > 0.001) c2 = mix(c2, textureGrad(CLIFF_M, p * MS + vec2(0.83, 0.39), dx * MS, dy * MS).rgb, mzk);
+              #endif
               cc += (1.0 - sx) * c2;
               #ifdef TERRAIN_SNOWROCK
                 sN += (1.0 - sx) * texture2D(tMacro, vec2(-wp.x / 40.0, wp.y / 9.0) + vec2(0.61, 0.17)).rg;
                 vec2 f2 = vec2(0.0);
                 if (farK < 0.999 && mzk < 0.999) f2 = mix(textureGrad(tForm, p, dx, dy).rg, formTurn(textureGrad(tForm, pR, dxR, dyR).rgb), xb);
                 if (farK > 0.001) f2 = mix(f2, textureGrad(tForm, p * 0.4 + vec2(0.71, 0.29), dx * 0.4, dy * 0.4).rg, farK);
-                if (mzk > 0.001) f2 = mix(f2, textureGrad(tFormM, p * MS + vec2(0.83, 0.39), dx * MS, dy * MS).rg, mzk);
+                if (mzk > 0.001) f2 = mix(f2, formTurnM(textureGrad(tForm, pM, dxM, dyM).rgb), mzk);
                 fm += (1.0 - sx) * f2;
               #endif
             }
@@ -519,6 +633,9 @@ function splatMaterial(biome, cfg) {
               float rawS = mix(textureLod(tSlopeR, (gqc + 0.5) / uGridN, 0.0).r, sl.y, smoothstep(0.0, 12.0, dOut));
               float topR = 1.0 - smoothstep(uScree.z, uScree.w, max(rawS, sl.y - 0.16) + (wN.r - 0.5) * 0.1 + (nE - 0.5) * 0.06);
               float topK = mix(1.0 - smoothstep(uScree.x, uScree.y, max(slope, sl.y)), topR, smoothstep(-0.05, 0.2, vCv));
+              #ifdef TERRAIN_DUNES
+                topK *= 1.0 - mesaK;          // (a crash mesa sets its sand by height, below)
+              #endif
               cc = mix(cc, col * vec3(0.94, 0.9, 0.88), topK);
             #else
               // ledges and shelves inside the rock hold what the ground holds (grass, golden grass,
@@ -606,7 +723,35 @@ function splatMaterial(biome, cfg) {
             wk = smoothstep(uRev.x, uRev.y, wk + (min(tLum(cc), 0.7) - 0.4) * 0.5 * (1.0 - wk) + (nE - 0.5) * 0.1 + ((wN.r - 0.5) * 0.3 + (wN.b - 0.5) * 0.15) * steepW * (1.0 - wk * wk));
             #endif
             #ifdef TERRAIN_DUNES
-              wk *= 1.0 - smoothstep(-0.05, 0.35, vCv);                // dune crests stay sand
+              // dune crests stay sand (but not a wall's steep convex shoulder: the sandstone runs up to
+              // where its lip lies back under ~30 degrees, so a wall is rock under a sand cap, never one
+              // thin band of rock between sand above and sand below)
+              wk *= 1.0 - smoothstep(-0.05, 0.35, vCv) * (1.0 - mesaK) * (1.0 - smoothstep(0.16, 0.28, sl.y));
+              if (mesaK > 0.0) {
+                // a crash mesa is a sandstone butte: rock all round its flanks under a cap of drifted sand
+                // hanging over its lip, above a drift at its foot, with sand lying on its bench and a lit
+                // ledge (a hard bed) at the bench's level all the way round, a cool shadow under it.
+                // Every edge is set by HEIGHT (and a noise on the face), never by the triangles.
+                float hb = wp.y - mY.x, ht = mY.y - wp.y;
+                float cp = 0.6 + (wN.b - 0.5) * 1.1 + (nE - 0.5) * 0.3;
+                float sk = 0.9 + (wN.g - 0.5) * 1.4 + (nE - 0.5) * 0.3;
+                float mR = smoothstep(cp - 0.12, cp + 0.12, ht) * smoothstep(sk - 0.15, sk + 0.15, hb);
+                float bh = wp.y - mY.z + (wN.r - 0.5) * 0.45;
+                vec2 rd = normalize(wp.xz - mC + 1e-4);
+                float bS = smoothstep(0.4, 0.8, dot(rd, vec2(cos(mY.w), sin(mY.w))));
+                mR *= 1.0 - bS * (1.0 - smoothstep(0.18, 0.42, abs(bh + 0.05)));
+                mR *= smoothstep(0.06, 0.14, slope);                                  // (anything lying flat holds sand)
+                float lip = smoothstep(-0.06, 0.04, bh) * (1.0 - smoothstep(0.22, 0.34, bh)), und = smoothstep(-0.85, -0.5, bh) * (1.0 - smoothstep(-0.12, 0.0, bh));
+                cc = mix(cc, cc * vec3(0.66, 0.62, 0.7), und * 0.7 * mesaK);
+                cc = mix(cc, mix(cc, vec3(0.86, 0.7, 0.48), 0.6), lip * 0.8 * mesaK);
+                // the caprock: a thick pale hard bed right under the sand cap, lit along its top, and the
+                // soft rock under it scooped back into a cool shadow (so the top reads as a cap that overhangs)
+                float cq = ht - cp + (wN.g - 0.5) * 0.3;
+                float capB = smoothstep(0.05, 0.15, cq) * (1.0 - smoothstep(0.95, 1.15, cq)), capU = smoothstep(1.05, 1.2, cq) * (1.0 - smoothstep(1.6, 2.1, cq));
+                cc = mix(cc, vec3(0.8, 0.64, 0.42) * (0.82 + 0.4 * tLum(cc)) * mix(1.12, 0.92, smoothstep(0.1, 0.6, cq)), capB * 0.8 * mesaK);
+                cc = mix(cc, cc * vec3(0.58, 0.54, 0.62), capU * 0.75 * mesaK);
+                wk = mix(wk, mR, mesaK);
+              }
             #endif
             // a thin collar of scree and dirt where the rock comes out of the ground
             float collar = clamp(wk * (1.0 - wk) * 4.0, 0.0, 1.0) * smoothstep(0.15, 0.55, nE + mB.g * 0.4);
@@ -1201,17 +1346,18 @@ function clutterMaterial(biome) {
   const m = new THREE.MeshLambertMaterial({ map: clutterTex(biome), alphaTest: 0.45, side: THREE.FrontSide });
   m.alphaToCoverage = true;
   m.userData.U = U;
-  m.customProgramCacheKey = () => 'terrain-clutter-v2';
+  m.customProgramCacheKey = () => 'terrain-clutter-v3';
   m.onBeforeCompile = sh => {
     sh.uniforms.uTime = U.uTime;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', `#include <common>
-        attribute vec3 aCard; uniform float uTime;`)
+        attribute vec3 aCard; uniform float uTime; varying float vTone;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         {
           vec3 ip = vec3(instanceMatrix[3][0], instanceMatrix[3][1], instanceMatrix[3][2]);
-          float cd = distance(ip.xz, cameraPosition.xz);
-          transformed *= 1.0 - smoothstep(aCard.z * 0.62, aCard.z, cd);   // shrink into the ground, no popping
+          float cd = distance(ip.xz, cameraPosition.xz), fd = floor(aCard.z);
+          vTone = fract(aCard.z);                                      // (the fraction: this card's tone)
+          transformed *= 1.0 - smoothstep(fd * 0.62, fd, cd);          // shrink into the ground, no popping
           float sw = sin(uTime * 1.5 + ip.x * 0.37 + ip.z * 0.23) * 0.6 + sin(uTime * 2.6 + ip.z * 0.9 + ip.x * 0.2) * 0.3;
           float hy = position.y * position.y;
           transformed.x += sw * 0.07 * hy;
@@ -1219,6 +1365,11 @@ function clutterMaterial(biome) {
         }`)
       .replace('#include <uv_vertex>', `#include <uv_vertex>
         vMapUv = vMapUv * vec2(0.25, 0.5) + aCard.xy;`);
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', `#include <common>
+        varying float vTone;`)
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        diffuseColor.rgb *= 0.84 + 0.32 * vTone;`);
   };
   clutterMatCache.set(biome, m);
   return m;
@@ -1294,17 +1445,19 @@ class Clutter {
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = false;
     this.mesh.receiveShadow = true;
-    this.m4 = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.v = new THREE.Vector3(); this.sv = new THREE.Vector3(); this.up = new THREE.Vector3(0, 1, 0);
-    patches.forEach((p, i) => this.set(i, p.x, p.y, p.z, p.ry, p.w, p.h, p.card, p.fade));
+    this.m4 = new THREE.Matrix4(); this.q = new THREE.Quaternion(); this.q2 = new THREE.Quaternion(); this.ax = new THREE.Vector3(); this.v = new THREE.Vector3(); this.sv = new THREE.Vector3(); this.up = new THREE.Vector3(0, 1, 0);
+    patches.forEach((p, i) => this.set(i, p.x, p.y, p.z, p.ry, p.w, p.h, p.card, p.fade, p.lean, p.leanA, p.tone));
     this.ki = new Int32Array(this.N * this.N).fill(-2147483648);
     this.kj = new Int32Array(this.N * this.N).fill(-2147483648);
     for (let s = 0; s < near; s++) this.hide(this.base + s);
   }
-  set(i, x, y, z, ry, w, h, card, fade) {
+  // (fade: the distance it shrinks away by; tone 0..1: darker or lighter, 0.5 as painted)
+  set(i, x, y, z, ry, w, h, card, fade, lean = 0, leanA = 0, tone = 0.5) {
     this.q.setFromAxisAngle(this.up, ry);
+    if (lean) this.q.premultiply(this.q2.setFromAxisAngle(this.ax.set(Math.cos(leanA), 0, Math.sin(leanA)), lean));
     this.m4.compose(this.v.set(x, y, z), this.q, this.sv.set(w, h, w));
     this.mesh.setMatrixAt(i, this.m4);
-    this.aCard[i * 3] = (card % 4) * 0.25; this.aCard[i * 3 + 1] = card < 4 ? 0.5 : 0; this.aCard[i * 3 + 2] = fade;
+    this.aCard[i * 3] = (card % 4) * 0.25; this.aCard[i * 3 + 1] = card < 4 ? 0.5 : 0; this.aCard[i * 3 + 2] = Math.floor(fade) + Math.max(0, Math.min(0.99, tone));
   }
   hide(i) { this.m4.makeScale(0, 0, 0); this.mesh.setMatrixAt(i, this.m4); }
   // how bare the ground is here (the dirt of a clearing): 0..1
@@ -1318,7 +1471,7 @@ class Clutter {
     if (x < W.X0 + 2 || x > W.X0 + W.nx * W.cell - 2 || z < W.Z0 + 2 || z > W.Z1 - 2) return false;
     if (Math.abs(x - W.roadX(z)) < roadHW(W, this.cfg, z) + roadPad) return false;
     if (this.blocked(x, z)) return false;
-    if (this.plots.length && this.plotDepth(x, z) > 0.9) return false;
+    if (this.plots.length && this.plotDepth(x, z) > 0.3) return false;      // (the crop and its trodden headland)
     const e = 0.7, gx = W.heightAt(x + e, z) - W.heightAt(x - e, z), gz = W.heightAt(x, z + e) - W.heightAt(x, z - e);
     if (Math.hypot(gx, gz) / (2 * e) > 0.8) return false;        // no tufts on cliff faces
     for (const m of W.mud) if (z > m.z0 - 2 && z < m.z1 + 2 && Math.abs(x - W.roadX(z)) < 22) return false;
@@ -1328,17 +1481,19 @@ class Clutter {
     }
     return true;
   }
-  // how far inside a cultivated plot (m from its rectangle's edge; <= 0 outside every plot)
+  // how far inside a cultivated plot (m from its edge, which wanders as the splat's does; <= 0 outside every plot)
   plotDepth(x, z) {
-    let best = 0;
+    let best = -1e9;
     for (const f of this.plots) {
       const dx = x - f.x, dz = z - f.z, u = dx * f.sn + dz * f.cs, v = dx * f.cs - dz * f.sn;
-      best = Math.max(best, Math.min(f.hl - Math.abs(u), f.hd - Math.abs(v)));
+      best = Math.max(best, plotM(f, u, v));
     }
     return best;
   }
-  // Rows of wheat cards along each wheat plot's ridges (where the splat paints its rows: the same
-  // spacing and the same wander), a few cut-straw tufts in the stubble, nothing on the furrows.
+  // Standing wheat along every row of a wheat plot (on the crests the splat paints: the same jittered
+  // spacing and the same wander), a card every ~0.5 m, so a row is a continuous thicket; heights vary
+  // in patches and stalks lean a little, most of them the same way (the wind). The crop's edge follows
+  // the plot's wandering edge. A few cut-straw tufts on the stubble rows, nothing on the furrows.
   plotRows(out) {
     const W = this.W, WC = this.C.wheatCards;
     for (const f of this.plots) {
@@ -1346,19 +1501,29 @@ class Clutter {
       const wheat = f.kind === 'wheat', per = wheat ? 0.72 : 0.7, pk = f.i * 1.37, al = f.along ? 1 : 0;
       const A = al ? f.hd : f.hl, Bm = al ? f.hl : f.hd;
       const r = cellRng(Math.round(f.x * 10), Math.round(f.z * 10), W.seed + 9);
-      for (let k = Math.ceil(-A / per - 1); k * per < A + 1; k++) {
-        const step = wheat ? 0.78 : 1.7;
-        for (let b = -Bm + r() * step; b < Bm; b += step * (0.8 + r() * 0.4)) {
+      const windA = r() * 6.283;
+      for (let k = Math.floor(-A / per - 3); k * per < A + 3; k++) {
+        const step = wheat ? 0.5 : 1.7;
+        for (let b = -Bm - 1 + r() * step; b < Bm + 1; b += step * (0.8 + r() * 0.4)) {
           if (!wheat && r() > 0.42) continue;
           const wan = Math.sin(b * 0.085 + pk * 5) * 0.55 + Math.sin(b * 0.31 + pk * 2) * 0.1;
-          const a = (k + 0.5) * per - wan + (r() - 0.5) * 0.12;
+          const a0 = (k + 0.5) * per;
+          let aw = a0;
+          for (let it = 0; it < 4; it++) aw = a0 - per * rowJ(aw / per, pk);
+          const a = aw - wan + (r() - 0.5) * 0.12;
           const u = al ? b : a, v = al ? a : b;
-          if (Math.min(f.hl - Math.abs(u), f.hd - Math.abs(v)) < (wheat ? 1.5 : 1.7)) continue;
+          const m = plotM(f, u, v);
+          if (m < (wheat ? 1.4 + r() * 0.25 : 1.7)) continue;
           const x = f.x + u * f.sn + v * f.cs, z = f.z + u * f.cs - v * f.sn;
           if (this.blocked(x, z)) continue;
           if (wheat) {
+            if (m < 2.3 && r() > 0.45 + 0.55 * sstep(1.5, 2.3, m)) continue;   // a ragged, thinning edge
             const tall = r() < 0.8, [c, hh] = WC[tall ? 0 : 1];
-            out.push({ x, y: W.heightAt(x, z) - 0.05, z, ry: r() * 6.283, w: 1.0 + r() * 0.3, h: hh * (0.92 + r() * 0.2), card: c, fade: 125 });
+            const n1 = noise2(x / 4.5, z / 4.5, W.seed + 71), n2 = noise2(x / 9, z / 9, W.seed + 75);
+            const patch = 1 + 0.14 * n1 + 0.06 * noise2(x / 1.7, z / 1.7, W.seed + 73);
+            const edge = 0.85 + 0.15 * sstep(1.4, 2.6, m);         // a little shorter along the crop's edge
+            out.push({ x, y: W.heightAt(x, z) - 0.05, z, ry: r() * 6.283, w: 0.95 + r() * 0.3, h: hh * (0.9 + r() * 0.22) * patch * edge * 1.08, card: c, fade: 125,
+              lean: 0.05 + r() * 0.09, leanA: windA + (r() - 0.5) * 1.6, tone: 0.5 + 0.3 * n2 + 0.18 * n1 + (r() - 0.5) * 0.2 });
           } else {
             out.push({ x, y: W.heightAt(x, z) - 0.03, z, ry: r() * 6.283, w: 0.55 + r() * 0.3, h: 0.24 + r() * 0.12, card: 7, fade: 70 });
           }
@@ -1469,7 +1634,7 @@ class Clutter {
 const prewarmed = new Set();
 function prewarmQueue(biome) {
   const cfg = CFG[biome];
-  return [`ground_${biome}`, `ground2_${biome}`, `dirt_${biome}`, `road_${biome}`, cfg?.mudTex || 'mud', `cliff_${biome}`, cfg?.snowRock ? 'cliff_snow_form' : '', cfg?.snowRock ? 'cliff_snow_mesa' : '', cfg?.snowRock ? 'cliff_snow_mesa_form' : '', `clutter_${biome}`, `sky_mtn_${biome}`, `sky_clouds_${biome}`, 'terrain_detail']
+  return [`ground_${biome}`, `ground2_${biome}`, `dirt_${biome}`, `road_${biome}`, cfg?.mudTex || 'mud', `cliff_${biome}`, cfg?.snowRock ? 'cliff_snow_form' : '', `clutter_${biome}`, `sky_mtn_${biome}`, `sky_clouds_${biome}`, 'terrain_detail']
     .filter(n => has(n) && !prewarmed.has(n));
 }
 
@@ -1564,6 +1729,9 @@ export function buildTerrain(W) {
   let skyT = -1e9;
   const clutter = new Clutter(W, cfg, biome);
   group.add(clutter.mesh);
+  // (Dun Morogh, Tanaris) the crash mesas' broken silhouettes: shoulders, rim blocks or caprock, talus (render only)
+  const talus = cfg.snowRock || cfg.dunes ? buildTalus(W) : null;
+  if (talus) group.add(talus);
   for (const n of prewarmQueue(biome)) prewarmed.add(n);
   // tomorrow's textures are painted one at a time while the night lasts (no stall at dawn)
   const next = BIOME_BY_DAY[W.day] || null;
@@ -1572,6 +1740,7 @@ export function buildTerrain(W) {
     group,
     update(dt, t, camPos) {
       if (cfg.sparkle) mat.userData.U.uSpark.value = atmo.sparkle;
+      if (cfg.plots && atmo.lightDir) mat.userData.U.uSun.value.copy(atmo.lightDir);
       if (queue.length && atmo.night > 0.6 && t > idleAt && typeof requestIdleCallback === 'function') {
         idleAt = t + 1.5;
         requestIdleCallback(() => { const n = queue.shift(); if (n && !prewarmed.has(n)) { try { canvasFor(n); } catch {} prewarmed.add(n); } }, { timeout: 4000 });
@@ -1581,6 +1750,6 @@ export function buildTerrain(W) {
       if (camPos.distanceToSquared(skyAt) > 4 && (t - skyT > 0.2 || t < skyT)) { skyAt.copy(camPos); skyT = t; setSkyline(skylineFrom(W, lattice, camPos, sky)); }
       clutter.update(t, camPos);
     },
-    dispose() { clutter.dispose(); data.slopeTex.dispose(); data.rawTex.dispose(); apronTex.dispose(); queue = []; },
+    dispose() { clutter.dispose(); talus?.geometry.dispose(); data.slopeTex.dispose(); data.rawTex.dispose(); apronTex.dispose(); queue = []; },
   };
 }

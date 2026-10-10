@@ -1876,17 +1876,17 @@ register('cliff_meadow', {
   },
 });
 register('cliff_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: gray-brown rock in long rounded slabs and ledges, cream-lit tops, cool blue-gray undersides, vertical joints, dry grass on the lips',
+  family: 'terrain', size: 512, note: 'Westfall: warm ochre and umber sandstone in long, softly eroded slabs and ledges, sandy cream-lit tops, cool violet-brown undersides, vertical joints, dry grass tufts on the lips and ledges',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
-      fill: [3, 7], big: 5, bigR: [80, 120], asp: [3, 6], ledgeN: 4, ledgeL: [90, 230], small: 0, sx: 1, sy: 1, rot: 0.08, warp: 12, tilt: 0.05,
-      dome: 22, zs: 14, smooth: 0.12, exp: 4.5, bulge: 5, soft: 2, relief: 1.0, contrast: 2.5, planes: 0.35, shSlope: 0.5, castA: 0.5, tone: 0.07, hueMix: 0.4,
-      crease: 0.36, creaseW: 5, creaseD: 4, creaseA: 0.45, creaseC: '#5a4636',
-      colors: ['#8a8170', '#928876', '#827a6c', '#9a8e78', '#867c6a'], blot: ['#a49478', '#6e6a66', '#9a8a70', '#7a7466'],
-      light: '#e0cfa4', shadow: '#6a6878', cast: '#625e6c', deep: '#4e4a56', glaze: '#ffe8b8',
-      cover: { p: 0.5, up: 0.3, shade: '#8a7438', mid: '#a68e46', lit: '#c8ae5c', max: 0.65 },
-      stains: 18, stain: '#5a4636', stainA: 0.1, fringe: ['#c8a85a', '#b8963e', '#e2c56a', '#8a7a3a', '#d8bc6a'], fringeN: 22, lichen: ['#c8b070', '#d0a860'],
-      chisel: 120, chiselA: 0.1, cracks: 4, joints: 5, undercut: '#3e2e26',
+      fill: [3, 7], big: 5, bigR: [80, 120], asp: [3, 6.5], ledgeN: 5, ledgeL: [100, 240], small: 0, sx: 1, sy: 1, rot: 0.08, warp: 15, tilt: 0.05,
+      dome: 26, zs: 14, smooth: 0.2, exp: 3.4, bulge: 6, soft: 3, relief: 0.95, contrast: 2.2, planes: 0.25, shSlope: 0.5, castA: 0.45, tone: 0.09, hueMix: 0.45,
+      crease: 0.3, creaseW: 6, creaseD: 4, creaseA: 0.38, creaseC: '#5e3e2a',
+      colors: ['#9e7a52', '#a8845a', '#906c4a', '#b08c5e', '#98744e'], blot: ['#ba9462', '#7e5e42', '#a88258', '#8c6a4c'],
+      light: '#efd8a6', shadow: '#76626c', cast: '#6c5462', deep: '#523e48', glaze: '#ffe0a0',
+      cover: { p: 0.5, up: 0.3, shade: '#8a7034', mid: '#a88c42', lit: '#ccae58', max: 0.6 },
+      stains: 20, stain: '#6a4630', stainA: 0.12, fringe: ['#c8a85a', '#b8963e', '#e2c56a', '#8a7a3a', '#d8bc6a', '#a88c48'], fringeN: 40, lichen: ['#c8b070', '#d6b068', '#b8a060'],
+      chisel: 90, chiselA: 0.08, cracks: 3, joints: 4, undercut: '#4a2e22',
     }, cv);
   },
 });
@@ -1982,7 +1982,7 @@ function sandstone(g, s, rnd, cv, P) {
     let c; do { c = pick(rnd, pal); } while (c === lastC && pal.length > 1);
     lastC = c;
     beds.push({ hard: hardB[j], c: hex(jitter(c, rnd, 0.025)), c2: hex(jitter(pick(rnd, pal), rnd, 0.03)), wob: periodic(rnd, 4, 1.1, 1), wob2: periodic(rnd, 3, 0.8, 6),
-      amp: range(rnd, P.wob[0], P.wob[1]), sp: range(rnd, 16, 30), lens: periodic(rnd, 3, 0.9, 1), lensK: range(rnd, 0.15, 0.6), lip: periodic(rnd, 3, 1, 2), sand: periodic(rnd, 6, 0.8, 2), sand2: periodic(rnd, 3, 1, 1),
+      amp: range(rnd, P.wob[0], P.wob[1]) * (rnd() < (P.wavy ?? 0) ? 2.2 : 1), sp: range(rnd, 16, 30), lens: periodic(rnd, 3, 0.9, 1), lensK: range(rnd, ...(P.lensK || [0.15, 0.6])), lip: periodic(rnd, 3, 1, 2), sand: periodic(rnd, 6, 0.8, 2), sand2: periodic(rnd, 3, 1, 1),
       flute: periodic(rnd, 8, 0.6, 9), joints: [], tone: [], A: range(rnd, 0.75, 1.25) });
   }
   // the boundaries per column (top of each bed; the last is the first one tile further down). A hard
@@ -2038,7 +2038,7 @@ function sandstone(g, s, rnd, cv, P) {
         const deep = ab.hard ? 1 : 0.35;
         hh = -P.softA * deep * Math.pow(1 - f, 1.6) - P.softA * 0.18 * (1 - deep);
         const nL = Math.max(2, Math.round(t / b.sp)), pres = sst(-0.25, 0.35, ML[k]);
-        hh += P.softA * 0.035 * Math.sin(f * nL * TAU) * pres;
+        hh += P.softA * (P.subA ?? 0.035) * Math.sin(f * nL * TAU) * pres;
         hh -= P.softA * 0.14 * (0.5 + 0.5 * b.flute(u + f * 0.03)) * sst(0.15, 0.6, f) * sst(-0.1, 0.4, M2[k]);
         // a drift of sand on the ledge of the hard bed below: a ramp up against it
         if (bb.hard) {
@@ -2114,19 +2114,29 @@ function sandstone(g, s, rnd, cv, P) {
       });
     }
   }
+  // (optional) pale wind-scoured streaks running down the face, long and soft, gathered in a few
+  // vertical bands so the face reads as weathered from above rather than ruled into stripes
+  if (P.scourN) layered(g, s, P.scourA, lg => {
+    const bands = []; for (let i = 0; i < 4; i++) bands.push(rnd() * s);
+    for (let q = 0; q < P.scourN; q++) {
+      const x = pick(rnd, bands) + range(rnd, -40, 40), y0 = rnd() * s, L = range(rnd, 60, 220), w = range(rnd, 4, 14);
+      const pts = []; let px = 0; for (let i = 0; i <= 6; i++) { pts.push([px, L * i / 6]); px += range(rnd, -1.5, 1.5); }
+      wrap(s, x, y0 + L / 2, L + w, (X, Y) => stroke(lg, pts.map(([a, b2]) => [X + a, Y - L / 2 + b2]), w, w * 0.2, pick(rnd, P.scour), range(rnd, 0.35, 1)));
+    }
+  });
   streaks(g, s, rnd, { colors: [P.light], count: 60, len: [8, 26], width: [1.5, 3.5], angle: 0.05, wobble: 0.2, alpha: 0.06 });
   glaze(g, s, s, P.glaze, 0.1, 'soft-light');
   soften(cv, 0.6);
 }
 register('cliff_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: thick tan, rust and honey sandstone beds between lens-shaped cream hard beds (rounded lit tops, cast shadows, joints), sand on the ledges, varnish streaks (16 m tile)',
+  family: 'terrain', size: 512, note: 'Tanaris: tan, rust and honey sandstone beds of very different thickness between lens-shaped cream hard beds (some wavy, some pinching out; rounded lit tops, cast shadows, joints), sand on the ledges, dark varnish and pale wind-scour streaks down the face (16 m tile)',
   paint(g, s, rnd, h, cv) {
     sandstone(g, s, rnd, cv, {
-      softT: [80, 150], hardT: [30, 64], wob: [3, 12], hardA: 18, softA: 10, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
+      softT: [56, 190], hardT: [26, 92], wob: [2, 12], wavy: 0.35, lensK: [0.15, 0.95], subA: 0.01, hardA: 20, softA: 11, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
       softC: ['#a8764c', '#9e6c45', '#cc9e6c', '#c4955f'], hardC: ['#e6cea0', '#ddc290', '#e9d3a8'],
       light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
       sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
-      varnish: '#5a3c32', varnishA: 0.15, varnishN: 6, pit: '#946c4c', glaze: '#ffe6b8',
+      varnish: '#5a3c32', varnishA: 0.2, varnishN: 9, pit: '#946c4c', glaze: '#ffe6b8', scour: ['#f2dcb0', '#ecd2a2'], scourA: 0.16, scourN: 46,
     });
   },
 });
