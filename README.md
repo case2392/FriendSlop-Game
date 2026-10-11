@@ -198,6 +198,9 @@ tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewp
 npm test
 ```
 
+- `tools/namecheck.mjs` fails if another game's place names or a real brand
+  get into the text players can see (the store and the Steam agreement need
+  everything shipped to be ours).
 - `test/logic.mjs` plays a whole run over real WebSockets with two fake
   players and real physics (31 checks). It drives, carries and throws a vase
   (it chips), cracks the ranger gate, winches the RV up the grade, pawns a
@@ -220,6 +223,8 @@ npm test
 - `npm run test:desktop` drives the real desktop app (needs a display, or
   `xvfb-run`): the locked-down shell, a trip, Quit, and two copies of the app
   joining each other over the stand-in Steam.
+- After `npm run dist`, `node tools/depotcheck.mjs` checks the packaged
+  folders before a Steam upload.
 
 `FRIENDSLOP_FAST=1` speeds the clock up, and `FRIENDSLOP_TEST=1` enables test
 levers (teleport the RV, set the clock). Don't set either in production.
