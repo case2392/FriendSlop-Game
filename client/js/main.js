@@ -3,6 +3,7 @@ import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
 import { LOOT, fmt$ } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
+import { isTripCode, normalizeTripCode } from '/shared/tripcode.js';
 import * as net from './net.js';
 import * as voice from './voice.js';
 import { initAudio, sfx, setLoops, at as sfxAt } from './sfx.js';
@@ -108,8 +109,9 @@ const BUILD = () => window.desktop?.build ?? null;   // the desktop build checks
 const savedSession = code => { try { const s = JSON.parse(sessionStorage.getItem('nmdSession') || 'null'); return s && s.code === code ? s.token : null; } catch { return null; } };
 
 // ---- the desktop build (the one on Steam) ----------------------------------------------------------
-// A trip is hosted on the player's own PC and friends come in through Steam (an invite, or Join Game in
-// the friends list): there are no trip codes to type. Without Steam running it plays solo.
+// A trip is hosted on the player's own PC. Friends come in by typing its 4-digit trip code under Join
+// Game (the shell finds the trip on Steam), from a Steam invite, or with Join Game in their friends list.
+// Without Steam running it plays solo.
 const DESK = window.desktop || null;
 const STEAM = DESK?.steam?.ok ? DESK.steam : null;
 // the menu's small print: the version (the build fingerprint after the + is what friends must share)
@@ -117,46 +119,72 @@ const showVersion = build => { if (build) $('versionLabel').textContent = `Versi
 showVersion(DESK?.build);
 relabelPage();   // the help page's and the hints' key names, in the player's keyboard layout
 if (DESK) {
-  $('joinBox').classList.add('hidden');
   $('quitBtn').classList.remove('hidden');
   $('quitBtn').onclick = () => DESK.quit();
   $('ctpQuit').classList.remove('hidden');
   $('menuSteam').classList.remove('hidden');
   $('menuSteam').textContent = STEAM
-    ? `On Steam as ${STEAM.name || 'you'}. Start a trip, then invite friends from it (Esc, then Invite Friends), or they can pick Join Game on you in their Steam friends list.`
+    ? `On Steam as ${STEAM.name || 'you'}. Host a game and read out your 4-digit trip code: friends type it under Join Game. Steam invites work too.`
     : `${DESK.steam?.reason || 'Steam isn\'t running, so friends can\'t join.'} You can still drive solo.`;
 }
-// friends can join once the trip is up: a friends-only Steam lobby
+// friends can join once the trip is up: a Steam lobby that carries the trip code
 async function startHosting(code) {
   if (!STEAM) return;
   const r = await DESK.host(code).catch(e => ({ ok: false, msg: e.message }));
-  if (r?.ok) { $('ctpInvite').classList.remove('hidden'); toast('Friends can join you now: press Esc, then Invite Friends.', '#7CFC00', 6); }
+  if (r?.ok) { $('ctpInvite').classList.remove('hidden'); showTripCode(code); announceCode(code); }
   else toast(`Friends can't join this trip: ${r?.msg || 'Steam said no.'}`, '#ffb4a2', 6);
 }
+// the trip code, where the crew can read it: the HUD's chip (click: copy) and the Esc card
+function showTripCode(code) {
+  if (!isTripCode(code)) return;
+  $('hCode').innerHTML = `<span class="k">Trip code</span>${escapeHtml(code)}`;
+  $('hCode').title = 'Your trip code: friends click Join Game and type it in. Click to copy.';
+  $('hCode').classList.remove('hidden');
+  $('ctpCodeNum').textContent = code;
+  $('ctpCode').classList.remove('hidden');
+}
+// the host hears their code once the first day is up and its zone text has faded (a toast during the
+// load or under the zone text would go unseen); it stays on the HUD and the Esc card
+function announceCode(code) {
+  const t0 = performance.now();
+  const k = setInterval(() => {
+    if (S.phase !== 'game' || S.tripOver || performance.now() - t0 > 180000) { clearInterval(k); return; }
+    if (!S.W || worldBuilding) return;
+    clearInterval(k);
+    setTimeout(() => { if (S.phase === 'game' && S.code === code) toast(`Your trip code is ${code}. Friends click Join Game and type it in. (It's on the Esc menu too.)`, '#7CFC00', 12); }, 8000);
+  }, 500);
+}
+const menuStatus = text => { $('menuStatus').textContent = text || ''; };
 async function inviteFriends() {
   if (!STEAM) return;
   document.exitPointerLock?.();
   const r = await DESK.invite().catch(e => ({ ok: false, msg: e.message }));
   if (!r?.ok) toast(r?.msg || 'Steam\'s invite window didn\'t open. Invite them from your Steam friends list instead.', '#ffb4a2', 5);
 }
-// a friend's trip, from an invite or Join Game: the lobby, then the bridge to the host's game
-async function joinFriend(id) {
-  if (!STEAM || S.phase !== 'menu' || $('hostBtn').disabled) return;
+// a friend's trip, from an invite or Join Game (a lobby id) or from its trip code (a Steam search): the
+// lobby, then the bridge to the host's game, which the page connects to as if it were a server
+const joinFriend = id => joinViaSteam(() => DESK.joinLobby(id), 'Joining your friend\'s trip…');
+async function joinViaSteam(find, status, busyMs) {
+  if (!STEAM || S.phase !== 'menu' || $('hostBtn').disabled) return false;
   initAudio();
-  menuBusy('joinBtn');
-  $('menuError').textContent = 'Joining your friend\'s trip…';
-  const r = await DESK.joinLobby(id).catch(e => ({ ok: false, msg: e.message }));
-  if (!r?.ok) { menuBusy(null); $('menuError').textContent = r?.msg || 'Couldn\'t join that trip.'; return; }
+  menuBusy('joinBtn', busyMs);
+  $('menuError').textContent = ''; menuStatus(status);
+  const r = await find().catch(e => ({ ok: false, msg: e.message }));
+  if (!r?.ok) { menuBusy(null); menuStatus(''); $('menuError').textContent = r?.msg || 'Couldn\'t join that trip.'; return false; }
+  menuStatus(`Joining ${r.hostName || 'your friend'}'s trip…`);
   await physReady;
   try { await net.connect(r.wsUrl); }
-  catch (e) { menuBusy(null); $('menuError').textContent = e.message; DESK.leave(); return; }
+  catch (e) { menuBusy(null); menuStatus(''); $('menuError').textContent = e.message; DESK.leave(); return false; }
   S.hosting = false; S.viaSteam = true;
   net.send({ t: 'join', name: myName(), room: r.code, build: BUILD(), rdy: 1 });
+  return true;
 }
-// an invite accepted while the game runs: straight in from the menu; mid-trip, ask first
+// an invite accepted while the game runs: straight in from the menu; mid-trip, ask first. While the
+// menu is busy (joining by code, hosting) the invite waits in the shell: ask again in a moment
 function onLobbyInvite(id) {
+  if (S.phase === 'menu' && $('hostBtn').disabled) { setTimeout(() => onLobbyInvite(id), 1000); return; }
   if (S.phase === 'menu') { DESK.takeLobby(); joinFriend(id); return; }
-  netModal('Join your friend\'s trip?', 'You\'re on a trip right now. Leave it and join theirs?', [
+  netModal('Join your friend\'s trip?', S.hosting ? 'You\'re hosting a trip right now: leaving ends it for everyone on it. Join theirs?' : 'You\'re on a trip right now. Leave it and join theirs?', [
     ['Join them', () => backToMenu(null)],          // the invite waits in the shell for the menu to take it
     ['Stay here', () => { DESK.takeLobby(); $('netModal')?.remove(); }],
   ]);
@@ -176,8 +204,8 @@ if (STEAM) {
   DESK.takeLobby().then(id => { if (id) joinFriend(id); });
 }
 // while the menu waits for an answer the buttons say so, and a second click can't open a second socket
-let menuBusyT = 0;
-function menuBusy(which) {
+let menuBusyT = 0, joinCooldown = 0;
+function menuBusy(which, ms = 12000) {
   clearTimeout(menuBusyT);
   for (const [id, text] of [['hostBtn', 'Starting…'], ['joinBtn', 'Joining…']]) {
     const b = $(id);
@@ -185,33 +213,48 @@ function menuBusy(which) {
     b.disabled = !!which;
     b.textContent = which === id ? text : b.dataset.label;
   }
-  if (which) menuBusyT = setTimeout(() => menuBusy(null), 12000);
+  if (which) menuBusyT = setTimeout(() => { menuBusy(null); menuStatus(''); }, ms);
 }
+// this PC's own game server (never wherever the last socket went: after a failed Steam join that was a
+// friend's bridge, now gone)
 async function ensureConnected() {
   if (net.connected()) return true;
-  try { await net.connect(); return true; } catch (e) { $('menuError').textContent = e.message; return false; }
+  try { await net.connect(net.socketUrl()); return true; } catch (e) { $('menuError').textContent = e.message; return false; }
 }
 $('hostBtn').onclick = async () => {
   if ($('hostBtn').disabled) return;
   initAudio(); sfx.click();
-  menuBusy('hostBtn');
-  $('menuError').textContent = '';
+  menuBusy('hostBtn', STEAM ? 30000 : 12000);
+  $('menuError').textContent = ''; menuStatus('');
   await physReady;
   S.hosting = true;
-  if (await ensureConnected()) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null, build: BUILD(), rdy: 1 });
+  // on Steam, a trip code that no other trip has right now (the shell asks Steam; else the server picks)
+  const pick = STEAM ? await DESK.pickCode?.().catch(() => null) : null;
+  if (await ensureConnected()) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null, code: pick?.ok ? pick.code : undefined, build: BUILD(), rdy: 1 });
   else menuBusy(null);
 };
+// Join Game: the trip code a friend read out. The browser build asks its server; the desktop build has
+// the shell find the trip on Steam, then gets in the way an invite does
 $('joinBtn').onclick = async () => {
   if ($('joinBtn').disabled) return;
   initAudio(); sfx.click();
-  const code = $('codeInput').value.trim().toUpperCase();
-  if (code.length !== 4) { $('menuError').textContent = 'Trip codes are 4 characters.'; return; }
+  const code = normalizeTripCode($('codeInput').value);
+  $('codeInput').value = code;
+  if (!isTripCode(code)) { $('menuError').textContent = 'Trip codes are 4 digits. Your friend sees theirs at the top right of their screen.'; return; }
+  if (DESK) {
+    if (!STEAM) { $('menuError').textContent = DESK.steam?.reason || 'Joining a friend needs Steam running.'; return; }
+    if (performance.now() < joinCooldown) return;
+    if (!await joinViaSteam(() => DESK.joinCode(code), `Looking for trip ${code} on Steam…`, 60000)) joinCooldown = performance.now() + 2000;
+    return;
+  }
   menuBusy('joinBtn');
-  $('menuError').textContent = '';
+  $('menuError').textContent = ''; menuStatus('');
   await physReady;
   if (await ensureConnected()) net.send({ t: 'join', name: myName(), room: code, resume: savedSession(code), build: BUILD(), rdy: 1 });
   else menuBusy(null);
 };
+// trip codes are digits: keep only those (a pasted "12 34" still works), four at most
+$('codeInput').addEventListener('input', () => { const el = $('codeInput'), v = normalizeTripCode(el.value).slice(0, 4); if (el.value !== v) el.value = v; });
 $('helpOk').onclick = () => { $('help').classList.add('hidden'); askVoice(); };
 // Proximity voice is half the game: the first trip asks once (a card by the voice button, not a modal:
 // nobody is held up), and remembers the answer
@@ -231,8 +274,9 @@ function askVoice() {
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn').click(); });
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('hostBtn').click(); });
 $('hCode').onclick = () => {
-  if (DESK) { inviteFriends(); return; }
-  navigator.clipboard?.writeText(S.code || ''); toast(`Room code ${S.code || ''} copied. Send it to the boys.`);
+  if (!isTripCode(S.code)) return;
+  navigator.clipboard?.writeText(S.code).catch(() => {});
+  toast(`Trip code ${S.code} copied. Friends click Join Game and type it in.`);
 };
 
 // ---- toasts & ui ---------------------------------------------------------------------
@@ -259,7 +303,7 @@ const canvas = $('canvas');
 const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden') || !!$('netModal')
   || !$('settings').classList.contains('hidden') || !$('credits').classList.contains('hidden');
 canvas.addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
-$('clickToPlay').addEventListener('click', e => { if (!e.target.closest('.ctp-row') && !uiOpen()) canvas.requestPointerLock?.(); });
+$('clickToPlay').addEventListener('click', e => { if (!e.target.closest('.ctp-row, .ctp-code') && !uiOpen()) canvas.requestPointerLock?.(); });
 // Esc: the pointer comes free and this card offers the rest (the world keeps going: it's co-op)
 $('ctpInvite').onclick = () => inviteFriends();
 $('ctpLeave').onclick = () => netModal('Leave the trip?', DESK && S.hosting ? 'The trip runs on your PC: if you leave, it ends for everyone.' : 'Your seat goes to whoever joins next.', [
@@ -788,19 +832,22 @@ net.on('welcome', m => {
   $('clickToPlay').classList.remove('hidden');
   voice.initVoice(m.id, renderVoiceUI);
   renderVoiceUI();
-  // the invite code (the gate's keypad wants a different one); on Steam, the invite window
-  if (!DESK) $('hCode').innerHTML = `<span class="k">Room</span>${escapeHtml(m.code)}`;
-  else if (STEAM) $('hCode').innerHTML = '<span class="k">Steam</span>Invite';
-  else $('hCode').classList.add('hidden');
+  // the trip code (the gate's keypad wants a different one): in the browser build at once; a desktop
+  // host's once its Steam lobby is up (a code nobody can find yet would only mislead); a guest who came
+  // in over Steam has the host's, to pass on
+  menuStatus('');
+  $('hCode').classList.add('hidden');
+  if (!DESK || S.viaSteam) showTripCode(m.code);
   if (STEAM && S.viaSteam) $('ctpInvite').classList.remove('hidden');
   if (DESK && S.hosting) startHosting(m.code);
+  else if (!DESK && S.hosting) announceCode(m.code);
   updatePresence();
   if (!localStorage.getItem('nmdHelpSeen')) { $('help').classList.remove('hidden'); localStorage.setItem('nmdHelpSeen', '1'); }
 });
 net.on('session', m => { showVersion(m.build); try { sessionStorage.setItem('nmdSession', JSON.stringify({ code: S.code, token: m.resume })); } catch {} });
 net.on('hostleft', m => { hostLeft = m.msg || 'The host ended the trip.'; });
 net.on('error', m => {
-  menuBusy(null);
+  menuBusy(null); menuStatus('');
   if (welcomeWait) { welcomeWait.reject(m); return; }
   if (S.phase === 'menu' && S.viaSteam) { S.viaSteam = false; net.close(); DESK?.leave(); }
   if (S.phase === 'menu') $('menuError').textContent = m.msg; else toast(m.msg, '#ff8a80');
@@ -1215,7 +1262,7 @@ S.gpu = () => ({ name: gpuName(), quality: S.quality });
 // the interface grows with the window (900 px tall = 1x, up to 2x) and the Interface size setting
 function applyUiScale() {
   const base = Math.min(2, Math.max(1, window.innerHeight / 900)) * (DESK?.steam?.deck ? 1.1 : 1);
-  document.documentElement.style.setProperty('--ui', (base * settings.uiScale).toFixed(3));
+  document.documentElement.style.setProperty('--ui-scale', (base * settings.uiScale).toFixed(3));
 }
 window.addEventListener('resize', applyUiScale);
 applyUiScale();

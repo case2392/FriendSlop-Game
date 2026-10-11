@@ -16,13 +16,13 @@ const { EventEmitter } = require('node:events');
 const http = require('node:http');
 const { WebSocketServer } = require('ws');
 const { K, LINK_PROTO, packJson, unpackJson, packGame, packVoice, SnapAssembler } = require('./frame.cjs');
-const { P2PNet, CB, memberChange, big } = require('./p2p.cjs');
+const { P2PNet, CB, memberChange, big, lobbyCall } = require('./p2p.cjs');
 const { setPresence } = require('./host.cjs');
 
 class GuestBridge extends EventEmitter {
-  constructor({ steam, build, origin = null, timeoutMs = 10000, log = () => {} }) {
+  constructor({ steam, build, origin = null, timeoutMs = 10000, lobbyTimeoutMs = 20000, log = () => {} }) {
     super();
-    Object.assign(this, { steam, build, origin, timeoutMs, log });
+    Object.assign(this, { steam, build, origin, timeoutMs, lobbyTimeoutMs, log });
     this.me = big(steam.localplayer.getSteamId().steamId64);
     this.state = 'idle';          // idle | joined | hello | open | ended
     this.connId = 0;
@@ -34,8 +34,8 @@ class GuestBridge extends EventEmitter {
   // a lobby id from an invite, Join Game, or +connect_lobby
   async joinLobby(lobbyId) {
     let lobby;
-    try { lobby = await this.steam.matchmaking.joinLobby(big(lobbyId)); }
-    catch (e) { throw Object.assign(new Error('Couldn\'t get into that trip. It may be full (6 max) or over.'), { code: 'lobby' }); }
+    try { lobby = await lobbyCall(this.steam.matchmaking.joinLobby(big(lobbyId)), this.lobbyTimeoutMs, 'no answer'); }
+    catch (e) { throw Object.assign(new Error(e.message === 'no answer' ? 'Steam didn\'t let us into that trip. Try again.' : 'Couldn\'t get into that trip. It may be full (6 max) or over.'), { code: 'lobby' }); }
     let d = {};
     try { d = lobby.getFullData() || {}; } catch {}
     const fail = (msg, code) => { try { lobby.leave(); } catch {} throw Object.assign(new Error(msg), { code }); };

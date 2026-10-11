@@ -329,6 +329,54 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(room.day === 2, `rooms: after 45 s the RV leaves at dawn anyway (day ${room.day})`);
 }
 
+// ---- in process: trip codes (GameHost) -----------------------------------------------------------------
+{
+  const { GameHost } = await import('../server/host.js');
+  const { EventEmitter } = await import('node:events');
+  class Sock extends EventEmitter {
+    constructor() { super(); this.readyState = 1; this.sent = []; this.closedWith = null; }
+    send(s) { if (typeof s === 'string') this.sent.push(JSON.parse(s)); }
+    close(code) { this.closedWith = code; this.readyState = 3; }
+    last(t) { return [...this.sent].reverse().find(m => m.t === t); }
+    msg(m) { this.emit('message', JSON.stringify(m), false); }
+  }
+  const host = new GameHost({ build: 'x', log: () => {} });
+  const codes = new Set();
+  for (let i = 0; i < 300; i++) { const c = host.newCode(); codes.add(c); host.rooms.set(c, { closed: false }); }
+  const easy = c => /^(\d)\1{3}$/.test(c) || '0123456789'.includes(c) || '9876543210'.includes(c);
+  check(codes.size === 300 && [...codes].every(c => /^[1-9]\d{3}$/.test(c)) && ![...codes].some(easy),
+    `trip codes: 300 new trips, 300 different codes, all 4 digits from 1000 to 9999, none like 7777 or 1234 (${[...codes].slice(0, 6).join(' ')} ...)`);
+  host.rooms.clear();
+  // a closed trip's code waits ten minutes: an old code read out in chat can't lead into a stranger's trip
+  host.freed.set('4821', Date.now());
+  const fresh = new Set(Array.from({ length: 3000 }, () => host.newCode()));
+  host.freed.set('4822', Date.now() - 11 * 60 * 1000);
+  check(!fresh.has('4821') && host.cooling('4821') && !host.cooling('4822'), 'trip codes: a closed trip\'s code is not handed out again for ten minutes');
+  // every code taken: a clean refusal, not an endless loop
+  for (let i = 1000; i < 10000; i++) host.rooms.set(String(i), { closed: false });
+  const s1 = new Sock(); host.attach(s1, { kind: 'ws' }); s1.msg({ t: 'create', name: 'x' });
+  check(s1.last('error')?.code === 'full' && host.newCode() === null, 'trip codes: with every code taken, a new trip is refused cleanly');
+  host.rooms.clear();
+  // guessing: ten wrong codes and the connection is closed
+  const s2 = new Sock(); host.attach(s2, { kind: 'ws' });
+  for (let i = 0; i < 10; i++) s2.msg({ t: 'join', name: 'g', room: String(2000 + i) });
+  await sleep(120);
+  check(s2.sent.filter(m => m.t === 'error' && m.code === 'noroom').length === 10 && s2.closedWith === 4008, 'trip codes: a connection that keeps guessing codes is closed after 10 wrong ones');
+  // the desktop host's own page may bring the code its shell found free on Steam; a Steam guest needs no
+  // code (the lobby picked the trip); nobody else gets to choose a code
+  const solo = new GameHost({ build: 'x', singleRoom: true, log: () => {} });
+  const s3 = new Sock(); solo.attach(s3, { kind: 'local' }); s3.msg({ t: 'create', name: 'Hosty', code: '4821' });
+  const s4 = new Sock(); solo.attach(s4, { kind: 'steam', key: 'steam:7' }); s4.msg({ t: 'join', name: 'Beans', room: '' });
+  check(s3.last('welcome')?.code === '4821' && s4.last('welcome')?.code === '4821', 'trip codes: the desktop host\'s page picks its trip\'s code; a Steam guest joins it with no code');
+  const multi = new GameHost({ build: 'x', log: () => {} });
+  const s5 = new Sock(); multi.attach(s5, { kind: 'local' }); s5.msg({ t: 'create', name: 'Hosty', code: '1234' });
+  const solo2 = new GameHost({ build: 'x', singleRoom: true, log: () => {} });
+  const s6 = new Sock(); solo2.attach(s6, { kind: 'ws' }); s6.msg({ t: 'create', name: 'Lan', code: '4821' });
+  const c5 = s5.last('welcome')?.code, c6 = s6.last('welcome')?.code;
+  check(/^[1-9]\d{3}$/.test(c5) && c5 !== '1234' && /^[1-9]\d{3}$/.test(c6) && c6 !== '4821', `trip codes: a browser server, or a LAN socket, can't choose its code (${c5}, ${c6})`);
+  for (const h of [host, solo, multi, solo2]) h.close();
+}
+
 // ---- over the wire --------------------------------------------------------------------------------------
 const PORT = 4700 + Math.floor(Math.random() * 400);
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });

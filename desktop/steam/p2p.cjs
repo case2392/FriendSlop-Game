@@ -87,4 +87,15 @@ class P2PNet extends EventEmitter {
   }
 }
 
-module.exports = { P2PNet, SendType, CB, memberChange, big };
+// steamworks.js's lobby calls (createLobby, joinLobby) have no timeout, and Steam may never answer:
+// give up after ms; a lobby that arrives after that is left at once, so nobody sits in a lobby unseen
+function lobbyCall(p, ms, msg) {
+  let late = false;
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => { late = true; rej(new Error(msg)); }, ms);
+    p.then(l => { if (late) { try { l.leave(); } catch {} } else { clearTimeout(t); res(l); } },
+      e => { clearTimeout(t); if (!late) rej(e); });
+  });
+}
+
+module.exports = { P2PNet, SendType, CB, memberChange, big, lobbyCall };

@@ -10,6 +10,11 @@
 //     owner leaves (Steam does this), LobbyChatUpdate with string member_state_change ("Entered",
 //     "Left", "Disconnected") as steamworks.js delivers it, invites -> GameLobbyJoinRequested.
 //   - a process exit (socket close) = the Steam client noticing the game died: "Disconnected".
+//   - the lobby list (RequestLobbyList) as Steam answers it: only Public and Invisible lobbies that are
+//     joinable and not full; string filters (Equal / NotEqual, compared as text); a distance filter over
+//     regions (each user has one; a lobby takes its creator's: Close = the same region, Default = up to
+//     one away, Far = two, Worldwide = all); nearest first; 50 results unless a count filter says
+//     otherwise. Every search is recorded (CONTROL 'lists'); levers make it slow, fail or never answer.
 import net from 'node:net';
 import { OP, frame, jframe, decoder, json } from './wire.mjs';
 
@@ -21,7 +26,9 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
   let nextLobby = 109775240000000000n;
   const defaults = { lat: 25, jit: 8, loss: 0, dup: 0, failMs: 6000 };
   const pairState = new Map();      // `${a}>${b}` -> { lastRel }
-  const stats = { pkts: 0, bytes: 0, dropped: 0, dupd: 0, retrans: 0, held: 0, rejectedBig: 0 };
+  const stats = { pkts: 0, bytes: 0, dropped: 0, dupd: 0, retrans: 0, held: 0, rejectedBig: 0, lists: 0 };
+  const lists = [];                 // every lobby search: { by, filters, results }
+  const search = { delayMs: 40, fail: false, hang: false };   // levers (CONTROL 'search')
 
   const now = () => performance.now();
   const netOf = id => ({ ...defaults, ...(users.get(id)?.net || {}) });
@@ -119,7 +126,7 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
         me = String(j.steamId);
         const old = users.get(me);
         if (old) old.sock.destroy();
-        users.set(me, { sock, name: j.name, accepted: new Set(), pending: new Map(), lastReq: new Map(), presence: {}, net: j.net || null });
+        users.set(me, { sock, name: j.name, accepted: new Set(), pending: new Map(), lastReq: new Map(), presence: {}, net: j.net || null, region: Number(j.region) || 0 });
         send(me, jframe(OP.REGISTERED, { steamId: me }));
         log(`[backend] ${j.name} (${me}) online`);
         return;
@@ -138,7 +145,7 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
         case OP.CREATE_LOBBY: {
           const j = json(p);
           const id = String(nextLobby++);
-          const L = { id, owner: me, members: [me], data: {}, max: j.max, type: j.type, joinable: true };
+          const L = { id, owner: me, members: [me], data: {}, max: j.max, type: j.type, joinable: true, region: u.region };
           lobbies.set(id, L);
           send(me, jframe(OP.LOBBY_RESULT, { reqId: j.reqId, ok: true, lobby: id }));
           pushLobby(L);
@@ -166,6 +173,24 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
           return;
         }
         case OP.SET_JOINABLE: { const j = json(p), L = lobbies.get(String(j.lobby)); if (L && L.owner === me) { L.joinable = !!j.joinable; pushLobby(L); } return; }
+        case OP.LIST_LOBBIES: {
+          const j = json(p), f = j.filters || {}, entry = { by: me, filters: f, results: null };
+          lists.push(entry); stats.lists++;
+          if (search.hang) return;                                   // Steam never answers: the caller's timeout
+          setTimeout(() => {
+            if (!users.has(me)) return;
+            if (search.fail) { send(me, jframe(OP.LOBBY_LIST, { reqId: j.reqId, ok: false, err: 'IOFailure' })); return; }
+            const here = users.get(me).region, far = [0, 1, 2, Infinity][f.distance ?? 1] ?? 1;
+            const out = [...lobbies.values()]
+              .filter(L => (L.type === 2 || L.type === 3) && L.joinable && L.members.length < L.max && Math.abs(L.region - here) <= far)
+              .filter(L => (f.strings || []).every(s => (s.cmp === 3 ? (L.data[s.key] ?? '') !== s.value : (L.data[s.key] ?? '') === s.value)))
+              .sort((a, b) => Math.abs(a.region - here) - Math.abs(b.region - here))
+              .slice(0, f.count ?? 50);
+            entry.results = out.map(L => L.id);
+            send(me, jframe(OP.LOBBY_LIST, { reqId: j.reqId, ok: true, lobbies: out.map(L => ({ lobby: L.id, data: { ...L.data }, max: L.max, count: L.members.length })) }));
+          }, search.delayMs);
+          return;
+        }
         case OP.INVITE: { const j = json(p); send(String(j.to), jframe(OP.JOIN_REQUESTED, { lobby_steam_id: String(j.lobby), friend_steam_id: me })); return; }
         case OP.RICH_PRESENCE: { const j = json(p); if (j.value == null) delete u.presence[j.key]; else u.presence[j.key] = j.value; return; }
         case OP.CONTROL: {
@@ -176,6 +201,9 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
           else if (j.op === 'presence') res = Object.fromEntries([...users].map(([id, x]) => [id, x.presence]));
           else if (j.op === 'lobbies') res = [...lobbies.values()];
           else if (j.op === 'stats') res = stats;
+          else if (j.op === 'region') users.get(String(j.id ?? me)).region = Number(j.region) || 0;
+          else if (j.op === 'search') Object.assign(search, j.search || {});
+          else if (j.op === 'lists') res = lists;
           send(me, jframe(OP.CONTROL_RESULT, { reqId: j.reqId, res }));
           return;
         }
@@ -190,5 +218,5 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
     sock.on('close', gone);
     sock.on('error', () => {});
   });
-  return new Promise(res => server.listen(port, '127.0.0.1', () => res({ port: server.address().port, close: () => server.close(), stats, users, lobbies })));
+  return new Promise(res => server.listen(port, '127.0.0.1', () => res({ port: server.address().port, close: () => server.close(), stats, users, lobbies, lists, search })));
 }

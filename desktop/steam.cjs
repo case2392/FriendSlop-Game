@@ -10,6 +10,9 @@ const TEST_APP = 480;          // Spacewar: Valve's public test app (any Steam a
 
 function start({ enabled = true, appId = TEST_APP, log = console.log, packaged = false } = {}) {
   const S = { ok: false, reason: 'Steam is switched off (--no-steam).', restarting: false, client: null, sw: null, onJoin: null, ready: Promise.resolve() };
+  // the lobby-list filters a trip-code search sets (steam/lobbysearch.cjs): Steam's own through FFI, or
+  // the fake's; null = search unfiltered
+  S.lobbyFilters = () => null;
   S.info = () => (S.ok
     ? { ok: true, appId: safe(() => S.client.utils.getAppId()), name: safe(() => S.client.localplayer.getName()),
         steamId: safe(() => String(S.client.localplayer.getSteamId().steamId64)), deck: safe(() => S.client.utils.isSteamRunningOnSteamDeck()) }
@@ -19,8 +22,9 @@ function start({ enabled = true, appId = TEST_APP, log = console.log, packaged =
   // tests (never a packaged build): test/fakesteam stands in for the Steam client
   if (process.env.NMD_FAKE_STEAM && !packaged) {
     S.ready = import(path.join(__dirname, '../test/fakesteam/client.mjs')).then(async fake => {
-      S.client = await fake.initFakeSteam({ port: Number(process.env.NMD_FAKE_STEAM), steamId: BigInt(process.env.NMD_FAKE_ID || '76561190000000001'), name: process.env.NMD_FAKE_NAME || 'Tester' });
+      S.client = await fake.initFakeSteam({ port: Number(process.env.NMD_FAKE_STEAM), steamId: BigInt(process.env.NMD_FAKE_ID || '76561190000000001'), name: process.env.NMD_FAKE_NAME || 'Tester', region: Number(process.env.NMD_FAKE_REGION) || 0 });
       S.ok = true; S.reason = '';
+      S.lobbyFilters = () => S.client.lobbyFilters || null;
       log('[steam] the fake Steam is up', JSON.stringify(S.info()));
       S.client.callback.register(fake.SteamCallback.GameLobbyJoinRequested, v => { log('[steam] join requested: lobby', String(v.lobby_steam_id)); S.onJoin?.(String(v.lobby_steam_id)); });
     }).catch(e => { S.reason = 'The fake Steam did not start.'; log('[steam] fake Steam failed:', e.message); });
@@ -45,6 +49,8 @@ function start({ enabled = true, appId = TEST_APP, log = console.log, packaged =
   try {
     S.client = sw.init(fromSteam ? undefined : appId);
     S.ok = true; S.reason = '';
+    // only now: the FFI calls into steam_api need the initialised client (a null interface crashes)
+    S.lobbyFilters = () => require('./steam/lobbysearch.cjs').ffiFilters();
   } catch (e) {
     S.reason = 'Steam isn\'t running, so friends can\'t join. Start Steam, then the game.';
     log(`[steam] init failed after ${Date.now() - t0} ms: ${e?.message || e}`);

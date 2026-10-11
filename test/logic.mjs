@@ -268,11 +268,21 @@ try {
   B.send({ t: 'join', name: B.name, room: wA.code });
   await B.wait(m => m.t === 'welcome', 8000, 'B welcome');
   await B.wait(m => m.t === 'tp', 8000, 'B tp');
-  B.send({ t: 'join', name: 'x', room: 'ZZZZ' });   // already joined: ignored
-  const bad = new Player('Nobody'); await bad.connect(); bad.send({ t: 'join', name: 'n', room: 'QQQQ' });
+  check(/^[1-9]\d{3}$/.test(wA.code), `the trip code is 4 digits (${wA.code})`);
+  const other = wA.code === '5000' ? '5001' : '5000';
+  B.send({ t: 'join', name: 'x', room: other });   // already joined: ignored
+  const bad = new Player('Nobody'); await bad.connect(); bad.send({ t: 'join', name: 'n', room: other });
   const err = await bad.wait(m => m.t === 'error', 4000, 'error');
-  check(err.code === 'noroom' && /No trip with that code/.test(err.msg), 'bad room code rejected');
+  check(err.code === 'noroom' && /No trip with that code/.test(err.msg), 'a well-formed code with no trip is turned away');
+  bad.send({ t: 'join', name: 'n', room: 'QQQQ' });
+  const err2 = await bad.wait(m => m.t === 'error' && m !== err, 4000, 'error 2');
+  check(err2.code === 'noroom' && /4 digits/.test(err2.msg), 'letters are not a trip code (the old format)');
   bad.ws.close();
+  // the code as a player might type or paste it: spaces and a dash fold away
+  const typo = new Player('Typo'); await typo.connect(); typo.send({ t: 'join', name: 'Typo', room: ` ${wA.code.slice(0, 2)}-${wA.code.slice(2)} ` });
+  await typo.wait(m => m.t === 'welcome', 8000, 'typo welcome');
+  ok(`"${wA.code.slice(0, 2)}-${wA.code.slice(2)}" with spaces still finds trip ${wA.code}`);
+  typo.send({ t: 'leave' }); typo.ws.close();
   A.pose(); B.pose();
   await A.until((g, s) => s.pl.length === 2, 4000, 'two players in snapshot');
   ok('two players in the room, poses flowing');

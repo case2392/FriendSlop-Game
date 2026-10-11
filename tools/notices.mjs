@@ -22,6 +22,8 @@ const parts = [
   [`steamworks.js ${ver('steamworks.js')}: the Steam API for Node`, 'https://github.com/ceifa/steamworks.js', read('node_modules/steamworks.js/LICENSE')],
   ['Steamworks SDK redistributables (steam_api64.dll, libsteam_api.so)', 'https://partner.steamgames.com',
     'Copyright (c) Valve Corporation. Distributed under the Steamworks SDK Access Agreement, for use with Steam.'],
+  [`koffi ${ver('koffi')}: calls Steam's lobby search (finding a trip by its code)`, 'https://koffi.dev', read('node_modules/koffi/LICENSE.txt') + '\n\n' +
+    'koffi.node is built with node-addon-api (MIT):\n\n' + read('node_modules/koffi/vendor/node-addon-api/LICENSE.md')],
   ['Fonts: Marcellus, Cinzel, Philosopher', 'https://fonts.google.com', read('client/fonts/OFL.txt')],
   [`Electron ${ver('electron')} and Chromium`, 'https://www.electronjs.org', 'See LICENSE.electron.txt and LICENSES.chromium.html in this folder.\n\n' +
     `Chromium's FFmpeg (the ffmpeg library next to the executable) is under the GNU LGPL 2.1 or later; its\n` +

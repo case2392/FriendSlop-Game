@@ -18,12 +18,14 @@ import * as C from '../shared/constants.js';
 import { Room } from './room.js';
 import { initPhysics } from './sim.js';
 import { computeBuild } from './build.js';
+import { isTripCode, normalizeTripCode, randomTripCode } from '../shared/tripcode.js';
 
 const ROOT = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 const require = createRequire(import.meta.url);
 export const RAPIER_ESM = path.join(path.dirname(require.resolve('@dimforge/rapier3d-compat')), 'rapier.mjs');
 
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODE_COOLDOWN = 10 * 60 * 1000;   // a closed trip's code isn't handed out again for this long
+const MISS_LIMIT = 10;                  // wrong trip codes one connection may try before it is closed
 const HOLD_SECS = 90;              // a dropped player's seat is kept this long (room.js does the keeping)
 const VOICE_RANGE = 45;            // voice.js spatialize(): the gain reaches 0 at 2.5 + 42.5 m
 const RATE = 120, BURST = 240;     // messages per second per connection, sustained / burst
@@ -64,16 +66,29 @@ export function staticHandler(req, res) {
 }
 
 export class GameHost {
-  // singleRoom: the desktop build hosts one trip; a join needs no code (Steam guests can't type one)
+  // singleRoom: the desktop build hosts one trip; a join needs no code (the Steam lobby a guest found by
+  // invite or by trip code already picked the trip)
   constructor({ build = null, holdSecs = HOLD_SECS, singleRoom = false, log = (...a) => console.log(...a) } = {}) {
     this.build = build ?? computeBuild();
     this.holdSecs = holdSecs; this.singleRoom = singleRoom; this.log = log;
     this.rooms = new Map();
+    this.freed = new Map();   // trip code -> when its room closed
     this.closing = false;
     this.stats = { voiceIn: 0, voiceOut: 0, snapsOut: 0, snapsSkipped: 0, dropped: 0 };
   }
   async init() { await initPhysics(); return this; }
-  newCode() { let c; do c = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join(''); while (this.rooms.has(c)); return c; }
+  // A fresh trip code (shared/tripcode.js): never one an open room has (kept seats keep theirs), nor one
+  // freed in the last ten minutes, so an old code read out in chat can't lead into a stranger's new trip.
+  // null when every code is taken.
+  newCode() {
+    const int = (lo, hi) => crypto.randomInt(lo, hi);
+    return randomTripCode(int, c => this.rooms.has(c) || this.cooling(c)) ?? randomTripCode(int, c => this.rooms.has(c));
+  }
+  cooling(code) {
+    const t = this.freed.get(code);
+    if (t != null && Date.now() - t > CODE_COOLDOWN) this.freed.delete(code);
+    return this.freed.has(code);
+  }
   get room() { return [...this.rooms.values()].find(r => !r.closed) || null; }
 
   // info: { kind: 'local' | 'ws' | 'steam', key?: 'steam:<id>' }
@@ -84,7 +99,7 @@ export class GameHost {
     // trying at ten times the rate is dropped
     const bucket = (rate, burst) => ({ rate, burst, tokens: burst, last: performance.now() });
     const msgs = bucket(RATE, BURST), voiceB = bucket(VOICE_RATE, VOICE_BURST);
-    let excess = 0, excessAt = 0;
+    let excess = 0, excessAt = 0, misses = 0;
     const allow = b => {
       const now = performance.now();
       b.tokens = Math.min(b.burst, b.tokens + (now - b.last) / 1000 * b.rate);
@@ -109,11 +124,20 @@ export class GameHost {
           if (m.t === 'create') {
             if (this.singleRoom && this.room) return fail('This game is already hosting a trip.', 'denied');
             const seed = Number.isFinite(+m.seed) && m.seed !== '' && m.seed != null ? (+m.seed >>> 0) : null;
-            r = new Room(this.newCode(), seed);
+            // the desktop host's own page may bring the code its shell already checked is free on Steam
+            const want = this.singleRoom && info.kind === 'local' ? normalizeTripCode(m.code) : '';
+            const code = isTripCode(want) && !this.rooms.has(want) && !this.cooling(want) ? want : this.newCode();
+            if (!code) return fail('Too many trips are running on this server. Try again in a minute.', 'full');
+            r = new Room(code, seed);
             this.rooms.set(r.code, r);
           } else {
-            r = this.singleRoom ? this.room : this.rooms.get(String(m.room || '').toUpperCase().trim());
-            if (!r || r.closed) return fail('No trip with that code. Check it with your friend.', 'noroom');
+            const want = normalizeTripCode(m.room);
+            r = this.singleRoom ? this.room : isTripCode(want) ? this.rooms.get(want) : null;
+            if (!r || r.closed) {
+              // guessing codes gets a connection closed (9,000 codes don't take long at 120 messages a second)
+              if (++misses >= MISS_LIMIT) { this.log(`[host] closing a connection after ${misses} wrong trip codes`); setTimeout(() => { try { conn.close(4008, 'too many codes'); } catch {} }, 50); }
+              return fail(this.singleRoom || isTripCode(want) ? 'No trip with that code. Check it with your friend.' : 'Trip codes are 4 digits.', 'noroom');
+            }
           }
           const opts = { ready: !!m.rdy };
           const key = info.key ?? (typeof m.resume === 'string' && /^[0-9a-f]{24}$/.test(m.resume) ? 'tok:' + m.resume : null);
@@ -177,7 +201,7 @@ export class GameHost {
       while (acc >= STEP) {
         acc -= STEP;
         for (const [code, room] of this.rooms) {
-          if (room.closed) { this.rooms.delete(code); room.sim?.free(); continue; }
+          if (room.closed) { this.rooms.delete(code); this.freed.set(code, Date.now()); room.sim?.free(); continue; }
           try { room.tick(STEP); } catch (e) { console.error(`room ${code} tick error:`, e); }
         }
       }

@@ -54,11 +54,20 @@ try {
   await host.click('#hostBtn');
   await ready(host);
   const code = await host.evaluate(() => window.__nmd.code);
-  check(/^[A-Z0-9]{4}$/.test(code), `hosted a trip (code ${code})`);
+  const chip = await host.evaluate(() => document.getElementById('hCode').textContent);
+  check(/^[1-9]\d{3}$/.test(code) && chip.includes(code), `hosted a trip: trip code ${code}, shown on the HUD ("${chip}")`);
   const joiner = await open('Dave');
-  await joiner.fill('#codeInput', code);
-  // note when a prop smashes on Dave's side (his socket opens on the join click)
+  // note when a prop smashes on Dave's side (his socket opens on his first Join click)
   await joiner.evaluate(() => { const WS = window.WebSocket; window.__breakAt = []; window.WebSocket = class extends WS { constructor(...a) { super(...a); this.addEventListener('message', e => { if (String(e.data).includes('"k":"break"')) window.__breakAt.push(performance.now()); }); } }; });
+  // a wrong code first: a clear answer, and the menu stays usable
+  const wrong = code === '5000' ? '5001' : '5000';
+  await joiner.fill('#codeInput', wrong);
+  await joiner.click('#joinBtn');
+  await joiner.waitForFunction(() => /No trip with that code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 30000 });
+  await joiner.fill('#codeInput', 'ab12');
+  const typed = await joiner.evaluate(() => document.getElementById('codeInput').value);
+  check(typed === '12', `a wrong code gets "No trip with that code", and the code box only takes digits ("ab12" -> "${typed}")`);
+  await joiner.fill('#codeInput', `${code.slice(0, 2)} ${code.slice(2)}`);
   await joiner.click('#joinBtn');
   // while Dave's day loads (it waits seconds for its textures), Steve drops a vase that smashes and a
   // safe that takes a dent, out past the camp: Dave must end up with Steve's props, no ghost of the vase

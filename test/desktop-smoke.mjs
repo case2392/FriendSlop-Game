@@ -75,7 +75,12 @@ try {
   }));
   check(info.origin === 'app://nmd' && info.secure && info.desk, `the page runs at ${info.origin} (a secure context) with window.desktop`);
   check(info.build === BUILD && /^ws:\/\/127\.0\.0\.1:\d+$/.test(info.ws || ''), `the shell reports this build (${info.build}) and the game server's socket (${info.ws})`);
-  check(info.steam.ok === false && /Steam isn't running/.test(info.note) && info.joinHidden && info.quit, `no Steam running: the menu says so ("${info.note}"), no trip codes, a Quit button`);
+  check(info.steam.ok === false && /Steam isn't running/.test(info.note) && !info.joinHidden && info.quit, `no Steam running: the menu says so ("${info.note}"), a Quit button`);
+  await page.fill('#codeInput', '4821');
+  await page.click('#joinBtn');
+  const noSteam = await page.evaluate(() => ({ err: document.getElementById('menuError').textContent, phase: window.__nmd.phase }));
+  check(/Steam isn't running/.test(noSteam.err) && noSteam.phase === 'menu', `Join Game without Steam says why, and stays on the menu ("${noSteam.err}")`);
+  await page.evaluate(() => { document.getElementById('menuError').textContent = ''; document.getElementById('codeInput').value = ''; });
   check(/script-src 'self'/.test(info.csp) && /connect-src 'self' ws:\/\/127\.0\.0\.1:\*/.test(info.csp), 'the page has a content security policy (its own scripts, sockets to this PC only)');
   const files = await page.evaluate(async () => Promise.all(['/%2e%2e/package.json', '/..%2fpackage.json', '/shared/%2e%2e/server/host.js', '/vendor/rapier.mjs', '/shared/world.js'].map(u => fetch(u).then(r => r.status, () => 'blocked'))));
   check(files[0] !== 200 && files[1] !== 200 && files[2] !== 200 && files[3] === 200 && files[4] === 200, `app:// serves the game's files and nothing outside them (${files.join(', ')})`);
@@ -136,9 +141,10 @@ try {
 
   // ---- 2. two copies over the fake Steam ------------------------------------------------------------
   const be = await startBackend({});
-  const fakeEnv = (id, name) => ({ NMD_FAKE_STEAM: String(be.port), NMD_FAKE_ID: String(76561190000000000n + BigInt(id)), NMD_FAKE_NAME: name });
-  const host = await launch('host', { userData: udHost, env: fakeEnv(1, 'Hosty') });
-  const guest = await launch('guest', { userData: path.join(tmp, 'guest'), env: fakeEnv(2, 'Dave') });
+  // the friend lives two Steam regions from the host: only a worldwide search finds the trip
+  const fakeEnv = (id, name, region = 0) => ({ NMD_FAKE_STEAM: String(be.port), NMD_FAKE_ID: String(76561190000000000n + BigInt(id)), NMD_FAKE_NAME: name, NMD_FAKE_REGION: String(region) });
+  const host = await launch('host', { userData: udHost, env: fakeEnv(1, 'Hosty', 2) });
+  const guest = await launch('guest', { userData: path.join(tmp, 'guest'), env: fakeEnv(2, 'Dave', 0) });
   try {
     const hs = await host.page.evaluate(() => ({ steam: window.desktop.steam, note: document.getElementById('menuSteam').textContent, name: document.getElementById('nameInput').value }));
     check(hs.steam.ok && hs.steam.name === 'Hosty' && /On Steam as Hosty/.test(hs.note) && hs.name, `with Steam: "${hs.note}"`);
@@ -149,19 +155,41 @@ try {
     check(tex.cacheHits > 50, `the texture cache survived the restart: ${tex.cacheHits} textures from the cache, ${tex.workerPaints} painted`);
     const lobbyUp = await until(() => [...be.lobbies.values()].some(L => L.data.code), 15000);
     const L = [...be.lobbies.values()].find(L => L.data.code);
-    check(lobbyUp && L.data.build === BUILD && L.type === 1 && L.max === 6, `starting a trip opened a friends-only Steam lobby (code ${L?.data.code}, build ${L?.data.build})`);
-    check(await host.page.evaluate(() => /Invite/.test(document.getElementById('hCode').textContent) && !document.getElementById('ctpInvite').classList.contains('hidden')), 'the host gets Invite Friends (the pill and the Esc menu)');
+    const code = L?.data.code;
+    check(lobbyUp && L.data.build === BUILD && L.type === 2 && L.max === 6 && /^[1-9]\d{3}$/.test(code) && L.data.nmd_code === code, `hosting opened a Public Steam lobby carrying trip code ${code} (build ${L?.data.build})`);
+    const shown = await until(() => host.page.evaluate(c => document.getElementById('hCode').textContent.includes(c) && document.getElementById('ctpCodeNum').textContent === c && !document.getElementById('ctpInvite').classList.contains('hidden'), code), 10000);
+    check(shown, `the host sees trip code ${code} on the HUD and on the Esc menu, with Invite Friends next to it`);
     const inv = await host.page.evaluate(() => window.desktop.invite());
     check(inv.ok, 'Invite Friends opens Steam\'s invite dialog');
 
-    // a friend accepts the invite while their game sits on the menu
+    // a friend two regions away types a wrong code, then the right one, on their menu
+    const wrong = code === '5000' ? '5001' : '5000';
+    await guest.page.fill('#codeInput', wrong);
+    await guest.page.click('#joinBtn');
+    const noTrip = await guest.page.waitForFunction(() => /No trip with code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 45000 })
+      .then(() => guest.page.evaluate(() => document.getElementById('menuError').textContent), () => null);
+    check(noTrip, `a wrong trip code: "${noTrip}"`);
+    await sleep(2200);                                // Join Game rests 2 s after a failed search
+    await guest.page.fill('#codeInput', code);
+    await guest.page.click('#joinBtn');
+    await ready(guest.page);
+    const gs = await guest.page.evaluate(() => ({ id: window.__nmd.selfId, code: window.__nmd.code, roster: window.__nmd.meta?.players.map(p => p.name), chip: document.getElementById('hCode').textContent }));
+    await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);
+    const hr = await host.page.evaluate(() => window.__nmd.meta?.players.map(p => p.name));
+    check(gs.code === code && gs.chip.includes(code) && hr.length === 2 && hr.includes('Dave') && gs.roster?.length === 2, `the trip code brought the friend into the host's trip over Steam (host sees ${hr.join(', ')}; Dave sees ${gs.roster?.join(', ')}, and the code to pass on)`);
+    const asks = be.lists.filter(x => x.by === '76561190000000002');
+    check(asks.length >= 2 && asks.every(x => x.filters.distance === 3 && x.filters.strings?.[0]?.key === 'nmd_code'), `the desktop shell searched Steam worldwide for the code (${asks.length} searches: ${asks.map(x => x.filters.strings?.[0]?.value).join(', ')})`);
+
+    // invites still work: the friend leaves, and a Steam invite brings them back while they sit on the menu
+    await guest.page.evaluate(() => window.__nmd.backToMenu(null));
+    await guest.page.waitForFunction(() => window.__nmd?.phase === 'menu', null, { timeout: 60000 });
+    await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 1), 20000);
     const inviter = await initFakeSteam({ port: be.port, steamId: 76561190000000009n, name: 'Steam' });
     inviter.__fake.invite(L.id, 76561190000000002n);
     await ready(guest.page);
-    const gs = await guest.page.evaluate(() => ({ id: window.__nmd.selfId, code: window.__nmd.code, roster: window.__nmd.meta?.players.map(p => p.name) }));
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);
-    const hr = await host.page.evaluate(() => window.__nmd.meta?.players.map(p => p.name));
-    check(gs.code === L.data.code && hr.length === 2 && hr.includes('Dave') && gs.roster?.length === 2, `the friend's invite brought them into the host's trip over Steam (host sees ${hr.join(', ')}; Dave sees ${gs.roster?.join(', ')})`);
+    const hr2 = await host.page.evaluate(() => window.__nmd.meta?.players.map(p => p.name));
+    check(hr2.length === 2 && hr2.includes('Dave'), `and a Steam invite brings them back (host sees ${hr2.join(', ')})`);
     const quiet = await guest.page.evaluate(() => new Promise(res => setTimeout(() => res(performance.now() - window.__nmd.lastMsgAt()), 1500)));
     check(quiet < 500, `the friend's game is live (the last message came ${Math.round(quiet)} ms ago: snapshots keep coming through the bridge)`);
     await until(() => (be.users.get('76561190000000001')?.presence.steam_player_group_size) === '2', 5000);

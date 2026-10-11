@@ -270,20 +270,58 @@ function lockDownSession() {
 }
 
 // ---- friends over Steam (steam/): hosting a lobby, or joining a friend's ---------------------------------
-// Host: the page starts a trip, then desktop.host(code): a friends-only lobby that friends join from
-// an invite or with Join Game in their friends list; each friend's packets reach the server (SteamHost).
-// Guest: an invite (or +connect_lobby) gives a lobby id; desktop.joinLobby(id) joins it and opens a
-// bridge on 127.0.0.1 that the page connects to as if it were a server (GuestBridge).
-let steamHost = null, bridge = null, pendingLobby = FLAGS.lobby, presence = null;
+// Host: desktop.pickCode() finds a trip code no trip on Steam is using, the page creates its trip with
+// it, then desktop.host(code): a Public lobby carrying the code; friends join it by typing the code (a
+// lobby search), from an invite, or with Join Game in their friends list. Each friend's packets reach
+// the server (SteamHost).
+// Guest: a lobby id from an invite (or +connect_lobby), or from desktop.joinCode(code)'s search;
+// joinLobby(id) joins it and opens a bridge on 127.0.0.1 that the page connects to as if it were a
+// server (GuestBridge).
+let steamHost = null, bridge = null, pendingLobby = FLAGS.lobby, presence = null, searching = false;
 const steamNet = () => require('./steam/index.cjs');
-async function hostLobby(code) {
+const lobbySearch = () => require('./steam/lobbysearch.cjs');
+// the trip-code rules both builds share (an ES module: loaded now, so a packaging slip shows in the log)
+const tripcode = import(require('node:url').pathToFileURL(path.join(__dirname, '../shared/tripcode.js')).href);
+tripcode.catch(e => log('[main] shared/tripcode.js did not load:', e.message));
+async function hostLobby(raw) {
   if (!steam.ok) return { ok: false, msg: steam.reason };
-  if (steamHost && !steamHost.closed) { steamHost.setCode(code); return { ok: true, lobby: String(steamHost.lobby?.id ?? '') }; }
+  const { isTripCode } = await tripcode;
+  const code = isTripCode(raw) ? raw : '';         // never junk in a search key
+  if (steamHost && !steamHost.closed) { steamHost.setCode(code); return { ok: true, lobby: String(steamHost.lobby?.id ?? ''), code }; }
   if (bridge) { bridge.leave(); bridge = null; }
-  steamHost = new (steamNet().SteamHost)({ steam: steam.client, link: server.link, build: server.build, code, log });
-  const lobby = await steamHost.open();
-  if (presence) steamHost.setPresence(presence);
-  return { ok: true, lobby: String(lobby.id) };
+  const h = steamHost = new (steamNet().SteamHost)({ steam: steam.client, link: server.link, build: server.build, code, log });
+  let lobby;
+  try { lobby = await h.open(); }
+  catch (e) { if (steamHost === h) steamHost = null; try { h.close(); } catch {} throw e; }   // no half-made host: a retry starts clean
+  if (presence) h.setPresence(presence);
+  return { ok: true, lobby: String(lobby.id), code };
+}
+// Before hosting: a trip code that no open trip on Steam carries (4 digits make 9,000 codes for every
+// trip in the world). A search that fails or takes too long just takes its code: the joiner's side copes
+// with two trips on one code.
+async function pickCode() {
+  if (!steam.ok) return { ok: false, msg: steam.reason };
+  const { randomTripCode } = await tripcode;
+  const draw = () => randomTripCode((lo, hi) => require('node:crypto').randomInt(lo, hi));
+  return { ok: true, code: await lobbySearch().pickFreeCode(steam.client, steam.lobbyFilters(), draw, { log }) };
+}
+// A friend typed a trip code: find its lobby on Steam, then join it exactly as an invite would
+async function joinByCode(raw) {
+  const { normalizeTripCode, isTripCode } = await tripcode;
+  const code = normalizeTripCode(raw);
+  if (!isTripCode(code)) return { ok: false, code: 'noroom', msg: 'Trip codes are 4 digits.' };
+  if (!steam.ok) return { ok: false, code: 'steam', msg: steam.reason };
+  if (searching) return { ok: false, code: 'busy', msg: 'Already looking for a trip.' };
+  searching = true;
+  try {
+    const t = await lobbySearch().findTripByCode(steam.client, steam.lobbyFilters(), code, { me: steam.info().steamId, build: server.build, log });
+    if (!t.ok) return t;
+    if (t.matches > 1) log(`[steam] ${t.matches} trips carry code ${code}: joining ${t.hostName}'s`);
+    return await joinLobby(t.lobbyId);
+  } catch (e) {
+    log('[steam] trip code search failed:', e.message);
+    return { ok: false, code: 'search', msg: e.code === 'search' ? e.message : 'The Steam search failed. Try again.' };
+  } finally { searching = false; }
 }
 async function joinLobby(id) {
   if (!steam.ok) return { ok: false, msg: steam.reason };
@@ -351,11 +389,12 @@ on('desktop:presence', (_e, p) => {
   else if (bridge) bridge.setPresence(presence);
   else steamNet().setPresence(steam.client, presence || { ph: 'menu' });
 });
-handle('desktop:host', code => hostLobby(String(code || '').slice(0, 8)));
+handle('desktop:pick-code', () => pickCode());
+handle('desktop:host', code => hostLobby(String(code ?? '')));
 handle('desktop:invite', () => {
   if (!steam.ok) return { ok: false, msg: steam.reason };
   const lobby = steamHost?.lobby || bridge?.lobby;
-  if (!lobby) return { ok: false, msg: 'Start a trip first.' };
+  if (!lobby) return { ok: false, msg: 'Host a game first.' };
   steam.client.overlay.activateInviteDialog(lobby.id);
   return { ok: true };
 });
@@ -368,6 +407,7 @@ handle('desktop:leave', () => {
 });
 handle('desktop:take-lobby', () => { const id = pendingLobby; pendingLobby = null; return id; });
 handle('desktop:join-lobby', id => joinLobby(String(id)));
+handle('desktop:join-code', code => joinByCode(String(code ?? '').slice(0, 32)));
 
 // ---- start and stop --------------------------------------------------------------------------------------
 Menu.setApplicationMenu(null);
