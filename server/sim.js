@@ -35,6 +35,9 @@ const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
 
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
 const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });
+// a number from a client: finite and within +-lim, or 0 (JSON can carry 1e999 = Infinity, which would
+// turn a body's velocity into NaN and freeze it for good)
+const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 const sub = (a, b) => v3(a.x - b.x, a.y - b.y, a.z - b.z);
 const add = (a, b) => v3(a.x + b.x, a.y + b.y, a.z + b.z);
 const mul = (a, s) => v3(a.x * s, a.y * s, a.z * s);
@@ -280,9 +283,9 @@ export class Sim {
   grab(pid, pl, m) {
     if (!pl?.eye) return false;
     this.release(pid);
-    const pt = v3(Number(m.pt?.[0]) || 0, Number(m.pt?.[1]) || 0, Number(m.pt?.[2]) || 0);
+    const pt = v3(num(m.pt?.[0], 1e5), num(m.pt?.[1], 1e5), num(m.pt?.[2], 1e5));
     if (len(sub(pt, pl.eye)) > C.PLAYER.REACH + 0.8) return false;
-    const dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, Number(m.d) || C.GRAB.HOLD_DEFAULT));
+    const dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, num(m.d, 100) || C.GRAB.HOLD_DEFAULT));
     if (m.kind === 'prop') {
       const p = this.props.get(Number(m.id));
       if (!p) return false;
@@ -311,7 +314,7 @@ export class Sim {
 
   holdDist(pid, d) {
     const h = this.holds.get(pid);
-    if (h) h.dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, Number(d) || h.dist));
+    if (h) h.dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, num(d, 100) || h.dist));
   }
 
   release(pid, throwDir = null, pl = null) {
@@ -326,7 +329,7 @@ export class Sim {
     if (throwDir) {
       const m = p.body.mass();
       const imp = Math.min(m * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP);
-      const d = v3(Number(throwDir[0]) || 0, Number(throwDir[1]) || 0, Number(throwDir[2]) || 0);
+      const d = v3(num(throwDir[0], 100), num(throwDir[1], 100), num(throwDir[2], 100));
       const n = len(d) || 1;
       p.body.applyImpulse(mul(d, imp / n), true);
       if (pl?.vel) p.body.applyImpulse(mul(pl.vel, m * 0.6), true);
@@ -338,8 +341,8 @@ export class Sim {
   // the pusher actually is and on the thing pushed: a point far off would give the force a huge lever arm
   // (rolling the RV over from across the map, and billing the crew for the tow).
   push(pid, m, pl = null) {
-    const pt = v3(Number(m.pt?.[0]) || 0, Number(m.pt?.[1]) || 0, Number(m.pt?.[2]) || 0);
-    const d = v3(Number(m.dir?.[0]) || 0, 0, Number(m.dir?.[2]) || 0);
+    const pt = v3(num(m.pt?.[0], 1e5), num(m.pt?.[1], 1e5), num(m.pt?.[2], 1e5));
+    const d = v3(num(m.dir?.[0], 100), 0, num(m.dir?.[2], 100));
     const n = len(d);
     if (n < 0.1) return;
     if (!pl?.pos || len(sub(pt, v3(pl.pos.x, pl.pos.y + 0.9, pl.pos.z))) > 2) return;
@@ -355,8 +358,8 @@ export class Sim {
   }
 
   setDrive(m) {
-    this.drive.th = Math.max(-1, Math.min(1, Number(m.th) || 0));
-    this.drive.st = Math.max(-1, Math.min(1, Number(m.st) || 0));
+    this.drive.th = num(m.th, 1);
+    this.drive.st = num(m.st, 1);
     this.drive.hb = m.hb ? 1 : 0;
   }
 
@@ -667,16 +670,20 @@ export class Sim {
       }
     }
 
-    // anything that fell out of the world goes back to the road
+    // anything that fell out of the world goes back to the road (and anything whose motion went
+    // non-finite, which nothing else would ever fix: the test is written so NaN fails it)
+    const sane = (t, v) => t.y > -60 && Number.isFinite(t.x + t.z + v.x + v.y + v.z);
     for (const p of this.props.values()) {
       const t = p.body.translation();
-      if (t.y < -60) {
-        p.body.setTranslation(v3(W.roadX(t.z), W.heightAt(W.roadX(t.z), t.z) + 2, t.z), true);
+      if (!sane(t, p.body.linvel())) {
+        const z = Number.isFinite(t.z) ? t.z : 0;
+        p.body.setTranslation(v3(W.roadX(z), W.heightAt(W.roadX(z), z) + 2, z), true);
         p.body.setLinvel(v3(), true);
+        p.body.setAngvel(v3(), true);
       }
     }
     const rt = this.rv.translation();
-    if (rt.y < -60) this.placeRV(W.roadX(rt.z), rt.z, 0);
+    if (!sane(rt, this.rv.linvel())) { const z = Number.isFinite(rt.z) ? rt.z : 0; this.placeRV(W.roadX(z), z, 0); }
   }
 
   // Is the RV upside-down / on its side?

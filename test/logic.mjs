@@ -196,7 +196,7 @@ try {
   B.send({ t: 'join', name: 'x', room: 'ZZZZ' });   // already joined: ignored
   const bad = new Player('Nobody'); await bad.connect(); bad.send({ t: 'join', name: 'n', room: 'QQQQ' });
   const err = await bad.wait(m => m.t === 'error', 4000, 'error');
-  check(/No RV/.test(err.msg), 'bad room code rejected');
+  check(err.code === 'noroom' && /No trip with that code/.test(err.msg), 'bad room code rejected');
   bad.ws.close();
   A.pose(); B.pose();
   await A.until((g, s) => s.pl.length === 2, 4000, 'two players in snapshot');
