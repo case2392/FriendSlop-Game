@@ -1843,7 +1843,7 @@ export class Hands {
 function posed(color, opts, P) { const ch = buildCharacter(color, opts); ch.driven = true; applyPose(ch, { ...restPose(), ...P }); return ch.root; }
 // a player in a given state, posed by the real PlayerView logic (springs settled)
 function viewIn(id, st, { emote = null, speed = 0, frames = 90 } = {}) {
-  const v = new PlayerView({ add() {}, remove() {} }, { id, color: ['#7CFC00', '#FF6EC7', '#00E5FF', '#FFA033', '#B26EFF', '#FFE93B'][id % 6], name: '' });
+  const v = new PlayerView({ add() {}, remove() {} }, { id, color: C.COLORS[id % C.COLORS.length], name: '' });
   v.emote = emote ? { e: emote, t: 99 } : null;
   const S = { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, mode: C.MODE.WALK, flags: 0, ...st };
   for (let i = 0; i < frames; i++) { S.pos = { x: 0, y: 0, z: S.pos.z + speed / 30 }; v.update(1 / 30, i / 30, S); }
@@ -1859,7 +1859,7 @@ export const PREVIEW = {
   player3: () => buildCharacter('#00E5FF', { hatIndex: 2, skinIndex: 2 }).root,
   player4: () => buildCharacter('#FFA033', { hatIndex: 3, skinIndex: 3 }).root,
   player5: () => buildCharacter('#B26EFF', { hatIndex: 4, skinIndex: 4 }).root,
-  player6: () => buildCharacter('#FFE93B', { hatIndex: 5, skinIndex: 5 }).root,
+  player6: () => buildCharacter('#F4F4F4', { hatIndex: 5, skinIndex: 5 }).root,
   ed: () => buildCharacter('#c0392b', { hatIndex: 2, skinIndex: 3 }).root,
   clerk: () => buildCharacter('#2e86ab', { hatIndex: 0, skinIndex: 4 }).root,
   dealer: () => buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }).root,

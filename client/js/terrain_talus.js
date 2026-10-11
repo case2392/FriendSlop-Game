@@ -123,7 +123,7 @@ function put(acc, W, S, geo, m4, { cap = 0, snow = false, gnd = null } = {}) {
     _v.fromBufferAttribute(P, i).applyMatrix4(m4);
     _n.fromBufferAttribute(N, i).applyMatrix3(_m3).normalize();
     const sink = _v.y - (gnd ? gnd(_v.x, _v.z) : W.heightAt(_v.x, _v.z)), ao = 0.78 + 0.22 * sstep(-0.15, 0.6, sink);
-    acc.v(_v.x, _v.y, _v.z, _n.x, _n.y, _n.z, [S.ao[0] + (1 - S.ao[0]) * ao, S.ao[1] + (1 - S.ao[1]) * ao, S.ao[2] + (1 - S.ao[2]) * ao], [0, 0], [1, sink, snow ? -1 : 99, cap]);
+    acc.vf(_v.x, _v.y, _v.z, _n.x, _n.y, _n.z, S.ao[0] + (1 - S.ao[0]) * ao, S.ao[1] + (1 - S.ao[1]) * ao, S.ao[2] + (1 - S.ao[2]) * ao, 0, 0, 1, sink, snow ? -1 : 99, cap);
   }
   if (I) for (let i = 0; i < I.count; i++) acc.I.push(v0 + I.getX(i));
   else for (let i = 0; i < P.count; i++) acc.I.push(v0 + i);

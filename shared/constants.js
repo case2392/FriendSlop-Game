@@ -105,7 +105,7 @@ export const WINCH = {
   ANCHOR_REACH: 1.6,
 };
 
-export const COLORS = ['#7CFC00', '#FF6EC7', '#00E5FF', '#FFA033', '#B26EFF', '#FFE93B'];
+export const COLORS = ['#7CFC00', '#FF6EC7', '#00E5FF', '#FFA033', '#B26EFF', '#F4F4F4'];   // (white, not yellow: a yellow was too close to the green for red-blind players)
 export const EMOTES = ['😂', '😭', '💀', '🤬', '👑', '🤡'];
 
 // pose modes, sent as a small int

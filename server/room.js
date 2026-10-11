@@ -575,7 +575,9 @@ export class Room {
     // nobody at the wheel, or a driver who stopped sending (frozen tab, minimized window, dead link)? it
     // coasts ("WHO'S DRIVING?!") until it's nearly stopped, then the parking brake catches
     const drv = [...this.players.values()].find(p => p.seat === 0);
-    if (!drv || this.t - drv.drvAt > 0.3) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
+    // (a driver unheard from for a second has frozen or dropped: off the pedals. The page sends 20 a second
+    // on its own timer, so even a PC drawing a frame a second keeps driving)
+    if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
     sim.step(dt, this.players);
     for (const p of this.players.values()) this.resolvePlayer(p);
 

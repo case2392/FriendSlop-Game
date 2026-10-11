@@ -29,7 +29,7 @@ async function open(name) {
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error') errors.push(`[${name}] ${m.text()}`); });
   await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
   await page.fill('#nameInput', name);
   return page;
 }

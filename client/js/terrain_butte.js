@@ -57,9 +57,10 @@ export function rng32(seed) {
 }
 // a smooth periodic function of the bearing, about -1..1
 function periodicA(rnd, k0, k1, fall = 1) {
-  const T = []; let norm = 0;
-  for (let k = k0; k <= k1; k++) { const a = (0.5 + rnd()) / Math.pow(k, fall); T.push([k, rnd() * TAU, a]); norm += a; }
-  return th => { let v = 0; for (const [k, p, a] of T) v += Math.sin(k * th + p) * a; return Math.max(-1, Math.min(1, v / norm * 1.7)); };
+  const K = [], Ph = [], A = []; let norm = 0;
+  for (let k = k0; k <= k1; k++) { const a = (0.5 + rnd()) / Math.pow(k, fall); K.push(k); Ph.push(rnd() * TAU); A.push(a); norm += a; }
+  const n = K.length;
+  return th => { let v = 0; for (let i = 0; i < n; i++) v += Math.sin(K[i] * th + Ph[i]) * A[i]; return Math.max(-1, Math.min(1, v / norm * 1.7)); };
 }
 // the wall's offset from the outline's radius kept inside [lo, hi], smoothly (never a flat clipped band)
 const softClamp = (f, lo, hi) => { const c = (lo + hi) / 2, w = (hi - lo) / 2; return c + w * Math.tanh((f - c) / w); };
@@ -342,6 +343,10 @@ function bodyForm(W, S, rnd, o) {
   // (a broad gully, the deepest and darkest of them: erosion works hardest in a re-entrant)
   for (const c of OL.cusps) J.push({ a: c, w: 0.55 + rnd() * 0.3, d: 0.3 + rnd() * 0.05, y0: -1e9, y1: 1e9, cap: true, cusp: true, dark: 0.86 });
   B.joints = J;
+  // (arc distances on a ring outline, fast: the bearing's arc length once per call and each feature's
+  // once, the same sums OL.arcD does; the bench's arc keeps OL.arcD)
+  const fastD = OL.ring ? (st, sa) => { let d = st - sa; d -= OL.perim * Math.round(d / OL.perim); return Math.abs(d); } : null;
+  for (const j of J) j.sa = OL.s(j.a);
   // A value of its own for each block of rock between two joints (Js), blended across each joint's cleft
   // (the step hides in it); the bench's arc: arcV before its first joint
   const bySeg = (Js, vals, arcV) => {
@@ -392,12 +397,20 @@ function bodyForm(W, S, rnd, o) {
   for (let k = 0; k < nS; k++) spurs.push({ a: B.arc ? lerp(B.arc[0] + 0.4, B.arc[1] - 0.4, rnd()) : rnd() * TAU, w: (0.25 + rnd() * 0.25) * R, k: 0.6 + rnd() * 0.6 });
   // (and a broad one under the middle of each lobe: a bastion's foot)
   for (const sg of OL.segs) if (sg.lobe) spurs.push({ a: OL.th((sg.s0 + sg.s1) / 2), w: Math.min(3.2, 0.4 * (sg.s1 - sg.s0)), k: 0.8 + rnd() * 0.4 });
-  const spurAt = th => { let sp = 0; for (const s of spurs) sp = Math.max(sp, s.k * (1 - sstep(s.w * 0.4, s.w, OL.arcD(th, s.a)))); return sp; };
+  for (const sp of spurs) sp.sa = OL.s(sp.a);
+  for (const n of notch) n.sa = OL.s(n.a);
+  const spurAt = th => {
+    const st = fastD ? OL.s(th) : 0;
+    let sp = 0;
+    for (const s of spurs) sp = Math.max(sp, s.k * (1 - sstep(s.w * 0.4, s.w, fastD ? fastD(st, s.sa) : OL.arcD(th, s.a))));
+    return sp;
+  };
   // how deep in a joint (0..1) at (th, y), how far it cuts (m), and how dark its shade is there
   const jointAt = (th, y) => {
     let best = 0, cut = 0, dark = 0;
+    const st = fastD ? OL.s(th) : 0;
     for (const j of J) {
-      const s = OL.arcD(th, j.a);
+      const s = fastD ? fastD(st, j.sa) : OL.arcD(th, j.a);
       if (s > j.w * 1.2) continue;
       const across = 1 - sstep(j.w * 0.3, j.w, s);
       const along = sstep(j.y0 - 0.7, j.y0 + 0.5, y) * (1 - sstep(j.y1 - 0.5, j.y1 + 0.7, y));
@@ -407,7 +420,12 @@ function bodyForm(W, S, rnd, o) {
     return [best, cut, dark];
   };
   B.joint = jointAt;
-  const notchAt = th => { let k = 0; for (const n of notch) k = Math.max(k, n.k * (1 - sstep(n.w * 0.55, n.w, OL.arcD(th, n.a)))); return k; };
+  const notchAt = th => {
+    const st = fastD ? OL.s(th) : 0;
+    let k = 0;
+    for (const n of notch) k = Math.max(k, n.k * (1 - sstep(n.w * 0.55, n.w, fastD ? fastD(st, n.sa) : OL.arcD(th, n.a))));
+    return k;
+  };
   B.notch = notchAt;
   const relief = S.form ? reliefMap('cliff_snow_form', 1) : reliefMap(S.rock);
   const yU0 = yT - (S.capT[0] + S.capT[1]) / 2 - 0.4;
@@ -422,7 +440,8 @@ function bodyForm(W, S, rnd, o) {
   };
   B.ov = th => {
     let v = capP.at(th) - Rb(th);
-    for (const j of J) if (j.cap) { const s = OL.arcD(th, j.a); if (s < j.w * 1.4) v -= (0.6 + j.d * 2) * (1 - sstep(j.w * 0.3, j.w * 1.4, s)) * 0.3; }
+    const st = fastD ? OL.s(th) : 0;
+    for (const j of J) if (j.cap) { const s = fastD ? fastD(st, j.sa) : OL.arcD(th, j.a); if (s < j.w * 1.4) v -= (0.6 + j.d * 2) * (1 - sstep(j.w * 0.3, j.w * 1.4, s)) * 0.3; }
     v = lerp(v * cbO(th), 0.03, notchAt(th));
     return Math.max(0.03, Math.min(LIP, v * (main ? (B.overK ? B.overK(th) : 1) : B.head(th))));
   };
@@ -457,7 +476,7 @@ function bodyForm(W, S, rnd, o) {
     if (B.arc) h *= sstep(0.15, 0.7, ARC_B - angDiff(th, (B.arc[0] + B.arc[1]) / 2)) * (B.mainIn ? 1 - sstep(-1.2, 0.3, B.mainIn(th)) : 1);
     return Math.max(0, Math.min(1.35, h));
   };
-  B.bankR = th => Math.max(0.5, Math.min(2.4 + 1.8 * B.bankH(th) + 0.6 * reachN(th), roadD(th) - 7.0));
+  B.bankR = (th, h = B.bankH(th)) => Math.max(0.5, Math.min(2.4 + 1.8 * h + 0.6 * reachN(th), roadD(th) - 7.0));
   B.hF = th => {
     const room = yT - B.capT(th) - B.ucH(th) - g(th, Rb(th) + 0.2);
     return Math.max(0.3, Math.min(0.75 + 0.35 * spurAt(th), room * 0.55));
@@ -543,9 +562,10 @@ export function butteGround(W, p) {
 export class Acc {
   constructor() { this.P = []; this.N = []; this.C = []; this.U = []; this.K = []; this.I = []; }
   get n() { return this.P.length / 3; }
-  v(x, y, z, nx, ny, nz, c, u, k) {
-    this.P.push(x, y, z); this.N.push(nx, ny, nz); this.C.push(c[0], c[1], c[2]); this.U.push(u[0], u[1]); this.K.push(k[0], k[1], k[2], k[3]);
-    return this.n - 1;
+  v(x, y, z, nx, ny, nz, c, u, k) { return this.vf(x, y, z, nx, ny, nz, c[0], c[1], c[2], u[0], u[1], k[0], k[1], k[2], k[3]); }
+  vf(x, y, z, nx, ny, nz, c0, c1, c2, u0, u1, k0, k1, k2, k3) {
+    this.P.push(x, y, z); this.N.push(nx, ny, nz); this.C.push(c0, c1, c2); this.U.push(u0, u1); this.K.push(k0, k1, k2, k3);
+    return this.P.length / 3 - 1;
   }
   // smooth normals over faces I[i0..] (area weighted), for vertices v0..
   normals(v0, i0) {
@@ -663,7 +683,8 @@ function bankInto(acc, W, S, B) {
       const r0 = R + B.wall(th, B.g(th, R + 0.3) + h * 0.5) - 0.12, r = r0 + reach * t;
       const x = B.cx + c * r, z = B.cz + s * r, g = W.heightAt(x, z);
       const y = g + h * Math.pow(1 - t, 1.7) - (t >= 1 ? 0.12 : 0);
-      row.push(acc.v(x, y, z, 0, 1, 0, aoColor(S, lerp(0.86, 1, t)), [u, 0], [0, y - g, S.bank[3] ? -2 : -1, 0]));
+      const ao = lerp(0.86, 1, t);
+      row.push(acc.vf(x, y, z, 0, 1, 0, lerp(S.ao[0], 1, ao), lerp(S.ao[1], 1, ao), lerp(S.ao[2], 1, ao), u, 0, 0, y - g, S.bank[3] ? -2 : -1, 0));
     }
     ids.push(row);
   }
@@ -680,9 +701,9 @@ export function bankAt(F, x, z) {
     if (!B) continue;
     const dx = x - B.cx, dz = z - B.cz, r = Math.hypot(dx, dz), th = Math.atan2(dz, dx);
     if (B.arc && angDiff(th, (B.arc[0] + B.arc[1]) / 2) > (B.arc[1] - B.arc[0]) / 2) continue;
-    const r0 = B.Rb(th) + 0.05, reach = B.bankR(th), t = (r - r0) / reach;
+    const h0 = B.bankH(th), r0 = B.Rb(th) + 0.05, reach = B.bankR(th, h0), t = (r - r0) / reach;
     if (t < -0.2 || t > 1) continue;
-    h = Math.max(h, B.bankH(th) * Math.pow(1 - Math.max(0, t), 1.7));
+    h = Math.max(h, h0 * Math.pow(1 - Math.max(0, t), 1.7));
   }
   return h;
 }
@@ -699,7 +720,7 @@ function bodyInto(acc, W, S, B) {
     const row = [];
     for (const q of P) {
       const x = B.cx + c * q.r, z = B.cz + s * q.r;
-      row.push({ id: acc.v(x, q.y, z, 0, 1, 0, aoColor(S, q.ao), [u, vo], [0, q.y - W.heightAt(x, z) - bank, B.yT - q.y, q.cap]), dup: q.dup });
+      row.push({ id: acc.vf(x, q.y, z, 0, 1, 0, lerp(S.ao[0], 1, q.ao), lerp(S.ao[1], 1, q.ao), lerp(S.ao[2], 1, q.ao), u, vo, 0, q.y - W.heightAt(x, z) - bank, B.yT - q.y, q.cap), dup: q.dup });
     }
     ids.push(row);
   }

@@ -15,7 +15,7 @@ const page = await ctx.newPage();
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
 await page.goto(`http://localhost:${PORT}`);
-await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
 await page.fill('#nameInput', 'Driver');
 await page.fill('#seedInput', '4242');
 await page.click('#hostBtn');

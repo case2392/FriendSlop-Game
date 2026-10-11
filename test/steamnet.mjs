@@ -168,7 +168,8 @@ try {
   g3.page.startPoses();
   await until(() => hostPage.meta?.players.length === 3);
   check(hostPage.meta?.players.length === 3, `the host's roster: ${hostPage.meta?.players.map(p => p.name).join(', ')}`);
-  for (const p of [g2.page, g3.page]) check(['welcome', 'world', 'props', 'tp', 'meta'].every(t => p.byType[t]), `${p.name} got welcome, world, props, tp and meta through Steam`);
+  const gotAll = p => ['welcome', 'world', 'props', 'tp', 'meta'].every(t => p.byType[t]);
+  for (const p of [g2.page, g3.page]) { await until(() => gotAll(p), 5000); check(gotAll(p), `${p.name} got welcome, world, props, tp and meta through Steam`); }
   await sleep(3000);
   const rate = g2.page.snapRate(3000);
   check(rate > 16 && rate < 22, `snapshots reach a Steam guest at ${rate.toFixed(1)} Hz (20 Hz sent)`);

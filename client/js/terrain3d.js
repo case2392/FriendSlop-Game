@@ -96,6 +96,12 @@ const CFG = {
   },
 };
 
+// graphics quality: how far the grass reaches and how thick it grows (applies from the next day built)
+let clutterK = { radius: 1, slots: 1 };
+export function setClutterQuality(level) {
+  clutterK = level === 'low' ? { radius: 0.65, slots: 0.5 } : level === 'medium' ? { radius: 0.85, slots: 0.75 } : { radius: 1, slots: 1 };
+}
+
 // Westfall's cultivated plots (W.fields), painted into the splat: at most MAX_PLOTS per leg. Their
 // colours (sRGB): furrow trough, mid, lit ridge; stubble soil, straw, lit straw; wheat gap, body, lit heads.
 const MAX_PLOTS = 10;
@@ -1505,7 +1511,8 @@ function butteTufts(W, cfg, biome) {
 // clump of three to five); a cell's tufts gather round one spot and mostly share one kind.
 class Clutter {
   constructor(W, cfg, biome) {
-    this.W = W; this.cfg = cfg; this.C = cfg.clutter;
+    this.W = W; this.cfg = cfg;
+    this.C = { ...cfg.clutter, radius: cfg.clutter.radius * clutterK.radius, slots: Math.max(1, Math.round(cfg.clutter.slots * clutterK.slots)) };
     this.blocked = exclusion(W);
     // the cultivated plots (their own row clutter comes from patches(); nothing random grows inside)
     this.plots = cfg.plots ? (W.fields || []).slice(0, MAX_PLOTS).map((f, i) => ({ ...f, i, sn: Math.sin(f.ry), cs: Math.cos(f.ry) })) : [];

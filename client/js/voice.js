@@ -12,6 +12,8 @@
 // desktop build's app://), and WebCodecs' Opus is in Chromium (so Steam's build) and recent Firefox.
 
 import * as net from './net.js';
+import { audioCtx, bus } from './audio.js';
+import { settings, setSetting } from './settings.js';
 
 const SPEAK_RMS = 0.045;          // RMS above this = "speaking" (the meter, and the open mic's gate)
 const GATE_HOLD = 0.4;            // the open mic keeps sending this long after the voice drops
@@ -33,7 +35,7 @@ export const V = {
   ptt: false,                      // push-to-talk key held right now
   walkieKey: false,                // T held: talking on the walkie
   muted: load('muted', false),     // self-mute toggle
-  masterVol: load('masterVol', 1),
+  get masterVol() { return settings.voice; },     // the mixer's voice bus (Settings > Audio)
   micId: load('micId', ''),
   mics: [],                        // [{deviceId, label}]
   peers: new Map(),                // speaker id -> peer
@@ -52,15 +54,14 @@ let meterTimer = null;
 
 function emitChange() { V._onChange?.(); }
 
+// voices share the game's one AudioContext (48 kHz, Opus's rate) and go to the mixer's voice bus
 function ensureCtx() {
   if (!actx) {
-    try { actx = new AudioContext({ sampleRate: RATE, latencyHint: 'interactive' }); }
-    catch { actx = new AudioContext(); }
+    actx = audioCtx();
     masterGain = actx.createGain();
-    masterGain.connect(actx.destination);
+    masterGain.connect(bus.voice);
   }
   if (actx.state === 'suspended') actx.resume();
-  masterGain.gain.value = V.masterVol;
 }
 
 // ---- transmit gating ------------------------------------------------------------------
@@ -416,11 +417,7 @@ export function toggleMute() {
   emitChange();
 }
 
-export function setMasterVol(v) {
-  V.masterVol = Math.max(0, Math.min(1, v));
-  store('masterVol', V.masterVol);
-  if (masterGain) masterGain.gain.value = V.masterVol;
-}
+export function setMasterVol(v) { setSetting('voice', v); }
 
 export function setPeerVol(id, v) {
   const peer = V.peers.get(id);

@@ -43,7 +43,7 @@ await page.addInitScript(() => {
   };
 });
 await page.goto(`http://localhost:${PORT}`);
-await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
 await page.fill('#nameInput', 'Steve'); await page.fill('#seedInput', '777'); await page.click('#hostBtn');
 const built = d => page.waitForFunction(d => { const S = window.__nmd; return S?.W && S.lw && S.wv && S.W.day === d; }, d, { polling: 100 });
 const frames = async n => { const f0 = await page.evaluate(() => window.__nmd.frames || 0); await page.waitForFunction(n => (window.__nmd.frames || 0) >= n, f0 + n, { polling: 50 }); };

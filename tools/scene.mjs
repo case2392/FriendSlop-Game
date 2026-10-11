@@ -42,8 +42,8 @@ async function open(name) {
   page.setDefaultTimeout(240000);   // several agents may be rendering on swiftshader at once
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' && !/404|favicon/.test(m.text())) errors.push(`[${name}] ${m.text()}`); });
-  await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.goto(`http://localhost:${PORT}/?quality=high`, { timeout: 240000 });
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1'), window.__nmd?.setSetting?.('tutorial', false)));
   await page.fill('#nameInput', name);
   return page;
 }

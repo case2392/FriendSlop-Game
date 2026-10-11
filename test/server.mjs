@@ -67,8 +67,10 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   room.handle(A, { t: 'drv', th: 1, st: 0.5, hb: 0 });
   tick(room, 0.1);
   const pressed = room.sim.drive.th;
-  tick(room, 0.5);
-  check(pressed === 1 && room.sim.drive.th === 0, `rooms: a silent driver's throttle lets go after 0.3 s (${pressed} -> ${room.sim.drive.th})`);
+  tick(room, 0.6);
+  const still = room.sim.drive.th;
+  tick(room, 0.6);
+  check(pressed === 1 && still === 1 && room.sim.drive.th === 0, `rooms: a silent driver keeps the throttle through a slow frame (0.7 s) and loses it after 1 s (${pressed} -> ${still} -> ${room.sim.drive.th})`);
 
   // client numbers that would poison the physics: Infinity / huge in push and throw
   const rp = room.sim.rv.translation();

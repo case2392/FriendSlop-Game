@@ -19,8 +19,8 @@ async function open(name) {
   const page = await ctx.newPage();
   page.setDefaultTimeout(240000);   // software GL: the first world build can take ~30 s per client
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
-  await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.goto(`http://localhost:${PORT}/?quality=high`, { timeout: 240000 });
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1'), window.__nmd?.setSetting?.('tutorial', false)));
   await page.fill('#nameInput', name);
   return page;
 }
