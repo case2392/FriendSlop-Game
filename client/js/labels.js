@@ -35,7 +35,7 @@ import { paintVista, finishVista } from './paint/ui.js';
 import { RV_ART } from './paint/vehicle.js';
 import { RV_DIM, toLocal, insideRV } from '/shared/rv.js';
 
-export const UI_FONT = "'NMD UI', 'Marcellus', 'Friz Quadrata TT', 'Friz Quadrata', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif";
+export const UI_FONT = "'NMD UI', 'Marcellus', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif";
 export const TITLE_FONT = "'Cinzel', 'Trajan Pro', 'Marcellus', 'Palatino Linotype', Georgia, serif";
 
 // ---- fonts ------------------------------------------------------------------------------
@@ -383,7 +383,7 @@ async function renderDiorama(W, H) {
     sp.renderOrder = 3;
     scene.add(sp);
   }
-  scene.add(signpost(5.2, -19.5, -0.5));
+  if (!new URLSearchParams(location.search).has('nosign')) scene.add(signpost(5.2, -19.5, -0.5));   // ?nosign: key art without words
   // the boys: one riding on the roof, one walking alongside
   try {
     const P = ppl?.PREVIEW;
@@ -440,9 +440,12 @@ async function renderDiorama(W, H) {
 // task; shown at once as a quiet meadow), then the diorama over it, faded in when ready.
 // 1280 x 720, or 1600 x 900 on big screens (the backdrop is painted at 1280 and scaled;
 // the diorama renders at size). Without WebGL, the whole scene is painted in 2D.
+// ?titlesize=3840x2160: any 16:9 size, kept lossless (the store art: tools/storeart.mjs).
 async function paintMenu(afterBackdrop) {
   const big = (window.devicePixelRatio || 1) * window.innerWidth > 1400;
-  const W = big ? 1600 : 1280, H = big ? 900 : 720, bw = 1280, bh = 720;
+  const size = new URLSearchParams(location.search).get('titlesize')?.match(/^(\d{3,4})x(\d{3,4})$/);
+  const W = size ? +size[1] : big ? 1600 : 1280, H = size ? +size[2] : big ? 900 : 720, bw = 1280, bh = 720;
+  const finalType = size ? 'image/png' : 'image/jpeg';
   const back = document.createElement('canvas');
   back.width = bw; back.height = bh;
   const bg = back.getContext('2d');
@@ -475,7 +478,7 @@ async function paintMenu(afterBackdrop) {
   afterBackdrop?.();
   dio = await pending;
   if (dio) {
-    publish('menu-final', finish(dio, 0.05), 'image/jpeg', () => {
+    publish('menu-final', finish(dio, 0.05), finalType, () => {
       document.getElementById('menu')?.classList.add('art-final');
       document.documentElement.dataset.menuArt = 'diorama';
     });
@@ -487,7 +490,7 @@ async function paintMenu(afterBackdrop) {
   const cv = document.createElement('canvas');
   cv.width = W; cv.height = H;
   cv.getContext('2d').drawImage(back, 0, 0, W, H);
-  publish('menu-final', cv, 'image/jpeg', () => {
+  publish('menu-final', cv, finalType, () => {
     document.getElementById('menu')?.classList.add('art-final');
     document.documentElement.dataset.menuArt = 'painted';
   });

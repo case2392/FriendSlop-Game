@@ -389,12 +389,12 @@ const foliage = (P, B, pal = null, bpal = null) => atlas([
 ]);
 
 register('leaves_oak', {
-  family: F, size: 512, alpha: true, note: 'Elwynn foliage atlas: canopy clump, hanging skirt, dense core mass, bush clump (solid lobes, scalloped leaf edges)',
+  family: F, size: 512, alpha: true, note: 'meadow foliage atlas: canopy clump, hanging skirt, dense core mass, bush clump (solid lobes, scalloped leaf edges)',
   paint: foliage(OAK, BUSH),
 });
 
 register('leaves_autumn', {
-  family: F, size: 512, alpha: true, note: 'Westfall foliage: olive-gold clump (some rust), skirt, dense core, olive-gold bush',
+  family: F, size: 512, alpha: true, note: 'fields foliage: olive-gold clump (some rust), skirt, dense core, olive-gold bush',
   paint: foliage(GOLD, OLIVE, [GOLD, GOLD, GOLD, OLIVE, RUST], [OLIVE, GOLD, GOLD]),
 });
 
@@ -541,7 +541,7 @@ function denseNeedles(g, ox, oy, w, h, rnd, P) {
 }
 
 register('needles_pine', {
-  family: F, size: 512, alpha: true, note: 'pine atlas: two drooping boughs, dense needles, tip spray (Elwynn green)',
+  family: F, size: 512, alpha: true, note: 'pine atlas: two drooping boughs, dense needles, tip spray (meadow green)',
   paint: atlas([
     (g, ox, oy, w, h, rnd) => bough(g, ox, oy, w, h, rnd, { spread: 0.47, n: 15 }),
     (g, ox, oy, w, h, rnd) => bough(g, ox, oy, w, h, rnd, { spread: 0.42, n: 13 }),
@@ -636,7 +636,7 @@ function snowMound(g, ox, oy, w, h, rnd) {
 
 register('needles_snow', {
   family: F, w: 1024, h: 512, size: 1024, alpha: true,
-  note: 'Dun Morogh pine atlas, 4×2: snowy boughs (0, 1), snowy shrub mound (4), snowy tip (5); bare copies at +2 columns (2, 3, 7) and dense needles (6)',
+  note: 'snow pine atlas, 4×2: snowy boughs (0, 1), snowy shrub mound (4), snowy tip (5); bare copies at +2 columns (2, 3, 7) and dense needles (6)',
   paint(g, s, rnd, h, cv) {
     const C = 256;
     const at = i => [(i % 4) * C, Math.floor(i / 4) * C];
@@ -719,7 +719,7 @@ register('straw_tuft', {
 // ---- bark ------------------------------------------------------------------------------------------
 
 register('bark_oak', {
-  family: F, size: 256, note: 'Elwynn oak: warm gray-brown plates of varied width, lit left edges, deep soft furrows that split and merge',
+  family: F, size: 256, note: 'meadow oak: warm gray-brown plates of varied width, lit left edges, deep soft furrows that split and merge',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#7e6a58');
     mottle(g, s, rnd, { colors: ['#97806a', '#6a5848', '#8a7660', '#76624f', '#a28c70', '#6e6452', '#7e7058'], count: 28, rmin: 30, rmax: 84, alpha: 0.45, hard: 0.06, stretch: 2.4, rot: Math.PI / 2 });
@@ -984,7 +984,7 @@ function rockPaint(g, s, rnd, cv, P) {
 }
 
 register('rock_gray', {
-  family: F, size: 512, note: 'Elwynn rock: warm-cool gray planes, long fractures with lit lips, chips, lichen (moss comes from the cover)',
+  family: F, size: 512, note: 'meadow rock: warm-cool gray planes, long fractures with lit lips, chips, lichen (moss comes from the cover)',
   paint: (g, s, rnd, h, cv) => rockPaint(g, s, rnd, cv, {
     base: '#88847a', big: ['#a29c8e', '#6c6a66', '#8a8c7c', '#9a9284', '#767472'], blot: ['#a09a8e', '#6a6764', '#7c866c', '#8c8070', '#a8a294'],
     lip: '#e2d8bc', crease: '#4a4652', deep: '#36323e', stain: '#4a4650',
@@ -992,7 +992,7 @@ register('rock_gray', {
   }),
 });
 register('rock_warm', {
-  family: F, size: 512, note: 'Westfall rock: sun-warmed tan-gray, yellow and orange lichen',
+  family: F, size: 512, note: 'fields rock: sun-warmed tan-gray, yellow and orange lichen',
   paint: (g, s, rnd, h, cv) => rockPaint(g, s, rnd, cv, {
     base: '#958a76', big: ['#aea08a', '#786e60', '#a49478', '#8a7e6a'], blot: ['#ab9e84', '#776c5e', '#a08860', '#8a7a62'],
     lip: '#ecdcb8', crease: '#54484a', deep: '#3e3432', stain: '#5a4a3e',
@@ -1000,7 +1000,7 @@ register('rock_warm', {
   }),
 });
 register('rock_granite', {
-  family: F, size: 512, note: 'Dun Morogh granite: blue-gray planes, pale feldspar flecks, cold fractures',
+  family: F, size: 512, note: 'snow granite: blue-gray planes, pale feldspar flecks, cold fractures',
   paint: (g, s, rnd, h, cv) => rockPaint(g, s, rnd, cv, {
     base: '#868e9c', big: ['#a6b0c0', '#66707e', '#909aa8', '#76808e'], blot: ['#a4acb8', '#646a7a', '#848a9a', '#94969f'],
     lip: '#e4ecf4', crease: '#3e4256', deep: '#2c2e40', stain: '#3c4050',
@@ -1219,7 +1219,7 @@ register('rock_red', {
 // beds only a little paler than they are, each told by its crisp lit lip and the cool purple-brown
 // undercut under it; wind-scoured pits in loose clusters and a few soft wind grooves.
 register('rock_sand', {
-  family: F, size: 512, note: 'Tanaris sandstone: thin beds of tan, rose, ochre and honey between thin hard beds (crisp lit lips, cool undercuts) at fixed heights the mounds follow; wind pits and grooves (seamless)',
+  family: F, size: 512, note: 'desert sandstone: thin beds of tan, rose, ochre and honey between thin hard beds (crisp lit lips, cool undercuts) at fixed heights the mounds follow; wind pits and grooves (seamless)',
   paint: (g, s, rnd, h, cv) => bedded(g, s, rnd, cv, {
     beds: STRATA_BEDS.rock_sand,
     softs: ['#d0a472', '#c99680', '#d49e56', '#dab284', '#c08a72', '#c08f62', '#d2a48e', '#d8aa68'],
@@ -1313,7 +1313,7 @@ register('cover_moss', {
   }, lumpyMask(50, 10, 34, 0.6, 1.8, 450, '#6c6c6c', 22)),
 });
 register('cover_lichen', {
-  family: F, size: 256, alpha: true, note: 'Westfall: dry golden lichen and grass on rock tops',
+  family: F, size: 256, alpha: true, note: 'fields: dry golden lichen and grass on rock tops',
   paint: cover((g, s, rnd, cv) => {
     fill(g, s, s, '#a89848');
     mottle(g, s, rnd, { colors: ['#c0ae58', '#8a8a40', '#b8a050', '#988a3e'], count: 50, rmin: 8, rmax: 30, alpha: 0.5, hard: 0.3 });
@@ -1347,7 +1347,7 @@ register('cover_dust', {
   }, lumpyMask(50, 18, 50, 0.6, 5)),
 });
 register('cover_sand', {
-  family: F, size: 256, alpha: true, note: 'Tanaris: pale sand drifted onto rock tops, with ripples',
+  family: F, size: 256, alpha: true, note: 'desert: pale sand drifted onto rock tops, with ripples',
   paint: cover((g, s, rnd, cv) => {
     fill(g, s, s, '#d8b884');
     mottle(g, s, rnd, { colors: ['#e2c696', '#c8a872', '#ead2a4', '#c0a06c'], count: 40, rmin: 12, rmax: 50, alpha: 0.45, hard: 0.15 });

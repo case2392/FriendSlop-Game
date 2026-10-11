@@ -7,6 +7,7 @@
 // Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) mesa(crash mesas from the road)
 //        boulder gate grade winch town pawn casino pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin
 //        crew hands loot night fields fclose(day 2: each plot from the road edge / from inside it)   (or "all")
+// SCENE_W=1920 SCENE_H=1080 renders at that size (Steam's store screenshots; slower on software GL).
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3 snow, 4 badlands, 5 desert.  PROFILE=<dir> keeps one browser profile across runs (the
 // painted-texture cache too), so a second run shows the textures as a returning player gets them;
@@ -33,11 +34,12 @@ await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).
 // PROFILE=<dir>: one persistent browser profile for every page (the painted-texture cache in IndexedDB
 // survives between runs: a second run shows the cached textures); default: a fresh profile per page
 const launchOpts = { executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome', args: ['--use-angle=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] };
-const persistent = process.env.PROFILE ? await chromium.launchPersistentContext(process.env.PROFILE, { ...launchOpts, viewport: { width: 1280, height: 720 } }) : null;
+const VIEW = { width: +process.env.SCENE_W || 1280, height: +process.env.SCENE_H || 720 };   // SCENE_W/SCENE_H: e.g. 1920 x 1080 for the store
+const persistent = process.env.PROFILE ? await chromium.launchPersistentContext(process.env.PROFILE, { ...launchOpts, viewport: VIEW }) : null;
 const browser = persistent || await chromium.launch(launchOpts);
 const errors = [];
 async function open(name) {
-  const ctx = persistent || await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const ctx = persistent || await browser.newContext({ viewport: VIEW });
   const page = await ctx.newPage();
   page.setDefaultTimeout(240000);   // several agents may be rendering on swiftshader at once
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));

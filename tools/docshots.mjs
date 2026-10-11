@@ -15,7 +15,7 @@ const errors = [];
 const ONLY = process.env.ONLY ? new Set(process.env.ONLY.split(',')) : null;
 const want = n => !ONLY || ONLY.has(n);
 async function open(name) {
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+  const ctx = await browser.newContext({ viewport: { width: +process.env.SCENE_W || 1280, height: +process.env.SCENE_H || 720 } });   // SCENE_W/SCENE_H: e.g. 1920 x 1080
   const page = await ctx.newPage();
   page.setDefaultTimeout(240000);   // software GL: the first world build can take ~30 s per client
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));

@@ -26,7 +26,7 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 :root {
-  --ui: 'NMD UI', 'Marcellus', 'Friz Quadrata TT', 'Friz Quadrata', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
+  --ui: 'NMD UI', 'Marcellus', 'Palatino Linotype', 'Book Antiqua', Palatino, Georgia, serif;
   --display: 'Cinzel', 'Trajan Pro', 'Marcellus', 'Palatino Linotype', Georgia, serif;
   --gold: #ffd100;            /* WoW's yellow-gold text */
   --gold-2: #f0c75e;

@@ -460,7 +460,7 @@ register('rs_bleach', {
   },
 });
 register('rs_plaster', {
-  family: F, size: 256, note: 'cream lime plaster between timbers (Elwynn gatehouse): soft trowel blotches, damp shadows, hairline cracks, a patch of wattle showing',
+  family: F, size: 256, note: 'cream lime plaster between timbers (meadow gatehouse): soft trowel blotches, damp shadows, hairline cracks, a patch of wattle showing',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#e0d0aa');
     mottle(g, s, rnd, { colors: ['#ecdec0', '#d2c09a', '#e6d6b2', '#c8b68e'], count: 26, rmin: 20, rmax: 64, alpha: 0.4, hard: 0.08 });
@@ -662,13 +662,13 @@ register('rs_gingham', {
   },
 });
 register('rs_burlap', {
-  family: F, size: 256, note: 'coarse burlap sacking (Westfall tablecloths): visible weave, stencil ghost, stains, folds',
+  family: F, size: 256, note: 'coarse burlap sacking (fields tablecloths): visible weave, stencil ghost, stains, folds',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#b4966a');
     mottle(g, s, rnd, { colors: ['#c4a678', '#a08458', '#bc9e6c'], count: 26, rmin: 18, rmax: 56, alpha: 0.35, hard: 0.1 });
     for (let y = 0; y < s; y += 4) line(g, [[0, y + 1], [s, y + 1]], 1.6, rnd() < 0.5 ? '#8a6c44' : '#d2b688', 0.22);
     for (let x = 0; x < s; x += 4) line(g, [[x + 1, 0], [x + 1, s]], 1.4, rnd() < 0.5 ? '#7a5e3a' : '#d8bc8e', 0.18);
-    letters(g, 'WESTFALL', s / 2, s * 0.42, { font: FONT(34), color: '#6a3a2a', alpha: 0.28, worn: 0.6, rnd, maxW: s * 0.8, under: '#b4966a' });
+    letters(g, 'GOLDENFIELD', s / 2, s * 0.42, { font: FONT(34), color: '#6a3a2a', alpha: 0.28, worn: 0.6, rnd, maxW: s * 0.8, under: '#b4966a' });
     letters(g, 'FINE FLOUR', s / 2, s * 0.56, { font: FONT(20), color: '#6a3a2a', alpha: 0.25, worn: 0.5, rnd, maxW: s * 0.6, under: '#b4966a' });
     for (let i = 0; i < 3; i++) {
       const x = rnd() * s, w = range(rnd, 24, 44);
@@ -680,7 +680,7 @@ register('rs_burlap', {
   },
 });
 register('rs_plaid', {
-  family: F, size: 256, note: 'dwarven wool plaid (Dun Morogh tablecloths): muted green and red tartan, soft weave, folds',
+  family: F, size: 256, note: 'dwarven wool plaid (snow tablecloths): muted green and red tartan, soft weave, folds',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#3e5a46');
     const bands = [[0, 46, '#2e4636', 0.6], [70, 20, '#8e3a2c', 0.7], [104, 8, '#d6c6a0', 0.6], [140, 46, '#2e4636', 0.6], [200, 14, '#8e3a2c', 0.55], [232, 6, '#c8963a', 0.5]];
@@ -1970,7 +1970,7 @@ register('rs_logend', {
   },
 });
 register('rs_hay', {
-  family: F, size: 256, note: 'pressed hay (Westfall bales; straw along u): golden strands lit on top, dark gaps, loose wisps',
+  family: F, size: 256, note: 'pressed hay (fields bales; straw along u): golden strands lit on top, dark gaps, loose wisps',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#a8863e');
     mottle(g, s, rnd, { colors: ['#c8a050', '#8e7032', '#d8b860'], count: 26, rmin: 16, rmax: 46, alpha: 0.4, hard: 0.1, stretch: 2.5, rot: 0 });
@@ -1996,7 +1996,7 @@ register('rs_bone', {
 // ---- other biomes' building materials ---------------------------------------------------------------------
 
 register('rs_slate', {
-  family: F, size: 256, note: 'blue-gray slate roofing (Dun Morogh; up the roof = up the texture): overlapping rows, lit lower lips, cool shadows',
+  family: F, size: 256, note: 'blue-gray slate roofing (snow; up the roof = up the texture): overlapping rows, lit lower lips, cool shadows',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#2e3440');
     const rows = 7, rh = s / rows;
@@ -2021,7 +2021,7 @@ register('rs_slate', {
   },
 });
 register('rs_adobe', {
-  family: F, size: 256, note: 'tan adobe plaster (Gadgetzan post bases): trowel swirls, soft blotches, hairline cracks, a little bare brick',
+  family: F, size: 256, note: 'tan adobe plaster (desert post bases): trowel swirls, soft blotches, hairline cracks, a little bare brick',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#c8a478');
     mottle(g, s, rnd, { colors: ['#d4b086', '#b8946a', '#dcbc90'], count: 26, rmin: 20, rmax: 60, alpha: 0.35, hard: 0.08 });
@@ -2210,7 +2210,7 @@ function tuft(g, s, rnd, cols) {
   g.globalCompositeOperation = 'source-over';
 }
 register('rs_tuft', { family: F, size: 128, alpha: true, note: 'a grass tuft card (alpha): lush painted blades, lit tips, cool roots', paint(g, s, rnd) { tuft(g, s, rnd, ['#5e8a34', '#6e9a3a', '#4e7a2e', '#7aa842', '#8ab04a']); } });
-register('rs_tuft_dry', { family: F, size: 128, alpha: true, note: 'a dry golden grass tuft card (Westfall)', paint(g, s, rnd) { tuft(g, s, rnd, ['#a89040', '#c8a850', '#8a8a3a', '#d8b860', '#7a7a34']); } });
+register('rs_tuft_dry', { family: F, size: 128, alpha: true, note: 'a dry golden grass tuft card (fields)', paint(g, s, rnd) { tuft(g, s, rnd, ['#a89040', '#c8a850', '#8a8a3a', '#d8b860', '#7a7a34']); } });
 // The crash furrow's scorch (alpha, fitted to the 2.2 m x ~10.7 m sheet draped down the furrow and over its ridges'
 // inner slopes: u across, v along it, v = 1 at the nose end). A canvas pixel is 0.82 as wide on the ground as it is
 // long, so every round thing here is drawn squashed to 0.82 of its width in y and comes out round. Colour fills the
@@ -2531,13 +2531,13 @@ register('rs_shingles', {
   paint(g, s, rnd, h, cv) { shingles(g, s, rnd, cv, { colors: ['#8a5e3a', '#7a5232', '#946640', '#6e4a30'] }); },
 });
 register('rs_shingles_red', {
-  family: F, size: 256, note: 'Elwynn red shingles (up the roof = up the texture): brick-red to rust, faded tips, moss in the laps',
+  family: F, size: 256, note: 'meadow red shingles (up the roof = up the texture): brick-red to rust, faded tips, moss in the laps',
   paint(g, s, rnd, h, cv) { shingles(g, s, rnd, cv, { colors: ['#9a3a2c', '#a8463a', '#8a3428', '#b04e38', '#94402e'], gapC: '#3a2024', moss: 0.18 }); },
 });
 // Thatch: straw courses laid in rows, each row's ragged lower edge lit gold with a dark under-shadow on the
 // row below (up the roof = up the texture). Tiles both ways.
 register('rs_thatch', {
-  family: F, size: 256, note: 'layered straw thatch (Westfall; up the roof = up the texture): courses with ragged lit tips, dark under-shadow, strands along v',
+  family: F, size: 256, note: 'layered straw thatch (fields; up the roof = up the texture): courses with ragged lit tips, dark under-shadow, strands along v',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#8a6a34');
     const rows = 4, rh = s / rows;

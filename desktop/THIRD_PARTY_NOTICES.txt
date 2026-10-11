@@ -234,6 +234,12 @@ Apache License
    See the License for the specific language governing permissions and
    limitations under the License.
 
+Rapier's WebAssembly also contains these Rust libraries, used under the Apache License 2.0 above
+(the dual-licensed ones are also available under the MIT license):
+  parry3d 0.31.1 and nalgebra 0.35.0 (Apache-2.0, Dimforge); glam 0.33.10, glamx 0.3.1, hashbrown 0.17.1,
+  smallvec 1.16.2, once_cell 1.21.4, dlmalloc 0.2.13, ena 0.14.4, js-sys 0.3.106, web-time 1.1.0 and the
+  Rust standard library (each MIT OR Apache-2.0).
+
 ==============================================================================
 ws 8.21.0: WebSockets
 https://github.com/websockets/ws
@@ -295,12 +301,11 @@ Copyright (c) Valve Corporation. Distributed under the Steamworks SDK Access Agr
 Fonts: Marcellus, Cinzel, Philosopher
 https://fonts.google.com
 ------------------------------------------------------------------------------
-Marcellus — Copyright 2012 Brian J. Bonislawsky DBA Astigmatic (AOETI). SIL Open Font License 1.1.
-Cinzel — Copyright 2020 The Cinzel Project Authors. SIL Open Font License 1.1.
-Philosopher — Copyright 2011 The Philosopher Project Authors (https://github.com/alexeiva/philosopher). SIL Open Font License 1.1 (used for the figures 0-9).
-Vendored from the @fontsource/marcellus, @fontsource/cinzel and @fontsource/philosopher npm packages (latin subsets).
-
-Copyright (c) 2012 by Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Name "Marcellus"
+Marcellus: Copyright (c) 2012, Brian J. Bonislawsky DBA Astigmatic (AOETI) (astigma@astigmatic.com), with Reserved Font Names "Marcellus"
+Cinzel: Copyright 2020 The Cinzel Project Authors (https://github.com/NDISCOVER/Cinzel)
+Philosopher: Copyright 2011 The Philosopher Project Authors (https://github.com/alexeiva/philosopher) (used for the figures 0-9)
+All three: SIL Open Font License 1.1, below. Vendored from the @fontsource/marcellus, @fontsource/cinzel and
+@fontsource/philosopher npm packages (latin subsets), unmodified.
 
 This Font Software is licensed under the SIL Open Font License, Version 1.1.
 This license is copied below, and is also available with a FAQ at:
@@ -399,4 +404,8 @@ Electron 44.7.0 and Chromium
 https://www.electronjs.org
 ------------------------------------------------------------------------------
 See LICENSE.electron.txt and LICENSES.chromium.html in this folder.
+
+Chromium's FFmpeg (the ffmpeg library next to the executable) is under the GNU LGPL 2.1 or later; its
+source is the one Electron 44.7.0 builds from (https://github.com/electron/electron, tag v44.7.0, and the
+Chromium and FFmpeg sources it names). You may replace that library with your own build of it.
 

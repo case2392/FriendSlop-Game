@@ -8,7 +8,7 @@ const fuses = process.env.NMD_FUSES !== '0';
 module.exports = {
   appId: 'com.nomoneydown.game',
   productName: 'NO MONEY DOWN',
-  copyright: 'Copyright (c) 2026 No Money Down Inc.',
+  copyright: 'Copyright (c) 2026 the NO MONEY DOWN developers',          // match the name used in Steamworks
   directories: { output: process.env.NMD_OUT || 'dist', buildResources: 'desktop/build' },
   // keep every pattern in this one list: a platform-level "files" gets an implicit "**/*" in front of it
   // and packs the whole folder (tests, tools, screenshots)

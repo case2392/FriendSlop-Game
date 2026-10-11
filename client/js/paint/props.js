@@ -700,11 +700,11 @@ register('loot_bakelite', {
   },
 });
 register('loot_toastplate', {
-  family: F, w: 128, h: 40, note: "the toaster's riveted brass maker's plate: TOASTMASTER 9000",
+  family: F, w: 128, h: 40, note: "the toaster's riveted brass maker's plate: TOASTOMATIC 9000",
   paint(g, w, rnd, h, cv) {
     g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#f8e49a'], [0.4, '#d8b058'], [1, '#8a6628']]); g.fillRect(0, 0, w, h);
     molding(g, 1, 1, w - 2, h - 2, '#c8a050', 5);
-    letters(g, 'TOASTMASTER', w / 2, h * 0.42, 15, { rnd, jit: 0.03, fill: ['#5a3a14', '#3a2410', '#2a1808'], rim: '#fff0b8', lit: '#2a1808', shadow: 0, chip: 0.2, rough: 0.4, maxW: w - 30 });
+    letters(g, 'TOASTOMATIC', w / 2, h * 0.42, 15, { rnd, jit: 0.03, fill: ['#5a3a14', '#3a2410', '#2a1808'], rim: '#fff0b8', lit: '#2a1808', shadow: 0, chip: 0.2, rough: 0.4, maxW: w - 30 });
     letters(g, '9000', w / 2, h * 0.76, 10, { rnd, jit: 0.03, fill: ['#5a3a14', '#3a2410', '#2a1808'], rim: '#fff0b8', lit: '#2a1808', shadow: 0, chip: 0.1, rough: 0.3 });
     for (const [x, y] of [[7, 7], [w - 7, 7], [7, h - 7], [w - 7, h - 7]]) rivet(g, x, y, 2.6, '#c8a050');
     blurTile(cv, 0.3);
@@ -1180,7 +1180,7 @@ function came(g, pts, closed = true) {
   line(g, p, 2.6, '#3a2a18', 0.95); line(g, p.map(([x, y]) => [x - 0.5, y - 0.6]), 0.8, '#7a6040', 0.6);
 }
 register('loot_glass', {
-  family: F, w: 512, h: 128, note: 'Tiffany leaded glass (u wraps; top = the crown, bottom = the scalloped rim): amber crown, a leaf band, poppies of petal panes on honey, an amber border',
+  family: F, w: 512, h: 128, note: 'leaded stained glass (u wraps; top = the crown, bottom = the scalloped rim): amber crown, a leaf band, poppies of petal panes on honey, an amber border',
   paint(g, w, rnd, h, cv) {
     rect(g, 0, 0, w, h, '#3a2a18');
     const HONEY = ['#d89a3a', '#e0a848', '#f0c060', '#e8b050', '#d49440'], AMBER = ['#c8862e', '#b8742a', '#d89a3a'], LEAF = ['#6a8a3a', '#8aa048', '#5a7a34', '#7a9440'], RED = ['#b8402a', '#c25032', '#a8382a', '#c8603a'];
@@ -1436,7 +1436,7 @@ register('loot_boot', {
 // ---- the velvet portrait -----------------------------------------------------------------------------
 
 register('loot_portrait', {
-  family: F, w: 384, h: 288, note: 'the Velvet Elvis on black-violet velvet: an airbrushed halo, a swept blue-black pompadour, five value steps on the face lit from the upper left, the sneer, a rhinestone collar; soft-edged, crisp glints on top',
+  family: F, w: 384, h: 288, note: 'the velvet crooner on black-violet velvet: an airbrushed halo, a swept blue-black pompadour, five value steps on the face lit from the upper left, an easy half-smile, a red lounge jacket trimmed with rhinestones; soft-edged, crisp glints on top',
   paint(g, w, rnd, h, cv) {
     const cx = 192;
     // soft fill: the path filled through a blur, so no edge is vector-crisp
@@ -1447,26 +1447,25 @@ register('loot_portrait', {
     rect(g, 0, 0, w, h, '#140c22');
     for (let i = 0; i < 30; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 20, 70), range(rnd, 16, 50), rnd() * 3, pick(rnd, ['#1c1230', '#100a1a', '#1a1028']), 0.5, 0.1);
     g.fillStyle = radial(g, cx + 4, 104, 10, 176, [[0, '#4a3a8a', 0.95], [0.4, '#3a2c72', 0.6], [0.75, '#241a48', 0.25], [1, '#140c22', 0]]); g.fillRect(0, 0, w, h);
-    // ---- the white jumpsuit's shoulders, lit on the left, cool on the right
+    // ---- the red lounge jacket's shoulders, lit on the left, deep wine on the right
     const suit = P([[-6, h + 6], [6, 238], [56, 212], [148, 202], [172, 204], [192, 252], [212, 204], [236, 202], [326, 212], [378, 238], [w + 6, h + 6]]);
-    soft(suit, lin(g, 0, 0, w, 0, [[0, '#fbf6ec'], [0.3, '#ecebf0'], [0.55, '#c8cce0'], [0.8, '#8a92b8'], [1, '#6a7098']]), 1.5);
+    soft(suit, lin(g, 0, 0, w, 0, [[0, '#ee7a7c'], [0.3, '#cc4450'], [0.55, '#9c2c40'], [0.8, '#6c1c36'], [1, '#4c1430']]), 1.5);
     within(suit, () => {
-      for (const [x0, y0, x1, y1, c, a] of [[70, 222, 96, 288, '#8a96c4', 0.45], [120, 214, 140, 288, '#8a96c4', 0.4], [262, 214, 250, 288, '#5a6290', 0.5], [318, 226, 300, 288, '#4e5682', 0.5], [40, 240, 54, 288, '#a8b0d0', 0.35]]) { g.save(); g.filter = 'blur(3px)'; stroke(g, [[x0, y0], [(x0 + x1) / 2 + 4, (y0 + y1) / 2], [x1, y1]], 4, 14, c, a); g.restore(); }
-      blob(g, 64, 232, 40, 16, -0.3, '#fffaf0', 0.55, 0.3);
-      blob(g, 330, 250, 50, 30, 0, '#4a5080', 0.45, 0.3);
+      for (const [x0, y0, x1, y1, c, a] of [[70, 222, 96, 288, '#8a2238', 0.45], [120, 214, 140, 288, '#8a2238', 0.4], [262, 214, 250, 288, '#4e1228', 0.5], [318, 226, 300, 288, '#40102a', 0.5], [40, 240, 54, 288, '#b84452', 0.35]]) { g.save(); g.filter = 'blur(3px)'; stroke(g, [[x0, y0], [(x0 + x1) / 2 + 4, (y0 + y1) / 2], [x1, y1]], 4, 14, c, a); g.restore(); }
+      blob(g, 64, 232, 40, 16, -0.3, '#ffb4a4', 0.45, 0.3);
+      blob(g, 330, 250, 50, 30, 0, '#3a0e24', 0.45, 0.3);
     });
-    // ---- the great standing collar, behind the neck: soft folds, warm lit edges
-    const colL = P([[166, 206], [160, 184], [158, 160, 152, 142, 146, 132], [128, 128, 112, 130, 102, 138], [96, 160, 100, 188, 116, 210]]), colR = P([[220, 206], [226, 184], [228, 160, 234, 142, 240, 132], [258, 128, 274, 130, 284, 138], [290, 160, 286, 188, 270, 210]]);
-    soft(colL, lin(g, 104, 140, 156, 206, [[0, '#fff4e0'], [0.45, '#dcdeea'], [1, '#9aa4c8']]), 1.4);
-    soft(colR, lin(g, 228, 206, 280, 140, [[0, '#6a7098'], [0.6, '#8a96c4'], [1, '#b8c0dc']]), 1.4);
-    within(colL, () => { for (const t of [0.3, 0.62]) { g.save(); g.filter = 'blur(2.5px)'; stroke(g, [[158 - t * 40, 206], [150 - t * 34, 172], [146 - t * 30, 136]], 3, 7, '#8a96c4', 0.55); g.restore(); } blob(g, 156, 180, 8, 26, 0, '#7a84b0', 0.5, 0.3); });
-    within(colR, () => { for (const t of [0.3, 0.62]) { g.save(); g.filter = 'blur(2.5px)'; stroke(g, [[228 + t * 40, 206], [236 + t * 34, 172], [240 + t * 30, 136]], 3, 7, '#4e5682', 0.55); g.restore(); } });
-    stroke(g, [[104, 136], [124, 128], [146, 132]], 3, 1.5, '#fff4e0', 0.85);
-    stroke(g, [[100, 150], [100, 182], [114, 208]], 2, 1, '#fff4e0', 0.5);
     // ---- neck and the open V of the chest, in the jaw's shadow
     soft(P([[166, 160], [220, 160], [224, 208], [192, 252], [160, 208]]), lin(g, 160, 0, 226, 0, [[0, '#c88660'], [0.45, '#a8705a'], [1, '#5e4058']]), 1.2);
     blob(g, 196, 184, 34, 12, 0, '#3e2238', 0.8, 0.25);
     blob(g, 176, 216, 9, 18, 0, '#d8946a', 0.45, 0.3);
+    // ---- the jacket's wide lapels framing the open collar: a darker roll, a lit edge along the V
+    for (const sd of [-1, 1]) {
+      const X = x => sd < 0 ? x : 384 - x;
+      soft(P([[X(160), 205], [X(144), 206], [X(128), 214], [X(176), 272], [X(192), 264], [X(192), 252]]), sd < 0 ? '#b03a48' : '#561430', 1.2);
+      stroke(g, [[X(158), 207], [X(176), 230], [X(190), 250]], 2.2, 1.4, sd < 0 ? '#f6a29a' : '#86283c', 0.6);
+      stroke(g, [[X(132), 216], [X(156), 246], [X(176), 270]], 3, 2, sd < 0 ? '#7a1e34' : '#30081a', 0.5);
+    }
     // ---- ears and the face: a square jaw, five values, the light from the upper left
     soft(P([[150, 104], [140, 102, 140, 128, 152, 136]]), '#b8765a', 1); soft(P([[234, 104], [244, 102, 244, 128, 232, 136]]), '#6a4458', 1);
     const face = P([[154, 82], [146, 100, 147, 132, 156, 156], [162, 168, 176, 178, 192, 180], [208, 178, 222, 168, 228, 156], [237, 132, 238, 100, 230, 82], [214, 70, 172, 70, 154, 82]]);
@@ -1487,10 +1486,9 @@ register('loot_portrait', {
       blob(g, 193, 139, 11, 4, 0, '#4e2c40', 0.8, 0.3);
       ellipse(g, 187, 136, 2.4, 1.4, 0.2, '#3a1e28', 0.85); ellipse(g, 198, 136, 2.4, 1.4, -0.2, '#3a1e28', 0.9);
       blob(g, 185, 132, 4, 3, 0, '#f6c898', 0.6, 0.4);
-      // the sneer: a crease from the left nostril, the upper lip curled up on the left
-      stroke(g, [[182, 137], [178, 143], [175, 149]], 2.6, 1.4, '#7a4448', 0.7);
-      soft(P([[175, 148], [180, 142], [188, 145], [192, 148], [200, 147], [208, 151], [192, 154]]), '#8a4a4c', 0.8);
-      soft(P([[177, 148], [181, 145], [188, 148], [184, 150]]), '#e8dccc', 0.5);
+      // an easy half-smile: the right corner lifted, a soft smile line beside it, the upper lip
+      stroke(g, [[204, 139], [208, 144], [209.5, 149]], 2.2, 1.2, '#5a3446', 0.45);
+      soft(P([[176, 150], [184, 146.8], [192, 148.2], [200, 146.6], [207.5, 148.2], [192, 153]]), '#8a4a4c', 0.8);
       stroke(g, [[150, 104], [156, 114], [158, 128]], 6, 3, '#e8a678', 0.35);
       blob(g, 192, 157, 12, 4.5, 0, '#d08a6c', 0.9, 0.35);
       blob(g, 192, 164, 11, 3.5, 0, '#5e3a50', 0.7, 0.3);
@@ -1509,7 +1507,7 @@ register('loot_portrait', {
     soft(hair, '#141018', 1.3);
     // a loose lock falling onto the forehead
     soft(P([[178, 74], [186, 76, 186, 86, 180, 96], [178, 88, 178, 82, 174, 78]]), '#16121c', 0.8);
-    for (const sd of [-1, 1]) soft(P(sd < 0 ? [[149, 100], [158, 102], [159, 128], [157, 150], [151, 132]] : [[235, 100], [226, 102], [225, 128], [227, 150], [233, 132]]), '#16121c', 0.9);
+    for (const sd of [-1, 1]) soft(P(sd < 0 ? [[149, 100], [158, 102], [158, 116], [156, 126], [151, 118]] : [[235, 100], [226, 102], [226, 116], [228, 126], [233, 118]]), '#16121c', 0.9);
     within(hair, () => {
       blob(g, 184, 40, 36, 20, -0.2, '#262646', 0.7, 0.3);
       blob(g, 230, 60, 20, 30, 0, '#0e0a14', 0.6, 0.3);
@@ -1528,10 +1526,10 @@ register('loot_portrait', {
     wave([[160, 78], [160, 56], [174, 36], [198, 26], [226, 28]], 5, '#3a4a98', 0.65);
     wave([[182, 76], [198, 62], [218, 50], [238, 48], [248, 62]], 4, '#2e3a80', 0.6);
     wave([[176, 80], [182, 82], [182, 90]], 2.4, '#3a4a98', 0.7);
-    wave([[151, 102], [152, 116], [155, 140]], 2.6, '#3a4a98', 0.55);
+    wave([[151, 102], [152, 110], [154, 120]], 2.6, '#3a4a98', 0.55);
     blurTile(cv, 0.01);
     { const t = makeCanvas(w, h); t.getContext('2d').drawImage(cv, 0, 0); g.save(); g.filter = 'blur(1px)'; g.drawImage(t, 0, 0); g.restore(); }
-    // ---- crisp on top: the crest's glint, the eyes, the lip's light, the rhinestones
+    // ---- crisp on top: the crest's glint, the eyes, the lips, the rhinestones
     stroke(g, [[145, 70], [147, 46], [160, 24], [184, 13]], 2, 0.6, '#8aa0e8', 0.85);
     stroke(g, [[170, 24], [190, 16], [210, 16]], 1.4, 0.5, '#b8c8f8', 0.7);
     stroke(g, [[164, 72], [172, 60], [188, 52]], 1.2, 0.5, '#8aa0e8', 0.55);
@@ -1542,20 +1540,19 @@ register('loot_portrait', {
       stroke(g, [[ex - 9, ey + 0.5], [ex - 3, ey - 2.4], [ex + 4, ey - 2.4], [ex + 9, ey]], 3, 2, lid, 0.95);
       line(g, [[ex - 7, ey - 5], [ex + 7, ey - 5.5]], 1.2, '#5a3446', 0.5);
     }
-    stroke(g, [[176, 149], [181, 145.5], [188, 148.8], [196, 150.4], [207, 151.5]], 2.2, 1.4, '#2e121a', 0.95);
-    line(g, [[178.5, 146.4], [184, 146.2]], 0.9, '#a85a50', 0.6);
+    stroke(g, [[177, 150], [184, 151], [192, 151.4], [200, 150.6], [207.5, 148.2]], 2.2, 1.4, '#2e121a', 0.95);
+    line(g, [[185, 147.8], [196, 147.6]], 0.9, '#a85a50', 0.5);
     blob(g, 189, 155.5, 5, 1.6, 0, '#f6c4a0', 0.8, 0.5);
     blob(g, 172, 82, 8, 3, -0.1, '#ffe0b4', 0.6, 0.5);
-    // rhinestones: settings in deliberate lines down the collar and the V, each with a four-point glint
+    // rhinestones: settings in deliberate lines down the lapels and on the shoulders, each with a four-point glint
     const gem = (x, y, r = 1.8, glint = true) => {
       ellipse(g, x + 0.6, y + 0.8, r + 0.8, r + 0.8, 0, '#3a2a40', 0.7); ellipse(g, x, y, r + 0.6, r + 0.6, 0, '#c8a050'); ellipse(g, x, y, r, r, 0, '#eef4ff');
       if (glint) { line(g, [[x - r * 2.6, y], [x + r * 2.6, y]], 0.7, '#ffffff', 0.85); line(g, [[x, y - r * 2.6], [x, y + r * 2.6]], 0.7, '#ffffff', 0.85); }
     };
     const along = (a, b, n, r, gl) => { for (let k = 0; k <= n; k++) { const t = k / n; gem(a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, r, gl(k)); } };
-    along([112, 142], [146, 192], 6, 1.7, k => k % 2 === 0); along([108, 160], [116, 202], 4, 1.5, k => k === 1);
-    along([272, 142], [238, 192], 6, 1.5, k => k === 3); along([174, 210], [190, 244], 4, 1.6, k => k % 2 === 1); along([210, 210], [194, 244], 4, 1.5, () => false);
+    along([152, 214], [182, 254], 5, 1.6, k => k % 2 === 1); along([232, 214], [202, 254], 5, 1.5, () => false);
     for (const [x, y] of [[60, 250], [84, 262], [108, 250], [296, 252], [320, 264]]) gem(x, y, 2, x < 200);
-    letters(g, 'E.P.', w - 34, h - 16, 14, { rnd, jit: 0.06, shadow: 0, fill: ['#e8c870', '#c89a40', '#a87a30'], rim: '#1a1008', chip: 0.3, rough: 0.6 });
+    letters(g, 'SAL', w - 34, h - 16, 14, { rnd, jit: 0.06, shadow: 0, fill: ['#e8c870', '#c89a40', '#a87a30'], rim: '#1a1008', chip: 0.3, rough: 0.6 });
     glaze(g, w, h, '#ffe0c0', 0.05);
   },
 });
@@ -1567,7 +1564,7 @@ register('loot_portrait', {
 // hanging wire (geometry) with the wire's soft shadow, and the pawn ticket.
 export const PAINTBACK = { eyeX: 0.3, eyeY: 0.2, sagY: 0.105 };   // the hanging wire, in meters from the board's center (props3d)
 register('loot_paintback', {
-  family: F, w: 240, h: 192, note: "the Velvet Elvis's back: a nailed pine dust board, dark worn edges, iron corner straps, FRAGILE / THIS SIDE UP stencils, a pawn ticket",
+  family: F, w: 240, h: 192, note: "the velvet crooner's back: a nailed pine dust board, dark worn edges, iron corner straps, FRAGILE / THIS SIDE UP stencils, a pawn ticket",
   paint(g, w, rnd, h, cv) {
     const BW = 0.88, BH = 0.7, X = m => w / 2 + m / BW * w, Y = m => h / 2 - m / BH * h;
     // the planks: a dark gap between each, a lit upper edge, grain along the plank
@@ -1752,7 +1749,7 @@ register('loot_guitar', {
 // ---- tire & wheel ------------------------------------------------------------------------------------
 
 register('loot_tire', {
-  family: F, w: 512, h: 128, note: "a chunky whitewall tire (u wraps round it; v: hub bead → lettered sidewall → whitewall → shoulder → tread → and back): warm charcoal rubber, offset lugs with lit tops and deep grooves, GOBLINYEAR · ROAD KING raised on both sides",
+  family: F, w: 512, h: 128, note: "a chunky whitewall tire (u wraps round it; v: hub bead → lettered sidewall → whitewall → shoulder → tread → and back): warm charcoal rubber, offset lugs with lit tops and deep grooves, GOBLINTREAD · ROAD KING raised on both sides",
   paint(g, w, rnd, h, cv) {
     const Y = v => (1 - v) * h, T = TIRE_V;
     g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#2e2a2c'], [0.18, '#3a3436'], [0.38, '#46403e'], [0.5, '#3a3436'], [0.62, '#46403e'], [0.82, '#3a3436'], [1, '#2a2628']]); g.fillRect(0, 0, w, h);
@@ -1784,7 +1781,7 @@ register('loot_tire', {
     for (const [ya, yb] of [[t0 - 16, t0 - 6], [t1 + 6, t1 + 16]]) for (let i = 0; i < n; i++) { const x = i * bw + (ya < t0 ? 0 : bw / 2) + range(rnd, -1, 1); wrapX(w, x, 4, X => { line(g, [[X, ya], [X, yb]], 3, '#1c1a1c', 0.7); line(g, [[X - 2, ya], [X - 2, yb]], 1, '#6a6460', 0.4); }); }
     // raised lettering on both sidewalls: lit on top, a shadow below, a few shades off the rubber
     for (const [a, b] of [T.textLo, T.textHi]) {
-      const yc = (Y(a) + Y(b)) / 2, size = (Y(a) - Y(b)) * 0.78, txt = 'GOBLINYEAR \u00b7 ROAD KING \u00b7 ';
+      const yc = (Y(a) + Y(b)) / 2, size = (Y(a) - Y(b)) * 0.78, txt = 'GOBLINTREAD \u00b7 ROAD KING \u00b7 ';
       g.save(); g.font = `bold ${size.toFixed(1)}px ${SANS}`; g.textBaseline = 'middle';
       const tw = g.measureText(txt).width, k = (w / 2) / tw;
       for (const off of [0, w / 2]) {

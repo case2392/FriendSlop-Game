@@ -21,6 +21,7 @@ import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
+import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -112,8 +113,9 @@ const savedSession = code => { try { const s = JSON.parse(sessionStorage.getItem
 const DESK = window.desktop || null;
 const STEAM = DESK?.steam?.ok ? DESK.steam : null;
 // the menu's small print: the version (the build fingerprint after the + is what friends must share)
-const showVersion = build => { if (build) $('versionLabel').textContent = `Version ${build.split('+')[0]} (build ${build.split('+')[1] || '?'}) · No Money Down Inc.`; };
+const showVersion = build => { if (build) $('versionLabel').textContent = `Version ${build.split('+')[0]} (build ${build.split('+')[1] || '?'})`; };
 showVersion(DESK?.build);
+relabelPage();   // the help page's and the hints' key names, in the player's keyboard layout
 if (DESK) {
   $('joinBox').classList.add('hidden');
   $('quitBtn').classList.remove('hidden');
@@ -312,7 +314,7 @@ window.addEventListener('keydown', e => {
   // in game, Ctrl (crouch) and Cmd combinations are ours, not the browser's or the desktop shell's
   // (Ctrl+W, Ctrl+R and friends used to close or reload the game mid-crouch)
   if ((e.ctrlKey || e.metaKey) && S.phase !== 'menu') e.preventDefault();
-  const k = e.key.toLowerCase();
+  const k = keyName(e);   // by position: WASD is ZQSD on AZERTY (keys.js)
   if (k === ' ' || k === 'tab') e.preventDefault();
   if (keys[k]) return;
   keys[k] = true;
@@ -327,7 +329,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'v') voice.setPtt(true);
   else if (k === 'm') {
     if (!voice.V.on) toast('Voice chat is off. JOIN VOICE is at the bottom left (press Esc for the mouse).', '#fff', 4);
-    else { voice.toggleMute(); toast(voice.V.muted ? 'Mic muted (M)' : 'Mic on', voice.V.muted ? '#ffb4a2' : '#7CFC00', 2); }
+    else { voice.toggleMute(); toast(voice.V.muted ? `Mic muted (${keyLabel('M')})` : 'Mic on', voice.V.muted ? '#ffb4a2' : '#7CFC00', 2); }
   }
   else if (k === 't') voice.setWalkieKey(true);
   else if (k === 'f1' || k === '?') { e.preventDefault(); $('help').classList.toggle('hidden'); }
@@ -335,7 +337,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'escape') closeKeypad();
 });
 window.addEventListener('keyup', e => {
-  const k = e.key.toLowerCase();
+  const k = keyName(e);
   keys[k] = false;
   if (k === 'v') voice.setPtt(false);
   if (k === 't') voice.setWalkieKey(false);
@@ -376,7 +378,7 @@ function doorNear() {
 
 function computeTarget() {
   if (!S.lw) return null;
-  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · R reel winch · H horn' : '[E] get up' };
+  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : '[E] get up' };
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
     const a = nearestAnchor();
@@ -1237,7 +1239,7 @@ function renderVoiceUI() {
   if (VV.on) {
     $('voiceMuteBtn').textContent = '';   // CSS paints the mic / muted-mic icon from the .off class
     $('voiceMuteBtn').classList.toggle('off', VV.muted);
-    $('voiceTxHint').textContent = VV.muted ? 'muted (M)' : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : 'hold V to talk') : 'proximity mic';
+    $('voiceTxHint').textContent = VV.muted ? `muted (${keyLabel('M')})` : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : `hold ${keyLabel('V')} to talk`) : 'proximity mic';
   }
   const rows = $('voicePeerRows');
   rows.innerHTML = '';
@@ -1407,7 +1409,7 @@ requestAnimationFrame(frame);
 
   // what am I looking at
   target = computeTarget();
-  $('prompt').textContent = target?.label || '';
+  $('prompt').textContent = keysIn(target?.label || '');
   $('prompt').classList.toggle('hidden', !target?.label || (me.holding?.type === 'map' && mapRaised));   // the raised map covers the view
   if (target?.kind === 'revive' && keys.e && reviveT > 0) {
     reviveT += dt;
@@ -1577,12 +1579,12 @@ function hud(rv) {
   $('koOverlay').classList.toggle('hidden', me.mode !== 'ko');
   if (me.mode === 'ko') {
     const alone = (S.meta?.players.length || 1) < 2;
-    $('koT').textContent = alone ? `You'll wake up in ${Math.ceil(me.koT)}s. The doctor's bill: ${fmt$(C.medBill(g?.day || 1))}.` : `${Math.ceil(me.koT)}s — or until a friend picks you up (hold E). Waking up alone costs ${fmt$(C.medBill(g?.day || 1))}.`;
+    $('koT').textContent = alone ? `You'll wake up in ${Math.ceil(me.koT)}s. The doctor's bill: ${fmt$(C.medBill(g?.day || 1))}.` : `${Math.ceil(me.koT)}s — or until a friend picks you up (hold ${keyLabel('E')}). Waking up alone costs ${fmt$(C.medBill(g?.day || 1))}.`;
     $('koOverlay').querySelector('.ko-btn').textContent = alone ? 'Hang in there…' : 'Waiting for a friend…';
   }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (R)` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
@@ -1610,7 +1612,7 @@ function tutWatch(inMyRV) {
 }
 function tutTip(g, town) {
   if (!settings.tutorial) return null;
-  if (g.ph === 'camp') return tut.has('drive') ? null : 'Hint: E on the RV\'s driver seat, then drive out of camp (WASD)';
+  if (g.ph === 'camp') return tut.has('drive') ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';

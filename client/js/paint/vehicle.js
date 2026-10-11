@@ -1205,7 +1205,7 @@ function paintSlots(g, rnd) {
     bandlessMottle(g, rnd, x0, y2, WW, S, ['#6e8c6a', '#46301a'], 8, 0.3);
     g.save(); rrect(g, x0 + 5, y2 + 5, WW - 10, S - 10, 5); g.lineWidth = 2.5; g.strokeStyle = '#4a2e14'; g.stroke(); g.restore();
     handLetter(g, 'SLOP 9K', x0 + WW / 2, y2 + 27, WW - 26, 20, rnd, { top: '#4a6a8a', bot: '#1c2c44', under: '#121a2a', outline: '#e8d6a6', hi: '#a8c8e0', chips: 1, tilt: 0.02, wobble: 0.4, shadow: 0.3 });
-    g.save(); g.font = `bold 8px ${SERIF}`; g.textAlign = 'center'; g.fillStyle = '#4a2e14'; g.fillText('GADGETZAN TRADE PERMIT', x0 + WW / 2, y2 + 52); g.restore();
+    g.save(); g.font = `bold 8px ${SERIF}`; g.textAlign = 'center'; g.fillStyle = '#4a2e14'; g.fillText('LOST WAGES TRADE PERMIT', x0 + WW / 2, y2 + 52, WW - 18); g.restore();
     for (const [u, v] of [[10, 10], [WW - 10, 10], [10, S - 10], [WW - 10, S - 10]]) rivet(g, x0 + u, y2 + v, 2.6, '#8a6a3a');
   }
   // the slogan board: a painted wooden plank

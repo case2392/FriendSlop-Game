@@ -237,7 +237,7 @@ function splatMaterial(biome, cfg) {
         // its bounds (centre, radius out to the scree's reach; w: that reach), and the scree's tint (uScreeT)
         uniform vec4 uMesaR[${MAX_SITES * MESA_N / 4}], uMesaS[${MAX_SITES}]; uniform vec3 uScreeT; uniform vec2 uScree2;
         #ifdef TERRAIN_DUNES
-          // (Tanaris) the narrows' z (the gate's and the boulder's: the only sandstone in the erg)
+          // (desert) the narrows' z (the gate's and the boulder's: the only sandstone in the erg)
           uniform vec4 uNarrow;
           // the wind (world gen's WIND, 0.62 rad): the sand's ripples lie across it, along the dunes' crests
           // (a ground fetch at WR * xz runs its painted ripples along the crests; WR2 another 0.17 rad on)
@@ -260,7 +260,7 @@ function splatMaterial(biome, cfg) {
         }
         void tCap(inout vec2 dx, inout vec2 dy) { tCapK(dx, dy, TERRAIN_ANISO); }
         // the rock's second sample (a long wall never repeats) and its far sample (bigger masses): a
-        // 0.71 x 0.83 and a 0.4x scale; in the Tanaris sandstone both scale only along the wall, so its
+        // 0.71 x 0.83 and a 0.4x scale; in the desert sandstone both scale only along the wall, so its
         // beds stay at the same heights (a bed seen through two samples at two heights would ghost into
         // soft double lines)
         #ifdef TERRAIN_DUNES
@@ -350,7 +350,7 @@ function splatMaterial(biome, cfg) {
           if (side) { gdxr = vec2(gdx.x * 0.8 - gdx.y * 0.6, gdx.x * 0.6 + gdx.y * 0.8); gdyr = vec2(gdy.x * 0.8 - gdy.y * 0.6, gdy.x * 0.6 + gdy.y * 0.8); }
           float sBias = side ? 1.0 : exp2(smoothstep(0.12, 0.45, 1.0 - nr.y) * 2.0 * smoothstep(8.0, 30.0, distance(cameraPosition, wp)));   // (never blurred at your feet)
           #ifdef TERRAIN_DUNES
-            // (Tanaris) wind ripples lie only on the dune floor: from ~20 degrees they smooth away (the sand
+            // (desert) wind ripples lie only on the dune floor: from ~20 degrees they smooth away (the sand
             // fetched ~5 mips softer, its broad mottles kept) and by ~30 a slope is plain sand, streaked
             // down its fall line (below)
             // (and far off, where they would only alias into corduroy on the dunes and the walls)
@@ -373,7 +373,7 @@ function splatMaterial(biome, cfg) {
             float w2 = smoothstep(uG2.x - 0.1, uG2.x + 0.1, n2 + clamp(tLum(g2) - tLum(g1), -0.3, 0.3) * uG2.y);
             col = mix(g1, g2, w2);
           }
-          float sDet = 1.0;           // (Tanaris: the sand slope's small detail, for the face's half-buried rock too)
+          float sDet = 1.0;           // (desert: the sand slope's small detail, for the face's half-buried rock too)
           #ifdef TERRAIN_DUNES
           if (rippleK < 0.999) {
             // sand sliding down a slope: soft streaks along its fall line (across it ~0.4-1.2 m, down it several m)
@@ -442,7 +442,7 @@ function splatMaterial(biome, cfg) {
           }
           #ifdef TERRAIN_PLOTS
           {
-            // Westfall's cultivated plots: turned furrows, cut stubble or standing wheat, in rows that run
+            // the fields' cultivated plots: turned furrows, cut stubble or standing wheat, in rows that run
             // along or across the road, wander a little and are never evenly spaced (+-15%); a trodden
             // headland of packed dirt and flattened straw rings each one, and every edge wanders on its
             // own (+-0.8 m over 3-20 m, the same function the wheat cards are placed by) and is ragged
@@ -652,7 +652,7 @@ function splatMaterial(biome, cfg) {
           float locK = smoothstep(0.08, 0.16, sl.y - sl.x);
           if (uLocal >= 0.0) cB = max(cB, mix(cB, sl.y - uLocal + (nE - 0.5) * 0.1 + (mB.g - 0.5) * 0.06, locK));
           #ifdef TERRAIN_DUNES
-            // (Tanaris) the sandstone shows wherever the slope itself passes ~35 degrees (the 3 x 3 slope:
+            // (desert) the sandstone shows wherever the slope itself passes ~35 degrees (the 3 x 3 slope:
             // the wide average would keep a 9 m wall half sand, and the sand there would be rippled)
             cB = max(cB, sl.y - 0.03 + (nE - 0.5) * 0.06 + (mB.g - 0.5) * 0.05);
             // ...but only where the ground ITSELF is that steep (its own slope at the vertices, bilinear, so
@@ -767,7 +767,7 @@ function splatMaterial(biome, cfg) {
             float wk = smoothstep(uCliff.x, uCliff.y, cB + cShift), snowOn = 0.0;
             #ifdef TERRAIN_SNOWROCK
             {
-              // Dun Morogh: blue-gray granite on every face steeper than ~45 degrees, at its full painted
+              // snow: blue-gray granite on every face steeper than ~45 degrees, at its full painted
               // value (lit cream tops, cool undersides, dark soft creases), with snow lying on whatever
               // the PAINTED rock turns up to the sky (tForm), gathered into long lumpy shelves by a noise
               // on the face. Gentle granite holds a lot of snow, a sheer face only its ledges. One field
