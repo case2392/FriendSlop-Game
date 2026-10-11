@@ -244,8 +244,11 @@ the difficulty curve stays in the quota.
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get
 the suitcase *down*), junk piles, the roadside fiberglass dinosaur. A butte is
 solid cylinders in world gen (a flat top, sheer walls, a lower bench to rest
-on half-way up, lobes so it isn't a drum) on a talus mound, because the 2.5 m
-terrain grid can only draw a steep hill as a cone.
+on half-way up, lobes so it isn't a drum), because the 2.5 m terrain grid can
+only draw a steep hill as a cone. It stands on its own talus: a concave scree
+apron in the heightfield that buries its lower third, about 31° at the foot so
+you can walk up to the wall, and kept short on the road side so it meets the
+ditch at nothing.
 
 ### 7.2 Loot
 

@@ -233,7 +233,7 @@ export function talusInto(acc, W, S, forms) {
         const d0 = footOf(B, a);
         if (d0 == null) continue;
         const roadSide = angDiff(a, F.roadA) < 0.9;
-        const q = Math.pow(r(), 1.4), d = d0 - 0.1 + q * 3.6;
+        const q = Math.pow(r(), 1.4), d = d0 - 0.1 + q * (roadSide ? 3.2 : 4.6);   // (down the apron: the road side's is short)
         const big = !roadSide && r() < 0.35 * (1 - q), k0 = big ? 0.85 + r() * 0.6 : roadSide ? 0.3 + r() * 0.3 : 0.4 + r() * 0.45;
         const [x, z] = at(B, a, d);
         if (!roadClear(x, z, k0)) continue;
@@ -250,7 +250,7 @@ export function talusInto(acc, W, S, forms) {
       const a = B.arc ? B.arc[0] + r() * (B.arc[1] - B.arc[0]) : r() * TAU;
       const d0 = footOf(B, a);
       if (d0 == null) continue;
-      const cl = 1 + Math.floor(r() * 3), d = d0 + Math.pow(r(), 1.3) * 3.2;
+      const cl = 1 + Math.floor(r() * 3), d = d0 + Math.pow(r(), 1.3) * 4.4;
       for (let j = 0; j < cl; j++) {
         const [x0, z0] = at(B, a, d), x = x0 + (r() - 0.5) * 0.9, z = z0 + (r() - 0.5) * 0.9, kk = 0.1 + r() * 0.2;
         if (!roadClear(x, z, kk) || inOther(B, x, z) > 0) continue;

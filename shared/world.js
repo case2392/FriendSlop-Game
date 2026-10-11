@@ -65,6 +65,8 @@ export const BIOMES = {
   },
 };
 
+const TALUS_P = 1.8;   // how concave a crash butte's talus apron is (its height falls as (1 - e / reach)^P)
+
 const POI_WEIGHTS = [['gas', 3], ['semi', 3], ['yard', 3], ['crash', 2], ['junk', 2], ['dino', 1]];
 
 const BILLBOARDS = [
@@ -255,16 +257,26 @@ export function generateLeg(seed, day) {
       if (dp < 15) h = lerp(h, p.padY, smoothstep(15, 9.5, dp));
     }
     // crash mesas are buttes: their bodies are solid cylinders (W.cyls, mat 'mesa': a flat top and sheer
-    // walls, which the 2.5 m heightfield could only draw as a cone), standing on a gentle talus mound here
-    // (under ~25 degrees: you walk up to the wall's foot). Where the road bends toward one, the mound
-    // still stops at the ditch.
+    // walls, which the 2.5 m heightfield could only draw as a cone), standing on their talus here: a
+    // concave scree apron, ~31 degrees at the wall's foot (you walk up to it) and flattening out. Its
+    // reach wanders (fans of debris); toward the road it shortens and lowers so it meets the ditch at
+    // nothing, and the mound still stops at the ditch wherever the road bends toward one.
     for (const p of mesas) {
       const M = p.mesa;
-      if (Math.hypot(x - p.x, z - p.z) > M.R * 1.6 + 9) continue;
-      // how far outside the butte's foot (its body, lobes and bench), then the mound's profile out to 7 m
+      if (Math.hypot(x - p.x, z - p.z) > M.R * 1.4 + M.reach * 1.2 + 1) continue;
+      // how far outside the butte's foot (its body, lobes and bench)
       let e = Math.hypot(x - p.x, z - p.z) - M.R;
       for (const c of [...M.lobes, M.bench]) e = Math.min(e, Math.hypot(x - c.x, z - c.z) - c.r);
-      const mound = M.base + M.talus * smoothstep(7, -1, e + noise2(x / 3, z / 3, S + 51) * 0.6);
+      e += noise2(x / 3, z / 3, S + 51) * 0.6;
+      // (ad + e: about how far from the road the foot stands, straight across). Short of room it runs
+      // straighter, so the side you see from the road still stands tall against the foot
+      const room = Math.max(3, ad + e - 7.5), P = 1 + (TALUS_P - 1) * smoothstep(4, 12, room);
+      const reach = Math.min(M.reach * (1 + 0.2 * noise2(x / 9, z / 9, S + 53)), room);
+      const tal = Math.min(M.talus, 0.62 * reach / P);
+      // (debris lying on the ground: in a hollow lower than the butte's foot it fills less and less toward
+      // its toe, so it never ends in a step there)
+      const floor = lerp(Math.min(h, M.base), M.base, smoothstep(reach, 0.3 * reach, e));
+      const mound = floor + tal * Math.pow(1 - clamp(e / reach, 0, 1), P);
       h = Math.max(h, lerp(h, mound, smoothstep(6.4, 8.9, ad)));
     }
     return h;
@@ -276,15 +288,18 @@ export function generateLeg(seed, day) {
     M.base = roadY(p.z) - 0.2;
     // shape from a hash of the stop's z (no rng: the layout stays put)
     const hz = Math.abs(Math.sin(p.z * 12.9898) * 43758.5453) % 1, hz2 = Math.abs(Math.sin(p.z * 78.233) * 12543.123) % 1;
-    M.lobes = 3 + Math.floor(hz * 3);          // (outline noise for the renderers: the colliders are round)
-    M.ph = hz2 * 6.283;
     // the top's radius (the wreck and its loot need ~5 m), its wall kept a metre clear of the road's ditch
     M.r = M.R = Math.min(M.r, p.off - 7.6);
-    M.talus = 1.6 + hz * 0.8;
     // a lower tier (the bench) on one end, along the road so it shows side-on from it, turned a little
     // away from the road; it is where a climber rests half-way up
     M.benchA = hz < 0.5 ? Math.PI / 2 - p.side * 0.35 : -Math.PI / 2 + p.side * 0.35;   // (x: cos, z: sin; the road is at -side)
     M.benchK = 0.55 + hz2 * 0.15;
+    // the talus: its own debris buries the lower third of the butte (a cliff band standing on a scree
+    // apron, as a real butte stands, not a drum on the sand), the bench still 2.5 m clear of it; it
+    // reaches far enough out that it is ~31 degrees at the foot (walkable) and flattens from there
+    const h3 = Math.abs(Math.sin(p.z * 63.7) * 3571.9) % 1;
+    M.talus = Math.min(M.h * (0.32 + 0.08 * h3), M.h * M.benchK - 2.5);
+    M.reach = M.talus * TALUS_P / 0.62;
     M.bench = { x: p.x + Math.cos(M.benchA) * 0.8 * M.R, z: p.z + Math.sin(M.benchA) * 0.8 * M.R, r: 0.55 * M.R, top: M.base + M.h * M.benchK };
     // two lobes swell the main body's outline (one round drum reads as a tank from the road), each its own
     // solid cylinder at the top's height: one in profile from the road (along it, at the end away from the

@@ -162,7 +162,7 @@ function splatMaterial(biome, cfg) {
     uPlotC: { value: PLOT_COLORS.map(c => new THREE.Color(c)) },
     uSun: { value: new THREE.Vector3(0.57, 0.74, -0.36) },
     uScree: { value: new THREE.Vector4(...(cfg.scree || [0.3, 0.5, 0.3, 0.46])) }, uSWarp: { value: cfg.strataWarp ?? 0 }, uFarS: { value: cfg.farS ?? 0.4 }, uRockDet: { value: cfg.rockDet ?? 0 },
-    uNarrow: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uMesa: { value: Array.from({ length: MAX_SITES * MAX_CIRC }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaS: { value: Array.from({ length: MAX_SITES }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uScreeT: { value: new THREE.Vector4(...TALUS(cfg)[0], TALUS_REACH) }, uScree2: { value: new THREE.Vector2(TALUS(cfg)[1], TALUS(cfg)[2]) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
+    uNarrow: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uMesa: { value: Array.from({ length: MAX_SITES * MAX_CIRC }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaS: { value: Array.from({ length: MAX_SITES }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uScreeT: { value: new THREE.Vector3(...TALUS(cfg)[0]) }, uScree2: { value: new THREE.Vector2(TALUS(cfg)[1], TALUS(cfg)[2]) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   if (cfg.snowRock) {
@@ -212,8 +212,8 @@ function splatMaterial(biome, cfg) {
           float rowJ(float x, float pk) { return 0.05 * sin(x * 1.9 + pk) + 0.0125 * sin(x * 4.3 + pk * 3.0); }
         #endif
         // the crash mesas' buttes: each site's cylinders (centre, radius: its body, bench and lobes) and
-        // its bounds (centre, radius out to the scree's reach), and the scree's tint and reach (uScreeT)
-        uniform vec4 uMesa[${MAX_SITES * MAX_CIRC}], uMesaS[${MAX_SITES}]; uniform vec4 uScreeT; uniform vec2 uScree2;
+        // its bounds (centre, radius out to the scree's reach; w: that reach), and the scree's tint (uScreeT)
+        uniform vec4 uMesa[${MAX_SITES * MAX_CIRC}], uMesaS[${MAX_SITES}]; uniform vec3 uScreeT; uniform vec2 uScree2;
         #ifdef TERRAIN_DUNES
           // (Tanaris) the narrows' z (the gate's and the boulder's: the only sandstone in the erg)
           uniform vec4 uNarrow;
@@ -277,15 +277,15 @@ function splatMaterial(biome, cfg) {
           float dOut = length(gq - gqc) * uGrid.z;
           if (dOut > 0.0) st = mix(st, textureLod(tSlopeA, ((wp.xz - uGridA.xy) / uGridA.z + 0.5) / uGridAN, 0.0), smoothstep(0.0, 12.0, dOut));   // the apron, on its own 10 m lattice
           sl = st.rg; hn = st.ba * 2.0 - 1.0;
-          // the talus mound round a crash mesa's butte: how near its foot (1 at the wall, 0 by ~6.5 m out
-          // in wandering tongues), from the nearest of its cylinders (the union's foot); a site whose
-          // bounds it lies outside costs one distance
+          // the talus apron round a crash mesa's butte: how near its foot (1 at the wall, 0 most of the
+          // way down its apron, uMesaS.w, in wandering tongues), from the nearest of its cylinders (the
+          // union's foot); a site whose bounds it lies outside costs one distance
           float talK = 0.0;
           for (int mi = 0; mi < ${MAX_SITES}; mi++) {
             if (distance(wp.xz, uMesaS[mi].xy) > uMesaS[mi].z) continue;
             for (int mk = 0; mk < ${MAX_CIRC}; mk++) {
               vec4 mc = uMesa[mi * ${MAX_CIRC} + mk];
-              talK = max(talK, 1.0 - smoothstep(0.0, uScreeT.w, distance(wp.xz, mc.xy) - mc.z));
+              talK = max(talK, 1.0 - smoothstep(0.0, uMesaS[mi].w, distance(wp.xz, mc.xy) - mc.z));
             }
           }
           // ground: two scales of the main ground, picked patch by patch so neither tile shows. Flat
@@ -1864,8 +1864,8 @@ export function buildTerrain(W) {
     const sites = [...bySite.values()].slice(0, MAX_SITES), U = mat.userData.U;
     U.uMesa.value.forEach(v => v.set(1e5, 1e5, 0, 0)); U.uMesaS.value.forEach(v => v.set(1e5, 1e5, 0, 0));
     sites.forEach((cs, i) => {
-      const x = cs[0].x, z = cs[0].z;
-      U.uMesaS.value[i].set(x, z, Math.max(...cs.map(c => Math.hypot(c.x - x, c.z - z) + c.r)) + TALUS_REACH + 0.5, 0);
+      const x = cs[0].x, z = cs[0].z, reach = Math.max(TALUS_REACH, 0.8 * (W.pois[cs[0].poi]?.mesa?.reach || 0));
+      U.uMesaS.value[i].set(x, z, Math.max(...cs.map(c => Math.hypot(c.x - x, c.z - z) + c.r)) + reach + 0.5, reach);
       cs.slice(0, MAX_CIRC).forEach((c, k) => U.uMesa.value[i * MAX_CIRC + k].set(c.x, c.z, c.r, c.y + c.hh));
     });
   }
