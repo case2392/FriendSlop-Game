@@ -1,8 +1,9 @@
 // The talus round the crash mesas' buttes (part of the terrain art pass; render only, no colliders).
 //
-// A butte (terrain_butte.js: a body of rock on each of world gen's two cylinders) stands on a walkable
-// talus mound in the heightfield. Here the mound gets what has fallen off the butte, all of it on the
-// mound and against the foot, never on the walkable tops, the road or its ditch:
+// A butte (terrain_butte.js: rock on world gen's cylinders, the main tier's body and lobes and the bench)
+// stands on a walkable talus mound in the heightfield. Here the mound gets what has fallen off the butte,
+// all of it on the mound and against the foot (round the outline, lobes and all), never on the walkable
+// tops, inside the other tier, on the road or in its ditch:
 //   - SHOULDERS: one or two big blocks lodged against the wall's foot on the sides seen in profile from
 //     the road (their tops at most ~1.4 m above the ground: nothing a climber would hang on);
 //   - CAP SLABS: under each place where a piece of the caprock broke away (terrain_butte's notches), two
@@ -135,7 +136,9 @@ export function talusInto(acc, W, S, forms) {
   const snowy = biome === 'snow', round = biome === 'meadow', tabular = !snowy && !round;
   // one block: size s [x, y, z] (m), yaw, tilt [x, z] (rad), a fraction `sink` of its height buried
   // (a block spans about -1..0.55 of its size in its own frame); kinds by biome
-  const block = (r, x, z, s, yaw, tilt, { cap = 0, sink = 0.4, lift = 0, flat = false } = {}) => {
+  const block = (r, x, z, s, yaw, tilt, { cap = 0, sink = 0.4, lift = 0, flat = false, B = null } = {}) => {
+    // (none inside the other tier: a bench's fallen block where a lobe of the main tier stands round it)
+    if (B && inOther(B, x, z) > 0.2) return;
     // it rests on the ground under its footprint (the mound, a bank's slope): its height from the mean
     // ground round it, tipped most of the way with the slope, so it is neither buried on the uphill side
     // (a bare plate showing) nor standing off the downhill one
@@ -163,17 +166,19 @@ export function talusInto(acc, W, S, forms) {
     put(acc, W, S, toCreasedNormals(g, 0.9), _m, { gnd });
   };
   const roadClear = (x, z, pad) => Math.abs(x - W.roadX(z)) > 6.7 + pad;
-  let gnd = (x, z) => W.heightAt(x, z);
+  let gnd = (x, z) => W.heightAt(x, z), inOther = () => -1;
   for (const F of forms) {
     const r = rng32((Math.round(F.p.z * 977) ^ 0x2545F491) >>> 0);
     // (the ground here: the mound, and the bank of sand, snow or scree lapping up the butte's foot)
     gnd = F.bank ? (x, z) => W.heightAt(x, z) + F.bank(x, z) : (x, z) => W.heightAt(x, z);
     const bodies = [F.main, F.bench].filter(Boolean);
+    // (how far inside the tier other than B a point stands: the main tier's outline is its body and lobes)
+    inOther = (B, x, z) => { const Q = B === F.main ? F.bench : F.main; return Q ? Q.Rb(Math.atan2(z - Q.cz, x - Q.cx)) - Math.hypot(x - Q.cx, z - Q.cz) : -1; };
     // where a body's foot shows (the main body's lies inside the bench round the bench)
     const footOf = (B, a) => {
       if (B.arc && angDiff(a, (B.arc[0] + B.arc[1]) / 2) > (B.arc[1] - B.arc[0]) / 2 - 0.35) return null;
       if (B.shortY && B.shortY(a) != null) return null;
-      return B.R + B.wall(a, B.gm + 1) + B.flare(a) * 0.55;
+      return B.Rb(a) + B.wall(a, B.gm + 1) + B.flare(a) * 0.55;
     };
     const at = (B, a, d) => [B.cx + Math.cos(a) * d, B.cz + Math.sin(a) * d];
     // shoulders: big blocks lodged against the wall's foot, on the sides seen in profile from the road
@@ -187,7 +192,7 @@ export function talusInto(acc, W, S, forms) {
         const [x, z] = at(F.main, a, d0 + s[2] * 0.25);
         if (!roadClear(x, z, s[0])) continue;
         // (a third of it buried: its top no more than ~1.3 m above the ground)
-        block(r, x, z, s, -a + (r() - 0.5) * 0.4, [(r() - 0.5) * 0.18, (r() - 0.5) * 0.18], { sink: 0.36 });
+        block(r, x, z, s, -a + (r() - 0.5) * 0.4, [(r() - 0.5) * 0.18, (r() - 0.5) * 0.18], { sink: 0.36, B: F.main });
         break;
       }
     }
@@ -198,12 +203,12 @@ export function talusInto(acc, W, S, forms) {
         const a = F.roadA + Math.PI + (r() - 0.5) * 3.8, d0 = footOf(F.main, a);
         if (d0 == null || angDiff(a, F.roadA) < 1.15) continue;
         for (let j = 0, n = 3 + Math.floor(r() * 3); j < n; j++) {
-          const aj = a + (r() - 0.5) * 2.6 / F.main.R, dj = d0 - 0.3 + r() * 1.7, k0 = 0.85 + r() * 0.75;
+          const aj = a + (r() - 0.5) * 2.6 / F.main.Rb(a), dj = d0 - 0.3 + r() * 1.7, k0 = 0.85 + r() * 0.75;
           const [x, z] = at(F.main, aj, dj);
           if (!roadClear(x, z, k0)) continue;
           const s = tabular ? [k0 * (1.05 + r() * 0.4), k0 * (0.55 + r() * 0.3), k0 * (0.85 + r() * 0.35)]
             : [k0 * (0.95 + r() * 0.35), k0 * (0.7 + r() * 0.2), k0 * (0.9 + r() * 0.35)];
-          block(r, x, z, s, r() * TAU, [(r() - 0.5) * 0.6, (r() - 0.5) * 0.6], { sink: 0.36 });
+          block(r, x, z, s, r() * TAU, [(r() - 0.5) * 0.6, (r() - 0.5) * 0.6], { sink: 0.36, B: F.main });
         }
         break;
       }
@@ -212,12 +217,12 @@ export function talusInto(acc, W, S, forms) {
     for (const B of bodies) for (const nt of B.notches) {
       const n = 2 + (r() < 0.5 ? 1 : 0);
       for (let k = 0; k < n; k++) {
-        const a = nt.a + (r() - 0.5) * nt.w / B.R * 1.6, d0 = footOf(B, a);
+        const a = nt.a + (r() - 0.5) * nt.w / B.Rb(nt.a) * 1.6, d0 = footOf(B, a);
         if (d0 == null) continue;
         const d = d0 + 0.6 + r() * 2.6, [x, z] = at(B, a, d), th = B.capT(nt.a) / Math.max(0.5, 1 - 0.45 * nt.k);
         const s = [1.0 + r() * 0.7, Math.min(0.9, th * (0.45 + r() * 0.2)), 0.8 + r() * 0.5];
         if (!roadClear(x, z, s[0])) continue;
-        block(r, x, z, s, r() * TAU, [(r() - 0.5) * 0.7, (r() - 0.5) * 0.7], { cap: 1, sink: 0.38 });
+        block(r, x, z, s, r() * TAU, [(r() - 0.5) * 0.7, (r() - 0.5) * 0.7], { cap: 1, sink: 0.38, B });
       }
     }
     // the talus: fallen blocks round the foot, bigger and closer in near the wall
@@ -235,7 +240,7 @@ export function talusInto(acc, W, S, forms) {
         const s = tabular ? [k0 * (1.0 + r() * 0.4), k0 * (0.42 + r() * 0.25), k0 * (0.8 + r() * 0.35)]
           : round ? [k0 * (0.9 + r() * 0.35), k0 * (0.65 + r() * 0.25), k0 * (0.85 + r() * 0.35)]
           : [k0 * (0.85 + r() * 0.4), k0 * (0.55 + r() * 0.3), k0 * (0.85 + r() * 0.4)];
-        block(r, x, z, s, r() * TAU, [(r() - 0.5) * (tabular ? 0.8 : 0.45), (r() - 0.5) * (tabular ? 0.8 : 0.45)], { sink: round ? 0.42 : 0.4 });
+        block(r, x, z, s, r() * TAU, [(r() - 0.5) * (tabular ? 0.8 : 0.45), (r() - 0.5) * (tabular ? 0.8 : 0.45)], { sink: round ? 0.42 : 0.4, B });
       }
     }
     // rubble: a scatter of small pieces in loose clusters between them
@@ -248,7 +253,7 @@ export function talusInto(acc, W, S, forms) {
       const cl = 1 + Math.floor(r() * 3), d = d0 + Math.pow(r(), 1.3) * 3.2;
       for (let j = 0; j < cl; j++) {
         const [x0, z0] = at(B, a, d), x = x0 + (r() - 0.5) * 0.9, z = z0 + (r() - 0.5) * 0.9, kk = 0.1 + r() * 0.2;
-        if (!roadClear(x, z, kk)) continue;
+        if (!roadClear(x, z, kk) || inOther(B, x, z) > 0) continue;
         pebble(r, x, z, kk);
       }
     }

@@ -65,8 +65,6 @@ export const BIOMES = {
   },
 };
 
-const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));   // between two bearings, 0..pi
-
 const POI_WEIGHTS = [['gas', 3], ['semi', 3], ['yard', 3], ['crash', 2], ['junk', 2], ['dino', 1]];
 
 const BILLBOARDS = [
@@ -288,20 +286,21 @@ export function generateLeg(seed, day) {
     M.benchA = hz < 0.5 ? Math.PI / 2 - p.side * 0.35 : -Math.PI / 2 + p.side * 0.35;   // (x: cos, z: sin; the road is at -side)
     M.benchK = 0.55 + hz2 * 0.15;
     M.bench = { x: p.x + Math.cos(M.benchA) * 0.8 * M.R, z: p.z + Math.sin(M.benchA) * 0.8 * M.R, r: 0.55 * M.R, top: M.base + M.h * M.benchK };
-    // two lobes swell the main body's outline (one round drum reads as a tank from the road), on the far
-    // side of the butte or along the road and well off the bench, each its own solid cylinder at the top's
-    // height. Each one holds the centre, so the outline stays a single radius per bearing
+    // two lobes swell the main body's outline (one round drum reads as a tank from the road), each its own
+    // solid cylinder at the top's height: one in profile from the road (along it, at the end away from the
+    // bench, so the butte's silhouette widens there), one round the back; both well off the bench (>= 1.1
+    // rad, or it would swallow it). Each holds the centre, so the outline stays a single radius per bearing
     // (butteRadius() below), what the renderer wraps the wall round.
     const away = p.side > 0 ? 0 : Math.PI;   // the bearing straight away from the road
-    M.lobes = [];
-    for (let k = 0, t = 0; k < 2 && t < 12; t++) {
-      const hk = Math.abs(Math.sin(p.z * (31.7 + t * 17.3)) * 9631.7) % 1;
-      const a = away + (k === 0 ? -1 : 1) * (0.25 + 1.05 * hk);
-      if (angDiff(a, M.benchA) < 0.75) continue;
+    const toBench = Math.sign(Math.sin(M.benchA - away)) || 1;   // which way round from 'away' the bench lies
+    const h1 = Math.abs(Math.sin(p.z * 31.7) * 9631.7) % 1, h2 = Math.abs(Math.sin(p.z * 49.1) * 7177.3) % 1;
+    M.lobes = [
+      [away - toBench * (1.1 + 0.4 * h1), h1],          // in profile, at the far end from the bench
+      [away + toBench * (-0.45 + 0.5 * h2), h2],        // round the back
+    ].map(([a, hk]) => {
       const d = M.R * (0.48 + 0.14 * hk), r = M.R * (0.62 + 0.1 * hk);   // d < r: it holds the centre
-      M.lobes.push({ x: p.x + Math.cos(a) * d, z: p.z + Math.sin(a) * d, r });
-      k++;
-    }
+      return { x: p.x + Math.cos(a) * d, z: p.z + Math.sin(a) * d, r };
+    });
   }
 
   // ---- the heightfield ------------------------------------------------------------

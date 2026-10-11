@@ -99,9 +99,10 @@ const CFG = {
 // Westfall's cultivated plots (W.fields), painted into the splat: at most MAX_PLOTS per leg. Their
 // colours (sRGB): furrow trough, mid, lit ridge; stubble soil, straw, lit straw; wheat gap, body, lit heads.
 const MAX_PLOTS = 10;
-// the crash mesas' butte tiers the splat knows (two per crash site), and how far out round each the
-// talus mound's scree reaches (m); per biome [tint, second-ground share, strength]
-const MAX_TIERS = 12, TALUS_REACH = 6.5;
+// the crash sites the splat knows (MAX_SITES a leg; world gen makes at most five), each its butte's
+// cylinders (MAX_CIRC: the body, the bench and up to two lobes), and how far out round them the talus
+// mound's scree reaches (m); per biome [tint, second-ground share, strength]
+const MAX_SITES = 6, MAX_CIRC = 4, TALUS_REACH = 6.5;
 const TALUS = cfg => cfg.talus || [[1, 1, 1], 0, 0.8];
 const PLOT_COLORS = ['#3e2b1e', '#6c4a32', '#a47a50', '#8a6c4a', '#cdb47e', '#e4d29e', '#5e4a22', '#c39a3c', '#efcd6c'];
 
@@ -161,7 +162,7 @@ function splatMaterial(biome, cfg) {
     uPlotC: { value: PLOT_COLORS.map(c => new THREE.Color(c)) },
     uSun: { value: new THREE.Vector3(0.57, 0.74, -0.36) },
     uScree: { value: new THREE.Vector4(...(cfg.scree || [0.3, 0.5, 0.3, 0.46])) }, uSWarp: { value: cfg.strataWarp ?? 0 }, uFarS: { value: cfg.farS ?? 0.4 }, uRockDet: { value: cfg.rockDet ?? 0 },
-    uNarrow: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uMesa: { value: Array.from({ length: MAX_TIERS }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uScreeT: { value: new THREE.Vector4(...TALUS(cfg)[0], TALUS_REACH) }, uScree2: { value: new THREE.Vector2(TALUS(cfg)[1], TALUS(cfg)[2]) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
+    uNarrow: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uMesa: { value: Array.from({ length: MAX_SITES * MAX_CIRC }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaS: { value: Array.from({ length: MAX_SITES }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uScreeT: { value: new THREE.Vector4(...TALUS(cfg)[0], TALUS_REACH) }, uScree2: { value: new THREE.Vector2(TALUS(cfg)[1], TALUS(cfg)[2]) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   if (cfg.snowRock) {
@@ -177,7 +178,7 @@ function splatMaterial(biome, cfg) {
   if (cfg.snowRock) m.defines.TERRAIN_SNOWROCK = 1;
   m.defines.TERRAIN_ANISO = cheap ? '2.0' : '3.0';
   m.defines.TERRAIN_NEARSHARP = cheap ? '0.62' : '0.82';
-  const key = 'terrain-splat-v28' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.plots ? 'p' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
+  const key = 'terrain-splat-v29' + (cfg.sparkle ? 's' : '') + (cfg.strata ? 't' : '') + (cfg.dunes ? 'd' : '') + (cfg.plots ? 'p' : '') + (cfg.snowRock ? 'r' : '') + (cheap ? 'c' : '');
   m.customProgramCacheKey = () => key;
   m.onBeforeCompile = sh => {
     Object.assign(sh.uniforms, U);
@@ -210,8 +211,9 @@ function splatMaterial(biome, cfg) {
           // the rows' spacing, jittered +-15% (a monotone warp; rowJ() in JS is the same)
           float rowJ(float x, float pk) { return 0.05 * sin(x * 1.9 + pk) + 0.0125 * sin(x * 4.3 + pk * 3.0); }
         #endif
-        // the crash mesas' buttes (both tiers): centre, radius, and the scree's tint and reach (uScreeT)
-        uniform vec4 uMesa[${MAX_TIERS}]; uniform vec4 uScreeT; uniform vec2 uScree2;
+        // the crash mesas' buttes: each site's cylinders (centre, radius: its body, bench and lobes) and
+        // its bounds (centre, radius out to the scree's reach), and the scree's tint and reach (uScreeT)
+        uniform vec4 uMesa[${MAX_SITES * MAX_CIRC}], uMesaS[${MAX_SITES}]; uniform vec4 uScreeT; uniform vec2 uScree2;
         #ifdef TERRAIN_DUNES
           // (Tanaris) the narrows' z (the gate's and the boulder's: the only sandstone in the erg)
           uniform vec4 uNarrow;
@@ -276,11 +278,15 @@ function splatMaterial(biome, cfg) {
           if (dOut > 0.0) st = mix(st, textureLod(tSlopeA, ((wp.xz - uGridA.xy) / uGridA.z + 0.5) / uGridAN, 0.0), smoothstep(0.0, 12.0, dOut));   // the apron, on its own 10 m lattice
           sl = st.rg; hn = st.ba * 2.0 - 1.0;
           // the talus mound round a crash mesa's butte: how near its foot (1 at the wall, 0 by ~6.5 m out
-          // in wandering tongues), from the nearest tier
+          // in wandering tongues), from the nearest of its cylinders (the union's foot); a site whose
+          // bounds it lies outside costs one distance
           float talK = 0.0;
-          for (int i = 0; i < ${MAX_TIERS}; i++) {
-            float d = distance(wp.xz, uMesa[i].xy) - uMesa[i].z;
-            talK = max(talK, 1.0 - smoothstep(0.0, uScreeT.w, d));
+          for (int mi = 0; mi < ${MAX_SITES}; mi++) {
+            if (distance(wp.xz, uMesaS[mi].xy) > uMesaS[mi].z) continue;
+            for (int mk = 0; mk < ${MAX_CIRC}; mk++) {
+              vec4 mc = uMesa[mi * ${MAX_CIRC} + mk];
+              talK = max(talK, 1.0 - smoothstep(0.0, uScreeT.w, distance(wp.xz, mc.xy) - mc.z));
+            }
           }
           // ground: two scales of the main ground, picked patch by patch so neither tile shows. Flat
           // ground is projected from above; on slopes (by a smoothed slope, so the grid never shows)
@@ -1460,26 +1466,30 @@ function butteTufts(W, cfg, biome) {
     const r = cellRng(Math.round(F.p.x * 10), Math.round(F.p.z * 10), W.seed + 41), top = butteGround(W, F.p);
     for (const B of [F.main, F.bench]) {
       if (!B) continue;
+      // (each tier's outline: the main tier's body and lobes, the bench's circle along its arc, which keeps
+      // 0.35 rad clear of the main tier)
+      const OL = B.OL, [s0, s1] = OL.ring ? [0, OL.perim] : [0.35 * B.R, OL.perim - 0.35 * B.R];
       const [a0, a1] = B.arc ? [B.arc[0] + 0.35, B.arc[1] - 0.35] : [0, Math.PI * 2];
-      const onMain = (x, z) => B.kind === 'bench' && Math.hypot(x - F.main.cx, z - F.main.cz) < F.main.R + 0.2;
+      const inTier = (Q, x, z, pad) => Math.hypot(x - Q.cx, z - Q.cz) < Q.Rb(Math.atan2(z - Q.cz, x - Q.cx)) + pad;
+      const onMain = (x, z) => B.kind === 'bench' && inTier(F.main, x, z, 0.2);
       // the fringe along the rim, in runs with gaps
-      const n = Math.round((a1 - a0) * B.R / 0.3);
+      const n = Math.round((s1 - s0) / 0.3);
       for (let i = 0; i < n; i++) {
         if (noise2(i * 0.31, B.R, W.seed + 43) < -0.25 || r() < 0.15) continue;
-        const a = a0 + (a1 - a0) * (i + r()) / n, ov = B.ov(a), d = B.R - 0.35 + r() * (0.35 + ov * 0.7);
+        const a = OL.th(s0 + (s1 - s0) * (i + r()) / n), ov = B.ov(a), Ra = B.Rb(a), d = Ra - 0.35 + r() * (0.35 + ov * 0.7);
         const x = B.cx + Math.cos(a) * d, z = B.cz + Math.sin(a) * d;
         if (onMain(x, z) || !free(x, z, 0.4)) continue;
         const card = cards[Math.floor(r() * cards.length)], [cw, ch] = C.cards[card], sc = 0.75 + r() * 0.45;
         out.push({ x, y: top(x, z) - 0.04, z, ry: r() * 6.283, w: cw * sc, h: ch * sc * 1.1, card, fade: 150,
-          lean: d > B.R ? 0.45 + r() * 0.45 : 0.1 + r() * 0.3, leanA: a - Math.PI / 2, tone: 0.35 + r() * 0.4 });
+          lean: d > Ra ? 0.45 + r() * 0.45 : 0.1 + r() * 0.3, leanA: a - Math.PI / 2, tone: 0.35 + r() * 0.4 });
       }
       // tufts on the top, in clumps (a flower now and then in Elwynn)
-      const nc = Math.round(B.R * B.R * 0.35);
+      const nc = Math.round(OL.area / Math.PI * 0.35);
       for (let k = 0; k < nc; k++) {
-        const a = a0 + r() * (a1 - a0), d = Math.sqrt(r()) * (B.R - 0.4), cx = B.cx + Math.cos(a) * d, cz = B.cz + Math.sin(a) * d;
+        const a = a0 + r() * (a1 - a0), d = Math.sqrt(r()) * (B.Rb(a) - 0.4), cx = B.cx + Math.cos(a) * d, cz = B.cz + Math.sin(a) * d;
         for (let j = 0, m = 2 + Math.floor(r() * 4); j < m; j++) {
           const x = cx + (r() - 0.5) * 1.2, z = cz + (r() - 0.5) * 1.2;
-          if (Math.hypot(x - B.cx, z - B.cz) > B.R - 0.2 || onMain(x, z) || !free(x, z, 0.6)) continue;
+          if (!inTier(B, x, z, -0.2) || onMain(x, z) || !free(x, z, 0.6)) continue;
           const card = flowers.length && r() < 0.12 ? flowers[Math.floor(r() * flowers.length)] : cards[Math.floor(r() * cards.length)];
           const [cw, ch] = C.cards[card], sc = 0.65 + r() * 0.5;
           out.push({ x, y: top(x, z) - 0.04, z, ry: r() * 6.283, w: cw * sc, h: ch * sc, card, fade: 110, tone: 0.3 + r() * 0.5 });
@@ -1847,9 +1857,18 @@ export function buildTerrain(W) {
   mat.userData.U.uFire.value.set(fires[0]?.x ?? 1e5, fires[0]?.z ?? 1e5, fires[1]?.x ?? 1e5, fires[1]?.z ?? 1e5);
   // (Tanaris) the narrows, where its sandstone shows
   { const z = (W.obstacles || []).filter(o => o.type === 'gate' || o.type === 'boulder').map(o => o.z); mat.userData.U.uNarrow.value.set(z[0] ?? 1e5, z[1] ?? 1e5, z[2] ?? 1e5, z[3] ?? 1e5); }
-  // the crash mesas' butte tiers (the scree on their talus mounds)
-  const tiers = (W.cyls || []).filter(c => c.mat === 'mesa');
-  mat.userData.U.uMesa.value.forEach((v, i) => { const c = tiers[i]; if (c) v.set(c.x, c.z, c.r, c.y + c.hh); else v.set(1e5, 1e5, 0, 0); });
+  // the crash mesas' buttes (the scree on their talus mounds): each site's cylinders, and its bounds
+  {
+    const bySite = new Map();
+    for (const c of W.cyls || []) if (c.mat === 'mesa') { if (!bySite.has(c.poi)) bySite.set(c.poi, []); bySite.get(c.poi).push(c); }
+    const sites = [...bySite.values()].slice(0, MAX_SITES), U = mat.userData.U;
+    U.uMesa.value.forEach(v => v.set(1e5, 1e5, 0, 0)); U.uMesaS.value.forEach(v => v.set(1e5, 1e5, 0, 0));
+    sites.forEach((cs, i) => {
+      const x = cs[0].x, z = cs[0].z;
+      U.uMesaS.value[i].set(x, z, Math.max(...cs.map(c => Math.hypot(c.x - x, c.z - z) + c.r)) + TALUS_REACH + 0.5, 0);
+      cs.slice(0, MAX_CIRC).forEach((c, k) => U.uMesa.value[i * MAX_CIRC + k].set(c.x, c.z, c.r, c.y + c.hh));
+    });
+  }
   // the cultivated plots (Westfall)
   const KIND = { wheat: 0, stubble: 1, furrow: 2 };
   mat.userData.U.uPlot.value.forEach((v, i) => { const f = cfg.plots ? (W.fields || [])[i] : null; if (f) v.set(f.x, f.z, Math.sin(f.ry), Math.cos(f.ry)); else v.set(1e5, 1e5, 0, 1); });

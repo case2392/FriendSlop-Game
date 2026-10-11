@@ -1,33 +1,41 @@
-// The crash mesas' bodies (part of the terrain art pass). World gen makes each crash mesa a butte: two
-// solid cylinders in W.cyls with mat 'mesa' (the main body, flat-topped where the wreck and its loot
-// lie, and a lower bench tier on one end, seen side-on from the road), standing on a talus mound in the
-// heightfield. Here each is drawn as natural rock fitted to its collider, never as a drum:
-//   - the wall: the biome's own valley-wall rock (cliff_<biome>) wrapped round the body a whole number of
-//     tiles (no seam). It is a stack of beds, each an irregular polygon of flat faces (its own tone each)
-//     stepping in or out a little over the one below (a ledge, a shadow; now and then a soft bed set
-//     back); vertical joints cut it into pillars (dark clefts, some notching the cap); between two joints
-//     that run its whole height the blocks settled on their own (the beds jog up or down, so no band runs
-//     round unbroken); the painting's own relief (its lit masses stand out, its seams sink back) and a
-//     slight batter on top. All of it stays within [WALL_IN, WALL_OUT] of the collider's radius, so a
-//     climber hugs the rock. The shader weathers it: desert varnish and rain streaks down from the rim,
-//     a paler, sun-bleached cap bed, AO in the joints and under the ledges;
-//   - the foot: below ~1.5 m the rock flares out onto the mound in buttresses (clear of the road's
-//     ditch), and a bank laps up it (drifted sand or snow, deepest on the side world gen's wind comes
-//     from, or the terrain's scree), so no clean circle meets the ground; terrain_talus.js heaps fallen
-//     blocks on it;
-//   - the caprock: a thick hard top bed, a polygon of its own, standing out 0.03-LIP past the collider
-//     over a cool undercut (only where it stands well above head height), its edge rounded over, notched
-//     where joints reach it and broken back where a piece of it fell (its slabs lie on the talus below);
-//     the walkable top inside the collider's radius is exactly flat at the collider's top;
+// The crash mesas' bodies (part of the terrain art pass). World gen makes each crash mesa a butte of
+// solid cylinders in W.cyls with mat 'mesa': the main tier (its body plus one or two lobe cylinders at the
+// same height, each holding the centre, so their union is star-shaped about it: butteRadius), flat-topped
+// where the wreck and its loot lie, and a lower bench tier on one end, seen side-on from the road; it
+// stands on a talus mound in the heightfield. Here each is drawn as natural rock fitted to its colliders'
+// outline (the main tier's: the union, arcs of its circles meeting in concave cusps), never as a drum:
+//   - the wall: the biome's own valley-wall rock (cliff_<biome>) wrapped round the outline by arc length
+//     a whole number of tiles (no stretch on a lobe, the seam in a cusp's cleft). It is a stack of beds,
+//     each an irregular polygon of flat faces (its own tone each) stepping in or out a little over the
+//     one below (a ledge, a shadow; now and then a soft bed set back); every cusp is a corner of every
+//     bed, so no face fills the re-entrant; vertical joints cut it into pillars (dark clefts, some
+//     notching the cap), and a cleft runs the whole height of every cusp, where two masses (the body, a
+//     lobe: each a bastion of the same rock, weathered a little differently, the beds running on across)
+//     meet; between two other joints that run its whole height the blocks settled on their own (the
+//     beds jog up or down, so no band runs round unbroken); the painting's own relief (its lit masses
+//     stand out, its seams sink back) and a slight batter on top. All of it stays within [WALL_IN,
+//     WALL_OUT] of the outline's radius (a cusp is rounded by at most CUSP_K / 4 and cut back by its
+//     cleft), so a climber hugs the rock. The shader weathers it: desert varnish and rain streaks down
+//     from the rim, the cap bed's own tint, AO in the joints and under the ledges;
+//   - the foot: below ~1.5 m the rock flares out onto the mound in buttresses (broadest under each lobe;
+//     clear of the road's ditch), and a bank laps up it (drifted sand or snow, deepest on the side world
+//     gen's wind comes from, or the terrain's scree), so no clean circle meets the ground;
+//     terrain_talus.js heaps fallen blocks on it;
+//   - the caprock: a thick hard top bed, a polygon of its own split into blocks at the joints (each its
+//     own thickness, overhang and tone), standing out 0.03-LIP past the outline over a cool undercut (only
+//     where it stands well above head height), its edge rounded over, notched where joints reach it (a V
+//     at every cusp) and broken back where a piece of it fell (its slabs lie on the talus below); the
+//     walkable top inside the outline is exactly flat at the colliders' top, lobes and all;
 //   - the cover: turf, golden grass, snow (on the ledges too), red dust or drifted sand on whatever faces
 //     up, and hanging a little way over the rim (Dun Morogh: a snow cornice);
-//   - the bench: a lower step of the same rock round the main body's end, its cap overhanging only where
+//   - the bench: a lower step of the same rock round the main tier's end, its cap overhanging only where
 //     it stands well above head height.
 // Everything (both tiers of every butte on the leg, their banks and their talus) is one mesh with one
 // material: one draw call a day.
 //
 //   buildButtes(W, { form, macro, scree, tint }) -> { mesh, dispose() } | null   (null: no crash mesas)
-//   butteForms(W) -> [{ p, main, bench, roadA, bank }]   the shapes (pure maths), for the talus and the crash
+//   butteForms(W) -> [{ p, main, bench, roadA, bank, inside }]   the shapes (pure maths), for the talus,
+//     the terrain and the crash (each tier: Rb(th) its outline's radius along a bearing from its centre)
 //   butteGeometry(W, { tint }) -> BufferGeometry   the merged mesh alone (userData.tiers: each tier's
 //     vertex range), for a fit check
 //   butteGround(W, p) -> (x, z) => y   the drawn top of p's butte where it stands (its rounded rim,
@@ -36,6 +44,7 @@
 import { THREE, tex } from './gfx.js';
 import { canvasFor } from './paint/index.js';
 import { talusInto } from './terrain_talus.js';
+import { butteRadius } from '/shared/world.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = v => Math.max(0, Math.min(1, v));
@@ -52,13 +61,14 @@ function periodicA(rnd, k0, k1, fall = 1) {
   for (let k = k0; k <= k1; k++) { const a = (0.5 + rnd()) / Math.pow(k, fall); T.push([k, rnd() * TAU, a]); norm += a; }
   return th => { let v = 0; for (const [k, p, a] of T) v += Math.sin(k * th + p) * a; return Math.max(-1, Math.min(1, v / norm * 1.7)); };
 }
-// the wall's offset from the collider's radius kept inside [lo, hi], smoothly (never a flat clipped band)
+// the wall's offset from the outline's radius kept inside [lo, hi], smoothly (never a flat clipped band)
 const softClamp = (f, lo, hi) => { const c = (lo + hi) / 2, w = (hi - lo) / 2; return c + w * Math.tanh((f - c) / w); };
 
-// The wall stays within [IN, OUT] of the collider's radius from ~1.5 m above the ground to the cap; the
-// cap's edge stands 0.03 to LIP past it; the main body's wall is left out where the bench stands round it
-// by more than SHORT_IN (it starts on the bench's top there).
-export const WALL_IN = -0.345, WALL_OUT = 0.1, LIP = 0.43;   // (the cap's face swells up to 0.02 more; a face between two columns lies a few mm in)
+// The wall stays within [IN, OUT] of the colliders' outline (the main tier: its body and lobes' union)
+// from ~1.5 m above the ground to the cap; the cap's edge stands 0.03 to LIP past it; the main tier's
+// wall is left out where the bench stands round it by more than SHORT_IN (it starts on the bench's top
+// there).
+export const WALL_IN = -0.345, WALL_OUT = 0.1, LIP = 0.41;   // (the cap's face swells up to 0.02 more, to 0.43; a face between two columns lies a few mm in)
 const SHORT_IN = 0.45, ARC_B = 1.75;   // (the bench's wall: +-100 degrees round its far end; the rest lies in the main body)
 
 // Per biome: the rock (texture, metres a tile; snow: the walls' granite turned 26.6 degrees, 7.96 m a tile,
@@ -147,51 +157,144 @@ function texUV(S, u, y) {
   return [u / S.tile, y / S.tile];
 }
 
+// ---- the outline -------------------------------------------------------------------------------------
+// A tier's foot round its centre, one radius per bearing. The main tier's is the union of world gen's
+// body cylinder and its lobes: each lobe holds the centre, so the union is star-shaped about it
+// (butteRadius gives its radius along a bearing), its boundary arcs of those circles meeting in concave
+// cusps. The bench's is its own circle, along the arc that stands clear of the main body. The wall's own
+// coordinate is the arc length s round it from t0 (the main tier: from a cusp, so the seam hides in the
+// cleft there).
+//   Rb(th)       the exact radius there (the colliders')
+//   fill(th)     how far the drawn wall's rounding of a cusp stands out past it (<= CUSP_K / 4)
+//   s(th, raw)   the arc length from t0 (raw: th already in [t0, t0 + a turn], as the mesh's columns are)
+//   th(s)        its inverse; perim: the length round it (the bench: along its arc)
+//   segs         [{ s0, s1, rho, lobe }]: the arcs between cusps, each its circle's radius (a lobe's or
+//                the body's); cusps: [bearing]
+//   arcD(th, a)  how far apart two bearings lie along it (m); sArc: the same, signed (th past a: > 0)
+const OL_N = 2048, CUSP_K = 0.28;
+function mainOutline(p) {
+  const M = p.mesa, C = [{ x: 0, z: 0, r: M.R ?? M.r }, ...(M.lobes || []).map(c => ({ x: c.x - p.x, z: c.z - p.z, r: c.r }))];
+  // how far out along th the ray from the centre leaves each circle (each holds the centre)
+  const exits = th => {
+    const ux = Math.cos(th), uz = Math.sin(th);
+    return C.map(c => { const b = ux * c.x + uz * c.z, q = c.r * c.r - (c.x * c.x + c.z * c.z) + b * b; return q > 0 ? b + Math.sqrt(q) : -1e9; });
+  };
+  const own = th => { const e = exits(th); let k = 0; for (let i = 1; i < e.length; i++) if (e[i] > e[k]) k = i; return k; };
+  // the cusps: where the boundary passes from one circle to the next (a fine scan, then bisection)
+  const cusps = [];
+  let prev = own(0);
+  for (let k = 1; k <= 1440; k++) {
+    const b1 = k / 1440 * TAU, o = own(b1);
+    if (o === prev) continue;
+    let a = (k - 1) / 1440 * TAU, b = b1;
+    for (let it = 0; it < 30; it++) { const m = (a + b) / 2; if (own(m) === prev) a = m; else b = m; }
+    cusps.push((a + b) / 2);
+    prev = o;
+  }
+  const t0 = cusps.length ? cusps[0] : 0;
+  const Rb = th => butteRadius(p, th);
+  // the arc-length table, from t0 once round
+  const S = new Float64Array(OL_N + 1);
+  let px = Math.cos(t0) * Rb(t0), pz = Math.sin(t0) * Rb(t0);
+  for (let k = 1; k <= OL_N; k++) {
+    const th = t0 + k / OL_N * TAU, r = Rb(th), x = Math.cos(th) * r, z = Math.sin(th) * r;
+    S[k] = S[k - 1] + Math.hypot(x - px, z - pz); px = x; pz = z;
+  }
+  const perim = S[OL_N];
+  const s = (th, raw = false) => {
+    let t = th - t0;
+    if (!raw) t = ((t % TAU) + TAU) % TAU;
+    const f = Math.max(0, Math.min(OL_N, t / TAU * OL_N)), k = Math.min(OL_N - 1, Math.floor(f));
+    return S[k] + (S[k + 1] - S[k]) * (f - k);
+  };
+  const thOf = sv => {
+    sv = ((sv % perim) + perim) % perim;
+    let lo = 0, hi = OL_N;
+    while (hi - lo > 1) { const m = (lo + hi) >> 1; if (S[m] <= sv) lo = m; else hi = m; }
+    return t0 + (lo + (sv - S[lo]) / Math.max(1e-9, S[lo + 1] - S[lo])) / OL_N * TAU;
+  };
+  // the arcs between the cusps (none: the body's own circle, no lobe standing out past it)
+  const cs = cusps.map(a => s(a));
+  const segs = cusps.length ? cs.map((s0, i) => { const s1 = i + 1 < cs.length ? cs[i + 1] : perim, o = own(thOf((s0 + s1) / 2)); return { s0, s1, rho: C[o].r, lobe: o > 0 }; })
+    : [{ s0: 0, s1: perim, rho: C[0].r, lobe: false }];
+  // a cusp rounded: the smooth maximum of the two circles' radii there (it fills the V by <= CUSP_K / 4)
+  const fill = th => {
+    if (!cusps.length) return 0;
+    const e = exits(th).sort((a, b) => b - a), h = Math.max(0, CUSP_K - (e[0] - e[1])) / CUSP_K;
+    return h * h * CUSP_K / 4;
+  };
+  const sArc = (th, a) => { let d = s(th) - s(a); d -= perim * Math.round(d / perim); return d; };
+  let area = 0; for (let k = 0; k < 360; k++) area += 0.5 * Rb(k / 360 * TAU) ** 2 * TAU / 360;
+  return { ring: true, t0, span: TAU, Rb, fill, s, th: thOf, perim, segs, cusps, sArc, arcD: (th, a) => Math.abs(sArc(th, a)), area, inArc: th => th, circles: C };
+}
+// the bench: its circle, along the arc round its far end (mid +- half)
+function arcOutline(R, mid, half) {
+  const a0 = mid - half, perim = 2 * half * R;
+  const inArc = th => mid + Math.atan2(Math.sin(th - mid), Math.cos(th - mid));
+  const sArc = (th, a) => (inArc(th) - inArc(a)) * R;
+  return { ring: false, t0: a0, span: 2 * half, Rb: () => R, fill: () => 0, s: th => (inArc(th) - a0) * R, th: sv => a0 + sv / R, perim,
+    segs: [{ s0: 0, s1: perim, rho: R }], cusps: [], sArc, arcD: (th, a) => Math.abs(sArc(th, a)), area: Math.PI * R * R, inArc };
+}
+
 // ---- the shapes -------------------------------------------------------------------------------------
 
-// One tier: a body standing on the collider (cx, cz, R, yT). Its wall offset wall(th, y), the cap's
-// overhang ov(th), thickness capT(th), the undercut's height ucH(th) and depth ucD(th), the foot's flare
-// flare(th) and height hF(th), joints and broken notches, the texture's wrap radius Rref.
+// One tier: a body standing on its colliders (centre cx, cz; top yT; outline OL). Its wall offset
+// wall(th, y) from the outline's radius, the cap's overhang ov(th), thickness capT(th), the undercut's
+// height ucH(th) and depth ucD(th), the foot's flare flare(th) and height hF(th), joints and broken
+// notches, the wall's texture coordinate U(th).
 function bodyForm(W, S, rnd, o) {
-  const { cx, cz, R, yT, kind, roadA } = o;
+  const { cx, cz, R, yT, kind, roadA, OL } = o;
   const main = kind === 'main';
-  const B = { cx, cz, R, yT, kind };
+  const B = { cx, cz, R, yT, kind, OL, Rb: OL.Rb };
+  const Rb = OL.Rb;
   const g = (th, r) => W.heightAt(cx + Math.cos(th) * r, cz + Math.sin(th) * r);
   B.g = g;
   // the bench's wall runs round its far end only (the rest lies inside the main body)
-  B.arc = main ? null : [o.benchA - ARC_B, o.benchA + ARC_B];
+  B.arc = main ? null : [OL.t0, OL.t0 + OL.span];
   // (a bearing as the bench's arc counts it: within half a turn of its middle, whatever atan2 gave)
-  B.inArc = th => (B.arc ? o.benchA + Math.atan2(Math.sin(th - o.benchA), Math.cos(th - o.benchA)) : th);
-  const C = TAU * R;
-  // the texture wraps a whole number of tiles round the main body (no seam); the bench's open arc keeps
-  // its true scale
-  if (!main) B.Rref = R;
-  else if (S.turn) { const b = Math.max(1, Math.round(C * TURN[1] / S.tile)); B.Rref = b * S.tile / TURN[1] / TAU; }
-  else { const n = Math.max(1, Math.round(C / S.tile)); B.Rref = n * S.tile / TAU; }
+  B.inArc = OL.inArc;
+  // the texture wraps a whole number of tiles round the main tier (no seam); the bench's open arc keeps
+  // its true scale. U: the wall's own coordinate along it (m)
+  let uK = 1;
+  if (main) {
+    const P = OL.perim;
+    if (S.turn) uK = Math.max(1, Math.round(P * TURN[1] / S.tile)) * S.tile / TURN[1] / P;
+    else uK = Math.max(1, Math.round(P / S.tile)) * S.tile / P;
+  }
+  B.U = (th, raw = false) => (main ? OL.s(th, raw) * uK : OL.s(th) + OL.t0 * R);
   // the mean ground round it
-  let gm = 0; for (let k = 0; k < 16; k++) gm += g(k / 16 * TAU, R + 0.3); gm /= 16;
+  let gm = 0; for (let k = 0; k < 16; k++) { const th = k / 16 * TAU; gm += g(th, Rb(th) + 0.3); } gm /= 16;
   B.gm = gm;
   // headroom: a cap may overhang only well above head height (the bench can be low)
-  B.head = th => sstep(2.4, 3.4, yT - g(th, R + 0.3));
+  B.head = th => sstep(2.4, 3.4, yT - g(th, Rb(th) + 0.3));
   const capN = periodicA(rnd, 2, 7, 0.9), ucN = periodicA(rnd, 3, 8, 0.8), buttP = periodicA(rnd, 3, 7, 0.6);
   // The plan: the wall is a stack of beds, each an irregular polygon of flat rock faces (~3-5 m across, its
-  // corners a hair outside the collider's radius, the faces' middles ~0.25 m in) turned its own
-  // way, so the wall breaks into lit and shaded faces like stacked blocks of jointed rock (each bed stepping
-  // in or out a little over the one under it: a ledge, a shadow), never a turned drum. The cap is a polygon
-  // too, standing out past the top bed's corners by its own amount at each. Joints: clefts that cut the
-  // wall into pillars (some its whole height, notching the cap, some down from the cap, a few up from the
-  // foot).
-  const span = B.arc ? B.arc[1] - B.arc[0] : TAU;
-  const dA = 2 * Math.acos(1 - 0.3 / R);                  // (a face whose middle lies ~0.3 m in from its corners)
-  const nF = Math.max(B.arc ? 3 : 7, Math.round(span / dA));
-  const polygon = (rIn, rOut) => {
-    const wts = []; for (let k = 0; k < nF; k++) wts.push(0.62 + rnd() * 0.76);
-    const wsum = wts.reduce((p, q) => p + q, 0), CA = [], CR = [], TN = [];
-    let ca = B.arc ? B.arc[0] : rnd() * TAU;
-    for (let k = 0; k <= nF; k++) { CA.push(ca); CR.push(lerp(rIn, rOut, rnd())); TN.push(0.93 + rnd() * 0.14); if (k < nF) ca += wts[k] / wsum * span; }
-    if (!B.arc) CR[nF] = CR[0];                             // (a closed ring: the last corner is the first, a turn on)
+  // corners a hair outside the outline, the faces' middles ~0.25 m in) turned its own way, so the wall
+  // breaks into lit and shaded faces like stacked blocks of jointed rock (each bed stepping in or out a
+  // little over the one under it: a ledge, a shadow), never a turned drum. Every cusp of the outline is a
+  // corner of every bed (no face spans a re-entrant, so none fills it), and the faces along each arc are
+  // as long as its circle allows for that ~0.3 m. The cap is a polygon too, standing out past the top
+  // bed's corners by its own amount at each. Joints: clefts that cut the wall into pillars (some its whole
+  // height, notching the cap, some down from the cap, a few up from the foot), and one in every cusp.
+  const polygon = (oIn, oOut) => {
+    const SS = [];
+    for (const sg of OL.segs) {
+      const len = sg.s1 - sg.s0;
+      const n = Math.max(OL.ring ? (OL.cusps.length ? 1 : 7) : 3, Math.round(len / Math.sqrt(2.4 * sg.rho)));
+      const wts = []; for (let k = 0; k < n; k++) wts.push(0.62 + rnd() * 0.76);
+      const wsum = wts.reduce((p, q) => p + q, 0);
+      // (a ring with no cusp: its first corner anywhere round it; otherwise a corner on each cusp)
+      let sv = sg.s0 + (OL.ring && !OL.cusps.length ? rnd() * len : 0);
+      for (let k = 0; k < n; k++) { SS.push(sv); sv += wts[k] / wsum * len; }
+      if (!OL.ring) SS.push(sg.s1);                       // (the bench's arc: a corner at each end)
+    }
+    let CA = SS.map(sv => OL.th(sv));
+    if (OL.ring) { const c0 = CA[0]; CA = CA.map(a => c0 + (((a - c0) % TAU) + TAU) % TAU).sort((p, q) => p - q); }
+    const nF = OL.ring ? CA.length : CA.length - 1;
+    const CR = CA.map(a => Rb(a) + lerp(oIn, oOut, rnd())), TN = CA.map(() => 0.93 + rnd() * 0.14);
+    if (OL.ring) { CA.push(CA[0] + TAU); CR.push(CR[0]); TN.push(TN[0]); }   // (closed: the last corner is the first, a turn on)
     const face = th => {
-      const t = B.arc ? Math.max(CA[0], Math.min(CA[nF], B.inArc(th))) : ((th - CA[0]) % TAU + TAU) % TAU + CA[0];
+      const t = OL.ring ? ((th - CA[0]) % TAU + TAU) % TAU + CA[0] : Math.max(CA[0], Math.min(CA[nF], OL.inArc(th)));
       let k = 0; while (k < nF - 1 && t >= CA[k + 1]) k++;
       return [k, t];
     };
@@ -202,62 +305,73 @@ function bodyForm(W, S, rnd, o) {
     };
     // (each face its own tone, +-7%: the faces read as separate planes of rock even in flat light)
     const tone = th => TN[face(th)[0]];
-    return { CA, CR, at, tone, corners: B.arc ? CA.slice() : CA.slice(0, nF) };
+    return { CA, CR, at, tone, corners: OL.ring ? CA.slice(0, nF) : CA.slice() };
   };
   // the beds, from the foot to the cap, 1.6-3.4 m each (the lowest runs down into the ground)
   const H = yT - gm, yCapLo = yT - S.capT[1] - 0.6, beds = [];
   for (let y = gm + 1.2 + rnd() * 1.4; y < yCapLo - 1.0; y += 1.6 + rnd() * 1.8) beds.push(y);
-  // (a soft bed, now and then, stands back ~0.12 m under the harder one over it: a ledge and its shadow)
-  B.beds = [-1e9, ...beds, 1e9].map((y0, k, A) => { if (k >= A.length - 1) return null; const o = k > 0 && rnd() < 0.45 ? -0.1 : 0; return { y0, y1: A[k + 1], P: polygon(R + 0.05 + o, R + 0.11 + o) }; }).filter(Boolean);
-  const capP = polygon(R + Math.max(0.26, S.ov[0]), R + S.ov[1]);
+  // (a soft bed, now and then, stands back ~0.1 m under the harder one over it: a ledge and its shadow)
+  B.beds = [-1e9, ...beds, 1e9].map((y0, k, A) => { if (k >= A.length - 1) return null; const o = k > 0 && rnd() < 0.45 ? -0.1 : 0; return { y0, y1: A[k + 1], P: polygon(0.05 + o, 0.11 + o) }; }).filter(Boolean);
+  const capP = polygon(Math.max(0.26, S.ov[0]), S.ov[1]);
   B.corners = [...new Set(B.beds.flatMap(b => b.P.corners).concat(capP.corners))];
   B.plan = (th, y) => {
     let k = 0; while (k < B.beds.length - 1 && y > B.beds[k].y1) k++;
-    const b = B.beds[k], v = b.P.at(th) - R;
+    const b = B.beds[k], r0 = Rb(th), v = b.P.at(th) - r0;
     // (a soft step, 0.3 m, into the bed above or below)
-    if (k + 1 < B.beds.length && y > b.y1 - 0.15) return lerp(v, B.beds[k + 1].P.at(th) - R, sstep(b.y1 - 0.15, b.y1 + 0.15, y));
-    if (k > 0 && y < b.y0 + 0.15) return lerp(B.beds[k - 1].P.at(th) - R, v, sstep(b.y0 - 0.15, b.y0 + 0.15, y));
+    if (k + 1 < B.beds.length && y > b.y1 - 0.15) return lerp(v, B.beds[k + 1].P.at(th) - r0, sstep(b.y1 - 0.15, b.y1 + 0.15, y));
+    if (k > 0 && y < b.y0 + 0.15) return lerp(B.beds[k - 1].P.at(th) - r0, v, sstep(b.y0 - 0.15, b.y0 + 0.15, y));
     return v;
   };
-  const polyAt = (th, P) => P.at(th);
   B.tone = (th, y) => { let k = 0; while (k < B.beds.length - 1 && y > B.beds[k].y1) k++; return B.beds[k].P.tone(th); };
   B.capTone = th => capP.tone(th) * cbC(th);
   const J = [];
-  const nJ = Math.max(B.arc ? 2 : 5, Math.round(span * R / (3.8 + rnd() * 2.2)));
-  const ja0 = rnd() * TAU;
+  const P = OL.perim;
+  const nJ = Math.max(B.arc ? 2 : 5, Math.round(P / (3.8 + rnd() * 2.2)));
+  const js0 = rnd() * P;
   for (let k = 0; k < nJ; k++) {
-    const f = (k + 0.5 + (rnd() - 0.5) * 0.6) / nJ, a = B.arc ? lerp(B.arc[0] + 0.25, B.arc[1] - 0.25, f) : ja0 + f * TAU;
+    const f = (k + 0.5 + (rnd() - 0.5) * 0.6) / nJ, a = OL.th(OL.ring ? js0 + f * P : lerp(0.25 * R, P - 0.25 * R, f));
     const q = rnd(), full = q < 0.55, top = q >= 0.55 && q < 0.85;
-    J.push({ a, w: 0.26 + rnd() * 0.26, d: 0.2 + rnd() * 0.14,
+    const j = { a, w: 0.26 + rnd() * 0.26, d: 0.2 + rnd() * 0.14,
       y0: full || top ? (full ? -1e9 : yT - H * (0.35 + rnd() * 0.35)) : -1e9,
-      y1: full || top ? 1e9 : gm + H * (0.3 + rnd() * 0.3), cap: full || top });
+      y1: full || top ? 1e9 : gm + H * (0.3 + rnd() * 0.3), cap: full || top };
+    // (none crowding a cusp: the cusp has its own)
+    if (!OL.cusps.some(c => OL.arcD(a, c) < 1.2)) J.push(j);
   }
+  // a cleft in every cusp, where two of the butte's masses meet: the whole height, through the cap (the
+  // beds run on across it: no fault there)
+  // (a broad gully, the deepest and darkest of them: erosion works hardest in a re-entrant)
+  for (const c of OL.cusps) J.push({ a: c, w: 0.55 + rnd() * 0.3, d: 0.3 + rnd() * 0.05, y0: -1e9, y1: 1e9, cap: true, cusp: true, dark: 0.86 });
   B.joints = J;
-  // A value of its own for each block of rock between two joints (Js, sorted), blended across each
-  // joint's cleft (the step hides in it); the bench's arc: arcV before its first joint
-  const bySeg = (Js, vals, arcV) => th => {
-    const n = Js.length;
-    if (!n) return arcV;
-    if (!B.arc && n < 2) return vals[0];
-    const t = B.arc ? B.inArc(th) : ((th - Js[0].a) % TAU + TAU) % TAU + Js[0].a;
-    let k = B.arc ? -1 : n - 1;
-    for (let i = 0; i < n; i++) if (t >= Js[i].a) k = i;
-    const val = i => (B.arc ? (i < 0 ? arcV : vals[i]) : vals[(i + n) % n]);
-    for (let i = 0; i < n; i++) {
-      for (const turn of B.arc ? [0] : [-TAU, 0, TAU]) {
-        const d = (t - Js[i].a - turn) * R, w = Js[i].w * 0.6;
+  // A value of its own for each block of rock between two joints (Js), blended across each joint's cleft
+  // (the step hides in it); the bench's arc: arcV before its first joint
+  const bySeg = (Js, vals, arcV) => {
+    const L = Js.map((j, i) => ({ s: OL.s(j.a), w: j.w, v: vals[i] })).sort((p, q) => p.s - q.s), n = L.length;
+    const val = i => (OL.ring ? L[(i + n) % n].v : (i < 0 ? arcV : L[i].v));
+    return th => {
+      if (!n) return arcV;
+      if (OL.ring && n < 2) return L[0].v;
+      const sv = OL.s(th);
+      for (let i = 0; i < n; i++) {
+        let d = sv - L[i].s;
+        if (OL.ring) d -= P * Math.round(d / P);
+        const w = L[i].w * 0.6;
         if (Math.abs(d) < w) return lerp(val(i - 1), val(i), sstep(-w, w, d));
       }
-    }
-    return val(k);
+      let k = OL.ring ? n - 1 : -1;
+      for (let i = 0; i < n; i++) if (sv >= L[i].s) k = i;
+      return val(k);
+    };
   };
+  // each of the butte's masses (the body, each lobe: between two cusps) weathered a little differently
+  const cuspJ = J.filter(j => j.cusp);
+  B.massTone = bySeg(cuspJ, cuspJ.map(() => 0.92 + rnd() * 0.16), 1);
   // Faults: between two joints that run the wall's whole height its blocks settled on their own, the beds
   // a little higher or lower (+-0.4 m), so no band runs round the butte unbroken
-  const fulls = J.filter(j => j.y0 < -1e8 && j.y1 > 1e8).sort((p, q) => p.a - q.a);
+  const fulls = J.filter(j => j.y0 < -1e8 && j.y1 > 1e8 && !j.cusp);
   B.vOff = bySeg(fulls, fulls.map(() => (rnd() - 0.5) * 0.8), (rnd() - 0.5) * 0.8);
   // The cap is blocks too, split by the joints that reach it: each its own thickness (its underside steps
   // +-0.2 m at a cleft), overhang (x0.7-1.1) and tone, so it never reads as one turned lid
-  const capJ = J.filter(j => j.cap).sort((p, q) => p.a - q.a);
+  const capJ = J.filter(j => j.cap);
   const cbT = bySeg(capJ, capJ.map(() => (rnd() - 0.5) * 0.4), (rnd() - 0.5) * 0.4);
   const cbO = bySeg(capJ, capJ.map(() => 0.7 + rnd() * 0.4), 0.7 + rnd() * 0.4);
   const cbC = bySeg(capJ, capJ.map(() => 0.9 + rnd() * 0.18), 0.9 + rnd() * 0.18);
@@ -272,57 +386,60 @@ function bodyForm(W, S, rnd, o) {
     break;
   }
   B.notches = notch;
-  // the buttresses at the foot: three to five spurs
+  // the buttresses at the foot: three to five spurs (w: m along the outline)
   const spurs = [];
   const nS = main ? 3 + Math.floor(rnd() * 3) : 1 + Math.floor(rnd() * 2);
-  for (let k = 0; k < nS; k++) spurs.push({ a: B.arc ? lerp(B.arc[0] + 0.4, B.arc[1] - 0.4, rnd()) : rnd() * TAU, w: 0.25 + rnd() * 0.25, k: 0.6 + rnd() * 0.6 });
-  // how deep in a joint (0..1) at (th, y), and how far it cuts (m)
+  for (let k = 0; k < nS; k++) spurs.push({ a: B.arc ? lerp(B.arc[0] + 0.4, B.arc[1] - 0.4, rnd()) : rnd() * TAU, w: (0.25 + rnd() * 0.25) * R, k: 0.6 + rnd() * 0.6 });
+  // (and a broad one under the middle of each lobe: a bastion's foot)
+  for (const sg of OL.segs) if (sg.lobe) spurs.push({ a: OL.th((sg.s0 + sg.s1) / 2), w: Math.min(3.2, 0.4 * (sg.s1 - sg.s0)), k: 0.8 + rnd() * 0.4 });
+  const spurAt = th => { let sp = 0; for (const s of spurs) sp = Math.max(sp, s.k * (1 - sstep(s.w * 0.4, s.w, OL.arcD(th, s.a)))); return sp; };
+  // how deep in a joint (0..1) at (th, y), how far it cuts (m), and how dark its shade is there
   const jointAt = (th, y) => {
-    let best = 0, cut = 0;
+    let best = 0, cut = 0, dark = 0;
     for (const j of J) {
-      const s = angDiff(th, j.a) * R;
+      const s = OL.arcD(th, j.a);
       if (s > j.w * 1.2) continue;
       const across = 1 - sstep(j.w * 0.3, j.w, s);
       const along = sstep(j.y0 - 0.7, j.y0 + 0.5, y) * (1 - sstep(j.y1 - 0.5, j.y1 + 0.7, y));
       const k = across * along;
-      if (k > best) { best = k; cut = j.d * k; }
+      if (k > best) { best = k; cut = j.d * k; dark = (j.dark || 0.74) * k; }
     }
-    return [best, cut];
+    return [best, cut, dark];
   };
   B.joint = jointAt;
-  const notchAt = th => { let k = 0; for (const n of notch) k = Math.max(k, n.k * (1 - sstep(n.w * 0.55, n.w, angDiff(th, n.a) * R))); return k; };
+  const notchAt = th => { let k = 0; for (const n of notch) k = Math.max(k, n.k * (1 - sstep(n.w * 0.55, n.w, OL.arcD(th, n.a)))); return k; };
   B.notch = notchAt;
   const relief = S.form ? reliefMap('cliff_snow_form', 1) : reliefMap(S.rock);
   const yU0 = yT - (S.capT[0] + S.capT[1]) / 2 - 0.4;
   B.wall = (th, y) => {
     const t = clamp01((y - gm - 1.2) / Math.max(1, yU0 - gm - 1.2));
-    let f = 0.03 - 0.1 * t;                                         // a slight batter
+    let f = 0.03 - 0.1 * t + OL.fill(th);                         // a slight batter; a cusp rounded
     f += B.plan(th, y);
-    const [tu, tv] = texUV(S, th * B.Rref, y + B.vOff(th));
+    const [tu, tv] = texUV(S, B.U(th), y + B.vOff(th));
     f += S.rel * relief(tu, tv);
     f -= jointAt(th, y)[1];
     return softClamp(f, WALL_IN, WALL_OUT);
   };
   B.ov = th => {
-    let v = polyAt(th, capP) - R;
-    for (const j of J) if (j.cap) { const s = angDiff(th, j.a) * R; if (s < j.w * 1.4) v -= (0.6 + j.d * 2) * (1 - sstep(j.w * 0.3, j.w * 1.4, s)) * 0.3; }
+    let v = capP.at(th) - Rb(th);
+    for (const j of J) if (j.cap) { const s = OL.arcD(th, j.a); if (s < j.w * 1.4) v -= (0.6 + j.d * 2) * (1 - sstep(j.w * 0.3, j.w * 1.4, s)) * 0.3; }
     v = lerp(v * cbO(th), 0.03, notchAt(th));
     return Math.max(0.03, Math.min(LIP, v * (main ? (B.overK ? B.overK(th) : 1) : B.head(th))));
   };
   B.capT = th => {
     let t = (lerp(S.capT[0], S.capT[1], 0.5 + 0.5 * capN(th)) + cbT(th)) * (main ? 1 : 0.75);
     t *= 1 - 0.45 * notchAt(th);
-    if (!main) t = Math.min(t, Math.max(0.35, yT - g(th, R + 0.3) - 2.3));
+    if (!main) t = Math.min(t, Math.max(0.35, yT - g(th, Rb(th) + 0.3) - 2.3));
     return t;
   };
   B.ucH = th => (0.3 + 0.25 * (0.5 + 0.5 * ucN(th))) * (main ? 1 : 0.4 + 0.6 * B.head(th));
   B.ucD = th => (main ? 0.06 + 0.27 * (B.overK ? B.overK(th) : 1) : 0.06 + 0.27 * B.head(th)) * (1 - 0.6 * notchAt(th));
+  // (the road's distance from the foot at a bearing)
+  const roadD = th => { const r = Rb(th), x = cx + Math.cos(th) * r, z = cz + Math.sin(th) * r; return Math.abs(x - W.roadX(z)); };
   B.flare = th => {
-    let sp = 0; for (const s of spurs) sp = Math.max(sp, s.k * (1 - sstep(s.w * 0.4, s.w, angDiff(th, s.a))));
-    let F = S.flare[0] * (0.75 + 0.25 * buttP(th)) + S.flare[1] * sp;
+    let F = S.flare[0] * (0.75 + 0.25 * buttP(th)) + S.flare[1] * spurAt(th);
     // never into the road's ditch: the foot keeps 6.9 m from the road's centre line
-    const x = cx + Math.cos(th) * R, z = cz + Math.sin(th) * R, dR = Math.abs(x - W.roadX(z));
-    F = Math.min(F, Math.max(0.05, dR - 6.9));
+    F = Math.min(F, Math.max(0.05, roadD(th) - 6.9));
     // (and none where the main body's wall runs into the bench: its foot is the bench's there)
     return B.benchIn ? F * (1 - sstep(-1.6, 0.2, B.benchIn(th))) : F;
   };
@@ -333,22 +450,17 @@ function bodyForm(W, S, rnd, o) {
   B.bankH = th => {
     const up = Math.max(0, -(Math.cos(th) * 0.58104 + Math.sin(th) * 0.81388));
     let h = S.bank[0] + S.bank[1] * up + S.bank[2] * bankN(th);
-    const x = cx + Math.cos(th) * R, z = cz + Math.sin(th) * R, dR = Math.abs(x - W.roadX(z));
-    h *= sstep(7.4, 9.5, dR);
+    h *= sstep(7.4, 9.5, roadD(th));
     if (B.benchIn) h *= 1 - sstep(-1.2, 0.3, B.benchIn(th));
     // (the bench's bank tapers away toward its arc's ends, where its wall runs into the main body's:
-    // never a cut end standing up off the mound like a plank)
-    if (B.arc) h *= sstep(0.15, 0.7, ARC_B - angDiff(th, o.benchA));
+    // never a cut end standing up off the mound like a plank; and none where it runs into a lobe)
+    if (B.arc) h *= sstep(0.15, 0.7, ARC_B - angDiff(th, (B.arc[0] + B.arc[1]) / 2)) * (B.mainIn ? 1 - sstep(-1.2, 0.3, B.mainIn(th)) : 1);
     return Math.max(0, Math.min(1.35, h));
   };
-  B.bankR = th => {
-    const x = cx + Math.cos(th) * R, z = cz + Math.sin(th) * R, dR = Math.abs(x - W.roadX(z));
-    return Math.max(0.5, Math.min(2.4 + 1.8 * B.bankH(th) + 0.6 * reachN(th), dR - 7.0));
-  };
+  B.bankR = th => Math.max(0.5, Math.min(2.4 + 1.8 * B.bankH(th) + 0.6 * reachN(th), roadD(th) - 7.0));
   B.hF = th => {
-    let sp = 0; for (const s of spurs) sp = Math.max(sp, s.k * (1 - sstep(s.w * 0.4, s.w, angDiff(th, s.a))));
-    const room = yT - B.capT(th) - B.ucH(th) - g(th, R + 0.2);
-    return Math.max(0.3, Math.min(0.75 + 0.35 * sp, room * 0.55));
+    const room = yT - B.capT(th) - B.ucH(th) - g(th, Rb(th) + 0.2);
+    return Math.max(0.3, Math.min(0.75 + 0.35 * spurAt(th), room * 0.55));
   };
   return B;
 }
@@ -360,30 +472,40 @@ export function butteForms(W) {
   for (const p of W.mesas || []) {
     const M = p.mesa;
     if (!M) continue;
-    // (world gen's two cylinders, from p.mesa: the main body and the bench)
+    // (world gen's cylinders, from p.mesa: the main body and its lobes (one outline), and the bench)
     const cm = { x: p.x, z: p.z, r: M.R ?? M.r, top: M.base + M.h };
     const cb = M.bench ? { x: M.bench.x, z: M.bench.z, r: M.bench.r, top: M.bench.top } : null;
     const rnd = rng32((Math.round(p.z * 977) ^ Math.imul(W.seed | 0, 0x2C1B3C6D) ^ 0x51ED27) >>> 0);
     const roadA = Math.atan2(0, W.roadX(p.z) - p.x);       // toward the road (x, z: cos, sin)
-    const main = bodyForm(W, S, rnd, { cx: cm.x, cz: cm.z, R: cm.r, yT: cm.top, kind: 'main', roadA, lobes: M.lobes, ph: M.ph });
+    const main = bodyForm(W, S, rnd, { cx: cm.x, cz: cm.z, R: cm.r, yT: cm.top, kind: 'main', roadA, OL: mainOutline(p) });
     let bench = null;
     if (cb) {
       const benchA = Math.atan2(cb.z - cm.z, cb.x - cm.x);
-      bench = bodyForm(W, S, rnd, { cx: cb.x, cz: cb.z, R: cb.r, yT: cb.top, kind: 'bench', roadA, benchA });
+      // (how far inside the main tier's outline a point stands)
+      const inMain = (x, z) => main.Rb(Math.atan2(z - cm.z, x - cm.x)) - Math.hypot(x - cm.x, z - cm.z);
+      bench = bodyForm(W, S, rnd, { cx: cb.x, cz: cb.z, R: cb.r, yT: cb.top, kind: 'bench', roadA, OL: arcOutline(cb.r, benchA, ARC_B) });
       bench.benchA = benchA;
+      // how far inside the main tier the bench's wall stands at a bearing (a lobe can stand round it)
+      bench.mainIn = th => inMain(cb.x + Math.cos(th) * cb.r, cb.z + Math.sin(th) * cb.r);
       // the main body's cap overhangs the bench's top only where it stands well above head height over it
       main.overK = th => {
-        const x = cm.x + Math.cos(th) * (cm.r + LIP), z = cm.z + Math.sin(th) * (cm.r + LIP);
+        const r = main.Rb(th) + LIP, x = cm.x + Math.cos(th) * r, z = cm.z + Math.sin(th) * r;
         if (Math.hypot(x - cb.x, z - cb.z) > cb.r + LIP + 0.3) return 1;
         return sstep(2.4, 3.2, main.yT - main.capT(th) - main.ucH(th) - bench.yT);
       };
-      // how far inside the bench the main body's wall stands at a bearing; its wall starts on the bench's
+      // how far inside the bench the main tier's wall stands at a bearing; its wall starts on the bench's
       // top wherever the bench stands round it
-      main.benchIn = th => cb.r - Math.hypot(cm.x + Math.cos(th) * cm.r - cb.x, cm.z + Math.sin(th) * cm.r - cb.z);
+      main.benchIn = th => { const r = main.Rb(th); return cb.r - Math.hypot(cm.x + Math.cos(th) * r - cb.x, cm.z + Math.sin(th) * r - cb.z); };
       main.shortY = th => main.benchIn(th) > SHORT_IN ? bench.yT - 0.3 : null;
     }
     const F = { p, main, bench, roadA };
     F.bank = (x, z) => bankAt(F, x, z);      // (the banks' height over the ground: the talus lies on them)
+    // how far inside the butte (either tier) a point stands (< 0: outside)
+    F.inside = (x, z) => {
+      let d = main.Rb(Math.atan2(z - cm.z, x - cm.x)) - Math.hypot(x - cm.x, z - cm.z);
+      if (cb) d = Math.max(d, cb.r - Math.hypot(x - cb.x, z - cb.z));
+      return d;
+    };
     out.push(F);
   }
   FORMS.set(W, out);
@@ -394,13 +516,12 @@ export function butteForms(W) {
 // The rim's rounded edge: from (R, yT) round a quarter ellipse to the cap's face at R + ov, e below.
 const rimDrop = ov => Math.min(0.26, ov * 0.6 + 0.04);
 function topOf(B, x, z) {
-  const dx = x - B.cx, dz = z - B.cz, r = Math.hypot(dx, dz);
-  if (r <= B.R) return B.yT;
-  const th = Math.atan2(dz, dx);
+  const dx = x - B.cx, dz = z - B.cz, r = Math.hypot(dx, dz), th = Math.atan2(dz, dx), R = B.Rb(th);
+  if (r <= R) return B.yT;
   if (B.arc && angDiff(th, (B.arc[0] + B.arc[1]) / 2) > ARC_B) return null;
   const ov = B.ov(th);
-  if (r > B.R + ov) return null;
-  const e = rimDrop(ov), q = (r - B.R) / ov;
+  if (r > R + ov) return null;
+  const e = rimDrop(ov), q = (r - R) / ov;
   return B.yT - e + e * Math.sqrt(Math.max(0, 1 - q * q));
 }
 export function butteGround(W, p) {
@@ -455,28 +576,28 @@ export const aoColor = (S, ao) => [lerp(S.ao[0], 1, ao), lerp(S.ao[1], 1, ao), l
 // One column of a tier from its buried foot to its top's middle: [{ r, y, ao, cap, dup }] (dup: the same
 // point again, with no faces between them: a crease). Every column of a tier has the same number of points.
 function profile(W, S, B, th, nBody) {
-  const R = B.R, yT = B.yT, P = [];
+  const R = B.Rb(th), yT = B.yT, P = [];
   const add = (r, y, ao, cap = 0, dup = false) => { P.push({ r, y, ao, cap, dup }); };
   const ov = B.ov(th), capT = B.capT(th), ucH = B.ucH(th), ucD = B.ucD(th);
   const yCapB = yT - capT, yUc = yCapB - ucH;
-  const F = B.flare(th), hF = B.hF(th);
+  const F = B.flare(th), hF = B.hF(th), mT = B.massTone(th);
   // (heights from the lowest ground just outside the wall: where the road's ditch cuts into the mound the
   // ground falls away from the foot, and nothing stands out past the wall more than ~1.5 m above it)
   const gW = Math.min(B.g(th, R + 0.25), B.g(th, R + 0.3 + F * 0.6));
   // (darker in a joint's cleft, and under a bed that steps out over the one below)
-  const jAO = y => (1 - 0.74 * B.joint(th, y)[0]) * (1 - Math.min(0.3, Math.max(0, B.plan(th, y + 0.35) - B.plan(th, y)) * 2.4));
+  const jAO = y => (1 - B.joint(th, y)[2]) * (1 - Math.min(0.3, Math.max(0, B.plan(th, y + 0.35) - B.plan(th, y)) * 2.4));
   // the foot, hugging the mound: the rock flares out onto it (buttresses where the spurs are)
   for (const k of [-0.6, -0.05, 0.2, 0.45, 0.72, 1.0]) {
     const h = k * hF, x = k <= 0 ? F + (-k) * 0.6 : F * Math.pow(1 - k, 1.7);
     const r = R + B.wall(th, gW + Math.max(0, h)) + x;
     const y = Math.min(B.g(th, r), gW) + h;
-    add(r, y, lerp(0.62, 0.92, clamp01(k)) * jAO(y) * B.tone(th, y));
+    add(r, y, lerp(0.62, 0.92, clamp01(k)) * jAO(y) * B.tone(th, y) * mT);
   }
   // the wall
   const yF = P[P.length - 1].y;
   for (let k = 1; k <= nBody; k++) {
     const y = yF + (yUc - yF) * k / nBody, t = k / nBody;
-    add(R + B.wall(th, y), y, lerp(0.92, 1.0, t) * (1 - 0.12 * sstep(0.85, 1, t)) * jAO(y) * B.tone(th, y));
+    add(R + B.wall(th, y), y, lerp(0.92, 1.0, t) * (1 - 0.12 * sstep(0.85, 1, t)) * jAO(y) * B.tone(th, y) * mT);
   }
   // the undercut under the cap (cool, in shadow), the cap's underside, its face, its rounded rim
   const rU = R - ucD;
@@ -501,45 +622,50 @@ function profile(W, S, B, th, nBody) {
   return P;
 }
 
-// the bearings of a tier's columns: ~0.45 m apart, closer round each joint
+// the bearings of a tier's columns: ~0.45 m apart along its outline, closer round each corner and joint
+// (the main tier's from its seam t0 once round, so their raw arc length runs 0..perim, and the seam's
+// column again at the end, a turn on: its u runs on)
 function columns(B) {
-  const R = B.R, out = [];
-  const [a0, a1] = B.arc || [0, TAU];
-  const n = Math.max(12, Math.ceil((a1 - a0) * R / 0.45));
-  for (let i = 0; i < n; i++) out.push(a0 + (a1 - a0) * i / n);
-  if (B.arc) out.push(a1);
+  const OL = B.OL, P = OL.perim, out = [];
+  const n = Math.max(12, Math.ceil(P / 0.45));
+  for (let i = 0; i < n; i++) out.push(P * i / n);
+  if (!OL.ring) out.push(P);
   // (each corner crisp: a column on it and one either side; a joint's cleft in seven)
-  const extra = [];
-  for (const c of B.corners) for (const k of [-0.12, 0, 0.12]) extra.push(c + k / R);
-  for (const j of B.joints) for (const k of [-1.25, -0.8, -0.4, 0.4, 0.8, 1.25]) extra.push(j.a + k * j.w / R);
-  for (let a of extra) {
-    if (B.arc) { if (a <= a0 || a >= a1) continue; }
-    else a = ((a % TAU) + TAU) % TAU;
-    out.push(a);
+  for (const c of B.corners) { const s = OL.s(c); for (const k of [-0.12, 0, 0.12]) out.push(s + k); }
+  for (const j of B.joints) { const s = OL.s(j.a); for (const k of [-1.25, -0.8, -0.4, 0, 0.4, 0.8, 1.25]) out.push(s + k * j.w); }
+  const L = [];
+  for (let s of out) {
+    if (OL.ring) s = ((s % P) + P) % P;
+    else if (s < 0 || s > P) continue;
+    L.push(s);
   }
-  out.sort((p, q) => p - q);
-  const A = out.filter((a, i) => i === 0 || a - out[i - 1] > 0.004);
-  if (!B.arc) A.push(A[0] + TAU);     // the seam: the first column again, a turn on (its u runs on)
-  return A;
+  L.sort((p, q) => p - q);
+  const A = L.filter((s, i) => i === 0 || s - L[i - 1] > 0.02);
+  const th = A.map(s => (OL.ring ? OL.t0 + (((OL.th(s) - OL.t0) % TAU) + TAU) % TAU : OL.th(s)));
+  if (OL.ring) th.push(OL.t0 + TAU);
+  return th;
 }
 
 // The bank: a smooth skirt round a tier's foot from just inside its wall, bankH up, falling (concave) onto
 // the mound bankR out, its outer edge sunk into the ground; the cover's (sand, snow) or the scree's colour.
 function bankInto(acc, W, S, B) {
-  const [a0, a1] = B.arc ? [B.arc[0] + 0.15, B.arc[1] - 0.15] : [0, TAU];
-  const n = Math.max(16, Math.ceil((a1 - a0) * B.R / 0.45)), T = [0, 0.1, 0.24, 0.42, 0.64, 0.86, 1.0];
+  const OL = B.OL;
+  // (round the main tier from its seam once round; along the bench's arc, stopping 0.15 rad short of its ends)
+  const [s0, s1] = OL.ring ? [0, OL.perim] : [0.15 * B.R, OL.perim - 0.15 * B.R];
+  const n = Math.max(16, Math.ceil((s1 - s0) / 0.45)), T = [0, 0.1, 0.24, 0.42, 0.64, 0.86, 1.0];
   const v0 = acc.n, i0 = acc.I.length, ids = [];
   for (let i = 0; i <= n; i++) {
-    const th = a0 + (a1 - a0) * i / n, c = Math.cos(th), s = Math.sin(th), h = B.bankH(th), reach = B.bankR(th);
+    const sv = s0 + (s1 - s0) * i / n;
+    const th = !OL.ring ? OL.th(sv) : i === n ? OL.t0 + TAU : OL.t0 + (((OL.th(sv) - OL.t0) % TAU) + TAU) % TAU;
+    const c = Math.cos(th), s = Math.sin(th), h = B.bankH(th), reach = B.bankR(th), R = B.Rb(th), u = B.U(th, true);
     const row = [];
     for (const t of T) {
-      const r0 = B.R + B.wall(th, B.g(th, B.R + 0.3) + h * 0.5) - 0.12, r = r0 + reach * t;
+      const r0 = R + B.wall(th, B.g(th, R + 0.3) + h * 0.5) - 0.12, r = r0 + reach * t;
       const x = B.cx + c * r, z = B.cz + s * r, g = W.heightAt(x, z);
       const y = g + h * Math.pow(1 - t, 1.7) - (t >= 1 ? 0.12 : 0);
-      row.push(acc.v(x, y, z, 0, 1, 0, aoColor(S, lerp(0.86, 1, t)), [th * B.Rref, 0], [0, y - g, S.bank[3] ? -2 : -1, 0]));
+      row.push(acc.v(x, y, z, 0, 1, 0, aoColor(S, lerp(0.86, 1, t)), [u, 0], [0, y - g, S.bank[3] ? -2 : -1, 0]));
     }
     ids.push(row);
-    if (!B.arc && i === n) break;
   }
   for (let i = 0; i < n; i++) for (let k = 0; k + 1 < T.length; k++) {
     const a = ids[i][k], b = ids[i][k + 1], c = ids[i + 1][k + 1], d = ids[i + 1][k];
@@ -554,7 +680,7 @@ export function bankAt(F, x, z) {
     if (!B) continue;
     const dx = x - B.cx, dz = z - B.cz, r = Math.hypot(dx, dz), th = Math.atan2(dz, dx);
     if (B.arc && angDiff(th, (B.arc[0] + B.arc[1]) / 2) > (B.arc[1] - B.arc[0]) / 2) continue;
-    const r0 = B.R + 0.05, reach = B.bankR(th), t = (r - r0) / reach;
+    const r0 = B.Rb(th) + 0.05, reach = B.bankR(th), t = (r - r0) / reach;
     if (t < -0.2 || t > 1) continue;
     h = Math.max(h, B.bankH(th) * Math.pow(1 - Math.max(0, t), 1.7));
   }
@@ -568,12 +694,12 @@ function bodyInto(acc, W, S, B) {
   const ids = [];
   let L = -1;
   for (const th of cols) {
-    const P = profile(W, S, B, th, nBody), c = Math.cos(th), s = Math.sin(th), vo = B.vOff(th), bank = B.bankH(th);
+    const P = profile(W, S, B, th, nBody), c = Math.cos(th), s = Math.sin(th), vo = B.vOff(th), bank = B.bankH(th), u = B.U(th, true);
     if (L < 0) L = P.length;
     const row = [];
     for (const q of P) {
       const x = B.cx + c * q.r, z = B.cz + s * q.r;
-      row.push({ id: acc.v(x, q.y, z, 0, 1, 0, aoColor(S, q.ao), [th * B.Rref, vo], [0, q.y - W.heightAt(x, z) - bank, B.yT - q.y, q.cap]), dup: q.dup });
+      row.push({ id: acc.v(x, q.y, z, 0, 1, 0, aoColor(S, q.ao), [u, vo], [0, q.y - W.heightAt(x, z) - bank, B.yT - q.y, q.cap]), dup: q.dup });
     }
     ids.push(row);
   }
@@ -723,7 +849,7 @@ export function butteGeometry(W, { tint = null } = {}) {
     // the splat's broad warm/cool tint and value drift where it stands (40-80 m fields: one per butte),
     // read on the open mound beside it, so the rock and the ground round it are tinted alike
     if (tint) {
-      const a = F.roadA + Math.PI, R = F.main.R + 3.5, t = tint(F.main.cx + Math.cos(a) * R, F.main.cz + Math.sin(a) * R);
+      const a = F.roadA + Math.PI, R = F.main.Rb(a) + 3.5, t = tint(F.main.cx + Math.cos(a) * R, F.main.cz + Math.sin(a) * R);
       for (let i = v0 * 3; i < acc.C.length; i += 3) { acc.C[i] *= t.r; acc.C[i + 1] *= t.g; acc.C[i + 2] *= t.b; }
     }
   }
