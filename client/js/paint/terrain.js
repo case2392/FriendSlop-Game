@@ -2817,10 +2817,16 @@ const MTN = {
     { col: '#6c7c96', lo: 0.26, hi: 0.72, kind: 'peak', n: 16, snow: 0.42, hero: [[0.37, 0.07, 1], [0.87, 0.07, 0.95]] },
     { col: '#34504e', lo: 0.20, hi: 0.5, kind: 'pines', n: 34, snow: 0.35, hero: [[0.71, 0.045, 1]] },
   ],
+  // (Tanaris: an open erg. Long dune ridges fading into the haze, each with a long lit windward back and a
+  // short shaded slip face under a soft crest; standing up out of them, far apart, a few isolated sandstone
+  // buttes and a low mesa (flat caprock, sheer flanks, a talus apron spreading into the sand, two or three
+  // faint beds); never a continuous wall. buttes: [u, half-width (of the ring), height (of the row)])
   desert: [
-    { col: '#c4a07e', lo: 0.20, hi: 0.70, kind: 'mesa', n: 10, hero: [[0.0, 0.03, 1], [0.028, 0.022, 0.7], [-0.03, 0.026, 0.82], [0.5, 0.028, 0.9], [0.53, 0.02, 0.64], [0.47, 0.024, 0.76]] },
-    { col: '#d0ac84', lo: 0.14, hi: 0.42, kind: 'dune', n: 14, hero: [[0.37, 0.09, 1], [0.87, 0.08, 0.95]] },
-    { col: '#c49a6a', lo: 0.10, hi: 0.30, kind: 'dune', n: 18, hero: [[0.71, 0.08, 1]] },
+    { col: '#d4b28c', lo: 0.12, hi: 0.36, kind: 'dune', long: true, n: 10, hero: [[0.0, 0.12, 0.85], [0.5, 0.11, 0.8]],
+      buttes: [[0.085, 0.014, 0.34], [0.24, 0.032, 0.24, 'mesa'], [0.6, 0.012, 0.36], [0.625, 0.009, 0.27], [0.83, 0.026, 0.26, 'mesa']], bcol: '#c39270' },
+    { col: '#d6ae84', lo: 0.12, hi: 0.38, kind: 'dune', long: true, n: 13, hero: [[0.37, 0.09, 1], [0.87, 0.08, 0.95]],
+      buttes: [[0.45, 0.011, 0.44], [0.98, 0.022, 0.34, 'mesa']], bcol: '#c08a64' },
+    { col: '#cfa576', lo: 0.1, hi: 0.32, kind: 'dune', long: true, n: 16, hero: [[0.71, 0.08, 1]] },
   ],
 };
 
@@ -2845,7 +2851,10 @@ function mtnRow(rnd, L, w, rowH) {
       add(rnd() * w, wid, hgt);
     }
     for (const [hx, hw, hh] of L.hero || []) add(hx * w + range(rnd, -8, 8), hw * w, hh, { hero: true, z: -1 + rnd() * 0.1 });
+    if (L.long) for (const P of out) P.long = true, P.skew = (P.skew < 0 ? -1 : 1) * range(rnd, 0.4, 0.62);   // (dunes: a long back, a short slip face)
   }
+  // isolated buttes and mesas standing up out of the row (in front of everything in it)
+  for (const [bx, bw, bh, k] of L.buttes || []) out.push({ x: ((bx * w + range(rnd, -4, 4)) % w + w) % w, h: bh * rowH, wid: bw * w, kind: k || 'butte', gam: 1, skew: 0, ph: rnd() * 6, strat: rnd(), notch: periodic(rnd, 5, 0.6, 3), gul: null, z: -2 - rnd() * 0.1, butte: true });
   return out;
 }
 const PU = [0];
@@ -2867,6 +2876,14 @@ function peakAt(P, kind, x, w, tiers = false) {        // height of shape P at c
     }
     return cap * 0.42 * Math.pow(1 - (e - 0.8) / 0.2, 1.5);
   }
+  if (P.butte) {
+    // an isolated butte (or a low mesa, wider): a flat caprock with a jittered top, a shoulder, sheer
+    // sandstone flanks tapering a little, then a talus apron spreading into the sand
+    const cap = P.h - P.notch(x / w) * 1.4, m = P.kind === 'mesa' ? 0.7 : 0.5;
+    if (e < m) return cap - sst(m - 0.12, m, e) * 0.05 * P.h;
+    if (e < m + 0.16) return cap * (0.95 - (e - m) / 0.16 * 0.42);
+    return cap * 0.53 * Math.pow(1 - (e - m - 0.16) / (1 - m - 0.16), 1.7);
+  }
   if (kind === 'forest') return P.h * Math.sqrt(1 - u * u);
   if (kind === 'pines') return P.h * Math.pow(1 - e, 0.9) * (1 - 0.1 * (Math.floor((1 - e) * 4) % 2));
   if (kind === 'mesa') {
@@ -2880,7 +2897,7 @@ function peakAt(P, kind, x, w, tiers = false) {        // height of shape P at c
     return P.h * 0.6 * Math.pow(1 - (e - 0.6) / 0.4, 1.6);
   }
   const v = u < P.skew ? (u + 1) / (P.skew + 1) : (1 - u) / (1 - P.skew);
-  if (kind === 'dune') return P.h * Math.pow(Math.max(0, v), 1.3);
+  if (kind === 'dune') return P.long ? P.h * sst(0, 1, Math.max(0, v)) * (0.92 + 0.08 * Math.max(0, v)) : P.h * Math.pow(Math.max(0, v), 1.3);
   if (kind === 'hill') return P.h * Math.pow(Math.max(0, Math.sin(v * Math.PI / 2)), 1.3);
   // peak: rounded shoulders, a firm summit
   const tri = Math.max(0, v), dome = Math.sin(tri * Math.PI / 2);
@@ -2930,6 +2947,10 @@ for (const b of Object.keys(MTN)) {
             if (tree) {
               const vy = Math.min(1, (ptop - hb) / Math.max(4, best.h));
               f = -bu * 0.9 + (1 - vy) * 0.5 - 0.15;
+            } else if (best.butte) {
+              const e = Math.abs(bu), m = best.kind === 'mesa' ? 0.7 : 0.5, capB = hb > best.h - Math.max(3, best.h * 0.13);
+              if (e < m + 0.16) f = capB ? 0.7 : (bu < 0 ? 0.48 : -0.55) - depth * 0.12;               // the cap's lit top band, its flanks
+              else f = (bu < 0 ? 0.3 : -0.3) * (1 - (e - m - 0.16) / (1 - m - 0.16) * 0.6) + 0.1;      // the apron, paler, fading into the sand
             } else if (L.kind === 'mesa' && L.tiers) {
               // faces lit on the left, shaded on the right; every flat top (the cap, each bench) lit
               const e = Math.abs(bu), pa = best === BASE ? 1 : Math.abs(peakAt(best, 'mesa', x + 2, w, true) - peakAt(best, 'mesa', x - 2, w, true)) / 4;
@@ -2950,7 +2971,14 @@ for (const b of Object.keys(MTN)) {
             }
             r = base.r; gg = base.g; bb = base.b;
             if (f > 0) mixTo(lit, Math.min(1, f) * 0.85); else mixTo(dark, Math.min(1, -f) * 0.85);
-            if (L.tiers && best !== BASE && Math.abs(bu) < 0.8) {          // level strata bands, the same height across neighbours
+            if (best.butte) {
+              // the butte's own sandstone, two or three faint beds across its flanks (no stripes), the apron the sand's
+              const e = Math.abs(bu), m = best.kind === 'mesa' ? 0.7 : 0.5, bc = hex(L.bcol || L.col);
+              const onRock = 1 - sst(m + 0.12, m + 0.24, e);
+              mixTo(bc, 0.7 * onRock);
+              const q = (hb + best.strat * 30) / Math.max(10, best.h * 0.3);
+              if (e < m + 0.16 && hb < best.h - 3 && q - Math.floor(q) < 0.2) mixTo(dark, 0.12);
+            } else if (L.tiers && best !== BASE && Math.abs(bu) < 0.8) {          // level strata bands, the same height across neighbours
               const q = (hb + 3) / 11, bi = Math.floor(q), bc = hex(L.bands[((bi % L.bands.length) + L.bands.length) % L.bands.length]);
               mixTo(bc, 0.5);
               if (q - bi < 0.16) mixTo(dark, 0.32); else if (q - bi > 0.88) mixTo(lit, 0.18);

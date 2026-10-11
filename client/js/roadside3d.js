@@ -1252,6 +1252,9 @@ function buildYard(B, p, parts, ctx, decor) {
 }
 
 function buildCrash(B, p, parts, ctx, decor) {
+  // (on a crash mesa the wreck lies on its butte's top: everything here is laid on, and hangs over, the
+  // butte as the terrain draws it, its rounded rim and the caprock's lip, not on the talus mound under it)
+  if (p.mesa && typeof TERRAIN.butteGround === 'function') B.ctx = { ...ctx, H: TERRAIN.butteGround(ctx.W, p) };
   const d = decor.find(e => e.k === 'plane') || { x: p.x, y: p.y, z: p.z, ry: (p.ry || 0) + 0.8 };
   B.frame(d.x, d.y, d.z, d.ry);
   const L = parts.map(s => B.loc(s));
@@ -1410,7 +1413,11 @@ function buildCrash(B, p, parts, ctx, decor) {
     if (ctx.smokes) ctx.smokes.push(B.world(fus.x, fy + 0.05, zN - 0.2));
     // the earth heaped up in front of the nose, and the furrow it ploughed coming in: two ragged ridges of
     // turned earth either side of the fuselage, the ground between them scorched
-    const zBack = -Math.max(4, (p.mesa ? p.mesa.r : 7) - 1.3), flen = zN - zBack;
+    // (on a butte the furrow ends well inside its walkable top: the ridges' far ends, a fifth of the furrow's
+    // length past zBack and up to 1.9 m to the side, keep 0.75 m inside the collider's edge, where the rim
+    // drops sheer to the talus)
+    const RB = p.mesa ? (p.mesa.R ?? p.mesa.r) : 7;
+    const zBack = p.mesa ? Math.max(-(RB - 1.3), (0.2 * zN + 0.2 - Math.sqrt(Math.max(9, (RB - 0.75) ** 2 - 3.6))) / 1.2) : -Math.max(4, RB - 1.3), flen = zN - zBack;
     const heaps = [[1.4, 0.45, 0.9, fus.x, zN + 0.6, 0, 7]];
     // each ridge three overlapping heaps of its own height and set, so its crest is lumpy, never one straight line
     const rr = rngOf(seedOf(p.x, p.z, 23));
