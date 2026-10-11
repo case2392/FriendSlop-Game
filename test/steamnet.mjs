@@ -117,19 +117,19 @@ class Page {
 const BUILD = computeBuild();
 const be = await startBackend({ log });
 const SID = n => 76561190000000000n + BigInt(n);
-const steamFor = (n, name, netem) => initFakeSteam({ port: be.port, steamId: SID(n), name, netem });
+const steamFor = (n, name, netem, region = 0) => initFakeSteam({ port: be.port, steamId: SID(n), name, netem, region });
 const cleanup = [];
 
 // the host: a game server (its own page connects over loopback, as in the desktop build) and the lobby
-async function hostTrip(n, name, seed) {
+async function hostTrip(n, name, seed, { region = 0, maxMembers = 6 } = {}) {
   const gh = await new GameHost({ build: BUILD, holdSecs: 20, singleRoom: true, log }).init();
   gh.start();
   const port = await gh.listen({ port: 0, host: '127.0.0.1', origin: ORIGIN });
   const page = await new Page(name, `ws://127.0.0.1:${port}`, { build: BUILD, origin: ORIGIN }).connect();
   await page.create(seed);
   page.startPoses();
-  const steam = await steamFor(n, name);
-  const sh = new SteamHost({ steam, link: gh, build: BUILD, code: page.code, log });
+  const steam = await steamFor(n, name, null, region);
+  const sh = new SteamHost({ steam, link: gh, build: BUILD, code: page.code, maxMembers, log });
   const lobby = await sh.open();
   cleanup.push(() => { page.close(); try { sh.close(); } catch {} gh.close(); steam.__fake.close(); });
   return { gh, port, page, steam, sh, lobby };
@@ -149,13 +149,29 @@ async function guest(H, n, name, { build = BUILD, invite = true, netem = null, t
   g.page = await new Page(name, `ws://127.0.0.1:${port}`, { build, origin: ORIGIN, reconnectSecs }).connect();
   return g;
 }
+// a guest who typed the trip code: the search the desktop shell runs (lobbysearch.cjs, with the fake's
+// lobby filters where the real build has its FFI ones), then the bridge, exactly as after an invite
+const { findTripByCode, pickFreeCode, ffiFilters } = require('../desktop/steam/lobbysearch.cjs');
+async function guestByCode(n, name, code, { build = BUILD, region = 0, timeoutMs = 4000 } = {}) {
+  const steam = await steamFor(n, name, null, region);
+  const br = new GuestBridge({ steam, build, origin: ORIGIN, timeoutMs, log });
+  const g = { n, name, steam, br };
+  cleanup.push(() => { g.page?.close(); br.close(); steam.__fake.close(); });
+  g.found = await findTripByCode(steam, steam.lobbyFilters, code, { me: String(SID(n)), build, retryMs: 300, log });
+  if (!g.found.ok) return g;
+  try { g.joined = await br.joinLobby(g.found.lobbyId); }
+  catch (e) { g.err = e; return g; }
+  const port = await br.listen();
+  g.page = await new Page(name, `ws://127.0.0.1:${port}`, { build, origin: ORIGIN }).connect();
+  return g;
+}
 
 try {
   const H = await hostTrip(1, 'Hosty', 777);
   const { gh, page: hostPage, lobby, sh } = H;
   const room = gh.room;
-  check(lobby.getData('build') === BUILD && lobby.getData('host') === String(SID(1)) && lobby.getData('code') === hostPage.code && Number(lobby.getMemberLimit()) === 6,
-    `the host's trip ${hostPage.code} opened a friends-only lobby (6 max) with the build, the host and the code in its data`);
+  check(lobby.getData('build') === BUILD && lobby.getData('host') === String(SID(1)) && lobby.getData('code') === hostPage.code && Number(lobby.getMemberLimit()) === 6 && be.lobbies.get(String(lobby.id))?.type === 2,
+    `the host's trip ${hostPage.code} opened a Public lobby (6 max) with the build, the host and the code in its data`);
 
   // ---- two friends join through Steam ----
   const g2 = await guest(H, 2, 'Dave');
@@ -339,6 +355,134 @@ try {
   check(g.page.over?.code === 'gave-up' && g.page.closes[0]?.code === 4005, `the host went unreachable: the page reconnected for its window, then gave up ${((g.page.over?.at - t1) / 1000).toFixed(1)} s in (3 s silence + 8 s of retries)`);
 } catch (e) {
   fail('exception (host unreachable): ' + (e.stack || e));
+}
+
+// ---- a friend types the trip code: the lobby search (lobbysearch.cjs) ----
+try {
+  const H = await hostTrip(41, 'Coder', 57, { region: 2 });
+  const code = H.page.code;
+  const off = k => String(1000 + ((Number(code) - 1000 + k) % 9000));     // other codes, near this one
+  check(be.lobbies.get(String(H.lobby.id))?.type === 2 && /^[1-9]\d{3}$/.test(code) && H.lobby.getData('nmd_code') === code,
+    `code join: the host's lobby is Public (searches list it) and carries trip code ${code} as nmd_code`);
+  // other people's lobbies: 55 trips nearer the friend than the host is (an unfiltered search stops at 50),
+  // and another game on the shared test app that happens to use 'code' too
+  const crowd = await steamFor(42, 'Crowd', null, 1), other = await steamFor(43, 'OtherGame', null, 1);
+  cleanup.push(() => { crowd.__fake.close(); other.__fake.close(); });
+  for (let i = 1; i <= 55; i++) (await crowd.matchmaking.createLobby(2, 4)).mergeFullData({ nmd_code: off(i) });
+  (await other.matchmaking.createLobby(2, 4)).mergeFullData({ code });
+  await sleep(200);
+
+  const g = await guestByCode(44, 'Faraway', code, { region: 1 });
+  const ask = be.lists.find(x => x.by === String(SID(44)))?.filters;
+  check(g.found?.ok && g.found.lobbyId === String(H.lobby.id) && g.joined?.hostName === 'Coder',
+    `code join: a friend a region away typed ${code} and found the host's lobby past 56 others (${g.found?.hostName || g.found?.msg})`);
+  check(ask?.distance === 3 && ask.count === 10 && ask.strings?.length === 1 && ask.strings[0].key === 'nmd_code' && ask.strings[0].value === code && ask.strings[0].cmp === 0,
+    `code join: the search asked Steam for nmd_code = ${code}, worldwide, 10 at most (${JSON.stringify(ask)})`);
+  const w = g.page ? await g.page.join(g.joined.code).catch(e => e) : null;
+  await until(() => H.page.meta?.players.some(p => p.name === 'Faraway'), 8000);
+  check(w?.t === 'welcome' && w.code === code && H.page.meta?.players.some(p => p.name === 'Faraway'), 'code join: and they play: welcome, and the host\'s roster has them');
+  const blind = await findTripByCode(g.steam, null, code, { me: String(SID(44)), retryMs: 50, log });
+  check(!blind.ok && blind.code === 'search' && /only looked nearby/.test(blind.msg), `code join: without the filters (Steam's default: 50 lobbies, nearby) the same search misses it, which is why the build sets them; the player is told why: "${blind.msg}"`);
+
+  const nobody = off(4500);
+  const t = await guestByCode(45, 'Typo', nobody, { region: 2 });
+  check(!t.found.ok && t.found.code === 'noroom' && /No trip with code/.test(t.found.msg) && !H.lobby.getMembers().some(m => m.steamId64 === SID(45)),
+    `code join: a code no trip has: "${t.found.msg}" (no lobby joined)`);
+  const self = await findTripByCode(H.steam, H.steam.lobbyFilters, code, { me: String(SID(41)), build: BUILD, retryMs: 50, log });
+  check(!self.ok && self.code === 'self', `code join: the host typing their own code: "${self.msg}"`);
+  const v = await guestByCode(46, 'OldCode', code, { region: 2, build: '0.5.9+deadbeef00' });
+  check(v.found?.ok && v.err?.code === 'version' && /Version mismatch/.test(v.err.message), `code join: a friend on another version finds the trip and is told: "${v.err?.message}"`);
+
+  // two trips on one code (the host checks first, but two can draw it at once): this version's, the newest
+  const H2 = await hostTrip(50, 'Twin', 59, { region: 0 });
+  H2.sh.setCode(code);
+  await sleep(150);
+  const both = await findTripByCode(g.steam, g.steam.lobbyFilters, code, { me: String(SID(44)), build: BUILD, retryMs: 50, log });
+  H2.sh.lobby.mergeFullData({ build: '0.5.9+deadbeef00' });
+  await sleep(150);
+  const sameBuild = await findTripByCode(g.steam, g.steam.lobbyFilters, code, { me: String(SID(44)), build: BUILD, retryMs: 50, log });
+  check(both.ok && both.matches === 2 && both.lobbyId === String(H2.lobby.id) && sameBuild.lobbyId === String(H.lobby.id),
+    'code join: two trips on one code: the newest wins, unless only the older one runs this version');
+  const picked = await pickFreeCode(H2.steam, H2.steam.lobbyFilters, (q => () => q.shift() ?? nobody)([code, nobody]), { log });
+  check(picked === nobody, `code join: hosting passes over a code another trip carries (${code} -> ${picked})`);
+
+  // a full trip doesn't show up (Steam leaves full lobbies out of searches)
+  const H3 = await hostTrip(51, 'Small', 60, { maxMembers: 2 });
+  const a = await guestByCode(52, 'First', H3.page.code);
+  const b = await guestByCode(53, 'Second', H3.page.code);
+  check(a.found?.ok && !b.found.ok && /full trip doesn't show up/.test(b.found.msg), `code join: a full trip isn't listed, and the message says it may be full: "${b.found.msg}"`);
+  H3.sh.close('bye');
+  await sleep(500);
+  const ended = await findTripByCode(g.steam, g.steam.lobbyFilters, H3.page.code, { me: String(SID(44)), retryMs: 50, log });
+  check(!ended.ok && ended.code === 'noroom', 'code join: a trip that ended can\'t be found by its code');
+
+  // Steam failing, or never answering: an error, never a hang, and the next search still works
+  await H.steam.__fake.control({ op: 'search', search: { fail: true } });
+  const e1 = await findTripByCode(g.steam, g.steam.lobbyFilters, code, { retryMs: 50, log }).then(() => null, e => e);
+  await H.steam.__fake.control({ op: 'search', search: { fail: false, hang: true } });
+  const t0 = performance.now();
+  const e2 = await findTripByCode(g.steam, g.steam.lobbyFilters, code, { retryMs: 50, timeoutMs: 800, log }).then(() => null, e => e);
+  const waited = performance.now() - t0;
+  await H.steam.__fake.control({ op: 'search', search: { hang: false } });
+  const again = await findTripByCode(g.steam, g.steam.lobbyFilters, code, { me: String(SID(44)), build: BUILD, retryMs: 50, log });
+  check(/IOFailure/.test(e1?.message || '') && e2?.code === 'search' && waited < 2000 && again.ok,
+    `code join: Steam failing ("${e1?.message}") or silent (gave up after ${waited.toFixed(0)} ms: "${e2?.message}"), then the next search works`);
+} catch (e) {
+  fail('exception (code join): ' + (e.stack || e));
+}
+// ---- a join Steam is slow to answer: the player moves on or tries again, and nothing is left behind ----
+try {
+  const H = await hostTrip(60, 'Slowpoke', 61);
+  const id = String(H.lobby.id), inLobby = () => (be.lobbies.get(id)?.members || []).includes(String(SID(61)));
+  const st = await steamFor(61, 'Mover');
+  cleanup.push(() => st.__fake.close());
+  // closed while Steam takes its time (main.cjs closes the bridge when the player hosts, or joins elsewhere)
+  await st.__fake.control({ op: 'joins', joins: { delayMs: 600 } });
+  const b1 = new GuestBridge({ steam: st, build: BUILD, origin: ORIGIN, log });
+  const j1 = b1.joinLobby(id).then(() => null, e => e);
+  await sleep(100);
+  b1.close();
+  const e1 = await j1;
+  await sleep(300);
+  check(e1?.code === 'closed' && !b1.net && !inLobby(), `slow join: a bridge closed while Steam answers stops there and leaves the lobby it got ("${e1?.message}")`);
+  // a first try that timed out, then a retry that got in: the first answer, when it comes, throws nobody out
+  await st.__fake.control({ op: 'joins', joins: { delayMs: 900 } });
+  const b2 = new GuestBridge({ steam: st, build: BUILD, origin: ORIGIN, lobbyTimeoutMs: 300, log });
+  const e2 = await b2.joinLobby(id).then(() => null, e => e);
+  b2.close();
+  await st.__fake.control({ op: 'joins', joins: { delayMs: 0 } });
+  const b3 = new GuestBridge({ steam: st, build: BUILD, origin: ORIGIN, log });
+  cleanup.push(() => b3.close());
+  const r3 = await b3.joinLobby(id);
+  await sleep(1000);
+  check(e2?.code === 'lobby' && r3?.code === H.page.code && inLobby() && b3.state === 'joined' && b3.lobby?.getData('code') === H.page.code,
+    `slow join: a late answer to a try that timed out doesn't take the retry out of the lobby ("${e2?.message}")`);
+  const p3 = await new Page('Mover', `ws://127.0.0.1:${await b3.listen()}`, { build: BUILD, origin: ORIGIN }).connect();
+  cleanup.push(() => p3.close());
+  const w = await p3.join(r3.code).catch(e => e);
+  check(w?.t === 'welcome' && H.sh.isMember(SID(61)), 'slow join: and the retry plays (welcome; the host counts them in its lobby)');
+  // a bridge closed before its socket is up: listen() says so instead of never answering
+  const st2 = await steamFor(62, 'Quitter');
+  cleanup.push(() => st2.__fake.close());
+  const b4 = new GuestBridge({ steam: st2, build: BUILD, origin: ORIGIN, log });
+  await b4.joinLobby(id);
+  const lp = b4.listen();
+  b4.close();
+  const e4 = await Promise.race([lp.then(() => 'listening', e => e), sleep(2000).then(() => 'hung')]);
+  check(e4?.code === 'closed', `slow join: a bridge closed while its socket opens gives up at once (${e4?.message || e4})`);
+} catch (e) {
+  fail('exception (slow join): ' + (e.stack || e));
+}
+// the real build's filters: koffi loads the Steam library steamworks.js ships and finds Steam's flat-API
+// lobby-list functions; before Steam is up the interface is null and the wrapper refuses (no crash).
+// (steamworks.js ships x64 libraries only: an arm64 machine can't load them, so it skips this)
+if ((process.platform === 'linux' || process.platform === 'win32') && process.arch === 'x64') {
+  try {
+    const f = ffiFilters();
+    let refused = null;
+    try { f.stringFilter('nmd_code', '1234'); } catch (e) { refused = e.message; }
+    check(f && typeof f.distanceFilter === 'function' && /not ready/.test(refused || ''), `the FFI lobby filters bind to the bundled Steam library, and refuse before Steam starts ("${refused}")`);
+  } catch (e) { fail('FFI filters: ' + (e.stack || e)); }
 }
 
 for (const f of cleanup) { try { f(); } catch {} }

@@ -54,11 +54,28 @@ try {
   await host.click('#hostBtn');
   await ready(host);
   const code = await host.evaluate(() => window.__nmd.code);
-  check(/^[A-Z0-9]{4}$/.test(code), `hosted a trip (code ${code})`);
+  const chip = await host.evaluate(() => document.getElementById('hCode').textContent);
+  check(/^[1-9]\d{3}$/.test(code) && chip.includes(code), `hosted a trip: trip code ${code}, shown on the HUD ("${chip}")`);
   const joiner = await open('Dave');
-  await joiner.fill('#codeInput', code);
-  // note when a prop smashes on Dave's side (his socket opens on the join click)
+  // note when a prop smashes on Dave's side (his socket opens on his first Join click)
   await joiner.evaluate(() => { const WS = window.WebSocket; window.__breakAt = []; window.WebSocket = class extends WS { constructor(...a) { super(...a); this.addEventListener('message', e => { if (String(e.data).includes('"k":"break"')) window.__breakAt.push(performance.now()); }); } }; });
+  // a wrong code first: a clear answer, and the menu stays usable
+  const wrong = code === '5000' ? '5001' : '5000';
+  await joiner.fill('#codeInput', wrong);
+  await joiner.click('#joinBtn');
+  await joiner.waitForFunction(() => /No trip with that code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 30000 });
+  await joiner.fill('#codeInput', 'ab12');
+  const typed = await joiner.evaluate(() => document.getElementById('codeInput').value);
+  check(typed === '12', `a wrong code gets "No trip with that code", and the code box only takes digits ("ab12" -> "${typed}")`);
+  // a pasted chat line gives its code, digits from other scripts count (a Persian keyboard's ۴۸۲۱), and a
+  // code that starts with 0 is told why it can't be one
+  const pasted = [];
+  for (const v of ['code: 4821, see you at 8', '۴۸۲۱', '٤٨-٢١']) { await joiner.fill('#codeInput', v); pasted.push(await joiner.evaluate(() => document.getElementById('codeInput').value)); }
+  await joiner.fill('#codeInput', '0482');
+  await joiner.click('#joinBtn');
+  const zero = await joiner.evaluate(() => document.getElementById('menuError').textContent);
+  check(pasted.join() === '4821,4821,4821' && /never start with 0/.test(zero), `the code box takes a pasted chat line and other scripts' digits (${pasted.join(', ')}); "0482": "${zero}"`);
+  await joiner.fill('#codeInput', `${code.slice(0, 2)} ${code.slice(2)}`);
   await joiner.click('#joinBtn');
   // while Dave's day loads (it waits seconds for its textures), Steve drops a vase that smashes and a
   // safe that takes a dent, out past the camp: Dave must end up with Steve's props, no ghost of the vase
@@ -274,6 +291,26 @@ try {
     const said = await p.waitForFunction(() => /couldn't start 3D/.test(document.body.textContent), null, { timeout: 60000 }).then(() => true, () => false);
     check(said, 'without WebGL the game says what to do, instead of a dead menu');
     await nogl.close();
+  }
+  {
+    // a trip that closes before its welcome, then one that never answers: the menu says so, and works after
+    const { WebSocketServer } = await import('ws');
+    const wss = new WebSocketServer({ port: 0, host: '127.0.0.1' });
+    await new Promise(r => wss.once('listening', r));
+    let joins = 0;
+    wss.on('connection', ws => ws.on('message', d => { if (JSON.parse(d).t === 'join' && ++joins === 1) ws.close(4005, 'lost'); }));
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
+    const p = await ctx.newPage();
+    p.on('pageerror', e => errors.push(`[Lost] ${e.message}`));
+    await p.goto(`http://localhost:${PORT}/?ws=ws://127.0.0.1:${wss.address().port}`);
+    await p.fill('#codeInput', code);
+    await p.click('#joinBtn');
+    const lost = await p.waitForFunction(() => /Lost the connection/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled && !document.getElementById('menuStatus').textContent, null, { timeout: 30000 }).then(() => true, () => false);
+    const t0 = Date.now();
+    await p.click('#joinBtn');
+    const gaveUp = await p.waitForFunction(() => /No answer/.test(document.getElementById('menuError').textContent) && !document.getElementById('hostBtn').disabled, null, { timeout: 40000 }).then(() => true, () => false);
+    check(lost && gaveUp, `a trip that drops before its welcome says so; one that never answers is given up on after ${((Date.now() - t0) / 1000).toFixed(0)} s; the buttons work after both`);
+    await ctx.close(); wss.close();
   }
   server.kill('SIGTERM');
   await joiner.waitForFunction(() => /The trip is over/.test(document.getElementById('netModal')?.textContent || ''), null, { timeout: 20000 });

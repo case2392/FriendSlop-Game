@@ -23,10 +23,14 @@ module.exports = {
     '!node_modules/@dimforge/rapier3d-compat/dist/rapier_wasm3d*',     // the compat build inlines its wasm in rapier.mjs
     '!node_modules/@types/**', '!node_modules/undici-types/**',        // type definitions steamworks.js depends on
     '!node_modules/steamworks.js/dist/osx/**', '!node_modules/steamworks.js/dist/win64/*.lib',
+    // koffi (the trip-code search's Steam filters, desktop/steam/lobbysearch.cjs): its index.js and the
+    // two desktop platforms' koffi.node; not its sources, docs or the other 16 platforms
+    '!node_modules/koffi/{src,vendor,lib,doc}/**', '!node_modules/koffi/build/koffi/*/*.{lib,exp}',
+    '!node_modules/koffi/build/koffi/{darwin_*,freebsd_*,openbsd_*,musl_*,linux_arm*,linux_ia32,linux_loong64,linux_riscv64d,win32_arm64,win32_ia32}/**',
   ],
   extraFiles: [{ from: 'desktop/THIRD_PARTY_NOTICES.txt', to: 'THIRD_PARTY_NOTICES.txt' }],   // node tools/notices.mjs
   asar: true,
-  asarUnpack: ['node_modules/steamworks.js/dist/**'],                  // the .node addon and steam_api64.dll / libsteam_api.so beside it
+  asarUnpack: ['node_modules/steamworks.js/dist/**', 'node_modules/koffi/build/koffi/**'],   // native files: LoadLibrary/dlopen can't read app.asar
   electronLanguages: ['en-US'],                                        // drops ~45 MB of Chromium's UI translations
   ...(fuses && { electronFuses: {
     runAsNode: false, enableNodeOptionsEnvironmentVariable: false, enableNodeCliInspectArguments: false,
@@ -35,11 +39,14 @@ module.exports = {
   win: { target: [{ target: 'dir', arch: ['x64'] }], icon: 'desktop/build/icon.ico', executableName: 'NoMoneyDown', signAndEditExecutable: true },
   linux: { target: [{ target: 'dir', arch: ['x64'] }], icon: 'desktop/build/icon.png', executableName: 'nomoneydown', category: 'Game' },
   publish: null,                                                       // Steam ships the updates
-  // each build keeps only its own platform's Steam library
+  // each build keeps only its own platform's Steam library and koffi binary, and refuses to finish
+  // without its own koffi (joining by trip code would silently break)
   afterPack: async ({ appOutDir, electronPlatformName }) => {
     const fs = require('node:fs'), path = require('node:path');
-    const dir = path.join(appOutDir, 'resources/app.asar.unpacked/node_modules/steamworks.js/dist');
-    const other = electronPlatformName === 'win32' ? 'linux64' : 'win64';
-    fs.rmSync(path.join(dir, other), { recursive: true, force: true });
+    const un = path.join(appOutDir, 'resources/app.asar.unpacked/node_modules'), win = electronPlatformName === 'win32';
+    fs.rmSync(path.join(un, 'steamworks.js/dist', win ? 'linux64' : 'win64'), { recursive: true, force: true });
+    fs.rmSync(path.join(un, 'koffi/build/koffi', win ? 'linux_x64' : 'win32_x64'), { recursive: true, force: true });
+    const mine = path.join(un, 'koffi/build/koffi', win ? 'win32_x64' : 'linux_x64', 'koffi.node');
+    if (!fs.existsSync(mine)) throw new Error(`koffi's ${win ? 'Windows' : 'Linux'} binary is missing from the build (${mine})`);
   },
 };

@@ -87,4 +87,30 @@ class P2PNet extends EventEmitter {
   }
 }
 
-module.exports = { P2PNet, SendType, CB, memberChange, big };
+// Lobbies a bridge is in or joining right now, per Steam client (one per game; the tests run several).
+// Steam keeps one membership per lobby, however many joins asked for it, so a lobby that turns up for a
+// join given up on is left only if no other join wants it (else a late answer to the first try would
+// throw out the retry that got in).
+const lobbiesInUse = new WeakMap();   // Steam client -> (lobby id -> how many users)
+const inUse = steam => { let m = lobbiesInUse.get(steam); if (!m) lobbiesInUse.set(steam, m = new Map()); return m; };
+function useLobby(steam, id) {
+  const m = inUse(steam), k = String(id);
+  m.set(k, (m.get(k) || 0) + 1);
+  let done = false;
+  return () => { if (done) return; done = true; const n = m.get(k) - 1; if (n > 0) m.set(k, n); else m.delete(k); };
+}
+function leaveUnlessUsed(steam, l) { if (l && !inUse(steam).has(String(l.id))) try { l.leave(); } catch {} }
+
+// steamworks.js's lobby calls (createLobby, joinLobby) have no timeout, and Steam may never answer:
+// give up after ms; a lobby that arrives after that is left at once, so nobody sits in a lobby unseen
+// (a join's, only if no other join of this player's is using it: pass their Steam client)
+function lobbyCall(p, ms, msg, steam = null) {
+  let late = false;
+  return new Promise((res, rej) => {
+    const t = setTimeout(() => { late = true; rej(new Error(msg)); }, ms);
+    p.then(l => { if (!late) { clearTimeout(t); res(l); } else if (steam) leaveUnlessUsed(steam, l); else try { l.leave(); } catch {} },
+      e => { clearTimeout(t); if (!late) rej(e); });
+  });
+}
+
+module.exports = { P2PNet, SendType, CB, memberChange, big, lobbyCall, useLobby, leaveUnlessUsed };

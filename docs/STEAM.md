@@ -8,10 +8,23 @@ How the Steam build works, and the steps from this repo to friends playing it. T
 - **One app, no servers to rent.** The desktop build (Electron) carries the whole game: the page, and
   the game server, which runs on the player's own PC in a background process (`desktop/main.cjs`,
   `desktop/server-process.mjs`). Whoever starts a trip *is* the server for it.
-- **Friends join through Steam.** Starting a trip opens a friends-only Steam lobby. Friends join with
-  **Invite Friends** (press Esc in the game), the Steam friends list's **Invite to Game**, or **Join
-  Game** on the host in their own friends list. Their game talks to the host's over Steam's P2P
-  network (`desktop/steam/`): no port forwarding, no IP addresses, Steam's relays handle the routers.
+- **Friends join with a 4-digit trip code.** **Host Game** gives the host a trip code (it's at the top
+  right of the screen and on the Esc menu). Friends type it under **Join Game**: their game asks Steam
+  for the lobby with that code, anywhere in the world, and joins it. Steam invites work too: **Invite
+  Friends** (press Esc in the game), the friends list's **Invite to Game**, or **Join Game** on the
+  host in their own friends list. Either way, their game talks to the host's over Steam's P2P network
+  (`desktop/steam/`): no port forwarding, no IP addresses, Steam's relays handle the routers.
+- **How the code finds the trip.** The host's Steam lobby is Public (Steam's searches only list Public
+  lobbies) and carries the code. steamworks.js can't filter a lobby search, so the game sets Steam's
+  own search filters (this code, worldwide) through Steam's flat API with koffi, right before the
+  search (`desktop/steam/lobbysearch.cjs`). Before hosting, the game checks that no open trip already
+  has the code it drew. If the filters can't be set (koffi or Steam's library didn't load), Steam only
+  lists lobbies nearby: the game says its search only looked nearby, and a Steam invite still works.
+- **The trip code is not a password.** With 9,000 possible codes, anyone who has it, guesses it, or
+  lists the game's lobbies can join, and a mistyped code can land a player in a stranger's trip (the
+  menu says whose trip it's joining). Fine for friends; there's no kick button yet. The browser build's
+  server slows guessing down: ten wrong codes close the connection, and then that address gets one more
+  try every 30 s.
 - **Voice chat** rides the same connection (Opus, 24 kbit/s): the host's game passes each voice on only
   to the players who can hear it (within earshot, or both holding walkies). Nothing peer-to-peer.
 - **The same version on both ends.** Every build carries a fingerprint of the game code
@@ -21,7 +34,7 @@ How the Steam build works, and the steps from this repo to friends playing it. T
   if they're back within 90 s. If the host quits, everyone is told the trip is over.
 - **No Steam running:** the game still starts and plays solo, and the menu says why friends can't join.
 - **The browser build** (`npm start`, then `http://localhost:3000`) still works for development and
-  LAN play, with 4-letter trip codes.
+  LAN play, with the same 4-digit trip codes (its server hands them out).
 
 ## Try it before you have an App ID
 
@@ -209,6 +222,9 @@ Answer these in Steamworks before the store page goes to review:
       the text players see: `tools/namecheck.mjs`)
 - [ ] A build on the beta branch was played by 2+ people on different internet
       connections, including someone joining mid-day and someone dropping and coming back
+- [ ] Join by trip code works between two real Steam accounts, ideally far apart (say, the US and
+      Europe): the search's filters are set through Steam's flat API, which only a real Steam client
+      can prove (the tests use a stand-in)
 - [ ] The overlay invite dialog works (Shift+Tab also opens the overlay)
 - [ ] Frame rate checked on a low-end laptop GPU and on a Steam Deck
 - [ ] The App ID is in `package.json`, and `steam_appid.txt` is not in the depot (the depot file

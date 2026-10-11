@@ -2,7 +2,7 @@
   "name": "no-money-down",
   "productName": "NO MONEY DOWN",
   "version": "0.6.0",
-  "description": "NO MONEY DOWN \u2014 a first-person co-op friendslop road trip. One RV, one shared bank account, one Repo Man.",
+  "description": "NO MONEY DOWN — a first-person co-op friendslop road trip. One RV, one shared bank account, one Repo Man.",
   "author": "The NO MONEY DOWN developers",
   "type": "module",
   "main": "desktop/main.cjs",
@@ -25,6 +25,7 @@
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
+    "koffi": "2.16.3",
     "steamworks.js": "0.4.0",
     "ws": "^8.18.0"
   },

@@ -74,14 +74,17 @@ classic:
 
 ```bash
 npm install
-npm run desktop    # with Steam running: friends join through Steam invites
+npm run desktop    # with Steam running: friends join by trip code or Steam invite
 ```
 
-One person **starts a trip**; friends join with **Invite Friends** (press
-`Esc` in the game) or **Join Game** on the host in their Steam friends list.
-The host's PC runs the trip, and everyone talks to it over Steam, so there is
-nothing to port-forward. Without Steam running it plays solo. How the Steam
-build works, and how to ship it: [docs/STEAM.md](docs/STEAM.md).
+One person clicks **Host Game** and reads out the 4-digit trip code at the top
+right of their screen (it's on the `Esc` menu too). Friends type it under
+**Join Game**, and their game finds the trip through Steam. Steam invites work
+too: **Invite Friends** (press `Esc`), or **Join Game** on the host in the
+Steam friends list. The host's PC runs the trip, and everyone talks to it over
+Steam, so there is nothing to port-forward. Without Steam running it plays
+solo. How the Steam build works, and how to ship it:
+[docs/STEAM.md](docs/STEAM.md).
 
 **The browser build (LAN and development):**
 
@@ -89,8 +92,8 @@ build works, and how to ship it: [docs/STEAM.md](docs/STEAM.md).
 npm start          # → http://localhost:3000
 ```
 
-One person **STARTS A TRIP**, sends the 4-character code, and everyone else
-**JOINS**. Click the window to grab the mouse; **F1** shows controls, `Esc`
+One person clicks **Host Game** and sends the 4-digit trip code; everyone else
+types it under **Join Game**. Click the window to grab the mouse; **F1** shows controls, `Esc`
 frees the mouse and offers Leave Trip. To replay the same roads, put the same
 number in "trip seed". A dropped connection gets its seat back if it returns
 within 90 s.
@@ -100,7 +103,7 @@ built in your browser. Background workers paint what they can while the
 loading bar is up, your browser keeps the painted textures (IndexedDB) so
 the next visit decodes them instead, and the next day gets ready during the
 night. On a machine with no GPU (software rendering on 4 CPU cores), from
-"Start a Trip": the first visit draws its first frames after about 23 s, a
+"Host Game": the first visit draws its first frames after about 23 s, a
 returning visit after about 22 s (its world is built in about 6 s), and a
 later day takes 9–14 s. Most of the rest on that machine is the software
 renderer drawing its first frames; a real graphics card does that much

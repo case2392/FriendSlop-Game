@@ -24,16 +24,17 @@
   <div class="menu-card framed">
     <label class="fl" for="nameInput">Character Name</label>
     <input id="nameInput" maxlength="16" placeholder="your name, chief" autocomplete="off">
-    <button id="hostBtn" class="btn big green">Start a Trip</button>
+    <button id="hostBtn" class="btn big green">Host Game</button>
     <div id="joinBox">
-      <div class="or"><span>or join the boys</span></div>
+      <div class="or"><span>or join a friend's trip</span></div>
       <div class="join-row">
-        <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
-        <button id="joinBtn" class="btn big pink">Join</button>
+        <input id="codeInput" maxlength="200" inputmode="numeric" pattern="[0-9]*" placeholder="code" aria-label="Trip code (4 digits)" autocomplete="off" enterkeyhint="go">
+        <button id="joinBtn" class="btn big pink">Join Game</button>
       </div>
     </div>
     <input id="seedInput" maxlength="10" placeholder="trip seed (optional · same seed, same roads)" autocomplete="off" class="seed">
     <p id="menuSteam" class="menu-steam hidden"></p>
+    <p id="menuStatus" class="status-text"></p>
     <p id="menuError" class="error-text"></p>
     <div class="menu-row">
       <button id="settingsBtn" class="btn small gray">Settings</button>
@@ -78,6 +79,7 @@
   <div id="flash" class="flash hidden"></div>
   <div id="clickToPlay" class="click-to-play hidden">
     <div class="ctp-go">Click to Play<small>F1 for controls</small></div>
+    <div id="ctpCode" class="ctp-code hidden"><span class="k">Trip code</span><b id="ctpCodeNum"></b><small>Friends click Join Game and type it in</small></div>
     <div class="ctp-row">
       <button id="ctpInvite" class="btn small green hidden">Invite Friends</button>
       <button id="ctpSettings" class="btn small gray">Settings</button>

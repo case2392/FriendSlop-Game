@@ -1,7 +1,9 @@
 'use strict';
 // The host's side of playing over Steam (in the host's main process, next to steamworks.js).
-//   - a friends-only lobby (6 max) with { build, proto, host, name, code } in its data: friends join it
-//     from an invite or with Join Game in their friends list
+//   - a Public lobby (6 max) with { build, proto, host, name, code, nmd_code, since } in its data: friends
+//     join it from an invite, with Join Game in their friends list, or by typing its trip code (a Steam
+//     lobby search for nmd_code: lobbysearch.cjs; Steam lists Public lobbies, never friends-only ones).
+//     The trip code is not a password: anyone who has it (or lists the game's lobbies) can join.
 //   - P2P sessions ONLY with that lobby's members
 //   - each guest page connection (HELLO) becomes a SteamPeerConn, a ws-like socket handed to the game
 //     server (through main's ServerLink), so the server doesn't know Steam exists
@@ -9,7 +11,7 @@
 //     keeps their seat); close() says BYE to everyone, then leaves the lobby
 const { EventEmitter } = require('node:events');
 const { K, LINK_PROTO, packJson, unpackJson, packGame, packSnap, packVoice } = require('./frame.cjs');
-const { P2PNet, CB, memberChange, big } = require('./p2p.cjs');
+const { P2PNet, CB, memberChange, big, lobbyCall } = require('./p2p.cjs');
 
 const LobbyType = { Private: 0, FriendsOnly: 1, Public: 2, Invisible: 3 };
 
@@ -45,9 +47,9 @@ class SteamPeerConn extends EventEmitter {
 
 class SteamHost extends EventEmitter {
   // link: anything with attach(conn, info), the game server's door (main.cjs ServerLink, or a GameHost)
-  constructor({ steam, link, build, code = '', maxMembers = 6, timeoutMs = 10000, log = () => {} }) {
+  constructor({ steam, link, build, code = '', maxMembers = 6, lobbyType = LobbyType.Public, timeoutMs = 10000, lobbyTimeoutMs = 20000, log = () => {} }) {
     super();
-    Object.assign(this, { steam, link, build, code, maxMembers, log });
+    Object.assign(this, { steam, link, build, code, maxMembers, lobbyType, lobbyTimeoutMs, log });
     this.me = big(steam.localplayer.getSteamId().steamId64);
     this.peers = new Map();            // steamId -> SteamPeerConn
     this.net = new P2PNet(steam, { timeoutMs, accept: id => this.isMember(id) });
@@ -56,9 +58,11 @@ class SteamHost extends EventEmitter {
   isMember(id) { try { return !!this.lobby && this.lobby.getMembers().some(m => big(m.steamId64) === id); } catch { return false; } }
 
   async open() {
-    this.lobby = await this.steam.matchmaking.createLobby(LobbyType.FriendsOnly, this.maxMembers);
+    this.lobby = await lobbyCall(this.steam.matchmaking.createLobby(this.lobbyType, this.maxMembers), this.lobbyTimeoutMs, 'Steam didn\'t open a lobby for the trip.');
     if (this.closed) { try { this.lobby.leave(); } catch {} throw new Error('closed while opening'); }
-    this.lobby.mergeFullData({ build: this.build, proto: String(LINK_PROTO), host: String(this.me), name: this.steam.localplayer.getName(), code: this.code });
+    // nmd_code is the search key (a name no other game on the shared test app 480 would use); since tells
+    // two trips that drew the same code apart (the newest wins)
+    this.lobby.mergeFullData({ build: this.build, proto: String(LINK_PROTO), host: String(this.me), name: this.steam.localplayer.getName(), code: this.code, nmd_code: this.code, since: String(Date.now()) });
     this.net.on('packet', (from, buf) => { try { this.onPacket(from, buf); } catch (e) { this.log('[steam] bad packet from', String(from), e.message); } });
     this.net.on('timeout', (id, ms) => this.drop(id, `no packets for ${Math.round(ms)} ms`));
     this.net.on('fail', (id, err) => this.drop(id, `P2P session failed (${err})`));
@@ -74,7 +78,7 @@ class SteamHost extends EventEmitter {
     this.log(`[steam] hosting lobby ${this.lobby.id} for trip ${this.code} (build ${this.build})`);
     return this.lobby;
   }
-  setCode(code) { this.code = code; try { this.lobby?.mergeFullData({ code }); } catch {} }
+  setCode(code) { this.code = code; try { this.lobby?.mergeFullData({ code, nmd_code: code }); } catch {} }
 
   onPacket(from, buf) {
     const kind = buf[0], peer = this.peers.get(from);
@@ -124,6 +128,7 @@ class SteamHost extends EventEmitter {
     for (const id of new Set([...members, ...this.peers.keys()])) if (id !== this.me) this.net.send(id, packJson(K.BYE, { reason: 'host-left', msg }), 'reliable');
     for (const p of [...this.peers.values()]) p._closed(4000, 'host left');
     try { this.lobby?.setJoinable?.(false); } catch {}
+    try { this.lobby?.deleteData?.('nmd_code'); } catch {}     // no search finds it in the moment before it goes
     // a moment for the reliable BYEs to leave before the sessions go
     setTimeout(() => {
       try { this.lobby?.leave(); } catch {}

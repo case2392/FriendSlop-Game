@@ -13,13 +13,14 @@ export const SteamCallback = {
 };
 const pid = id => ({ steamId64: BigInt(id), steamId32: `STEAM_0:${BigInt(id) & 1n}:${(BigInt(id) & 0xffffffffn) >> 1n}`, accountId: Number(BigInt(id) & 0xffffffffn) });
 
-export async function initFakeSteam({ port, steamId, name, netem = null }) {
+export async function initFakeSteam({ port, steamId, name, netem = null, region = 0 }) {
   const me = String(steamId);
   const sock = net.connect(port, '127.0.0.1');
   sock.setNoDelay(true);
   await new Promise((res, rej) => { sock.once('connect', res); sock.once('error', rej); });
   const inbox = [];                 // received P2P packets: { from, data }
   const lobbies = new Map();        // id(str) -> state pushed by the backend
+  const listed = new Map();         // id(str) -> what the last lobby search said about it (not a member)
   const handlers = new Map();       // callback id -> Set(fn)
   const cbQueue = [];
   const waiting = new Map();        // reqId -> resolve
@@ -40,11 +41,13 @@ export async function initFakeSteam({ port, steamId, name, netem = null }) {
       case OP.LOBBY_CHAT_UPDATE: { const j = json(p); raise(SteamCallback.LobbyChatUpdate, { lobby: big(j.lobby), user_changed: big(j.user_changed), making_change: big(j.making_change), member_state_change: j.member_state_change }); return; }
       case OP.LOBBY_DATA_UPDATE: { const j = json(p); raise(SteamCallback.LobbyDataUpdate, { lobby: big(j.lobby), member: big(j.member), success: j.success }); return; }
       case OP.JOIN_REQUESTED: { const j = json(p); raise(SteamCallback.GameLobbyJoinRequested, { lobby_steam_id: big(j.lobby_steam_id), friend_steam_id: big(j.friend_steam_id) }); return; }
-      case OP.LOBBY_RESULT: case OP.CONTROL_RESULT: { const j = json(p); waiting.get(j.reqId)?.(j); waiting.delete(j.reqId); return; }
+      case OP.LOBBY_RESULT: case OP.CONTROL_RESULT: case OP.LOBBY_LIST: { const j = json(p); waiting.get(j.reqId)?.(j); waiting.delete(j.reqId); return; }
     }
   }));
   const request = (op, obj) => new Promise(res => { const reqId = reqN++; waiting.set(reqId, res); sock.write(jframe(op, { ...obj, reqId })); });
-  sock.write(jframe(OP.REGISTER, { steamId: me, name, net: netem }));
+  // the backend went away: nothing it owed will come (callers see ok: false)
+  sock.on('close', () => { for (const res of waiting.values()) res({ ok: false, err: 'Steam went away' }); waiting.clear(); });
+  sock.write(jframe(OP.REGISTER, { steamId: me, name, net: netem, region }));
   await ready;
 
   // the runCallbacks pump
@@ -54,11 +57,12 @@ export async function initFakeSteam({ port, steamId, name, netem = null }) {
 
   class Lobby {
     constructor(id) { this.id = BigInt(id); this._k = String(id); }
-    get _s() { return lobbies.get(this._k) || { members: [], data: {}, owner: null, max: 0 }; }
+    // a lobby you're in; else what a search said (Steam shows data and counts, not members or owner)
+    get _s() { return lobbies.get(this._k) || listed.get(this._k) || { members: [], data: {}, owner: null, max: 0 }; }
     join() { return mm.joinLobby(this.id); }
     leave() { sock.write(frame(OP.LEAVE_LOBBY, Buffer.from(this._k))); lobbies.delete(this._k); }
     openInviteDialog() { client.overlay.activateInviteDialog(this.id); }
-    getMemberCount() { return BigInt(this._s.members.length); }
+    getMemberCount() { return BigInt(this._s.count ?? this._s.members.length); }
     getMemberLimit() { return this._s.max == null ? null : BigInt(this._s.max); }
     getMembers() { return this._s.members.map(pid); }
     getOwner() { return pid(this._s.owner ?? 0); }
@@ -88,7 +92,24 @@ export async function initFakeSteam({ port, steamId, name, netem = null }) {
       await waitFor(() => lobbies.has(String(r.lobby)));
       return new Lobby(r.lobby);
     },
-    async getLobbies() { return []; },
+    // RequestLobbyList: takes (and clears) the filters set since the last search, as Steam does
+    async getLobbies() {
+      const f = pendingFilters; pendingFilters = { strings: [] };
+      const r = await request(OP.LIST_LOBBIES, { filters: f });
+      if (!r.ok) throw new Error(r.err || 'IOFailure');
+      return r.lobbies.map(x => { listed.set(String(x.lobby), { members: [], data: x.data, owner: null, max: x.max, count: x.count }); return new Lobby(x.lobby); });
+    },
+  };
+  // Steam's lobby-list filters, which the real build sets through the flat API (desktop/steam/
+  // lobbysearch.cjs): the same three methods, the same enum ranges
+  let pendingFilters = { strings: [] };
+  const lobbyFilters = {
+    stringFilter(key, value, cmp = 0) {
+      if (![-2, -1, 0, 1, 2, 3].includes(cmp)) throw new Error(`bad ELobbyComparison ${cmp}`);
+      pendingFilters.strings.push({ key: String(key), value: String(value), cmp });
+    },
+    distanceFilter(d) { if (![0, 1, 2, 3].includes(d)) throw new Error(`bad ELobbyDistanceFilter ${d}`); pendingFilters.distance = d; },
+    resultCountFilter(n) { pendingFilters.count = Math.max(1, n | 0); },
   };
   const waitFor = (fn, ms = 3000) => new Promise((res, rej) => { const t0 = Date.now(); const k = setInterval(() => { if (fn()) { clearInterval(k); res(); } else if (Date.now() - t0 > ms) { clearInterval(k); rej(new Error('timeout')); } }, 5); });
 
@@ -118,6 +139,7 @@ export async function initFakeSteam({ port, steamId, name, netem = null }) {
       acceptP2PSession: steamId64 => sock.write(frame(OP.ACCEPT, Buffer.from(String(steamId64)))),
     },
     matchmaking: mm,
+    lobbyFilters,
     callback: {
       SteamCallback,
       register(cb, fn) { if (!handlers.has(cb)) handlers.set(cb, new Set()); handlers.get(cb).add(fn); return { disconnect: () => handlers.get(cb).delete(fn) }; },

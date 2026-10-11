@@ -27,7 +27,10 @@ export function connect(to) {
     let sock;
     try { sock = new WebSocket(url); } catch { reject(new Error('Could not reach the game.')); return; }
     sock.binaryType = 'arraybuffer';
+    // one connection at a time: the one it replaces goes quietly, and nothing it still says is heard
+    const old = ws;
     ws = sock;
+    if (old) try { old.close(1000, 'replaced'); } catch {}
     let opened = false;
     sock.onopen = () => { opened = true; lastMsg = performance.now(); resolve(); };
     sock.onerror = () => { if (!opened) reject(new Error('Could not reach the game.')); };
@@ -38,6 +41,7 @@ export function connect(to) {
       if (opened && handlers._close) handlers._close({ code: ev.code, reason: ev.reason });
     };
     sock.onmessage = ev => {
+      if (ws !== sock) return;
       lastMsg = performance.now();
       if (typeof ev.data !== 'string') { binary?.(ev.data); return; }
       let m;
@@ -56,6 +60,8 @@ export function sendBinary(buf) {
 }
 
 export function connected() { return !!ws && ws.readyState === 1; }
+// where the connection in use goes (null: none)
+export function at() { return ws ? url : null; }
 // when the last message of any kind came in (the client's watchdog: snapshots arrive 20 times a second)
 export function lastMessageAt() { return lastMsg; }
 

@@ -16,13 +16,13 @@ const { EventEmitter } = require('node:events');
 const http = require('node:http');
 const { WebSocketServer } = require('ws');
 const { K, LINK_PROTO, packJson, unpackJson, packGame, packVoice, SnapAssembler } = require('./frame.cjs');
-const { P2PNet, CB, memberChange, big } = require('./p2p.cjs');
+const { P2PNet, CB, memberChange, big, lobbyCall, useLobby, leaveUnlessUsed } = require('./p2p.cjs');
 const { setPresence } = require('./host.cjs');
 
 class GuestBridge extends EventEmitter {
-  constructor({ steam, build, origin = null, timeoutMs = 10000, log = () => {} }) {
+  constructor({ steam, build, origin = null, timeoutMs = 10000, lobbyTimeoutMs = 20000, log = () => {} }) {
     super();
-    Object.assign(this, { steam, build, origin, timeoutMs, log });
+    Object.assign(this, { steam, build, origin, timeoutMs, lobbyTimeoutMs, log });
     this.me = big(steam.localplayer.getSteamId().steamId64);
     this.state = 'idle';          // idle | joined | hello | open | ended
     this.connId = 0;
@@ -31,14 +31,17 @@ class GuestBridge extends EventEmitter {
     this.stats = { toPage: 0, fromPage: 0, snapsToPage: 0, rejects: 0, links: 0 };
   }
 
-  // a lobby id from an invite, Join Game, or +connect_lobby
+  // a lobby id from an invite, Join Game, a trip code's search, or +connect_lobby
   async joinLobby(lobbyId) {
+    const unuse = this.unuse = useLobby(this.steam, big(lobbyId));     // until leave(), or this join fails
     let lobby;
-    try { lobby = await this.steam.matchmaking.joinLobby(big(lobbyId)); }
-    catch (e) { throw Object.assign(new Error('Couldn\'t get into that trip. It may be full (6 max) or over.'), { code: 'lobby' }); }
+    try { lobby = await lobbyCall(this.steam.matchmaking.joinLobby(big(lobbyId)), this.lobbyTimeoutMs, 'no answer', this.steam); }
+    catch (e) { unuse(); throw Object.assign(new Error(e.message === 'no answer' ? 'Steam didn\'t let us into that trip. Try again.' : 'Couldn\'t get into that trip. It may be full (6 max) or over.'), { code: 'lobby' }); }
+    const fail = (msg, code) => { unuse(); leaveUnlessUsed(this.steam, lobby); throw Object.assign(new Error(msg), { code }); };
+    // closed while Steam was answering (the player went on to host, or to another trip): nothing more
+    if (this.closed) fail('Joining that trip was called off.', 'closed');
     let d = {};
     try { d = lobby.getFullData() || {}; } catch {}
-    const fail = (msg, code) => { try { lobby.leave(); } catch {} throw Object.assign(new Error(msg), { code }); };
     if (!d.host || !/^\d+$/.test(d.host)) fail('That trip isn\'t running any more.', 'noroom');
     if (big(d.host) === this.me) fail('That\'s your own trip.', 'self');
     if (d.proto !== String(LINK_PROTO) || d.build !== this.build) {
@@ -66,12 +69,15 @@ class GuestBridge extends EventEmitter {
   // the page connects here as if this were a game server. Only the game's own page may (a browser always
   // sends Origin: a web page can't drive the game through ws://127.0.0.1); tools send none.
   listen(port = 0) {
+    if (this.closed) return Promise.reject(Object.assign(new Error('Joining that trip was called off.'), { code: 'closed' }));
     this.http = http.createServer((_req, res) => { res.writeHead(404); res.end(); });
     this.wss = new WebSocketServer({ server: this.http, maxPayload: 64 * 1024, verifyClient: ({ origin }) => !origin || origin === this.origin });
     this.wss.on('connection', ws => this.onPage(ws));
     this.wss.on('error', e => this.log('[steam] bridge socket error:', e.message));
     return new Promise((res, rej) => {
       this.http.once('error', rej);
+      // closed before it was listening: the callback never comes
+      this.http.once('close', () => rej(Object.assign(new Error('Joining that trip was called off.'), { code: 'closed' })));
       this.http.listen(port, '127.0.0.1', () => { this.http.off('error', rej); this.port = this.http.address().port; res(this.port); });
     });
   }
@@ -203,13 +209,16 @@ class GuestBridge extends EventEmitter {
     clearInterval(this.helloT);
     if (sayBye && this.host && this.net && this.state !== 'ended') this.net.send(this.host, packJson(K.BYE, { reason: 'guest-left' }), 'reliable');
     try { this.chatH?.disconnect(); } catch {}
-    try { this.lobby?.leave(); } catch {}
+    this.unuse?.();
+    leaveUnlessUsed(this.steam, this.lobby);
     this.chatH = null; this.lobby = null;
     if (this.state !== 'ended') this.state = 'idle';
     const net = this.net;
     setTimeout(() => net?.stop(), 250);
   }
+  // for good: a join still waiting on Steam stops when Steam answers (and leaves the lobby it got)
   close() {
+    this.closed = true;
     this.leave(true);
     this.closePage(1000, 'bridge closed');
     try { this.wss?.close(); } catch {}

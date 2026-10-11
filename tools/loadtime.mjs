@@ -39,7 +39,7 @@ const ROOT = path.resolve(arg('root', path.join(path.dirname(fileURLToPath(impor
 const SEED = arg('seed', '777');
 const SKIP = new Set(String(arg('skip', '')).split(',').filter(Boolean));
 const NIGHT_SECS = +arg('night', 12);
-const DWELL = +arg('dwell', 0);   // ms on the menu before clicking "Start a Trip" (a player types a name)
+const DWELL = +arg('dwell', 0);   // ms on the menu before clicking "Host Game" (a player types a name)
 
 const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);
 let PORT; do PORT = 9000 + Math.floor(Math.random() * 900); while (UNSAFE_PORTS.has(PORT));

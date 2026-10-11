@@ -38,12 +38,16 @@ const builds = [['win-unpacked', 'NoMoneyDown.exe'], ['linux-unpacked', 'nomoney
 if (!builds.length) problems.push(`no build in ${DIST} (npm run dist:win / dist:linux)`);
 for (const [dir, exe] of builds) {
   const at = path.join(DIST, dir), bad = m => problems.push(`${dir}: ${m}`);
-  for (const f of [exe, 'LICENSE.electron.txt', 'LICENSES.chromium.html', 'THIRD_PARTY_NOTICES.txt', 'resources/app.asar']) if (!fs.existsSync(path.join(at, f))) bad(`missing ${f}`);
+  const win = dir.startsWith('win'), un = 'resources/app.asar.unpacked/node_modules/';
+  // the native files beside the archive: Steam's library and its addon, koffi (the trip-code search)
+  const natives = win ? [`${un}steamworks.js/dist/win64/steam_api64.dll`, `${un}steamworks.js/dist/win64/steamworksjs.win32-x64-msvc.node`, `${un}koffi/build/koffi/win32_x64/koffi.node`]
+    : [`${un}steamworks.js/dist/linux64/libsteam_api.so`, `${un}steamworks.js/dist/linux64/steamworksjs.linux-x64-gnu.node`, `${un}koffi/build/koffi/linux_x64/koffi.node`];
+  for (const f of [exe, 'LICENSE.electron.txt', 'LICENSES.chromium.html', 'THIRD_PARTY_NOTICES.txt', 'resources/app.asar', ...natives]) if (!fs.existsSync(path.join(at, f))) bad(`missing ${f}`);
   if (fs.existsSync(path.join(at, 'steam_appid.txt'))) bad('steam_appid.txt is in the folder (a developer\'s file: the depot excludes it, but don\'t leave it there)');
   const asarFile = path.join(at, 'resources/app.asar');
   if (!fs.existsSync(asarFile)) continue;
   const files = readAsar(asarFile), names = [...files.keys()];
-  for (const f of ['package.json', 'desktop/main.cjs', 'server/host.js', 'shared/world.js', 'client/index.html', 'client/js/main.js', 'client/fonts/OFL.txt', 'client/vendor/THREE-LICENSE']) if (!files.has(f)) bad(`app.asar lacks ${f}`);
+  for (const f of ['package.json', 'desktop/main.cjs', 'desktop/steam/lobbysearch.cjs', 'server/host.js', 'shared/world.js', 'shared/tripcode.js', 'client/index.html', 'client/js/main.js', 'client/fonts/OFL.txt', 'client/vendor/THREE-LICENSE', 'node_modules/koffi/index.js']) if (!files.has(f)) bad(`app.asar lacks ${f}`);
   const stray = names.filter(n => /^(test|tools|docs|steam|dist|\.git|\.github)\//.test(n) || /(^|\/)(README|DESIGN|ART|STEAM)\.md$/.test(n) || /^client\/(gallery|preview)\.html$/.test(n) || /(^|\/)steam_appid\.txt$/.test(n) || /\.(mp4|map)$/.test(n));
   for (const n of stray.slice(0, 10)) bad(`app.asar ships ${n}`);
   if (stray.length > 10) bad(`... and ${stray.length - 10} more stray files`);
