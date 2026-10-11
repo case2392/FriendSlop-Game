@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>texture gallery</title>
+<style>
+  body { margin: 0; background: #2a2430; color: #eee; font: 13px/1.3 'Trebuchet MS', sans-serif; }
+  #grid { display: flex; flex-wrap: wrap; gap: 14px; padding: 14px; }
+  .t { background: #1c1820; padding: 6px; border-radius: 6px; }
+  .t b { color: #ffd166; } .t small { color: #aaa; display: block; max-width: 512px; }
+  canvas { display: block; image-rendering: auto; }
+  #err { color: #ff8a80; padding: 10px; white-space: pre-wrap; }
+</style></head>
+<body><div id="err"></div><div id="grid"></div>
+<script type="module">
+  const q = new URLSearchParams(location.search);
+  const fam = q.get('family'); const only = q.get('names'); const tile = Number(q.get('tile') || 256);
+  try {
+    const P = await import('/js/paint/index.js');
+    let items = P.list(fam && fam !== 'all' ? fam : null);
+    if (only) { const set = new Set(only.split(',')); items = items.filter(t => set.has(t.name)); }
+    const grid = document.getElementById('grid');
+    for (const t of items) {
+      const div = document.createElement('div'); div.className = 't';
+      const t0 = performance.now();
+      let src;
+      try { src = P.canvasFor(t.name); } catch (e) { div.innerHTML = `<b>${t.name}</b> FAILED: ${e.message}`; grid.appendChild(div); continue; }
+      const ms = Math.round(performance.now() - t0);
+      const aspect = src.height / src.width;
+      const w = tile, h = Math.round(tile * aspect);
+      const cv = document.createElement('canvas'); cv.width = w * 2; cv.height = h * 2;
+      const g = cv.getContext('2d');
+      if (t.alpha) { // checker behind alpha textures
+        for (let y = 0; y < cv.height; y += 16) for (let x = 0; x < cv.width; x += 16) { g.fillStyle = ((x + y) / 16) % 2 ? '#6b8f5a' : '#93a87e'; g.fillRect(x, y, 16, 16); }
+      }
+      for (let i = 0; i < 2; i++) for (let j = 0; j < 2; j++) g.drawImage(src, i * w, j * h, w, h);
+      div.innerHTML = `<b>${t.name}</b> <small>${t.family} · ${src.width}×${src.height}${t.alpha ? ' · alpha' : ''} · ${ms} ms${t.note ? ' · ' + t.note : ''}</small>`;
+      div.appendChild(cv);
+      grid.appendChild(div);
+    }
+    if (!items.length) document.getElementById('err').textContent = 'no textures registered' + (fam ? ` in family "${fam}"` : '');
+  } catch (e) { document.getElementById('err').textContent = e.stack || String(e); }
+  window.__galleryDone = true;
+</script></body></html>

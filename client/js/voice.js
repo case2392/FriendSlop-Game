@@ -61,7 +61,15 @@ function ensureCtx() {
 // ---- transmit gating --------------------------------------------------------
 
 function txAllowed() {
-  return V.on && !V.muted && (V.mode === 'open' || V.ptt);
+  return V.on && !V.muted && (V.mode === 'open' || V.ptt || V.walkieKey);
+}
+
+// holding T to talk on the walkie always transmits, even in push-to-talk mode
+export function setWalkieKey(held) {
+  held = !!held;
+  if (V.walkieKey === held) return;
+  V.walkieKey = held;
+  applyTx();
 }
 
 function applyTx() {
@@ -225,10 +233,64 @@ function attachRemote(peer, stream) {
   peer.analyser.fftSize = 512;
   peer.data = new Uint8Array(peer.analyser.frequencyBinCount);
   src.connect(peer.analyser);
-  peer.analyser.connect(peer.gain);
+  // proximity path: muffle (occlusion) -> 3D panner -> distance gain
+  peer.lp = actx.createBiquadFilter();
+  peer.lp.type = 'lowpass';
+  peer.lp.frequency.value = 18000;
+  peer.panner = actx.createPanner();
+  peer.panner.panningModel = 'HRTF';
+  peer.panner.distanceModel = 'linear';
+  peer.panner.rolloffFactor = 0;           // we do distance ourselves (a nicer curve)
+  peer.gSpatial = actx.createGain();
+  peer.analyser.connect(peer.lp);
+  peer.lp.connect(peer.panner);
+  peer.panner.connect(peer.gSpatial);
+  peer.gSpatial.connect(peer.gain);
+  // walkie-talkie path: tinny, crunchy, no distance
+  const bp = actx.createBiquadFilter();
+  bp.type = 'bandpass'; bp.frequency.value = 1700; bp.Q.value = 1.1;
+  const shaper = actx.createWaveShaper();
+  const curve = new Float32Array(256);
+  for (let i = 0; i < 256; i++) { const x = i / 128 - 1; curve[i] = Math.tanh(x * 3.2); }
+  shaper.curve = curve;
+  peer.gRadio = actx.createGain();
+  peer.gRadio.gain.value = 0;
+  peer.analyser.connect(bp);
+  bp.connect(shaper);
+  shaper.connect(peer.gRadio);
+  peer.gRadio.connect(peer.gain);
   peer.gain.connect(masterGain);
   applyPeerVol(peer);
   emitChange();
+}
+
+// Called every frame. listener: {pos, fwd}; info(id) -> {head, occluded, ko, radio} | null
+export function spatialize(listener, info) {
+  if (!actx || !V.on) return;
+  const L = actx.listener;
+  const t = actx.currentTime;
+  if (L.positionX) {
+    L.positionX.value = listener.pos.x; L.positionY.value = listener.pos.y; L.positionZ.value = listener.pos.z;
+    L.forwardX.value = listener.fwd.x; L.forwardY.value = listener.fwd.y; L.forwardZ.value = listener.fwd.z;
+    L.upX.value = 0; L.upY.value = 1; L.upZ.value = 0;
+  } else {
+    L.setPosition(listener.pos.x, listener.pos.y, listener.pos.z);
+    L.setOrientation(listener.fwd.x, listener.fwd.y, listener.fwd.z, 0, 1, 0);
+  }
+  for (const peer of V.peers.values()) {
+    if (!peer.panner) continue;
+    const s = info(peer.id);
+    if (!s) { peer.gSpatial.gain.setTargetAtTime(0, t, 0.1); peer.gRadio.gain.setTargetAtTime(0, t, 0.05); continue; }
+    const p = peer.panner;
+    if (p.positionX) { p.positionX.value = s.head.x; p.positionY.value = s.head.y; p.positionZ.value = s.head.z; }
+    else p.setPosition(s.head.x, s.head.y, s.head.z);
+    const d = Math.hypot(s.head.x - listener.pos.x, s.head.y - listener.pos.y, s.head.z - listener.pos.z);
+    let g = d < 2.5 ? 1 : Math.pow(Math.max(0, 1 - (d - 2.5) / 42.5), 1.6);
+    if (s.occluded) g *= 0.6;
+    peer.gSpatial.gain.setTargetAtTime(g, t, 0.08);
+    peer.lp.frequency.setTargetAtTime(s.ko ? 520 : s.occluded ? 950 : 18000, t, 0.1);
+    peer.gRadio.gain.setTargetAtTime(s.radio ? 0.95 : 0, t, 0.04);
+  }
 }
 
 function applyPeerVol(peer) {
@@ -256,7 +318,7 @@ export function syncPeers(players) {
   if (!V.on) return;
   const want = new Set();
   for (const p of V._players) {
-    if (p.id === V._selfId || p.isBot || !p.connected || !p.voice) continue;
+    if (p.id === V._selfId || p.connected === false || !p.voice) continue;
     want.add(p.id);
     if (!V.peers.has(p.id) && V._selfId < p.id) makePeer(p.id); // onnegotiationneeded fires the offer
   }
@@ -328,6 +390,7 @@ export function setMode(mode) {
 }
 
 export function setPtt(held) {
+  held = !!held;
   if (V.ptt === held) return;
   V.ptt = held;
   applyTx();
