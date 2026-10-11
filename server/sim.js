@@ -25,6 +25,7 @@ const grp = (m, f) => ((m << 16) | f) >>> 0;
 const GROUPS = {
   world: grp(G_WORLD, 0xffff),
   rv: grp(G_RV, G_WORLD | G_RV | G_PROP),
+  rvStep: grp(G_RV, G_PROP),                 // the door steps hang 7 cm off the road: they'd snag the ground
   prop: grp(G_PROP, 0xffff),
   hook: grp(G_HOOK, G_WORLD | G_PROP),
   flimsy: grp(G_WORLD, G_PROP | G_HOOK),     // cacti: they stop people, not a 3-ton RV
@@ -84,11 +85,15 @@ export class Sim {
     this.hook = { state: 'stowed', body: null, len: 0, reeling: false, holder: null, anchor: null, attach: null };
     // yesterday's loot, back where it was in the RV
     const rp = this.rv.translation(), rq = this.rv.rotation();
+    const toTie = [];
     for (const c of carry) {
       const w = toWorld(rp, rq, v3(c.lx, c.ly + 0.04, c.lz));
       const q = mulQ(rq, c.q);
-      this.addProp(c.type, w, q, c.value, c.max);
+      const pr = this.addProp(c.type, w, q, c.value, c.max);
+      if (c.tied && pr) toTie.push(pr);
     }
+    // (bungee cords stay on overnight: what was tied down yesterday still is)
+    for (const pr of toTie) this.tieProp(pr);
     this.spawnMap();
   }
 
@@ -125,15 +130,18 @@ export class Sim {
   }
 
   buildRV(x, y, z, yaw) {
+    // (it never sleeps: asleep, the vehicle controller went on adding suspension impulses to a body
+    // that wasn't moving, it read ~0.6 m/s at a standstill, and 'brake before you change direction'
+    // kept a parked RV parked for good)
     const bd = RAPIER.RigidBodyDesc.dynamic().setTranslation(x, y, z).setRotation(yawQ(yaw))
-      .setLinearDamping(0.06).setAngularDamping(0.5).setCcdEnabled(true);
+      .setLinearDamping(0.06).setAngularDamping(0.5).setCcdEnabled(true).setCanSleep(false);
     this.rv = this.world.createRigidBody(bd);
     this.rvCols = {};
     for (const [name, hx, hy, hz, cx, cy, cz, o] of RV_PARTS) {
       const vol = 8 * hx * hy * hz;
       const cd = RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(cx, cy, cz)
         .setDensity(o.mass ? o.mass / vol : 0).setFriction(name === 'chassis' ? 0.4 : 0.75)
-        .setCollisionGroups(GROUPS.rv);
+        .setCollisionGroups(o.step ? GROUPS.rvStep : GROUPS.rv);
       const col = this.world.createCollider(cd, this.rv);
       this.rvCols[name] = col;
       if (o.part && !this.parts[o.part]) col.setEnabled(false);
@@ -167,12 +175,14 @@ export class Sim {
     const vol = k === 'box' ? 8 * L.shape[1] * L.shape[2] * L.shape[3]
       : k === 'cyl' ? Math.PI * L.shape[2] ** 2 * 2 * L.shape[1]
         : 4 / 3 * Math.PI * L.shape[1] ** 3;
+    // the boulder: 1000 kg at friction 0.3 (0.6 against the ground's 0.9) slides at ~5.9 kN, more than
+    // one shoving player (~4.5 kN), less than two; alone, it's the RV's bumper or the winch
     const col = this.world.createCollider(shapeDesc(L.shape)
-      .setDensity(L.mass / vol).setFriction(type === 'boulder' ? 0.85 : 0.6).setRestitution(0.1)
+      .setDensity(L.mass / vol).setFriction(type === 'boulder' ? 0.3 : 0.6).setRestitution(0.1)
       .setCollisionGroups(GROUPS.prop)
       .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
       .setContactForceEventThreshold(L.mass * L.tough * 9.81), body);
-    const prop = { id, type, body, col, value, max: max ?? value, holders: new Set(), sentSleep: false };
+    const prop = { id, type, body, col, value, max: max ?? value, holders: new Set(), sentSleep: false, knockUntil: 0, knockG: 0 };
     this.props.set(id, prop);
     this.byCollider.set(col.handle, id);
     return prop;
@@ -210,7 +220,11 @@ export class Sim {
   rvPose() { return { p: this.rv.translation(), q: this.rv.rotation() }; }
   rvToWorld(l) { return toWorld(this.rv.translation(), this.rv.rotation(), l); }
   rvToLocal(w) { return toLocal(this.rv.translation(), this.rv.rotation(), w); }
-  rvSpeed() { return this.vehicle.currentVehicleSpeed(); }
+  rvSpeed() {
+    const lv = this.rv.linvel(), q = this.rv.rotation();
+    const fx = 2 * (q.x * q.z + q.w * q.y), fz = 1 - 2 * (q.x * q.x + q.y * q.y), n = Math.hypot(fx, fz) || 1;
+    return (lv.x * fx + lv.z * fz) / n;
+  }
 
   // give the physics world's WASM memory back (a new day builds a new Sim)
   free() {
@@ -264,6 +278,17 @@ export class Sim {
     if (this.hook.state !== 'stowed') this.stowHook();
   }
 
+  // The ids of the loot in the RV right now (not on the roof)
+  cargo() {
+    const rp = this.rv.translation(), rq = this.rv.rotation(), ids = [];
+    for (const p of this.props.values()) {
+      if (p.type === 'map' || p.type === 'boulder' || p.max <= 0) continue;
+      const l = toLocal(rp, rq, p.body.translation());
+      if (insideRV(l.x, l.y, l.z, 0.05) && l.y < RV_DIM.ROOF_Y - 0.1) ids.push(p.id);
+    }
+    return ids;
+  }
+
   // Loot that's in the RV right now, in RV-local coordinates (rides into tomorrow).
   carryOver() {
     const rp = this.rv.translation(), rq = this.rv.rotation();
@@ -272,7 +297,7 @@ export class Sim {
       if (p.type === 'map' || p.type === 'boulder') continue;
       const l = toLocal(rp, rq, p.body.translation());
       if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) continue;
-      list.push({ type: p.type, value: p.value, max: p.max, lx: l.x, ly: l.y, lz: l.z, q: mulQ(conjQ(rq), p.body.rotation()) });
+      list.push({ type: p.type, value: p.value, max: p.max, lx: l.x, ly: l.y, lz: l.z, q: mulQ(conjQ(rq), p.body.rotation()), tied: this.tied.has(p.id) });
     }
     return list;
   }
@@ -310,6 +335,54 @@ export class Sim {
       return this.takeHook(pid, pl);
     }
     return false;
+  }
+
+  // Loading the RV. A prop held at its open door, outside and low, is helped in the way people get a thing
+  // through a door without thinking: lifted over the sill (the floor is a metre up; the hand's spring alone
+  // rams it into the floor's edge or the steps) and, if it's long, turned end-on to the doorway (1.3 m).
+  // Heavy loot still needs two pairs of hands to get that high. atDoor: the prop's RV-local middle, or null.
+  atDoor(p) {
+    if (!this.doorOpen && this.parts.doors) return null;
+    const l = this.rvToLocal(p.body.translation());
+    if (l.x < -3.4 || l.x > -0.95 || Math.abs(l.z - RV_DIM.DOOR_Z) > RV_DIM.DOOR_HALF + 0.6 || l.y < -2.4 || l.y > 1.2) return null;
+    return l;
+  }
+
+  // the prop's axes in the RV's frame
+  axesInRV(p) {
+    const rq = this.rv.rotation(), iq = { x: -rq.x, y: -rq.y, z: -rq.z, w: rq.w }, pq = p.body.rotation();
+    return [v3(1, 0, 0), v3(0, 1, 0), v3(0, 0, 1)].map(v => qRotate(iq, qRotate(pq, v)));
+  }
+
+  // how far to raise the hold point so that, with it where the hand wants it, the prop's lowest point
+  // clears the floor
+  sillLift(p, l, gp, target) {
+    const [kind, a, b, c] = LOOT[p.type].shape, ax = this.axesInRV(p);
+    const down = kind === 'box' ? Math.abs(ax[0].y) * a + Math.abs(ax[1].y) * b + Math.abs(ax[2].y) * c
+      : kind === 'cyl' ? Math.abs(ax[1].y) * a + b * Math.sqrt(Math.max(0, 1 - ax[1].y ** 2)) : a;
+    const bottom = l.y - down + this.rvToLocal(target).y - this.rvToLocal(gp).y;
+    return Math.max(0, Math.min(1.6, 0.08 - bottom));
+  }
+
+  // and turned to fit: stood up the way it's built to stand and, if it's long, turned end-on to the
+  // doorway (the way people get a sofa through a door). Torques in the RV's frame; held props spin against
+  // an angular damping of 3.5/s, so this settles at a few radians a second per radian off.
+  turnToDoor(p, dt) {
+    const L = LOOT[p.type], [kind, a, b, c] = L.shape;
+    if (kind !== 'box' || L.tool || Math.max(a, b, c) < RV_DIM.DOOR_HALF - 0.15) return;
+    const ax = this.axesInRV(p), I = p.body.mass() * (a * a + b * b + c * c) * 2 / 9, K = 12 * I;
+    const up = ax[1], tilt = Math.acos(Math.max(-1, Math.min(1, up.y))), sx = -up.z, sz = up.x, sn = Math.hypot(sx, sz);
+    const tq = sn > 1e-4 ? v3(sx / sn * K * tilt, 0, sz / sn * K * tilt) : v3(up.y < 0 ? K * Math.PI : 0, 0, 0);
+    // the longest axis lying flat, if it's longer than the doorway is wide: its angle off the RV's x,
+    // either end first (a positive turn about up takes +x toward -z)
+    let best = null, ext = RV_DIM.DOOR_HALF - 0.08;
+    [a, b, c].forEach((h, i) => { if (h > ext && Math.abs(ax[i].y) < 0.7) { ext = h; best = ax[i]; } });
+    if (best) {
+      let th = Math.atan2(best.z, best.x);
+      if (th > Math.PI / 2) th -= Math.PI; else if (th < -Math.PI / 2) th += Math.PI;
+      tq.y = K * th;
+    }
+    p.body.applyTorqueImpulse(mul(qRotate(this.rv.rotation(), tq), dt), true);
   }
 
   holdDist(pid, d) {
@@ -361,6 +434,7 @@ export class Sim {
     this.drive.th = num(m.th, 1);
     this.drive.st = num(m.st, 1);
     this.drive.hb = m.hb ? 1 : 0;
+    if (Math.abs(this.drive.th) > 0.05 || Math.abs(this.drive.st) > 0.05) this.rv.wakeUp();
   }
 
   // ---- the winch -------------------------------------------------------------------------
@@ -526,19 +600,20 @@ export class Sim {
   // ---- bungee cords: everything in the RV gets tied down until someone grabs it ---------
 
   tieDown() {
-    const rp = this.rv.translation(), rq = this.rv.rotation();
     let n = 0;
-    for (const p of this.props.values()) {
-      if (this.tied.has(p.id) || p.type === 'map' || p.type === 'boulder') continue;
-      const l = toLocal(rp, rq, p.body.translation());
-      if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) continue;
-      const rel = mulQ(conjQ(rq), p.body.rotation());
-      const j = this.world.createImpulseJoint(
-        RAPIER.JointData.fixed(l, rel, v3(), { x: 0, y: 0, z: 0, w: 1 }), this.rv, p.body, true);
-      this.tied.set(p.id, j);
-      n++;
-    }
+    for (const p of this.props.values()) if (this.tieProp(p)) n++;
     return n;
+  }
+  tieProp(p) {
+    if (this.tied.has(p.id) || p.type === 'map' || p.type === 'boulder') return false;
+    const rp = this.rv.translation(), rq = this.rv.rotation();
+    const l = toLocal(rp, rq, p.body.translation());
+    if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) return false;
+    const rel = mulQ(conjQ(rq), p.body.rotation());
+    const j = this.world.createImpulseJoint(
+      RAPIER.JointData.fixed(l, rel, v3(), { x: 0, y: 0, z: 0, w: 1 }), this.rv, p.body, true);
+    this.tied.set(p.id, j);
+    return true;
   }
 
   // ---- the step -------------------------------------------------------------------------
@@ -549,7 +624,7 @@ export class Sim {
 
     // driving
     const v = this.vehicle;
-    const sp = v.currentVehicleSpeed();
+    const sp = this.rvSpeed();
     const { th, st, hb } = this.drive;
     let engine = 0, brake = 0.6;
     if (th > 0.05) {
@@ -582,6 +657,7 @@ export class Sim {
     this.mudWheels = mudWheels;
 
     // hands on things
+    const turned = new Set();
     for (const [pid, h] of this.holds) {
       const pl = players.get(pid);
       if (!pl || !pl.eye || pl.ko) { this.release(pid); continue; }
@@ -603,10 +679,23 @@ export class Sim {
         const n = p.holders.size || 1;
         const m = Math.min(body.mass() / n, 400);
         const vp = body.velocityAtPoint(gp);
-        let F = add(mul(add(mul(sub(target, gp), C.GRAB.KP), mul(sub(tv, vp), C.GRAB.KD)), m), v3(0, m * 9.81, 0));
+        const door = this.atDoor(p), lift = door ? this.sillLift(p, door, gp, target) : 0;
+        if (door && !turned.has(p.id)) { turned.add(p.id); this.turnToDoor(p, dt); }
+        // (and steered to the middle of the doorway)
+        const goal = door ? add(target, qRotate(this.rv.rotation(), v3(0, lift, Math.max(-0.8, Math.min(0.8, RV_DIM.DOOR_Z - door.z))))) : target;
+        let F = add(mul(add(mul(sub(goal, gp), C.GRAB.KP), mul(sub(tv, vp), C.GRAB.KD)), m), v3(0, m * 9.81, 0));
         const fl = len(F);
-        if (fl > C.GRAB.FMAX) F = mul(F, C.GRAB.FMAX / fl);
-        body.applyImpulseAtPoint(mul(F, dt), gp, true);
+        if (fl > C.GRAB.FMAX) {
+          if (lift > 0 && F.y > 0) {
+            // over the sill, the hands hold it up first and push it along with what strength is left
+            const fy = Math.min(F.y, C.GRAB.FMAX), fh = Math.hypot(F.x, F.z);
+            const k = fh > 1e-6 ? Math.min(1, Math.sqrt(C.GRAB.FMAX ** 2 - fy * fy) / fh) : 0;
+            F = v3(F.x * k, fy, F.z * k);
+          } else F = mul(F, C.GRAB.FMAX / fl);
+        }
+        // at the door the hands guide it without wrenching it round (turnToDoor does the turning)
+        if (door) body.applyImpulse(mul(F, dt), true);
+        else body.applyImpulseAtPoint(mul(F, dt), gp, true);
       } else if (h.kind === 'rv') {
         const gp = this.rvToWorld(h.local);
         if (len(sub(gp, pl.eye)) > C.PLAYER.REACH + 1.4) { this.holds.delete(pid); continue; }
@@ -627,29 +716,47 @@ export class Sim {
     v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle));
     this.world.step(this.eq);
 
-    // impacts: knock value off the loot
+    // impacts: knock value off the loot. Each knock counts once, at its hardest: a thing landing touches
+    // down at several points over a few steps, and every contact used to count every step (one pothole hit
+    // a guitar fifteen times). A knock is the step's hardest contact; within 0.12 s of one, only a harder
+    // one adds (the part over it). Bungee'd loot is strapped down. Loot riding in the RV takes half (a
+    // carpeted floor, and a rigid step makes every slide into a wall read like a fall), a third on the
+    // grade (the RV tipped past 20 degrees, or being winched up it): sliding about there is no crash
+    const rq0 = this.rv.rotation(), rp0 = this.rv.translation();
+    const upY = 1 - 2 * (rq0.x * rq0.x + rq0.z * rq0.z);
+    const grade = this.hook.reeling || upY < 0.94;
+    const hits = new Map();
     this.eq.drainContactForceEvents(e => {
       for (const h of [e.collider1(), e.collider2()]) {
         const id = this.byCollider.get(h);
         if (id == null) continue;
         const p = this.props.get(id);
-        if (!p || p.max <= 0) continue;
-        const L = LOOT[p.type];
+        if (!p || p.max <= 0 || this.tied.has(id)) continue;
         const g = e.totalForceMagnitude() / p.body.mass() / 9.81;
-        if (g <= L.tough) continue;
-        let dmg = (g - L.tough) * L.frag * 0.006 * p.max;
-        if (p.holders.size) dmg *= 0.5;
-        dmg = Math.min(dmg, p.max * 0.4);
-        if (dmg < 1) continue;
-        p.value -= dmg;
-        if (p.value < Math.max(8, p.max * 0.07)) {
-          this.out.push({ k: 'break', id: p.id, type: p.type, lost: Math.round(p.max), x: r3(p.body.translation().x), y: r3(p.body.translation().y), z: r3(p.body.translation().z) });
-          this.removeProp(p.id);
-        } else {
-          this.out.push({ k: 'dmg', id: p.id, value: Math.round(p.value), lost: Math.round(dmg) });
-        }
+        if (g > (hits.get(id) || 0)) hits.set(id, g);
       }
     });
+    for (const [id, g] of hits) {
+      const p = this.props.get(id);
+      if (!p) continue;
+      const L = LOOT[p.type], knock = p.knockUntil > this.t;
+      const over = g - Math.max(L.tough, knock ? p.knockG : 0);
+      if (over <= 0) continue;
+      if (!knock) p.knockUntil = this.t + 0.12;
+      p.knockG = g;
+      let dmg = over * L.frag * 0.006 * p.max;
+      if (p.holders.size) dmg *= 0.5;
+      { const l = toLocal(rp0, rq0, p.body.translation()); if (insideRV(l.x, l.y, l.z, 0.1)) dmg *= grade ? 0.33 : 0.5; }
+      dmg = Math.min(dmg, p.max * 0.4);
+      if (dmg < 1) continue;
+      p.value -= dmg;
+      if (p.value < Math.max(8, p.max * 0.07)) {
+        this.out.push({ k: 'break', id: p.id, type: p.type, lost: Math.round(p.max), x: r3(p.body.translation().x), y: r3(p.body.translation().y), z: r3(p.body.translation().z) });
+        this.removeProp(p.id);
+      } else {
+        this.out.push({ k: 'dmg', id: p.id, value: Math.round(p.value), lost: Math.round(dmg) });
+      }
+    }
 
     // the RV runs people over
     const rvv = this.rv.linvel();

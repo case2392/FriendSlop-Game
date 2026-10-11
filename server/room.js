@@ -58,6 +58,8 @@ export class Room {
     // the old day's physics world lives in WASM memory that garbage collection gives back late or
     // never: free it, once the tick that replaced it (which may still hold it) has finished
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
+    // (a blackjack hand still being voted on when the day ends: the stake comes back)
+    if (this.bj?.state === 'vote' && this.bj.stake > 0) { this.bank += this.bj.stake; this.toast(`The dealer pushed the hand back: ${fmt$(this.bj.stake)} returned.`, '#fff', 4); }
     this.W = generateLeg(this.seed, this.day);
     this.sim = new Sim(this.W, { parts: this.parts, carry });
     this.phase = 'camp';
@@ -74,7 +76,10 @@ export class Room {
     this.gatesOpen = new Set();
     this.bedAt = null;
     this.receipt = null;
-    for (const p of this.players.values()) { p.bed = false; p.seat = null; p.ko = false; this.awaitReady(p); }
+    for (const p of this.players.values()) {
+      if (p.seat != null) this.send(p, { t: 'seat', seat: null });
+      p.bed = false; p.seat = null; p.ko = false; this.awaitReady(p);
+    }
   }
 
   nextDay() {
@@ -420,20 +425,7 @@ export class Room {
         this.toast(`${code || '????'} — wrong. Somebody go read the rock.`, '#ff8a80', 3, p);
       }
     } else if (u.kind === 'pawnBell') {
-      const ids = sim.propsIn(W.town.pawn);
-      if (!ids.length) { this.toast('Ed looks at the empty counter. Ed looks at you.', '#fff', 3, p); return; }
-      let total = 0;
-      const names = [];
-      for (const id of ids) {
-        const pr = sim.props.get(id);
-        total += Math.round(pr.value);
-        names.push(LOOT[pr.type].name);
-        sim.removeProp(id);
-      }
-      this.bank += total;
-      this.stats.sold += total; this.dayStats.sold += total;
-      this.broadcast({ t: 'ev', list: [{ k: 'sold', ids, total, by: p.id }] });
-      this.toast(`SOLD: ${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
+      if (!this.sellCounter(p.id)) this.toast('Ed looks at the empty counter. Ed looks at you. (Loot on the counter, or the RV in his loading zone.)', '#fff', 4, p);
     } else if (u.kind === 'bj') {
       if (u.arg === 'deal') {
         const r = this.bj.deal(this.t, this.bank);
@@ -528,11 +520,13 @@ export class Room {
     if (this.phase === 'night' || this.phase === 'over') return;
     this.phase = 'night';
     this.nightAt = this.t;
+    // the RV parks at the lot by the town's campfire (whoever rides in it and whatever it carries come
+    // along), so nobody wakes up at the fire 100 m from it, next to the junkyard's decoys
     const lot = this.W.town.lot;
-    if (!this.inTown) {
-      this.sim.placeRV(lot.x, lot.z, lot.yaw);
-      this.toast('You limped into town overnight.', '#fff', 4);
-    }
+    if (!this.inTown) this.toast('You limped into town overnight.', '#fff', 4);
+    this.sim.placeRV(lot.x, lot.z, lot.yaw);
+    // and anyone knocked out comes round by the fire: no doctor's bill for sleeping through midnight
+    for (const p of this.players.values()) if (p.ko) { p.ko = false; this.send(p, { t: 'revived' }); }
     // anyone not riding the RV gets dragged to the campfire
     for (const p of this.players.values()) {
       if (p.par) continue;
@@ -545,8 +539,44 @@ export class Room {
     this.broadcast(this.receipt);
   }
 
+  // the RV parked in Ed's loading zone, stopped: his bell buys its load too
+  docked() {
+    const d = this.W.town.dock, sim = this.sim;
+    if (!d || !this.inTown || sim.rvFlipped()) return false;
+    const t = sim.rv.translation();
+    return Math.hypot(t.x - d.x, t.z - d.z) < d.r && Math.abs(sim.rvSpeed()) < 1.5;
+  }
+
+  // Honest Ed buys whatever is on his counter, and the RV's whole load at DOCK_RATE when it's parked in
+  // his loading zone: the bell, or midnight (nobody rang it). Returns the total.
+  sellCounter(by = 0, late = false) {
+    const sim = this.sim, ids = sim.propsIn(this.W.town.pawn);
+    const load = this.docked() ? sim.cargo().filter(id => !ids.includes(id)) : [];
+    if (!ids.length && !load.length) return 0;
+    let total = 0, lot = 0;
+    const names = [];
+    for (const id of ids) {
+      const pr = sim.props.get(id);
+      total += Math.round(pr.value);
+      names.push(LOOT[pr.type].name);
+      sim.removeProp(id);
+    }
+    for (const id of load) {
+      lot += Math.round(sim.props.get(id).value * C.DOCK_RATE);
+      sim.removeProp(id);
+    }
+    total += lot;
+    if (load.length) names.push(`the RV's load (${load.length} thing${load.length > 1 ? 's' : ''}, ${fmt$(lot)})`);
+    this.bank += total;
+    this.stats.sold += total; this.dayStats.sold += total;
+    this.broadcast({ t: 'ev', list: [{ k: 'sold', ids: [...ids, ...load], total, by }] });
+    this.toast(`${late ? 'Ed rang it up himself: ' : 'SOLD: '}${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
+    return total;
+  }
+
   midnight() {
     if (this.paid) return;
+    this.sellCounter(0, true);
     if (this.bank >= this.due) { this.pay(); return; }
     // short. he takes everything you have, and a piece of the RV.
     const part = C.REPO_PARTS[this.strikes];
@@ -580,6 +610,11 @@ export class Room {
     if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
     sim.step(dt, this.players);
     for (const p of this.players.values()) this.resolvePlayer(p);
+    // the driver floors it against a winch cable still clipped to its post: say why nothing happens
+    if (drv && sim.hook.state === 'anchored' && !sim.hook.reeling && Math.abs(sim.drive.th) > 0.3 && Math.abs(sim.rvSpeed()) < 0.4) {
+      this.hookedT = (this.hookedT || 0) + dt;
+      if (this.hookedT > 1.5 && this.t - (this.hookedToastAt ?? -99) > 12) { this.hookedToastAt = this.t; this.toast('The winch is still clipped to the post. Someone unhook it: E on the hook.', '#ffd166', 5); }
+    } else this.hookedT = 0;
 
     const rvp = sim.rv.translation();
     if (this.phase === 'camp' && rvp.z > this.W.camp.exitZ) {
@@ -684,13 +719,14 @@ export class Room {
   gameState() {
     const sim = this.sim;
     const pawnIds = sim.propsIn(this.W.town.pawn);
-    let pawn = 0;
+    let pawn = 0, dock = 0;
     for (const id of pawnIds) pawn += Math.round(sim.props.get(id).value);
+    if (this.docked()) for (const id of sim.cargo()) if (!pawnIds.includes(id)) dock += Math.round(sim.props.get(id).value * C.DOCK_RATE);
     return {
       ph: this.phase, day: this.day, clk: Math.round(this.clock * 100) / 100,
       bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0, str: this.strikes,
       town: this.inTown ? 1 : 0, door: sim.doorOpen ? 1 : 0,
-      bj: this.bj.view(this.t), flip: this.flip.view(this.t), pawn, pawnIds,
+      bj: this.bj.view(this.t), flip: this.flip.view(this.t), pawn, pawnIds, dock,
       gates: [...this.gatesOpen], beds: [...this.players.values()].filter(p => p.bed).map(p => p.id),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,

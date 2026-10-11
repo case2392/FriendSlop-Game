@@ -104,6 +104,186 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(A.voice === false, 'rooms: voice on then off in the same tick leaves the mic off');
 }
 {
+  // a parked RV drives off again: it used to fall asleep, read ~0.6 m/s at a standstill, and brake
+  // forever ('rolling backwards: brake first'). Parked on a -3% downhill with 56 kg of loot up front,
+  // handbrake 3 s, then full throttle; and on the flat, stopped 3 s, then reverse
+  const { toWorld } = await import('../shared/rv.js');
+  const room = new Room('PARK', 4242);
+  const c = new FakeConn(), D = room.addPlayer(c, 'Driver').player;
+  room.welcome(D);
+  const W = room.W, sim = room.sim;
+  for (const g of W.gates) sim.openGate(g.id);
+  const drive = (th, hb, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); i++) { room.handle(D, { t: 'drv', th, st: 0, hb }); room.tick(1 / C.SIM_HZ); } };
+  const z0 = 702;
+  sim.placeRV(W.roadX(z0), z0, Math.atan2(W.roadX(z0 + 8) - W.roadX(z0), 8));
+  room.phase = 'road';
+  tick(room, 1);
+  const r0 = sim.rvPose();
+  for (let i = 0; i < 4; i++) sim.addProp('suitcase', toWorld(r0.p, r0.q, { x: -0.3 + (i % 2) * 0.6, y: 0.3, z: 1.2 + Math.floor(i / 2) * 0.5 }), r0.q, 600, 600);
+  room.onPose(D, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+  room.handle(D, { t: 'use', kind: 'seat0' });
+  drive(0, 1, 3);
+  const zA = sim.rv.translation().z;
+  drive(1, 0, 6);
+  const fwd = sim.rv.translation().z - zA;
+  drive(0, 1, 4);
+  const zB = sim.rv.translation().z;
+  drive(-1, 0, 5);
+  const back = zB - sim.rv.translation().z;
+  check(D.seat === 0 && fwd > 5 && back > 2, `sim: a parked RV drives off (${fwd.toFixed(1)} m in 6 s, downhill with loot) and reverses after a stop (${back.toFixed(1)} m in 5 s)`);
+  room.sim.free?.();
+}
+{
+  // nightfall and dawn: loot left on Ed's counter is sold at midnight, the RV comes to the lot by the
+  // fire, a knocked-out player comes round free, a hand still being voted on is refunded at dawn, and a
+  // driver still in the seat is told he isn't
+  const room = new Room('NIGHT', 4242);
+  const ca = new FakeConn(), cb = new FakeConn();
+  const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player;
+  room.welcome(A); room.welcome(B);
+  room.phase = 'road';
+  const T = room.W.town;
+  room.sim.addProp('vase', { x: T.pawn.x, y: T.pawn.y + 0.5, z: T.pawn.z }, { x: 0, y: 0, z: 0, w: 1 }, 700, 700);
+  tick(room, 0.5);
+  B.ko = true; B.koAt = room.t;
+  room.bank = 900; room.due = 1500;
+  const bank0 = room.bank;
+  room.midnight();
+  const rv = room.sim.rv.translation();
+  const sold = room.dayStats.sold;
+  check(sold > 600 && room.paid && room.bank === bank0 + sold - 1500, `rooms: loot left on the pawn counter is sold at midnight (+$${sold}, and the payment made: bank $${room.bank})`);
+  check(Math.hypot(rv.x - T.lot.x, rv.z - T.lot.z) < 1 && Math.hypot(T.lot.x - T.fire.x, T.lot.z - T.fire.z) < 25, `rooms: at night the RV is at the lot, ${Math.hypot(T.lot.x - T.fire.x, T.lot.z - T.fire.z).toFixed(0)} m from the crew's fire`);
+  check(!B.ko && cb.has(m => m.t === 'revived') && room.bank === bank0 + sold - 1500, 'rooms: knocked out at nightfall, you come round at the fire with no bill');
+  A.seat = 0;
+  room.bj.state = 'vote'; room.bj.stake = 400; room.bank -= 400;
+  const b1 = room.bank;
+  room.nextDay();
+  check(room.bank === b1 + 400 && A.seat === null && ca.has(m => m.t === 'seat' && m.seat === null), `rooms: at dawn a hand mid-vote is refunded ($${room.bank - b1}) and the driver is told the seat is free`);
+  // bungee cords stay on overnight
+  const { toWorld } = await import('../shared/rv.js');
+  const r = room.sim.rvPose();
+  room.sim.addProp('vase', toWorld(r.p, r.q, { x: 0, y: 0.3, z: -1.5 }), r.q, 500, 500);
+  tick(room, 0.5);
+  const n = room.sim.tieDown();
+  room.nextDay();
+  check(n === 1 && room.sim.tied.size === 1, `sim: what was bungee'd in the RV is still tied down the next day (${n} tied, ${room.sim.tied.size} next day)`);
+}
+{
+  // the door steps hang 7 cm off the road: beside a canyon wall they used to rest on the rising ground,
+  // lift a wheel, and hold the RV there for good (forward and reverse)
+  const room = new Room('SNAG', 777);
+  const c = new FakeConn(), D = room.addPlayer(c, 'Driver').player;
+  room.welcome(D);
+  room.day = 1; room.nextDay();
+  const W = room.W, sim = room.sim;
+  for (const p of [...sim.props.values()]) if (p.type === 'boulder') sim.removeProp(p.id);
+  sim.placeRV(W.roadX(480.2) - 4.69, 480.2, 0);
+  room.phase = 'road';
+  tick(room, 1);
+  room.onPose(D, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+  room.handle(D, { t: 'use', kind: 'seat0' });
+  const z0 = sim.rv.translation().z;
+  for (let i = 0; i < 5 * C.SIM_HZ; i++) { room.handle(D, { t: 'drv', th: 0.6, st: 0.25, hb: 0 }); room.tick(1 / C.SIM_HZ); }
+  const moved = sim.rv.translation().z - z0;
+  check(D.seat === 0 && moved > 5, `sim: an RV with its door steps over the ground by a canyon wall drives on (${moved.toFixed(1)} m in 5 s)`);
+}
+{
+  // the Rockfall: two friends shove the boulder aside; one alone can't (that's the RV's bumper or the winch).
+  // It used to take four (2000 kg at friction 0.85).
+  const shove = n => {
+    const room = new Room('ROCK', 4242);
+    const P = Array.from({ length: n }, (_, i) => { const p = room.addPlayer(new FakeConn(), 'R' + i).player; room.welcome(p); return p; });
+    room.day = 1; room.nextDay();
+    room.phase = 'road';
+    const b = [...room.sim.props.values()].find(p => p.type === 'boulder'), W = room.W;
+    tick(room, 1);
+    const x0 = b.body.translation().x;
+    for (let k = 0; k < 15 * C.SIM_HZ; k++) {
+      const t = b.body.translation();
+      P.forEach((p, i) => {
+        const px = t.x - 2.35, pz = t.z + (i - (n - 1) / 2) * 0.7, py = W.heightAt(px, pz);
+        room.onPose(p, { par: 0, x: px, y: py, z: pz, yaw: Math.PI / 2, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+        if (k % 5 === 0) room.handle(p, { t: 'push', kind: 'prop', id: b.id, pt: [px + 0.34, py + 0.9, pz], dir: [1, 0, 0] });
+      });
+      room.tick(1 / C.SIM_HZ);
+    }
+    return b.body.translation().x - x0;
+  };
+  const one = shove(1), two = shove(2);
+  check(one < 0.5 && two > 2, `sim: two shoving players move the boulder (${two.toFixed(1)} m in 15 s), one doesn't (${one.toFixed(2)} m)`);
+}
+{
+  // loading heavy loot: two friends carry a safe, then the dino head, to the open door and in (the lead
+  // backing up the steps, the other behind it). Hands lift it over the sill, turn it end-on and steer it
+  // to the middle of the 1.3 m doorway; it used to jam against the floor's edge a metre up and fall out.
+  const { toWorld, toLocal, RV_DIM } = await import('../shared/rv.js');
+  const { LOOT } = await import('../shared/loot.js');
+  const load = (type, yaw0) => {
+    const room = new Room('LOAD', 4242);
+    const [A, B] = ['Lead', 'Back'].map(n => { const p = room.addPlayer(new FakeConn(), n).player; room.welcome(p); return p; });
+    const W = room.W, sim = room.sim, DZ = RV_DIM.DOOR_Z;
+    sim.placeRV(W.roadX(100), 100, 0);
+    room.phase = 'road';
+    tick(room, 1);
+    sim.setDoor(true);
+    const R = () => sim.rvPose(), lw = l => toWorld(R().p, R().q, l);
+    const at = lw({ x: -6, y: 0, z: DZ }), half = LOOT[type].shape[2];
+    const pr = sim.addProp(type, { x: at.x, y: W.heightAt(at.x, at.z) + half + 0.05, z: at.z }, { x: 0, y: Math.sin(yaw0 / 2), z: 0, w: Math.cos(yaw0 / 2) }, 1000, 1000);
+    tick(room, 1);
+    const item = () => toLocal(R().p, R().q, pr.body.translation());
+    // stand at local (x, y?, DZ) looking at the item
+    const pose = (p, x, y) => {
+      const w = lw({ x, y: y ?? 0, z: DZ }), it = pr.body.translation();
+      room.onPose(p, { par: 0, x: w.x, y: y == null ? W.heightAt(w.x, w.z) : w.y, z: w.z, yaw: Math.atan2(it.x - w.x, it.z - w.z), pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+    };
+    let lead = -4.6, back = -7.4, leadY = null;
+    pose(A, lead, null); pose(B, back, null);
+    const t0 = pr.body.translation();
+    for (const p of [A, B]) room.handle(p, { t: 'grab', kind: 'prop', id: pr.id, pt: [t0.x, t0.y + 0.15, t0.z], d: 1.2 });
+    for (const [x, y] of [[-2.4, null], [-1.64, -0.85], [-1.42, -0.42], [-0.9, 0], [-0.2, 0], [0.5, 0]]) {
+      for (let k = 0; k < 90; k++) {
+        lead += (x - lead) * 0.06; leadY = y;
+        back = Math.min(back + 1.2 / C.SIM_HZ, Math.min(-2.2, lead - 2.4));
+        pose(A, lead, leadY); pose(B, back, null);
+        room.tick(1 / C.SIM_HZ);
+      }
+    }
+    for (let k = 0; k < 120; k++) { back = Math.min(back + 1 / C.SIM_HZ, -1.9); pose(A, lead, leadY); pose(B, back, null); room.tick(1 / C.SIM_HZ); }
+    for (const p of [A, B]) room.handle(p, { t: 'rel' });
+    tick(room, 2);
+    const l = item();
+    return { inside: l.x > -1.1 && l.y > -0.1 && sim.props.has(pr.id), l };
+  };
+  const safe = load('safe', 0.4), dino = load('dino', 1.1);
+  check(safe.inside && dino.inside, `sim: two friends load a safe and the dino head through the RV's door (safe at x ${safe.l.x.toFixed(2)}, dino at x ${dino.l.x.toFixed(2)}; inside is > -1.2)`);
+}
+{
+  // Ed's loading zone: with the RV parked in front of his shop, the bell sells its whole load at DOCK_RATE
+  // (and the counter at full price); parked anywhere else, only the counter
+  const { toWorld } = await import('../shared/rv.js');
+  const sell = atDock => {
+    const room = new Room('DOCK', 4242);
+    const c = new FakeConn(), A = room.addPlayer(c, 'Ann').player;
+    room.welcome(A);
+    room.phase = 'road'; room.inTown = true;
+    const W = room.W, sim = room.sim, d = W.town.dock;
+    if (atDock) sim.placeRV(d.x, d.z, 0); else sim.placeRV(d.x, d.z + 30, 0);
+    tick(room, 1);
+    const r = sim.rvPose();
+    for (let i = 0; i < 3; i++) sim.addProp('suitcase', toWorld(r.p, r.q, { x: 0.3, y: 0.3, z: -1 + i * 0.6 }), r.q, 500, 500);
+    sim.addProp('vase', { x: W.town.pawn.x, y: W.town.pawn.y + 0.4, z: W.town.pawn.z }, { x: 0, y: 0, z: 0, w: 1 }, 300, 300);
+    tick(room, 1);
+    const bell = W.uses.find(u => u.kind === 'pawnBell');
+    room.onPose(A, { par: 0, x: bell.x + 1, y: bell.y - 1, z: bell.z, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+    const bank0 = room.bank;
+    room.handle(A, { t: 'use', id: bell.id });
+    return { got: room.bank - bank0, left: sim.cargo().length, offer: room.gameState().dock };
+  };
+  const at = sell(true), away = sell(false);
+  check(at.got === 300 + 3 * Math.round(500 * C.DOCK_RATE) && at.left === 0 && away.got === 300 && away.left === 3,
+    `rooms: in Ed's loading zone the bell sells the RV's load at ${C.DOCK_RATE * 100}% (+$${at.got}, ${at.left} left in the RV); parked down the street, only the counter (+$${away.got}, ${away.left} left)`);
+}
+{
   // bedtime: half the crew in a bunk starts a countdown; the rest can't hold everyone at the campfire
   const room = new Room('BEDS', 4242);
   const conns = [new FakeConn(), new FakeConn(), new FakeConn()];

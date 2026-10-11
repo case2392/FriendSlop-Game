@@ -30,6 +30,40 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(bad === 0 && tally.lose > tally.win, `blackjack engine: 3000 hands consistent ${JSON.stringify(tally)}`);
 }
 
+// --- world gen: the gate code's paint is clear of the ground; every boulder has its sign (pure logic) ---
+// (codes used to be brushed at a fixed spot on the rim, and 1 in 5 had a ridge of grass through the digits)
+{
+  let codes = 0, buried = 0, boulders = 0, signed = 0;
+  for (let i = 0; i < 24; i++) {
+    const seed = (Math.imul(i + 7, 2654435761) >>> 0) % 1e9;
+    for (let day = 1; day <= 5; day++) {
+      const W = generateLeg(seed, day);
+      for (const s of W.signs.filter(s => s.flat)) {
+        codes++;
+        // the slab's top as world.js rimSlab and town3d.js rimCode make it (a plane fitted to the ground
+        // around it, lifted clear of the bumps by up to 0.6 m, 0.24 m up), against the ground under the paint
+        const yaw = Math.atan2(s.x - W.roadX(s.z), 0) + Math.PI, c = Math.cos(yaw), sn = Math.sin(yaw);
+        const gy = (lx, lz) => W.heightAt(s.x + lx * c + lz * sn, s.z - lx * sn + lz * c);
+        const hx = s.w / 2 + 0.5, hz = s.h / 2 + 0.45;
+        let n = 0, sy = 0, sxy = 0, szy = 0, sxx = 0, szz = 0, lift = 0, poke = -1;
+        for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) { const lx = (a / 4 - 0.5) * 2.2 * hx, lz = (b / 4 - 0.5) * 2.2 * hz, y = gy(lx, lz); n++; sy += y; sxy += lx * y; szy += lz * y; sxx += lx * lx; szz += lz * lz; }
+        const a0 = sy / n, bx = sxy / sxx, bz = szy / szz;
+        for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) { const lx = (a / 4 - 0.5) * (s.w + 0.3), lz = (b / 4 - 0.5) * (s.h + 0.3); lift = Math.max(lift, gy(lx, lz) - (a0 + bx * lx + bz * lz)); }
+        const top0 = a0 + Math.min(lift, 0.6) + 0.24;
+        for (let a = 0; a <= 20; a++) for (let b = 0; b <= 12; b++) { const lx = (a / 20 - 0.5) * s.w, lz = (b / 12 - 0.5) * s.h; poke = Math.max(poke, gy(lx, lz) - (top0 + bx * lx + bz * lz)); }
+        if (poke > 0) buried++;
+      }
+      for (const o of W.obstacles.filter(o => o.type === 'boulder')) {
+        boulders++;
+        const s = W.signs.find(s => s.lines[0] === 'ROCKFALL' && s.z < o.z && o.z - s.z < 40);
+        if (s && Math.abs(W.heightAt(s.x, s.z) - W.roadY(s.z)) < 0.3) signed++;
+      }
+    }
+  }
+  check(codes > 80 && buried === 0, `world: no gate code has the ground poking through its paint (${buried} of ${codes})`);
+  check(boulders > 50 && signed === boulders, `world: every boulder has a ROCKFALL sign on flat ground before it (${signed} of ${boulders})`);
+}
+
 // --- body-vote blackjack: votes left standing after a hit wait for the timer (pure logic) ---
 // (a crew still on the HIT pad, reading its new card, used to be dealt another every 1.2 s until it bust)
 {

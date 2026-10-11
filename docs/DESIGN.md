@@ -233,7 +233,7 @@ the difficulty curve stays in the quota.
 | Obstacle | What happens | Verb it demands | Inspiration |
 |---|---|---|---|
 | **The Grade** | A washed-out slope too steep for the engine | Someone climbs the cliff with the winch hook, clips it to the anchor post at the top, and the driver reels in | RVTY + PEAK |
-| **The Boulder** | A 2-ton rock in a narrow pass | Shove it with 3+ bodies, or winch it off the edge | physics + headcount |
+| **The Boulder** | A one-ton rock in a narrow pass (a ROCKFALL sign warns you) | Two bodies shove it aside (one can't); alone, nudge it with the RV's bumper, or hook it and reel it while the RV stands angled | physics + headcount |
 | **The Mud Flat** | The wheels lose grip | Everyone out and push. Unloading heavy loot helps. | RVTY |
 | **The Ranger Gate** | Locked gate, 4-digit keypad | The code is brushed on a slab of rock up on the canyon rim (a sign at the gate says which rim). Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
@@ -299,7 +299,10 @@ M2 adds more parts: a wheel (it pulls left), the windshield, the engine
 ### 7.5 The Town
 
 - **Pawn shop:** put loot on the counter, the appraiser shows the price,
-  ring the bell to sell. The money goes to the shared bank.
+  ring the bell to sell. The money goes to the shared bank. Or park the RV in
+  Ed's loading zone out front and the bell sells its whole load too, sight
+  unseen, at 80%: carrying the good stuff in is worth it, carrying the junk in
+  isn't. (Unloading 20 things one at a time ate three game hours.)
 - **Casino:** every game bets *the shared bank*, and *anyone* can bet it.
   That's GWYF's comedy and it's ours too. In the first build:
   - **Blackjack.** Squad vs. dealer. Anyone can set the bet on the big
@@ -335,17 +338,21 @@ matters most. The face values below are **measured from the generator**
 
 | Day | Payment due | Stops | Loot on the leg (face value) | Due as a share of face value |
 |---|---|---|---|---|
-| 1 | $1,500 | 5 | ~$8,400 | 18% (a learning day: surplus to gamble) |
-| 2 | $3,000 | 6 | ~$13,500 | 22% |
-| 3 | $5,500 | 7 | ~$16,800 | 33% |
-| 4 | $9,000 | 8 | ~$22,600 | 40% |
+| 1 | $1,000 | 5 | ~$8,400 | 12% (a learning day: surplus to gamble) |
+| 2 | $2,500 | 6 | ~$13,500 | 19% |
+| 3 | $4,500 | 7 | ~$16,800 | 27% |
+| 4 | $7,500 | 8 | ~$22,600 | 33% |
 | 5 | $15,000 balloon | 8 | ~$24,300 | 62% (you will be gambling) |
 
-The realistic haul is roughly 40–60% of face value: the clock, stops on mesa
-tops you have to climb to, loot that breaks on the way down, and loot that
-slides around in the RV. Day 5 is beyond that unless you banked surplus or got
-lucky. The numbers need real playtests with real friends before anyone trusts
-them (confidence: moderate).
+The realistic haul is well short of face value: the clock, stops on mesa tops
+you have to climb to, loot that breaks on the way down, loot that slides
+around in the RV, and Ed's 80% for a load sold from the loading zone. A crew
+of bots that plays it straight (every stop it has time for, no casino; the
+full-run bot in the QA notes) pays days 1-3 on every seed tried and usually
+day 4, and is nowhere near the day-5 balloon: that one is the gamble, or a
+great run with surplus banked. Earlier quotas ($1,500 / $3,000 / $5,500 /
+$9,000) had the same bots missing day 2 or 3. The numbers still need real
+playtests with real friends before anyone trusts them (confidence: moderate).
 
 - Every casino game has a house edge (blackjack about 1–2% played sensibly,
   the coin flip 3%). The casino is variance you choose, never free money.

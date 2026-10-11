@@ -25,7 +25,7 @@ export const LOOT = {
   dino:     { name: 'Fiberglass Dino Head', shape: ['box', 0.55, 0.45, 0.75], mass: 120, value: 1700, frag: 0.7, cls: 'heavy', tough: 10 },
   // not loot: tools
   map:      { name: 'Road Map',         shape: ['box', 0.2, 0.02, 0.14],  mass: 0.4, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true },
-  boulder:  { name: 'Boulder',          shape: ['box', 2.0, 1.3, 1.5],    mass: 2000,value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true },
+  boulder:  { name: 'Boulder',          shape: ['box', 2.0, 1.3, 1.5],    mass: 1000,value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true },
 };
 
 export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);

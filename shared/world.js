@@ -174,7 +174,7 @@ export function generateLeg(seed, day) {
   const wallSoft = z => lerp(B.wallSoft, 5.5, narrowK(z));
   function wallDist(side, z) {
     let wd = B.wallDist[0] + B.wallDist[1] * fbm(z / 140, side * 7.7, S + 3, 2);
-    for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 6.2, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
+    for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 7.0, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
     return lerp(wd, 85, flatZone(z));
   }
   // Tanaris's dunes (B.erg): transverse dunes across the wind, each with a long gentle windward back and a
@@ -374,7 +374,7 @@ export function generateLeg(seed, day) {
   // The slab of rim rock a gate code is brushed on (town3d's rimCode draws it from the same numbers): a
   // plane fitted to the ground under it, lifted clear of the bumps, its top 0.24 m up. Its collider is a
   // 4 x 3 grid of boxes stepping along that plane, so nobody stands ankle-deep in the rock.
-  const rimSlab = (sx, sz, w, h) => {
+  const slabFit = (sx, sz, w, h) => {
     const yaw = Math.atan2(sx - roadX(sz), 0) + Math.PI;
     const F = frame(sx, 0, sz, yaw), gy = (lx, lz) => { const p = F(lx, 0, lz); return heightAt(p.x, p.z); };
     const hx = w / 2 + 0.5, hz = h / 2 + 0.45;
@@ -386,6 +386,10 @@ export function generateLeg(seed, day) {
     const a0 = sy / n, bx = sxy / sxx, bz = szy / szz;
     let lift = 0;
     for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) { const lx = (i / 4 - 0.5) * (w + 0.3), lz = (j / 4 - 0.5) * (h + 0.3); lift = Math.max(lift, gy(lx, lz) - (a0 + bx * lx + bz * lz)); }
+    return { yaw, F, gy, hx, hz, a0, bx, bz, lift };
+  };
+  const rimSlab = (sx, sz, w, h) => {
+    const { yaw, F, gy, hx, hz, a0, bx, bz, lift } = slabFit(sx, sz, w, h);
     const top0 = a0 + Math.min(lift, 0.6) + 0.24, NX = 4, NZ = 3, cw = hx * 0.95 / NX, cd = hz * 0.95 / NZ;
     for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
       const lx = -hx * 0.95 + cw * (2 * i + 1), lz = -hz * 0.95 + cd * (2 * j + 1), t = top0 + bx * lx + bz * lz;
@@ -454,6 +458,14 @@ export function generateLeg(seed, day) {
       const az = o.z + 26, ax = roadX(o.z + 26) + (rng() < 0.5 ? -1 : 1) * 5.0, ay = heightAt(ax, az);
       cyls.push({ x: ax, y: ay + 1.6, z: az, r: 0.3, hh: 1.6, mat: 'deadtree' });
       anchors.push({ id: anchors.length, x: ax, y: ay + 1.1, z: az });
+      // the warning sign, on the first flat ground short of the narrows (the walls close in at the boulder)
+      let sx = roadX(o.z - 18) - 4.6, sz = o.z - 18;
+      find: for (let dz = 18; dz <= 34; dz += 4) for (const off of [5.2, 4.6]) {
+        const z = o.z - dz, x = roadX(z) - off, h = heightAt(x, z);
+        if (Math.abs(h - roadY(z)) < 0.3 && Math.abs(heightAt(x - 0.6, z) - heightAt(x + 0.6, z)) < 0.3 && Math.abs(heightAt(x, z - 0.6) - heightAt(x, z + 0.6)) < 0.3) { sx = x; sz = z; break find; }
+      }
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
+        lines: ['ROCKFALL', 'SHOVE IT ASIDE', 'OR WINCH IT'], bg: '#f2c14e', fg: '#1d1d1d', post: true });
     } else if (o.type === 'gate') {
       const y = roadY(o.z);
       o.code = String(1000 + Math.floor(rng() * 9000));
@@ -467,8 +479,23 @@ export function generateLeg(seed, day) {
       // a driver heading +z has +x on the left
       signs.push({ x: rx + 5.4, y: heightAt(rx + 5.4, o.z - 6) + 2.2, z: o.z - 6, ry: 0, w: 3.2, h: 1.4,
         lines: ['RANGER STATION 7', side > 0 ? 'CODE ON THE LEFT RIM' : 'CODE ON THE RIGHT RIM'], bg: '#3a6b35', fg: '#f6efd6', post: true });
-      const cz = o.z - 14 - rng() * 10;
-      const cx = roadX(cz) + side * (wallDist(side > 0 ? 1 : 0, cz) + 9.5);
+      // on the flattest rim rock near where it was meant to go: a slab on a bump or a 50-degree face would
+      // have the ground poke through the digits. How badly: the slab's top (0.24 m over the fitted plane,
+      // lifted by up to 0.6 m) against the ground on a fine grid under the paint, and the plane's slope.
+      const cz0 = o.z - 14 - rng() * 10;
+      let cx = 0, cz = cz0, best = Infinity;
+      scan: for (const dz of [0, -3, 3, -6, 6]) for (const dd of [9.5, 8, 11, 12.5, 6.5, 14]) {
+        const z = Math.min(cz0 + dz, o.z - 9), x = roadX(z) + side * (wallDist(side > 0 ? 1 : 0, z) + dd);
+        const f = slabFit(x, z, 3.4, 2.0), top0 = f.a0 + Math.min(f.lift, 0.6) + 0.24;
+        let poke = -1;
+        for (let i = 0; i <= 12; i++) for (let j = 0; j <= 8; j++) {
+          const lx = (i / 12 - 0.5) * 3.4, lz = (j / 8 - 0.5) * 2.0;
+          poke = Math.max(poke, f.gy(lx, lz) - (top0 + f.bx * lx + f.bz * lz));
+        }
+        const score = Math.max(0, poke + 0.08) * 4 + Math.max(0, Math.hypot(f.bx, f.bz) - 0.4);
+        if (score < best - 1e-6) { best = score; cx = x; cz = z; }
+        if (best === 0) break scan;
+      }
       const cy = heightAt(cx, cz);
       o.codeAt = { x: cx, y: cy, z: cz };
       signs.push({ x: cx, y: cy + 0.06, z: cz, ry: side > 0 ? Math.PI / 2 : -Math.PI / 2, w: 3.4, h: 2.0,
@@ -893,6 +920,13 @@ export function generateLeg(seed, day) {
     const sg = F(0, 4.4, 4.6);
     signs.push({ x: sg.x, y: y0 + 4.4, z: sg.z, ry: Math.PI / 2, w: 5, h: 1.3, lines: ['HONEST ED\'S PAWN', 'WE BUY ANYTHING'], bg: '#f4d35e', fg: '#2b2d42' });
     town.pawnKeeper = F(0, 0, -3.4); town.pawnKeeper.y = y0; town.pawnKeeper.ry = Math.PI / 2;
+    // Ed's loading zone: the street in front of his door. With the RV parked here the bell sells the
+    // RV's whole load too, sight unseen, at DOCK_RATE (carry the good stuff in for the full price)
+    const dock = F(0, 0, 4.5 + 7.5);
+    town.dock = { x: dock.x, z: dock.z, r: 7 };
+    const ds = F(-1.4, 0, 4.5 + 4.2);
+    signs.push({ x: ds.x, y: heightAt(ds.x, ds.z) + 2.0, z: ds.z, ry: Math.PI / 2, w: 2.8, h: 1.3,
+      lines: ['ED\'S LOADING ZONE', 'PARK THE RV HERE', 'RING: HE BUYS THE LOT'], bg: '#f4d35e', fg: '#2b2d42', post: true });
   }
   // general store
   {

@@ -12,7 +12,7 @@ export const RV_DIM = {
   WALL_H: 2.3,
   ROOF_Y: 2.4,           // walkable roof surface
   DOOR_Z: 0.35,          // door center along the right (-X) wall
-  DOOR_HALF: 0.5,
+  DOOR_HALF: 0.65,       // 1.3 m: a safe or the dino head goes through with a hand's width to spare
 };
 
 // Every collider: [name, hx, hy, hz, cx, cy, cz, opts]
@@ -54,9 +54,10 @@ export const RV_PARTS = [
   // the bunks
   ['bed',       1.2, 0.28, 0.48,    0, 0.28, -3.42,   { mass: 20, use: 'bunk' }],
   ['bunkUp',    1.2, 0.05, 0.48,    0, 1.45, -3.42,   { mass: 8, use: 'bunk' }],
-  // getting in: two steps under the door
-  ['step0',     0.2, 0.04, 0.46,   -1.42, -0.46, D.DOOR_Z, { mass: 2 }],
-  ['step1',     0.2, 0.04, 0.46,   -1.64, -0.89, D.DOOR_Z, { mass: 2 }],
+  // getting in: two steps under the door (opts.step: people and loot stand on them; the ground doesn't
+  // catch them, the lower one hangs 7 cm off the road)
+  ['step0',     0.2, 0.04, D.DOOR_HALF - 0.04, -1.42, -0.46, D.DOOR_Z, { mass: 2, step: true }],
+  ['step1',     0.2, 0.04, D.DOOR_HALF - 0.04, -1.64, -0.89, D.DOOR_Z, { mass: 2, step: true }],
   // up top: the cab-over brow and the roof cargo (they go with the roof when the Repo Man takes it)
   ['brow',      1.15, 0.04, 0.27,   0, 2.43, 4.27,    { mass: 5, part: 'roof' }],
   ['rackLoad',  0.5, 0.2, 0.7,      0.05, 2.6, 3.15,  { mass: 5, part: 'roof' }],

@@ -1540,7 +1540,8 @@ function updateCasino(dt) {
   w.flipLabel.userData.set(f.busy ? 'FLIPPING…' : f.last && f.last.ago < 4 ? (f.last.win ? `DOUBLED! +${fmt$(f.last.stake)}` : `NOTHING. -${fmt$(f.last.stake)}`) : `DOUBLE OR NOTHING · stake ${fmt$(f.stake)}`,
     f.busy ? '#ffd166' : f.last && f.last.ago < 4 ? (f.last.win ? '#7CFC00' : '#ff5252') : '#ffd166');
   w.coin.rotation.z += dt * (f.busy ? 25 : 0.6);
-  w.pawnLabel.userData.set(g.pawn ? `ED OFFERS ${fmt$(g.pawn)} · ring the bell` : 'PUT LOOT ON THE COUNTER', g.pawn ? '#7CFC00' : '#ffe9a8');
+  const offer = (g.pawn || 0) + (g.dock || 0);
+  w.pawnLabel.userData.set(offer ? `ED OFFERS ${fmt$(offer)}${g.dock ? ' FOR THE LOT' : ''} · ring the bell` : 'LOOT ON THE COUNTER, OR THE RV OUTSIDE', offer ? '#7CFC00' : '#ffe9a8');
   w.hitPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.sin(time * 6) * 0.2 : 0.15;
   w.standPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.cos(time * 6) * 0.2 : 0.15;
 }
@@ -1605,7 +1606,7 @@ function tutDone(k) { if (tut.has(k)) return; tut.add(k); try { localStorage.set
 function tutWatch(inMyRV) {
   if (me.mode === 'seat' && me.seat === 0) tutDone('drive');
   if (me.holding && me.holding.type !== 'map') { tutDone('grab'); if (inMyRV) tutDone('load'); }
-  if ((S.g?.pawn || 0) > 0) tutDone('pawn');
+  if ((S.g?.pawn || 0) > 0 || (S.g?.dock || 0) > 0) tutDone('pawn');
 }
 function tutTip(g, town) {
   if (!settings.tutorial) return null;
@@ -1613,7 +1614,7 @@ function tutTip(g, town) {
   if (g.ph !== 'road') return null;
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
-  if (!tut.has('pawn')) return `Hint: in ${town}, put loot on the pawn shop counter and ring the bell`;
+  if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
   return null;
 }
 function questTracker(g) {
