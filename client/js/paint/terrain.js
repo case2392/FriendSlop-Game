@@ -7,9 +7,9 @@
 //   road_<b>      the dirt road in ROAD SPACE: x runs across the road (edge to edge, plus a
 //                 grassy shoulder), y runs along it; each biome's road is painted differently
 //   cliff_<b>     steep faces, projected from the side (y = world height, so strata stay level):
-//                 rounded granite masses (meadow, fields), angular fractured granite (snow; the crash
-//                 mesas keep rounded blocks in cliff_snow_mesa), strata (badlands), thick sandstone
-//                 beds (desert); cliff_snow_form / cliff_snow_mesa_form hold the granites' form
+//                 rounded granite masses (meadow, fields), angular fractured granite (snow),
+//                 strata (badlands), thick sandstone beds (desert); cliff_snow_form holds the snow
+//                 granite's form
 //   clutter_<b>   4×2 alpha atlas of ground-clutter cards (tufts, flowers, wheat, twigs, drifts)
 //   sky_clouds_<b> the painted cloud band around the sky dome (alpha), its own sky per biome
 //   sky_mtn_<b>   3 rows of distant land silhouettes (far, mid, near) for the horizon rings
@@ -1058,13 +1058,13 @@ function massRock(g, s, rnd, P, cv) {
     B[o] = r; B[o + 1] = gg; B[o + 2] = b; B[o + 3] = 255;
   }
   g.putImageData(base, 0, 0);
-  // (kept for a companion map: which way the painted rock faces, its height, its creases)
+  // (kept for a companion map: which way the painted rock faces, and its height)
   if (P.upName) {
     let h0 = Infinity, h1 = -Infinity;
     for (let k = 0; k < N; k++) { if (Hs[k] < h0) h0 = Hs[k]; if (Hs[k] > h1) h1 = Hs[k]; }
     const Hn = new Float32Array(N);
     for (let k = 0; k < N; k++) Hn[k] = (Hs[k] - h0) / (h1 - h0 || 1);
-    FORM.set(P.upName, { up: blurField(Float32Array.from(UP), s, 2, 2), h: Hn, cr: Float32Array.from(CR), ux: P.formUX ? blurField(UX, s, 2, 2) : null });
+    FORM.set(P.upName, { up: blurField(Float32Array.from(UP), s, 2, 2), h: Hn, ux: P.formUX ? blurField(UX, s, 2, 2) : null });
   }
   // -- painted details on the faces: soft chisel strokes, a few short cracks with a lit lip
   if (P.chisel) {
@@ -1904,35 +1904,20 @@ register('cliff_snow', {
     }, cv);
   },
 });
-// The crash mesas keep their own granite: chunky rounded blue-gray blocks (the shader samples it smaller)
-register('cliff_snow_mesa', {
-  family: 'terrain', size: 512, note: 'Dun Morogh crash mesas: chunky blue-gray granite blocks (1-3 m), cream-lit tops, cool undersides, soft dark creases, a light powder; the terrain shader lays the snow from its form map',
-  paint(g, s, rnd, h, cv) {
-    massRock(g, s, rnd, {
-      fill: [4, 6], big: 6, bigR: [66, 120], asp: [1.0, 2.6], small: 0, sx: 1, sy: 1, rot: 0.4, warp: 18, tilt: 0.14,
-      dome: 34, zs: 22, smooth: 0.2, exp: 3.4, bulge: 6, soft: 2, relief: 0.95, contrast: 2.4, planes: 0.55, shSlope: 0.45, castA: 0.5, tone: 0.11, hueMix: 0.4,
-      crease: 0.55, creaseW: 5, creaseD: 5, creaseA: 0.62, creaseC: '#353b52',
-      colors: ['#7a8292', '#848c9c', '#8e95a4', '#767e8e', '#8a90a2'], blot: ['#6e7686', '#9aa2b2', '#7c7a8c', '#88909e'],
-      light: '#e6e0d0', shadow: '#55607c', cast: '#5a6584', deep: '#3e465e', glaze: '#e8ecf8',
-      powder: { up: 0.45, a: 0.16 }, powderC: '#eef2f8',
-      stains: 24, stain: '#363e54', stainA: 0.14, lichen: ['#a8b0a0', '#c0c4b0', '#b8a88a'], chisel: 200, cracks: 18, upName: 'cliff_snow_mesa',
-    }, cv);
-  },
-});
-// Not colour: the FORM of a granite texture, texel for texel (linear data for the terrain shader,
+// Not colour: the FORM of the snow granite, texel for texel (linear data for the terrain shader,
 // which lays its snow on whatever the painted rock turns up to the sky). R: how far the surface faces
 // up (0.5 + 0.5 * up), G: its height (0..1), B: how far it faces right (0.5 + 0.5 * x; lets the
-// shader turn the form with a rotated sample), or the creases between masses for the mesa granite.
-for (const [name, src] of [['cliff_snow_form', 'cliff_snow'], ['cliff_snow_mesa_form', 'cliff_snow_mesa']]) register(name, {
-  family: 'terrain', size: 512, note: `data, not colour: the form of ${src} (R faces up, G height, B faces right or creases) for the snow shader`,
+// shader turn the form with a rotated sample).
+register('cliff_snow_form', {
+  family: 'terrain', size: 512, note: 'data, not colour: the form of cliff_snow (R faces up, G height, B faces right) for the snow shader',
   paint(g, s) {
-    canvasFor(src);
-    const F = FORM.get(src), img = g.getImageData(0, 0, s, s), D = img.data;
+    canvasFor('cliff_snow');
+    const F = FORM.get('cliff_snow'), img = g.getImageData(0, 0, s, s), D = img.data;
     for (let k = 0; k < s * s; k++) {
       const o = k * 4;
       D[o] = F ? Math.max(0, Math.min(255, Math.round(127.5 + 127.5 * F.up[k]))) : 128;
       D[o + 1] = F ? Math.round(255 * F.h[k]) : 128;
-      D[o + 2] = F ? (F.ux ? Math.max(0, Math.min(255, Math.round(127.5 + 127.5 * F.ux[k]))) : Math.round(255 * Math.min(1, F.cr[k]))) : 128;
+      D[o + 2] = F?.ux ? Math.max(0, Math.min(255, Math.round(127.5 + 127.5 * F.ux[k]))) : 128;
       D[o + 3] = 255;
     }
     g.putImageData(img, 0, 0);
@@ -2133,21 +2118,6 @@ register('cliff_desert', {
   paint(g, s, rnd, h, cv) {
     sandstone(g, s, rnd, cv, {
       softT: [56, 190], hardT: [26, 92], wob: [2, 12], wavy: 0.35, lensK: [0.15, 0.95], subA: 0.01, hardA: 20, softA: 11, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
-      softC: ['#a8764c', '#9e6c45', '#cc9e6c', '#c4955f'], hardC: ['#e6cea0', '#ddc290', '#e9d3a8'],
-      light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
-      sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
-      varnish: '#5a3c32', varnishA: 0.2, varnishN: 9, pit: '#946c4c', glaze: '#ffe6b8', scour: ['#f2dcb0', '#ecd2a2'], scourA: 0.09, scourN: 40, scourL: [40, 150],
-    });
-  },
-});
-
-// (a crash mesa's sandstone, wrapped round the butte: the same rock, but its beds lie flat and keep their
-// thickness, no wavy bed and no lens pinching out, which seen from below on a round face bowed into arches)
-register('cliff_desert_mesa', {
-  family: 'terrain', size: 512, note: 'Tanaris crash mesa: the valley walls\' tan, rust and honey sandstone with flat-lying beds of even thickness (no wavy or pinching hard beds), joints, sand on the ledges, varnish and wind-scour streaks (wrapped round the butte, 16 m tall)',
-  paint(g, s, rnd, h, cv) {
-    sandstone(g, s, rnd, cv, {
-      softT: [36, 230], hardT: [18, 84], wob: [2, 7], wavy: 0, lensK: [0.06, 0.26], subA: 0.01, hardA: 20, softA: 11, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
       softC: ['#a8764c', '#9e6c45', '#cc9e6c', '#c4955f'], hardC: ['#e6cea0', '#ddc290', '#e9d3a8'],
       light: '#f0dab0', shadow: '#8a5e52', cast: '#7a5048', crease: '#5e4038',
       sand: '#e0c08c', sandLit: '#f0d8a8', sandShade: '#c49e70', sandH: 16, sandRise: 9,
