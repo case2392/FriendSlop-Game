@@ -39,8 +39,33 @@ let worldBuilding = false;
 
 // ---- boot ---------------------------------------------------------------------------
 
-initGfx($('canvas'));
-const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); });
+// a game that can't start 3D (a blocklisted or broken driver, an old GPU) says so, instead of sitting on
+// its menu with buttons that do nothing
+function fatal(title, body) {
+  $('loading').classList.add('hidden');
+  const el = document.createElement('div');
+  el.className = 'panel parchment net-modal';
+  el.innerHTML = `<h2>${title}</h2><p>${body}</p>`;
+  document.body.appendChild(el);
+  window.desktop?.log?.('fatal', title, body);
+}
+try { initGfx($('canvas')); }
+catch (e) {
+  fatal('Your graphics couldn\'t start 3D', 'NO MONEY DOWN needs WebGL 2. Update your graphics driver, and on a laptop run the game on the dedicated GPU. If it still fails, set the Steam launch option <b>--use-angle=gl</b> (or <b>d3d11</b>, <b>vulkan</b>).');
+  throw e;
+}
+const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); }, e => { fatal('The physics engine couldn\'t start', String(e?.message || e)); throw e; });
+// errors: logged (the desktop build keeps a log file), and after a few a word to the player
+let pageErrors = 0;
+const noteError = msg => {
+  window.desktop?.log?.('page error', msg);
+  if (++pageErrors === 3) setTimeout(() => toast('Something went wrong in the game. If it misbehaves, restart it.', '#ff8a80', 6));
+};
+window.addEventListener('error', e => noteError(String(e.message)));
+window.addEventListener('unhandledrejection', e => noteError(String(e.reason?.message || e.reason)));
+// the GPU driver reset (or the context was taken away): three.js rebuilds everything once it's back
+$('canvas').addEventListener('webglcontextlost', e => { e.preventDefault(); S.gpuLost = true; connOverlay('Graphics driver reset — recovering…'); });
+$('canvas').addEventListener('webglcontextrestored', () => { S.gpuLost = false; connOverlay(null); });
 // the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js); while
 // the menu is up they get the first day's textures ready (a trip starts on day 1), all off this thread
 // (the few the page must paint itself only in long idle stretches while nobody is typing or moving the
@@ -68,26 +93,125 @@ setTimeOfDay(9);
 camera.position.set(0, 30, -120);
 camera.lookAt(0, 0, 100);
 
-$('nameInput').value = localStorage.getItem('nmdName') || '';
+$('nameInput').value = localStorage.getItem('nmdName') || window.desktop?.steam?.name || '';
 const myName = () => { const n = $('nameInput').value.trim() || 'Blob'; localStorage.setItem('nmdName', n); return n; };
+// what the last trip left to say (the host ended it, you left it), on the fresh menu
+try { const note = sessionStorage.getItem('nmdMenuNote'); if (note) { $('menuError').textContent = note; sessionStorage.removeItem('nmdMenuNote'); } } catch {}
+const BUILD = () => window.desktop?.build ?? null;   // the desktop build checks it runs the same game as the host
+// a seat to come back to: the server's resume token for this trip (kept for this tab's session)
+const savedSession = code => { try { const s = JSON.parse(sessionStorage.getItem('nmdSession') || 'null'); return s && s.code === code ? s.token : null; } catch { return null; } };
+
+// ---- the desktop build (the one on Steam) ----------------------------------------------------------
+// A trip is hosted on the player's own PC and friends come in through Steam (an invite, or Join Game in
+// the friends list): there are no trip codes to type. Without Steam running it plays solo.
+const DESK = window.desktop || null;
+const STEAM = DESK?.steam?.ok ? DESK.steam : null;
+// the menu's small print: the version (the build fingerprint after the + is what friends must share)
+const showVersion = build => { if (build) $('versionLabel').textContent = `Version ${build.split('+')[0]} (build ${build.split('+')[1] || '?'}) · No Money Down Inc.`; };
+showVersion(DESK?.build);
+if (DESK) {
+  $('joinBox').classList.add('hidden');
+  $('quitBtn').classList.remove('hidden');
+  $('quitBtn').onclick = () => DESK.quit();
+  $('ctpQuit').classList.remove('hidden');
+  $('menuSteam').classList.remove('hidden');
+  $('menuSteam').textContent = STEAM
+    ? `On Steam as ${STEAM.name || 'you'}. Start a trip, then invite friends from it (Esc, then Invite Friends), or they can pick Join Game on you in their Steam friends list.`
+    : `${DESK.steam?.reason || 'Steam isn\'t running, so friends can\'t join.'} You can still drive solo.`;
+}
+// friends can join once the trip is up: a friends-only Steam lobby
+async function startHosting(code) {
+  if (!STEAM) return;
+  const r = await DESK.host(code).catch(e => ({ ok: false, msg: e.message }));
+  if (r?.ok) { $('ctpInvite').classList.remove('hidden'); toast('Friends can join you now: press Esc, then Invite Friends.', '#7CFC00', 6); }
+  else toast(`Friends can't join this trip: ${r?.msg || 'Steam said no.'}`, '#ffb4a2', 6);
+}
+async function inviteFriends() {
+  if (!STEAM) return;
+  document.exitPointerLock?.();
+  const r = await DESK.invite().catch(e => ({ ok: false, msg: e.message }));
+  if (!r?.ok) toast(r?.msg || 'Steam\'s invite window didn\'t open. Invite them from your Steam friends list instead.', '#ffb4a2', 5);
+}
+// a friend's trip, from an invite or Join Game: the lobby, then the bridge to the host's game
+async function joinFriend(id) {
+  if (!STEAM || S.phase !== 'menu' || $('hostBtn').disabled) return;
+  initAudio();
+  menuBusy('joinBtn');
+  $('menuError').textContent = 'Joining your friend\'s trip…';
+  const r = await DESK.joinLobby(id).catch(e => ({ ok: false, msg: e.message }));
+  if (!r?.ok) { menuBusy(null); $('menuError').textContent = r?.msg || 'Couldn\'t join that trip.'; return; }
+  await physReady;
+  try { await net.connect(r.wsUrl); }
+  catch (e) { menuBusy(null); $('menuError').textContent = e.message; DESK.leave(); return; }
+  S.hosting = false; S.viaSteam = true;
+  net.send({ t: 'join', name: myName(), room: r.code, build: BUILD(), rdy: 1 });
+}
+// an invite accepted while the game runs: straight in from the menu; mid-trip, ask first
+function onLobbyInvite(id) {
+  if (S.phase === 'menu') { DESK.takeLobby(); joinFriend(id); return; }
+  netModal('Join your friend\'s trip?', 'You\'re on a trip right now. Leave it and join theirs?', [
+    ['Join them', () => backToMenu(null)],          // the invite waits in the shell for the menu to take it
+    ['Stay here', () => { DESK.takeLobby(); $('netModal')?.remove(); }],
+  ]);
+}
+// the friends list shows what the crew is up to (Steam's rich presence)
+let presKey = '';
+function updatePresence() {
+  if (!STEAM) return;
+  const ph = S.phase === 'menu' ? 'menu' : S.g?.ph || 'camp', day = S.dayLabel || 1;
+  if (`${ph}|${day}` === presKey) return;
+  presKey = `${ph}|${day}`;
+  DESK.presence({ ph, day, biome: BIOME_BY_DAY[Math.min(day, BIOME_BY_DAY.length) - 1] });
+}
+if (STEAM) {
+  updatePresence();
+  DESK.onEvent(ev => { if (ev?.t === 'lobby') onLobbyInvite(String(ev.id)); });
+  DESK.takeLobby().then(id => { if (id) joinFriend(id); });
+}
+// while the menu waits for an answer the buttons say so, and a second click can't open a second socket
+let menuBusyT = 0;
+function menuBusy(which) {
+  clearTimeout(menuBusyT);
+  for (const [id, text] of [['hostBtn', 'Starting…'], ['joinBtn', 'Joining…']]) {
+    const b = $(id);
+    b.dataset.label ??= b.textContent;
+    b.disabled = !!which;
+    b.textContent = which === id ? text : b.dataset.label;
+  }
+  if (which) menuBusyT = setTimeout(() => menuBusy(null), 12000);
+}
 async function ensureConnected() {
   if (net.connected()) return true;
   try { await net.connect(); return true; } catch (e) { $('menuError').textContent = e.message; return false; }
 }
 $('hostBtn').onclick = async () => {
+  if ($('hostBtn').disabled) return;
   initAudio(); sfx.click();
+  menuBusy('hostBtn');
+  $('menuError').textContent = '';
   await physReady;
-  if (await ensureConnected()) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null });
+  S.hosting = true;
+  if (await ensureConnected()) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null, build: BUILD(), rdy: 1 });
+  else menuBusy(null);
 };
 $('joinBtn').onclick = async () => {
+  if ($('joinBtn').disabled) return;
   initAudio(); sfx.click();
   const code = $('codeInput').value.trim().toUpperCase();
-  if (code.length !== 4) { $('menuError').textContent = 'Room codes are 4 letters.'; return; }
+  if (code.length !== 4) { $('menuError').textContent = 'Trip codes are 4 characters.'; return; }
+  menuBusy('joinBtn');
+  $('menuError').textContent = '';
   await physReady;
-  if (await ensureConnected()) net.send({ t: 'join', name: myName(), room: code });
+  if (await ensureConnected()) net.send({ t: 'join', name: myName(), room: code, resume: savedSession(code), build: BUILD(), rdy: 1 });
+  else menuBusy(null);
 };
+$('helpOk').onclick = () => $('help').classList.add('hidden');
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn').click(); });
-$('hCode').onclick = () => { navigator.clipboard?.writeText(S.code || ''); toast(`Room code ${S.code || ''} copied. Send it to the boys.`); };
+$('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('hostBtn').click(); });
+$('hCode').onclick = () => {
+  if (DESK) { inviteFriends(); return; }
+  navigator.clipboard?.writeText(S.code || ''); toast(`Room code ${S.code || ''} copied. Send it to the boys.`);
+};
 
 // ---- toasts & ui ---------------------------------------------------------------------
 
@@ -110,14 +234,27 @@ function fmtClock(h) {
 // ---- pointer lock & input -------------------------------------------------------------
 
 const canvas = $('canvas');
-const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden');
+const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden') || !!$('netModal');
 canvas.addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
-$('clickToPlay').addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
+$('clickToPlay').addEventListener('click', e => { if (!e.target.closest('.ctp-row') && !uiOpen()) canvas.requestPointerLock?.(); });
+// Esc: the pointer comes free and this card offers the rest (the world keeps going: it's co-op)
+$('ctpInvite').onclick = () => inviteFriends();
+$('ctpLeave').onclick = () => netModal('Leave the trip?', DESK && S.hosting ? 'The trip runs on your PC: if you leave, it ends for everyone.' : 'Your seat goes to whoever joins next.', [
+  ['Leave', () => backToMenu(null)], ['Stay', () => $('netModal')?.remove()],
+]);
+$('ctpQuit').onclick = () => netModal('Quit the game?', S.hosting ? 'The trip runs on your PC: quitting ends it for everyone.' : 'Your friends keep driving without you.', [
+  ['Quit', () => DESK?.quit()], ['Stay', () => $('netModal')?.remove()],
+]);
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   $('clickToPlay').classList.toggle('hidden', locked || S.phase === 'menu' || uiOpen());
-  if (!locked) { inp.grab = false; for (const k in keys) keys[k] = false; }
+  if (!locked) { inp.grab = false; for (const k in keys) keys[k] = false; letGoOfTheWheel(); }
 });
+// the driver's hands leave the controls: say so at once (a frozen or hidden page sends nothing at all,
+// and the server only lets go of a silent driver's throttle after a moment)
+function letGoOfTheWheel() { if (me.mode === 'seat' && me.seat === 0) net.send({ t: 'drv', th: 0, st: 0, hb: 0 }); }
+document.addEventListener('visibilitychange', () => { if (document.hidden) letGoOfTheWheel(); });
+window.addEventListener('pagehide', letGoOfTheWheel);
 document.addEventListener('mousemove', e => {
   if (!locked) return;
   const sens = 0.0022 * (Number(localStorage.getItem('nmdSens')) || 1);
@@ -143,6 +280,9 @@ document.addEventListener('wheel', e => {
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
+  // in game, Ctrl (crouch) and Cmd combinations are ours, not the browser's or the desktop shell's
+  // (Ctrl+W, Ctrl+R and friends used to close or reload the game mid-crouch)
+  if ((e.ctrlKey || e.metaKey) && S.phase !== 'menu') e.preventDefault();
   const k = e.key.toLowerCase();
   if (k === ' ' || k === 'tab') e.preventDefault();
   if (keys[k]) return;
@@ -167,7 +307,7 @@ window.addEventListener('keyup', e => {
   if (k === 't') voice.setWalkieKey(false);
   if (k === 'e') reviveT = 0;
 });
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; inp.grab = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; inp.grab = false; letGoOfTheWheel(); });
 
 // ---- interactions ----------------------------------------------------------------------
 
@@ -494,10 +634,94 @@ function removeProp(id, fx = null) {
   if (me.holding?.id === id) me.holding = null;
 }
 
+// ---- losing the connection ---------------------------------------------------------------------
+// The host's game IS the server: when it closes, the trip is over, and every guest is told why. Anything
+// else is a dropped connection: the server keeps the seat for 90 s, so come back to it with the token.
+let hostLeft = null, reconnecting = false, welcomeWait = null, lagShown = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function connOverlay(text) {
+  let el = $('connBox');
+  if (!text) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'connBox'; el.className = 'conn-box'; document.body.appendChild(el); }
+  el.textContent = text;
+}
+function netModal(title, body, buttons) {
+  $('netModal')?.remove();
+  const el = document.createElement('div');
+  el.id = 'netModal';
+  el.className = 'panel parchment net-modal';
+  el.innerHTML = `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><div class="row"></div>`;
+  for (const [label, fn] of buttons) { const b = document.createElement('button'); b.className = 'btn big'; b.textContent = label; b.onclick = fn; el.querySelector('.row').appendChild(b); }
+  document.body.appendChild(el);
+  document.exitPointerLock?.();
+}
+function endTrip(why) {
+  connOverlay(null);
+  reconnecting = false;
+  S.tripOver = why;
+  netModal('The trip is over', why, [['Back to menu', () => backToMenu(why)]]);
+}
+async function backToMenu(note) {
+  net.send({ t: 'leave' });
+  net.close(1000, 'left');
+  try { await DESK?.leave(); } catch {}          // the desktop: the host's trip ends; a guest leaves the lobby
+  try { sessionStorage.removeItem('nmdSession'); if (note) sessionStorage.setItem('nmdMenuNote', note); } catch {}
+  // (the browser build: if its server is gone too, a reload would land on the browser's error page)
+  if (/^https?:$/.test(location.protocol)) {
+    try { await fetch(location.href, { cache: 'no-store' }); }
+    catch { netModal('The game server is gone', 'Close this tab, or start the game again.', []); return; }
+  }
+  location.reload();
+}
+S.backToMenu = backToMenu;
+S.testDrop = () => net.drop();
+S.lastMsgAt = () => net.lastMessageAt();
+async function reconnect() {
+  if (reconnecting) return;
+  reconnecting = true;
+  const t0 = performance.now();
+  let delay = 1000;
+  while (reconnecting && performance.now() - t0 < 60000) {
+    connOverlay(`Connection lost — reconnecting… (${Math.ceil((60000 - (performance.now() - t0)) / 1000)} s)`);
+    try {
+      await net.connect();
+      const got = new Promise((resolve, reject) => { welcomeWait = { resolve, reject }; setTimeout(() => reject({ code: 'timeout' }), 8000); });
+      net.send({ t: 'join', name: myName(), room: S.code, resume: savedSession(S.code), build: BUILD(), rdy: 1 });
+      await got;
+      welcomeWait = null;
+      reconnecting = false;
+      connOverlay(null);
+      toast('Reconnected.', '#7CFC00', 3);
+      return;
+    } catch (e) {
+      welcomeWait = null;
+      if (e?.code === 'noroom' || e?.code === 'version' || e?.code === 'full') { reconnecting = false; endTrip(e.msg || 'The trip is gone.'); return; }
+      net.close();
+    }
+    await sleep(delay);
+    delay = Math.min(5000, delay * 2);
+  }
+  if (reconnecting) { reconnecting = false; endTrip('Couldn\'t reach the trip again. The host may have closed the game.'); }
+}
+// no word from the host for 3 s: say so; for 15 s: treat it as a dropped connection
+function watchdog(now) {
+  if (S.phase !== 'game' || worldBuilding || reconnecting || S.tripOver || S.gpuLost || !net.connected()) {
+    if (lagShown) { lagShown = false; connOverlay(null); }
+    return;
+  }
+  const quiet = now - net.lastMessageAt();
+  if (quiet > 15000) { lagShown = false; net.close(4005, 'timeout'); reconnect(); return; }
+  if ((quiet > 3000) !== lagShown) { lagShown = quiet > 3000; connOverlay(lagShown ? 'Connection problem… waiting for the host' : null); }
+}
+
 // ---- network ------------------------------------------------------------------------------
 
 net.on('welcome', m => {
+  menuBusy(null);
+  const back = S.phase === 'game';          // a reconnect: the game's screen is already up
   S.selfId = m.id; S.code = m.code;
+  welcomeWait?.resolve(m);
+  if (back) return;
   $('menuError').textContent = '';
   $('menu').classList.add('hidden');
   $('game').classList.remove('hidden');
@@ -505,17 +729,51 @@ net.on('welcome', m => {
   $('clickToPlay').classList.remove('hidden');
   voice.initVoice(m.id, renderVoiceUI);
   renderVoiceUI();
-  $('hCode').innerHTML = `<span class="k">Room</span>${escapeHtml(m.code)}`;   // the invite code (the gate's keypad wants a different one)
+  // the invite code (the gate's keypad wants a different one); on Steam, the invite window
+  if (!DESK) $('hCode').innerHTML = `<span class="k">Room</span>${escapeHtml(m.code)}`;
+  else if (STEAM) $('hCode').innerHTML = '<span class="k">Steam</span>Invite';
+  else $('hCode').classList.add('hidden');
+  if (STEAM && S.viaSteam) $('ctpInvite').classList.remove('hidden');
+  if (DESK && S.hosting) startHosting(m.code);
+  updatePresence();
   if (!localStorage.getItem('nmdHelpSeen')) { $('help').classList.remove('hidden'); localStorage.setItem('nmdHelpSeen', '1'); }
 });
-net.on('error', m => { if (S.phase === 'menu') $('menuError').textContent = m.msg; else toast(m.msg, '#ff8a80'); });
-net.on('_close', () => {
-  if (S.phase !== 'menu') { location.reload(); }
+net.on('session', m => { showVersion(m.build); try { sessionStorage.setItem('nmdSession', JSON.stringify({ code: S.code, token: m.resume })); } catch {} });
+net.on('hostleft', m => { hostLeft = m.msg || 'The host ended the trip.'; });
+net.on('error', m => {
+  menuBusy(null);
+  if (welcomeWait) { welcomeWait.reject(m); return; }
+  if (S.phase === 'menu' && S.viaSteam) { S.viaSteam = false; net.close(); DESK?.leave(); }
+  if (S.phase === 'menu') $('menuError').textContent = m.msg; else toast(m.msg, '#ff8a80');
+});
+net.on('_close', ev => {
+  menuBusy(null);
+  if (S.phase === 'menu' || S.tripOver) return;
+  if (hostLeft || ev.code === 4000) return endTrip(hostLeft || 'The host ended the trip.');
+  if (ev.code === 4002) return endTrip('You joined this trip again from somewhere else.');
+  reconnect();
 });
 net.on('world', m => {
   me.hasHook = false;   // a new world comes with the hook on its winch
+  // back after a dropped connection, on the same day: the world is already built (the props, the
+  // teleport and the rest follow as usual)
+  if (S.W && !worldBuilding && S.seed === m.seed && S.dayLabel === m.day) {
+    S.parts = m.parts; S.door = !!m.door;
+    rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door);
+    net.send({ t: 'ready' });
+    return;
+  }
   const newDay = S.dayLabel != null && S.dayLabel !== m.day;
-  buildDay(m).then(built => { if (built && newDay) { sfx.day(); flash(`DAY ${m.day}`); } });
+  buildDay(m).then(built => {
+    if (!built) return;
+    net.send({ t: 'ready' });   // snapshots wait for this (a page still building would only drop them)
+    if (newDay) { sfx.day(); flash(`DAY ${m.day}`); }
+  }, e => {
+    worldBuilding = false;
+    loadingBar(false);
+    (window.reportError || console.error)(e);
+    netModal('Couldn\'t build the day', String(e?.message || e), [['Try again', () => { $('netModal')?.remove(); buildDay(m).then(ok => { if (ok) net.send({ t: 'ready' }); }, () => backToMenu('The day couldn\'t be built.')); }], ['Back to menu', () => backToMenu(null)]]);
+  });
   $('receipt').classList.add('hidden');
   $('overScreen').classList.add('hidden');
 });
@@ -553,6 +811,7 @@ net.on('s', m => {
   S.interp.push(m, performance.now());
   S.g = m.g;
   onPhase(m.g.ph);
+  updatePresence();
   S.door = !!m.g.door;
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
@@ -745,7 +1004,12 @@ $('sensInput').oninput = e => localStorage.setItem('nmdSens', e.target.value);
 let lastT = performance.now(), time = 0;
 const _v = new THREE.Vector3();
 
+// if a frame's logic throws, the view still draws (and the error is reported once per frame, as before)
 function frame(now) {
+  try { frameInner(now); }
+  catch (e) { (window.reportError || console.error)(e); try { if (!S.noRender && S.W && !worldBuilding) render(); } catch {} }
+}
+function frameInner(now) {
   // test/debug hooks
 S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.y, dz = z - e.z; me.yaw = Math.atan2(dx, dz); me.pitch = -Math.atan2(dy, Math.hypot(dx, dz)); };
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
@@ -758,6 +1022,7 @@ requestAnimationFrame(frame);
   time += dt;
   S.frames = (S.frames || 0) + 1;
   S.frameAt = now;
+  watchdog(now);
   // while a day loads, the last frame stays up under the loading bar: re-rendering the old scene would
   // only take time from the paint workers (and on a software GPU a night frame costs seconds)
   if (!S.W || worldBuilding || !S.lw) { if (!S.noRender && !worldBuilding) render(); return; }

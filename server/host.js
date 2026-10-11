@@ -27,6 +27,7 @@ const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 const HOLD_SECS = 90;              // a dropped player's seat is kept this long (room.js does the keeping)
 const VOICE_RANGE = 45;            // voice.js spatialize(): the gain reaches 0 at 2.5 + 42.5 m
 const RATE = 120, BURST = 240;     // messages per second per connection, sustained / burst
+const VOICE_RATE = 60, VOICE_BURST = 120;   // voice frames (50 a second while talking) have their own
 const PING_MS = 5000, DEAD_MS = 15000;
 const SNAP_SKIP = 64 * 1024, SNAP_KILL = 2 * 1024 * 1024;   // a socket this far behind skips snapshots / is dropped
 
@@ -81,19 +82,21 @@ export class GameHost {
     const fail = (msg, code) => { try { conn.send(JSON.stringify({ t: 'error', msg, code })); } catch {} };
     // a token bucket: a stuck key or a modified client can't flood the crew; a connection that keeps
     // trying at ten times the rate is dropped
-    let tokens = BURST, last = performance.now(), excess = 0, excessAt = 0;
-    const allow = () => {
+    const bucket = (rate, burst) => ({ rate, burst, tokens: burst, last: performance.now() });
+    const msgs = bucket(RATE, BURST), voiceB = bucket(VOICE_RATE, VOICE_BURST);
+    let excess = 0, excessAt = 0;
+    const allow = b => {
       const now = performance.now();
-      tokens = Math.min(BURST, tokens + (now - last) / 1000 * RATE);
-      last = now;
-      if (tokens >= 1) { tokens--; return true; }
+      b.tokens = Math.min(b.burst, b.tokens + (now - b.last) / 1000 * b.rate);
+      b.last = now;
+      if (b.tokens >= 1) { b.tokens--; return true; }
       if (now - excessAt > 5000) { excess = 0; excessAt = now; }
       if (++excess > RATE * 10 * 5) { this.log(`[host] dropping a flooding connection (${info.kind || 'ws'})`); try { conn.terminate ? conn.terminate() : conn.close(4008, 'flood'); } catch {} }
       this.stats.dropped++;
       return false;
     };
     conn.on('message', (raw, isBinary) => {
-      if (!allow()) return;
+      if (!allow(isBinary ? voiceB : msgs)) return;
       if (isBinary) { if (room && player) this.relayVoice(room, player, raw); return; }
       let m;
       try { m = JSON.parse(raw); } catch { return; }
@@ -202,16 +205,21 @@ export class GameHost {
   }
   stop() { clearInterval(this.tickT); clearInterval(this.snapT); clearInterval(this.pingT); }
 
-  // The host is leaving: every page hears why (and today's client can at least toast it), then every
+  // The trip is over (the desktop host went back to the menu): every page hears why, then every
   // connection closes with 4000 so guests show 'the host ended the trip' instead of reconnecting
-  closeAll(reason = 'The host ended the trip.') {
-    this.closing = true;
+  endRooms(reason = 'The host ended the trip.') {
     for (const room of this.rooms.values()) {
+      if (room.closed) continue;
+      room.closed = true;
       room.broadcast({ t: 'hostleft', msg: reason });
       room.broadcast({ t: 'toast', text: reason, color: '#ff8a80', secs: 10 });
       for (const p of room.players.values()) { try { p.conn?.close?.(4000, 'host left'); } catch {} }
-      room.closed = true;
     }
+  }
+  // The host is quitting: the same, and no new trips from here on
+  closeAll(reason = 'The host ended the trip.') {
+    this.closing = true;
+    this.endRooms(reason);
   }
 
   // HTTP (the browser build's files) + WebSocket. origin: the desktop page's origin (app://nmd). A

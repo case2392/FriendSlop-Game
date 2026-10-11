@@ -21,7 +21,12 @@ const HOLD_SECS = 90;            // a dropped player's seat (id, color, walkie) 
 const BED_WAIT = 45;             // once half the crew is in a bunk, the rest get this long
 const READY_WAIT = 60;           // snapshots wait this long at most for a client to finish building its world
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, voice: 0.25, rtc: 1 / 30 };
+// a held key or a modified client can't spam the crew with these (anything that sets state, like
+// 'voice', is never dropped: a lost 'voice off' would leave a mic open)
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25 };
+// voice-chat signalling comes in bursts (an offer and a dozen ICE candidates within milliseconds), so
+// it gets a byte budget instead: 48 KB a second, 96 KB at once
+const RTC_RATE = 48 * 1024, RTC_BURST = 96 * 1024;
 // a number from a client: finite and within +-lim, or 0
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
@@ -270,7 +275,12 @@ export class Room {
       case 'dbg': if (C.TEST) this.debug(p, m); return;
       case 'rtc': {
         const target = this.players.get(Number(m.to));
-        if (!target || target === p || JSON.stringify(m.data ?? null).length > 20000) return;
+        const size = JSON.stringify(m.data ?? null).length;
+        if (!target || target === p || size > 20000) return;
+        p.rtcBudget = Math.min(RTC_BURST, (p.rtcBudget ?? RTC_BURST) + (this.t - (p.rtcAt ?? this.t)) * RTC_RATE);
+        p.rtcAt = this.t;
+        if (p.rtcBudget < size) return;
+        p.rtcBudget -= size;
         this.send(target, { t: 'rtc', from: p.id, data: m.data });
         return;
       }

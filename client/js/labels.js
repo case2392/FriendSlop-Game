@@ -282,7 +282,7 @@ function signpost(x, z, ry) {
   post.position.y = 1.35;
   const cap = new THREE.Mesh(new THREE.ConeGeometry(0.11, 0.16, 8), painted('timber_dark'));
   cap.position.y = 2.78;
-  const a = signBoard('GOLDSHIRE', -1); a.position.set(-1.62, 2.2, 0.08);
+  const a = signBoard('WESTMEADOW', -1); a.position.set(-1.62, 2.2, 0.08);
   const b = signBoard('LOST WAGES', 1); b.position.set(0.04, 1.72, 0.08); b.rotation.y = 0.28;
   g.add(post, cap, a, b);
   g.position.set(x, 0, z); g.rotation.y = ry;

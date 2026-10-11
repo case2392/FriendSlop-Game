@@ -1,56 +1,61 @@
-// In-game voice chat: WebRTC peer-to-peer audio in a full mesh (fine at 8
-// players), with the game's own WebSocket doing the signaling. No servers to
-// run, no accounts — walk in, hit JOIN VOICE, yell at the boys.
+// In-game voice chat: Opus over the game's own connection. Each player's voice goes to the server (in
+// the Steam build, the host's game), which passes every 20 ms frame on only to the players who can hear
+// it: within earshot, or both on a walkie (server/host.js relayVoice). No peer-to-peer connections, so
+// there's nothing to punch through home routers and nobody sees anybody's IP address.
 //
-// Browser rules worth knowing:
-//  - getUserMedia only exists in a "secure context": https OR localhost.
-//    Plain http://192.168.x.x:3000 gets no mic — we detect that and say so.
-//  - Remote WebRTC audio must be attached to an <audio> element or Chrome
-//    won't pump it into WebAudio (we want WebAudio for volume knobs and the
-//    speaking meter), so every peer gets a hidden muted <audio> shim.
+//   mic -> AudioWorklet (20 ms of 48 kHz mono) -> WebCodecs AudioEncoder (Opus, 24 kbps)
+//       -> [1][flags][seq u16][opus] to the server -> [2][speaker id][flags][seq u16][opus] to listeners
+//       -> an AudioDecoder per speaker -> a small jitter buffer -> the proximity graph (muffle, HRTF
+//          panner, distance) or the walkie's crunch -> that speaker's volume -> master volume
+//
+// Browser rules worth knowing: getUserMedia only exists in a secure context (https, localhost, or the
+// desktop build's app://), and WebCodecs' Opus is in Chromium (so Steam's build) and recent Firefox.
 
 import * as net from './net.js';
 
-const ICE = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] };
-const SPEAK_RMS = 0.045; // analyser RMS above this = "speaking"
+const SPEAK_RMS = 0.045;          // RMS above this = "speaking" (the meter, and the open mic's gate)
+const GATE_HOLD = 0.4;            // the open mic keeps sending this long after the voice drops
+const JITTER = 0.08;              // seconds of audio buffered per speaker before it plays
+const RATE = 48000;
 
-const store = (k, v) => localStorage.setItem('slopVoice.' + k, JSON.stringify(v));
+const store = (k, v) => { try { localStorage.setItem('slopVoice.' + k, JSON.stringify(v)); } catch {} };
 const load = (k, d) => {
   try { const v = localStorage.getItem('slopVoice.' + k); return v == null ? d : JSON.parse(v); }
   catch { return d; }
 };
 
 export const V = {
-  supported: !!(navigator.mediaDevices?.getUserMedia && window.RTCPeerConnection),
+  supported: !!(navigator.mediaDevices?.getUserMedia && window.AudioEncoder && window.AudioDecoder && window.AudioWorkletNode),
   secure: window.isSecureContext,
   on: false,                       // am I in voice?
   connecting: false,
   mode: load('mode', 'open'),      // 'open' | 'ptt'
   ptt: false,                      // push-to-talk key held right now
+  walkieKey: false,                // T held: talking on the walkie
   muted: load('muted', false),     // self-mute toggle
   masterVol: load('masterVol', 1),
   micId: load('micId', ''),
   mics: [],                        // [{deviceId, label}]
-  peers: new Map(),                // id -> peer
+  peers: new Map(),                // speaker id -> peer
   speaking: {},                    // id -> true (includes self while transmitting)
   err: null,
+  stats: { sent: 0, recv: 0, decoded: 0, late: 0 },
   _selfId: null,
   _players: [],                    // last meta roster
   _onChange: null,                 // UI refresh hook
 };
 
-let actx = null;
-let masterGain = null;
-let localStream = null;
-let localAnalyser = null;
-let localData = null;
+let actx = null, masterGain = null;
+let mic = null;                    // { stream, src, tap, an, data }
+let enc = null, seq = 0, ts = 0, lastLoud = -1e9;
 let meterTimer = null;
 
 function emitChange() { V._onChange?.(); }
 
 function ensureCtx() {
   if (!actx) {
-    actx = new (window.AudioContext || window.webkitAudioContext)();
+    try { actx = new AudioContext({ sampleRate: RATE, latencyHint: 'interactive' }); }
+    catch { actx = new AudioContext(); }
     masterGain = actx.createGain();
     masterGain.connect(actx.destination);
   }
@@ -58,7 +63,7 @@ function ensureCtx() {
   masterGain.gain.value = V.masterVol;
 }
 
-// ---- transmit gating --------------------------------------------------------
+// ---- transmit gating ------------------------------------------------------------------
 
 function txAllowed() {
   return V.on && !V.muted && (V.mode === 'open' || V.ptt || V.walkieKey);
@@ -69,42 +74,78 @@ export function setWalkieKey(held) {
   held = !!held;
   if (V.walkieKey === held) return;
   V.walkieKey = held;
-  applyTx();
-}
-
-function applyTx() {
-  const en = txAllowed();
-  localStream?.getAudioTracks().forEach(t => { t.enabled = en; });
   emitChange();
 }
 
-// ---- mic --------------------------------------------------------------------
+// ---- mic -> Opus -> the server ----------------------------------------------------------
 
 async function openMic() {
-  const constraints = {
-    audio: {
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-      ...(V.micId ? { deviceId: { ideal: V.micId } } : {}),
-    },
-  };
-  const stream = await navigator.mediaDevices.getUserMedia(constraints);
+  const stream = await navigator.mediaDevices.getUserMedia({
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1, ...(V.micId ? { deviceId: { ideal: V.micId } } : {}) },
+  });
   const src = actx.createMediaStreamSource(stream);
   const an = actx.createAnalyser();
   an.fftSize = 512;
-  src.connect(an); // analysis only — never wired to speakers (no self-echo)
-  return { stream, an };
+  src.connect(an);                       // analysis only: never wired to the speakers (no self-echo)
+  const tap = new AudioWorkletNode(actx, 'nmd-mic-tap', { numberOfInputs: 1, numberOfOutputs: 0, channelCount: 1, channelCountMode: 'explicit' });
+  src.connect(tap);
+  tap.port.onmessage = e => onMicBlock(e.data);
+  return { stream, src, tap, an, data: new Uint8Array(an.frequencyBinCount) };
+}
+function closeMic(m) {
+  if (!m) return;
+  try { m.tap.port.onmessage = null; m.src.disconnect(); m.tap.disconnect(); } catch {}
+  m.stream.getTracks().forEach(t => t.stop());
+}
+
+async function makeEncoder() {
+  const base = { codec: 'opus', sampleRate: actx.sampleRate, numberOfChannels: 1, bitrate: 24000 };
+  const tuned = { ...base, opus: { frameDuration: 20000, useinbandfec: true, complexity: 8 } };
+  const cfg = (await AudioEncoder.isConfigSupported(tuned).catch(() => ({})))?.supported ? tuned : base;
+  if (!(await AudioEncoder.isConfigSupported(cfg).catch(() => ({})))?.supported) throw new Error('this browser can\'t encode Opus');
+  const e = new AudioEncoder({
+    output: chunk => sendChunk(chunk),
+    error: err => { console.warn('voice encoder', err); enc = null; },
+  });
+  e.configure(cfg);
+  return e;
+}
+
+function onMicBlock(block) {
+  if (!V.on || !enc || enc.state !== 'configured') return;
+  let sum = 0;
+  for (let i = 0; i < block.length; i++) sum += block[i] * block[i];
+  const loud = Math.sqrt(sum / block.length) > SPEAK_RMS * 0.6;
+  const now = actx.currentTime;
+  if (loud) lastLoud = now;
+  // push-to-talk and the walkie send while the key is down; the open mic only while you're talking
+  const send = txAllowed() && (V.ptt || V.walkieKey || now - lastLoud < GATE_HOLD);
+  const frame = new AudioData({ format: 'f32-planar', sampleRate: actx.sampleRate, numberOfFrames: block.length, numberOfChannels: 1, timestamp: ts, data: block });
+  ts += Math.round(block.length / actx.sampleRate * 1e6);
+  if (send) enc.encode(frame);
+  frame.close();
+}
+
+function sendChunk(chunk) {
+  if (!V.on || chunk.byteLength > 560) return;
+  const b = new Uint8Array(4 + chunk.byteLength);
+  b[0] = 1;
+  b[1] = V.walkieKey ? 1 : 0;
+  b[2] = seq & 255; b[3] = (seq >> 8) & 255;
+  seq = (seq + 1) & 0xffff;
+  chunk.copyTo(b.subarray(4));
+  net.sendBinary(b);
+  V.stats.sent++;
 }
 
 export async function refreshMics() {
-  if (!V.supported) return;
+  if (!navigator.mediaDevices?.enumerateDevices) return;
   try {
     const devs = await navigator.mediaDevices.enumerateDevices();
     V.mics = devs.filter(d => d.kind === 'audioinput')
       .map((d, i) => ({ deviceId: d.deviceId, label: d.label || `Microphone ${i + 1}` }));
     emitChange();
-  } catch { /* no permission yet — labels come after joining */ }
+  } catch { /* no permission yet: labels come after joining */ }
 }
 
 export async function setMic(deviceId) {
@@ -112,32 +153,25 @@ export async function setMic(deviceId) {
   store('micId', deviceId);
   if (!V.on) return;
   try {
-    const { stream, an } = await openMic();
-    const newTrack = stream.getAudioTracks()[0];
-    for (const peer of V.peers.values()) {
-      const sender = peer.pc.getSenders().find(s => s.track?.kind === 'audio');
-      if (sender) await sender.replaceTrack(newTrack);
-    }
-    localStream?.getTracks().forEach(t => t.stop());
-    localStream = stream;
-    localAnalyser = an;
-    localData = new Uint8Array(an.frequencyBinCount);
-    applyTx();
+    const next = await openMic();
+    closeMic(mic);
+    mic = next;
   } catch (e) {
     V.err = 'Could not switch mic: ' + e.message;
     emitChange();
   }
 }
 
-// ---- join / leave -----------------------------------------------------------
+// ---- join / leave -------------------------------------------------------------------------
 
+let workletLoaded = null;
 export async function joinVoice() {
   if (V.on || V.connecting) return;
   V.err = null;
   if (!V.supported || !V.secure) {
-    V.err = V.secure
-      ? 'This browser has no microphone support.'
-      : 'Voice needs HTTPS (or localhost). Host through a tunnel like Tailscale/cloudflared, or use the desktop build.';
+    V.err = !V.secure
+      ? 'Voice needs HTTPS (or localhost). Host through a tunnel like Tailscale/cloudflared, or use the desktop build.'
+      : 'This browser can\'t do voice chat. Use the desktop build, or Chrome / Edge.';
     emitChange();
     return;
   }
@@ -145,20 +179,22 @@ export async function joinVoice() {
   emitChange();
   try {
     ensureCtx();
-    const { stream, an } = await openMic();
-    localStream = stream;
-    localAnalyser = an;
-    localData = new Uint8Array(an.frequencyBinCount);
+    workletLoaded ??= actx.audioWorklet.addModule(new URL('./voice_worklet.js', import.meta.url));
+    await workletLoaded;
+    enc = await makeEncoder();
+    mic = await openMic();
     V.on = true;
     net.send({ t: 'voice', on: true });
-    applyTx();
     refreshMics();
     startMeter();
-    syncPeers(); // dial anyone already in voice
+    syncPeers();
   } catch (e) {
+    closeMic(mic); mic = null;
+    try { enc?.close(); } catch {}
+    enc = null;
     V.err = e.name === 'NotAllowedError'
-      ? 'Mic permission denied — allow it in the browser bar and try again.'
-      : 'Mic error: ' + e.message;
+      ? 'Mic permission denied. Allow it and try again.'
+      : e.name === 'NotFoundError' ? 'No microphone found.' : 'Mic error: ' + e.message;
   }
   V.connecting = false;
   emitChange();
@@ -169,70 +205,28 @@ export function leaveVoice() {
   V.on = false;
   net.send({ t: 'voice', on: false });
   for (const id of [...V.peers.keys()]) closePeer(id);
-  localStream?.getTracks().forEach(t => t.stop());
-  localStream = null;
-  localAnalyser = null;
+  closeMic(mic); mic = null;
+  try { enc?.close(); } catch {}
+  enc = null;
   V.speaking = {};
   stopMeter();
   emitChange();
 }
 
-// ---- peers --------------------------------------------------------------------
+// ---- other players' voices -------------------------------------------------------------------
 
 function makePeer(id) {
-  const peer = {
-    id,
-    pc: new RTCPeerConnection(ICE),
-    audioEl: null,        // hidden muted <audio> (Chrome WebAudio shim)
-    gain: null,
-    analyser: null,
-    data: null,
-    candQ: [],
-    vol: load('vol.' + nameOf(id), 1),
-    muted: false,
-    polite: V._selfId > id, // higher id yields on offer collisions
-    makingOffer: false,
-  };
-  V.peers.set(id, peer);
-
-  localStream?.getTracks().forEach(t => peer.pc.addTrack(t, localStream));
-
-  peer.pc.onicecandidate = e => {
-    if (e.candidate) net.send({ t: 'rtc', to: id, data: { cand: e.candidate } });
-  };
-  peer.pc.ontrack = e => attachRemote(peer, e.streams[0]);
-  peer.pc.onnegotiationneeded = async () => {
-    try {
-      peer.makingOffer = true;
-      await peer.pc.setLocalDescription();
-      net.send({ t: 'rtc', to: id, data: { sdp: peer.pc.localDescription } });
-    } catch { /* peer likely vanished */ }
-    finally { peer.makingOffer = false; }
-  };
-  peer.pc.onconnectionstatechange = () => {
-    if (peer.pc.connectionState === 'failed') {
-      closePeer(id);
-      syncPeers(); // the lower id will re-dial
-    }
-    emitChange();
-  };
-  return peer;
-}
-
-function attachRemote(peer, stream) {
   ensureCtx();
-  if (!peer.audioEl) {
-    peer.audioEl = new Audio();
-    peer.audioEl.muted = true; // real output goes through WebAudio
-  }
-  peer.audioEl.srcObject = stream;
-  peer.audioEl.play().catch(() => {});
-  const src = actx.createMediaStreamSource(stream);
+  const peer = {
+    id, dec: null, playAt: 0, lastSeq: -1,
+    vol: load('vol.' + nameOf(id), 1), muted: false,
+  };
+  peer.input = actx.createGain();
   peer.gain = actx.createGain();
   peer.analyser = actx.createAnalyser();
   peer.analyser.fftSize = 512;
   peer.data = new Uint8Array(peer.analyser.frequencyBinCount);
-  src.connect(peer.analyser);
+  peer.input.connect(peer.analyser);
   // proximity path: muffle (occlusion) -> 3D panner -> distance gain
   peer.lp = actx.createBiquadFilter();
   peer.lp.type = 'lowpass';
@@ -242,7 +236,8 @@ function attachRemote(peer, stream) {
   peer.panner.distanceModel = 'linear';
   peer.panner.rolloffFactor = 0;           // we do distance ourselves (a nicer curve)
   peer.gSpatial = actx.createGain();
-  peer.analyser.connect(peer.lp);
+  peer.gSpatial.gain.value = 0;            // silent until spatialize() places them
+  peer.input.connect(peer.lp);
   peer.lp.connect(peer.panner);
   peer.panner.connect(peer.gSpatial);
   peer.gSpatial.connect(peer.gain);
@@ -255,13 +250,63 @@ function attachRemote(peer, stream) {
   shaper.curve = curve;
   peer.gRadio = actx.createGain();
   peer.gRadio.gain.value = 0;
-  peer.analyser.connect(bp);
+  peer.input.connect(bp);
   bp.connect(shaper);
   shaper.connect(peer.gRadio);
   peer.gRadio.connect(peer.gain);
   peer.gain.connect(masterGain);
   applyPeerVol(peer);
+  V.peers.set(id, peer);
   emitChange();
+  return peer;
+}
+
+function decoderFor(peer) {
+  if (peer.dec && peer.dec.state === 'configured') return peer.dec;
+  try {
+    peer.dec = new AudioDecoder({ output: d => play(peer, d), error: e => { console.warn('voice decoder', e); peer.dec = null; } });
+    peer.dec.configure({ codec: 'opus', sampleRate: RATE, numberOfChannels: 1 });
+  } catch (e) { console.warn('voice decoder', e); peer.dec = null; }
+  return peer.dec;
+}
+
+// a frame from the server: [2][speaker id][flags][seq u16][opus]
+function onFrame(buf) {
+  if (!V.on) return;
+  const b = new Uint8Array(buf);
+  if (b.length < 6 || b[0] !== 2) return;
+  const id = b[1];
+  if (id === V._selfId) return;
+  const s = b[3] | (b[4] << 8);
+  const peer = V.peers.get(id) || makePeer(id);
+  V.stats.recv++;
+  // a frame older than the last one played is late: drop it (16-bit sequence, wrapping)
+  if (peer.lastSeq >= 0 && ((s - peer.lastSeq) & 0xffff) > 0x8000) { V.stats.late++; return; }
+  peer.lastSeq = s;
+  const dec = decoderFor(peer);
+  if (!dec) return;
+  try { dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: s * 20000, data: b.subarray(5) })); }
+  catch (e) { console.warn('voice decode', e); }
+}
+
+function play(peer, d) {
+  try {
+    if (!V.peers.has(peer.id) || peer.muted) return;
+    const n = d.numberOfFrames;
+    const ab = actx.createBuffer(1, n, d.sampleRate);
+    const out = ab.getChannelData(0);
+    if (/^f32/.test(d.format)) d.copyTo(out, { planeIndex: 0 });
+    else { const tmp = new Int16Array(n * d.numberOfChannels); d.copyTo(tmp, { planeIndex: 0 }); for (let i = 0; i < n; i++) out[i] = tmp[i * d.numberOfChannels] / 32768; }
+    const src = actx.createBufferSource();
+    src.buffer = ab;
+    src.connect(peer.input);
+    const now = actx.currentTime;
+    // a gap (they stopped talking, or packets were lost) or a pile-up: start again a jitter-buffer ahead
+    if (peer.playAt < now + 0.01 || peer.playAt > now + 0.4) peer.playAt = now + JITTER;
+    src.start(peer.playAt);
+    peer.playAt += ab.duration;
+    V.stats.decoded++;
+  } finally { d.close(); }
 }
 
 // Called every frame. listener: {pos, fwd}; info(id) -> {head, occluded, ko, radio} | null
@@ -278,7 +323,6 @@ export function spatialize(listener, info) {
     L.setOrientation(listener.fwd.x, listener.fwd.y, listener.fwd.z, 0, 1, 0);
   }
   for (const peer of V.peers.values()) {
-    if (!peer.panner) continue;
     const s = info(peer.id);
     if (!s) { peer.gSpatial.gain.setTargetAtTime(0, t, 0.1); peer.gRadio.gain.setTargetAtTime(0, t, 0.05); continue; }
     const p = peer.panner;
@@ -300,8 +344,8 @@ function applyPeerVol(peer) {
 function closePeer(id) {
   const peer = V.peers.get(id);
   if (!peer) return;
-  try { peer.pc.close(); } catch { }
-  if (peer.audioEl) { peer.audioEl.srcObject = null; }
+  try { peer.dec?.close(); } catch {}
+  try { peer.gain.disconnect(); peer.input.disconnect(); } catch {}
   V.peers.delete(id);
   delete V.speaking[id];
   emitChange();
@@ -311,8 +355,7 @@ function nameOf(id) {
   return V._players.find(p => p.id === id)?.name || String(id);
 }
 
-// Reconcile the mesh with the roster: dial voice-on players (lower id dials
-// higher to avoid both sides offering at once), hang up on everyone else.
+// Keep a row (and a volume knob) for everyone in voice; drop the rest.
 export function syncPeers(players) {
   if (players) V._players = players;
   if (!V.on) return;
@@ -320,41 +363,12 @@ export function syncPeers(players) {
   for (const p of V._players) {
     if (p.id === V._selfId || p.connected === false || !p.voice) continue;
     want.add(p.id);
-    if (!V.peers.has(p.id) && V._selfId < p.id) makePeer(p.id); // onnegotiationneeded fires the offer
+    if (!V.peers.has(p.id)) makePeer(p.id);
   }
   for (const id of [...V.peers.keys()]) if (!want.has(id)) closePeer(id);
 }
 
-// ---- signaling ----------------------------------------------------------------
-
-async function onRtc(m) {
-  if (!V.on || m.from === V._selfId) return;
-  const data = m.data || {};
-  let peer = V.peers.get(m.from);
-  if (!peer && data.sdp?.type === 'offer') peer = makePeer(m.from);
-  if (!peer) return;
-
-  try {
-    if (data.sdp) {
-      const collision = data.sdp.type === 'offer'
-        && (peer.makingOffer || peer.pc.signalingState !== 'stable');
-      if (collision && !peer.polite) return; // impolite side ignores; polite rolls back
-      await peer.pc.setRemoteDescription(data.sdp);
-      for (const c of peer.candQ.splice(0)) await peer.pc.addIceCandidate(c).catch(() => {});
-      if (data.sdp.type === 'offer') {
-        await peer.pc.setLocalDescription();
-        net.send({ t: 'rtc', to: m.from, data: { sdp: peer.pc.localDescription } });
-      }
-    } else if (data.cand) {
-      if (peer.pc.remoteDescription) await peer.pc.addIceCandidate(data.cand).catch(() => {});
-      else peer.candQ.push(data.cand);
-    }
-  } catch (e) {
-    console.warn('rtc signal error', e.message);
-  }
-}
-
-// ---- speaking meter -------------------------------------------------------------
+// ---- speaking meter -------------------------------------------------------------------------
 
 function rms(an, buf) {
   an.getByteTimeDomainData(buf);
@@ -367,9 +381,9 @@ function startMeter() {
   stopMeter();
   meterTimer = setInterval(() => {
     const s = {};
-    if (localAnalyser && txAllowed() && rms(localAnalyser, localData) > SPEAK_RMS) s[V._selfId] = true;
+    if (mic && txAllowed() && rms(mic.an, mic.data) > SPEAK_RMS) s[V._selfId] = true;
     for (const peer of V.peers.values()) {
-      if (peer.analyser && !peer.muted && rms(peer.analyser, peer.data) > SPEAK_RMS) s[peer.id] = true;
+      if (!peer.muted && rms(peer.analyser, peer.data) > SPEAK_RMS) s[peer.id] = true;
     }
     const changed = JSON.stringify(s) !== JSON.stringify(V.speaking);
     V.speaking = s;
@@ -381,25 +395,25 @@ function stopMeter() {
   if (meterTimer) { clearInterval(meterTimer); meterTimer = null; }
 }
 
-// ---- knobs the UI turns ----------------------------------------------------------
+// ---- knobs the UI turns ---------------------------------------------------------------------
 
 export function setMode(mode) {
   V.mode = mode === 'ptt' ? 'ptt' : 'open';
   store('mode', V.mode);
-  applyTx();
+  emitChange();
 }
 
 export function setPtt(held) {
   held = !!held;
   if (V.ptt === held) return;
   V.ptt = held;
-  applyTx();
+  emitChange();
 }
 
 export function toggleMute() {
   V.muted = !V.muted;
   store('muted', V.muted);
-  applyTx();
+  emitChange();
 }
 
 export function setMasterVol(v) {
@@ -424,11 +438,11 @@ export function togglePeerMute(id) {
   emitChange();
 }
 
-// ---- boot ------------------------------------------------------------------------
+// ---- boot ------------------------------------------------------------------------------------
 
 export function initVoice(selfId, onChange) {
   V._selfId = selfId;
   V._onChange = onChange;
-  net.on('rtc', onRtc);
+  net.onBinary(onFrame);
   navigator.mediaDevices?.addEventListener?.('devicechange', refreshMics);
 }

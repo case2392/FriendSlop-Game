@@ -1,0 +1,18 @@
+// SteamPipe: uploads the game to Steam. Run from anywhere (paths are relative to this file):
+//   steamcmd +login <your Steamworks build account> +run_app_build "<full path to>/steam/app_build.vdf" +quit
+// Before the first upload, put your App ID below and your depot IDs here and in the depot files
+// (Steamworks > your app > SteamPipe > Depots: the first depot is usually the App ID + 1).
+"AppBuild"
+{
+	"AppID"	"480"					// <- your App ID (480 is Valve's test app: an upload to it fails)
+	"Desc"	"NO MONEY DOWN"			// shows in Steamworks > Builds; put the version here
+	"ContentRoot"	"../dist/"		// npm run dist:win (and dist:linux) put the builds here
+	"BuildOutput"	"../dist/steampipe/"	// SteamPipe's logs and cache
+	"SetLive"	""					// "" = set it live yourself in Steamworks (safer); never "default" from here
+	"Preview"	"0"					// "1" = a dry run: lists what would be uploaded, uploads nothing
+	"Depots"
+	{
+		"481"	"depot_windows.vdf"	// <- your Windows depot ID
+		// "482"	"depot_linux.vdf"	// <- a native Linux depot, later (Proton runs the Windows build on Linux and Steam Deck)
+	}
+}

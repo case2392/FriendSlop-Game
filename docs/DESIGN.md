@@ -162,7 +162,7 @@ attaches to neither, cut it.**
 
 | Input | Verb |
 |---|---|
-| WASD / Shift / Space / Ctrl | Walk, sprint (stamina), jump, crouch |
+| WASD / Shift / Space / C | Walk, sprint (stamina), jump, crouch |
 | **Hold left mouse** | **GRAB**: loot, rock (climb), the winch hook, the RV bumper, a friend |
 | Right mouse (holding something) | Throw |
 | Mouse wheel (holding) | Hold distance |

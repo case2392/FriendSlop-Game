@@ -365,6 +365,9 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .click-to-play::after { content: ''; position: absolute; inset: -16px; pointer-events: none; border: 50px solid transparent; border-image: var(--frame); }
 .click-to-play:hover { color: #fff1a8; }
 .click-to-play small { display: block; font-family: var(--ui); font-size: 14px; color: #e9dcc0; margin-top: 6px; letter-spacing: 0.5px; }
+.click-to-play .ctp-row { display: flex; gap: 10px; justify-content: center; margin-top: 14px; cursor: default; }
+.menu-steam { margin: 10px 0 0; font-size: 13px; line-height: 1.4; color: #e9dcc0; text-shadow: var(--outline-thin); }
+.menu-card .quit { display: block; margin: 10px auto 0; }
 
 /* knocked out: the world goes gray, a gold-framed popup up top (WoW's "release spirit") */
 .ko { position: absolute; inset: 0; pointer-events: none; z-index: 4; -webkit-backdrop-filter: grayscale(0.9) brightness(0.8) contrast(1.05); backdrop-filter: grayscale(0.9) brightness(0.8) contrast(1.05);
@@ -472,3 +475,12 @@ input[type=radio]:checked { background: radial-gradient(circle at 36% 32%, #fff0
 @keyframes flashIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); } 15% { opacity: 1; transform: translate(-50%, -50%) scale(1.02); } 80% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes zoneFade { 0% { opacity: 0; } 12% { opacity: 1; } 68% { opacity: 1; } 100% { opacity: 0; } }
 @keyframes loadGrow { to { width: 92%; } }
+
+/* ---- connection trouble: a banner while it lasts, a page when the trip is over ---------------- */
+.net-modal { position: fixed; z-index: 120; width: min(520px, 90vw); text-align: center; }
+.net-modal h2 { color: #5a2a10; text-shadow: none; }
+.net-modal p { font-size: 16px; }
+.net-modal .row { display: flex; justify-content: center; gap: 14px; margin-top: 16px; }
+.conn-box { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); z-index: 110; padding: 8px 22px; border-radius: 6px;
+  background: rgba(20, 12, 8, 0.86); box-shadow: 0 0 0 2px #6e4a16, 0 6px 18px rgba(0, 0, 0, 0.5); color: var(--gold); text-shadow: var(--outline-thin);
+  font-size: 16px; letter-spacing: 0.3px; pointer-events: none; }

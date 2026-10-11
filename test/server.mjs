@@ -85,6 +85,23 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(ca.sent.filter(m => m.t === 'emote').length - before === 1, 'rooms: 200 emotes in one tick go out once');
 }
 {
+  // voice chat's signalling comes in a burst (an offer and a dozen ICE candidates at once): all of it
+  // gets through, while a flood of big messages is capped
+  const room = new Room('RTC', 4242);
+  const A = room.addPlayer(new FakeConn(), 'Ann').player, D = room.addPlayer(new FakeConn(), 'Dee').player;
+  const rtcTo = c => c.sent.filter(m => m.t === 'rtc').length;
+  const r0 = rtcTo(D.conn);
+  room.handle(A, { t: 'rtc', to: D.id, data: { sdp: 'v=0 '.repeat(1000) } });
+  for (let i = 0; i < 14; i++) room.handle(A, { t: 'rtc', to: D.id, data: { cand: 'candidate:1 1 udp 2122260223 192.168.1.20 5' + i + ' typ host' } });
+  check(rtcTo(D.conn) - r0 === 15, `rooms: an offer and 14 ICE candidates in one tick all reach the other player (${rtcTo(D.conn) - r0}/15)`);
+  const r1 = rtcTo(D.conn);
+  for (let i = 0; i < 200; i++) room.handle(A, { t: 'rtc', to: D.id, data: 'x'.repeat(15000) });
+  check(rtcTo(D.conn) - r1 <= 7, `rooms: 200 big signalling messages at once are capped (${rtcTo(D.conn) - r1} relayed)`);
+  // state is never dropped as spam: voice on and off in one tick ends off
+  room.handle(A, { t: 'voice', on: true }); room.handle(A, { t: 'voice', on: false });
+  check(A.voice === false, 'rooms: voice on then off in the same tick leaves the mic off');
+}
+{
   // bedtime: half the crew in a bunk starts a countdown; the rest can't hold everyone at the campfire
   const room = new Room('BEDS', 4242);
   const conns = [new FakeConn(), new FakeConn(), new FakeConn()];

@@ -1,0 +1,19 @@
+"lang"
+{
+	"english"
+	{
+		"tokens"
+		{
+			"#Status_Menu"		"In the menu"
+			"#Status_Camp"		"Day %day% of 5 · at camp on {#Biome_%biome%}"
+			"#Status_Road"		"Day %day% of 5 · driving {#Biome_%biome%}"
+			"#Status_Night"		"Day %day% of 5 · the Repo Man came by"
+			"#Status_Over"		"The trip is over"
+			"#Biome_meadow"		"the Westmeadow Road"
+			"#Biome_fields"		"Goldenfield Pike"
+			"#Biome_snow"		"Frostpeak Pass"
+			"#Biome_badlands"	"the Redrock Badlands"
+			"#Biome_desert"		"the Lost Wages Flats"
+		}
+	}
+}
