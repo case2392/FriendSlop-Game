@@ -382,7 +382,7 @@ try {
   await until(() => H.page.meta?.players.some(p => p.name === 'Faraway'), 8000);
   check(w?.t === 'welcome' && w.code === code && H.page.meta?.players.some(p => p.name === 'Faraway'), 'code join: and they play: welcome, and the host\'s roster has them');
   const blind = await findTripByCode(g.steam, null, code, { me: String(SID(44)), retryMs: 50, log });
-  check(!blind.ok, 'code join: without the filters (Steam\'s default: 50 lobbies, nearby) the same search misses it, which is why the build sets them');
+  check(!blind.ok && blind.code === 'search' && /only looked nearby/.test(blind.msg), `code join: without the filters (Steam's default: 50 lobbies, nearby) the same search misses it, which is why the build sets them; the player is told why: "${blind.msg}"`);
 
   const nobody = off(4500);
   const t = await guestByCode(45, 'Typo', nobody, { region: 2 });
@@ -430,9 +430,53 @@ try {
 } catch (e) {
   fail('exception (code join): ' + (e.stack || e));
 }
+// ---- a join Steam is slow to answer: the player moves on or tries again, and nothing is left behind ----
+try {
+  const H = await hostTrip(60, 'Slowpoke', 61);
+  const id = String(H.lobby.id), inLobby = () => (be.lobbies.get(id)?.members || []).includes(String(SID(61)));
+  const st = await steamFor(61, 'Mover');
+  cleanup.push(() => st.__fake.close());
+  // closed while Steam takes its time (main.cjs closes the bridge when the player hosts, or joins elsewhere)
+  await st.__fake.control({ op: 'joins', joins: { delayMs: 600 } });
+  const b1 = new GuestBridge({ steam: st, build: BUILD, origin: ORIGIN, log });
+  const j1 = b1.joinLobby(id).then(() => null, e => e);
+  await sleep(100);
+  b1.close();
+  const e1 = await j1;
+  await sleep(300);
+  check(e1?.code === 'closed' && !b1.net && !inLobby(), `slow join: a bridge closed while Steam answers stops there and leaves the lobby it got ("${e1?.message}")`);
+  // a first try that timed out, then a retry that got in: the first answer, when it comes, throws nobody out
+  await st.__fake.control({ op: 'joins', joins: { delayMs: 900 } });
+  const b2 = new GuestBridge({ steam: st, build: BUILD, origin: ORIGIN, lobbyTimeoutMs: 300, log });
+  const e2 = await b2.joinLobby(id).then(() => null, e => e);
+  b2.close();
+  await st.__fake.control({ op: 'joins', joins: { delayMs: 0 } });
+  const b3 = new GuestBridge({ steam: st, build: BUILD, origin: ORIGIN, log });
+  cleanup.push(() => b3.close());
+  const r3 = await b3.joinLobby(id);
+  await sleep(1000);
+  check(e2?.code === 'lobby' && r3?.code === H.page.code && inLobby() && b3.state === 'joined' && b3.lobby?.getData('code') === H.page.code,
+    `slow join: a late answer to a try that timed out doesn't take the retry out of the lobby ("${e2?.message}")`);
+  const p3 = await new Page('Mover', `ws://127.0.0.1:${await b3.listen()}`, { build: BUILD, origin: ORIGIN }).connect();
+  cleanup.push(() => p3.close());
+  const w = await p3.join(r3.code).catch(e => e);
+  check(w?.t === 'welcome' && H.sh.isMember(SID(61)), 'slow join: and the retry plays (welcome; the host counts them in its lobby)');
+  // a bridge closed before its socket is up: listen() says so instead of never answering
+  const st2 = await steamFor(62, 'Quitter');
+  cleanup.push(() => st2.__fake.close());
+  const b4 = new GuestBridge({ steam: st2, build: BUILD, origin: ORIGIN, log });
+  await b4.joinLobby(id);
+  const lp = b4.listen();
+  b4.close();
+  const e4 = await Promise.race([lp.then(() => 'listening', e => e), sleep(2000).then(() => 'hung')]);
+  check(e4?.code === 'closed', `slow join: a bridge closed while its socket opens gives up at once (${e4?.message || e4})`);
+} catch (e) {
+  fail('exception (slow join): ' + (e.stack || e));
+}
 // the real build's filters: koffi loads the Steam library steamworks.js ships and finds Steam's flat-API
-// lobby-list functions; before Steam is up the interface is null and the wrapper refuses (no crash)
-if (process.platform === 'linux' || process.platform === 'win32') {
+// lobby-list functions; before Steam is up the interface is null and the wrapper refuses (no crash).
+// (steamworks.js ships x64 libraries only: an arm64 machine can't load them, so it skips this)
+if ((process.platform === 'linux' || process.platform === 'win32') && process.arch === 'x64') {
   try {
     const f = ffiFilters();
     let refused = null;

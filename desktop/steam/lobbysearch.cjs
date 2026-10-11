@@ -84,17 +84,20 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // only just opened can take a moment to show up in searches, so an empty answer gets a second look. Two
 // trips on one code (rare: the host checks first): the one on this game's version, then the newest.
 async function findTripByCode(client, filters, code, { me = '', build = '', retryMs = 1500, timeoutMs = 15000, log = () => {} } = {}) {
-  let found = [], mine = false;
+  let found = [], mine = false, filtered = true;
   for (let attempt = 0; attempt < 2 && !found.length; attempt++) {
     if (attempt) await sleep(retryMs);
     const r = await findLobbies(client, filters, 'nmd_code', code, { timeoutMs, log });
     found = r.lobbies.filter(x => x.data.host !== me);
     mine = r.lobbies.length > found.length;
+    filtered &&= r.filtered;
     log(`[steam] trip code ${code}: ${r.lobbies.length} lobby(s) of ${r.seen} listed${r.filtered ? '' : ' (unfiltered: nearby lobbies only)'}`);
   }
   if (!found.length) {
-    return mine ? { ok: false, code: 'self', msg: 'That\'s your own trip\'s code.' }
-      : { ok: false, code: 'noroom', msg: `No trip with code ${code}. Check the number with your friend. (A full trip doesn't show up either.)` };
+    if (mine) return { ok: false, code: 'self', msg: 'That\'s your own trip\'s code.' };
+    // without the filters Steam only lists 50 lobbies nearby: the code may well be right
+    if (!filtered) return { ok: false, code: 'search', msg: `Couldn't find trip ${code}: Steam's search only looked nearby. Ask your friend to invite you through Steam instead.` };
+    return { ok: false, code: 'noroom', msg: `No trip with code ${code}. Check the number with your friend. (A full trip doesn't show up either.)` };
   }
   found.sort((a, b) => (b.data.build === build) - (a.data.build === build) || Number(b.data.since || 0) - Number(a.data.since || 0));
   return { ok: true, lobbyId: String(found[0].lobby.id), hostName: String(found[0].data.name || ''), matches: found.length };

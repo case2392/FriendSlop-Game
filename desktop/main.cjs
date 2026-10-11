@@ -288,7 +288,7 @@ async function hostLobby(raw) {
   const { isTripCode } = await tripcode;
   const code = isTripCode(raw) ? raw : '';         // never junk in a search key
   if (steamHost && !steamHost.closed) { steamHost.setCode(code); return { ok: true, lobby: String(steamHost.lobby?.id ?? ''), code }; }
-  if (bridge) { bridge.leave(); bridge = null; }
+  if (bridge) { bridge.close(); bridge = null; }      // (a join still under way stops when Steam answers)
   const h = steamHost = new (steamNet().SteamHost)({ steam: steam.client, link: server.link, build: server.build, code, log });
   let lobby;
   try { lobby = await h.open(); }
@@ -307,9 +307,9 @@ async function pickCode() {
 }
 // A friend typed a trip code: find its lobby on Steam, then join it exactly as an invite would
 async function joinByCode(raw) {
-  const { normalizeTripCode, isTripCode } = await tripcode;
-  const code = normalizeTripCode(raw);
-  if (!isTripCode(code)) return { ok: false, code: 'noroom', msg: 'Trip codes are 4 digits.' };
+  const { normalizeTripCode, tripCodeError } = await tripcode;
+  const code = normalizeTripCode(raw), bad = tripCodeError(code);
+  if (bad) return { ok: false, code: 'noroom', msg: bad };
   if (!steam.ok) return { ok: false, code: 'steam', msg: steam.reason };
   if (searching) return { ok: false, code: 'busy', msg: 'Already looking for a trip.' };
   searching = true;
@@ -334,7 +334,7 @@ async function joinLobby(id) {
     const r = await b.joinLobby(id);
     const port = await b.listen();
     if (presence) b.setPresence(presence);
-    return { ok: true, wsUrl: `ws://127.0.0.1:${port}`, code: r.code, hostName: r.hostName };
+    return { ok: true, wsUrl: `ws://127.0.0.1:${port}`, code: r.code, hostName: r.hostName, lobby: String(b.lobby?.id ?? id) };
   } catch (e) {
     if (bridge === b) bridge = null;
     b.close();

@@ -169,9 +169,14 @@ try {
     const noTrip = await guest.page.waitForFunction(() => /No trip with code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 45000 })
       .then(() => guest.page.evaluate(() => document.getElementById('menuError').textContent), () => null);
     check(noTrip, `a wrong trip code: "${noTrip}"`);
-    await sleep(2200);                                // Join Game rests 2 s after a failed search
+    // the corrected code goes straight in (only the same code again rests for 2 s: its answer is up)
+    const searches = () => be.lists.filter(x => x.by === '76561190000000002').length;
+    const before = searches();
+    await guest.page.click('#joinBtn');
+    const resting = await guest.page.evaluate(() => document.getElementById('menuError').textContent);
     await guest.page.fill('#codeInput', code);
     await guest.page.click('#joinBtn');
+    check(resting === noTrip && await until(() => searches() > before, 5000), 'the same wrong code again at once is left with its answer; the corrected one is searched for straight away');
     await ready(guest.page);
     const gs = await guest.page.evaluate(() => ({ id: window.__nmd.selfId, code: window.__nmd.code, roster: window.__nmd.meta?.players.map(p => p.name), chip: document.getElementById('hCode').textContent }));
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);

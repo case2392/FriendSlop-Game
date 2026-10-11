@@ -18,9 +18,13 @@ How the Steam build works, and the steps from this repo to friends playing it. T
   lobbies) and carries the code. steamworks.js can't filter a lobby search, so the game sets Steam's
   own search filters (this code, worldwide) through Steam's flat API with koffi, right before the
   search (`desktop/steam/lobbysearch.cjs`). Before hosting, the game checks that no open trip already
-  has the code it drew.
+  has the code it drew. If the filters can't be set (koffi or Steam's library didn't load), Steam only
+  lists lobbies nearby: the game says its search only looked nearby, and a Steam invite still works.
 - **The trip code is not a password.** With 9,000 possible codes, anyone who has it, guesses it, or
-  lists the game's lobbies can join. Fine for friends; there's no kick button yet.
+  lists the game's lobbies can join, and a mistyped code can land a player in a stranger's trip (the
+  menu says whose trip it's joining). Fine for friends; there's no kick button yet. The browser build's
+  server slows guessing down: ten wrong codes close the connection, and then that address gets one more
+  try every 30 s.
 - **Voice chat** rides the same connection (Opus, 24 kbit/s): the host's game passes each voice on only
   to the players who can hear it (within earshot, or both holding walkies). Nothing peer-to-peer.
 - **The same version on both ends.** Every build carries a fingerprint of the game code

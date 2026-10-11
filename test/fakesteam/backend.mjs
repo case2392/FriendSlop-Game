@@ -15,6 +15,7 @@
 //     regions (each user has one; a lobby takes its creator's: Close = the same region, Default = up to
 //     one away, Far = two, Worldwide = all); nearest first; 50 results unless a count filter says
 //     otherwise. Every search is recorded (CONTROL 'lists'); levers make it slow, fail or never answer.
+//   - JoinLobby can answer late (CONTROL 'joins'); joining a lobby you're in answers yes (one membership).
 import net from 'node:net';
 import { OP, frame, jframe, decoder, json } from './wire.mjs';
 
@@ -29,6 +30,7 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
   const stats = { pkts: 0, bytes: 0, dropped: 0, dupd: 0, retrans: 0, held: 0, rejectedBig: 0, lists: 0 };
   const lists = [];                 // every lobby search: { by, filters, results }
   const search = { delayMs: 40, fail: false, hang: false };   // levers (CONTROL 'search')
+  const joins = { delayMs: 0 };                                 // a slow JoinLobby answer (CONTROL 'joins')
 
   const now = () => performance.now();
   const netOf = id => ({ ...defaults, ...(users.get(id)?.net || {}) });
@@ -153,14 +155,20 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
         }
         case OP.JOIN_LOBBY: {
           const j = json(p);
-          const L = lobbies.get(String(j.lobby));
-          // steamworks.js reports every failure the same way ("Failed to join lobby"); the reason is kept here for logs
-          const why = !L ? 'no such lobby' : !L.joinable ? 'not joinable' : L.members.length >= L.max ? 'full' : null;
-          if (why) { send(me, jframe(OP.LOBBY_RESULT, { reqId: j.reqId, ok: false, err: 'Failed to join lobby', why })); return; }
-          if (!L.members.includes(me)) L.members.push(me);
-          send(me, jframe(OP.LOBBY_RESULT, { reqId: j.reqId, ok: true, lobby: L.id }));
-          chatUpdate(L, me, 'Entered');
-          pushLobby(L);
+          const answer = () => {
+            if (!users.has(me)) return;
+            const L = lobbies.get(String(j.lobby));
+            // steamworks.js reports every failure the same way ("Failed to join lobby"); the reason is kept here for logs
+            const why = !L ? 'no such lobby' : !L.joinable ? 'not joinable' : L.members.length >= L.max ? 'full' : null;
+            if (why) { send(me, jframe(OP.LOBBY_RESULT, { reqId: j.reqId, ok: false, err: 'Failed to join lobby', why })); return; }
+            // already in it (an earlier join got there first): Steam answers yes, with one membership
+            const fresh = !L.members.includes(me);
+            if (fresh) L.members.push(me);
+            send(me, jframe(OP.LOBBY_RESULT, { reqId: j.reqId, ok: true, lobby: L.id }));
+            if (fresh) chatUpdate(L, me, 'Entered');
+            pushLobby(L);
+          };
+          if (joins.delayMs) setTimeout(answer, joins.delayMs); else answer();
           return;
         }
         case OP.LEAVE_LOBBY: { const L = lobbies.get(p.toString()); if (L) leaveLobby(L, me, 'Left'); return; }
@@ -203,6 +211,7 @@ export function startBackend({ port = 0, seed = 1, log = () => {} } = {}) {
           else if (j.op === 'stats') res = stats;
           else if (j.op === 'region') users.get(String(j.id ?? me)).region = Number(j.region) || 0;
           else if (j.op === 'search') Object.assign(search, j.search || {});
+          else if (j.op === 'joins') Object.assign(joins, j.joins || {});
           else if (j.op === 'lists') res = lists;
           send(me, jframe(OP.CONTROL_RESULT, { reqId: j.reqId, res }));
           return;

@@ -49,8 +49,14 @@ function start({ enabled = true, appId = TEST_APP, log = console.log, packaged =
   try {
     S.client = sw.init(fromSteam ? undefined : appId);
     S.ok = true; S.reason = '';
-    // only now: the FFI calls into steam_api need the initialised client (a null interface crashes)
-    S.lobbyFilters = () => require('./steam/lobbysearch.cjs').ffiFilters();
+    // only now: the FFI calls into steam_api need the initialised client (a null interface crashes).
+    // Without them a code search sees only nearby lobbies: say why in the log, once
+    let warned = false;
+    S.lobbyFilters = () => {
+      const ls = require('./steam/lobbysearch.cjs'), f = ls.ffiFilters();
+      if (!f && !warned) { warned = true; log('[steam] trip-code search filters unavailable, searching nearby lobbies only:', ls.ffiError()?.message || 'unknown'); }
+      return f;
+    };
   } catch (e) {
     S.reason = 'Steam isn\'t running, so friends can\'t join. Start Steam, then the game.';
     log(`[steam] init failed after ${Date.now() - t0} ms: ${e?.message || e}`);

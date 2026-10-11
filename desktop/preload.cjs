@@ -25,7 +25,7 @@ contextBridge.exposeInMainWorld('desktop', {
   leave: () => ipcRenderer.invoke('desktop:leave'),                        // the trip is over for this PC
   presence: p => ipcRenderer.send('desktop:presence', p),                  // { ph, day, biome } for the friends list
   takeLobby: () => ipcRenderer.invoke('desktop:take-lobby'),               // a friend's trip waiting to be joined?
-  joinLobby: id => ipcRenderer.invoke('desktop:join-lobby', String(id)),   // -> { ok, wsUrl, code, hostName } or { ok: false, msg }
+  joinLobby: id => ipcRenderer.invoke('desktop:join-lobby', String(id)),   // -> { ok, wsUrl, code, hostName, lobby } or { ok: false, msg }
   joinCode: code => ipcRenderer.invoke('desktop:join-code', String(code)), // the same, found by trip code on Steam
   onEvent: fn => { if (typeof fn === 'function') listeners.add(fn); },     // { t: 'lobby', id }: an invite accepted mid-game
 });

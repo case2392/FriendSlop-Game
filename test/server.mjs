@@ -347,11 +347,22 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(codes.size === 300 && [...codes].every(c => /^[1-9]\d{3}$/.test(c)) && ![...codes].some(easy),
     `trip codes: 300 new trips, 300 different codes, all 4 digits from 1000 to 9999, none like 7777 or 1234 (${[...codes].slice(0, 6).join(' ')} ...)`);
   host.rooms.clear();
-  // a closed trip's code waits ten minutes: an old code read out in chat can't lead into a stranger's trip
-  host.freed.set('4821', Date.now());
-  const fresh = new Set(Array.from({ length: 3000 }, () => host.newCode()));
-  host.freed.set('4822', Date.now() - 11 * 60 * 1000);
-  check(!fresh.has('4821') && host.cooling('4821') && !host.cooling('4822'), 'trip codes: a closed trip\'s code is not handed out again for ten minutes');
+  // a closed trip's code waits ten minutes: an old code read out in chat can't lead into a stranger's trip.
+  // Every code taken but 4821 (closed a moment ago), 5832 and 4822 (closed 11 minutes ago): never 4821
+  for (let i = 1000; i < 10000; i++) host.rooms.set(String(i), { closed: false });
+  for (const c of ['4821', '5832', '4822']) host.rooms.delete(c);
+  host.freed.set('4821', Date.now()); host.freed.set('4822', Date.now() - 11 * 60 * 1000);
+  const fresh = new Set(Array.from({ length: 200 }, () => host.newCode()));
+  host.rooms.set('5832', { closed: false }); host.rooms.set('4822', { closed: false });
+  const last = host.newCode();
+  check(!fresh.has('4821') && fresh.has('5832') && fresh.has('4822') && last === '4821',
+    `trip codes: a closed trip's code is not handed out again for ten minutes (drawn: ${[...fresh].join(', ')}), unless it's the last code left`);
+  // the loop is what records a closed trip's code
+  host.rooms.clear(); host.freed.clear();
+  host.rooms.set('6173', { closed: true });
+  host.start(); await sleep(120); host.stop();
+  check(!host.rooms.has('6173') && host.cooling('6173'), 'trip codes: a trip that closes has its code put aside');
+  host.freed.clear();
   // every code taken: a clean refusal, not an endless loop
   for (let i = 1000; i < 10000; i++) host.rooms.set(String(i), { closed: false });
   const s1 = new Sock(); host.attach(s1, { kind: 'ws' }); s1.msg({ t: 'create', name: 'x' });
@@ -362,6 +373,41 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   for (let i = 0; i < 10; i++) s2.msg({ t: 'join', name: 'g', room: String(2000 + i) });
   await sleep(120);
   check(s2.sent.filter(m => m.t === 'error' && m.code === 'noroom').length === 10 && s2.closedWith === 4008, 'trip codes: a connection that keeps guessing codes is closed after 10 wrong ones');
+  {
+    // ...and nothing it sends after that is looked at: a burst of 200 guesses, sent before the close lands
+    // (or by a client that ignores it), finds nothing
+    const hs = new Sock(); host.attach(hs, { kind: 'local' }); hs.msg({ t: 'create', name: 'Hosty' });
+    const code = hs.last('welcome')?.code, n = Number(code), from = Math.max(1000, Math.min(9799, n - 150));
+    const burst = new Sock(); host.attach(burst, { kind: 'ws', addr: '203.0.113.7' });
+    for (let c = from; c < from + 200; c++) burst.msg({ t: 'join', name: 'Stranger', room: String(c) });
+    await sleep(120);
+    const room = host.rooms.get(code);
+    check(!burst.last('welcome') && burst.sent.filter(m => m.t === 'error').length === 10 && burst.closedWith === 4008 && room.players.size === 1,
+      `trip codes: a burst of 200 guesses around trip ${code} gets 10 answers, then nothing (players ${room.players.size})`);
+    // a new socket from the same address doesn't start over: even the right code waits now
+    const again = new Sock(); host.attach(again, { kind: 'ws', addr: '203.0.113.7' }); again.msg({ t: 'join', name: 'Stranger', room: code });
+    const other = new Sock(); host.attach(other, { kind: 'ws', addr: '198.51.100.4' }); other.msg({ t: 'join', name: 'Friend', room: code });
+    check(!again.last('welcome') && /Too many wrong trip codes/.test(again.last('error')?.msg) && other.last('welcome')?.code === code,
+      'trip codes: after 10 wrong codes, a new socket from that address is refused even the right code; another address gets in');
+    // a friend coming back to their kept seat from that address gets in (their token, not the code, says who)
+    const token = other.last('session')?.resume;
+    other.emit('close');
+    const back = new Sock(); host.attach(back, { kind: 'ws', addr: '203.0.113.7' }); back.msg({ t: 'join', name: 'Friend', room: code, resume: token });
+    check(back.last('welcome')?.id === other.last('welcome')?.id, 'trip codes: a friend coming back to their seat gets in from a slowed-down address');
+    // and the address earns one more try every 30 s
+    host.guesses.get('203.0.113.7').at -= 31000;
+    const later = new Sock(); host.attach(later, { kind: 'ws', addr: '203.0.113.7' }); later.msg({ t: 'join', name: 'Stranger', room: '1001' }); later.msg({ t: 'join', name: 'Stranger', room: '1002' });
+    const errs = later.sent.filter(m => m.t === 'error').map(m => m.msg);
+    check(errs.length === 2 && /No trip with that code/.test(errs[0]) && /Too many wrong trip codes/.test(errs[1]), `trip codes: 30 s later the address gets one more try (${errs.join(' / ')})`);
+    // a code that starts with 0 is four digits, but never a trip's; a huge code costs nothing
+    const zero = new Sock(); host.attach(zero, { kind: 'ws', addr: '192.0.2.1' }); zero.msg({ t: 'join', name: 'z', room: '0482' });
+    const t0 = performance.now();
+    const huge = new Sock(); host.attach(huge, { kind: 'ws', addr: '192.0.2.2' });
+    for (let i = 0; i < 20; i++) huge.msg({ t: 'join', name: 'h', room: '\uFDFA'.repeat(20000) });
+    const ms = performance.now() - t0;
+    check(/never start with 0/.test(zero.last('error')?.msg) && ms < 100, `trip codes: '0482' is told codes never start with 0; 20 joins with 20,000-character codes take ${ms.toFixed(1)} ms`);
+    room.closed = true;
+  }
   // the desktop host's own page may bring the code its shell found free on Steam; a Steam guest needs no
   // code (the lobby picked the trip); nobody else gets to choose a code
   const solo = new GameHost({ build: 'x', singleRoom: true, log: () => {} });
