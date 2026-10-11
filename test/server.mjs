@@ -169,6 +169,33 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(n === 1 && room.sim.tied.size === 1, `sim: what was bungee'd in the RV is still tied down the next day (${n} tied, ${room.sim.tied.size} next day)`);
 }
 {
+  // the crash buttes' fallen blocks are solid: every one of world gen's rocks builds a convex hull, the
+  // same points every time (the server and each client build their own), and a block stops a ray
+  const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
+  const { generateLeg } = await import('../shared/world.js');
+  let n = 0, bad = 0, same = true, hit = 0, tried = 0;
+  for (const seed of [777, 1234, 4242]) for (let day = 1; day <= 5; day++) {
+    const W = generateLeg(seed, day), W2 = generateLeg(seed, day);
+    const world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
+    W.hulls.forEach((h, i) => {
+      n++;
+      const d = RAPIER.ColliderDesc.convexHull(h.pts);
+      if (!d) { bad++; return; }
+      world.createCollider(d.setTranslation(h.x, h.y, h.z));
+      const o = W2.hulls[i];
+      if (!o || o.x !== h.x || o.z !== h.z || o.pts.length !== h.pts.length || o.pts.some((v, k) => v !== h.pts[k])) same = false;
+    });
+    world.step();
+    for (const h of W.hulls.slice(0, 4)) {
+      tried++;
+      const ray = new RAPIER.Ray({ x: h.x, y: h.y + 20, z: h.z }, { x: 0, y: -1, z: 0 });
+      if (world.castRay(ray, 40, true)) hit++;
+    }
+    world.free();
+  }
+  check(n > 100 && bad === 0 && same && hit === tried, `world: ${n} fallen blocks at the buttes all build solid hulls (${bad} failed), the same every time, and stop a ray (${hit}/${tried})`);
+}
+{
   // the door steps hang 7 cm off the road: beside a canyon wall they used to rest on the rising ground,
   // lift a wheel, and hold the RV there for good (forward and reverse)
   const room = new Room('SNAG', 777);

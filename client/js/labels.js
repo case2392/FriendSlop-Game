@@ -819,10 +819,10 @@ const PULL = 0.7, PLATE_ORDER = 10;
 const SIGHT_MS = 180;
 let plateSeq = 0;
 const terrainHides = (W, c, p, d) => {
-  const n = Math.min(24, Math.max(7, Math.ceil(d / 2)));
+  const n = Math.min(24, Math.max(7, Math.ceil(d / 2))), at = W.topAt || W.heightAt;   // (topAt: a butte stands up to its top)
   for (let i = 1; i < n; i++) {
     const t = i / n, y = c.y + (p.y - c.y) * t;
-    if (W.heightAt(c.x + (p.x - c.x) * t, c.z + (p.z - c.z) * t) > y + 0.35) return true;
+    if (at(c.x + (p.x - c.x) * t, c.z + (p.z - c.z) * t) > y + 0.35) return true;
   }
   return false;
 };

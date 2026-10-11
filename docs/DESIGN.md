@@ -243,12 +243,17 @@ the difficulty curve stays in the quota.
 **POIs** are worth the detour and cost time. Abandoned gas stations,
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get
 the suitcase *down*), junk piles, the roadside fiberglass dinosaur. A butte is
-solid cylinders in world gen (a flat top, sheer walls, a lower bench to rest
-on half-way up, lobes so it isn't a drum), because the 2.5 m terrain grid can
-only draw a steep hill as a cone. It stands on its own talus: a concave scree
+a few solid convex masses in world gen (`shared/butte.js`: a flat top, a lower
+bench to rest on half-way up, two lobes), because the 2.5 m terrain grid can
+only draw a steep hill as a cone. The masses are angular, jointed rock (flat
+faces meeting at corners) and their walls lean in, 6-16° (typically 8°): upright
+cylinders read as drums or tanks from the road. It stands on its own talus: a concave scree
 apron in the heightfield that buries its lower third, about 31° at the foot so
-you can walk up to the wall, and kept short on the road side so it meets the
-ditch at nothing.
+you can walk up to the wall (never a triangle steeper than the 38° you can walk
+where the apron changed the ground), and kept short on the road side so it
+meets the ditch at nothing. What fell off it is solid: world gen lays and shapes
+every fallen block and the physics takes its points as a convex hull, so you
+stand on the rock you see, not in it.
 
 ### 7.2 Loot
 

@@ -122,6 +122,11 @@ export class Sim {
         .setTranslation(c.x, c.y, c.z).setCollisionGroups(FLIMSY.has(c.mat) ? GROUPS.flimsy : GROUPS.world), this.statics);
       if (FLIMSY.has(c.mat)) this.flimsy.add(col.handle);
     }
+    // convex rocks (the crash buttes' fallen blocks): world gen's points, the very ones the client draws
+    for (const h of W.hulls || []) {
+      const d = RAPIER.ColliderDesc.convexHull(h.pts);
+      if (d) this.world.createCollider(d.setTranslation(h.x, h.y, h.z).setFriction(0.8).setCollisionGroups(GROUPS.world), this.statics);
+    }
     for (const g of W.gates) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(g.hx, g.hy, g.hz)
         .setTranslation(g.x, g.y, g.z).setCollisionGroups(GROUPS.world), this.statics);

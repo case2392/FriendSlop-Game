@@ -2,7 +2,7 @@
 // Physics is real (Rapier on the server); the clock runs fast (FRIENDSLOP_FAST).
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
-import { generateLeg } from '../shared/world.js';
+import { generateLeg, butteRadius } from '../shared/world.js';
 import { QUOTAS, medBill } from '../shared/constants.js';
 import { Blackjack, handTotal } from '../server/blackjack.js';
 import { BJTable } from '../server/casino.js';
@@ -62,6 +62,47 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   }
   check(codes > 80 && buried === 0, `world: no gate code has the ground poking through its paint (${buried} of ${codes})`);
   check(boulders > 50 && signed === boulders, `world: every boulder has a ROCKFALL sign on flat ground before it (${signed} of ${boulders})`);
+}
+
+// --- world gen: the crash buttes are angular, leaning masses with room on top and clear of the road ---
+// (convex rings that hold their centre, the wreck's 5.6 m, every loot prop a metre inside the top, the
+// foot at the talus line 7.6 m off the road's centre, the bench 2.5 m over the talus, the same every time)
+{
+  const { sdPoly, polyArea } = await import('../shared/butte.js');
+  let sites = 0, bad = [];
+  for (let i = 0; i < 16; i++) {
+    const seed = (Math.imul(i + 3, 2246822519) >>> 0) % 1e9;
+    for (let day = 1; day <= 5; day++) {
+      const W = generateLeg(seed, day), W2 = generateLeg(seed, day);
+      W.mesas.forEach((p, k) => {
+        sites++;
+        const M = p.mesa, yC = M.base + M.talus, mains = M.parts.filter(q => q.part !== 'butte_bench');
+        for (const q of M.parts) {
+          if (q.top.length < 5 || polyArea(q.top) <= 0) bad.push(`${seed}/${day} ${q.part}: ${q.top.length} corners, area ${polyArea(q.top).toFixed(1)}`);
+        }
+        // the main tier's outline is one radius per bearing (what the renderer wraps the wall round): every
+        // point from the centre out to butteRadius lies in the rock
+        for (let a = 0; a < 90; a++) {
+          const th = a / 90 * Math.PI * 2, R = butteRadius(p, th);
+          for (let t = 0.25; t < R - 0.05; t += 0.25) {
+            const x = p.x + Math.cos(th) * t, z = p.z + Math.sin(th) * t;
+            if (!mains.some(q => sdPoly(q.top, x, z) <= 1e-6)) { bad.push(`${seed}/${day} a gap in the top ${t.toFixed(2)} m out at bearing ${a * 4}`); a = 90; break; }
+          }
+        }
+        const body = M.parts.find(q => q.part === 'butte');
+        if (-sdPoly(body.top, p.x, p.z) < 5.55) bad.push(`${seed}/${day} the top is ${(-sdPoly(body.top, p.x, p.z)).toFixed(2)} m from the centre to its nearest face`);
+        for (const pr of W.props.filter(pr => Math.hypot(pr.x - p.x, pr.z - p.z) < M.bound && pr.y > M.base + M.h - 0.5)) {
+          const inside = Math.max(...mains.map(q => -sdPoly(q.top, pr.x, pr.z)));
+          if (inside < 0.75) bad.push(`${seed}/${day} loot ${pr.type} ${inside.toFixed(2)} m inside the top`);
+        }
+        for (const q of mains) for (const v of q.polyAt(yC)) if (Math.abs(v[0] - W.roadX(v[1])) < 7.55) { bad.push(`${seed}/${day} the foot ${Math.abs(v[0] - W.roadX(v[1])).toFixed(2)} m off the road`); break; }
+        if (M.bench.top < yC + 2.45) bad.push(`${seed}/${day} the bench ${(M.bench.top - yC).toFixed(2)} m over the talus`);
+        const q2 = W2.mesas[k].mesa.parts;
+        if (M.parts.some((q, j) => q.top.length !== q2[j].top.length || q.top.some((v, n) => v[0] !== q2[j].top[n][0] || v[1] !== q2[j].top[n][1]))) bad.push(`${seed}/${day} not the same twice`);
+      });
+    }
+  }
+  check(sites > 40 && !bad.length, `world: ${sites} crash buttes are convex leaning masses with room on top, clear of the road, the same every time${bad.length ? ': ' + bad.slice(0, 4).join('; ') : ''}`);
 }
 
 // --- body-vote blackjack: votes left standing after a hit wait for the timer (pure logic) ---

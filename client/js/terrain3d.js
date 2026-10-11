@@ -17,7 +17,7 @@
 // x and z, so up a face they would only run in vertical bands). The valley walls' angular granite
 // (cliff_snow) is crossfaded with a second sample turned 30 degrees and 1.6x larger (its form turned to
 // match), and carries two or three snow-capped ledges at world heights.
-// The crash mesas are buttes on world gen's cylinders, drawn by terrain_butte.js (their rock, caprock and
+// The crash mesas are buttes on world gen's convex masses, drawn by terrain_butte.js (their rock, caprock and
 // cover) and terrain_talus.js (fallen blocks and rubble); here each one's talus mound is painted as scree,
 // the butte's debris over the ground, thickest against its foot and thinning out in tongues down the mound.
 // Tanaris is an open erg: its ripples lie across world gen's wind, along the dunes' crests, only on the
@@ -105,10 +105,26 @@ export function setClutterQuality(level) {
 // Westfall's cultivated plots (W.fields), painted into the splat: at most MAX_PLOTS per leg. Their
 // colours (sRGB): furrow trough, mid, lit ridge; stubble soil, straw, lit straw; wheat gap, body, lit heads.
 const MAX_PLOTS = 10;
-// the crash sites the splat knows (MAX_SITES a leg; world gen makes at most five), each its butte's
-// cylinders (MAX_CIRC: the body, the bench and up to two lobes), and how far out round them the talus
-// mound's scree reaches (m); per biome [tint, second-ground share, strength]
-const MAX_SITES = 6, MAX_CIRC = 4, TALUS_REACH = 6.5;
+// A crash butte's foot where the talus meets its walls, as a radius from its centre at MESA_N bearings: the
+// farthest the outline (its body and lobes, and the bench round its far end) reaches along each
+function mesaFoot(p) {
+  const M = p.mesa, out = [];
+  for (let k = 0; k < MESA_N; k++) {
+    const a = k / MESA_N * Math.PI * 2, ux = Math.cos(a), uz = Math.sin(a);
+    let far = 0;
+    for (let t = 0.5; t < M.bound; t += 0.25) if (M.footDist(p.x + ux * t, p.z + uz * t) <= 0) far = t;
+    // (to a centimetre: the last way out)
+    let lo = far, hi = far + 0.25;
+    for (let j = 0; j < 5; j++) { const m = (lo + hi) / 2; if (M.footDist(p.x + ux * m, p.z + uz * m) <= 0) lo = m; else hi = m; }
+    out.push(lo);
+  }
+  return out;
+}
+// the crash sites the splat knows (MAX_SITES a leg; world gen makes at most five), each its butte's foot as
+// a radius at MESA_N bearings round its centre (the outline where the talus meets the walls, the bench
+// included), and how far out round it the talus mound's scree reaches (m); per biome [tint, second-ground
+// share, strength]
+const MAX_SITES = 6, MESA_N = 32, TALUS_REACH = 6.5;
 const TALUS = cfg => cfg.talus || [[1, 1, 1], 0, 0.8];
 const PLOT_COLORS = ['#3e2b1e', '#6c4a32', '#a47a50', '#8a6c4a', '#cdb47e', '#e4d29e', '#5e4a22', '#c39a3c', '#efcd6c'];
 
@@ -168,7 +184,7 @@ function splatMaterial(biome, cfg) {
     uPlotC: { value: PLOT_COLORS.map(c => new THREE.Color(c)) },
     uSun: { value: new THREE.Vector3(0.57, 0.74, -0.36) },
     uScree: { value: new THREE.Vector4(...(cfg.scree || [0.3, 0.5, 0.3, 0.46])) }, uSWarp: { value: cfg.strataWarp ?? 0 }, uFarS: { value: cfg.farS ?? 0.4 }, uRockDet: { value: cfg.rockDet ?? 0 },
-    uNarrow: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uMesa: { value: Array.from({ length: MAX_SITES * MAX_CIRC }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uMesaS: { value: Array.from({ length: MAX_SITES }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uScreeT: { value: new THREE.Vector3(...TALUS(cfg)[0]) }, uScree2: { value: new THREE.Vector2(TALUS(cfg)[1], TALUS(cfg)[2]) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
+    uNarrow: { value: new THREE.Vector4(1e5, 1e5, 1e5, 1e5) }, uMesaR: { value: Array.from({ length: MAX_SITES * MESA_N / 4 }, () => new THREE.Vector4(0, 0, 0, 0)) }, uMesaS: { value: Array.from({ length: MAX_SITES }, () => new THREE.Vector4(1e5, 1e5, 0, 0)) }, uScreeT: { value: new THREE.Vector3(...TALUS(cfg)[0]) }, uScree2: { value: new THREE.Vector2(TALUS(cfg)[1], TALUS(cfg)[2]) }, uLedge: { value: new THREE.Vector3(...cfg.ledge) }, uTintA: { value: new THREE.Vector3(...cfg.tintA) }, uTintB: { value: new THREE.Vector3(...cfg.tintB) },
   };
   const m = new THREE.MeshLambertMaterial({ color: 0xffffff });
   if (cfg.snowRock) {
@@ -217,9 +233,9 @@ function splatMaterial(biome, cfg) {
           // the rows' spacing, jittered +-15% (a monotone warp; rowJ() in JS is the same)
           float rowJ(float x, float pk) { return 0.05 * sin(x * 1.9 + pk) + 0.0125 * sin(x * 4.3 + pk * 3.0); }
         #endif
-        // the crash mesas' buttes: each site's cylinders (centre, radius: its body, bench and lobes) and
+        // the crash mesas' buttes: each site's foot (its radius at MESA_N bearings, four to a vec4) and
         // its bounds (centre, radius out to the scree's reach; w: that reach), and the scree's tint (uScreeT)
-        uniform vec4 uMesa[${MAX_SITES * MAX_CIRC}], uMesaS[${MAX_SITES}]; uniform vec3 uScreeT; uniform vec2 uScree2;
+        uniform vec4 uMesaR[${MAX_SITES * MESA_N / 4}], uMesaS[${MAX_SITES}]; uniform vec3 uScreeT; uniform vec2 uScree2;
         #ifdef TERRAIN_DUNES
           // (Tanaris) the narrows' z (the gate's and the boulder's: the only sandstone in the erg)
           uniform vec4 uNarrow;
@@ -284,15 +300,17 @@ function splatMaterial(biome, cfg) {
           if (dOut > 0.0) st = mix(st, textureLod(tSlopeA, ((wp.xz - uGridA.xy) / uGridA.z + 0.5) / uGridAN, 0.0), smoothstep(0.0, 12.0, dOut));   // the apron, on its own 10 m lattice
           sl = st.rg; hn = st.ba * 2.0 - 1.0;
           // the talus apron round a crash mesa's butte: how near its foot (1 at the wall, 0 most of the
-          // way down its apron, uMesaS.w, in wandering tongues), from the nearest of its cylinders (the
-          // union's foot); a site whose bounds it lies outside costs one distance
+          // way down its apron, uMesaS.w, in wandering tongues), the foot's radius along this bearing from
+          // the site's table; a site whose bounds it lies outside costs one distance
           float talK = 0.0;
           for (int mi = 0; mi < ${MAX_SITES}; mi++) {
-            if (distance(wp.xz, uMesaS[mi].xy) > uMesaS[mi].z) continue;
-            for (int mk = 0; mk < ${MAX_CIRC}; mk++) {
-              vec4 mc = uMesa[mi * ${MAX_CIRC} + mk];
-              talK = max(talK, 1.0 - smoothstep(0.0, uMesaS[mi].w, distance(wp.xz, mc.xy) - mc.z));
-            }
+            vec2 dv = wp.xz - uMesaS[mi].xy;
+            float dd = length(dv);
+            if (dd > uMesaS[mi].z) continue;
+            float fb = fract(atan(dv.y, dv.x) / 6.2831853 + 1.0) * ${MESA_N}.0;
+            int b0 = int(fb) % ${MESA_N}, b1 = (b0 + 1) % ${MESA_N};
+            float rf = mix(uMesaR[mi * ${MESA_N / 4} + b0 / 4][b0 % 4], uMesaR[mi * ${MESA_N / 4} + b1 / 4][b1 % 4], fract(fb));
+            talK = max(talK, 1.0 - smoothstep(0.0, uMesaS[mi].w, dd - rf));
           }
           // ground: two scales of the main ground, picked patch by patch so neither tile shows. Flat
           // ground is projected from above; on slopes (by a smoothed slope, so the grid never shows)
@@ -1447,7 +1465,9 @@ function exclusion(W) {
     }
   };
   for (const st of W.statics) if (st.mat !== 'invisible' && st.hx < 40 && st.hz < 40) mark(st.x, st.z, st.hx, st.hz, st.ry || 0, 0.6);
-  for (const c of W.cyls) mark(c.x, c.z, c.r, c.r, 0, c.mat === 'mesa' ? 1.8 : 0.25);   // (a butte's foot: its scree, its fallen blocks)
+  for (const c of W.cyls) mark(c.x, c.z, c.r, c.r, 0, 0.25);
+  // a butte's masses (their foot: its scree) and its fallen blocks (nothing grows through them)
+  for (const h of W.hulls || []) { const k = h.mat === 'mesa' ? 1 : 0.75; mark(h.x, h.z, h.r * k, h.r * k, 0, h.mat === 'mesa' ? 1.8 : 0.1); }
   for (const d of W.decor) if (d.k === 'fire') mark(d.x, d.z, 1.6, 1.6, 0, 0.5);
   // whole building lots (+1.5 m: porches, steps, eaves) and painted codes on the ground (they must read)
   for (const b of W.buildings || []) mark(b.x, b.z, b.w / 2, b.dep / 2, b.ry || 0, 1.5);
@@ -1864,16 +1884,14 @@ export function buildTerrain(W) {
   mat.userData.U.uFire.value.set(fires[0]?.x ?? 1e5, fires[0]?.z ?? 1e5, fires[1]?.x ?? 1e5, fires[1]?.z ?? 1e5);
   // (Tanaris) the narrows, where its sandstone shows
   { const z = (W.obstacles || []).filter(o => o.type === 'gate' || o.type === 'boulder').map(o => o.z); mat.userData.U.uNarrow.value.set(z[0] ?? 1e5, z[1] ?? 1e5, z[2] ?? 1e5, z[3] ?? 1e5); }
-  // the crash mesas' buttes (the scree on their talus mounds): each site's cylinders, and its bounds
+  // the crash mesas' buttes (the scree on their talus mounds): each site's foot, by bearing, and its bounds
   {
-    const bySite = new Map();
-    for (const c of W.cyls || []) if (c.mat === 'mesa') { if (!bySite.has(c.poi)) bySite.set(c.poi, []); bySite.get(c.poi).push(c); }
-    const sites = [...bySite.values()].slice(0, MAX_SITES), U = mat.userData.U;
-    U.uMesa.value.forEach(v => v.set(1e5, 1e5, 0, 0)); U.uMesaS.value.forEach(v => v.set(1e5, 1e5, 0, 0));
-    sites.forEach((cs, i) => {
-      const x = cs[0].x, z = cs[0].z, reach = Math.max(TALUS_REACH, 0.8 * (W.pois[cs[0].poi]?.mesa?.reach || 0));
-      U.uMesaS.value[i].set(x, z, Math.max(...cs.map(c => Math.hypot(c.x - x, c.z - z) + c.r)) + reach + 0.5, reach);
-      cs.slice(0, MAX_CIRC).forEach((c, k) => U.uMesa.value[i * MAX_CIRC + k].set(c.x, c.z, c.r, c.y + c.hh));
+    const sites = (W.mesas || []).filter(p => p.mesa?.footDist).slice(0, MAX_SITES), U = mat.userData.U;
+    U.uMesaR.value.forEach(v => v.set(0, 0, 0, 0)); U.uMesaS.value.forEach(v => v.set(1e5, 1e5, 0, 0));
+    sites.forEach((p, i) => {
+      const M = p.mesa, reach = Math.max(TALUS_REACH, 0.8 * (M.reach || 0)), R = mesaFoot(p);
+      U.uMesaS.value[i].set(p.x, p.z, Math.max(...R) + reach + 0.5, reach);
+      for (let k = 0; k < MESA_N; k++) U.uMesaR.value[i * MESA_N / 4 + (k >> 2)].setComponent(k & 3, R[k]);
     });
   }
   // the cultivated plots (Westfall)
@@ -1889,7 +1907,7 @@ export function buildTerrain(W) {
   let skyT = -1e9;
   const clutter = new Clutter(W, cfg, biome);
   group.add(clutter.mesh);
-  // the crash mesas' buttes on world gen's cylinders, and their talus (every biome; one draw call)
+  // the crash mesas' buttes on world gen's masses, and their talus (every biome; one draw call)
   const buttes = buildButtes(W, { form: mat.userData.U.tForm?.value, macro: macroTex, tint: (x, z) => terrainTintAt(W, x, z),
     scree: { dirt: `dirt_${biome}`, g2: `ground2_${biome}`, sDirt: cfg.scale[2], sG2: cfg.scale[1], tint: TALUS(cfg)[0], share: TALUS(cfg)[1], k: TALUS(cfg)[2] } });
   if (buttes) group.add(buttes.mesh);

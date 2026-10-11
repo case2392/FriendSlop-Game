@@ -335,7 +335,7 @@ export class Me {
     if (inp.f > 0) {
       const head = add(add(nc, mul(tUp, 0.95)), mul(c.n, 0.4));
       const above = lw.ray(head, mul(c.n, -1), 1.1, G.WORLD | G.RV, exclude, false);
-      if (!above && this.mantle(lw, nc, c.n, exclude)) return;
+      if (!above && this.mantle(lw, nc, c.n, exclude, probe.mat === 'mesa')) return;
     }
     this.pos = v3(nc.x, nc.y - CH, nc.z);
     this.vel = v3();
@@ -345,14 +345,16 @@ export class Me {
     }
   }
 
-  mantle(lw, center, n, exclude) {
+  // strict (a butte's rim: its walls lean, so just under the rim there is sloping rock to land on): only a
+  // walkable landing will do, or you keep climbing
+  mantle(lw, center, n, exclude, strict = false) {
     const nh = norm(v3(-n.x, 0, -n.z));
     for (const [upBy, fwdBy] of [[1.35, 0.7], [1.0, 0.75], [1.7, 0.6], [0.7, 0.8]]) {
       const cand = add(add(center, v3(0, upBy, 0)), mul(nh, fwdBy));
       if (!lw.fits(cand)) continue;
       // there has to be something to stand on
       const g = lw.ray(cand, v3(0, -1, 0), CH + 0.8, G.WORLD | G.RV | G.PROP, exclude, false);
-      if (!g) continue;
+      if (!g || (strict && g.normal.y < WALKABLE)) continue;
       this.pos = v3(cand.x, g.point.y + 0.02, cand.z);
       this.mode = 'walk'; this.climb = null; this.vel = v3();
       this.events.push({ k: 'mantle' });
