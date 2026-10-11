@@ -291,6 +291,14 @@ export function initAtmosphere(_scene, _camera, _renderer) {
 // as atan(dz, dx)), from terrain3d whenever the camera moves; the rings haze up from it.
 const SKY_N = 128, skyData = new Uint8Array(SKY_N * 4).fill(89);
 let skyTex = null;
+// graphics quality: the sun's shadow map size, or none (0)
+export function setShadowQuality(size) {
+  if (!sun) return;
+  if (!size) { sun.castShadow = false; return; }
+  sun.castShadow = true;
+  if (sun.shadow.mapSize.x !== size) { sun.shadow.mapSize.set(size, size); sun.shadow.map?.dispose(); sun.shadow.map = null; }
+}
+
 export function setSkyline(prof) {
   const n = Math.min(SKY_N, prof.length);
   for (let i = 0; i < n; i++) { const v = Math.max(0, Math.min(255, Math.round((prof[i] + 0.35) * 255))); skyData[i * 4] = skyData[i * 4 + 1] = skyData[i * 4 + 2] = v; skyData[i * 4 + 3] = 255; }

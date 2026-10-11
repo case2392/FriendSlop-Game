@@ -68,9 +68,9 @@ const pnow = page => page.evaluate(() => performance.now());
 const at = (page, k) => page.evaluate(k => window.__nmd[k], k);
 async function firstLoad(page, tag) {
   let t = Date.now();
-  await page.goto(`http://localhost:${PORT}`);
+  await page.goto(`http://localhost:${PORT}/?quality=high`);
   log(`${tag} page load`, Date.now() - t);
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
   await page.fill('#nameInput', 'Steve');
   await page.fill('#seedInput', SEED);
   if (DWELL) await page.waitForTimeout(DWELL);

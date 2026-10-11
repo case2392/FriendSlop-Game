@@ -1,23 +1,38 @@
 {
   "name": "no-money-down",
+  "productName": "NO MONEY DOWN",
   "version": "0.6.0",
-  "description": "NO MONEY DOWN — a first-person co-op friendslop road trip. One RV, one shared bank account, one Repo Man.",
+  "description": "NO MONEY DOWN \u2014 a first-person co-op friendslop road trip. One RV, one shared bank account, one Repo Man.",
+  "author": "The NO MONEY DOWN developers",
   "type": "module",
-  "main": "server/index.js",
+  "main": "desktop/main.cjs",
+  "steamAppId": 480,
   "scripts": {
     "start": "node server/index.js",
     "dev": "node server/index.js --port 3000",
-    "test": "node test/logic.mjs && node test/smoke-browser.mjs",
+    "desktop": "electron .",
+    "test": "node tools/namecheck.mjs && node test/logic.mjs && node test/server.mjs && node test/steamnet.mjs && node test/smoke-browser.mjs",
     "test:logic": "node test/logic.mjs",
-    "test:race": "node tools/joinrace.mjs && node tools/dayrace.mjs"
+    "test:names": "node tools/namecheck.mjs",
+    "test:server": "node test/server.mjs",
+    "test:steam": "node test/steamnet.mjs",
+    "test:desktop": "node test/desktop-smoke.mjs",
+    "test:race": "node tools/joinrace.mjs && node tools/dayrace.mjs",
+    "icons": "node desktop/make-icons.mjs",
+    "dist:win": "electron-builder --config desktop/electron-builder.cjs --win",
+    "dist:linux": "electron-builder --config desktop/electron-builder.cjs --linux",
+    "dist": "electron-builder --config desktop/electron-builder.cjs --win --linux"
   },
   "dependencies": {
     "@dimforge/rapier3d-compat": "^0.21.0",
-    "three": "^0.185.1",
+    "steamworks.js": "0.4.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {
-    "playwright-core": "^1.48.0"
+    "electron": "44.7.0",
+    "electron-builder": "26.15.3",
+    "playwright-core": "1.64.0",
+    "three": "^0.185.1"
   },
   "engines": {
     "node": ">=20"

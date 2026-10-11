@@ -11,7 +11,7 @@
 </head>
 <body>
 
-<div id="loading" class="loading"><span>Loading the road</span><i><b></b></i></div>
+<div id="loading" class="loading"><span>Loading the road</span><i><b></b></i><small id="loadingTip"></small></div>
 
 <!-- ============ MENU (the login screen) ============ -->
 <div id="menu" class="screen">
@@ -25,16 +25,24 @@
     <label class="fl" for="nameInput">Character Name</label>
     <input id="nameInput" maxlength="16" placeholder="your name, chief" autocomplete="off">
     <button id="hostBtn" class="btn big green">Start a Trip</button>
-    <div class="or"><span>or join the boys</span></div>
-    <div class="join-row">
-      <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
-      <button id="joinBtn" class="btn big pink">Join</button>
+    <div id="joinBox">
+      <div class="or"><span>or join the boys</span></div>
+      <div class="join-row">
+        <input id="codeInput" maxlength="4" placeholder="CODE" autocomplete="off">
+        <button id="joinBtn" class="btn big pink">Join</button>
+      </div>
     </div>
     <input id="seedInput" maxlength="10" placeholder="trip seed (optional · same seed, same roads)" autocomplete="off" class="seed">
+    <p id="menuSteam" class="menu-steam hidden"></p>
     <p id="menuError" class="error-text"></p>
+    <div class="menu-row">
+      <button id="settingsBtn" class="btn small gray">Settings</button>
+      <button id="creditsBtn" class="btn small gray">Credits</button>
+      <button id="quitBtn" class="btn small gray hidden">Quit Game</button>
+    </div>
   </div>
   <p class="footer-note">1–6 players · first-person co-op · proximity voice · one shared bank account · five days to pay off the RV</p>
-  <p class="version">Version 1.0.5 (Slopmaster 9000) · No Money Down Inc.</p>
+  <p id="versionLabel" class="version"></p>
 </div>
 
 <!-- ============ THE GAME ============ -->
@@ -68,7 +76,15 @@
   <div id="toasts" class="toasts"></div>
   <div id="zoneText" class="zone-text hidden"><div class="zt-title"></div><div class="zt-sub"></div></div>
   <div id="flash" class="flash hidden"></div>
-  <div id="clickToPlay" class="click-to-play hidden">Click to Play<small>F1 for controls</small></div>
+  <div id="clickToPlay" class="click-to-play hidden">
+    <div class="ctp-go">Click to Play<small>F1 for controls</small></div>
+    <div class="ctp-row">
+      <button id="ctpInvite" class="btn small green hidden">Invite Friends</button>
+      <button id="ctpSettings" class="btn small gray">Settings</button>
+      <button id="ctpLeave" class="btn small pink">Leave Trip</button>
+      <button id="ctpQuit" class="btn small gray hidden">Quit Game</button>
+    </div>
+  </div>
   <div id="koOverlay" class="ko hidden"><div class="ko-box framed"><i class="ico ico-skull"></i><b>You have been knocked out.</b><span id="koT"></span><span class="ko-btn">Waiting for a friend…</span></div></div>
 
   <div id="keypad" class="panel keypad hidden">
@@ -86,7 +102,7 @@
     <div class="cols">
       <div>
         <span class="hd">Body</span>
-        <p><kbd>WASD</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump · <kbd>Ctrl</kbd> crouch</p>
+        <p><kbd>WASD</kbd> walk · <kbd>Shift</kbd> sprint · <kbd>Space</kbd> jump · <kbd>C</kbd> crouch</p>
         <p><kbd>Hold LMB</kbd> GRAB: loot, or any steep rock to <b>climb</b> it (watch your stamina). <kbd>Space</kbd> while climbing = lunge.</p>
         <p><kbd>RMB</kbd> throw · <kbd>Q</kbd> drop · <kbd>wheel</kbd> hold distance</p>
         <p><kbd>E</kbd> use: seats, door, winch, bell, buttons, keypad, bunk · hold on a knocked-out friend to pick them up</p>
@@ -103,7 +119,7 @@
     </div>
     <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (buy one at the store) · <kbd>F1</kbd> this page</p>
     <label class="sens">Mouse sensitivity <input id="sensInput" type="range" min="0.3" max="2.5" step="0.05"></label>
-    <button class="btn small green" onclick="document.getElementById('help').classList.add('hidden')">Got It</button>
+    <button id="helpOk" class="btn small green">Got It</button>
   </div>
 
   <div id="voiceDock" class="voice-dock">
@@ -118,7 +134,7 @@
   </div>
   <div id="voicePanel" class="panel voice-panel hidden">
     <h3>Voice Chat</h3>
-    <p class="voice-note">Proximity chat: the boys sound like they're where they are. Walls muffle. Walkie-talkies (T) reach anyone else who owns one.</p>
+    <p class="voice-note">Proximity chat: the boys sound like they're where they are. Walls muffle. Walkie-talkies (<kbd>T</kbd>) reach anyone else who owns one.</p>
     <label class="vrow">Mic <select id="voiceMicSel"></select></label>
     <div class="vrow"><span>Mode</span>
       <label><input type="radio" name="voiceMode" value="open"> Open mic</label>
@@ -128,6 +144,25 @@
     <div id="voicePeerRows"></div>
     <button id="voicePanelClose" class="btn small green">Close</button>
   </div>
+</div>
+
+<!-- ============ SETTINGS (from the menu or the Esc card) ============ -->
+<div id="settings" class="panel parchment settings hidden">
+  <h2>Settings</h2>
+  <div class="filigree"></div>
+  <div id="settingsBody" class="settings-body"></div>
+  <div class="row"><button id="settingsReset" class="btn small gray">Defaults</button><button id="settingsClose" class="btn small green">Done</button></div>
+</div>
+<div id="credits" class="panel parchment settings hidden">
+  <h2>Credits</h2>
+  <div class="filigree"></div>
+  <div class="settings-body credits">
+    <p><b>NO MONEY DOWN</b>. Every mesh, texture, song and sound in it is made by code.</p>
+    <p>Built with <b>three.js</b> (MIT), <b>Rapier</b> physics (Apache 2.0), <b>ws</b> (MIT), <b>steamworks.js</b> (MIT) and <b>Electron</b> (MIT).</p>
+    <p>Fonts: <b>Cinzel</b>, <b>Marcellus</b> and <b>Philosopher</b> (SIL Open Font License 1.1).</p>
+    <p>The full licence texts ship with the game (THIRD_PARTY_NOTICES.txt).</p>
+  </div>
+  <div class="row"><button id="creditsClose" class="btn small green">Done</button></div>
 </div>
 
 <script type="module" src="/js/main.js"></script>

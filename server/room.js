@@ -17,6 +17,18 @@ const r3 = n => Math.round(n * 1000) / 1000;
 const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const PRICES = { walkie: 150, drink: 40, bungee: 90 };
+const HOLD_SECS = 90;            // a dropped player's seat (id, color, walkie) is kept this long
+const BED_WAIT = 45;             // once half the crew is in a bunk, the rest get this long
+const READY_WAIT = 60;           // snapshots wait this long at most for a client to finish building its world
+// the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
+// a held key or a modified client can't spam the crew with these (anything that sets state, like
+// 'voice', is never dropped: a lost 'voice off' would leave a mic open)
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25 };
+// voice-chat signalling comes in bursts (an offer and a dozen ICE candidates within milliseconds), so
+// it gets a byte budget instead: 48 KB a second, 96 KB at once
+const RTC_RATE = 48 * 1024, RTC_BURST = 96 * 1024;
+// a number from a client: finite and within +-lim, or 0
+const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
 export class Room {
   constructor(code, seed = null) {
@@ -46,6 +58,8 @@ export class Room {
     // the old day's physics world lives in WASM memory that garbage collection gives back late or
     // never: free it, once the tick that replaced it (which may still hold it) has finished
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
+    // (a blackjack hand still being voted on when the day ends: the stake comes back)
+    if (this.bj?.state === 'vote' && this.bj.stake > 0) { this.bank += this.bj.stake; this.toast(`The dealer pushed the hand back: ${fmt$(this.bj.stake)} returned.`, '#fff', 4); }
     this.W = generateLeg(this.seed, this.day);
     this.sim = new Sim(this.W, { parts: this.parts, carry });
     this.phase = 'camp';
@@ -60,7 +74,12 @@ export class Room {
     this.flip = new FlipMachine();
     this.pendingFlip = null;
     this.gatesOpen = new Set();
-    for (const p of this.players.values()) { p.bed = false; p.seat = null; p.ko = false; }
+    this.bedAt = null;
+    this.receipt = null;
+    for (const p of this.players.values()) {
+      if (p.seat != null) this.send(p, { t: 'seat', seat: null });
+      p.bed = false; p.seat = null; p.ko = false; this.awaitReady(p);
+    }
   }
 
   nextDay() {
@@ -79,9 +98,11 @@ export class Room {
   finish(won) {
     this.phase = 'over';
     this.over = { won, at: this.t, day: Math.min(this.day, C.DAYS), stats: this.stats, bank: this.bank };
-    this.broadcast({ t: 'over', won, day: this.over.day, stats: this.stats, bank: this.bank, strikes: this.strikes });
+    this.broadcast(this.overMsg());
     this.sendMeta();
   }
+
+  overMsg() { return { t: 'over', won: this.over.won, day: this.over.day, stats: this.stats, bank: this.bank, strikes: this.strikes, next: Math.max(0, Math.round((C.FAST ? 3 : 25) - (this.t - this.over.at))) }; }
 
   worldMsg() {
     return { t: 'world', seed: this.seed, day: this.day, parts: this.parts, door: this.sim.doorOpen };
@@ -89,38 +110,86 @@ export class Room {
 
   // ---- membership --------------------------------------------------------------------
 
-  addPlayer(conn, name) {
-    if (this.players.size >= C.MAX_PLAYERS) return { error: 'This RV is full (6 seats, 2 of them real).' };
+  // opts.ready: the client says when it has built its world, and gets snapshots only after that
+  addPlayer(conn, name, opts = {}) {
+    if (this.players.size >= C.MAX_PLAYERS) {
+      // a newcomer beats a seat that's being kept for someone who dropped
+      const held = [...this.players.values()].filter(p => !p.connected).sort((a, b) => a.heldAt - b.heldAt)[0];
+      if (held) this.removePlayer(held.id, 'expired');
+    }
+    if (this.players.size >= C.MAX_PLAYERS) return { error: 'This RV is full (6 seats, 2 of them real).', code: 'full' };
     const used = [...this.players.values()].map(p => p.color);
     const color = C.COLORS.find(c => !used.includes(c)) || C.COLORS[0];
+    const slots = new Set([...this.players.values()].map(p => p.slot));
+    let slot = 0;
+    while (slots.has(slot)) slot++;
     const p = {
       id: nextPlayerId++, name: String(name || 'Blob').replace(/[<>]/g, '').slice(0, 16) || 'Blob',
-      color, conn, connected: true,
+      color, conn, connected: true, slot, rdy: !!opts.ready, ready: false, waitAt: this.t,
       par: 0, lp: null, pos: null, eye: null, look: { x: 0, y: 0, z: 1 }, vel: { x: 0, y: 0, z: 0 },
       yaw: 0, pitch: 0, mode: 0, flags: 0, seat: null, ko: false, koAt: 0, bed: false,
-      walkie: false, voice: false, lastPush: 0,
+      walkie: false, voice: false, lastPush: 0, drvAt: 0, cd: {},
     };
     this.players.set(p.id, p);
     if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
     return { player: p };
   }
 
-  removePlayer(id) {
+  // why: 'left' (they chose to), 'expired' (dropped and never came back), or null (silent)
+  removePlayer(id, why = null) {
     const p = this.players.get(id);
     if (!p) return;
     this.sim.release(id);
     this.sim.dropHook(id);
     this.players.delete(id);
-    if (this.hostId === id) this.hostId = [...this.players.values()][0]?.id ?? null;
-    if (this.players.size === 0) this.closed = true;
-    else this.sendMeta();
+    if (this.hostId === id) this.hostId = [...this.players.values()].find(q => q.connected)?.id ?? null;
+    if (this.players.size === 0) { this.closed = true; return; }
+    if (why === 'left') this.toast(`${p.name} left the trip.`, '#ffb4a2', 4);
+    else if (why === 'expired' && p.heldAt != null) this.toast(`${p.name} didn't make it back. Their seat is free.`, '#ffb4a2', 4);
+    this.sendMeta();
   }
+
+  // The connection dropped: keep the seat (id, color, walkie, slot) for `secs`, but take the body out of
+  // the world at once, so nothing waits on them (bunks, the wheel, a held prop, the hook) and the RV has
+  // no ghost to run over. The room stays open while anyone's seat is kept.
+  hold(p, secs = HOLD_SECS, quiet = false) {
+    if (!p.connected) return;
+    p.connected = false; p.conn = null; p.heldAt = this.t; p.holdSecs = secs; p.ready = false;
+    p.seat = null; p.bed = false; p.ko = false;
+    this.sim.release(p.id);
+    this.sim.dropHook(p.id);
+    p.raw = null; p.pos = null; p.eye = null; p.par = 0; p.lp = null;
+    if (this.hostId === p.id) this.hostId = [...this.players.values()].find(q => q.connected)?.id ?? null;
+    if (!quiet && [...this.players.values()].some(q => q.connected)) {
+      this.toast(`${p.name} lost connection. Their seat is saved for ${secs} s.`, '#ffb4a2', 4);
+      this.sendMeta();
+    }
+  }
+
+  // The same player again (a resume token, or the same Steam account) on a new connection: the same id,
+  // color and walkie. A seat still connected elsewhere (a reload that beat its old socket's close) moves.
+  resume(key, conn, opts = {}) {
+    if (!key) return null;
+    for (const p of this.players.values()) {
+      if (p.key !== key) continue;
+      if (p.connected) { const old = p.conn; this.hold(p, p.holdSecs || HOLD_SECS, true); try { old?.close?.(4002, 'replaced by a new connection'); } catch {} }
+      p.conn = conn; p.connected = true; p.heldAt = null; p.rdy = !!opts.ready;
+      this.awaitReady(p);
+      if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
+      return p;
+    }
+    return null;
+  }
+
+  awaitReady(p) { p.ready = false; p.waitAt = this.t; }
+  // does this player get snapshots? (one still building its world would only drop them)
+  wantsSnapshots(p) { return p.connected && (!p.rdy || p.ready || this.t - p.waitAt > READY_WAIT); }
 
   // where a fresh (or left-behind) player appears
   spawnFor(p) {
     const W = this.W;
     if (this.phase === 'camp') {
-      const s = W.camp.spawns[(p.id - 1) % W.camp.spawns.length];
+      const s = W.camp.spawns[(p.slot ?? 0) % W.camp.spawns.length];
       return { x: s.x, y: W.heightAt(s.x, s.z) + 0.05, z: s.z, yaw: Math.atan2(W.camp.fire.x - s.x, W.camp.fire.z - s.z) };
     }
     // next to the RV's door, outside
@@ -131,6 +200,7 @@ export class Room {
 
   spawnStragglers() {
     for (const p of this.players.values()) {
+      if (!p.connected) { p.pos = null; continue; }   // a kept seat has no body until they're back
       if (p.par) continue;   // riding the RV: they come along
       const s = this.spawnFor(p);
       this.send(p, { t: 'tp', ...s });
@@ -144,19 +214,23 @@ export class Room {
     this.send(p, { t: 'props', list: this.sim.allProps() });
     const s = this.spawnFor(p);
     this.send(p, { t: 'tp', ...s });
+    // joining at night or after the run ended: what everyone else is looking at
+    if (this.phase === 'night' && this.receipt) this.send(p, this.receipt);
+    if (this.phase === 'over' && this.over) this.send(p, this.overMsg());
     this.sendMeta();
   }
 
   // ---- messaging ----------------------------------------------------------------------
 
-  send(p, msg) {
-    if (p.conn && p.connected && p.conn.readyState === 1) p.conn.send(JSON.stringify(msg));
+  // opts go to the connection: { unreliable: true } lets a Steam peer send it unreliably (plain ws ignores it)
+  send(p, msg, opts) {
+    if (p.conn && p.connected && p.conn.readyState === 1) p.conn.send(JSON.stringify(msg), opts);
   }
-  broadcast(msg, except = null) {
+  broadcast(msg, except = null, opts) {
     const s = JSON.stringify(msg);
     for (const p of this.players.values()) {
       if (p === except) continue;
-      if (p.conn && p.connected && p.conn.readyState === 1) p.conn.send(s);
+      if (p.conn && p.connected && p.conn.readyState === 1) p.conn.send(s, opts);
     }
   }
   toast(text, color = '#fff', secs = 4, to = null) {
@@ -166,20 +240,32 @@ export class Room {
   sendMeta() {
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId,
-      players: [...this.players.values()].map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
     });
   }
 
   // ---- intents ----------------------------------------------------------------------------
 
+  // too soon after the last one of this kind?
+  spam(p, kind) {
+    const cd = COOLDOWN[kind];
+    if (!cd) return false;
+    if (this.t - (p.cd[kind] ?? -1e9) < cd) return true;
+    p.cd[kind] = this.t;
+    return false;
+  }
+
   handle(p, m) {
+    if (this.spam(p, m.t)) return;
     switch (m.t) {
       case 'p': return this.onPose(p, m);
+      case 'ready': p.ready = true; return;
+      case 'leave': this.removePlayer(p.id, 'left'); return;
       case 'grab': if (!p.ko && p.seat == null) { const ok = this.sim.grab(p.id, p, m); this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id }); } return;
       case 'rel': this.sim.release(p.id, m.thr ? m.dir : null, p); return;
       case 'hd': this.sim.holdDist(p.id, m.d); return;
       case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
-      case 'drv': if (p.seat === 0) this.sim.setDrive(m); return;
+      case 'drv': if (p.seat === 0) { p.drvAt = this.t; this.sim.setDrive(m); } return;
       case 'horn': if (p.seat === 0) this.broadcast({ t: 'ev', list: [{ k: 'horn' }] }); return;
       case 'use': return this.onUse(p, m);
       case 'ko': return this.onKO(p, m);
@@ -194,7 +280,12 @@ export class Room {
       case 'dbg': if (C.TEST) this.debug(p, m); return;
       case 'rtc': {
         const target = this.players.get(Number(m.to));
-        if (!target || target === p || JSON.stringify(m.data ?? null).length > 20000) return;
+        const size = JSON.stringify(m.data ?? null).length;
+        if (!target || target === p || size > 20000) return;
+        p.rtcBudget = Math.min(RTC_BURST, (p.rtcBudget ?? RTC_BURST) + (this.t - (p.rtcAt ?? this.t)) * RTC_RATE);
+        p.rtcAt = this.t;
+        if (p.rtcBudget < size) return;
+        p.rtcBudget -= size;
         this.send(target, { t: 'rtc', from: p.id, data: m.data });
         return;
       }
@@ -217,12 +308,11 @@ export class Room {
   }
 
   onPose(p, m) {
-    const f = a => (Number.isFinite(+a) ? +a : 0);
     p.par = m.par ? 1 : 0;
-    p.yaw = f(m.yaw); p.pitch = Math.max(-1.6, Math.min(1.6, f(m.pitch)));
-    p.mode = f(m.m) | 0; p.flags = f(m.f) | 0;
-    p.vel = { x: f(m.v?.[0]), y: f(m.v?.[1]), z: f(m.v?.[2]) };
-    const raw = { x: f(m.x), y: f(m.y), z: f(m.z) };
+    p.yaw = num(m.yaw, 1e4); p.pitch = num(m.pitch, 1.6);
+    p.mode = num(m.m, 99) | 0; p.flags = num(m.f, 1e6) | 0;
+    p.vel = { x: num(m.v?.[0], 60), y: num(m.v?.[1], 60), z: num(m.v?.[2], 60) };
+    const raw = { x: num(m.x, 1e5), y: num(m.y, 1e5), z: num(m.z, 1e5) };
     p.lp = p.par ? raw : null;
     p.raw = raw;
     this.resolvePlayer(p);
@@ -335,20 +425,7 @@ export class Room {
         this.toast(`${code || '????'} — wrong. Somebody go read the rock.`, '#ff8a80', 3, p);
       }
     } else if (u.kind === 'pawnBell') {
-      const ids = sim.propsIn(W.town.pawn);
-      if (!ids.length) { this.toast('Ed looks at the empty counter. Ed looks at you.', '#fff', 3, p); return; }
-      let total = 0;
-      const names = [];
-      for (const id of ids) {
-        const pr = sim.props.get(id);
-        total += Math.round(pr.value);
-        names.push(LOOT[pr.type].name);
-        sim.removeProp(id);
-      }
-      this.bank += total;
-      this.stats.sold += total; this.dayStats.sold += total;
-      this.broadcast({ t: 'ev', list: [{ k: 'sold', ids, total, by: p.id }] });
-      this.toast(`SOLD: ${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
+      if (!this.sellCounter(p.id)) this.toast('Ed looks at the empty counter. Ed looks at you. (Loot on the counter, or the RV in his loading zone.)', '#fff', 4, p);
     } else if (u.kind === 'bj') {
       if (u.arg === 'deal') {
         const r = this.bj.deal(this.t, this.bank);
@@ -443,11 +520,13 @@ export class Room {
     if (this.phase === 'night' || this.phase === 'over') return;
     this.phase = 'night';
     this.nightAt = this.t;
+    // the RV parks at the lot by the town's campfire (whoever rides in it and whatever it carries come
+    // along), so nobody wakes up at the fire 100 m from it, next to the junkyard's decoys
     const lot = this.W.town.lot;
-    if (!this.inTown) {
-      this.sim.placeRV(lot.x, lot.z, lot.yaw);
-      this.toast('You limped into town overnight.', '#fff', 4);
-    }
+    if (!this.inTown) this.toast('You limped into town overnight.', '#fff', 4);
+    this.sim.placeRV(lot.x, lot.z, lot.yaw);
+    // and anyone knocked out comes round by the fire: no doctor's bill for sleeping through midnight
+    for (const p of this.players.values()) if (p.ko) { p.ko = false; this.send(p, { t: 'revived' }); }
     // anyone not riding the RV gets dragged to the campfire
     for (const p of this.players.values()) {
       if (p.par) continue;
@@ -456,11 +535,48 @@ export class Room {
       const s = { x: f.x + Math.cos(a) * 3, z: f.z + Math.sin(a) * 3 };
       this.send(p, { t: 'tp', x: s.x, y: this.W.townY + 0.1, z: s.z, yaw: Math.atan2(f.x - s.x, f.z - s.z) });
     }
-    this.broadcast({ t: 'receipt', day: this.day, paid: this.paid, due: this.due, bank: this.bank, strikes: this.strikes, parts: this.parts, ...this.dayStats });
+    this.receipt = { t: 'receipt', day: this.day, paid: this.paid, due: this.due, bank: this.bank, strikes: this.strikes, parts: this.parts, ...this.dayStats };
+    this.broadcast(this.receipt);
+  }
+
+  // the RV parked in Ed's loading zone, stopped: his bell buys its load too
+  docked() {
+    const d = this.W.town.dock, sim = this.sim;
+    if (!d || !this.inTown || sim.rvFlipped()) return false;
+    const t = sim.rv.translation();
+    return Math.hypot(t.x - d.x, t.z - d.z) < d.r && Math.abs(sim.rvSpeed()) < 1.5;
+  }
+
+  // Honest Ed buys whatever is on his counter, and the RV's whole load at DOCK_RATE when it's parked in
+  // his loading zone: the bell, or midnight (nobody rang it). Returns the total.
+  sellCounter(by = 0, late = false) {
+    const sim = this.sim, ids = sim.propsIn(this.W.town.pawn);
+    const load = this.docked() ? sim.cargo().filter(id => !ids.includes(id)) : [];
+    if (!ids.length && !load.length) return 0;
+    let total = 0, lot = 0;
+    const names = [];
+    for (const id of ids) {
+      const pr = sim.props.get(id);
+      total += Math.round(pr.value);
+      names.push(LOOT[pr.type].name);
+      sim.removeProp(id);
+    }
+    for (const id of load) {
+      lot += Math.round(sim.props.get(id).value * C.DOCK_RATE);
+      sim.removeProp(id);
+    }
+    total += lot;
+    if (load.length) names.push(`the RV's load (${load.length} thing${load.length > 1 ? 's' : ''}, ${fmt$(lot)})`);
+    this.bank += total;
+    this.stats.sold += total; this.dayStats.sold += total;
+    this.broadcast({ t: 'ev', list: [{ k: 'sold', ids: [...ids, ...load], total, by }] });
+    this.toast(`${late ? 'Ed rang it up himself: ' : 'SOLD: '}${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
+    return total;
   }
 
   midnight() {
     if (this.paid) return;
+    this.sellCounter(0, true);
     if (this.bank >= this.due) { this.pay(); return; }
     // short. he takes everything you have, and a piece of the RV.
     const part = C.REPO_PARTS[this.strikes];
@@ -486,10 +602,19 @@ export class Room {
     this.t += dt;
     const sim = this.sim;
     for (const p of this.players.values()) this.resolvePlayer(p);
-    // nobody at the wheel? it coasts ("WHO'S DRIVING?!") until it's nearly stopped, then the parking brake catches
-    if (![...this.players.values()].some(p => p.seat === 0)) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
+    // nobody at the wheel, or a driver who stopped sending (frozen tab, minimized window, dead link)? it
+    // coasts ("WHO'S DRIVING?!") until it's nearly stopped, then the parking brake catches
+    const drv = [...this.players.values()].find(p => p.seat === 0);
+    // (a driver unheard from for a second has frozen or dropped: off the pedals. The page sends 20 a second
+    // on its own timer, so even a PC drawing a frame a second keeps driving)
+    if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
     sim.step(dt, this.players);
     for (const p of this.players.values()) this.resolvePlayer(p);
+    // the driver floors it against a winch cable still clipped to its post: say why nothing happens
+    if (drv && sim.hook.state === 'anchored' && !sim.hook.reeling && Math.abs(sim.drive.th) > 0.3 && Math.abs(sim.rvSpeed()) < 0.4) {
+      this.hookedT = (this.hookedT || 0) + dt;
+      if (this.hookedT > 1.5 && this.t - (this.hookedToastAt ?? -99) > 12) { this.hookedToastAt = this.t; this.toast('The winch is still clipped to the post. Someone unhook it: E on the hook.', '#ffd166', 5); }
+    } else this.hookedT = 0;
 
     const rvp = sim.rv.translation();
     if (this.phase === 'camp' && rvp.z > this.W.camp.exitZ) {
@@ -505,8 +630,18 @@ export class Room {
       if (this.clock >= C.MIDNIGHT) { this.clock = C.MIDNIGHT; this.midnight(); }
     }
     if (this.phase === 'night' && this.t - this.nightAt > C.NIGHT_MIN_SEC) {
+      // everyone in a bunk: morning. Half of them: the rest get BED_WAIT seconds (someone AFK, or still
+      // loading, must not hold the whole crew at the campfire forever)
       const live = [...this.players.values()].filter(p => p.connected);
-      if (live.length && live.every(p => p.bed)) this.nextDay();
+      const abed = live.filter(p => p.bed);
+      if (live.length && abed.length === live.length) this.nextDay();
+      else if (live.length && abed.length * 2 >= live.length) {
+        if (this.bedAt == null) {
+          this.bedAt = this.t;
+          const awake = live.filter(p => !p.bed).map(p => p.name);
+          this.toast(`${awake.join(', ')} ${awake.length > 1 ? 'are' : 'is'} still up. The RV leaves at dawn in ${BED_WAIT} s, awake or not.`, '#ffd166', 6);
+        } else if (this.t - this.bedAt > BED_WAIT) this.nextDay();
+      } else this.bedAt = null;
     }
     if (this.phase === 'over' && this.t - this.over.at > (C.FAST ? 3 : 25)) {
       this.newRun();
@@ -549,9 +684,13 @@ export class Room {
       if (p.ko && this.t - p.koAt > C.PLAYER.KO_TIME + 5) this.onWake(p);
     }
 
-    // physics events out
+    // a kept seat whose player never came back is freed
+    for (const p of [...this.players.values()]) if (!p.connected && this.t - p.heldAt > p.holdSecs) this.removePlayer(p.id, 'expired');
+
+    // physics events out (if a new day or run began in this tick, the old world's events would land on
+    // the new one's props, whose ids start over: drop them)
     const evs = sim.out.splice(0);
-    if (evs.length) {
+    if (evs.length && this.sim === sim) {
       const pub = [];
       for (const e of evs) {
         if (e.k === 'knock') {
@@ -580,13 +719,14 @@ export class Room {
   gameState() {
     const sim = this.sim;
     const pawnIds = sim.propsIn(this.W.town.pawn);
-    let pawn = 0;
+    let pawn = 0, dock = 0;
     for (const id of pawnIds) pawn += Math.round(sim.props.get(id).value);
+    if (this.docked()) for (const id of sim.cargo()) if (!pawnIds.includes(id)) dock += Math.round(sim.props.get(id).value * C.DOCK_RATE);
     return {
       ph: this.phase, day: this.day, clk: Math.round(this.clock * 100) / 100,
       bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0, str: this.strikes,
       town: this.inTown ? 1 : 0, door: sim.doorOpen ? 1 : 0,
-      bj: this.bj.view(this.t), flip: this.flip.view(this.t), pawn, pawnIds,
+      bj: this.bj.view(this.t), flip: this.flip.view(this.t), pawn, pawnIds, dock,
       gates: [...this.gatesOpen], beds: [...this.players.values()].filter(p => p.bed).map(p => p.id),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,

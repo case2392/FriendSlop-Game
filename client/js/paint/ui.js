@@ -1422,13 +1422,13 @@ export function* paintVista(g, W, H, rnd, { full = true } = {}) {
       stroke(g, [[bx, by + 1], [bx + dir * w, by - dir * 2 + 1]], 1.6, 1.6, '#e2be86', 0.7);
       g.font = `bold ${Math.round(h * 0.58)}px Georgia, 'Times New Roman', serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
       const tx = bx + dir * ((w + 6) / 2 + 3), ty = by + h / 2 + 1;
-      g.fillStyle = 'rgba(255,230,180,0.35)'; g.fillText(txt, tx + 0.8, ty + 0.8);
-      g.fillStyle = 'rgba(40,20,8,0.85)'; g.fillText(txt, tx, ty);
+      g.fillStyle = 'rgba(255,230,180,0.35)'; g.fillText(txt, tx + 0.8, ty + 0.8, w - 6);
+      g.fillStyle = 'rgba(40,20,8,0.85)'; g.fillText(txt, tx, ty, w - 6);
       g.restore();
       g.strokeStyle = 'rgba(36,20,10,0.8)'; g.lineWidth = 1.3; g.stroke(p);
       for (const nx of [bx + dir * 4]) ellipse(g, nx, by + h / 2, 1.3, 1.3, 0, '#2a2420', 1);
     };
-    board(x + 3, y - 140, 76, 21, -1, 'GOLDSHIRE');
+    board(x + 3, y - 140, 90, 21, -1, 'WESTMEADOW');
     board(x + 3, y - 112, 88, 20, 1, 'LOST WAGES');
     for (let j = 0; j < 22; j++) blade(g, x + range(rnd, -14, 16), y + 4, range(rnd, 8, 22), range(rnd, -0.5, 0.5), 2.6, pick(rnd, ['#4f7d2a', '#6f9c34', '#9cb447']), 0.95);
   }

@@ -43,7 +43,7 @@ export const RV_ART = {
   eaveY: 2.2,                             // the roof's soffit meets the side walls here
   wheelY: -0.86, archR: 0.72, archZ: [2.65, -2.6],
   tireR: 0.55, tireW: 0.48, tireLift: 0.045,   // the painted tire is fatter than the physics wheel
-  door: { z0: -0.15, z1: 0.85, y0: 0, y1: 1.98 },
+  door: { z0: -0.3, z1: 1.0, y0: 0, y1: 1.98 },  // RV_DIM's door (shared/rv.js): DOOR_Z ± DOOR_HALF
   // side openings: rectangles { z0, z1, y0, y1 } or portholes { z, y, r }
   winL: [
     { z0: 2.86, z1: 3.7, y0: 1.0, y1: 1.94, cab: true },
@@ -66,14 +66,14 @@ export const RV_ART = {
   wood: [0.065, 0.525], brassLow: [0.03, 0.065], rail: 0.548,
   emblem: { L: 2.42, R: 2.66, y: 1.56, r: 0.15 },
   // the name starts clear of the fat rear corner post (it ends at z ≈ -3.78)
-  name: { R: [-3.6, -0.3], L: [-3.6, 0.45] },
-  hatches: { R: [[-1.75, -0.65, 'LOOT'], [0.98, 1.84, 'JUNK']], L: [[0.62, 1.8, 'LOOT']] },
+  name: { R: [-3.6, -0.45], L: [-3.6, 0.45] },
+  hatches: { R: [[-1.75, -0.65, 'LOOT'], [1.03, 1.89, 'JUNK']], L: [[0.62, 1.8, 'LOOT']] },
   // iron rib straps down the sides (eave → rub rail), clear of every opening
-  ribs: { R: [-2.85, -1.95, 1.12], L: [-2.05, 0.0, 2.05] },
+  ribs: { R: [-2.85, -1.95, 1.2], L: [-2.05, 0.0, 2.05] },
   // story elements on the long rear halves: a goblin advert plate and chalk tallies (door side),
   // a round oak shield with the maker's cog (driver's side, 3D)
   advert: { z0: -1.72, z1: -0.74, y0: 1.04, y1: 1.7 },
-  tally: { z0: -0.62, z1: -0.28, y0: 1.18, y1: 1.5 },
+  tally: { z0: -0.72, z1: -0.42, y0: 1.18, y1: 1.5 },
   buckler: { z: -2.75, y: 1.42, r: 0.27 },
 };
 // atlas regions (px) of rv_body
@@ -1205,7 +1205,7 @@ function paintSlots(g, rnd) {
     bandlessMottle(g, rnd, x0, y2, WW, S, ['#6e8c6a', '#46301a'], 8, 0.3);
     g.save(); rrect(g, x0 + 5, y2 + 5, WW - 10, S - 10, 5); g.lineWidth = 2.5; g.strokeStyle = '#4a2e14'; g.stroke(); g.restore();
     handLetter(g, 'SLOP 9K', x0 + WW / 2, y2 + 27, WW - 26, 20, rnd, { top: '#4a6a8a', bot: '#1c2c44', under: '#121a2a', outline: '#e8d6a6', hi: '#a8c8e0', chips: 1, tilt: 0.02, wobble: 0.4, shadow: 0.3 });
-    g.save(); g.font = `bold 8px ${SERIF}`; g.textAlign = 'center'; g.fillStyle = '#4a2e14'; g.fillText('GADGETZAN TRADE PERMIT', x0 + WW / 2, y2 + 52); g.restore();
+    g.save(); g.font = `bold 8px ${SERIF}`; g.textAlign = 'center'; g.fillStyle = '#4a2e14'; g.fillText('LOST WAGES TRADE PERMIT', x0 + WW / 2, y2 + 52, WW - 18); g.restore();
     for (const [u, v] of [[10, 10], [WW - 10, 10], [10, S - 10], [WW - 10, S - 10]]) rivet(g, x0 + u, y2 + v, 2.6, '#8a6a3a');
   }
   // the slogan board: a painted wooden plank

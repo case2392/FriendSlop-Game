@@ -162,7 +162,7 @@ attaches to neither, cut it.**
 
 | Input | Verb |
 |---|---|
-| WASD / Shift / Space / Ctrl | Walk, sprint (stamina), jump, crouch |
+| WASD / Shift / Space / C | Walk, sprint (stamina), jump, crouch |
 | **Hold left mouse** | **GRAB**: loot, rock (climb), the winch hook, the RV bumper, a friend |
 | Right mouse (holding something) | Throw |
 | Mouse wheel (holding) | Hold distance |
@@ -233,7 +233,7 @@ the difficulty curve stays in the quota.
 | Obstacle | What happens | Verb it demands | Inspiration |
 |---|---|---|---|
 | **The Grade** | A washed-out slope too steep for the engine | Someone climbs the cliff with the winch hook, clips it to the anchor post at the top, and the driver reels in | RVTY + PEAK |
-| **The Boulder** | A 2-ton rock in a narrow pass | Shove it with 3+ bodies, or winch it off the edge | physics + headcount |
+| **The Boulder** | A one-ton rock in a narrow pass (a ROCKFALL sign warns you) | Two bodies shove it aside (one can't); alone, nudge it with the RV's bumper, or hook it and reel it while the RV stands angled | physics + headcount |
 | **The Mud Flat** | The wheels lose grip | Everyone out and push. Unloading heavy loot helps. | RVTY |
 | **The Ranger Gate** | Locked gate, 4-digit keypad | The code is brushed on a slab of rock up on the canyon rim (a sign at the gate says which rim). Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
@@ -243,12 +243,17 @@ the difficulty curve stays in the quota.
 **POIs** are worth the detour and cost time. Abandoned gas stations,
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get
 the suitcase *down*), junk piles, the roadside fiberglass dinosaur. A butte is
-solid cylinders in world gen (a flat top, sheer walls, a lower bench to rest
-on half-way up, lobes so it isn't a drum), because the 2.5 m terrain grid can
-only draw a steep hill as a cone. It stands on its own talus: a concave scree
+a few solid convex masses in world gen (`shared/butte.js`: a flat top, a lower
+bench to rest on half-way up, two lobes), because the 2.5 m terrain grid can
+only draw a steep hill as a cone. The masses are angular, jointed rock (flat
+faces meeting at corners) and their walls lean in, 6-16° (typically 8°): upright
+cylinders read as drums or tanks from the road. It stands on its own talus: a concave scree
 apron in the heightfield that buries its lower third, about 31° at the foot so
-you can walk up to the wall, and kept short on the road side so it meets the
-ditch at nothing.
+you can walk up to the wall (never a triangle steeper than the 38° you can walk
+where the apron changed the ground), and kept short on the road side so it
+meets the ditch at nothing. What fell off it is solid: world gen lays and shapes
+every fallen block and the physics takes its points as a convex hull, so you
+stand on the rock you see, not in it.
 
 ### 7.2 Loot
 
@@ -299,7 +304,10 @@ M2 adds more parts: a wheel (it pulls left), the windshield, the engine
 ### 7.5 The Town
 
 - **Pawn shop:** put loot on the counter, the appraiser shows the price,
-  ring the bell to sell. The money goes to the shared bank.
+  ring the bell to sell. The money goes to the shared bank. Or park the RV in
+  Ed's loading zone out front and the bell sells its whole load too, sight
+  unseen, at 80%: carrying the good stuff in is worth it, carrying the junk in
+  isn't. (Unloading 20 things one at a time ate three game hours.)
 - **Casino:** every game bets *the shared bank*, and *anyone* can bet it.
   That's GWYF's comedy and it's ours too. In the first build:
   - **Blackjack.** Squad vs. dealer. Anyone can set the bet on the big
@@ -335,17 +343,21 @@ matters most. The face values below are **measured from the generator**
 
 | Day | Payment due | Stops | Loot on the leg (face value) | Due as a share of face value |
 |---|---|---|---|---|
-| 1 | $1,500 | 5 | ~$8,400 | 18% (a learning day: surplus to gamble) |
-| 2 | $3,000 | 6 | ~$13,500 | 22% |
-| 3 | $5,500 | 7 | ~$16,800 | 33% |
-| 4 | $9,000 | 8 | ~$22,600 | 40% |
+| 1 | $1,000 | 5 | ~$8,400 | 12% (a learning day: surplus to gamble) |
+| 2 | $2,500 | 6 | ~$13,500 | 19% |
+| 3 | $4,500 | 7 | ~$16,800 | 27% |
+| 4 | $7,500 | 8 | ~$22,600 | 33% |
 | 5 | $15,000 balloon | 8 | ~$24,300 | 62% (you will be gambling) |
 
-The realistic haul is roughly 40–60% of face value: the clock, stops on mesa
-tops you have to climb to, loot that breaks on the way down, and loot that
-slides around in the RV. Day 5 is beyond that unless you banked surplus or got
-lucky. The numbers need real playtests with real friends before anyone trusts
-them (confidence: moderate).
+The realistic haul is well short of face value: the clock, stops on mesa tops
+you have to climb to, loot that breaks on the way down, loot that slides
+around in the RV, and Ed's 80% for a load sold from the loading zone. A crew
+of bots that plays it straight (every stop it has time for, no casino; the
+full-run bot in the QA notes) pays days 1-3 on every seed tried and usually
+day 4, and is nowhere near the day-5 balloon: that one is the gamble, or a
+great run with surplus banked. Earlier quotas ($1,500 / $3,000 / $5,500 /
+$9,000) had the same bots missing day 2 or 3. The numbers still need real
+playtests with real friends before anyone trusts them (confidence: moderate).
 
 - Every casino game has a house edge (blackjack about 1–2% played sensibly,
   the coin flip 3%). The casino is variance you choose, never free money.
@@ -550,7 +562,7 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
 
 ## Sources
 
-- Gamble With Your Friends: [games.gg overview](https://games.gg/gamble-with-your-friends/), [KeenGamer](https://www.keengamer.com/games/gamble-with-your-friends/), [GosuGamers: 1M in a week](https://www.gosugamers.net/entertainment/news/78409-gamble-with-your-friends-sells-one-million-copies-in-a-week), [Gamereactor](https://www.gamereactor.eu/the-latest-friendslop-hit-is-here-as-gamble-with-your-friends-sells-a-million-copies-in-less-than-two-weeks-1716843/); plus the reference video in `docs/reference/`
+- Gamble With Your Friends: [games.gg overview](https://games.gg/gamble-with-your-friends/), [KeenGamer](https://www.keengamer.com/games/gamble-with-your-friends/), [GosuGamers: 1M in a week](https://www.gosugamers.net/entertainment/news/78409-gamble-with-your-friends-sells-one-million-copies-in-a-week), [Gamereactor](https://www.gamereactor.eu/the-latest-friendslop-hit-is-here-as-gamble-with-your-friends-sells-a-million-copies-in-less-than-two-weeks-1716843/)
 - PEAK: [Game Informer review](https://gameinformer.com/review/peak/a-brilliant-co-op-climbing-adventure), [Outlook Respawn: 10M units](https://respawn.outlookindia.com/gaming/gaming-news/from-game-jam-to-10-million-units-indie-hit-peak-success), [TweakTown: hot tub / Airbnb origin](https://www.tweaktown.com/news/106032/comedy-climber-peak-was-conceived-in-a-hot-tub-and-developed-in-an-airbnb/index.html), [PCGamesN: revive](https://www.pcgamesn.com/peak/revive)
 - R.V. There Yet?: [Steam](https://store.steampowered.com/app/3949040/RV_There_Yet/), [Pure Xbox review roundup](https://www.purexbox.com/news/2026/06/rv-there-yet-is-available-today-with-xbox-game-pass-and-heres-what-the-reviews-are-saying), [Notebookcheck](https://www.notebookcheck.net/This-new-party-game-costing-only-8-with-proximity-based-voice-chat-is-blowing-up-on-Steam.1153790.0.html), [Deltia's controls guide](https://deltiasgaming.com/rv-there-yet-keybinds-and-controls-guide)
 - Meccha Chameleon: [Windows Central](https://www.windowscentral.com/gaming/the-viral-hit-of-2026-has-sold-15-million-copies-in-a-month-on-steam-costs-usd5-and-was-made-by-2-people), [Digital Citizen](https://www.digitalcitizen.life/meccha-chameleon-sells-15-million-copies-on-steam-in-less-than-a-month/)

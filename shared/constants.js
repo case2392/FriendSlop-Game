@@ -13,7 +13,8 @@ export const MAX_PLAYERS = 6;
 
 // ---- the run ----------------------------------------------------------------
 export const DAYS = 5;
-export const QUOTAS = [1500, 3000, 5500, 9000, 15000];   // due at midnight, per day
+export const QUOTAS = [1000, 2500, 4500, 7500, 15000];   // due at midnight, per day
+export const DOCK_RATE = 0.8;                            // what Ed pays for the RV's load at his loading zone
 export const STRIKES_TO_LOSE = 3;                        // 3rd missed payment: the RV is gone
 export const HOUR_SEC = FAST ? 5 : 45;                   // real seconds per game hour
 export const DAY_START = 6;                              // 06:00
@@ -105,7 +106,7 @@ export const WINCH = {
   ANCHOR_REACH: 1.6,
 };
 
-export const COLORS = ['#7CFC00', '#FF6EC7', '#00E5FF', '#FFA033', '#B26EFF', '#FFE93B'];
+export const COLORS = ['#7CFC00', '#FF6EC7', '#00E5FF', '#FFA033', '#B26EFF', '#F4F4F4'];   // (white, not yellow: a yellow was too close to the green for red-blind players)
 export const EMOTES = ['😂', '😭', '💀', '🤬', '👑', '🤡'];
 
 // pose modes, sent as a small int

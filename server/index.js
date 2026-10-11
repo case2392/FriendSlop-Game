@@ -1,121 +1,31 @@
-import http from 'node:http';
-import fs from 'node:fs';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { createRequire } from 'node:module';
-import { WebSocketServer } from 'ws';
+// npm start: the browser build. One GameHost (server/host.js) serves the client's files and every
+// player's WebSocket; the tools and tests start it the same way. The desktop build runs the same host
+// in a utility process instead (desktop/server-process.mjs).
 import * as C from '../shared/constants.js';
-import { Room } from './room.js';
-import { initPhysics } from './sim.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const ROOT = path.join(__dirname, '..');
-const require = createRequire(import.meta.url);
-const RAPIER_ESM = path.join(path.dirname(require.resolve('@dimforge/rapier3d-compat')), 'rapier.mjs');
+import { GameHost } from './host.js';
 
 const portArg = process.argv.indexOf('--port');
 const PORT = Number(process.env.PORT || (portArg !== -1 ? process.argv[portArg + 1] : 0) || 3000);
+const HOST = process.env.NMD_HOST || undefined;      // (not HOST: some shells set that to the machine name)
 
-const MIME = {
-  '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.css': 'text/css',
-  '.png': 'image/png', '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.json': 'application/json',
-  '.woff2': 'font/woff2', '.woff': 'font/woff', '.txt': 'text/plain',
-};
+// a stray exception must not take every room down with it: log it and keep serving
+process.on('uncaughtException', e => console.error('uncaught exception:', e));
+process.on('unhandledRejection', e => console.error('unhandled rejection:', e));
 
-const server = http.createServer((req, res) => {
-  // a malformed escape (decodeURIComponent throws) or a NUL byte (fs throws) must never reach the
-  // file system: either one, thrown here, would take the whole server and every room down with it
-  let urlPath;
-  try { urlPath = decodeURIComponent((req.url || '/').split('?')[0]); } catch { urlPath = null; }
-  if (!urlPath || urlPath.includes('\0')) { res.writeHead(400); res.end('bad request'); return; }
-  if (urlPath === '/') urlPath = '/index.html';
-  let filePath;
-  if (urlPath === '/vendor/rapier.mjs') filePath = RAPIER_ESM;
-  else {
-    // /shared/* is the repo's shared/ folder (the client runs the same world gen), everything else is
-    // client/; a path has to stay inside its own folder ('..' escapes, encoded or not, get a 403)
-    const shared = urlPath.startsWith('/shared/');
-    const base = path.join(ROOT, shared ? 'shared' : 'client');
-    filePath = path.normalize(path.join(base, shared ? urlPath.slice('/shared'.length) : urlPath));
-    if (!filePath.startsWith(base + path.sep)) { res.writeHead(403); res.end(); return; }
-  }
-  fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); res.end('not found'); return; }
-    res.writeHead(200, {
-      'Content-Type': MIME[path.extname(filePath)] || 'application/octet-stream',
-      'Cache-Control': filePath === RAPIER_ESM ? 'public, max-age=86400' : 'no-cache',
-    });
-    res.end(data);
-  });
-});
-
-const wss = new WebSocketServer({ server, maxPayload: 64 * 1024 });
-const rooms = new Map();
-
-const CODE_CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-function newCode() {
-  let code;
-  do code = Array.from({ length: 4 }, () => CODE_CHARS[Math.floor(Math.random() * CODE_CHARS.length)]).join('');
-  while (rooms.has(code));
-  return code;
+const host = await new GameHost().init();
+host.start();
+try {
+  await host.listen({ port: PORT, host });
+} catch (e) {
+  console.error(e.code === 'EADDRINUSE'
+    ? `Port ${PORT} is already in use: another copy of the game (or something else) is running. Try --port <another>.`
+    : `Could not start the server: ${e.message}`);
+  process.exit(1);
 }
+console.log(`NO MONEY DOWN server rolling on http://localhost:${PORT}${C.TEST ? ' (test mode)' : ''}`);
 
-wss.on('connection', ws => {
-  let room = null, player = null;
-  const fail = msg => ws.send(JSON.stringify({ t: 'error', msg }));
-  ws.on('message', raw => {
-    let m;
-    try { m = JSON.parse(raw); } catch { return; }
-    if (!m || typeof m !== 'object') return;
-    try {
-      if (m.t === 'create' && !player) {
-        const seed = Number.isFinite(+m.seed) && m.seed !== '' && m.seed != null ? (+m.seed >>> 0) : null;
-        const r = new Room(newCode(), seed);
-        rooms.set(r.code, r);
-        const res = r.addPlayer(ws, m.name);
-        room = r; player = res.player;
-        r.welcome(player);
-      } else if (m.t === 'join' && !player) {
-        const r = rooms.get(String(m.room || '').toUpperCase().trim());
-        if (!r || r.closed) return fail('No RV with that code. Check it with your friend.');
-        const res = r.addPlayer(ws, m.name);
-        if (res.error) return fail(res.error);
-        room = r; player = res.player;
-        r.welcome(player);
-        r.toast(`${player.name} climbed aboard.`, player.color, 3);
-      } else if (room && player) {
-        room.handle(player, m);
-      }
-    } catch (e) {
-      console.error('message error', e);
-    }
-  });
-  ws.on('close', () => { if (room && player) room.removePlayer(player.id); });
+// Ctrl+C / a kill: tell every crew the trip is over instead of just vanishing
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => {
+  host.closeAll('The server shut down.');
+  setTimeout(() => process.exit(0), 200);
 });
-
-await initPhysics();
-
-// physics + game loop at a fixed 60 Hz
-let last = performance.now(), acc = 0;
-const STEP = 1 / C.SIM_HZ;
-setInterval(() => {
-  const now = performance.now();
-  acc = Math.min(acc + (now - last) / 1000, 0.25);
-  last = now;
-  while (acc >= STEP) {
-    acc -= STEP;
-    for (const [code, room] of rooms) {
-      if (room.closed) { rooms.delete(code); room.sim?.free(); continue; }
-      try { room.tick(STEP); } catch (e) { console.error(`room ${code} tick error:`, e); }
-    }
-  }
-}, 1000 / C.SIM_HZ / 2);
-
-setInterval(() => {
-  for (const room of rooms.values()) {
-    if (room.closed) continue;
-    try { room.broadcast(room.snapshot()); } catch (e) { console.error('snapshot error', e); }
-  }
-}, 1000 / C.SNAP_HZ);
-
-server.listen(PORT, () => console.log(`NO MONEY DOWN server rolling on http://localhost:${PORT}`));

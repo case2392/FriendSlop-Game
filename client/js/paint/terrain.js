@@ -1356,7 +1356,7 @@ function crackPatches(g, s, rnd, { n = [2, 3], r = [44, 72], cells = 9, grout, l
 // ---- ground: meadow (Elwynn) ----------------------------------------------------------------
 
 register('ground_meadow', {
-  family: 'terrain', size: 512, note: 'anchor: Elwynn grass: tone fields, dry yellow and brown patches, dark hollows, short V-shaped blade clusters with yellow tips, a few lit clumps',
+  family: 'terrain', size: 512, note: 'anchor: meadow grass: tone fields, dry yellow and brown patches, dark hollows, short V-shaped blade clusters with yellow tips, a few lit clumps',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#506e2c');
     mottle(g, s, rnd, { colors: ['#4a6a2a', '#60822f', '#6c8a34', '#52722c', '#768a38', '#5a7a2e'], count: 40, rmin: 60, rmax: 170, alpha: 0.5, hard: 0.1 });
@@ -1379,7 +1379,7 @@ register('ground_meadow', {
 });
 
 register('ground2_meadow', {
-  family: 'terrain', size: 512, note: 'Elwynn: red-brown earth worn through the grass: soft cobbly clods and scuffs, stones in a few clusters, islands of grass thinning into the dirt',
+  family: 'terrain', size: 512, note: 'meadow: red-brown earth worn through the grass: soft cobbly clods and scuffs, stones in a few clusters, islands of grass thinning into the dirt',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#7a5438');
     mottle(g, s, rnd, { colors: ['#8a5e3c', '#6a4630', '#946844', '#70503a', '#865a38', '#9a6440'], count: 46, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
@@ -1410,7 +1410,7 @@ register('ground2_meadow', {
 // ---- ground: fields (Westfall) --------------------------------------------------------------
 
 register('ground_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: golden dry grass, short straw clusters with pale tips over dark gaps, golden clumps',
+  family: 'terrain', size: 512, note: 'fields: golden dry grass, short straw clusters with pale tips over dark gaps, golden clumps',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#b4944a');
     mottle(g, s, rnd, { colors: ['#c4a24e', '#a88a40', '#d2b05a', '#9e8642', '#b89848', '#c8a456'], count: 44, rmin: 60, rmax: 160, alpha: 0.45, hard: 0.1 });
@@ -1433,7 +1433,7 @@ register('ground_fields', {
 });
 
 register('ground2_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: grazed dusty pasture, short olive-gold tufts over pale dust, soft clods, loose straw',
+  family: 'terrain', size: 512, note: 'fields: grazed dusty pasture, short olive-gold tufts over pale dust, soft clods, loose straw',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#a8895a');
     mottle(g, s, rnd, { colors: ['#b4966a', '#9c7e52', '#c0a274', '#94784e', '#a88a5c'], count: 44, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
@@ -1511,7 +1511,7 @@ register('ground2_badlands', {
 // ---- ground: desert (Tanaris) ---------------------------------------------------------------
 
 register('ground_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: wind-rippled sand, broad lit windward faces and short dark lees',
+  family: 'terrain', size: 512, note: 'desert: wind-rippled sand, broad lit windward faces and short dark lees',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#dab682');
     mottle(g, s, rnd, { colors: ['#e6c894', '#d0aa72', '#c89e66', '#ecd2a0', '#d6b07c'], count: 40, rmin: 60, rmax: 170, alpha: 0.42, hard: 0.08 });
@@ -1527,7 +1527,7 @@ register('ground_desert', {
 });
 
 register('ground2_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: coarse wind-packed sand, a thin crust broken by open cracks, a dried silt hollow, grit in a few clusters',
+  family: 'terrain', size: 512, note: 'desert: coarse wind-packed sand, a thin crust broken by open cracks, a dried silt hollow, grit in a few clusters',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#caa06a');
     mottle(g, s, rnd, { colors: ['#b88e5c', '#d4ac78', '#c79c62', '#ad8452', '#ddb886'], count: 44, rmin: 40, rmax: 140, alpha: 0.42, hard: 0.1 });
@@ -1584,7 +1584,7 @@ function snowGrass(g, s, rnd, n, where = null) {
 }
 
 register('ground_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: wind-packed snow in big faint warm and cool fields, a few broad drifts with short crisp crests and soft blue lees, faint ripples, grass tips poking through',
+  family: 'terrain', size: 512, note: 'snow: wind-packed snow in big faint warm and cool fields, a few broad drifts with short crisp crests and soft blue lees, faint ripples, grass tips poking through',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#e6ecf2');
     mottle(g, s, rnd, { colors: ['#f7f4ec', '#e8eef4', '#dde6f0', '#f4f2ea', '#e2e9f2'], count: 26, rmin: 110, rmax: 230, alpha: 0.55, hard: 0.06 });
@@ -1603,7 +1603,7 @@ register('ground_snow', {
 });
 
 register('ground2_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: thin windswept snow, frozen tundra grass and stones in scoured lanes',
+  family: 'terrain', size: 512, note: 'snow: thin windswept snow, frozen tundra grass and stones in scoured lanes',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#dce4ec');
     mottle(g, s, rnd, { colors: ['#eeece4', '#cdd8e6', '#e2e8ee', '#d4dee8'], count: 40, rmin: 50, rmax: 150, alpha: 0.45, hard: 0.08 });
@@ -1633,7 +1633,7 @@ register('ground2_snow', {
 });
 
 register('dirt_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: trampled snow churned with frozen mud and straw (camps, doorsteps): soft trodden patches, a few boot-print trails',
+  family: 'terrain', size: 512, note: 'snow: trampled snow churned with frozen mud and straw (camps, doorsteps): soft trodden patches, a few boot-print trails',
   paint(g, s, rnd, h, cv) {
     fill(g, s, s, '#bcc2ca');
     mottle(g, s, rnd, { colors: ['#c8ced6', '#a8acb2', '#d6dce2', '#9e9890', '#b4b6b6'], count: 50, rmin: 40, rmax: 140, alpha: 0.45, hard: 0.1 });
@@ -1700,7 +1700,7 @@ for (const b of ['meadow', 'fields', 'badlands', 'desert']) {
 // ---- roads (road space) -----------------------------------------------------------------------
 
 register('road_meadow', {
-  family: 'terrain', size: 512, note: 'anchor: Elwynn red-brown packed dirt road: packed earth streaked along its length, lighter wheel-polished tracks, darker damp patches, broken shallow ruts, pebble clusters, a broken grassy crown, ragged grass at the edges',
+  family: 'terrain', size: 512, note: 'anchor: meadow red-brown packed dirt road: packed earth streaked along its length, lighter wheel-polished tracks, darker damp patches, broken shallow ruts, pebble clusters, a broken grassy crown, ragged grass at the edges',
   paint(g, s, rnd) {
     const c = s / 2, mpx = s / 10;
     fill(g, s, s, '#8a5a3a');
@@ -1725,7 +1725,7 @@ register('road_meadow', {
   },
 });
 register('road_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: a darker dusty cart road between the gold: hoof-churned middle, two soft ruts, straw, an olive grass fringe at the edges and a few tufts on the crown',
+  family: 'terrain', size: 512, note: 'fields: a darker dusty cart road between the gold: hoof-churned middle, two soft ruts, straw, an olive grass fringe at the edges and a few tufts on the crown',
   paint(g, s, rnd) {
     const c = s / 2, mpx = s / 10;
     fill(g, s, s, '#94704a');
@@ -1758,7 +1758,7 @@ register('road_fields', {
   },
 });
 register('road_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh: trampled packed snow, gravel and slush only in the ruts, snow berms along both edges (road space)',
+  family: 'terrain', size: 512, note: 'snow: trampled packed snow, gravel and slush only in the ruts, snow berms along both edges (road space)',
   paint(g, s, rnd) {
     paintRoad(g, s, rnd, { ...BIO.snow.road, clods: 180, clodR: [3, 7], pebN: 0, stoneN: 0, rutW: 0.6, rimA: 0.45, glaze: '#e8f0ff',
       extra(g, s, rnd, c, mpx, ruts) {
@@ -1820,7 +1820,7 @@ register('road_badlands', {
   },
 });
 register('road_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: a packed caravan track, darker and warmer than the sand: two faint wheel ruts, a firm crown, flat stones kicked to the edges, a little sand blown across',
+  family: 'terrain', size: 512, note: 'desert: a packed caravan track, darker and warmer than the sand: two faint wheel ruts, a firm crown, flat stones kicked to the edges, a little sand blown across',
   paint(g, s, rnd) {
     const c = s / 2, mpx = s / 10;
     fill(g, s, s, '#ae8858');
@@ -1862,7 +1862,7 @@ const GRANITE = {
 const BIG_PLANES = [{ cells: [3, 3], w: 0.85, amp: 1.0, tilt: 0.7, lean: [-0.3, 0.9] }, { cells: [9, 11], w: 0.6, amp: 0.35, tilt: 0.35, lean: [-0.5, 0.9] }];
 
 register('cliff_meadow', {
-  family: 'terrain', size: 512, note: 'Elwynn: big rounded gray granite masses, cream-lit upper-left, cool undersides, moss pads on the tops, rain streaks (~11 m tile)',
+  family: 'terrain', size: 512, note: 'meadow: big rounded gray granite masses, cream-lit upper-left, cool undersides, moss pads on the tops, rain streaks (~11 m tile)',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
       fill: [3, 4], big: 5, bigR: [85, 135], asp: [0.55, 1.8], small: 0, sx: 1, sy: 1, rot: 1.2, warp: 20, tilt: 0.1,
@@ -1876,7 +1876,7 @@ register('cliff_meadow', {
   },
 });
 register('cliff_fields', {
-  family: 'terrain', size: 512, note: 'Westfall: warm ochre and umber sandstone in long, softly eroded slabs and ledges, sandy cream-lit tops, cool violet-brown undersides, vertical joints, dry grass tufts on the lips and ledges',
+  family: 'terrain', size: 512, note: 'fields: warm ochre and umber sandstone in long, softly eroded slabs and ledges, sandy cream-lit tops, cool violet-brown undersides, vertical joints, dry grass tufts on the lips and ledges',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
       fill: [3, 7], big: 5, bigR: [80, 120], asp: [3, 6.5], ledgeN: 5, ledgeL: [100, 240], small: 0, sx: 1, sy: 1, rot: 0.08, warp: 15, tilt: 0.05,
@@ -1891,7 +1891,7 @@ register('cliff_fields', {
   },
 });
 register('cliff_snow', {
-  family: 'terrain', size: 512, note: 'Dun Morogh valley walls: angular blue-gray granite, flat fractured facets with straight edges, blocks from 1 to 3 m and long slabs, cream-lit planes, cool undersides, dark joints, a light powder; the shader lays snow shelves from its form map (10.5 m tile)',
+  family: 'terrain', size: 512, note: 'snow valley walls: angular blue-gray granite, flat fractured facets with straight edges, blocks from 1 to 3 m and long slabs, cream-lit planes, cool undersides, dark joints, a light powder; the shader lays snow shelves from its form map (10.5 m tile)',
   paint(g, s, rnd, h, cv) {
     massRock(g, s, rnd, {
       fill: [3, 5], big: 7, bigR: [44, 150], asp: [1.2, 4.2], ledgeN: 2, ledgeL: [110, 220], small: 12, sx: 1, sy: 1, rot: 0.35, warp: 9, tilt: 0.32, poly: [5, 7],
@@ -1924,7 +1924,7 @@ register('cliff_snow_form', {
   },
 });
 register('cliff_badlands', {
-  family: 'terrain', size: 512, note: 'Thousand Needles: red-orange strata that pinch out and step at faults, jutting hard bands with lit lips and undercuts, vertical fissures',
+  family: 'terrain', size: 512, note: 'badlands: red-orange strata that pinch out and step at faults, jutting hard bands with lit lips and undercuts, vertical fissures',
   paint(g, s, rnd, h, cv) {
     paintRockFace(g, s, rnd, {
       ...GRANITE, strata: true, band: [26, 70], hardP: 0.45, bandWarp: 7, ledge: 1.8, pinch: 24, faults: 4, fissures: [40, 120], fissureC: '#5a2418', lipLit: '#f0b880', undercut: '#5a2a26',
@@ -2114,7 +2114,7 @@ function sandstone(g, s, rnd, cv, P) {
   soften(cv, 0.6);
 }
 register('cliff_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris: tan, rust and honey sandstone beds of very different thickness between lens-shaped cream hard beds (some wavy, some pinching out; rounded lit tops, cast shadows, joints), sand on the ledges, dark varnish and pale wind-scour streaks down the face (16 m tile)',
+  family: 'terrain', size: 512, note: 'desert: tan, rust and honey sandstone beds of very different thickness between lens-shaped cream hard beds (some wavy, some pinching out; rounded lit tops, cast shadows, joints), sand on the ledges, dark varnish and pale wind-scour streaks down the face (16 m tile)',
   paint(g, s, rnd, h, cv) {
     sandstone(g, s, rnd, cv, {
       softT: [56, 190], hardT: [26, 92], wob: [2, 12], wavy: 0.35, lensK: [0.15, 0.95], subA: 0.01, hardA: 20, softA: 11, detail: 0.6, relief: 0.95, contrast: 2.3, planes: 0.25, litMax: 0.5, shSlope: 0.14, castA: 0.72,
@@ -2197,7 +2197,7 @@ register('mud', {
 });
 
 register('slush', {
-  family: 'terrain', size: 512, note: 'Dun Morogh mud: gray-white mush, lumps of dirty snow, gray slush pools with skins of ice (road space)',
+  family: 'terrain', size: 512, note: 'snow mud: gray-white mush, lumps of dirty snow, gray slush pools with skins of ice (road space)',
   paint(g, s, rnd) {
     churn(g, s, rnd, {
       base: '#8a8884', blot: ['#7e7a74', '#9a9a98', '#6e6a66', '#aeb2b6', '#868480'], rut: '#68645e', wet: '#56524e',
@@ -2219,7 +2219,7 @@ register('mud_badlands', {
   },
 });
 register('mud_desert', {
-  family: 'terrain', size: 512, note: 'Tanaris wash: dark wet sand churned along the track, a few shallow pools in the tracks (road space)',
+  family: 'terrain', size: 512, note: 'desert wash: dark wet sand churned along the track, a few shallow pools in the tracks (road space)',
   paint(g, s, rnd) {
     churn(g, s, rnd, {
       base: '#9c7a52', blot: ['#8e6e48', '#a8865c', '#86663e', '#b08e62', '#987650'], rut: '#7a5a3a', wet: '#5e4430',
@@ -2706,7 +2706,7 @@ function cloudBand(spec) {
 
 const CLOUDS = {
   meadow: {
-    note: 'Elwynn: big soft towering cumulus all round the sky (one every ~45 degrees, so two or three are always in view), a few flat banks low on the horizon, faint cirrus',
+    note: 'meadow: big soft towering cumulus all round the sky (one every ~45 degrees, so two or three are always in view), a few flat banks low on the horizon, faint cirrus',
     cirrus: { n: 5, y: [40, 200], len: [600, 1300], th: [8, 16], d: [0.2, 0.34] },
     fe: 6, planes: 0.18, lFloor: 0.12, feather: 2.4,
     clusters: (rnd, VW) => {
@@ -2723,7 +2723,7 @@ const CLOUDS = {
     },
   },
   fields: {
-    note: 'Westfall: rows of flat-bottomed fair-weather cumulus low over the horizon',
+    note: 'fields: rows of flat-bottomed fair-weather cumulus low over the horizon',
     cirrus: { n: 2, y: [60, 200], len: [500, 1000], th: [6, 14], d: [0.2, 0.3] },
     clusters: (rnd, VW) => {
       const o = [];
@@ -2736,7 +2736,7 @@ const CLOUDS = {
     },
   },
   snow: {
-    note: 'Dun Morogh: high cirrus and a gray-blue overcast cap lying over the peaks',
+    note: 'snow: high cirrus and a gray-blue overcast cap lying over the peaks',
     overcast: { y: 355, amp: 30, base: '#c4ccda', lit: '#eef0f6', under: '#9aa4b8', d: 0.85 },
     cirrus: { n: 10, y: [30, 300], len: [700, 1700], th: [8, 20], d: [0.3, 0.5] },
     clusters: (rnd, VW) => { const o = []; for (let i = 0; i < 4; i++) { const W = range(rnd, 220, 380); o.push({ x: rnd() * VW, yb: range(rnd, 300, 340), w: W, h: W * 0.4, d: 0.85, towers: 2, puffs: 14 }); } return o; },
@@ -2748,7 +2748,7 @@ const CLOUDS = {
     haze: { h: 120, a: 0.35 },
   },
   desert: {
-    note: 'Tanaris: a nearly clear sky, one or two wisps',
+    note: 'desert: a nearly clear sky, one or two wisps',
     cirrus: { n: 3, y: [80, 260], len: [500, 900], th: [6, 12], d: [0.3, 0.45] },
     clusters: (rnd, VW) => [{ x: rnd() * VW, yb: 380, w: 150, h: 50, d: 0.55, towers: 1, puffs: 8 }],
     haze: { h: 80, a: 0.2 },

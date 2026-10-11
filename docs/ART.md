@@ -5,8 +5,10 @@ silhouettes.** Hand-painted textures on chunky low-poly models with smooth
 shading. It should look like a 2004 MMO zone, painted by hand, and *not* like
 procedural or AI-generated "low poly indie" art.
 
-Reference frames from the clip the user supplied (Elwynn Forest / Goldshire)
-are in `docs/reference/frames/`, so look at them. The zones we borrow from:
+The reference clips and frames (Elwynn Forest / Goldshire) were taken out of the
+repo: they are other people's footage and must never ship or be published with
+the game. Nothing in the shipped game may name these zones (`npm test` runs
+`tools/namecheck.mjs`). The zones whose feel we borrow:
 
 | Day | Biome | WoW zone it should feel like | Town style |
 |---|---|---|---|

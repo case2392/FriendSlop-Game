@@ -482,7 +482,7 @@ function plasterPaint(g, s, rnd, cv, holes) {
   glaze(g, s, s, '#fff0d0', 0.12, 'soft-light');
   blurTile(cv, 0.5);
 }
-register('plaster_cream', { family: F, size: 512, note: 'Goldshire plaster: three creams, soft trowel strokes, rain streaks (the holes are separate decals: wall_holes)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
+register('plaster_cream', { family: F, size: 512, note: 'timber-town plaster: three creams, soft trowel strokes, rain streaks (the holes are separate decals: wall_holes)', paint(g, s, rnd, h, cv) { plasterPaint(g, s, rnd, cv, false); } });
 // Indoor plaster (Goldshire shops and the inn hall): a warmer, older cream than the outside. Big soft
 // clouds in three hues (cream, honey, a cool grey-beige where damp got in), trowel crescents with a
 // shaded lip, two re-plastered patches (fresher, paler, a lit upper-left edge and a shaded lower one),
@@ -684,7 +684,7 @@ register('stone_found', {
 });
 
 register('planks_weathered', {
-  family: F, size: 512, note: 'Westfall boards: vertical, sun-grayed honey wood, splits, nails',
+  family: F, size: 512, note: 'farm-town boards: vertical, sun-grayed honey wood, splits, nails',
   paint(g, s, rnd, h, cv) {
     planks(g, s, rnd, { rows: 8, minL: 150, maxL: 340, vertical: true, colors: ['#8a6c4c', '#9a7a56', '#7c6046', '#a08260', '#86684a'], gap: 4, gapColor: '#2a1e1c', grain: 12, weather: 0.8, splits: 0.5, nails: 2, knots: 0.35 });
     mottle(g, s, rnd, { colors: ['#a49c8c', '#6a5640'], count: 30, rmin: 20, rmax: 70, alpha: 0.12, hard: 0.1, stretch: 2.5, rot: Math.PI / 2 });
@@ -783,7 +783,7 @@ function granitePaint(g, s, rnd, cv, snow) {
   glaze(g, s, s, '#ffe8c8', 0.08, 'soft-light');
   blurTile(cv, 0.5);
 }
-register('granite_block', { family: F, size: 512, note: 'Kharanos ashlar: uneven courses of warm gray granite, chipped corners, chisel marks, snow caps on some blocks', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, true); } });
+register('granite_block', { family: F, size: 512, note: 'alpine-town ashlar: uneven courses of warm gray granite, chipped corners, chisel marks, snow caps on some blocks', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, true); } });
 register('granite_inner', { family: F, size: 512, note: 'indoor ashlar: no snow', paint(g, s, rnd, h, cv) { granitePaint(g, s, rnd, cv, false); } });
 
 // log courses (fractions of the 3 m tile, top of the canvas first): town_build lines the 3D log ends up with them
@@ -931,7 +931,7 @@ function adobePaint(g, s, rnd, cv, { base = '#c9976a', blot = ['#d8b083', '#b480
   glaze(g, s, s, '#ffe0b0', 0.12, 'soft-light');
   blurTile(cv, 0.6);
 }
-register('adobe', { family: F, size: 512, note: 'Gadgetzan adobe: warm tan mud render in three related tans (±12%), troweled swirls, straw flecks, three wavy trowel-lift seams, damp stains and drips along the top (laid at the parapet), rain runs (~3 m a tile; chips, patches and the base splash are decals placed per wall)', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { lifts: 3, damp: true }); } });
+register('adobe', { family: F, size: 512, note: 'desert adobe: warm tan mud render in three related tans (±12%), troweled swirls, straw flecks, three wavy trowel-lift seams, damp stains and drips along the top (laid at the parapet), rain runs (~3 m a tile; chips, patches and the base splash are decals placed per wall)', paint(g, s, rnd, h, cv) { adobePaint(g, s, rnd, cv, { lifts: 3, damp: true }); } });
 register('arch_streak', {
   family: F, w: 64, h: 256, alpha: true, note: 'a rain run down an adobe wall from under a viga: dark wet mud fading downward, a couple of drips (alpha decal)',
   paint(g, w, rnd, h) {
@@ -1044,11 +1044,11 @@ function flagAtlas(g, s, rnd, cv, P) {
   blurTile(cv, 0.5);
 }
 register('floor_flags', {
-  family: F, size: 512, note: 'indoor sandstone flags (Gadgetzan), one stone per 2×2 atlas cell: chipped outline, bedding lines, worn patches, pits, lit top-left and shaded bottom-right bevels, dark soft grout',
+  family: F, size: 512, note: 'indoor sandstone flags (adobe-town), one stone per 2×2 atlas cell: chipped outline, bedding lines, worn patches, pits, lit top-left and shaded bottom-right bevels, dark soft grout',
   paint(g, s, rnd, h, cv) { flagAtlas(g, s, rnd, cv, { cols: ['#d4b486', '#cdab7e', '#d8ba8e', '#c9a77a'], blot: ['#e2c69c', '#bc9a6c', '#c4a07a', '#dcc29a'], bedding: ['#b08c62', '#ecd4a8'], grout: '#5a4232', glaze: '#ffe2b0' }); },
 });
 register('floor_granite', {
-  family: F, size: 512, note: 'indoor granite flags (Kharanos), one stone per 2×2 atlas cell: chipped outline, speckle, worn patches, pits, lit top-left and cool shaded bottom-right bevels, dark soft grout',
+  family: F, size: 512, note: 'indoor granite flags (alpine-town), one stone per 2×2 atlas cell: chipped outline, speckle, worn patches, pits, lit top-left and cool shaded bottom-right bevels, dark soft grout',
   paint(g, s, rnd, h, cv) { flagAtlas(g, s, rnd, cv, { cols: ['#a4a6aa', '#9a9ea6', '#aaa8a4', '#9ea2a8'], blot: ['#b8b6b0', '#8a909a', '#a09a92', '#b4b8bc'], speck: ['#5e626c', '#70747c', '#d8dade', '#c8c4bc'], grout: '#3c3840', glaze: '#ffe8c0' }); },
 });
 
@@ -1100,7 +1100,7 @@ register('adobe_inner', {
 // ---- roofs ----------------------------------------------------------------------------------
 
 register('shingles_red', {
-  family: F, size: 512, note: 'Goldshire roof: red-brown wooden shingles, staggered, rounded butts, a little moss',
+  family: F, size: 512, note: 'timber-town roof: red-brown wooden shingles, staggered, rounded butts, a little moss',
   paint(g, s, rnd, h, cv) {
     shingles(g, s, rnd, { rows: 8, minW: 34, maxW: 104, colors: ['#9e3e2c', '#b44a30', '#883428', '#9e3e2c', '#a84434'], gapColor: '#2a181c', round: 0.4, grain: 3, moss: 0.14, missing: 0.012, patched: 0.06, butt: 0.45, chips: 0.35 });
     mottle(g, s, rnd, { colors: ['#b85a3c', '#6e2a22', '#8a4a34', '#7a3a2e'], count: 34, rmin: 30, rmax: 100, alpha: 0.14, hard: 0.08 });
@@ -1128,7 +1128,7 @@ register('slate_roof', {
 });
 
 register('thatch', {
-  family: F, size: 512, note: 'Westfall thatch: golden-brown straw bundles in ragged overlapping courses, lit bulges, dark under-lips, moss and grey weathering',
+  family: F, size: 512, note: 'farm-town thatch: golden-brown straw bundles in ragged overlapping courses, lit bulges, dark under-lips, moss and grey weathering',
   paint(g, s, rnd, h, cv) {
     thatch(g, s, rnd, { courses: 9, base: '#3a2c1c', straw: ['#b09048', '#a08040', '#c0a058', '#a68a46', '#987a3e'], tips: ['#dcc070', '#d0b468', '#e2c87a'], lip: '#5a4628', lit: '#dcc070', moss: 0.13 });
     // grey weathering and sun-bleached patches, big and soft
@@ -1396,7 +1396,7 @@ register('carpet_border', {
 });
 
 register('tile_goblin', {
-  family: F, size: 512, note: 'Gadgetzan gambling-hall floor: glazed ochre and terracotta tiles, teal diamond insets, brass inlay strips with rivets at the joints',
+  family: F, size: 512, note: 'adobe-town gambling-hall floor: glazed ochre and terracotta tiles, teal diamond insets, brass inlay strips with rivets at the joints',
   paint(g, s, rnd, h, cv) {
     const n = 4, T = s / n, gap = 7;
     fill(g, s, s, '#6a4c22');
@@ -1762,11 +1762,11 @@ const coinEmblem = (g, x, y) => {
   for (let k = 0; k < 16; k++) { const a = k / 16 * TAU; ellipse(g, x + Math.cos(a) * 31.5, y + Math.sin(a) * 31.5, 1.6, 1.6, 0, '#fff0b0', 0.7); }
 };
 register('banner_red', {
-  family: F, w: 128, h: 256, alpha: true, note: 'Goldshire hall banner: red cloth in soft folds, embroidered gold border, a gold coin, frayed swallowtail',
+  family: F, w: 128, h: 256, alpha: true, note: 'timber-town hall banner: red cloth in soft folds, embroidered gold border, a gold coin, frayed swallowtail',
   paint(g, s, rnd, H) { bannerCloth(g, 128, H, rnd, { field: '#8a2224', field2: '#9a2a28', border: '#c8a048', edge: '#4a1a10', emblem: coinEmblem }); },
 });
 register('banner_dwarf', {
-  family: F, w: 128, h: 256, alpha: true, note: 'Kharanos banner: deep blue wool, a gold knotwork border, a silver hammer over an anvil, straight frayed hem',
+  family: F, w: 128, h: 256, alpha: true, note: 'alpine-town banner: deep blue wool, a gold knotwork border, a silver hammer over an anvil, straight frayed hem',
   paint(g, s, rnd, H) {
     bannerCloth(g, 128, H, rnd, { field: '#2e3e6a', field2: '#36487a', border: '#c8a048', edge: '#1a1a30', tail: 'straight', emblem: (g, x, y) => {
       // anvil
@@ -1787,7 +1787,7 @@ register('banner_dwarf', {
   },
 });
 register('banner_goblin', {
-  family: F, w: 128, h: 256, alpha: true, note: 'Gadgetzan cartel banner: faded teal cloth, brass-thread border, a brass gear round a gold coin, swallowtail',
+  family: F, w: 128, h: 256, alpha: true, note: 'adobe-town cartel banner: faded teal cloth, brass-thread border, a brass gear round a gold coin, swallowtail',
   paint(g, s, rnd, H) {
     bannerCloth(g, 128, H, rnd, { field: '#2e6a64', field2: '#367a72', border: '#d0a040', edge: '#163430', emblem: (g, x, y) => {
       g.save(); g.translate(x + 2, y + 3); g.fillStyle = rgba('#0a1a18', 0.4); for (let k = 0; k < 10; k++) { g.rotate(TAU / 10); g.fillRect(-6, -44, 12, 12); } g.beginPath(); g.arc(0, 0, 36, 0, TAU); g.fill(); g.restore();
@@ -2852,7 +2852,7 @@ register('sign_demo_daub', { family: F, w: 1024, h: 600, note: 'sign sample: the
   });
 } });
 register('sign_demo_carved', { family: F, w: 512, h: 200, note: 'sign sample: carved road sign', paint(g) { g.drawImage(signCanvas(['PAYDIRT', 'POP. 41 · EST. 1971'], { w: 512, h: 200, style: 'carved' }), 0, 0); } });
-for (const [st, note] of [['oakgold', 'Goldshire casino: carved oak, gilded'], ['barn', 'Westfall casino: painted on the barn'], ['dwarf', 'Kharanos: rune-knot border'], ['hide', 'canyon outpost: branded hide (alpha)'], ['goblin', 'Gadgetzan: brass marquee'], ['plaque', 'Gadgetzan: brass plaque']]) {
+for (const [st, note] of [['oakgold', 'timber-town casino: carved oak, gilded'], ['barn', 'farm-town casino: painted on the barn'], ['dwarf', 'alpine-town: rune-knot border'], ['hide', 'canyon outpost: branded hide (alpha)'], ['goblin', 'adobe-town: brass marquee'], ['plaque', 'adobe-town: brass plaque']]) {
   register('sign_demo_' + st, { family: F, w: 640, h: 170, alpha: st === 'hide', note: 'sign sample: ' + note, paint(g) { g.drawImage(signCanvas(st === 'plaque' ? ['LOST WAGES', 'POP. 41 · EST. 1971'] : ['LUCKY SLOP', 'CASINO · NO CLOCKS'], { w: 640, h: 170, style: st }), 0, 0); } });
 }
 

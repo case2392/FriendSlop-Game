@@ -48,6 +48,13 @@ export class LocalWorld {
         .setCollisionGroups(grp(G.WORLD, 0xffff)), fixed);
       this.info.set(c.handle, { kind: 'static', mat: cy.mat });
     }
+    // convex rocks (the crash buttes' fallen blocks): world gen's points, the very ones terrain_talus draws
+    for (const h of W.hulls || []) {
+      const d = RAPIER.ColliderDesc.convexHull(h.pts);
+      if (!d) continue;
+      const c = this.world.createCollider(d.setTranslation(h.x, h.y, h.z).setCollisionGroups(grp(G.WORLD, 0xffff)), fixed);
+      this.info.set(c.handle, { kind: 'static', mat: h.mat });
+    }
     for (const g of W.gates) {
       const c = this.world.createCollider(RAPIER.ColliderDesc.cuboid(g.hx, g.hy, g.hz).setTranslation(g.x, g.y, g.z)
         .setCollisionGroups(grp(G.WORLD, 0xffff)), fixed);

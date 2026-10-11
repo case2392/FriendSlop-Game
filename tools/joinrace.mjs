@@ -69,7 +69,7 @@ const open = async tag => {
     });
   });
   await p.goto(`http://localhost:${PORT}`);
-  await p.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await p.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
   return p;
 };
 const nextWorld = tag => new Promise(r => worldWaiters.set(tag, r));

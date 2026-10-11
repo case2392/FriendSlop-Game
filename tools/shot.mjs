@@ -20,8 +20,8 @@ export async function newPage(name, w = 1280, h = 720) {
   const page = await ctx.newPage();
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errors.push(`[${name}] ${m.type()}: ${m.text()}`); });
-  await page.goto(`http://localhost:${PORT}`);
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.goto(`http://localhost:${PORT}/?quality=high`);
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1'), window.__nmd?.setSetting?.('tutorial', false)));
   await page.fill('#nameInput', name);
   return page;
 }

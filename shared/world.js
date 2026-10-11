@@ -8,6 +8,7 @@
 
 import { mulberry32, fbm, noise2, smoothstep, clamp, lerp } from './rng.js';
 import { LOOT, POI_LOOT } from './loot.js';
+import { butteParts, butteMains, polyExit, sdPoly, partHull } from './butte.js';
 
 export const CELL = 2.5;
 export const HALF_W = 150;
@@ -174,7 +175,7 @@ export function generateLeg(seed, day) {
   const wallSoft = z => lerp(B.wallSoft, 5.5, narrowK(z));
   function wallDist(side, z) {
     let wd = B.wallDist[0] + B.wallDist[1] * fbm(z / 140, side * 7.7, S + 3, 2);
-    for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 6.2, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
+    for (const o of narrows) wd = lerp(wd, o.type === 'gate' ? 8.6 : 7.0, 1 - smoothstep(14, 42, Math.abs(z - o.z)));
     return lerp(wd, 85, flatZone(z));
   }
   // Tanaris's dunes (B.erg): transverse dunes across the wind, each with a long gentle windward back and a
@@ -227,8 +228,8 @@ export function generateLeg(seed, day) {
     pois.push(p);
   }
 
-  // ---- the height function -------------------------------------------------------
-  function H(x, z) {
+  // ---- the height function (bare: without the crash buttes' talus aprons) ------------
+  function H(x, z, bare = false) {
     const rx = roadX(z), ry = roadY(z);
     const d = x - rx, ad = Math.abs(d);
     const flat = flatZone(z);
@@ -256,17 +257,16 @@ export function generateLeg(seed, day) {
       const dp = Math.hypot(x - p.x, z - p.z);
       if (dp < 15) h = lerp(h, p.padY, smoothstep(15, 9.5, dp));
     }
-    // crash mesas are buttes: their bodies are solid cylinders (W.cyls, mat 'mesa': a flat top and sheer
+    // crash mesas are buttes: their bodies are solid convex masses (W.hulls, mat 'mesa': a flat top and steep
     // walls, which the 2.5 m heightfield could only draw as a cone), standing on their talus here: a
     // concave scree apron, ~31 degrees at the wall's foot (you walk up to it) and flattening out. Its
     // reach wanders (fans of debris); toward the road it shortens and lowers so it meets the ditch at
     // nothing, and the mound still stops at the ditch wherever the road bends toward one.
-    for (const p of mesas) {
+    if (!bare) for (const p of mesas) {
       const M = p.mesa;
-      if (Math.hypot(x - p.x, z - p.z) > M.R * 1.4 + M.reach * 1.2 + 1) continue;
-      // how far outside the butte's foot (its body, lobes and bench)
-      let e = Math.hypot(x - p.x, z - p.z) - M.R;
-      for (const c of [...M.lobes, M.bench]) e = Math.min(e, Math.hypot(x - c.x, z - c.z) - c.r);
+      if (Math.hypot(x - p.x, z - p.z) > M.bound + M.reach * 1.2 + 1) continue;
+      // how far outside the butte's foot (its body, lobes and bench, where the talus meets the wall)
+      let e = M.footDist(x, z);
       e += noise2(x / 3, z / 3, S + 51) * 0.6;
       // (ad + e: about how far from the road the foot stands, straight across). Short of room it runs
       // straighter, so the side you see from the road still stands tall against the foot
@@ -301,11 +301,11 @@ export function generateLeg(seed, day) {
     M.talus = Math.min(M.h * (0.32 + 0.08 * h3), M.h * M.benchK - 2.5);
     M.reach = M.talus * TALUS_P / 0.62;
     M.bench = { x: p.x + Math.cos(M.benchA) * 0.8 * M.R, z: p.z + Math.sin(M.benchA) * 0.8 * M.R, r: 0.55 * M.R, top: M.base + M.h * M.benchK };
-    // two lobes swell the main body's outline (one round drum reads as a tank from the road), each its own
-    // solid cylinder at the top's height: one in profile from the road (along it, at the end away from the
-    // bench, so the butte's silhouette widens there), one round the back; both well off the bench (>= 1.1
-    // rad, or it would swallow it). Each holds the centre, so the outline stays a single radius per bearing
-    // (butteRadius() below), what the renderer wraps the wall round.
+    // two lobes swell the main body's outline (one round drum reads as a tank from the road), each laid out
+    // as a circle at the top's height (butteParts below makes the rock from these): one in profile from the
+    // road (along it, at the end away from the bench, so the butte's silhouette widens there), one round
+    // the back; both well off the bench (>= 1.1 rad, or it would swallow it). Each holds the centre, so the
+    // outline stays a single radius per bearing (butteRadius() below), what the renderer wraps the wall round.
     const away = p.side > 0 ? 0 : Math.PI;   // the bearing straight away from the road
     const toBench = Math.sign(Math.sin(M.benchA - away)) || 1;   // which way round from 'away' the bench lies
     const h1 = Math.abs(Math.sin(p.z * 31.7) * 9631.7) % 1, h2 = Math.abs(Math.sin(p.z * 49.1) * 7177.3) % 1;
@@ -316,6 +316,8 @@ export function generateLeg(seed, day) {
       const d = M.R * (0.48 + 0.14 * hk), r = M.R * (0.62 + 0.1 * hk);   // d < r: it holds the centre
       return { x: p.x + Math.cos(a) * d, z: p.z + Math.sin(a) * d, r };
     });
+    // and from those circles the rock itself: angular masses whose walls lean in (shared/butte.js)
+    butteParts(p, M, roadX);
   }
 
   // ---- the heightfield ------------------------------------------------------------
@@ -327,6 +329,68 @@ export function generateLeg(seed, day) {
     const x = X0 + ix * CELL;
     for (let iz = 0; iz <= nz; iz++) {
       heights[ix * (nz + 1) + iz] = H(x, Z0 + iz * CELL);
+    }
+  }
+  relaxAprons();
+  // The talus aprons stay walkable wherever they changed the ground. Where an apron's wander steepens it, or
+  // it runs down into a crease against the road's band, a few of the 2.5 m grid's triangles (either
+  // diagonal) would stand steeper than the 38 degrees a player can walk. Debris settles there: the lowest
+  // corner of such a triangle rises until it is walkable again (by the road's band, which never moves, its
+  // highest corner sinks instead, never below the bare ground). Only triangles the apron made steep: the
+  // bare land's own steep faces (the canyon walls) stay as they are. Done before anything reads the heights,
+  // in a fixed order with plain arithmetic: the same on the server and every client.
+  function relaxAprons() {
+    const N1 = nz + 1, LIM2 = Math.tan(37.9 * Math.PI / 180) ** 2, T2 = Math.tan(37.4 * Math.PI / 180) ** 2;
+    // a cell's four triangles (Rapier's diagonal and the other one): corner offsets [di, dk] as the
+    // gradient's x leg (from, to) and z leg (from, to); its corners are the legs' ends
+    const TRI = [[[0, 0], [1, 0], [0, 0], [0, 1]], [[0, 1], [1, 1], [1, 0], [1, 1]], [[0, 0], [1, 0], [1, 0], [1, 1]], [[0, 1], [1, 1], [0, 0], [0, 1]]];
+    for (const p of mesas) {
+      const M = p.mesa, rad = M.bound + M.reach * 1.2 + 1 + CELL;
+      const i0 = Math.max(0, Math.floor((p.x - rad - X0) / CELL)), i1 = Math.min(nx, Math.ceil((p.x + rad - X0) / CELL));
+      const k0 = Math.max(0, Math.floor((p.z - rad - Z0) / CELL)), k1 = Math.min(nz, Math.ceil((p.z + rad - Z0) / CELL));
+      // the bare ground (no apron) under each vertex here, and which may move (none in the road's band)
+      const D = k1 - k0 + 1, bare = new Float64Array((i1 - i0 + 1) * D), free = new Uint8Array(bare.length);
+      for (let i = i0; i <= i1; i++) for (let k = k0; k <= k1; k++) {
+        const x = X0 + i * CELL, z = Z0 + k * CELL, j = (i - i0) * D + (k - k0);
+        bare[j] = H(x, z, true);
+        free[j] = Math.abs(x - roadX(z)) > 8.9 ? 1 : 0;
+      }
+      const hv = [0, 0, 0], bv = [0, 0, 0], fv = [0, 0, 0], iv = [0, 0, 0], wx = [0, 0, 0], wz = [0, 0, 0];
+      for (let pass = 0, moved = 1; moved && pass < 32; pass++) {
+        moved = 0;
+        for (let i = i0; i < i1; i++) for (let k = k0; k < k1; k++) for (const [xa, xb, za, zb] of TRI) {
+          const gx = (heights[(i + xb[0]) * N1 + k + xb[1]] - heights[(i + xa[0]) * N1 + k + xa[1]]) / CELL;
+          const gz = (heights[(i + zb[0]) * N1 + k + zb[1]] - heights[(i + za[0]) * N1 + k + za[1]]) / CELL;
+          const gg = gx * gx + gz * gz;
+          if (gg <= LIM2) continue;
+          // its three corners: height, bare ground, free, index, and weight in each leg
+          let n = 0;
+          for (const c of [xa, xb, za, zb]) {
+            const id = (i + c[0]) * N1 + k + c[1];
+            let m = 0; while (m < n && iv[m] !== id) m++;
+            if (m === n) { const j = (i + c[0] - i0) * D + (k + c[1] - k0); iv[n] = id; hv[n] = heights[id]; bv[n] = bare[j]; fv[n] = free[j]; wx[n] = 0; wz[n] = 0; n++; }
+            if (c === xa) wx[m] -= 1; else if (c === xb) wx[m] += 1; else if (c === za) wz[m] -= 1; else wz[m] += 1;
+          }
+          // (steep on the bare ground too: the land's own face)
+          const bx = wx[0] * bv[0] + wx[1] * bv[1] + wx[2] * bv[2], bz = wz[0] * bv[0] + wz[1] * bv[1] + wz[2] * bv[2];
+          if ((bx * bx + bz * bz) / (CELL * CELL) > LIM2) continue;
+          // raise the lowest free corner just enough (|g + t w|^2 = T2, t = dh / CELL, its smaller root)
+          let lo = -1, hi = -1;
+          for (let m = 0; m < 3; m++) if (fv[m]) { if (lo < 0 || hv[m] < hv[lo]) lo = m; if (hi < 0 || hv[m] > hv[hi]) hi = m; }
+          if (lo < 0) continue;
+          let m = lo, ww = wx[m] * wx[m] + wz[m] * wz[m], gw = gx * wx[m] + gz * wz[m], disc = gw * gw - ww * (gg - T2);
+          let t = gw < 0 ? (disc >= 0 ? (-gw - Math.sqrt(disc)) / ww : -gw / ww) : 0;
+          if (!(t > 0)) {
+            // (no: its lowest corner lies in the road's band) sink the highest free one, never below the bare ground
+            m = hi; ww = wx[m] * wx[m] + wz[m] * wz[m]; gw = gx * wx[m] + gz * wz[m]; disc = gw * gw - ww * (gg - T2);
+            t = gw > 0 ? (disc >= 0 ? (-gw + Math.sqrt(disc)) / ww : -gw / ww) : 0;
+            t = Math.max(t, (bv[m] - hv[m]) / CELL);
+            if (!(t < 0)) continue;
+          }
+          heights[iv[m]] = hv[m] + t * CELL + (t > 0 ? 1e-4 : -1e-4);
+          moved++;
+        }
+      }
     }
   }
 
@@ -345,6 +409,7 @@ export function generateLeg(seed, day) {
   // ---- static stuff: buildings, posts, gates, signs ---------------------------------
   const statics = [];       // boxes with colliders: {x,y,z,hx,hy,hz,ry,mat,col}
   const cyls = [];          // cylinders with colliders: {x,y,z,r,hh,mat}
+  const hulls = [];         // convex rocks with colliders, {x,y,z,r,pts (about x,y,z),mat}: the crash buttes and their fallen blocks
   const decor = [];         // visual-only bits the renderer knows how to draw
   const signs = [];         // text panels: {x,y,z,ry,w,h,lines,bg,fg,flat,near}
   const uses = [];          // interactables: {id,kind,x,y,z,r,label,arg}
@@ -374,7 +439,7 @@ export function generateLeg(seed, day) {
   // The slab of rim rock a gate code is brushed on (town3d's rimCode draws it from the same numbers): a
   // plane fitted to the ground under it, lifted clear of the bumps, its top 0.24 m up. Its collider is a
   // 4 x 3 grid of boxes stepping along that plane, so nobody stands ankle-deep in the rock.
-  const rimSlab = (sx, sz, w, h) => {
+  const slabFit = (sx, sz, w, h) => {
     const yaw = Math.atan2(sx - roadX(sz), 0) + Math.PI;
     const F = frame(sx, 0, sz, yaw), gy = (lx, lz) => { const p = F(lx, 0, lz); return heightAt(p.x, p.z); };
     const hx = w / 2 + 0.5, hz = h / 2 + 0.45;
@@ -386,6 +451,10 @@ export function generateLeg(seed, day) {
     const a0 = sy / n, bx = sxy / sxx, bz = szy / szz;
     let lift = 0;
     for (let i = 0; i <= 4; i++) for (let j = 0; j <= 4; j++) { const lx = (i / 4 - 0.5) * (w + 0.3), lz = (j / 4 - 0.5) * (h + 0.3); lift = Math.max(lift, gy(lx, lz) - (a0 + bx * lx + bz * lz)); }
+    return { yaw, F, gy, hx, hz, a0, bx, bz, lift };
+  };
+  const rimSlab = (sx, sz, w, h) => {
+    const { yaw, F, gy, hx, hz, a0, bx, bz, lift } = slabFit(sx, sz, w, h);
     const top0 = a0 + Math.min(lift, 0.6) + 0.24, NX = 4, NZ = 3, cw = hx * 0.95 / NX, cd = hz * 0.95 / NZ;
     for (let i = 0; i < NX; i++) for (let j = 0; j < NZ; j++) {
       const lx = -hx * 0.95 + cw * (2 * i + 1), lz = -hz * 0.95 + cd * (2 * j + 1), t = top0 + bx * lx + bz * lz;
@@ -454,6 +523,14 @@ export function generateLeg(seed, day) {
       const az = o.z + 26, ax = roadX(o.z + 26) + (rng() < 0.5 ? -1 : 1) * 5.0, ay = heightAt(ax, az);
       cyls.push({ x: ax, y: ay + 1.6, z: az, r: 0.3, hh: 1.6, mat: 'deadtree' });
       anchors.push({ id: anchors.length, x: ax, y: ay + 1.1, z: az });
+      // the warning sign, on the first flat ground short of the narrows (the walls close in at the boulder)
+      let sx = roadX(o.z - 18) - 4.6, sz = o.z - 18;
+      find: for (let dz = 18; dz <= 34; dz += 4) for (const off of [5.2, 4.6]) {
+        const z = o.z - dz, x = roadX(z) - off, h = heightAt(x, z);
+        if (Math.abs(h - roadY(z)) < 0.3 && Math.abs(heightAt(x - 0.6, z) - heightAt(x + 0.6, z)) < 0.3 && Math.abs(heightAt(x, z - 0.6) - heightAt(x, z + 0.6)) < 0.3) { sx = x; sz = z; break find; }
+      }
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
+        lines: ['ROCKFALL', 'SHOVE IT ASIDE', 'OR WINCH IT'], bg: '#f2c14e', fg: '#1d1d1d', post: true });
     } else if (o.type === 'gate') {
       const y = roadY(o.z);
       o.code = String(1000 + Math.floor(rng() * 9000));
@@ -467,8 +544,23 @@ export function generateLeg(seed, day) {
       // a driver heading +z has +x on the left
       signs.push({ x: rx + 5.4, y: heightAt(rx + 5.4, o.z - 6) + 2.2, z: o.z - 6, ry: 0, w: 3.2, h: 1.4,
         lines: ['RANGER STATION 7', side > 0 ? 'CODE ON THE LEFT RIM' : 'CODE ON THE RIGHT RIM'], bg: '#3a6b35', fg: '#f6efd6', post: true });
-      const cz = o.z - 14 - rng() * 10;
-      const cx = roadX(cz) + side * (wallDist(side > 0 ? 1 : 0, cz) + 9.5);
+      // on the flattest rim rock near where it was meant to go: a slab on a bump or a 50-degree face would
+      // have the ground poke through the digits. How badly: the slab's top (0.24 m over the fitted plane,
+      // lifted by up to 0.6 m) against the ground on a fine grid under the paint, and the plane's slope.
+      const cz0 = o.z - 14 - rng() * 10;
+      let cx = 0, cz = cz0, best = Infinity;
+      scan: for (const dz of [0, -3, 3, -6, 6]) for (const dd of [9.5, 8, 11, 12.5, 6.5, 14]) {
+        const z = Math.min(cz0 + dz, o.z - 9), x = roadX(z) + side * (wallDist(side > 0 ? 1 : 0, z) + dd);
+        const f = slabFit(x, z, 3.4, 2.0), top0 = f.a0 + Math.min(f.lift, 0.6) + 0.24;
+        let poke = -1;
+        for (let i = 0; i <= 12; i++) for (let j = 0; j <= 8; j++) {
+          const lx = (i / 12 - 0.5) * 3.4, lz = (j / 8 - 0.5) * 2.0;
+          poke = Math.max(poke, f.gy(lx, lz) - (top0 + f.bx * lx + f.bz * lz));
+        }
+        const score = Math.max(0, poke + 0.08) * 4 + Math.max(0, Math.hypot(f.bx, f.bz) - 0.4);
+        if (score < best - 1e-6) { best = score; cx = x; cz = z; }
+        if (best === 0) break scan;
+      }
       const cy = heightAt(cx, cz);
       o.codeAt = { x: cx, y: cy, z: cz };
       signs.push({ x: cx, y: cy + 0.06, z: cz, ry: side > 0 ? Math.PI / 2 : -Math.PI / 2, w: 3.4, h: 2.0,
@@ -540,11 +632,9 @@ export function generateLeg(seed, day) {
       decor.push({ k: 'umbrella', x: F(4.5, 0, -1).x, y: y0, z: F(4.5, 0, -1).z, ry });
     } else if (p.type === 'crash') {
       const M = p.mesa, y0 = M.base + M.h; p.y = y0;
-      // the butte's body and its bench tier (sunk 0.6 m below the foot, so no gap shows under the mound)
-      const bot = M.base - 0.6;
-      cyls.push({ x: p.x, y: (y0 + bot) / 2, z: p.z, r: M.R, hh: (y0 - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte' });
-      cyls.push({ x: M.bench.x, y: (M.bench.top + bot) / 2, z: M.bench.z, r: M.bench.r, hh: (M.bench.top - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte_bench' });
-      for (const c of M.lobes) cyls.push({ x: c.x, y: (y0 + bot) / 2, z: c.z, r: c.r, hh: (y0 - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte_lobe' });
+      // the butte's body, lobes and bench tier as convex hulls (sunk 0.6 m below the foot, so no gap shows
+      // under the mound)
+      for (const q of M.parts) hulls.push(partHull(q, p.id));
       const F = frame(px, y0, p.z, ry + 0.8);
       decor.push({ k: 'plane', x: px, y: y0, z: p.z, ry: ry + 0.8 });
       lbox(F, ry + 0.8, 0, 0.7, 0, 0.7, 0.7, 3.2, 'metal', '#f1f1f1', 'fuselage');
@@ -591,6 +681,125 @@ export function generateLeg(seed, day) {
   }
 
   tagNow = null;
+
+  // ---- the crash buttes' talus: what fell off each butte, lying on its apron ----------------------------
+  // Big blocks lodged against the wall's foot on the sides seen in profile from the road, heaps of them
+  // round the back, slabs of the caprock under each notch where a piece of the cap broke away (the notches
+  // are picked here too: M.notches, M.bench.notches), and a skirt of smaller blocks round the foot, bigger
+  // and closer in near the wall. Every one is solid: world gen shapes it (Elwynn: a rounded granite boulder;
+  // Westfall, the Badlands, Tanaris: a tabular block of the bedded rock, a lumpy ball cut flat by fracture
+  // planes; Dun Morogh: a cut granite slab) and the physics takes its points as one convex hull (W.hulls),
+  // so the server, every client and the renderer (terrain_talus.js draws these very points) agree on every
+  // rock. Only the rubble, too small to trip on, is the renderer's own. Each site draws from its own stream
+  // (nothing else on the leg moves), and nothing lies inside either tier, on the road or in its ditch.
+  const talus = [];
+  {
+    const CAP_T = { meadow: 0.9, fields: 1.0, snow: 0.95, badlands: 1.3, desert: 1.4 }[biome] || 1.0;
+    const snowy = biome === 'snow', round = biome === 'meadow', tabular = !snowy && !round;
+    const ARC_B = 1.75, TAU = Math.PI * 2;
+    const angD = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));
+    for (const p of mesas) {
+      const M = p.mesa, r = mulberry32((Math.round(p.z * 977) ^ 0x2545F491 ^ Math.imul(seed, 0x27D4EB2F) ^ Math.imul(day, 0x165667B1)) >>> 0);
+      const roadA = Math.atan2(0, roadX(p.z) - p.x), bA = M.benchA;
+      // the tiers (each: its centre, its outline's radius along a bearing from it, the bearings its wall shows on)
+      // (the tiers' outlines where the talus meets the walls, which lean out lower down)
+      const yC = M.base + M.talus, mains = butteMains(p), PB = M.parts.find(q => q.part === 'butte_bench');
+      const mainFoot = a => { let r = 0; for (const q of mains) r = Math.max(r, polyExit(q.polyAt(yC), p.x, p.z, a)); return r; };
+      const main = { x: p.x, z: p.z, R: a => butteRadius(p, a), main: true };
+      const bench = { x: PB.cx, z: PB.cz, R: a => polyExit(PB.top, PB.cx, PB.cz, a), main: false };
+      const inMain = (x, z) => { let d = -1e9; for (const q of mains) d = Math.max(d, -sdPoly(q.polyAt(yC), x, z)); return d; };
+      const inBench = (x, z) => -sdPoly(PB.polyAt(yC), x, z);
+      // where a tier's foot shows along bearing a (null: none there, the bench's arc ends or the bench stands
+      // round the main wall), a little out from its colliders (the drawn wall and its flare)
+      const footOf = (T, a) => {
+        if (T.main) { const R = mainFoot(a); if (inBench(p.x + Math.cos(a) * R, p.z + Math.sin(a) * R) > 0.45) return null; return R + 0.15; }
+        return angD(a, bA) > ARC_B - 0.35 ? null : polyExit(PB.polyAt(yC), PB.cx, PB.cz, a) + 0.15;
+      };
+      const at = (T, a, d) => [T.x + Math.cos(a) * d, T.z + Math.sin(a) * d];
+      const roadClear = (x, z, pad) => Math.abs(x - roadX(z)) > 6.7 + pad;
+      // the cap's broken notches (terrain_butte draws the cap broken back there): one or two round the main
+      // tier, now and then one on the bench's arc, never facing the road (the wreck's gas bag hangs there)
+      const notches = T => {
+        const out = [], n = T.main ? 1 + (r() < 0.55 ? 1 : 0) : (r() < 0.45 ? 1 : 0);
+        for (let k = 0; k < n; k++) for (let t = 0; t < 16; t++) {
+          const a = T.main ? r() * TAU : lerp(bA - ARC_B + 0.5, bA + ARC_B - 0.5, r());
+          if (angD(a, roadA) < 1.25 || out.some(q => angD(q.a, a) < 1.3)) continue;
+          out.push({ a, w: 0.8 + r() * 0.9, k: 0.75 + r() * 0.25 });
+          break;
+        }
+        return out;
+      };
+      M.notches = notches(main); M.bench.notches = notches(bench);
+      // one block: size s (m), yaw, tilt [x, z] (rad), a fraction `sink` of its height buried; it rests on the
+      // ground under its footprint, tipped most of the way with the slope
+      const block = (T, x, z, s, yaw, tilt, sink, cap = 0) => {
+        if ((T.main ? inBench(x, z) : inMain(x, z)) > 0.2) return;           // (inside the other tier)
+        const e = Math.max(0.3, Math.max(s[0], s[2]) * 0.6);
+        const gE = heightAt(x + e, z), gW = heightAt(x - e, z), gN = heightAt(x, z + e), gS = heightAt(x, z - e), gC = heightAt(x, z);
+        const y = (gE + gW + gN + gS + 2 * gC) / 6 + s[1] * (1 - 1.55 * sink);
+        const q = qMul(qUp(-(gE - gW) / (2 * e) * 0.8, -(gN - gS) / (2 * e) * 0.8), qEuler(tilt[0], yaw, tilt[1]));
+        const rs = mulberry32((r() * 4294967296) >>> 0);
+        const shape = snowy ? slabShape(rs) : round ? ballShape(rs, 2 + Math.floor(rs() * 2), 0.3) : ballShape(rs, 6 + Math.floor(rs() * 3), 0.18);
+        // its points about its centre, scaled and turned: the mesh's (a slab's snow cap: C), and all of them
+        // the collider's (you stand on a slab's snow, not in it)
+        const turn = U => { const out = new Float32Array(U.length); for (let i = 0; i < U.length; i += 3) { const v = qRot(q, U[i] * s[0], U[i + 1] * s[1], U[i + 2] * s[2]); out[i] = v[0]; out[i + 1] = v[1]; out[i + 2] = v[2]; } return out; };
+        const P = turn(shape.P), C = shape.C ? { P: turn(shape.C.P), I: shape.C.I } : null;
+        const pts = C ? Float32Array.from([...P, ...C.P]) : P;
+        let rr = 0; for (let i = 0; i < pts.length; i += 3) rr = Math.max(rr, Math.hypot(pts[i], pts[i + 2]));
+        talus.push({ poi: p.id, x, y, z, P, I: shape.I, C, kind: snowy ? 'slab' : round ? 'round' : 'tabular', cap });
+        hulls.push({ x, y, z, r: rr, pts, mat: 'talus', poi: p.id });
+      };
+      // shoulders: one or two big blocks lodged against the wall's foot, on the sides seen from the road
+      const side0 = r() < 0.5 ? 1 : -1;
+      for (let k = 0, n = 1 + (r() < 0.6 ? 1 : 0); k < n; k++) for (let t = 0; t < 10; t++) {
+        const a = roadA + (k ? -side0 : side0) * (Math.PI / 2 + (r() - 0.5) * 1.0), d0 = footOf(main, a);
+        if (d0 == null) continue;
+        const s = [1.5 + r() * 0.6, 1.0 + r() * 0.25, 1.1 + r() * 0.5], [x, z] = at(main, a, d0 + s[2] * 0.25);
+        if (!roadClear(x, z, s[0])) continue;
+        block(main, x, z, s, -a + (r() - 0.5) * 0.4, [(r() - 0.5) * 0.18, (r() - 0.5) * 0.18], 0.36);
+        break;
+      }
+      // heaps: two or three piles of big blocks against the foot, away from the road
+      for (let k = 0, nP = 2 + (r() < 0.5 ? 1 : 0); k < nP; k++) for (let t = 0; t < 12; t++) {
+        const a = roadA + Math.PI + (r() - 0.5) * 3.8, d0 = footOf(main, a);
+        if (d0 == null || angD(a, roadA) < 1.15) continue;
+        for (let j = 0, n = 3 + Math.floor(r() * 3); j < n; j++) {
+          const aj = a + (r() - 0.5) * 2.6 / butteRadius(p, a), dj = d0 - 0.3 + r() * 1.7, k0 = 0.85 + r() * 0.75, [x, z] = at(main, aj, dj);
+          if (!roadClear(x, z, k0)) continue;
+          const s = tabular ? [k0 * (1.05 + r() * 0.4), k0 * (0.55 + r() * 0.3), k0 * (0.85 + r() * 0.35)] : [k0 * (0.95 + r() * 0.35), k0 * (0.7 + r() * 0.2), k0 * (0.9 + r() * 0.35)];
+          block(main, x, z, s, r() * TAU, [(r() - 0.5) * 0.6, (r() - 0.5) * 0.6], 0.36);
+        }
+        break;
+      }
+      // the caprock's slabs, fallen under each notch
+      for (const [T, list] of [[main, M.notches], [bench, M.bench.notches]]) for (const nt of list) {
+        for (let k = 0, n = 2 + (r() < 0.5 ? 1 : 0); k < n; k++) {
+          const a = nt.a + (r() - 0.5) * nt.w / T.R(nt.a) * 1.6, d0 = footOf(T, a);
+          if (d0 == null) continue;
+          const [x, z] = at(T, a, d0 + 0.6 + r() * 2.6), th = CAP_T * (T.main ? 1 : 0.75);   // (the cap bed's thickness)
+          const s = [1.0 + r() * 0.7, Math.min(0.9, th * (0.45 + r() * 0.2)), 0.8 + r() * 0.5];
+          if (!roadClear(x, z, s[0])) continue;
+          block(T, x, z, s, r() * TAU, [(r() - 0.5) * 0.7, (r() - 0.5) * 0.7], 0.38, 1);
+        }
+      }
+      // the skirt: fallen blocks round the foot (the road side's fewer, smaller and closer in)
+      for (const T of [main, bench]) {
+        const n = Math.round((T.main ? 20 : 6) + r() * 5);
+        for (let k = 0; k < n; k++) {
+          const a = T.main ? (k + r() * 0.8) / n * TAU : bA - ARC_B + (k + r() * 0.8) / n * 2 * ARC_B, d0 = footOf(T, a);
+          if (d0 == null) continue;
+          const roadSide = angD(a, roadA) < 0.9, qd = Math.pow(r(), 1.4), d = d0 - 0.1 + qd * (roadSide ? 3.2 : 4.6);
+          const big = !roadSide && r() < 0.35 * (1 - qd), k0 = big ? 0.85 + r() * 0.6 : roadSide ? 0.3 + r() * 0.3 : 0.4 + r() * 0.45;
+          const [x, z] = at(T, a, d);
+          if (!roadClear(x, z, k0)) continue;
+          const s = tabular ? [k0 * (1.0 + r() * 0.4), k0 * (0.42 + r() * 0.25), k0 * (0.8 + r() * 0.35)]
+            : round ? [k0 * (0.9 + r() * 0.35), k0 * (0.65 + r() * 0.25), k0 * (0.85 + r() * 0.35)]
+            : [k0 * (0.85 + r() * 0.4), k0 * (0.55 + r() * 0.3), k0 * (0.85 + r() * 0.4)];
+          block(T, x, z, s, r() * TAU, [(r() - 0.5) * (tabular ? 0.8 : 0.45), (r() - 0.5) * (tabular ? 0.8 : 0.45)], round ? 0.42 : 0.4);
+        }
+      }
+    }
+  }
 
   // ---- billboards & landmarks (they're on the map, so you can navigate by them) --------
   const landmarks = [];
@@ -893,6 +1102,13 @@ export function generateLeg(seed, day) {
     const sg = F(0, 4.4, 4.6);
     signs.push({ x: sg.x, y: y0 + 4.4, z: sg.z, ry: Math.PI / 2, w: 5, h: 1.3, lines: ['HONEST ED\'S PAWN', 'WE BUY ANYTHING'], bg: '#f4d35e', fg: '#2b2d42' });
     town.pawnKeeper = F(0, 0, -3.4); town.pawnKeeper.y = y0; town.pawnKeeper.ry = Math.PI / 2;
+    // Ed's loading zone: the street in front of his door. With the RV parked here the bell sells the
+    // RV's whole load too, sight unseen, at DOCK_RATE (carry the good stuff in for the full price)
+    const dock = F(0, 0, 4.5 + 7.5);
+    town.dock = { x: dock.x, z: dock.z, r: 7 };
+    const ds = F(-1.4, 0, 4.5 + 4.2);
+    signs.push({ x: ds.x, y: heightAt(ds.x, ds.z) + 2.0, z: ds.z, ry: Math.PI / 2, w: 2.8, h: 1.3,
+      lines: ['ED\'S LOADING ZONE', 'PARK THE RV HERE', 'RING: HE BUYS THE LOT'], bg: '#f4d35e', fg: '#2b2d42', post: true });
   }
   // general store
   {
@@ -1030,8 +1246,9 @@ export function generateLeg(seed, day) {
     let y = heightAt(x, z);
     for (const p of mesas) {
       const M = p.mesa;
-      if (Math.hypot(x - p.x, z - p.z) < M.R || M.lobes.some(c => Math.hypot(x - c.x, z - c.z) < c.r)) y = Math.max(y, M.base + M.h);
-      else if (Math.hypot(x - M.bench.x, z - M.bench.z) < M.bench.r) y = Math.max(y, M.bench.top);
+      if (Math.hypot(x - p.x, z - p.z) > M.bound) continue;
+      const t = M.topAt(x, z);
+      if (t != null) y = Math.max(y, t);
     }
     return y;
   }
@@ -1039,22 +1256,131 @@ export function generateLeg(seed, day) {
   return {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
     roadX, roadY, heightAt, topAt, townY,
-    obstacles, pois, mesas, statics, cyls, decor, signs, uses, anchors, mud, gates, props,
+    obstacles, pois, mesas, statics, cyls, hulls, talus, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
   };
 }
 
-// A butte's main tier outline (its body and lobes, solid cylinders that each hold the centre): how far from
-// the centre (p.x, p.z) its foot lies along bearing a (x: cos a, z: sin a). Exact for the union of the
-// circles, so it is one radius per bearing.
+// A butte's main tier outline at its top (its body and lobes, convex masses that each hold the centre): how
+// far from the centre (p.x, p.z) its rim lies along bearing a (x: cos a, z: sin a), one radius per bearing.
+// (Lower down the wall leans out: at height y it is this times part.sAt(y).)
+export { butteMains, polyExit };
 export function butteRadius(p, a) {
-  const M = p.mesa, ux = Math.cos(a), uz = Math.sin(a);
+  const M = p.mesa;
+  if (M.parts) {
+    // (from a table of 2048 bearings, made on first use: linear between them is within 0.01 mm of the
+    // exact outline, and the renderer asks this a great many times)
+    let T = M.rTable;
+    if (!T) {
+      const mains = butteMains(p), N = 2048;
+      T = M.rTable = new Float64Array(N + 1);
+      for (let k = 0; k <= N; k++) { const th = k / N * Math.PI * 2; let r = 0; for (const q of mains) r = Math.max(r, polyExit(q.top, p.x, p.z, th)); T[k] = r; }
+    }
+    let f = a / (Math.PI * 2); f = (f - Math.floor(f)) * 2048;
+    const k = Math.min(2047, Math.floor(f));
+    return T[k] + (T[k + 1] - T[k]) * (f - k);
+  }
+  const ux = Math.cos(a), uz = Math.sin(a);
   let r = M.R;
   for (const c of M.lobes || []) {
     const cx = c.x - p.x, cz = c.z - p.z, b = ux * cx + uz * cz, q = c.r * c.r - (cx * cx + cz * cz) + b * b;
     if (q > 0) r = Math.max(r, b + Math.sqrt(q));
   }
   return r;
+}
+
+// ---- the talus blocks' shapes and turns (pure maths: world gen shapes every fallen block, the physics takes
+// its points as a convex hull, terrain_talus.js draws them) -------------------------------------------------
+// the unit icosphere subdivided once (42 points, 80 faces, wound outward)
+const ICO = (() => {
+  const t = (1 + Math.sqrt(5)) / 2;
+  const V = [[-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0], [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t], [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1]];
+  const F0 = [0, 11, 5, 0, 5, 1, 0, 1, 7, 0, 7, 10, 0, 10, 11, 1, 5, 9, 5, 11, 4, 11, 10, 2, 10, 7, 6, 7, 1, 8, 3, 9, 4, 3, 4, 2, 3, 2, 6, 3, 6, 8, 3, 8, 9, 4, 9, 5, 2, 4, 11, 6, 2, 10, 8, 6, 7, 9, 8, 1];
+  const mid = new Map(), I = [];
+  const m = (a, b) => { const k = a < b ? a * 64 + b : b * 64 + a; if (!mid.has(k)) { mid.set(k, V.length); V.push([(V[a][0] + V[b][0]) / 2, (V[a][1] + V[b][1]) / 2, (V[a][2] + V[b][2]) / 2]); } return mid.get(k); };
+  for (let i = 0; i < F0.length; i += 3) {
+    const a = F0[i], b = F0[i + 1], c = F0[i + 2], ab = m(a, b), bc = m(b, c), ca = m(c, a);
+    I.push(a, ab, ca, ab, b, bc, ca, bc, c, ab, bc, ca);
+  }
+  const P = new Float64Array(V.length * 3);
+  V.forEach((v, i) => { const l = Math.hypot(v[0], v[1], v[2]); P[i * 3] = v[0] / l; P[i * 3 + 1] = v[1] / l; P[i * 3 + 2] = v[2] / l; });
+  return { P, I: Uint16Array.from(I) };
+})();
+// a fallen block, unit-ish (y up): the icosphere made lumpy, then cut by a flattened top and `cuts` random
+// fracture planes (a point past a plane moves onto it)
+function ballShape(r, cuts, lump) {
+  const P = Float64Array.from(ICO.P);
+  for (let i = 0; i < P.length; i += 3) { const k = 1 - lump / 2 + r() * lump; P[i] *= k; P[i + 1] *= k; P[i + 2] *= k; }
+  const planes = [];
+  { const nx = (r() - 0.5) * 0.25, nz = (r() - 0.5) * 0.25, l = Math.hypot(nx, 1, nz); planes.push([nx / l, 1 / l, nz / l, 0.5 + r() * 0.15]); }
+  for (let k = 0; k < cuts; k++) { const a = r() * Math.PI * 2, e = (r() - 0.35) * 1.1; planes.push([Math.cos(a) * Math.cos(e), Math.sin(e), Math.sin(a) * Math.cos(e), 0.55 + r() * 0.3]); }
+  for (const [nx, ny, nz, d] of planes) for (let i = 0; i < P.length; i += 3) {
+    const t = P[i] * nx + P[i + 1] * ny + P[i + 2] * nz;
+    if (t > d) { P[i] += nx * (d - t); P[i + 1] += ny * (d - t); P[i + 2] += nz * (d - t); }
+  }
+  return { P, I: ICO.I };
+}
+// a cut granite slab, unit-ish (radius ~1 in x and z, y from -1 to its flat top at 0.5): an irregular n-sided
+// outline, faces leaning out a little toward the top, a chamfer round the top edge, the top ring shifted a
+// little; and the soft snow cap it wears (C: its points and faces), which the collider takes in too
+function slabShape(r) {
+  const n = 6 + Math.floor(r() * 3), ang = [], rad = [];
+  for (let k = 0; k < n; k++) { ang.push((k + (r() - 0.5) * 0.7) / n * Math.PI * 2); rad.push(0.74 + r() * 0.36); }
+  const ox = (r() - 0.5) * 0.12, oz = (r() - 0.5) * 0.12, cy = 0.27 + r() * 0.08;
+  const rings = [[-1.0, 0.86, 0], [-0.3, 0.95, 0.4], [cy, 1.0, 0.8], [0.5, 0.82 - r() * 0.06, 1]];
+  const jy = ang.map(() => (r() - 0.5) * 0.07);
+  const P = [], I = [];
+  for (let ri = 0; ri < rings.length; ri++) for (let k = 0; k < n; k++) {
+    const [y, sc, sh] = rings[ri], rr = rad[k] * sc;
+    P.push(Math.cos(ang[k]) * rr + ox * sh, y + (ri === 2 ? jy[k] : 0), Math.sin(ang[k]) * rr + oz * sh);
+  }
+  const T = rings.length - 1, top = P.length / 3, bot = top + 1;
+  P.push(ox, 0.5, oz, 0, -1.0, 0);
+  for (let ri = 0; ri < T; ri++) for (let k = 0; k < n; k++) {
+    const a = ri * n + k, b = ri * n + (k + 1) % n, c = (ri + 1) * n + (k + 1) % n, d = (ri + 1) * n + k;
+    I.push(a, c, b, a, d, c);
+  }
+  for (let k = 0; k < n; k++) { I.push(top, T * n + (k + 1) % n, T * n + k); I.push(bot, k, (k + 1) % n); }
+  return { P: Float64Array.from(P), I: Uint16Array.from(I), C: capShape(r, { ang, rad, top: rings[T][1], ox, oz }) };
+}
+// the snow cap over a slab's top (its frame): it follows the outline, a little wider, so it hangs over the
+// edge in a lip that droops further in places; a rounded crown
+function capShape(r, S) {
+  const n = S.ang.length, pts = [];
+  for (let k = 0; k < n; k++) {
+    const a0 = S.ang[k], a1 = S.ang[(k + 1) % n] + (k === n - 1 ? Math.PI * 2 : 0), r0 = S.rad[k], r1 = S.rad[(k + 1) % n];
+    const x0 = Math.cos(a0) * r0, z0 = Math.sin(a0) * r0, x1 = Math.cos(a1) * r1, z1 = Math.sin(a1) * r1;
+    for (let j = 0; j < 3; j++) pts.push([x0 + (x1 - x0) * j / 3, z0 + (z1 - z0) * j / 3, 1.04 + r() * 0.12, 0.07 + r() * r() * 0.3]);
+  }
+  const N = pts.length, P = [], I = [];
+  for (const [sc, y] of [[0.78, 0.47], [-1, 0], [-2, 0.56], [0.9, 0.665], [0.55, 0.71]]) for (const [x, z, o, d] of pts) {
+    if (sc === -1) P.push(x * o + S.ox, 0.5 - d, z * o + S.oz);                                  // (the lip's droop)
+    else if (sc === -2) P.push(x * (o + 0.03) + S.ox, y + d * 0.15, z * (o + 0.03) + S.oz);      // (its rim)
+    else P.push(x * sc * S.top / 0.82 + S.ox, y + (sc > 0.8 ? 0.02 * (o - 1.1) : 0), z * sc * S.top / 0.82 + S.oz);
+  }
+  for (let ri = 0; ri < 4; ri++) for (let k = 0; k < N; k++) { const a = ri * N + k, b = ri * N + (k + 1) % N, c = (ri + 1) * N + (k + 1) % N, d = (ri + 1) * N + k; I.push(a, c, b, a, d, c); }
+  const ci = P.length / 3; P.push(S.ox, 0.73, S.oz);
+  for (let k = 0; k < N; k++) I.push(ci, 4 * N + (k + 1) % N, 4 * N + k);
+  return { P: Float64Array.from(P), I: Uint16Array.from(I) };
+}
+// quaternions [x, y, z, w] (three.js's conventions: Euler order XYZ; the turn taking +y onto (nx, 1, nz)
+// normalised; a * b turns by b, then a)
+function qEuler(x, y, z) {
+  const c1 = Math.cos(x / 2), c2 = Math.cos(y / 2), c3 = Math.cos(z / 2), s1 = Math.sin(x / 2), s2 = Math.sin(y / 2), s3 = Math.sin(z / 2);
+  return [s1 * c2 * c3 + c1 * s2 * s3, c1 * s2 * c3 - s1 * c2 * s3, c1 * c2 * s3 + s1 * s2 * c3, c1 * c2 * c3 - s1 * s2 * s3];
+}
+function qUp(nx, nz) {
+  const l = Math.hypot(nx, 1, nz), x = nx / l, y = 1 / l, z = nz / l;
+  const q = [z, 0, -x, 1 + y], m = Math.hypot(q[0], q[1], q[2], q[3]);
+  return [q[0] / m, q[1] / m, q[2] / m, q[3] / m];
+}
+function qMul(a, b) {
+  return [a[0] * b[3] + a[3] * b[0] + a[1] * b[2] - a[2] * b[1], a[1] * b[3] + a[3] * b[1] + a[2] * b[0] - a[0] * b[2],
+    a[2] * b[3] + a[3] * b[2] + a[0] * b[1] - a[1] * b[0], a[3] * b[3] - a[0] * b[0] - a[1] * b[1] - a[2] * b[2]];
+}
+function qRot(q, x, y, z) {
+  const tx = 2 * (q[1] * z - q[2] * y), ty = 2 * (q[2] * x - q[0] * z), tz = 2 * (q[0] * y - q[1] * x);
+  return [x + q[3] * tx + q[1] * tz - q[2] * ty, y + q[3] * ty + q[2] * tx - q[0] * tz, z + q[3] * tz + q[0] * ty - q[1] * tx];
 }
 
 // Is a world point inside a mud patch?

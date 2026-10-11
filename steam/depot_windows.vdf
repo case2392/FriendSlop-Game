@@ -1,0 +1,14 @@
+// The Windows build (npm run dist:win -> dist/win-unpacked/). Launch option in Steamworks: NoMoneyDown.exe
+"DepotBuild"
+{
+	"DepotID"	"481"					// <- your Windows depot ID
+	"ContentRoot"	"../dist/win-unpacked/"
+	"FileMapping"
+	{
+		"LocalPath"	"*"
+		"DepotPath"	"."
+		"Recursive"	"1"
+	}
+	"FileExclusion"	"*.pdb"
+	"FileExclusion"	"steam_appid.txt"		// a developer's file: never ship it
+}

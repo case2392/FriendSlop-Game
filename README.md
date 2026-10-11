@@ -21,7 +21,7 @@ Then the roof. Then the RV.
 | ![carrying a CRT TV](docs/screenshots/carrying.jpg) | ![the paper road map](docs/screenshots/map.jpg) |
 | **Fragile physics loot.** Every bump costs money. | **One paper map.** Only whoever's holding it can read it. |
 | ![body-vote blackjack](docs/screenshots/casino.jpg) | ![the pawn counter](docs/screenshots/pawn.jpg) |
-| **The Lucky Slop.** Bet the *shared* bank, vote HIT/STAND with your body. | **Honest Ed's Pawn.** Put it on the counter, ring the bell. |
+| **The Lucky Slop.** Bet the *shared* bank, vote HIT/STAND with your body. | **Honest Ed's Pawn.** Put it on the counter, ring the bell (or park in his loading zone: he buys the whole load). |
 | ![the Repo Man](docs/screenshots/repo-man.jpg) | ![night at the campfire](docs/screenshots/night.jpg) |
 | **The Repo Man** collects at midnight. | **Night.** Receipt, campfire, store, bunks, day 2. |
 
@@ -70,14 +70,30 @@ classic:
 
 ## Play it
 
+**The desktop build (the one for Steam):**
+
 ```bash
 npm install
+npm run desktop    # with Steam running: friends join through Steam invites
+```
+
+One person **starts a trip**; friends join with **Invite Friends** (press
+`Esc` in the game) or **Join Game** on the host in their Steam friends list.
+The host's PC runs the trip, and everyone talks to it over Steam, so there is
+nothing to port-forward. Without Steam running it plays solo. How the Steam
+build works, and how to ship it: [docs/STEAM.md](docs/STEAM.md).
+
+**The browser build (LAN and development):**
+
+```bash
 npm start          # → http://localhost:3000
 ```
 
-One person **STARTS A TRIP**, sends the 4-letter code, and everyone else
-**JOINS**. Click the window to grab the mouse; **F1** shows controls. To
-replay the same roads, put the same number in "trip seed".
+One person **STARTS A TRIP**, sends the 4-character code, and everyone else
+**JOINS**. Click the window to grab the mouse; **F1** shows controls, `Esc`
+frees the mouse and offers Leave Trip. To replay the same roads, put the same
+number in "trip seed". A dropped connection gets its seat back if it returns
+within 90 s.
 
 **The first load takes a while.** Every texture is painted and every mesh is
 built in your browser. Background workers paint what they can while the
@@ -93,7 +109,7 @@ on.
 
 | | |
 |---|---|
-| `WASD` `Shift` `Space` `Ctrl` | walk · sprint · jump · crouch |
+| `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch |
 | **hold `LMB`** | **GRAB**: loot, or any steep rock or wall to **climb** it (`Space` = lunge) |
 | `RMB` · `Q` · wheel | throw · drop · hold distance |
 | `E` | use: driver seat, door, winch, pawn bell, casino buttons, keypad, bunk. Hold it on a knocked-out friend to pick them up. |
@@ -110,16 +126,19 @@ on it and he takes the RV, however many strikes you had left.
 
 ## Voice
 
-Hit **JOIN VOICE**. It's **proximity chat**: peer-to-peer WebRTC audio
-through a 3D HRTF panner at each player's head. It fades out by ~45 m, gets
+Hit **JOIN VOICE**. It's **proximity chat**: each voice is Opus audio sent
+over the game's own connection, and the host passes it only to the players who
+can hear it, who hear it through a 3D HRTF panner at the speaker's head. It fades out by ~45 m, gets
 muffled when terrain or the RV is between you, and sounds face-down when
 someone's knocked out. **Walkie-talkies** ($150 at the general store) reach
 anyone else who owns one, at any range, through a crunchy radio filter. Hold
 `T`.
 
-Mics need a secure context (https or localhost). For LAN or internet play,
-put the server behind any TLS tunnel (Tailscale, cloudflared, ngrok) or
-reverse proxy. The Electron build (`electron/`) doesn't have this problem.
+Nothing is peer-to-peer, so nobody's router gets in the way and nobody sees
+anyone's IP address. In a browser, mics need a secure context (https or
+localhost): for LAN play put the server behind any TLS tunnel (Tailscale,
+cloudflared, ngrok) or reverse proxy. The desktop build doesn't have this
+problem.
 
 ## How it's built
 
@@ -128,7 +147,11 @@ shared/   world.js     seeded deterministic leg generator: biome, terrain, road,
                        town, decor, and every collider (trees, rocks, shelves, yard props)
           rv.js        the RV's collider layout (server body, client copy and renderer all use it)
           loot.js      loot catalog: mass, value, fragility, carry class
-server/   sim.js       Rapier 3D physics: heightfield, RV on raycast wheels, loot, grab springs,
+desktop/  main.cjs     the desktop app (Electron): the window, the game server in its own process,
+                       Steam (lobbies, invites, rich presence); steam/: friends' traffic over Steam P2P
+server/   host.js      every connection (the host's page, friends over Steam, browsers): rooms, kept
+                       seats, rate limits, the voice relay; index.js runs it for the browser build
+          sim.js       Rapier 3D physics: heightfield, RV on raycast wheels, loot, grab springs,
                        push intents, winch cable + anchors + reel, impact damage, run-over checks
           room.js      the run: days, clock, shared bank, pawn, casino, store, Repo Man, KO bills
           casino.js    body-vote blackjack + double-or-nothing
@@ -146,7 +169,7 @@ client/   player.js    first-person controller: walk/sprint/jump, stamina climbi
           town3d.js · town_build.js · town_kit.js · town_yard.js   five town styles, interiors, NPCs
           roadside3d.js              the stops, gates, camp, anchors, junk, the dino
           rv3d.js · props3d.js · people.js · labels.js   the RV, loot, characters, painted signs/HUD
-          voice.js     WebRTC mesh + spatial audio · sfx.js: synthesized sound
+          voice.js     Opus voice over the game connection + spatial audio · sfx.js: synthesized sound
 tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewpoints per day
           gallery.mjs   every texture, tiled to show seams · preview.mjs  single 3D assets
           drive-test.mjs  headless autopilot down a leg (RV handling)
@@ -175,6 +198,9 @@ tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewp
 npm test
 ```
 
+- `tools/namecheck.mjs` fails if another game's place names or a real brand
+  get into the text players can see (the store and the Steam agreement need
+  everything shipped to be ours).
 - `test/logic.mjs` plays a whole run over real WebSockets with two fake
   players and real physics (31 checks). It drives, carries and throws a vase
   (it chips), cracks the ranger gate, winches the RV up the grade, pawns a
@@ -182,11 +208,23 @@ npm test
   buys a walkie, pays the Repo Man, sleeps into day 2, gets billed for a KO,
   gets revived for free, gets run over, loses the doors, the roof, then the
   RV, starts over, and wins on day 5.
+- `test/server.mjs` checks what keeps an evening going when connections
+  misbehave: kept seats, malformed frames, floods, a different build, silent
+  connections, the goodbye when the server shuts down.
+- `test/steamnet.mjs` plays over a stand-in for Steam (`test/fakesteam/`):
+  invites, the version check, a dropped link coming back to its seat, voice,
+  packet loss, the host quitting or crashing.
 - `test/smoke-browser.mjs` runs two real Chromium clients in one room. They
   join through the menu and see each other. One drives while the other rides
   inside, and the passenger stays glued in on both screens. They carry a TV,
-  climb a canyon wall, read the map, play blackjack by body-vote, and connect
-  proximity voice peer-to-peer. The test fails on any page error.
+  climb a canyon wall, read the map, play blackjack by body-vote, talk over
+  proximity voice, drop and get their seat back. The test fails on any page
+  error.
+- `npm run test:desktop` drives the real desktop app (needs a display, or
+  `xvfb-run`): the locked-down shell, a trip, Quit, and two copies of the app
+  joining each other over the stand-in Steam.
+- After `npm run dist`, `node tools/depotcheck.mjs` checks the packaged
+  folders before a Steam upload.
 
 `FRIENDSLOP_FAST=1` speeds the clock up, and `FRIENDSLOP_TEST=1` enables test
 levers (teleport the RV, set the clock). Don't set either in production.

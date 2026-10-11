@@ -54,7 +54,7 @@ for (const pass of ['cold', 'warm']) {
   await page.goto(`http://localhost:${PORT}`);
   const hasCache = await page.evaluate(() => !!window.__nmd?.texCache);
   if (pass === 'warm' && !hasCache) { await page.close(); break; }
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
   await page.fill('#nameInput', 'Steve');
   await page.fill('#seedInput', SEED);
   await page.click('#hostBtn');

@@ -2,7 +2,7 @@
 // Physics is real (Rapier on the server); the clock runs fast (FRIENDSLOP_FAST).
 import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
-import { generateLeg } from '../shared/world.js';
+import { generateLeg, butteRadius } from '../shared/world.js';
 import { QUOTAS, medBill } from '../shared/constants.js';
 import { Blackjack, handTotal } from '../server/blackjack.js';
 import { BJTable } from '../server/casino.js';
@@ -28,6 +28,81 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     if (h.outcome === 'win' && handTotal(h.dealer) <= 21 && handTotal(h.squad) <= handTotal(h.dealer)) bad++;
   }
   check(bad === 0 && tally.lose > tally.win, `blackjack engine: 3000 hands consistent ${JSON.stringify(tally)}`);
+}
+
+// --- world gen: the gate code's paint is clear of the ground; every boulder has its sign (pure logic) ---
+// (codes used to be brushed at a fixed spot on the rim, and 1 in 5 had a ridge of grass through the digits)
+{
+  let codes = 0, buried = 0, boulders = 0, signed = 0;
+  for (let i = 0; i < 24; i++) {
+    const seed = (Math.imul(i + 7, 2654435761) >>> 0) % 1e9;
+    for (let day = 1; day <= 5; day++) {
+      const W = generateLeg(seed, day);
+      for (const s of W.signs.filter(s => s.flat)) {
+        codes++;
+        // the slab's top as world.js rimSlab and town3d.js rimCode make it (a plane fitted to the ground
+        // around it, lifted clear of the bumps by up to 0.6 m, 0.24 m up), against the ground under the paint
+        const yaw = Math.atan2(s.x - W.roadX(s.z), 0) + Math.PI, c = Math.cos(yaw), sn = Math.sin(yaw);
+        const gy = (lx, lz) => W.heightAt(s.x + lx * c + lz * sn, s.z - lx * sn + lz * c);
+        const hx = s.w / 2 + 0.5, hz = s.h / 2 + 0.45;
+        let n = 0, sy = 0, sxy = 0, szy = 0, sxx = 0, szz = 0, lift = 0, poke = -1;
+        for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) { const lx = (a / 4 - 0.5) * 2.2 * hx, lz = (b / 4 - 0.5) * 2.2 * hz, y = gy(lx, lz); n++; sy += y; sxy += lx * y; szy += lz * y; sxx += lx * lx; szz += lz * lz; }
+        const a0 = sy / n, bx = sxy / sxx, bz = szy / szz;
+        for (let a = 0; a <= 4; a++) for (let b = 0; b <= 4; b++) { const lx = (a / 4 - 0.5) * (s.w + 0.3), lz = (b / 4 - 0.5) * (s.h + 0.3); lift = Math.max(lift, gy(lx, lz) - (a0 + bx * lx + bz * lz)); }
+        const top0 = a0 + Math.min(lift, 0.6) + 0.24;
+        for (let a = 0; a <= 20; a++) for (let b = 0; b <= 12; b++) { const lx = (a / 20 - 0.5) * s.w, lz = (b / 12 - 0.5) * s.h; poke = Math.max(poke, gy(lx, lz) - (top0 + bx * lx + bz * lz)); }
+        if (poke > 0) buried++;
+      }
+      for (const o of W.obstacles.filter(o => o.type === 'boulder')) {
+        boulders++;
+        const s = W.signs.find(s => s.lines[0] === 'ROCKFALL' && s.z < o.z && o.z - s.z < 40);
+        if (s && Math.abs(W.heightAt(s.x, s.z) - W.roadY(s.z)) < 0.3) signed++;
+      }
+    }
+  }
+  check(codes > 80 && buried === 0, `world: no gate code has the ground poking through its paint (${buried} of ${codes})`);
+  check(boulders > 50 && signed === boulders, `world: every boulder has a ROCKFALL sign on flat ground before it (${signed} of ${boulders})`);
+}
+
+// --- world gen: the crash buttes are angular, leaning masses with room on top and clear of the road ---
+// (convex rings that hold their centre, the wreck's 5.6 m, every loot prop a metre inside the top, the
+// foot at the talus line 7.6 m off the road's centre, the bench 2.5 m over the talus, the same every time)
+{
+  const { sdPoly, polyArea } = await import('../shared/butte.js');
+  let sites = 0, bad = [];
+  for (let i = 0; i < 16; i++) {
+    const seed = (Math.imul(i + 3, 2246822519) >>> 0) % 1e9;
+    for (let day = 1; day <= 5; day++) {
+      const W = generateLeg(seed, day), W2 = generateLeg(seed, day);
+      W.mesas.forEach((p, k) => {
+        sites++;
+        const M = p.mesa, yC = M.base + M.talus, mains = M.parts.filter(q => q.part !== 'butte_bench');
+        for (const q of M.parts) {
+          if (q.top.length < 5 || polyArea(q.top) <= 0) bad.push(`${seed}/${day} ${q.part}: ${q.top.length} corners, area ${polyArea(q.top).toFixed(1)}`);
+        }
+        // the main tier's outline is one radius per bearing (what the renderer wraps the wall round): every
+        // point from the centre out to butteRadius lies in the rock
+        for (let a = 0; a < 90; a++) {
+          const th = a / 90 * Math.PI * 2, R = butteRadius(p, th);
+          for (let t = 0.25; t < R - 0.05; t += 0.25) {
+            const x = p.x + Math.cos(th) * t, z = p.z + Math.sin(th) * t;
+            if (!mains.some(q => sdPoly(q.top, x, z) <= 1e-6)) { bad.push(`${seed}/${day} a gap in the top ${t.toFixed(2)} m out at bearing ${a * 4}`); a = 90; break; }
+          }
+        }
+        const body = M.parts.find(q => q.part === 'butte');
+        if (-sdPoly(body.top, p.x, p.z) < 5.55) bad.push(`${seed}/${day} the top is ${(-sdPoly(body.top, p.x, p.z)).toFixed(2)} m from the centre to its nearest face`);
+        for (const pr of W.props.filter(pr => Math.hypot(pr.x - p.x, pr.z - p.z) < M.bound && pr.y > M.base + M.h - 0.5)) {
+          const inside = Math.max(...mains.map(q => -sdPoly(q.top, pr.x, pr.z)));
+          if (inside < 0.75) bad.push(`${seed}/${day} loot ${pr.type} ${inside.toFixed(2)} m inside the top`);
+        }
+        for (const q of mains) for (const v of q.polyAt(yC)) if (Math.abs(v[0] - W.roadX(v[1])) < 7.55) { bad.push(`${seed}/${day} the foot ${Math.abs(v[0] - W.roadX(v[1])).toFixed(2)} m off the road`); break; }
+        if (M.bench.top < yC + 2.45) bad.push(`${seed}/${day} the bench ${(M.bench.top - yC).toFixed(2)} m over the talus`);
+        const q2 = W2.mesas[k].mesa.parts;
+        if (M.parts.some((q, j) => q.top.length !== q2[j].top.length || q.top.some((v, n) => v[0] !== q2[j].top[n][0] || v[1] !== q2[j].top[n][1]))) bad.push(`${seed}/${day} not the same twice`);
+      });
+    }
+  }
+  check(sites > 40 && !bad.length, `world: ${sites} crash buttes are convex leaning masses with room on top, clear of the road, the same every time${bad.length ? ': ' + bad.slice(0, 4).join('; ') : ''}`);
 }
 
 // --- body-vote blackjack: votes left standing after a hit wait for the timer (pure logic) ---
@@ -196,7 +271,7 @@ try {
   B.send({ t: 'join', name: 'x', room: 'ZZZZ' });   // already joined: ignored
   const bad = new Player('Nobody'); await bad.connect(); bad.send({ t: 'join', name: 'n', room: 'QQQQ' });
   const err = await bad.wait(m => m.t === 'error', 4000, 'error');
-  check(/No RV/.test(err.msg), 'bad room code rejected');
+  check(err.code === 'noroom' && /No trip with that code/.test(err.msg), 'bad room code rejected');
   bad.ws.close();
   A.pose(); B.pose();
   await A.until((g, s) => s.pl.length === 2, 4000, 'two players in snapshot');

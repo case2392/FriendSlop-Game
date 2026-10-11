@@ -27,7 +27,7 @@
 // API: buildRoadside(W) -> { group, gates, update(dt, t, camPos) }, isRoadside(s), PREVIEW.
 import { THREE, tex } from './gfx.js';
 import { canvasFor, has } from './paint/index.js';
-import { generateLeg } from '/shared/world.js';
+import { generateLeg, butteRadius } from '/shared/world.js';
 import * as TERRAIN from './terrain3d.js';
 
 const ROADSIDE_PARTS = new Set(['log_seat', 'parked_rv', 'keypad_post']);
@@ -1416,7 +1416,9 @@ function buildCrash(B, p, parts, ctx, decor) {
     // (on a butte the furrow ends well inside its walkable top: the ridges' far ends, a fifth of the furrow's
     // length past zBack and up to 1.9 m to the side, keep 0.75 m inside the collider's edge, where the rim
     // drops sheer to the talus)
-    const RB = p.mesa ? (p.mesa.R ?? p.mesa.r) : 7;
+    // (the top's radius that way: the butte's narrowest bearing within the furrow's spread behind the nose)
+    let RB = 7;
+    if (p.mesa) { const a0 = Math.atan2(-Math.cos(d.ry), -Math.sin(d.ry)); RB = Infinity; for (let k = -9; k <= 9; k++) RB = Math.min(RB, butteRadius(p, a0 + k * 0.05)); }
     const zBack = p.mesa ? Math.max(-(RB - 1.3), (0.2 * zN + 0.2 - Math.sqrt(Math.max(9, (RB - 0.75) ** 2 - 3.6))) / 1.2) : -Math.max(4, RB - 1.3), flen = zN - zBack;
     const heaps = [[1.4, 0.45, 0.9, fus.x, zN + 0.6, 0, 7]];
     // each ridge three overlapping heaps of its own height and set, so its crest is lumpy, never one straight line

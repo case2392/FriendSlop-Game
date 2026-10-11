@@ -1,12 +1,17 @@
 // NO MONEY DOWN — client entry.
 import * as C from '/shared/constants.js';
-import { generateLeg, BIOME_BY_DAY } from '/shared/world.js';
+import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
 import { LOOT, fmt$ } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
 import * as net from './net.js';
 import * as voice from './voice.js';
-import { initAudio, sfx, setLoops } from './sfx.js';
-import { THREE, initGfx, scene, camera, renderer, render, setTimeOfDay, updateSun, setBiome, labelSprite, flat } from './gfx.js';
+import { initAudio, sfx, setLoops, at as sfxAt } from './sfx.js';
+import { THREE, initGfx, scene, camera, renderer, render, setTimeOfDay, updateSun, setBiome, labelSprite, flat, setRenderQuality, guessQuality, gpuName } from './gfx.js';
+import { settings, setSetting, onSettings, resetSettings, settingSpec } from './settings.js';
+import { audioCtx, bus, panner, setListener } from './audio.js';
+import { updateAmbience, quietAmbience } from './ambience.js';
+import { createRadio } from './music.js';
+import { setClutterQuality } from './terrain3d.js';
 import { initPhys, LocalWorld, G } from './phys.js';
 import { Me } from './player.js';
 import { Interp } from './interp.js';
@@ -16,6 +21,7 @@ import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
+import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -28,7 +34,7 @@ const me = S.me;
 let rvView = null, hands = null;
 let locked = false;
 const isLocked = () => locked || !!S.forceLock;   // tests flip forceLock (headless has no pointer lock)
-let lastPose = 0, lastDrive = 0;
+let lastPose = 0;
 const keys = {};
 const inp = { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: false };
 let target = null;            // what the crosshair is on
@@ -39,8 +45,33 @@ let worldBuilding = false;
 
 // ---- boot ---------------------------------------------------------------------------
 
-initGfx($('canvas'));
-const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); });
+// a game that can't start 3D (a blocklisted or broken driver, an old GPU) says so, instead of sitting on
+// its menu with buttons that do nothing
+function fatal(title, body) {
+  $('loading').classList.add('hidden');
+  const el = document.createElement('div');
+  el.className = 'panel parchment net-modal';
+  el.innerHTML = `<h2>${title}</h2><p>${body}</p>`;
+  document.body.appendChild(el);
+  window.desktop?.log?.('fatal', title, body);
+}
+try { initGfx($('canvas')); }
+catch (e) {
+  fatal('Your graphics couldn\'t start 3D', 'NO MONEY DOWN needs WebGL 2. Update your graphics driver, and on a laptop run the game on the dedicated GPU. If it still fails, set the Steam launch option <b>--use-angle=gl</b> (or <b>d3d11</b>, <b>vulkan</b>).');
+  throw e;
+}
+const physReady = initPhys().then(() => { if (!worldBuilding) $('loading').classList.add('hidden'); }, e => { fatal('The physics engine couldn\'t start', String(e?.message || e)); throw e; });
+// errors: logged (the desktop build keeps a log file), and after a few a word to the player
+let pageErrors = 0;
+const noteError = msg => {
+  window.desktop?.log?.('page error', msg);
+  if (++pageErrors === 3) setTimeout(() => toast('Something went wrong in the game. If it misbehaves, restart it.', '#ff8a80', 6));
+};
+window.addEventListener('error', e => noteError(String(e.message)));
+window.addEventListener('unhandledrejection', e => noteError(String(e.reason?.message || e.reason)));
+// the GPU driver reset (or the context was taken away): three.js rebuilds everything once it's back
+$('canvas').addEventListener('webglcontextlost', e => { e.preventDefault(); S.gpuLost = true; connOverlay('Graphics driver reset — recovering…'); });
+$('canvas').addEventListener('webglcontextrestored', () => { S.gpuLost = false; connOverlay(null); });
 // the paint workers and the texture cache's source hashes, once the page has loaded (texprep.js); while
 // the menu is up they get the first day's textures ready (a trip starts on day 1), all off this thread
 // (the few the page must paint itself only in long idle stretches while nobody is typing or moving the
@@ -68,26 +99,141 @@ setTimeOfDay(9);
 camera.position.set(0, 30, -120);
 camera.lookAt(0, 0, 100);
 
-$('nameInput').value = localStorage.getItem('nmdName') || '';
+$('nameInput').value = localStorage.getItem('nmdName') || window.desktop?.steam?.name || '';
 const myName = () => { const n = $('nameInput').value.trim() || 'Blob'; localStorage.setItem('nmdName', n); return n; };
+// what the last trip left to say (the host ended it, you left it), on the fresh menu
+try { const note = sessionStorage.getItem('nmdMenuNote'); if (note) { $('menuError').textContent = note; sessionStorage.removeItem('nmdMenuNote'); } } catch {}
+const BUILD = () => window.desktop?.build ?? null;   // the desktop build checks it runs the same game as the host
+// a seat to come back to: the server's resume token for this trip (kept for this tab's session)
+const savedSession = code => { try { const s = JSON.parse(sessionStorage.getItem('nmdSession') || 'null'); return s && s.code === code ? s.token : null; } catch { return null; } };
+
+// ---- the desktop build (the one on Steam) ----------------------------------------------------------
+// A trip is hosted on the player's own PC and friends come in through Steam (an invite, or Join Game in
+// the friends list): there are no trip codes to type. Without Steam running it plays solo.
+const DESK = window.desktop || null;
+const STEAM = DESK?.steam?.ok ? DESK.steam : null;
+// the menu's small print: the version (the build fingerprint after the + is what friends must share)
+const showVersion = build => { if (build) $('versionLabel').textContent = `Version ${build.split('+')[0]} (build ${build.split('+')[1] || '?'})`; };
+showVersion(DESK?.build);
+relabelPage();   // the help page's and the hints' key names, in the player's keyboard layout
+if (DESK) {
+  $('joinBox').classList.add('hidden');
+  $('quitBtn').classList.remove('hidden');
+  $('quitBtn').onclick = () => DESK.quit();
+  $('ctpQuit').classList.remove('hidden');
+  $('menuSteam').classList.remove('hidden');
+  $('menuSteam').textContent = STEAM
+    ? `On Steam as ${STEAM.name || 'you'}. Start a trip, then invite friends from it (Esc, then Invite Friends), or they can pick Join Game on you in their Steam friends list.`
+    : `${DESK.steam?.reason || 'Steam isn\'t running, so friends can\'t join.'} You can still drive solo.`;
+}
+// friends can join once the trip is up: a friends-only Steam lobby
+async function startHosting(code) {
+  if (!STEAM) return;
+  const r = await DESK.host(code).catch(e => ({ ok: false, msg: e.message }));
+  if (r?.ok) { $('ctpInvite').classList.remove('hidden'); toast('Friends can join you now: press Esc, then Invite Friends.', '#7CFC00', 6); }
+  else toast(`Friends can't join this trip: ${r?.msg || 'Steam said no.'}`, '#ffb4a2', 6);
+}
+async function inviteFriends() {
+  if (!STEAM) return;
+  document.exitPointerLock?.();
+  const r = await DESK.invite().catch(e => ({ ok: false, msg: e.message }));
+  if (!r?.ok) toast(r?.msg || 'Steam\'s invite window didn\'t open. Invite them from your Steam friends list instead.', '#ffb4a2', 5);
+}
+// a friend's trip, from an invite or Join Game: the lobby, then the bridge to the host's game
+async function joinFriend(id) {
+  if (!STEAM || S.phase !== 'menu' || $('hostBtn').disabled) return;
+  initAudio();
+  menuBusy('joinBtn');
+  $('menuError').textContent = 'Joining your friend\'s trip…';
+  const r = await DESK.joinLobby(id).catch(e => ({ ok: false, msg: e.message }));
+  if (!r?.ok) { menuBusy(null); $('menuError').textContent = r?.msg || 'Couldn\'t join that trip.'; return; }
+  await physReady;
+  try { await net.connect(r.wsUrl); }
+  catch (e) { menuBusy(null); $('menuError').textContent = e.message; DESK.leave(); return; }
+  S.hosting = false; S.viaSteam = true;
+  net.send({ t: 'join', name: myName(), room: r.code, build: BUILD(), rdy: 1 });
+}
+// an invite accepted while the game runs: straight in from the menu; mid-trip, ask first
+function onLobbyInvite(id) {
+  if (S.phase === 'menu') { DESK.takeLobby(); joinFriend(id); return; }
+  netModal('Join your friend\'s trip?', 'You\'re on a trip right now. Leave it and join theirs?', [
+    ['Join them', () => backToMenu(null)],          // the invite waits in the shell for the menu to take it
+    ['Stay here', () => { DESK.takeLobby(); $('netModal')?.remove(); }],
+  ]);
+}
+// the friends list shows what the crew is up to (Steam's rich presence)
+let presKey = '';
+function updatePresence() {
+  if (!STEAM) return;
+  const ph = S.phase === 'menu' ? 'menu' : S.g?.ph || 'camp', day = S.dayLabel || 1;
+  if (`${ph}|${day}` === presKey) return;
+  presKey = `${ph}|${day}`;
+  DESK.presence({ ph, day, biome: BIOME_BY_DAY[Math.min(day, BIOME_BY_DAY.length) - 1] });
+}
+if (STEAM) {
+  updatePresence();
+  DESK.onEvent(ev => { if (ev?.t === 'lobby') onLobbyInvite(String(ev.id)); });
+  DESK.takeLobby().then(id => { if (id) joinFriend(id); });
+}
+// while the menu waits for an answer the buttons say so, and a second click can't open a second socket
+let menuBusyT = 0;
+function menuBusy(which) {
+  clearTimeout(menuBusyT);
+  for (const [id, text] of [['hostBtn', 'Starting…'], ['joinBtn', 'Joining…']]) {
+    const b = $(id);
+    b.dataset.label ??= b.textContent;
+    b.disabled = !!which;
+    b.textContent = which === id ? text : b.dataset.label;
+  }
+  if (which) menuBusyT = setTimeout(() => menuBusy(null), 12000);
+}
 async function ensureConnected() {
   if (net.connected()) return true;
   try { await net.connect(); return true; } catch (e) { $('menuError').textContent = e.message; return false; }
 }
 $('hostBtn').onclick = async () => {
+  if ($('hostBtn').disabled) return;
   initAudio(); sfx.click();
+  menuBusy('hostBtn');
+  $('menuError').textContent = '';
   await physReady;
-  if (await ensureConnected()) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null });
+  S.hosting = true;
+  if (await ensureConnected()) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null, build: BUILD(), rdy: 1 });
+  else menuBusy(null);
 };
 $('joinBtn').onclick = async () => {
+  if ($('joinBtn').disabled) return;
   initAudio(); sfx.click();
   const code = $('codeInput').value.trim().toUpperCase();
-  if (code.length !== 4) { $('menuError').textContent = 'Room codes are 4 letters.'; return; }
+  if (code.length !== 4) { $('menuError').textContent = 'Trip codes are 4 characters.'; return; }
+  menuBusy('joinBtn');
+  $('menuError').textContent = '';
   await physReady;
-  if (await ensureConnected()) net.send({ t: 'join', name: myName(), room: code });
+  if (await ensureConnected()) net.send({ t: 'join', name: myName(), room: code, resume: savedSession(code), build: BUILD(), rdy: 1 });
+  else menuBusy(null);
 };
+$('helpOk').onclick = () => { $('help').classList.add('hidden'); askVoice(); };
+// Proximity voice is half the game: the first trip asks once (a card by the voice button, not a modal:
+// nobody is held up), and remembers the answer
+function askVoice() {
+  let asked = null;
+  try { asked = localStorage.getItem('nmdVoiceAsked'); } catch {}
+  if (asked || voice.V.on || !voice.V.supported || $('voiceAsk')) return;
+  const el = document.createElement('div');
+  el.id = 'voiceAsk'; el.className = 'voice-ask panel parchment';
+  el.innerHTML = '<b>Proximity voice chat</b><p>Hear whoever is near you in the game, from where they stand. Press Esc to use the mouse.</p><div class="row"><button class="btn small green" id="voiceAskYes">Use my mic</button><button class="btn small gray" id="voiceAskNo">Not now</button></div>';
+  $('game').appendChild(el);
+  const done = () => { try { localStorage.setItem('nmdVoiceAsked', '1'); } catch {} el.remove(); };
+  $('voiceAskYes').onclick = () => { done(); initAudio(); voice.joinVoice(); };
+  $('voiceAskNo').onclick = done;
+  setTimeout(() => { if (el.isConnected) el.remove(); }, 45000);
+}
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn').click(); });
-$('hCode').onclick = () => { navigator.clipboard?.writeText(S.code || ''); toast(`Room code ${S.code || ''} copied. Send it to the boys.`); };
+$('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('hostBtn').click(); });
+$('hCode').onclick = () => {
+  if (DESK) { inviteFriends(); return; }
+  navigator.clipboard?.writeText(S.code || ''); toast(`Room code ${S.code || ''} copied. Send it to the boys.`);
+};
 
 // ---- toasts & ui ---------------------------------------------------------------------
 
@@ -99,7 +245,7 @@ function toast(text, color = '#fff', secs = 4) {
   $('toasts').prepend(el);
   while ($('toasts').children.length > 5) $('toasts').lastChild.remove();
   setTimeout(() => { el.classList.add('fade'); setTimeout(() => el.remove(), 600); }, secs * 1000);
-  sfx.toast();
+  sfx.toast(/^#(7cfc00|9be15d|8bc34a|a5d6a7)/i.test(color) ? 'good' : /^#(ff8a80|ff5252|ffb4a2|e57373)/i.test(color) ? 'bad' : 'info');
 }
 
 function fmtClock(h) {
@@ -110,19 +256,41 @@ function fmtClock(h) {
 // ---- pointer lock & input -------------------------------------------------------------
 
 const canvas = $('canvas');
-const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden');
+const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden') || !!$('netModal')
+  || !$('settings').classList.contains('hidden') || !$('credits').classList.contains('hidden');
 canvas.addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
-$('clickToPlay').addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
+$('clickToPlay').addEventListener('click', e => { if (!e.target.closest('.ctp-row') && !uiOpen()) canvas.requestPointerLock?.(); });
+// Esc: the pointer comes free and this card offers the rest (the world keeps going: it's co-op)
+$('ctpInvite').onclick = () => inviteFriends();
+$('ctpLeave').onclick = () => netModal('Leave the trip?', DESK && S.hosting ? 'The trip runs on your PC: if you leave, it ends for everyone.' : 'Your seat goes to whoever joins next.', [
+  ['Leave', () => backToMenu(null)], ['Stay', () => $('netModal')?.remove()],
+]);
+$('ctpQuit').onclick = () => netModal('Quit the game?', S.hosting ? 'The trip runs on your PC: quitting ends it for everyone.' : 'Your friends keep driving without you.', [
+  ['Quit', () => DESK?.quit()], ['Stay', () => $('netModal')?.remove()],
+]);
+document.addEventListener('pointerlockerror', () => { if (S.phase === 'game') toast('Click again to look around.', '#fff', 2); });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
   $('clickToPlay').classList.toggle('hidden', locked || S.phase === 'menu' || uiOpen());
-  if (!locked) { inp.grab = false; for (const k in keys) keys[k] = false; }
+  if (!locked) { inp.grab = false; for (const k in keys) keys[k] = false; letGoOfTheWheel(); }
 });
+// the driver's hands leave the controls: say so at once (a frozen or hidden page sends nothing at all,
+// and the server only lets go of a silent driver's throttle after a moment)
+function letGoOfTheWheel() { if (me.mode === 'seat' && me.seat === 0) net.send({ t: 'drv', th: 0, st: 0, hb: 0 }); }
+// The wheel and the pedals go to the server 20 times a second on their own clock, not once a frame: on a
+// slow PC (a frame a second) the server would let go of a driver it hasn't heard from for a second
+setInterval(() => {
+  if (S.phase !== 'game' || me.mode !== 'seat' || me.seat !== 0 || !net.connected()) return;
+  const typingNow = uiOpen() || !isLocked();
+  net.send({ t: 'drv', th: typingNow ? 0 : (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0), st: typingNow ? 0 : (keys.a || keys.arrowleft ? 1 : 0) - (keys.d || keys.arrowright ? 1 : 0), hb: keys[' '] ? 1 : 0 });
+}, 50);
+document.addEventListener('visibilitychange', () => { if (document.hidden) letGoOfTheWheel(); });
+window.addEventListener('pagehide', letGoOfTheWheel);
 document.addEventListener('mousemove', e => {
   if (!locked) return;
-  const sens = 0.0022 * (Number(localStorage.getItem('nmdSens')) || 1);
+  const sens = 0.0022 * settings.sens;
   me.yaw -= e.movementX * sens;
-  me.pitch = Math.max(-1.45, Math.min(1.45, me.pitch + e.movementY * sens));
+  me.pitch = Math.max(-1.45, Math.min(1.45, me.pitch + e.movementY * sens * (settings.invertY ? -1 : 1)));
 });
 document.addEventListener('mousedown', e => {
   if (!isLocked()) return;
@@ -143,31 +311,39 @@ document.addEventListener('wheel', e => {
 
 window.addEventListener('keydown', e => {
   if (e.target.tagName === 'INPUT') return;
-  const k = e.key.toLowerCase();
+  // in game, Ctrl (crouch) and Cmd combinations are ours, not the browser's or the desktop shell's
+  // (Ctrl+W, Ctrl+R and friends used to close or reload the game mid-crouch)
+  if ((e.ctrlKey || e.metaKey) && S.phase !== 'menu') e.preventDefault();
+  const k = keyName(e);   // by position: WASD is ZQSD on AZERTY (keys.js)
   if (k === ' ' || k === 'tab') e.preventDefault();
   if (keys[k]) return;
   keys[k] = true;
   if (S.phase === 'menu') return;
+  // the night's receipt (shown while the mouse is captured): any of these keys puts it away
+  if (!$('receipt').classList.contains('hidden') && (k === 'e' || k === 'enter' || k === ' ' || k === 'escape')) { $('receipt').classList.add('hidden'); return; }
   if (k === 'e') onUse();
   else if (k === 'q') onDrop();
   else if (k === 'f') { mapRaised = !mapRaised; }
   else if (k === 'r' && me.mode === 'seat' && me.seat === 0) net.send({ t: 'use', kind: 'reel' });
   else if (k === 'h' && me.mode === 'seat' && me.seat === 0) net.send({ t: 'horn' });
   else if (k === 'v') voice.setPtt(true);
-  else if (k === 'm') voice.toggleMute();
+  else if (k === 'm') {
+    if (!voice.V.on) toast('Voice chat is off. JOIN VOICE is at the bottom left (press Esc for the mouse).', '#fff', 4);
+    else { voice.toggleMute(); toast(voice.V.muted ? `Mic muted (${keyLabel('M')})` : 'Mic on', voice.V.muted ? '#ffb4a2' : '#7CFC00', 2); }
+  }
   else if (k === 't') voice.setWalkieKey(true);
   else if (k === 'f1' || k === '?') { e.preventDefault(); $('help').classList.toggle('hidden'); }
   else if (/^[1-6]$/.test(k)) net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
   else if (k === 'escape') closeKeypad();
 });
 window.addEventListener('keyup', e => {
-  const k = e.key.toLowerCase();
+  const k = keyName(e);
   keys[k] = false;
   if (k === 'v') voice.setPtt(false);
   if (k === 't') voice.setWalkieKey(false);
   if (k === 'e') reviveT = 0;
 });
-window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; inp.grab = false; });
+window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; inp.grab = false; letGoOfTheWheel(); });
 
 // ---- interactions ----------------------------------------------------------------------
 
@@ -202,7 +378,7 @@ function doorNear() {
 
 function computeTarget() {
   if (!S.lw) return null;
-  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · R reel winch · H horn' : '[E] get up' };
+  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : '[E] get up' };
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
     const a = nearestAnchor();
@@ -336,9 +512,23 @@ $('kpCancel').onclick = closeKeypad;
 
 // The loading screen (the boot bar, reused): shown from the world message until the new world has
 // drawn a frame; the bar follows the day's textures getting ready.
+const TIPS = [
+  'The Repo Man collects at midnight. Every night.',
+  'Loot loses value every time it gets knocked about. Carry it gently.',
+  'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
+  'The road map is on the dash, and only whoever holds it can read it.',
+  'Walk into the RV to push it out of the mud.',
+  'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
+  'Walkie-talkies reach anyone else holding one, at any range. $150 at the store.',
+  'The winch: take the hook from the front bumper, clip it to a post, and the driver reels in with R.',
+  'Everyone in a bunk starts the next day.',
+  'The casino pays out to the whole crew. So do its losses.',
+];
+let tipN = Math.floor(Math.random() * TIPS.length);
 function loadingBar(on, frac = 0, text = 'Loading the road') {
   const el = $('loading');
   if (!on) { el.classList.add('hidden'); return; }
+  if (el.classList.contains('hidden') || !el.dataset.tip) { el.dataset.tip = '1'; $('loadingTip').textContent = TIPS[tipN++ % TIPS.length]; }
   el.classList.remove('hidden');
   el.classList.add('day');
   el.querySelector('span').textContent = text;
@@ -346,7 +536,7 @@ function loadingBar(on, frac = 0, text = 'Loading the road') {
   b.style.animation = 'none';
   b.style.width = `${Math.round(6 + 90 * Math.max(0, Math.min(1, frac)))}%`;
 }
-let buildSeq = 0, prefetched = null, recordTimer = 0;
+let buildSeq = 0, prefetched = null, recordTimer = 0, loadingDay = 'Loading the road';
 // Get the day's textures ready off the main thread before the build asks for them (texprep.js): from
 // the texture cache, else painted by the workers, the few that can't be painted there painted here
 // meanwhile. Never waits on a stuck worker: after 20 s without progress the build goes ahead and
@@ -357,7 +547,7 @@ async function prepareDay(W) {
   let last = performance.now();
   const t0 = performance.now();
   // none of this is needed to build: on any failure canvasFor paints what's missing, as before
-  const p = texPrep.prepare(names, { page: true, onProgress: (d, n) => { last = performance.now(); loadingBar(true, 0.85 * d / Math.max(1, n)); } })
+  const p = texPrep.prepare(names, { page: true, onProgress: (d, n) => { last = performance.now(); loadingBar(true, 0.85 * d / Math.max(1, n), loadingDay); } })
     .catch(e => { console.warn('textures:', e?.message || e); return null; });
   let stuck = false, done = false;
   p.then(() => { done = true; });
@@ -376,7 +566,10 @@ async function buildDay(m) {
   clearTimeout(recordTimer);
   texPrep.record(false);
   texPrep.building(true);   // no texture-cache writes competing with the build
-  loadingBar(true, 0);
+  const biome = BIOMES[BIOME_BY_DAY[Math.min(m.day, BIOME_BY_DAY.length) - 1]];
+  loadingDay = `Day ${m.day} of ${C.DAYS} · ${biome?.name || 'the road'}`;
+  $('loading').dataset.tip = '';
+  loadingBar(true, 0, loadingDay);
   await physReady;
   prefetched = null;
   const W = generateLeg(m.seed, m.day);
@@ -397,6 +590,9 @@ async function buildDay(m) {
   S.parts = m.parts;
   S.door = !!m.door;
   S.gatesOpen = new Set();
+  // where campfires crackle (ambience.js)
+  S.fires = [W.camp?.fire, W.town?.fire].filter(Boolean).map(f => ({ x: f.x, y: W.heightAt(f.x, f.z), z: f.z }));
+  newDayMusic();
   S.lw = new LocalWorld(W, S.parts);
   setBiome(W.biome);
   S.wv = buildWorld(W);
@@ -421,6 +617,7 @@ async function buildDay(m) {
     try { q.fn(); } catch (e) { (window.reportError || console.error)(e); }
   }
   S.builtAt = performance.now();   // tools/loadtime.mjs: the world (and its loot) is in
+  if ($('help').classList.contains('hidden')) setTimeout(askVoice, 1500);
   // the loading screen stays up until the new world has drawn; then, once things are quiet, what was
   // painted this session goes into the texture cache (the workers encode and write it in the
   // background) and the list of what this build asked for is kept for next time
@@ -494,10 +691,96 @@ function removeProp(id, fx = null) {
   if (me.holding?.id === id) me.holding = null;
 }
 
+// ---- losing the connection ---------------------------------------------------------------------
+// The host's game IS the server: when it closes, the trip is over, and every guest is told why. Anything
+// else is a dropped connection: the server keeps the seat for 90 s, so come back to it with the token.
+let hostLeft = null, reconnecting = false, welcomeWait = null, lagShown = false;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+function connOverlay(text) {
+  let el = $('connBox');
+  if (!text) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'connBox'; el.className = 'conn-box'; document.body.appendChild(el); }
+  el.textContent = text;
+}
+function netModal(title, body, buttons) {
+  $('netModal')?.remove();
+  const el = document.createElement('div');
+  el.id = 'netModal';
+  el.className = 'panel parchment net-modal';
+  el.innerHTML = `<h2>${escapeHtml(title)}</h2><p>${escapeHtml(body)}</p><div class="row"></div>`;
+  for (const [label, fn] of buttons) { const b = document.createElement('button'); b.className = 'btn big'; b.textContent = label; b.onclick = fn; el.querySelector('.row').appendChild(b); }
+  document.body.appendChild(el);
+  document.exitPointerLock?.();
+}
+function endTrip(why) {
+  connOverlay(null);
+  reconnecting = false;
+  S.tripOver = why;
+  netModal('The trip is over', why, [['Back to menu', () => backToMenu(why)]]);
+}
+async function backToMenu(note) {
+  quietAmbience();
+  net.send({ t: 'leave' });
+  net.close(1000, 'left');
+  try { await DESK?.leave(); } catch {}          // the desktop: the host's trip ends; a guest leaves the lobby
+  try { sessionStorage.removeItem('nmdSession'); if (note) sessionStorage.setItem('nmdMenuNote', note); } catch {}
+  // (the browser build: if its server is gone too, a reload would land on the browser's error page)
+  if (/^https?:$/.test(location.protocol)) {
+    try { await fetch(location.href, { cache: 'no-store' }); }
+    catch { netModal('The game server is gone', 'Close this tab, or start the game again.', []); return; }
+  }
+  location.reload();
+}
+S.backToMenu = backToMenu;
+S.testDrop = () => net.drop();
+S.lastMsgAt = () => net.lastMessageAt();
+S.setSetting = setSetting;     // tools: S.setSetting('tutorial', false) before screenshots
+async function reconnect() {
+  if (reconnecting) return;
+  reconnecting = true;
+  const t0 = performance.now();
+  let delay = 1000;
+  while (reconnecting && performance.now() - t0 < 60000) {
+    connOverlay(`Connection lost — reconnecting… (${Math.ceil((60000 - (performance.now() - t0)) / 1000)} s)`);
+    try {
+      await net.connect();
+      const got = new Promise((resolve, reject) => { welcomeWait = { resolve, reject }; setTimeout(() => reject({ code: 'timeout' }), 8000); });
+      net.send({ t: 'join', name: myName(), room: S.code, resume: savedSession(S.code), build: BUILD(), rdy: 1 });
+      await got;
+      welcomeWait = null;
+      reconnecting = false;
+      connOverlay(null);
+      toast('Reconnected.', '#7CFC00', 3);
+      return;
+    } catch (e) {
+      welcomeWait = null;
+      if (e?.code === 'noroom' || e?.code === 'version' || e?.code === 'full') { reconnecting = false; endTrip(e.msg || 'The trip is gone.'); return; }
+      net.close();
+    }
+    await sleep(delay);
+    delay = Math.min(5000, delay * 2);
+  }
+  if (reconnecting) { reconnecting = false; endTrip('Couldn\'t reach the trip again. The host may have closed the game.'); }
+}
+// no word from the host for 3 s: say so; for 15 s: treat it as a dropped connection
+function watchdog(now) {
+  if (S.phase !== 'game' || worldBuilding || reconnecting || S.tripOver || S.gpuLost || !net.connected()) {
+    if (lagShown) { lagShown = false; connOverlay(null); }
+    return;
+  }
+  const quiet = now - net.lastMessageAt();
+  if (quiet > 15000) { lagShown = false; net.close(4005, 'timeout'); reconnect(); return; }
+  if ((quiet > 3000) !== lagShown) { lagShown = quiet > 3000; connOverlay(lagShown ? 'Connection problem… waiting for the host' : null); }
+}
+
 // ---- network ------------------------------------------------------------------------------
 
 net.on('welcome', m => {
+  menuBusy(null);
+  const back = S.phase === 'game';          // a reconnect: the game's screen is already up
   S.selfId = m.id; S.code = m.code;
+  welcomeWait?.resolve(m);
+  if (back) return;
   $('menuError').textContent = '';
   $('menu').classList.add('hidden');
   $('game').classList.remove('hidden');
@@ -505,17 +788,51 @@ net.on('welcome', m => {
   $('clickToPlay').classList.remove('hidden');
   voice.initVoice(m.id, renderVoiceUI);
   renderVoiceUI();
-  $('hCode').innerHTML = `<span class="k">Room</span>${escapeHtml(m.code)}`;   // the invite code (the gate's keypad wants a different one)
+  // the invite code (the gate's keypad wants a different one); on Steam, the invite window
+  if (!DESK) $('hCode').innerHTML = `<span class="k">Room</span>${escapeHtml(m.code)}`;
+  else if (STEAM) $('hCode').innerHTML = '<span class="k">Steam</span>Invite';
+  else $('hCode').classList.add('hidden');
+  if (STEAM && S.viaSteam) $('ctpInvite').classList.remove('hidden');
+  if (DESK && S.hosting) startHosting(m.code);
+  updatePresence();
   if (!localStorage.getItem('nmdHelpSeen')) { $('help').classList.remove('hidden'); localStorage.setItem('nmdHelpSeen', '1'); }
 });
-net.on('error', m => { if (S.phase === 'menu') $('menuError').textContent = m.msg; else toast(m.msg, '#ff8a80'); });
-net.on('_close', () => {
-  if (S.phase !== 'menu') { location.reload(); }
+net.on('session', m => { showVersion(m.build); try { sessionStorage.setItem('nmdSession', JSON.stringify({ code: S.code, token: m.resume })); } catch {} });
+net.on('hostleft', m => { hostLeft = m.msg || 'The host ended the trip.'; });
+net.on('error', m => {
+  menuBusy(null);
+  if (welcomeWait) { welcomeWait.reject(m); return; }
+  if (S.phase === 'menu' && S.viaSteam) { S.viaSteam = false; net.close(); DESK?.leave(); }
+  if (S.phase === 'menu') $('menuError').textContent = m.msg; else toast(m.msg, '#ff8a80');
+});
+net.on('_close', ev => {
+  menuBusy(null);
+  if (S.phase === 'menu' || S.tripOver) return;
+  if (hostLeft || ev.code === 4000) return endTrip(hostLeft || 'The host ended the trip.');
+  if (ev.code === 4002) return endTrip('You joined this trip again from somewhere else.');
+  reconnect();
 });
 net.on('world', m => {
   me.hasHook = false;   // a new world comes with the hook on its winch
+  // back after a dropped connection, on the same day: the world is already built (the props, the
+  // teleport and the rest follow as usual)
+  if (S.W && !worldBuilding && S.seed === m.seed && S.dayLabel === m.day) {
+    S.parts = m.parts; S.door = !!m.door;
+    rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door);
+    net.send({ t: 'ready' });
+    return;
+  }
   const newDay = S.dayLabel != null && S.dayLabel !== m.day;
-  buildDay(m).then(built => { if (built && newDay) { sfx.day(); flash(`DAY ${m.day}`); } });
+  buildDay(m).then(built => {
+    if (!built) return;
+    net.send({ t: 'ready' });   // snapshots wait for this (a page still building would only drop them)
+    if (newDay) { sfx.day(); flash(`DAY ${m.day}`); }
+  }, e => {
+    worldBuilding = false;
+    loadingBar(false);
+    (window.reportError || console.error)(e);
+    netModal('Couldn\'t build the day', String(e?.message || e), [['Try again', () => { $('netModal')?.remove(); buildDay(m).then(ok => { if (ok) net.send({ t: 'ready' }); }, () => backToMenu('The day couldn\'t be built.')); }], ['Back to menu', () => backToMenu(null)]]);
+  });
   $('receipt').classList.add('hidden');
   $('overScreen').classList.add('hidden');
 });
@@ -553,6 +870,7 @@ net.on('s', m => {
   S.interp.push(m, performance.now());
   S.g = m.g;
   onPhase(m.g.ph);
+  updatePresence();
   S.door = !!m.g.door;
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
@@ -631,11 +949,12 @@ function showReceipt(m) {
     ${row('Bank', fmt$(m.bank))}
     ${!m.paid ? `<p class="bad">The Repo Man took: <b>${!m.parts.doors && m.parts.roof ? 'the doors' : !m.parts.roof ? 'the roof' : 'nothing (yet)'}</b></p>` : ''}
     <p class="hint">Campfire's lit. The store is open. When everyone's in a bunk (E on the bed in the RV), day ${m.day + 1} starts.</p>
-    <button class="btn small green" id="receiptClose">Okay</button>`;
+    <button class="btn small green" id="receiptClose">[E] Okay</button>`;
   $('receipt').classList.remove('hidden');
   $('receiptClose').onclick = () => $('receipt').classList.add('hidden');
   sfx.sleep();
 }
+let overTimer = 0;
 function showOver(m) {
   const s = m.stats || {};
   $('overScreen').innerHTML = m.won
@@ -648,9 +967,19 @@ function showOver(m) {
     <div class="rrow"><span>Knockouts</span><b>${s.kos || 0}</b></div>
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
-    <p class="hint">A new run starts in a few seconds.</p>`;
+    <p class="hint" id="overNext"></p>
+    <div class="row"><button class="btn small pink" id="overLeave">Leave Trip</button></div>`;
   $('overScreen').classList.remove('hidden');
-  (m.won ? sfx.win : sfx.repo)();
+  $('overLeave').onclick = () => backToMenu(null);
+  const until = performance.now() + (m.next ?? 25) * 1000;
+  clearInterval(overTimer);
+  overTimer = setInterval(() => {
+    const left = Math.ceil((until - performance.now()) / 1000);
+    if (!$('overNext') || left < 0) { clearInterval(overTimer); return; }
+    $('overNext').textContent = left > 0 ? `A new trip starts in ${left} s.` : 'Starting a new trip…';
+  }, 250);
+  document.exitPointerLock?.();
+  (m.won ? sfx.owned : sfx.repo)();
 }
 
 // ---- little fx -------------------------------------------------------------------------------
@@ -692,8 +1021,209 @@ function flash(text) {
 function positional(at, fn) {
   if (!at) return fn();
   const d = Math.hypot(at.x - camera.position.x, at.y - camera.position.y, at.z - camera.position.z);
-  if (d < 45) fn();
+  if (d < 60) sfxAt({ x: at.x, y: at.y, z: at.z }, fn);
 }
+
+
+// ---- sound around you: other players' feet, the engine, brakes; the radio and the casino's band ------
+
+const feet = new Map();          // id -> where they were last frame and how far they've walked since a step
+let lastDrv = null, lastRvSpeed = 0, brakeAt = 0;
+function worldSounds(dt, rv, rvSpeed, others) {
+  for (const [id, st] of others) {
+    const here = st.par ? st.lp : st.pos;
+    const f = feet.get(id);
+    if (!f || f.par !== !!st.par) { feet.set(id, { x: here.x, z: here.z, par: !!st.par, walked: 0 }); continue; }
+    const d = Math.hypot(here.x - f.x, here.z - f.z);
+    f.x = here.x; f.z = here.z;
+    if (st.mode !== C.MODE.WALK || d / Math.max(dt, 1e-3) < 0.8 || d > 2) continue;
+    f.walked += d;
+    if (f.walked > 1.7) {
+      f.walked = 0;
+      if (Math.hypot(st.pos.x - camera.position.x, st.pos.z - camera.position.z) < 25) sfxAt(st.pos, () => sfx.step(0.9));
+    }
+  }
+  for (const id of feet.keys()) if (!others.has(id)) feet.delete(id);
+  // the engine turning over or dying, and the brakes when the RV slows hard
+  const drv = S.g?.drv ?? null;
+  if (rv && lastDrv !== null && !!drv !== !!lastDrv) sfxAt(rv.p, () => (drv ? sfx.engineStart() : sfx.engineStop()));
+  lastDrv = drv;
+  if (rv) {
+    const decel = (lastRvSpeed - rvSpeed) / Math.max(dt, 1e-3);
+    if (rvSpeed > 3 && decel > 5 && performance.now() - brakeAt > 1500) { brakeAt = performance.now(); sfxAt(rv.p, () => sfx.brake(Math.min(1, decel / 10))); }
+    lastRvSpeed = rvSpeed;
+  }
+}
+
+// Music: the menu plays the country station; in a trip, the RV's radio plays while someone drives (from
+// the dash: muffled from outside), switching to the 'midnight' station in the last hour before the
+// Repo Man; the casino has its lounge band. All of it is music.js, synthesized.
+const R = { menu: null, rv: null, casino: null };
+function radioIn(out, seed, station) { const r = createRadio(audioCtx(), out, { seed, station }); r.on = false; r.station = station; return r; }
+function setRadio(r, on) { if (!r || r.on === on) return; r.on = on; if (on) r.start(0); else r.stop(); }
+function place(p, at) { if (p.positionX) { p.positionX.value = at.x; p.positionY.value = at.y; p.positionZ.value = at.z; } else p.setPosition(at.x, at.y, at.z); }
+function newDayMusic() {
+  // (a new day: a new tune; the old radios fade out and are let go)
+  for (const k of ['rv', 'casino']) if (R[k]) { setRadio(R[k], false); const old = R[k]; setTimeout(() => { try { old.out.disconnect(); } catch {} }, 3000); R[k] = null; }
+}
+function updateMusic(rv, inMyRV) {
+  const ctx = audioCtx();
+  if (!ctx || ctx.state !== 'running') return;
+  if (!R.menu) R.menu = radioIn(bus.music, 7, 'country');
+  setRadio(R.menu, S.phase === 'menu');
+  if (S.phase !== 'game' || !S.W) { setRadio(R.rv, false); setRadio(R.casino, false); return; }
+  const g = S.g;
+  if (!R.rv) {
+    const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 20000;
+    const pan = panner({ x: 0, y: -1000, z: 0 }, { ref: 4, max: 70, out: bus.music });
+    lp.connect(pan);
+    R.rv = radioIn(lp, (S.seed || 1) * 7 + (S.dayLabel || 1), 'country');
+    R.rv.lp = lp; R.rv.pan = pan; R.rv.out = pan;
+  }
+  setRadio(R.rv, !!(settings.radio && g?.drv && rv && g.ph !== 'night' && g.ph !== 'over'));
+  if (R.rv.on && rv) {
+    const late = g.ph === 'road' && g.clk >= 22.5;
+    const st = late ? 'midnight' : 'country';
+    if (st !== R.rv.station) { R.rv.setStation(st); R.rv.station = st; }
+    if (late) R.rv.setTension((g.clk - 22.5) / 1.5);
+    place(R.rv.pan, toWorld(rv.p, rv.q, { x: 0, y: 1.3, z: 3.4 }));
+    R.rv.lp.frequency.setTargetAtTime(inMyRV ? 20000 : 1300, ctx.currentTime, 0.2);
+  }
+  const cas = S.W.town?.casino;
+  if (cas) {
+    if (!R.casino) {
+      const pan = panner({ x: cas.x, y: (cas.y ?? S.W.heightAt(cas.x, cas.z)) + 2, z: cas.z }, { ref: 5, max: 45, out: bus.music });
+      R.casino = radioIn(pan, 3 + (S.dayLabel || 1), 'lounge');
+      R.casino.out = pan;
+    }
+    setRadio(R.casino, g?.ph !== 'over' && Math.hypot(cas.x - me.pos.x, cas.z - me.pos.z) < 50);
+  }
+}
+// the menu's music starts with the first click (browsers keep audio off until one) or at once in the
+// desktop build
+const menuTick = () => { if (S.phase === 'menu') updateMusic(null, false); };
+setInterval(menuTick, 500);
+window.addEventListener('pointerdown', () => initAudio(), { once: true, capture: true });
+if (DESK) initAudio();
+
+// ---- settings (Settings panel: the menu's button, or the Esc card) ---------------------------------
+
+const pct = v => `${Math.round(v * 100)}%`;
+const SETTINGS_UI = [
+  ['Controls'],
+  ['sens', 'Mouse sensitivity', 'range', 0.3, 2.5, 0.05, v => v.toFixed(2)],
+  ['invertY', 'Invert mouse up and down', 'check'],
+  ['fov', 'Field of view', 'range', 60, 100, 1, v => `${v}°`],
+  ['Audio'],
+  ['master', 'Master volume', 'range', 0, 1, 0.05, pct],
+  ['music', 'Music', 'range', 0, 1, 0.05, pct],
+  ['sfx', 'Sound effects', 'range', 0, 1, 0.05, pct],
+  ['amb', 'Ambience', 'range', 0, 1, 0.05, pct],
+  ['voice', 'Voice chat', 'range', 0, 1, 0.05, pct],
+  ['radio', 'The RV radio plays while someone drives', 'check'],
+  ['muteInBackground', 'Mute when the game is in the background', 'check'],
+  ['Video'],
+  ['quality', 'Graphics', 'select', [['auto', 'Auto'], ['low', 'Low'], ['medium', 'Medium'], ['high', 'High']]],
+  ['fpsCap', 'Frame rate limit', 'select', [[0, 'None'], [30, '30'], [60, '60'], [120, '120']]],
+  ['Interface'],
+  ['uiScale', 'Interface size', 'range', 0.8, 1.6, 0.05, pct],
+  ['tutorial', 'First-trip hints in the quest tracker', 'check'],
+];
+function renderSettings() {
+  const body = $('settingsBody');
+  body.innerHTML = '';
+  for (const [k, label, kind, ...a] of SETTINGS_UI) {
+    if (!label) { const h = document.createElement('h3'); h.textContent = k; body.appendChild(h); continue; }
+    const row = document.createElement('label'); row.className = 'srow';
+    const name = document.createElement('span'); name.textContent = label;
+    const val = document.createElement('span'); val.className = 'sval';
+    let input;
+    if (kind === 'range') {
+      input = document.createElement('input'); input.type = 'range'; input.min = a[0]; input.max = a[1]; input.step = a[2]; input.value = settings[k];
+      val.textContent = a[3](settings[k]);
+      input.oninput = () => { setSetting(k, input.value); val.textContent = a[3](settings[k]); };
+    } else if (kind === 'check') {
+      input = document.createElement('input'); input.type = 'checkbox'; input.checked = settings[k];
+      input.onchange = () => setSetting(k, input.checked);
+    } else {
+      input = document.createElement('select');
+      for (const [v, t] of a[0]) { const o = document.createElement('option'); o.value = v; o.textContent = t; if (String(settings[k]) === String(v)) o.selected = true; input.appendChild(o); }
+      input.onchange = () => setSetting(k, input.value);
+      if (k === 'quality') val.textContent = settings.quality === 'auto' ? S.quality : '';
+    }
+    input.dataset.setting = k;
+    row.append(name, input, val);
+    body.appendChild(row);
+  }
+  if (DESK) {
+    const row = document.createElement('div'); row.className = 'srow';
+    const name = document.createElement('span'); name.textContent = 'Fullscreen (F11)';
+    const b = document.createElement('button'); b.className = 'btn small gray'; b.textContent = 'Toggle';
+    b.onclick = () => DESK.setFullscreen(null);
+    row.append(name, b, document.createElement('span'));
+    $('settingsBody').appendChild(row);
+  }
+}
+function openPanel(id) {
+  document.exitPointerLock?.();
+  if (id === 'settings') renderSettings();
+  $(id).classList.remove('hidden');
+  $('clickToPlay').classList.add('hidden');
+}
+function closePanel(id) {
+  $(id).classList.add('hidden');
+  if (S.phase === 'game' && !locked) $('clickToPlay').classList.remove('hidden');
+}
+$('settingsBtn').onclick = () => { sfx.click(); openPanel('settings'); };
+$('ctpSettings').onclick = () => openPanel('settings');
+$('settingsClose').onclick = () => closePanel('settings');
+$('settingsReset').onclick = () => { resetSettings(); renderSettings(); };
+$('creditsBtn').onclick = () => { sfx.click(); openPanel('credits'); };
+$('creditsClose').onclick = () => closePanel('credits');
+for (const b of document.querySelectorAll('.btn')) b.addEventListener('pointerenter', () => sfx.hover());
+
+// graphics quality: 'auto' guesses from the GPU's name, then watches the first minute of play and steps
+// down if frames come too slowly (and says so once). Tools force one with ?quality=high.
+const forcedQ = new URLSearchParams(location.search).get('quality');
+let autoQ = null;
+try { autoQ = localStorage.getItem('nmdAutoQ'); } catch {}
+function qualityLevel() {
+  if (/^(low|medium|high)$/.test(forcedQ || '')) return forcedQ;
+  if (settings.quality !== 'auto') return settings.quality;
+  return (autoQ ||= guessQuality());
+}
+function applyQuality() { const q = qualityLevel(); setRenderQuality(q); setClutterQuality(q); S.quality = q; }
+applyQuality();
+const probe = { t: 0, frames: [], done: false };
+function probeQuality(dt) {
+  if (probe.done || settings.quality !== 'auto' || forcedQ || worldBuilding || S.phase !== 'game') return;
+  probe.t += dt;
+  if (probe.t < 5) return;                 // (the first seconds after a load are never typical)
+  probe.frames.push(dt);
+  if (probe.t < 20) return;
+  probe.done = true;
+  const f = probe.frames.sort((a, b) => a - b), p90 = f[Math.floor(f.length * 0.9)] * 1000;
+  const down = { high: 'medium', medium: 'low' }[S.quality];
+  if (p90 > 30 && down) {
+    autoQ = down;
+    try { localStorage.setItem('nmdAutoQ', down); } catch {}
+    applyQuality();
+    toast(`Graphics set to ${down[0].toUpperCase() + down.slice(1)} for this PC (it was running slow). Change it in Settings.`, '#fff', 7);
+  }
+}
+S.gpu = () => ({ name: gpuName(), quality: S.quality });
+// the interface grows with the window (900 px tall = 1x, up to 2x) and the Interface size setting
+function applyUiScale() {
+  const base = Math.min(2, Math.max(1, window.innerHeight / 900)) * (DESK?.steam?.deck ? 1.1 : 1);
+  document.documentElement.style.setProperty('--ui', (base * settings.uiScale).toFixed(3));
+}
+window.addEventListener('resize', applyUiScale);
+applyUiScale();
+onSettings(k => {
+  if (k === 'quality') { applyQuality(); if (S.W) toast('The grass follows on the next day.', '#fff', 3); }
+  if (k === 'uiScale') applyUiScale();
+  if (k === 'sens') $('sensInput').value = settings.sens;
+});
 
 // ---- voice ui (dock + settings panel) ---------------------------------------------------------
 
@@ -709,7 +1239,7 @@ function renderVoiceUI() {
   if (VV.on) {
     $('voiceMuteBtn').textContent = '';   // CSS paints the mic / muted-mic icon from the .off class
     $('voiceMuteBtn').classList.toggle('off', VV.muted);
-    $('voiceTxHint').textContent = VV.muted ? 'muted (M)' : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : 'hold V to talk') : 'proximity mic';
+    $('voiceTxHint').textContent = VV.muted ? `muted (${keyLabel('M')})` : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : `hold ${keyLabel('V')} to talk`) : 'proximity mic';
   }
   const rows = $('voicePeerRows');
   rows.innerHTML = '';
@@ -737,15 +1267,24 @@ $('voicePanelClose').onclick = () => $('voicePanel').classList.add('hidden');
 $('voiceMicSel').onchange = e => voice.setMic(e.target.value);
 $('voiceMasterVol').oninput = e => voice.setMasterVol(Number(e.target.value));
 document.querySelectorAll('input[name=voiceMode]').forEach(r => { r.onchange = () => voice.setMode(r.value); });
-$('sensInput').value = localStorage.getItem('nmdSens') || '1';
-$('sensInput').oninput = e => localStorage.setItem('nmdSens', e.target.value);
+$('sensInput').value = settings.sens;
+$('sensInput').oninput = e => setSetting('sens', e.target.value);
 
 // ---- the frame ------------------------------------------------------------------------------
 
 let lastT = performance.now(), time = 0;
 const _v = new THREE.Vector3();
 
+// if a frame's logic throws, the view still draws (and the error is reported once per frame, as before)
+let lastFrameAt = 0;
 function frame(now) {
+  // a frame-rate limit (Settings > Video): skip this display refresh if the last frame was too recent
+  if (settings.fpsCap && now - lastFrameAt < 1000 / settings.fpsCap - 2) { requestAnimationFrame(frame); return; }
+  lastFrameAt = now;
+  try { frameInner(now); }
+  catch (e) { (window.reportError || console.error)(e); try { if (!S.noRender && S.W && !worldBuilding) render(); } catch {} }
+}
+function frameInner(now) {
   // test/debug hooks
 S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.y, dz = z - e.z; me.yaw = Math.atan2(dx, dz); me.pitch = -Math.atan2(dy, Math.hypot(dx, dz)); };
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
@@ -758,6 +1297,7 @@ requestAnimationFrame(frame);
   time += dt;
   S.frames = (S.frames || 0) + 1;
   S.frameAt = now;
+  watchdog(now);
   // while a day loads, the last frame stays up under the loading bar: re-rendering the old scene would
   // only take time from the paint workers (and on a software GPU a night frame costs seconds)
   if (!S.W || worldBuilding || !S.lw) { if (!S.noRender && !worldBuilding) render(); return; }
@@ -787,7 +1327,7 @@ requestAnimationFrame(frame);
       if (!s) continue;
       let pos = s.p, yaw = s.yaw;
       if (s.par && rv) { pos = toWorld(rv.p, rv.q, s.p); yaw = s.yaw + qYaw(rv.q); }
-      others.set(p.id, { pos, yaw, pitch: s.pitch, mode: s.mode, flags: s.flags });
+      others.set(p.id, { pos, yaw, pitch: s.pitch, mode: s.mode, flags: s.flags, par: s.par, lp: s.p });
       S.lw.setPlayer(p.id, pos, s.mode === C.MODE.KO);
     }
   }
@@ -829,11 +1369,7 @@ requestAnimationFrame(frame);
     if (voice.V.walkieKey && S.myWalkie) pose.f |= C.FLAG.WALKIE_TX;
     net.send(pose);
   }
-  if (me.mode === 'seat' && me.seat === 0 && now - lastDrive > 50) {
-    lastDrive = now;
-    const typingNow = uiOpen();
-    net.send({ t: 'drv', th: typingNow ? 0 : (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0), st: typingNow ? 0 : (keys.a || keys.arrowleft ? 1 : 0) - (keys.d || keys.arrowright ? 1 : 0), hb: keys[' '] ? 1 : 0 });
-  }
+
 
   // camera
   const eye = me.eye(rv), look = me.look();
@@ -844,7 +1380,7 @@ requestAnimationFrame(frame);
     camera.lookAt(ex + Math.sin(me.yaw), ey + 0.9, ez + Math.cos(me.yaw));
     camera.rotation.z += Math.sin(time * 0.7) * 0.25;
   } else camera.lookAt(ex + look.x, ey + look.y, ez + look.z);
-  camera.fov = 74 + (me.sprinting ? 6 : 0);
+  camera.fov = settings.fov + (me.sprinting ? 6 : 0);
   camera.updateProjectionMatrix();
 
   // views of other players
@@ -873,7 +1409,7 @@ requestAnimationFrame(frame);
 
   // what am I looking at
   target = computeTarget();
-  $('prompt').textContent = target?.label || '';
+  $('prompt').textContent = keysIn(target?.label || '');
   $('prompt').classList.toggle('hidden', !target?.label || (me.holding?.type === 'map' && mapRaised));   // the raised map covers the view
   if (target?.kind === 'revive' && keys.e && reviveT > 0) {
     reviveT += dt;
@@ -902,11 +1438,19 @@ requestAnimationFrame(frame);
   const drv = S.g?.drv;
   const rvSpeed = rv ? Math.hypot(rv.v.x, rv.v.z) : 0;
   const rvDist = rv ? Math.hypot(rv.p.x - me.pos.x, rv.p.y - me.pos.y, rv.p.z - me.pos.z) : 999;
+  const inMyRV = !!me.par && insideRV(...Object.values(me.lp || { x: 9, y: 9, z: 9 }));
+  setListener(camera.position, look);
   setLoops({
     engineOn: !!drv, rpm: Math.min(1.4, rvSpeed / 12), near: Math.max(0, 1 - rvDist / 60),
     winchOn: !!S.hook?.reeling && rvDist < 50,
-    windAmt: me.par ? Math.min(1, rvSpeed / 14) * (insideRV(...Object.values(me.lp || { x: 9, y: 9, z: 9 })) ? 0.2 : 1) : 0.15 + Math.max(0, me.pos.y - S.W.roadY(me.pos.z)) / 40,
+    windAmt: me.par ? Math.min(1, rvSpeed / 14) * (inMyRV ? 0.2 : 1) : 0.15 + Math.max(0, me.pos.y - S.W.roadY(me.pos.z)) / 40,
+    rv: rv?.p, speed: rv ? rvSpeed : 0,
   });
+  worldSounds(dt, rv, rvSpeed, others);
+  probeQuality(dt);
+  tutWatch(inMyRV);
+  updateAmbience({ pos: camera.position, biome: S.W.biome, night, inside: inMyRV, fires: S.fires }, dt);
+  updateMusic(rv, inMyRV);
   updateVoice(others);
   // walkie static when someone keys up
   const tx = new Set([...others].filter(([, s]) => s.flags & C.FLAG.WALKIE_TX).map(([id]) => id));
@@ -998,7 +1542,8 @@ function updateCasino(dt) {
   w.flipLabel.userData.set(f.busy ? 'FLIPPING…' : f.last && f.last.ago < 4 ? (f.last.win ? `DOUBLED! +${fmt$(f.last.stake)}` : `NOTHING. -${fmt$(f.last.stake)}`) : `DOUBLE OR NOTHING · stake ${fmt$(f.stake)}`,
     f.busy ? '#ffd166' : f.last && f.last.ago < 4 ? (f.last.win ? '#7CFC00' : '#ff5252') : '#ffd166');
   w.coin.rotation.z += dt * (f.busy ? 25 : 0.6);
-  w.pawnLabel.userData.set(g.pawn ? `ED OFFERS ${fmt$(g.pawn)} · ring the bell` : 'PUT LOOT ON THE COUNTER', g.pawn ? '#7CFC00' : '#ffe9a8');
+  const offer = (g.pawn || 0) + (g.dock || 0);
+  w.pawnLabel.userData.set(offer ? `ED OFFERS ${fmt$(offer)}${g.dock ? ' FOR THE LOT' : ''} · ring the bell` : 'LOOT ON THE COUNTER, OR THE RV OUTSIDE', offer ? '#7CFC00' : '#ffe9a8');
   w.hitPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.sin(time * 6) * 0.2 : 0.15;
   w.standPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.cos(time * 6) * 0.2 : 0.15;
 }
@@ -1013,11 +1558,11 @@ function hud(rv) {
     $('hClock').classList.toggle('late', g.ph === 'road' && g.clk >= 21);
     $('hBank').textContent = `BANK ${fmt$(g.bank)}`;
     $('hBank').classList.toggle('neg', g.bank < 0);
-    $('hDue').textContent = g.paid ? `PAID ✓` : `DUE ${fmt$(g.due)} @ MIDNIGHT`;
+    $('hDue').textContent = g.paid ? `PAID ✓` : g.bank >= g.due ? `DUE ${fmt$(g.due)} · COVERED ✓` : `DUE ${fmt$(g.due)} @ MIDNIGHT`;
     $('hDue').classList.toggle('ok', !!g.paid || g.bank >= g.due);
-    $('hStrikes').textContent = `STRIKES ${g.str}/${C.STRIKES_TO_LOSE - 1}`;
+    $('hStrikes').textContent = `MISSED ${g.str}/${C.STRIKES_TO_LOSE}`;
     $('hStrikes').classList.toggle('red', g.str > 0);
-    $('hStrikes').title = 'Missed payments. Two strikes take parts of the RV. The third takes the RV.';
+    $('hStrikes').title = 'Missed payments: the first two take the doors and the roof, the third takes the RV.';
   }
   const pct = Math.max(0, me.stamina / C.STAMINA.MAX * 100);
   $('stamFill').style.width = `${pct}%`;
@@ -1032,10 +1577,14 @@ function hud(rv) {
   $('heldLabel').textContent = held;
   $('heldLabel').classList.toggle('hidden', !held);
   $('koOverlay').classList.toggle('hidden', me.mode !== 'ko');
-  if (me.mode === 'ko') $('koT').textContent = `${Math.ceil(me.koT)}s — or until a friend picks you up (hold E). Waking up alone costs ${fmt$(C.medBill(g?.day || 1))}.`;
+  if (me.mode === 'ko') {
+    const alone = (S.meta?.players.length || 1) < 2;
+    $('koT').textContent = alone ? `You'll wake up in ${Math.ceil(me.koT)}s. The doctor's bill: ${fmt$(C.medBill(g?.day || 1))}.` : `${Math.ceil(me.koT)}s — or until a friend picks you up (hold ${keyLabel('E')}). Waking up alone costs ${fmt$(C.medBill(g?.day || 1))}.`;
+    $('koOverlay').querySelector('.ko-btn').textContent = alone ? 'Hang in there…' : 'Waiting for a friend…';
+  }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (R)` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
@@ -1053,9 +1602,28 @@ function townName(W) {
   }
   return townNm;
 }
+// first-trip hints (Settings > Interface): each shows until it's been done once, on this PC
+const tut = (() => { try { return new Set(JSON.parse(localStorage.getItem('nmdTutorial') || '[]')); } catch { return new Set(); } })();
+function tutDone(k) { if (tut.has(k)) return; tut.add(k); try { localStorage.setItem('nmdTutorial', JSON.stringify([...tut])); } catch {} }
+function tutWatch(inMyRV) {
+  if (me.mode === 'seat' && me.seat === 0) tutDone('drive');
+  if (me.holding && me.holding.type !== 'map') { tutDone('grab'); if (inMyRV) tutDone('load'); }
+  if ((S.g?.pawn || 0) > 0 || (S.g?.dock || 0) > 0) tutDone('pawn');
+}
+function tutTip(g, town) {
+  if (!settings.tutorial) return null;
+  if (g.ph === 'camp') return tut.has('drive') ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
+  if (g.ph !== 'road') return null;
+  if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
+  if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
+  if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
+  return null;
+}
 function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
   const town = townName(S.W), L = [];
+  const tip = tutTip(g, town);
+  if (tip) L.push([tip, 'tip']);
   if (g.ph === 'camp') L.push(['Drive out of camp to start the clock', '']);
   else if (g.ph === 'road') {
     if (!g.town) {
@@ -1074,7 +1642,7 @@ function questTracker(g) {
   if (key === questKey) return;
   questKey = key;
   $('qtTitle').textContent = title;
-  $('qtLines').innerHTML = L.map(([t, c]) => `<div class="qt-line${c ? ' ' + c : ''}">${escapeHtml(t)}</div>`).join('');
+  $('qtLines').innerHTML = L.map(([t, c]) => `<div class="qt-line${c ? ' ' + c : ''}">${c === 'done' ? '✓ ' : c === 'fail' ? '✗ ' : ''}${escapeHtml(t)}</div>`).join('');
   $('tracker').classList.remove('hidden');
 }
 

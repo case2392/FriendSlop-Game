@@ -693,7 +693,7 @@ function buildShell(b) {
   // the steps under the door: a chunky two-step oak crate, darker risers, iron corner straps.
   // Tread tops at the step colliders (-0.42 and -0.85).
   {
-    const z = D.DOOR_Z, L = 0.9;
+    const z = D.DOOR_Z, L = D.DOOR_HALF * 2 - 0.1;
     b.trim.add(at(rboxB(0.42, 0.2, L, 0.03, TRIM.oak, 2), -1.42, -0.52, z));
     b.trim.add(at(rboxB(0.44, 0.38, L, 0.03, TRIM.oak, 2), -1.64, -1.04, z));
     b.trim.add(at(beam(0.03, 0.16, L - 0.06, TRIM.wood), -1.63, -0.53, z));
@@ -907,7 +907,7 @@ function lantern(b, x, y, z, s = 1) {
 function buildClutter(b) {
   // the door side: a rolled canvas awning on iron brackets over the door, a lantern by it
   {
-    const x = -HW - 0.13, y = 1.83, z0 = A.door.z0 - 0.3, z1 = A.door.z1 + 0.28;
+    const x = -HW - 0.13, y = 1.83, z0 = A.door.z0 - 0.3, z1 = A.door.z1 + 0.13;
     b.trim.add(at(rod(0.085, z1 - z0, TRIM.awning, { segs: 10, density: 0.9 }), x, y, (z0 + z1) / 2, PI / 2, 0, 0));
     for (const z of [z0 + 0.25, z1 - 0.25]) b.trim.add(at(toBand(new THREE.TorusGeometry(0.088, 0.012, 5, 12), TRIM.leather), x, y, z));
     for (const z of [z0 + 0.06, z1 - 0.06]) {
@@ -1122,7 +1122,7 @@ function buildInterior(b) {
   b.itrim.add(at(beam(0.03, 0.04, 0.04, TRIM.iron), IN - 0.015, 1.49, -1.98));
 
   sconce(b, 1, 1.6, -0.05);
-  sconce(b, -1, 1.66, 1.09);
+  sconce(b, -1, 1.66, 1.22);
   sconce(b, 1, 1.86, -2.45);
   curtains(b, 1, A.winL[1]);
   curtains(b, 1, A.winL[2]);

@@ -1,0 +1,15 @@
+// The native Linux build (npm run dist:linux -> dist/linux-unpacked/), for later: see docs/STEAM.md.
+// Launch option in Steamworks: nomoneydown, arguments --no-sandbox (a depot can't carry Chromium's
+// setuid sandbox helper).
+"DepotBuild"
+{
+	"DepotID"	"482"					// <- your Linux depot ID
+	"ContentRoot"	"../dist/linux-unpacked/"
+	"FileMapping"
+	{
+		"LocalPath"	"*"
+		"DepotPath"	"."
+		"Recursive"	"1"
+	}
+	"FileExclusion"	"steam_appid.txt"
+}

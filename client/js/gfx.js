@@ -7,6 +7,7 @@ import { initAtmosphere } from './atmosphere.js';
 
 export { THREE };
 export { setTimeOfDay, updateSun, setBiome } from './atmosphere.js';
+import { setShadowQuality } from './atmosphere.js';
 export { textCanvas, labelSprite } from './labels.js';
 export let renderer, scene, camera;
 
@@ -81,6 +82,33 @@ export function initGfx(canvas) {
 
   window.addEventListener('resize', resize);
   resize();
+}
+
+// Graphics quality (Settings > Video): the render resolution and the sun's shadows. 'auto' picks one
+// from the GPU's name; main.js steps it down if the first minutes run slow.
+export const QUALITY = {
+  low: { cap: 1, scale: 0.75, shadow: 0 },
+  medium: { cap: 1, scale: 1, shadow: 1024 },
+  high: { cap: 1.75, scale: 1, shadow: 2048 },
+};
+export function setRenderQuality(level) {
+  const q = QUALITY[level] || QUALITY.high;
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, q.cap) * q.scale);
+  setShadowQuality(q.shadow);
+  resize();
+}
+export function gpuName() {
+  try {
+    const gl = renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+    return String(ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER));
+  } catch { return ''; }
+}
+export function guessQuality() {
+  const n = gpuName();
+  if (/swiftshader|llvmpipe|software|softpipe/i.test(n)) return 'low';
+  // integrated graphics and the Steam Deck (AMD Custom GPU 0405, "Van Gogh")
+  if (/intel|uhd|iris|AMD Custom GPU|van gogh|mali|adreno|powervr|apple gpu/i.test(n) && !/arc\b/i.test(n)) return 'medium';
+  return 'high';
 }
 
 function resize() {

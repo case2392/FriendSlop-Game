@@ -29,7 +29,7 @@ async function open(name) {
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error') errors.push(`[${name}] ${m.text()}`); });
   await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
-  await page.evaluate(() => localStorage.setItem('nmdHelpSeen', '1'));
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
   await page.fill('#nameInput', name);
   return page;
 }
@@ -219,12 +219,18 @@ try {
   await wait(host, 800);
   await shot(host, 'repo-man');
 
-  // ---- voice: both join, the WebRTC mesh connects, panners exist ----
+  // ---- voice: both join; Dave talks (push-to-talk held) next to Steve, who hears it through the game's own connection ----
   await host.evaluate(() => document.getElementById('voiceJoinBtn').click());
   await joiner.evaluate(() => document.getElementById('voiceJoinBtn').click());
-  await host.waitForFunction(() => { const p = [...window.__nmd.voicePeers?.() || []]; return p.length === 1 && p[0].panner; }, null, { timeout: 60000 }).catch(() => {});
-  const vstate = await host.evaluate(() => ({ on: window.__nmdVoice?.on, peers: window.__nmdVoice ? [...window.__nmdVoice.peers.values()].map(p => ({ state: p.pc.connectionState, spatial: !!p.panner })) : null }));
-  check(vstate.on && vstate.peers?.length === 1 && vstate.peers[0].spatial, `proximity voice mesh up (${JSON.stringify(vstate.peers)})`);
+  const hp = await host.evaluate(() => window.__nmd.me.pos);
+  await joiner.evaluate(p => window.__nmd.me.teleport(p.x + 2, p.y, p.z, 0), hp);
+  await joiner.waitForFunction(() => window.__nmdVoice?.on, null, { timeout: 30000 }).catch(() => {});
+  await joiner.evaluate(() => { window.__nmdVoice.ptt = true; });
+  await host.waitForFunction(() => (window.__nmdVoice?.stats.decoded || 0) > 20, null, { timeout: 60000 }).catch(() => {});
+  await joiner.evaluate(() => { window.__nmdVoice.ptt = false; });
+  const vs = await host.evaluate(() => { const V = window.__nmdVoice; return { on: V.on, err: V.err, decoded: V.stats.decoded, peers: [...V.peers.values()].map(p => !!p.panner) }; });
+  const sent = await joiner.evaluate(() => ({ sent: window.__nmdVoice.stats.sent, err: window.__nmdVoice.err }));
+  check(vs.on && vs.decoded > 20 && vs.peers.length === 1 && vs.peers[0], `proximity voice: Dave sent ${sent.sent} Opus frames, Steve decoded ${vs.decoded} into a 3D panner${vs.err || sent.err ? ` (${vs.err || sent.err})` : ''}`);
 
   // ---- painted textures: got ready off the main thread, written to the cache, read back next time ----
   const tx = await host.evaluate(() => window.__nmd.texCache.stats());
@@ -244,6 +250,35 @@ try {
   const tx3 = await back.evaluate(() => window.__nmd.texCache.stats());
   check(tx3.cacheHits > 50 && tx3.workerPaints < 10, `a second visit decoded ${tx3.cacheHits} textures from the cache (${tx3.workerPaints} painted by workers, ${tx3.pagePaints} by the page)`);
   await back.close();
+
+  // ---- connections: a dropped socket comes back to the same seat; Ctrl is the game's; no 3D says so; the end of the server is said out loud ----
+  const was = await joiner.evaluate(() => ({ id: window.__nmd.selfId, built: window.__nmd.builtAt }));
+  // (on one machine the reconnect can take less than a frame: watch for the banner, don't poll for it)
+  await joiner.evaluate(() => {
+    window.__sawConn = false;
+    new MutationObserver(() => { if (/reconnecting/.test(document.getElementById('connBox')?.textContent || '')) window.__sawConn = true; })
+      .observe(document.body, { childList: true, subtree: true, characterData: true });
+    window.__nmd.testDrop();
+  });
+  const backToast = host.waitForFunction(() => [...document.querySelectorAll('.toast')].some(t => /Dave is back/.test(t.textContent)), null, { timeout: 60000 }).then(() => true, () => false);
+  await joiner.waitForFunction(() => !document.getElementById('connBox') && /Reconnected/.test([...document.querySelectorAll('.toast')].map(t => t.textContent).join(' ')), null, { timeout: 90000 });
+  const after = await joiner.evaluate(() => ({ id: window.__nmd.selfId, built: window.__nmd.builtAt, saw: window.__sawConn }));
+  const toldHost = await backToast;
+  check(after.saw && toldHost && after.id === was.id && after.built === was.built, `Dave's dropped connection came back to the same seat without rebuilding the world (id ${was.id} -> ${after.id}; banner ${after.saw}, the host told ${toldHost}, rebuilt ${after.built !== was.built})`);
+  const ctrlW = await joiner.evaluate(() => { const e = new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, cancelable: true, bubbles: true }); window.dispatchEvent(e); return e.defaultPrevented; });
+  check(ctrlW, 'in game, Ctrl+W belongs to the game (crouch-walk), not the browser');
+  {
+    const nogl = await chromium.launch({ executablePath: EXE, args: ['--disable-3d-apis'] });
+    const p = await nogl.newPage();
+    await p.goto(`http://localhost:${PORT}`);
+    const said = await p.waitForFunction(() => /couldn't start 3D/.test(document.body.textContent), null, { timeout: 60000 }).then(() => true, () => false);
+    check(said, 'without WebGL the game says what to do, instead of a dead menu');
+    await nogl.close();
+  }
+  server.kill('SIGTERM');
+  await joiner.waitForFunction(() => /The trip is over/.test(document.getElementById('netModal')?.textContent || ''), null, { timeout: 20000 });
+  const said = (await joiner.evaluate(() => document.getElementById('netModal').textContent)).replace(/\s+/g, ' ').trim();
+  check(/shut down/.test(said), `when the server shuts down, the guest is told why ("${said}")`);
 } catch (e) {
   fail(e.stack || e.message);
 }
