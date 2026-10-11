@@ -36,7 +36,7 @@ and town. You never see the same place twice in a run.
 | 2 | Goldenfield Pike | Golden grass, fenced wheat and stubble fields with round bales, a windmill | **Busted Flats**: plank barns and farmsteads |
 | 3 | Frostpeak Pass | Snowfields, snow-laden pines, blue-gray granite | **Last Chance**: squat stone halls, iron braziers |
 | 4 | The Redrock Badlands | Red strata, hoodoos, buttes, dead trees | **Snake Eyes**: log and plank outpost, palisades, hides |
-| 5 | The Lost Wages Flats | Dunes, sandstone arches, palms, bleached bones | **Lost Wages**: adobe, vigas, canvas awnings, goblin brass |
+| 5 | The Lost Wages Flats | An open sea of dunes, sandstone arches and buttes, palms, bleached bones | **Lost Wages**: adobe, vigas, canvas awnings, goblin brass |
 
 | | |
 |---|---|

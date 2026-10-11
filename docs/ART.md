@@ -14,7 +14,7 @@ are in `docs/reference/frames/`, so look at them. The zones we borrow from:
 | 2 | `fields` | Westfall: golden grass and wheat, haybales, scarecrows, rail fences, dusty roads | `farm`: Westfall farmsteads. Weathered plank barns, thatch or gambrel roofs, a windmill, wagon wheels, hay |
 | 3 | `snow` | Dun Morogh: snowfields, snow-laden pines, blue-gray granite with snow on every ledge, icy blue shadows, frozen streams | `alpine`: Kharanos. Squat dwarven stone halls, massive timber, steep roofs heavy with snow, iron braziers, warm windows |
 | 4 | `badlands` | The Badlands / Thousand Needles: red-orange canyon rock with horizontal strata, dead trees, ochre dust | `frontier`: Kargath / a canyon outpost. Rough log and plank, palisade stakes, hides and canvas, rope, ramshackle roofs |
-| 5 | `desert` | Tanaris / Gadgetzan: pale sand, dunes, palms, sun-bleached bones | `adobe`: Gadgetzan. Tan adobe walls, dark wood beams poking out, flat roofs, canvas awnings, goblin brass and rivets |
+| 5 | `desert` | Tanaris / Gadgetzan: an open erg (pale sand, dune ridges, ripples following the wind), sandstone only in the narrows and on lone buttes, palms, sun-bleached bones | `adobe`: Gadgetzan. Tan adobe walls, dark wood beams poking out, flat roofs, canvas awnings, goblin brass and rivets |
 
 All five days must look clearly different: ground, sky, fog, rocks, plants
 and towns. Nobody should ever confuse one day's screenshot for another's.

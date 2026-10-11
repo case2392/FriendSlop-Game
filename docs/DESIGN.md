@@ -220,11 +220,13 @@ style (details in [ART.md](ART.md)):
 | 2 | Goldenfield Pike | fields: golden grass, fenced crop plots (standing wheat, stubble with round bales, furrows, scarecrows), a windmill | Busted Flats (farmsteads) |
 | 3 | Frostpeak Pass | snow: pines, granite, snow on every ledge | Last Chance (alpine stone halls) |
 | 4 | The Redrock Badlands | badlands: red strata, hoodoos, buttes | Snake Eyes (frontier outpost) |
-| 5 | The Lost Wages Flats | desert: dunes, sandstone arches, palms | Lost Wages (adobe) |
+| 5 | The Lost Wages Flats | desert: an open erg of dunes, sandstone only at the narrows, arches, palms | Lost Wages (adobe) |
 
 The biome changes the scenery and the walls (snow and badlands canyons are
-higher and narrower), not the rules: every day has the same obstacle types
-and the same economy, so the difficulty curve stays in the quota.
+higher and narrower; the desert has no canyon at all, only dune banks, with
+a short sandstone gorge where the gate or the boulder pinches the road), not
+the rules: every day has the same obstacle types and the same economy, so
+the difficulty curve stays in the quota.
 
 **Obstacles.** Each one is designed around a specific co-op verb:
 
@@ -239,8 +241,11 @@ and the same economy, so the difficulty curve stays in the quota.
 | *Rockfall* (M2) | Falling rocks knock people over | Timing, and somebody's medical bill | PEAK |
 
 **POIs** are worth the detour and cost time. Abandoned gas stations,
-wrecked semis, yard sales, mesa-top crash sites (climb up and get the
-suitcase *down*), junk piles, the roadside fiberglass dinosaur.
+wrecked semis, yard sales, crash sites on top of a butte (climb up and get
+the suitcase *down*), junk piles, the roadside fiberglass dinosaur. A butte is
+solid cylinders in world gen (a flat top, sheer walls, a lower bench to rest
+on half-way up, lobes so it isn't a drum) on a talus mound, because the 2.5 m
+terrain grid can only draw a steep hill as a cone.
 
 ### 7.2 Loot
 
@@ -457,7 +462,7 @@ over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
 
 - Seeded 5-day runs through five biomes (meadow, fields, snow, badlands,
   desert), each with its own town style. Each leg has a camp, a road through
-  canyon walls, mesas, 4–8 stops, 2–5 obstacles (grade, mud, boulder, ranger
+  canyon walls (the desert: dunes), buttes, 4–8 stops, 2–5 obstacles (grade, mud, boulder, ranger
   gate), billboards and a cow skull as map landmarks, and a town.
 - The art pass: hand-painted procedural textures, splatted terrain with
   ground clutter, per-biome sky, fog, clouds and horizon rings, groves of

@@ -65,6 +65,8 @@ export const BIOMES = {
   },
 };
 
+const angDiff = (a, b) => Math.abs(Math.atan2(Math.sin(a - b), Math.cos(a - b)));   // between two bearings, 0..pi
+
 const POI_WEIGHTS = [['gas', 3], ['semi', 3], ['yard', 3], ['crash', 2], ['junk', 2], ['dino', 1]];
 
 const BILLBOARDS = [
@@ -259,10 +261,12 @@ export function generateLeg(seed, day) {
     // (under ~25 degrees: you walk up to the wall's foot). Where the road bends toward one, the mound
     // still stops at the ditch.
     for (const p of mesas) {
-      const M = p.mesa, d0 = Math.hypot(x - p.x, z - p.z), reach = M.R + 7;
-      if (d0 > reach + 1.5) continue;
-      const dm = d0 + noise2(x / 3, z / 3, S + 51) * 0.6;
-      const mound = M.base + M.talus * smoothstep(reach, M.R - 1, dm);
+      const M = p.mesa;
+      if (Math.hypot(x - p.x, z - p.z) > M.R * 1.6 + 9) continue;
+      // how far outside the butte's foot (its body, lobes and bench), then the mound's profile out to 7 m
+      let e = Math.hypot(x - p.x, z - p.z) - M.R;
+      for (const c of [...M.lobes, M.bench]) e = Math.min(e, Math.hypot(x - c.x, z - c.z) - c.r);
+      const mound = M.base + M.talus * smoothstep(7, -1, e + noise2(x / 3, z / 3, S + 51) * 0.6);
       h = Math.max(h, lerp(h, mound, smoothstep(6.4, 8.9, ad)));
     }
     return h;
@@ -284,6 +288,20 @@ export function generateLeg(seed, day) {
     M.benchA = hz < 0.5 ? Math.PI / 2 - p.side * 0.35 : -Math.PI / 2 + p.side * 0.35;   // (x: cos, z: sin; the road is at -side)
     M.benchK = 0.55 + hz2 * 0.15;
     M.bench = { x: p.x + Math.cos(M.benchA) * 0.8 * M.R, z: p.z + Math.sin(M.benchA) * 0.8 * M.R, r: 0.55 * M.R, top: M.base + M.h * M.benchK };
+    // two lobes swell the main body's outline (one round drum reads as a tank from the road), on the far
+    // side of the butte or along the road and well off the bench, each its own solid cylinder at the top's
+    // height. Each one holds the centre, so the outline stays a single radius per bearing
+    // (butteRadius() below), what the renderer wraps the wall round.
+    const away = p.side > 0 ? 0 : Math.PI;   // the bearing straight away from the road
+    M.lobes = [];
+    for (let k = 0, t = 0; k < 2 && t < 12; t++) {
+      const hk = Math.abs(Math.sin(p.z * (31.7 + t * 17.3)) * 9631.7) % 1;
+      const a = away + (k === 0 ? -1 : 1) * (0.25 + 1.05 * hk);
+      if (angDiff(a, M.benchA) < 0.75) continue;
+      const d = M.R * (0.48 + 0.14 * hk), r = M.R * (0.62 + 0.1 * hk);   // d < r: it holds the centre
+      M.lobes.push({ x: p.x + Math.cos(a) * d, z: p.z + Math.sin(a) * d, r });
+      k++;
+    }
   }
 
   // ---- the heightfield ------------------------------------------------------------
@@ -512,6 +530,7 @@ export function generateLeg(seed, day) {
       const bot = M.base - 0.6;
       cyls.push({ x: p.x, y: (y0 + bot) / 2, z: p.z, r: M.R, hh: (y0 - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte' });
       cyls.push({ x: M.bench.x, y: (M.bench.top + bot) / 2, z: M.bench.z, r: M.bench.r, hh: (M.bench.top - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte_bench' });
+      for (const c of M.lobes) cyls.push({ x: c.x, y: (y0 + bot) / 2, z: c.z, r: c.r, hh: (y0 - bot) / 2, mat: 'mesa', poi: p.id, part: 'butte_lobe' });
       const F = frame(px, y0, p.z, ry + 0.8);
       decor.push({ k: 'plane', x: px, y: y0, z: p.z, ry: ry + 0.8 });
       lbox(F, ry + 0.8, 0, 0.7, 0, 0.7, 0.7, 3.2, 'metal', '#f1f1f1', 'fuselage');
@@ -997,7 +1016,7 @@ export function generateLeg(seed, day) {
     let y = heightAt(x, z);
     for (const p of mesas) {
       const M = p.mesa;
-      if (Math.hypot(x - p.x, z - p.z) < M.R) y = Math.max(y, M.base + M.h);
+      if (Math.hypot(x - p.x, z - p.z) < M.R || M.lobes.some(c => Math.hypot(x - c.x, z - c.z) < c.r)) y = Math.max(y, M.base + M.h);
       else if (Math.hypot(x - M.bench.x, z - M.bench.z) < M.bench.r) y = Math.max(y, M.bench.top);
     }
     return y;
@@ -1009,6 +1028,19 @@ export function generateLeg(seed, day) {
     obstacles, pois, mesas, statics, cyls, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
   };
+}
+
+// A butte's main tier outline (its body and lobes, solid cylinders that each hold the centre): how far from
+// the centre (p.x, p.z) its foot lies along bearing a (x: cos a, z: sin a). Exact for the union of the
+// circles, so it is one radius per bearing.
+export function butteRadius(p, a) {
+  const M = p.mesa, ux = Math.cos(a), uz = Math.sin(a);
+  let r = M.R;
+  for (const c of M.lobes || []) {
+    const cx = c.x - p.x, cz = c.z - p.z, b = ux * cx + uz * cz, q = c.r * c.r - (cx * cx + cz * cz) + b * b;
+    if (q > 0) r = Math.max(r, b + Math.sqrt(q));
+  }
+  return r;
 }
 
 // Is a world point inside a mud patch?
