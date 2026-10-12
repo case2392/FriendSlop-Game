@@ -3,14 +3,15 @@
 //
 // Style: WoW Classic humans with a dash of OSRS chunk: big shoulders, a barrel chest, a leather
 // jerkin skirt with a tabard in the player's color hanging front and back, thick forearms and big
-// gloves with real thumbs and grooved fingers (arms bowed at rest, knuckles forward), laced knee boots with a flared turned-down cuff cut into riveted tabs on a heavy separate sole with a heel block, padded knee guards, a bedroll on
+// gloves with modeled fingers and a thumb laid along the first one (arms bowed at rest, knuckles forward), laced knee boots with a flared turned-down cuff cut into riveted tabs on a heavy separate sole with a heel block, padded knee guards, a bedroll on
 // the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 25-bone
 // skeleton, textured with ONE hand-painted 512×768 atlas from paint/characters.js. The face is
-// modeled (a broad blunt nose, a heavy brow ridge over deep sockets, cheekbones, a square chin
-// with a flat front; a woman's is narrower and rounder, with a short nose, a small round chin and
-// a slimmer neck) and painted in a few lit and shaded planes; beards and mustaches are modeled
-// sheets and rolls that take their texture from the painted face. Geometry is smooth lathes,
-// tubes and thick slabs, all built here; the detail lives in the texture.
+// modeled (a broad blunt nose, a brow ridge arching over deep sockets, cheekbones, a jaw tapering
+// to a square chin with a flat front, on a real neck; a woman's head is smaller, narrower and
+// rounder, with a short nose, a small round chin and a slimmer neck) and painted in a few lit and
+// shaded planes; beards and mustaches are modeled sheets and rolls that take their texture from
+// the painted face. Geometry is smooth lathes, tubes and thick slabs, all built here; the detail
+// lives in the texture.
 //
 // The crew: six kits (paint/characters.js KITS, picked by player id like the hat and the face):
 // a boiled-leather dome, layered leather lames or a riveted iron dome sitting down on each shoulder
@@ -309,8 +310,8 @@ function faceRelief(th, dy, fem) {
   return [fx * Math.max(0, Math.cos(th)), rr];
 }
 // a woman's head: a narrower, rounder jaw, a slimmer neck (z scale and x scale at height dy, unscaled)
-const femJaw = dy => 0.95 * (1 - 0.13 * sstep(-0.005, -0.075, dy)) * (1 - 0.05 * sstep(-0.1, -0.12, dy));
-const femNeck = dy => 1 - 0.2 * sstep(-0.098, -0.118, dy);
+const femJaw = dy => 0.95 * (1 - 0.13 * sstep(-0.005, -0.075, dy));
+const femNeck = dy => 1 - 0.12 * sstep(-0.098, -0.118, dy);
 // a point on the face surface (head-local meters), pushed `off` further out
 function facePt(th, dyM, off, fem) {
   const p = skull(th, dyM), [fx, rr] = faceRelief(th, dyM / HS, fem), dy = dyM / HS;
@@ -328,7 +329,7 @@ function headPartsOf(S) {
   const fem = S.look.female;
   const rings = HEAD_DY.map(dy => ({ y: dy * HS, w: lerpTable(HEAD_RINGS, dy, 1) * HS, d: lerpTable(HEAD_RINGS, dy, 2) * HS, db: lerpTable(HEAD_RINGS, dy, 3) * HS, n: fem && dy < 0.01 ? 2 + (lerpTable(HEAD_RINGS, dy, 4) - 2) * 0.3 : lerpTable(HEAD_RINGS, dy, 4), cx: lerpTable(HEAD_RINGS, dy, 5) * HS, v: lerpTable(HEAD_RINGS, dy, 6) }));
   parts.push(lathe(rings, {
-    seg: 36, thOf: headTh, reg: REG.head, bones: headWeights, xf: toHead,
+    seg: 30, thOf: headTh, reg: REG.head, bones: headWeights, xf: toHead,
     deform(p, th, r) {
       const dy = r.y / HS, [fx, rr] = faceRelief(th, dy, fem);
       const c = Math.cos(th), s = Math.sin(th);
@@ -340,7 +341,7 @@ function headPartsOf(S) {
   if (S.hat !== 'hood') for (const s of [-1, 1]) {
     const er = [[-0.03, 0], [-0.028, 0.45], [-0.022, 0.78], [-0.012, 0.95], [0.0, 1], [0.012, 1], [0.021, 0.9], [0.028, 0.6], [0.031, 0]].map(([dy, k], i, a) => ({ y: dy * HS * (fem ? 0.86 : 1), w: 0.0068 * k * HS, d: 0.019 * k * HS * (fem ? 0.86 : 1), db: 0.014 * k * HS * (fem ? 0.86 : 1), cx: (-0.006 - dy * 0.2) * HS, v: i / (a.length - 1) }));
     parts.push(lathe(er, {
-      seg: 14, reg: REG.ear, bones: B.head,
+      seg: 12, reg: REG.ear, bones: B.head,
       deform: (p, th, r, u, v) => {
         let z = p[2];
         if (z * s > 0) z *= 1 - 1.3 * gauss(th - s * Math.PI / 2, 0.62) * Math.pow(Math.sin(v * Math.PI), 2);
@@ -1084,11 +1085,13 @@ function armParts(S, F, s) {
     if (dy > -0.595) { const t = sstep(-0.555, -0.595, dy); return [[fa, 1 - t], [ha, t]]; }
     return [[ha, 1]];
   };
-  // The fingers are modelled. Below the wrist the lathe's 16 columns slide to even steps across the
-  // back and the palm (xn -1..1: a crown on each finger at xn -0.75, -0.25, 0.25, 0.75, a column on each
-  // split at -0.5, 0, 0.5), the splits sink in from the knuckles down, and the tips notch (the little
-  // finger, at the back, shortest). The paint follows: splits at u 1/8 1/4 3/8 (back) and 5/8 3/4 7/8
-  // (palm), crowns at u 1/16 3/16 5/16 7/16.
+  // Below the wrist the lathe's columns slide to even steps across the back and the palm (xn -1..1), so
+  // the painted fingers are evenly wide: splits at u 1/8 1/4 3/8 (back) and 5/8 3/4 7/8 (palm), crowns
+  // at u 1/16 3/16 5/16 7/16. Bare hands, seen up close across a counter, get 16 columns and modeled
+  // fingers (a crown column on each finger at xn -0.75, -0.25, 0.25, 0.75, a split column at -0.5, 0, 0.5:
+  // the splits sink in from the knuckles down and the tips notch, the little finger's shortest); a glove
+  // is a padded mitt on 12, its fingers painted.
+  const modeled = bare, nu = modeled ? 16 : 12;
   const xnOf = u => u <= 0.5 ? -1 + 4 * u : 1 - 4 * (u - 0.5);
   const hth = u => { const xn = xnOf(u), c = Math.sign(xn) * Math.pow(Math.abs(xn), 1.3), sn = Math.sqrt(Math.max(0, 1 - c * c)); return Math.atan2(u <= 0.5 ? sn : -sn, c); };
   const fingers = (p, r, u) => {
@@ -1109,12 +1112,12 @@ function armParts(S, F, s) {
       const t = sstep(-0.578, -0.6, r.y0), thb = th + (hth(u) - th) * t, [x, z] = ringXZ(thb, r.w, r.d, r.db, r.n ?? 2);
       p = [(r.cx || 0) + x, p[1], (r.cz || 0) + z];
     }
-    return bend(fingers(p, r, u), r);
+    return bend(modeled ? fingers(p, r, u) : p, r);
   };
-  const arm = lathe(rings, { seg: 16, reg: REG.arm, bones: wts, deform, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] });
+  const arm = lathe(rings, { seg: nu, reg: REG.arm, bones: wts, deform, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] });
   {
     // the tips close on a line: each pair of columns meeting there shares one normal (no crease)
-    const N = arm.attributes.normal, nu = 16, row = (rings.length - 1) * (nu + 1);
+    const N = arm.attributes.normal, row = (rings.length - 1) * (nu + 1);
     for (let j = 0; j <= nu / 2; j++) {
       const a = row + j, b = row + nu - j, x = N.getX(a) + N.getX(b), y = N.getY(a) + N.getY(b), z = N.getZ(a) + N.getZ(b), l = Math.hypot(x, y, z) || 1;
       N.setXYZ(a, x / l, y / l, z / l); N.setXYZ(b, x / l, y / l, z / l);
@@ -1396,8 +1399,9 @@ function charGeometry(S, F) {
     const head = headParts(S);
     // the Repo Man's head is a size up, so it isn't a pinhead on his bulk (scaled about the head bone)
     if (S.brute) for (const g of head) { g.translate(-HX, -J.head, 0); g.scale(1.12, 1.12, 1.12); g.translate(HX, J.head, 0); }
-    // a woman's head a size down, her hair and hat with it (WoW women carry a smaller, rounder head)
-    if (S.look.female) for (const g of head) { g.translate(-HX, -J.head, 0); g.scale(0.95, 0.95, 0.95); g.translate(HX, J.head, 0); }
+    // a woman's head a size down, her hair and hat with it (WoW women carry a smaller, rounder head), and
+    // set a little lower, so her neck isn't a stalk
+    if (S.look.female) for (const g of head) { g.translate(-HX, -J.head, 0); g.scale(0.95, 0.95, 0.95); g.translate(HX, J.head - 0.012, 0); }
     const parts = [...bodyParts(S, F), ...head].map(g => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k); return g; });
     const geo = mergeGeometries(parts, false);
     geo.computeBoundingSphere();
@@ -1415,6 +1419,7 @@ const WARM_HEMI = `{
   irradiance += getHemisphereLightIrradiance( hl, geometryNormal );
 }`;
 function warmBounce(m) {
+  if (!THREE.ShaderChunk.lights_fragment_begin.includes(HEMI)) { console.warn('people: the hemisphere light code changed; no warm bounce'); return m; }
   m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(HEMI, WARM_HEMI)); };
   m.customProgramCacheKey = () => 'people-warm-bounce';
   return m;
@@ -1856,7 +1861,7 @@ export class Hands {
     this.g = new THREE.Group();
     camera.add(this.g);
     this.color = color;
-    const mat = painted(handsAtlas(color));
+    const mat = warmBounce(painted(handsAtlas(color)));
     this.L = new THREE.Mesh(fpHand(-1), mat);
     this.R = new THREE.Mesh(fpHand(1), mat);
     for (const h of [this.L, this.R]) { h.frustumCulled = false; h.renderOrder = 2; }
@@ -1870,7 +1875,7 @@ export class Hands {
   setColor(color) {
     if (color === this.color) return;
     this.color = color;
-    const m = painted(handsAtlas(color));
+    const m = warmBounce(painted(handsAtlas(color)));
     this.L.material = m; this.R.material = m;
     if (this.board) for (const c of this.board.children) c.material = m;
   }

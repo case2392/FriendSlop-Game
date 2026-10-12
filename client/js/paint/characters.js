@@ -191,7 +191,7 @@ export const HATS = ['brim', 'bandana', 'cap', 'hood', 'straw', 'helm'];
 const OUTFITS = {
   player: { torso: 'tabard', arms: 'sleeve', hands: 'glove', legs: 'trousers', boots: 'tall', pauldrons: 'both', belt: true, skirt: true, collar: true, pack: true },
   ed:     { torso: 'shirt', arms: 'rolled', hands: 'bare', legs: 'wool', boots: 'short', pauldrons: 'none', belt: false, apron: true, hat: 'none', bulk: 1.08, belly: 0.045, armBulk: 1.08, forearm: 1.15, look: { hair: 'bald', hairColor: '#a3918a', facial: 'beard', beard: 1.3, female: false } },
-  clerk:  { torso: 'bodice', arms: 'blouse', hands: 'bare', legs: 'wool', boots: 'shoe', pauldrons: 'none', belt: false, dress: true, hat: 'none', armBulk: 0.84, collar: false, look: { hair: 'bun', hairColor: '#8e3a1c', female: true, facial: 'none' } },
+  clerk:  { torso: 'bodice', arms: 'blouse', hands: 'bare', legs: 'wool', boots: 'shoe', pauldrons: 'none', belt: false, dress: true, hat: 'none', armBulk: 0.84, collar: true, look: { hair: 'bun', hairColor: '#8e3a1c', female: true, facial: 'none' } },
   dealer: { torso: 'vest', arms: 'shirt', hands: 'bare', legs: 'black', boots: 'shoe', pauldrons: 'none', belt: true, hat: 'visor', armBulk: 0.86, shoulderK: 1.08, collar: true, look: { hair: 'slick', hairColor: '#17121a', facial: 'pencil', female: false, stern: true } },
   repo:   { torso: 'overalls', arms: 'flannel', hands: 'workglove', legs: 'overalls', boots: 'work', pauldrons: 'none', belt: false, hat: 'beanie', bulk: 1.12, brute: true, belly: 0.06, armBulk: 1.0, forearm: 1.14, chain: true, bib: true, shades: true, look: { hair: 'buzz', hairColor: '#1d1716', facial: 'stubble', female: false, stern: true } },
 };
@@ -667,9 +667,10 @@ function paintHead(g, r, S, rnd) {
   // light from the upper left, but people turn and the sun moves: the far side only a little darker
   const lit = s => s < 0 ? 1 : 0.9;
   // painted lights step down on dark skin (at full strength they read as ash-grey paint there)
-  const acc = 1 - 0.35 * T.dark;
+  const acc = 1 - 0.15 * T.dark;
   const warm = mix(T.base, fem ? '#c04a4a' : '#b8503c', 0.35 - 0.12 * T.dark);
   const weathered = !fem && (L.stern || L.hair === 'bald');
+  const hatShade = { brim: [0.36, -0.2, 15], straw: [0.34, -0.2, 15], cap: [0.3, 2.2, 10], visor: [0.3, 2.2, 10], helm: [0.3, -0.3, 12] }[S.hat];   // headwear's shade: [alpha, its bottom edge, half-width]
   clip(g, r, () => {
     // skin lit from above; under the jaw a soft warm shadow, never a dark band
     const vJ = headV(-0.094);
@@ -692,7 +693,7 @@ function paintHead(g, r, S, rnd) {
       // under it, a hollow running down to the jaw corner
       P(sp([[5.6, -4.6], [8.8, -3.6], [10.2, -6.5], [11, -10.4], [8.4, -10.2], [6.2, -7.6]]), T.shadow, (fem ? 0.08 : 0.14) * (1.25 - 0.25 * lit(s)), 5);
       // the eye socket: a soft rosy pool from the brow down under the eye
-      P(sp([[1.45, 2.3], [3.9, 2.8], [6.6, 2.3], [7.2, 0.2], [6.05, -1.3], [3.8, -1.6], [1.8, -0.9], [1.25, 0.6]]), mix(T.shadow, T.cool, 0.5), fem ? 0.26 : 0.42, 2.2);
+      P(sp([[1.45, 2.3], [3.9, 2.8], [6.6, 2.3], [7.2, 0.2], [6.05, -1.3], [3.8, -1.6], [1.8, -0.9], [1.25, 0.6]]), mix(T.shadow, T.cool, 0.5), (fem ? 0.26 : 0.42) * (hatShade ? 0.85 : 1), 2.2);
       // the brow ridge's lit top
       P(sp([[1.1, 3.1], [3.8, 3.6], [6.7, 3.3], [7.05, 2.5], [3.8, 2.4], [1.35, 2.2]]), T.hi, (fem ? 0.28 : 0.52) * lit(s) * acc, 1.8);
       // the jaw: a shadow plane under the lit chin, out to the jaw's corner
@@ -758,6 +759,12 @@ function paintHead(g, r, S, rnd) {
     else P([[-2.4, -11.2], [2.1, -11.2], [3.0, -12.4], [2.4, -14.0], [-2.6, -14.0], [-3.2, -12.4]], T.light, 0.26 * acc, 6);
     if (!fem && S.skin === 0) St([[0, yChin + 1.3], [0, yChin + 0.3]], 1.8, 1.2, T.shadow, 0.3);
     B(0, yJaw - 1.6, 9, 1.9, T.shadow, 0.24, 0.3);                            // under the jaw: warm, soft
+    // the shade a brim, a peak or a helm's rim casts on the brow (people never receive the sun's shadow,
+    // and at 5 cm a texel its map couldn't draw a brim's): the eyes and brows, painted over it, still glint
+    if (hatShade) {
+      const [a, yb, xw] = hatShade, sc = mix(T.deep, S.hat === 'visor' ? mix('#2e2228', '#2a5a3a', 0.35) : '#2e2228', 0.5);
+      P([[-xw, 13], [xw, 13], [xw, yb + 0.8], [6, yb], [0, yb + 0.4], [-6, yb], [-xw, yb + 0.8]], sc, a * (1 - 0.35 * T.dark), 6);
+    }
     // eyes & brows
     for (const s of [-1, 1]) paintEye(g, K, s, S, S.eyeGlow);
     const browC = L.hair === 'bald' ? mix(L.hairColor, '#5a4446', 0.4) : mix(shadowOf(L.hairColor, 0.12), '#3a2a22', hsl(L.hairColor).l < 0.15 ? 0.4 : 0);
@@ -772,13 +779,6 @@ function paintHead(g, r, S, rnd) {
         const t = k / 8, [px, py] = F(s * (1.2 + t * 5.2), yBrow - 0.45 + Math.sin(t * Math.PI) * 0.75 - (L.stern ? (1 - t) * 0.4 : 0));
         stroke(g, [[px - s * 2, py + 3], [px + s * 4, py - 3]], 1.8, 0.7, lightOf(browC, 0.35), 0.45);
       }
-    }
-    // the shade a brim, a peak or a helm's rim casts on the brow and the eyes (people never receive the
-    // sun's shadow, and at 5 cm a texel its map couldn't draw a brim's): soft, never hiding the eyes
-    const shade = { brim: [0.36, -0.2, 15], straw: [0.34, -0.2, 15], cap: [0.3, 2.2, 10], visor: [0.3, 2.2, 10], helm: [0.3, -0.3, 12] }[S.hat];
-    if (shade) {
-      const [a, yb, xw] = shade, sc = mix(T.deep, S.hat === 'visor' ? mix('#2e2228', '#2a5a3a', 0.35) : '#2e2228', 0.5);
-      P([[-xw, 13], [xw, 13], [xw, yb + 0.8], [6, yb], [0, yb + 0.4], [-6, yb], [-xw, yb + 0.8]], sc, a, 6);
     }
     facialHair(g, K, S, T, rnd);
     // the neck below the jaw, painted last: bare skin, in the jaw's shade at the top, the throat catching
@@ -804,7 +804,7 @@ function facialBase(g, K, S, T, rnd) {
   K.B(0, -12, 13, 6, sc, amt, 0.4);
   K.B(0, -7.6, 3.2, 0.9, sc, amt * 0.85, 0.3);
   for (let i = 0; i < 14; i++) K.B(range(rnd, -13, 13), range(rnd, -15, -5), range(rnd, 1.2, 2.6), range(rnd, 0.8, 1.4), sc, amt * 0.22, 0.1);
-  if (f === 'stubble') for (let i = 0; i < 150; i++) { const [x, y] = K.F(range(rnd, -14, 14), range(rnd, -16, -5)); ellipse(g, x, y, range(rnd, 0.6, 1.2), range(rnd, 0.6, 1.2), 0, sc, 0.3); }
+  if (f === 'stubble') for (let i = 0; i < 120; i++) { const [x, y] = K.F(range(rnd, -9, 9), range(rnd, -16, -7)); ellipse(g, x, y, range(rnd, 0.5, 0.9), range(rnd, 0.5, 0.9), 0, sc, 0.18); }   // grain on the chin, the jaw and the lip
   g.restore();
 }
 
