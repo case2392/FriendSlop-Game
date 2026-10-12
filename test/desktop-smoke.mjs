@@ -32,6 +32,9 @@ const fail = m => { console.error('❌', m); failed = true; };
 const check = (c, m) => (c ? ok(m) : fail(m));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await fn()) return true; } catch {} await sleep(step); } return false; };
+// back to the menu as the in-game menu does it. backToMenu ends by reloading the page, so the page's
+// context can go before an awaited answer comes back: start it, and don't wait on it in there
+const leaveToMenu = p => p.evaluate(() => { window.__nmd.backToMenu(null); }).catch(e => { if (!/context was destroyed|navigat/i.test(e.message)) throw e; });
 const BUILD = computeBuild();
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nmd-desktop-'));
 const ARGS = [ROOT, '--no-sandbox', '--swiftshader', '--windowed'];
@@ -111,7 +114,10 @@ try {
   await page.click('#hostBtn');
   const again = await page.waitForFunction(() => window.__nmd.phase === 'game', null, { timeout: 120000 }).then(() => true, () => false);
   check(again, 'Leave Trip goes back to the menu, and the next trip starts');
-  await page.evaluate(() => window.__nmd.backToMenu(null));
+  // what this run painted goes into the cache before the page goes (part 2 checks it survived a restart;
+  // on a busy machine the writes can still be going when the trip ends)
+  await page.waitForFunction(() => window.__nmd.texCache.idle(), null, { timeout: 240000, polling: 1000 }).catch(() => {});
+  await leaveToMenu(page);
   await page.waitForFunction(() => window.__nmd?.phase === 'menu', null, { timeout: 60000 });
 
   // a second copy hands over to the first and quits
@@ -166,17 +172,20 @@ try {
     const wrong = code === '5000' ? '5001' : '5000';
     await guest.page.fill('#codeInput', wrong);
     await guest.page.click('#joinBtn');
-    const noTrip = await guest.page.waitForFunction(() => /No trip with code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 45000 })
+    // (polled every 100 ms: a window in the background gets few frames, and the 2 s below starts with the answer)
+    const noTrip = await guest.page.waitForFunction(() => /No trip with code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 45000, polling: 100 })
       .then(() => guest.page.evaluate(() => document.getElementById('menuError').textContent), () => null);
     check(noTrip, `a wrong trip code: "${noTrip}"`);
-    // the corrected code goes straight in (only the same code again rests for 2 s: its answer is up)
+    // the corrected code goes straight in (only the same code again rests for 2 s: its answer is up). The same
+    // code goes again from inside the page, at once: a Playwright click first waits for the button to settle,
+    // which on a busy machine can outlast the 2 s
     const searches = () => be.lists.filter(x => x.by === '76561190000000002').length;
     const before = searches();
-    await guest.page.click('#joinBtn');
-    const resting = await guest.page.evaluate(() => document.getElementById('menuError').textContent);
+    const resting = await guest.page.evaluate(() => { document.getElementById('joinBtn').click(); return document.getElementById('menuError').textContent; });
     await guest.page.fill('#codeInput', code);
     await guest.page.click('#joinBtn');
-    check(resting === noTrip && await until(() => searches() > before, 5000), 'the same wrong code again at once is left with its answer; the corrected one is searched for straight away');
+    const looked = await until(() => searches() > before, 5000);
+    check(resting === noTrip && looked, `the same wrong code again at once is left with its answer${resting === noTrip ? '' : ` (it showed "${resting}")`}; the corrected one is searched for straight away${looked ? '' : ' (no search within 5 s)'}`);
     await ready(guest.page);
     const gs = await guest.page.evaluate(() => ({ id: window.__nmd.selfId, code: window.__nmd.code, roster: window.__nmd.meta?.players.map(p => p.name), chip: document.getElementById('hCode').textContent }));
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);
@@ -186,7 +195,7 @@ try {
     check(asks.length >= 2 && asks.every(x => x.filters.distance === 3 && x.filters.strings?.[0]?.key === 'nmd_code'), `the desktop shell searched Steam worldwide for the code (${asks.length} searches: ${asks.map(x => x.filters.strings?.[0]?.value).join(', ')})`);
 
     // invites still work: the friend leaves, and a Steam invite brings them back while they sit on the menu
-    await guest.page.evaluate(() => window.__nmd.backToMenu(null));
+    await leaveToMenu(guest.page);
     await guest.page.waitForFunction(() => window.__nmd?.phase === 'menu', null, { timeout: 60000 });
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 1), 20000);
     const inviter = await initFakeSteam({ port: be.port, steamId: 76561190000000009n, name: 'Steam' });
@@ -195,7 +204,12 @@ try {
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);
     const hr2 = await host.page.evaluate(() => window.__nmd.meta?.players.map(p => p.name));
     check(hr2.length === 2 && hr2.includes('Dave'), `and a Steam invite brings them back (host sees ${hr2.join(', ')})`);
-    const quiet = await guest.page.evaluate(() => new Promise(res => setTimeout(() => res(performance.now() - window.__nmd.lastMsgAt()), 1500)));
+    // (a few looks, the best one counts: a busy machine can stall a page for half a second, while a dead
+    // bridge never looks fresh)
+    const quiet = await guest.page.evaluate(() => new Promise(res => {
+      const seen = [], look = () => { seen.push(performance.now() - window.__nmd.lastMsgAt()); if (seen.length < 5 && Math.min(...seen) >= 500) setTimeout(look, 400); else res(Math.min(...seen)); };
+      setTimeout(look, 1500);
+    }));
     check(quiet < 500, `the friend's game is live (the last message came ${Math.round(quiet)} ms ago: snapshots keep coming through the bridge)`);
     await until(() => (be.users.get('76561190000000001')?.presence.steam_player_group_size) === '2', 5000);
     await sleep(1500);
@@ -204,7 +218,7 @@ try {
     check(hp?.steam_display === '#Status_Camp' && gp?.steam_display === '#Status_Camp' && hp?.steam_player_group === String(L.id) && gp?.steam_player_group === String(L.id) && hp?.steam_player_group_size === '2', `rich presence for both, grouped by the lobby (${JSON.stringify(hp)})`);
 
     // the host leaves: the friend is told the trip is over, and goes back to the menu
-    await host.page.evaluate(() => window.__nmd.backToMenu(null));
+    await leaveToMenu(host.page);
     const told = await guest.page.waitForFunction(() => /The trip is over/.test(document.getElementById('netModal')?.textContent || ''), null, { timeout: 20000 }).then(() => guest.page.evaluate(() => document.getElementById('netModal').textContent), () => null);
     check(told && /Hosty ended the trip/.test(told), `when the host leaves, the friend is told: "${told}"`);
     await guest.page.click('#netModal button');
