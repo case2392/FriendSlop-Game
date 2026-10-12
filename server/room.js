@@ -7,7 +7,7 @@
 
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
-import { LOOT, fmt$ } from '../shared/loot.js';
+import { LOOT, fmt$, MAP_NO_DRIVER } from '../shared/loot.js';
 import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
 import { BJTable, FlipMachine } from './casino.js';
@@ -261,7 +261,7 @@ export class Room {
       case 'p': return this.onPose(p, m);
       case 'ready': p.ready = true; return;
       case 'leave': this.removePlayer(p.id, 'left'); return;
-      case 'grab': if (!p.ko && p.seat == null) { const ok = this.sim.grab(p.id, p, m); this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id }); } return;
+      case 'grab': return this.onGrab(p, m);
       case 'rel': this.sim.release(p.id, m.thr ? m.dir : null, p); return;
       case 'hd': this.sim.holdDist(p.id, m.d); return;
       case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
@@ -339,6 +339,27 @@ export class Room {
 
   near(p, pt, r) { return p.pos && dist3(p.pos, pt) < r; }
 
+  // Nobody seated grabs anything (sitting down lets go of what you hold), so the driver never holds the
+  // road map; and the map comes off the dash only while somebody else is at the wheel: a passenger reads it
+  // and calls out the road. (The check comes before sim.grab, which lets go of what you hold first; a
+  // refusal is answered, so the client drops the hold it took ahead of us.)
+  onGrab(p, m) {
+    if (p.ko || p.seat != null) return;
+    if (m.kind === 'prop' && this.sim.props.get(Number(m.id))?.type === 'map' && !this.mayTakeMap(p)) {
+      this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id });
+      this.toast(MAP_NO_DRIVER, '#fff', 3, p);
+      return;
+    }
+    const ok = this.sim.grab(p.id, p, m);
+    this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id });
+  }
+  // Someone else is in the driver's seat; or you're alone on the trip, with nobody to read it to you (you
+  // still take it standing: stopped, out of the seat). The client asks the same (main.js mapFree).
+  mayTakeMap(p) {
+    const live = [...this.players.values()].filter(q => q.connected);
+    return live.some(q => q.seat === 0 && q !== p) || (live.length === 1 && live[0] === p);
+  }
+
   onUse(p, m) {
     if (p.ko || !p.pos) return;
     const W = this.W, sim = this.sim;
@@ -354,7 +375,12 @@ export class Room {
       p.seat = idx;
       if (idx === 0) sim.setDrive({ th: 0, st: 0, hb: 0 });
       this.send(p, { t: 'seat', seat: idx });
-      if (idx === 0) this.toast(`${p.name} is driving. God help us.`, p.color, 3);
+      if (idx === 0) {
+        // (the map is up for grabs now: say so, unless someone has it or there's nobody else to read it)
+        const map = [...sim.props.values()].find(q => q.type === 'map');
+        const crew = [...this.players.values()].filter(q => q.connected).length > 1;
+        this.toast(`${p.name} is driving. God help us.${crew && map && !map.holders.size ? ' Somebody grab the map.' : ''}`, p.color, 3);
+      }
       return;
     }
     if (kind === 'unseat') {

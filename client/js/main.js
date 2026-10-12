@@ -446,7 +446,7 @@ function doorNear() {
 
 function computeTarget() {
   if (!S.lw) return null;
-  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : '[E] get up' };
+  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : '[E] get up (stand to read the map)' };
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
     const a = nearestAnchor();
@@ -461,7 +461,9 @@ function computeTarget() {
     if (!p) return null;
     const L = LOOT[p.type];
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
-    if (p.type === 'map') return { kind: 'prop', id: p.id, hit, label: '[Hold LMB] take the road map' };
+    if (p.type === 'map') return mapFree()
+      ? { kind: 'prop', id: p.id, hit, label: driverName() ? `[Hold LMB] take the road map and call out the road to ${driverName()}` : '[Hold LMB] take the road map' }
+      : { kind: 'mapwait', label: 'The road map. Someone has to be driving before you can take it.' };
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
     return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
@@ -500,11 +502,21 @@ function computeTarget() {
   return null;
 }
 
+// who is at the wheel, if it's somebody else
+function driverName() {
+  const id = S.g?.drv;
+  if (!id || id === S.selfId) return null;
+  return S.meta?.players.find(q => q.id === id)?.name || 'the driver';
+}
+// May I take the road map? The server's rule (server/room.js mayTakeMap): someone else is at the wheel, or
+// nobody else is on the trip. This only words the prompt and saves sending a grab it would refuse.
+const mapFree = () => !!driverName() || (S.meta?.players.length ?? 1) < 2;
 // while a day loads, what the crosshair was on belongs to the old world (or none): nothing to grab, use or ping
 function onGrabPress() {
   if (worldBuilding) return;
   if (me.mode === 'seat' || me.mode === 'ko' || me.holding || me.hasHook) return;
   const t = target;
+  if (t?.kind === 'mapwait') { inp.grab = false; return; }   // not yet (the prompt says why); and no climbing the dash behind it
   if (t?.kind === 'prop') {
     const p = S.props.get(t.id);
     if (!p) return;
@@ -584,7 +596,7 @@ const TIPS = [
   'The Repo Man collects at midnight. Every night.',
   'Loot loses value every time it gets knocked about. Carry it gently.',
   'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
-  'The road map is on the dash, and only whoever holds it can read it.',
+  'The driver can\'t see the map. Once someone\'s driving, grab it off the dash and call out what\'s coming.',
   'Walk into the RV to push it out of the mud.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Walkie-talkies reach anyone else holding one, at any range. $150 at the store.',
@@ -894,6 +906,8 @@ net.on('_close', ev => {
 });
 net.on('world', m => {
   me.hasHook = false;   // a new world comes with the hook on its winch
+  me.holding = null;    // and with empty hands: a new day (or a seat taken back after a dropped connection)
+                        // holds nothing for you. A map kept in hand overnight showed the next day's map in camp
   // back after a dropped connection, on the same day: the world is already built (the props, the
   // teleport and the rest follow as usual)
   if (S.W && !worldBuilding && S.seed === m.seed && S.dayLabel === m.day) {
@@ -960,7 +974,8 @@ net.on('seat', inOrder(m => {
   if (m.seat == null) { me.unsit(m.exit); }
   else { if (me.holding) onGrabRelease(); me.sit(m.seat); }
 }));
-net.on('grabbed', inOrder(m => { if (!m.ok && me.holding?.id === m.id) me.holding = null; }));
+// the server's answer to a grab: no, and the hands are empty again; yes, and (the map) its sheet can go up
+net.on('grabbed', inOrder(m => { if (me.holding?.id !== m.id) return; if (m.ok) me.holding.ok = true; else me.holding = null; }));
 net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));
 net.on('drink', inOrder(() => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); }));
 net.on('revived', inOrder(() => { me.revive(); sfx.wake(); }));
@@ -1370,6 +1385,7 @@ S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
 S.target = () => target;
 S.send = m => net.send(m);
+S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?
 S.renderer = () => renderer;   // tools read draw-call counts
 requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastT) / 1000);
@@ -1476,7 +1492,7 @@ requestAnimationFrame(frame);
 
   // the RV, its hook, its dashboard
   const night = S.g ? (S.g.ph === 'night' || S.g.clk >= 20.2) : false;
-  const odo = rv ? rv.p.z - S.W.camp.rv.z : 0;
+  const odo = rv ? rv.p.z : 0;   // the metres the map's ticks count, from the end of camp (it reads 0 in camp)
   rvView.update(dt, rv, S.door, night, S.hook, odo, S.g ? fmtClock(S.g.clk) : '');
   if (S.g) setTimeOfDay(S.g.clk, S.g.ph === 'night');
   updateSun(me.pos);
@@ -1485,12 +1501,15 @@ requestAnimationFrame(frame);
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
-  if (me.holding?.type === 'map' && mapRaised) hands.showMap(S.mapCv); else hands.hideMap();
+  // the real map shows only on its reader's own screen, once the server has said the grab took (a refused
+  // grab never flashes it), and never in a seat (nobody seated holds anything anyway)
+  const reading = me.holding?.type === 'map' && !!me.holding.ok && mapRaised && me.mode !== 'seat';
+  if (reading) hands.showMap(S.mapCv); else hands.hideMap();
 
   // what am I looking at
   target = computeTarget();
   $('prompt').textContent = keysIn(target?.label || '');
-  $('prompt').classList.toggle('hidden', !target?.label || (me.holding?.type === 'map' && mapRaised));   // the raised map covers the view
+  $('prompt').classList.toggle('hidden', !target?.label || reading);   // the raised map covers the view
   if (target?.kind === 'revive' && keys.e && reviveT > 0) {
     reviveT += dt;
     if (reviveT >= C.PLAYER.REVIVE_HOLD) { net.send({ t: 'use', kind: 'revive', id: target.id }); reviveT = 0; }
@@ -1687,11 +1706,20 @@ const tut = (() => { try { return new Set(JSON.parse(localStorage.getItem('nmdTu
 function tutDone(k) { if (tut.has(k)) return; tut.add(k); try { localStorage.setItem('nmdTutorial', JSON.stringify([...tut])); } catch {} }
 function tutWatch(inMyRV) {
   if (me.mode === 'seat' && me.seat === 0) tutDone('drive');
+  if (me.holding?.type === 'map' && me.holding.ok) tutDone('map');
   if (me.holding && me.holding.type !== 'map') { tutDone('grab'); if (inMyRV) tutDone('load'); }
   if ((S.g?.pawn || 0) > 0 || (S.g?.dock || 0) > 0) tutDone('pawn');
 }
+// is the road map out: in my hands, or in another player's (their pose carries the MAP flag)?
+function mapOut() {
+  if (me.holding?.type === 'map') return true;
+  if (S.renderT == null || !S.meta) return false;
+  return S.meta.players.some(p => p.id !== S.selfId && (S.interp.samplePlayer(p.id, S.renderT)?.flags & C.FLAG.MAP));
+}
 function tutTip(g, town) {
   if (!settings.tutorial) return null;
+  // someone else took the wheel and nobody has the map out: a passenger navigates
+  if (!tut.has('map') && driverName() && (g.ph === 'camp' || (g.ph === 'road' && !g.town)) && !mapOut()) return `Hint: ${driverName()} can't see the map. Grab it off the dash and call out what's coming`;
   if (g.ph === 'camp') return tut.has('drive') ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';

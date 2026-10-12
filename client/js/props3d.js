@@ -1205,7 +1205,7 @@ export function mapCanvas(W) {
   const textW = (txt, size, italic = false) => { g.save(); g.font = `${italic ? 'italic ' : ''}bold ${size}px ${MAPFONT}`; const w = g.measureText(txt).width; g.restore(); return w; };
   // the fixed furniture first: the title banner, the compass, the note, the scale bar
   const bannerW = 250;
-  claim([8, 6, 8 + bannerW + 32, 62]); claim([CW - 80, 10, CW - 6, 92]); claim([CW - 270, CH - 30, CW - 8, CH - 8]); claim([12, CH - 50, 140, CH - 18]);
+  claim([8, 6, 8 + bannerW + 32, 78]); claim([CW - 80, 10, CW - 6, 92]); claim([12, CH - 50, 140, CH - 18]);
   for (const [x, y] of road) claim([x - 5, y - 5, x + 5, y + 5]);
   if (lake) claim([lake.cx - lake.r * 1.6, lake.cy - lake.r * 0.7, lake.cx + lake.r * 1.6, lake.cy + lake.r * 0.7]);
   // distance ticks every 100 m from camp
@@ -1300,7 +1300,8 @@ export function mapCanvas(W) {
     inkText(g, `Day ${Wd.day}: ${Wd.biomeName || 'The Road'}`, (x0 + x1) / 2, y0 + 13, { size: 14, halo: null, jit: 0.06 });
     inkText(g, `${Wd.LEN} m to town`, (x0 + x1) / 2, y0 + 27, { size: 11, weight: 'normal', italic: true, halo: null });
   }
-  inkText(g, '(no GPS. ask the driver what the odometer says.)', CW - 14, CH - 18, { size: 9.5, italic: true, weight: 'normal', align: 'right', color: '#5a4030' });
+  // (under the banner: the bottom corners are under your fists while you hold it up)
+  inkText(g, '(no GPS. ask the driver what the odometer says.)', 24 + bannerW / 2, 69, { size: 9.5, italic: true, weight: 'normal', color: '#5a4030' });
   compassRose(g, CW - 44, 54, 26);
   const sb = (X(100) - X(0));
   g.fillStyle = '#3a2a1e'; g.fillRect(20, CH - 30, sb, 3); g.fillStyle = '#f2e2b8'; g.fillRect(20 + sb / 2, CH - 29.5, sb / 2, 2);
@@ -1624,14 +1625,26 @@ function twUpdate(renderer, scene, camera) {
 // ---- building ------------------------------------------------------------------------------------
 
 const geoCache = new Map();
-let paperW = null, paperM = null, demoPaper = null;
-function paperMat(W) {
-  if (!W) return demoPaper ||= new THREE.MeshLambertMaterial({ map: canvasTex(mapCanvas(null)) });
-  if (paperW !== W) {      // only today's map stays on the GPU
-    if (paperM) { paperM.map?.dispose(); paperM.dispose(); }
-    paperW = W; paperM = new THREE.MeshLambertMaterial({ map: canvasTex(mapCanvas(W)) });
+// The road map as everyone sees it in the world (on the dash, dropped, in a friend's hands): folded, its
+// cover up. The road itself shows only on the raised sheet in the holder's own view (people.js
+// Hands.showMap), so the driver never reads the map, not even lying on the dash.
+let coverM = null;
+function coverMat() {
+  if (coverM) return coverM;
+  const CW = 512, CH = 376, cv = makeCanvas(CW, CH), g = cv.getContext('2d'), rnd = rngFrom('map-cover');
+  g.fillStyle = '#ead6a8'; g.fillRect(0, 0, CW, CH);
+  for (let i = 0; i < 50; i++) blob(g, rnd() * CW, rnd() * CH, range(rnd, 20, 70), range(rnd, 14, 50), rnd() * 3, pick(rnd, ['#f2e0b4', '#dcc492', '#e4cc9a', '#d4b884']), 0.35, 0.1);
+  for (let k = 1; k < 6; k++) {   // the creases of its six panels (the paper's folds)
+    const x = k / 6 * CW, gr = g.createLinearGradient(x - 10, 0, x + 10, 0);
+    gr.addColorStop(0, 'rgba(90,60,30,0)'); gr.addColorStop(0.5, k % 2 ? 'rgba(90,60,30,0.22)' : 'rgba(255,248,220,0.35)'); gr.addColorStop(1, 'rgba(90,60,30,0)');
+    g.fillStyle = gr; g.fillRect(x - 10, 0, 20, CH);
   }
-  return paperM;
+  g.strokeStyle = '#3a2a1e'; g.lineWidth = 3; g.strokeRect(22, 22, CW - 44, CH - 44); g.lineWidth = 1; g.strokeRect(31, 31, CW - 62, CH - 62);
+  inkText(g, 'ROAD MAP', CW / 2, CH * 0.4, { size: 58, halo: null, jit: 0.03 });
+  inkText(g, 'for the navigator', CW / 2, CH * 0.57, { size: 24, italic: true, weight: 'normal', halo: null });
+  inkText(g, '(not the driver)', CW / 2, CH * 0.67, { size: 17, italic: true, weight: 'normal', halo: null, color: '#5a4030' });
+  compassRose(g, CW - 78, CH - 78, 28);
+  return coverM = new THREE.MeshLambertMaterial({ map: canvasTex(cv) });
 }
 let paperGeo = null;
 function mapPaper() {
@@ -1669,7 +1682,7 @@ export function buildProp(type, W) {
   if (type === 'map') {
     const g = new THREE.Group();
     g.add(mesh);
-    const paper = new THREE.Mesh(mapPaper(), paperMat(W));
+    const paper = new THREE.Mesh(mapPaper(), coverMat());
     paper.position.set(0.012, 0.0075, 0);
     g.add(paper);
     return shadowy(g);
@@ -1681,7 +1694,7 @@ export function buildProp(type, W) {
 // (and a new biome's boulder) don't stall the frame they arrive in.
 export function prewarm(W) {
   const idle = (typeof window !== 'undefined' && window.requestIdleCallback) || (f => setTimeout(f, 30));
-  const jobs = [() => lootMat(), () => twinkleCloud(), ...Object.keys(BUILDERS).map(k => () => geoOf(k)), () => { if (W) buildProp('boulder', W); }, () => { if (W) paperMat(W); }];
+  const jobs = [() => lootMat(), () => twinkleCloud(), ...Object.keys(BUILDERS).map(k => () => geoOf(k)), () => { if (W) buildProp('boulder', W); }, () => coverMat()];
   const step = () => { const j = jobs.shift(); if (!j) return; try { j(); } catch (e) { console.warn('props prewarm', e); } idle(step); };
   idle(step);
 }

@@ -329,6 +329,68 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(room.day === 2, `rooms: after 45 s the RV leaves at dawn anyway (day ${room.day})`);
 }
 
+// ---- in process: the road map ---------------------------------------------------------------------------
+{
+  // a passenger reads it to the driver: nobody takes it until someone else is at the wheel; the driver can't
+  // take it; a reader keeps it when the driver gets up (or is knocked out); a reader who takes the wheel
+  // lets go of it
+  const room = new Room('MAP', 4242);
+  const ca = new FakeConn(), cb = new FakeConn();
+  const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player;
+  room.welcome(A); room.welcome(B);
+  tick(room, 0.5);
+  const sim = room.sim, map = [...sim.props.values()].find(p => p.type === 'map');
+  // standing in the cab (RV-local): Ann behind the driver's seat, Bob on the passenger side, both looking ahead and down
+  const stand = (p, x, z) => room.onPose(p, { par: 1, x, y: 0.05, z, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+  const grab = p => { const t = map.body.translation(); room.handle(p, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 }); };
+  const holds = p => sim.holds.get(p.id)?.id === map.id;
+  const said = (c, re) => c.has(m => m.t === 'toast' && re.test(m.text));
+  stand(A, 0.6, 2.4); stand(B, -0.4, 2.3);
+  grab(B);
+  check(!!map && cb.last('grabbed')?.ok === false && !holds(B) && said(cb, /has to be driving/), 'map: with nobody at the wheel nobody takes the road map, and is told why');
+  room.handle(A, { t: 'use', kind: 'seat0' });
+  grab(B);
+  tick(room, 0.5);
+  check(A.seat === 0 && cb.last('grabbed')?.ok === true && holds(B) && said(cb, /Somebody grab the map/), 'map: once someone drives (and the crew is told to grab the map), a passenger takes it');
+  const n0 = ca.sent.filter(m => m.t === 'grabbed').length;
+  grab(A);
+  check(!holds(A) && ca.sent.filter(m => m.t === 'grabbed').length === n0 && map.holders.size === 1, 'map: the driver can\'t take it from the seat');
+  room.handle(A, { t: 'use', kind: 'unseat' });
+  stand(A, 0.6, 2.4);
+  tick(room, 0.3);
+  grab(A);
+  check(A.seat === null && holds(B) && ca.last('grabbed')?.ok === false && !holds(A), 'map: the driver gets up: the reader keeps it, and nobody else takes it until someone drives again');
+  room.handle(B, { t: 'use', kind: 'seat0' });
+  tick(room, 0.3);
+  check(B.seat === 0 && !holds(B) && map.holders.size === 0, 'map: a reader who takes the wheel lets go of it');
+  grab(A);
+  room.handle(B, { t: 'ko', why: 'fall' });
+  tick(room, 0.3);
+  check(ca.last('grabbed')?.ok === true && holds(A) && B.seat === null, 'map: the new passenger takes it; a knocked-out driver leaves the seat and the reader keeps the map');
+  // the driver toast asks for a reader only while nobody has the map out
+  const n1 = ca.sent.length;
+  room.handle(B, { t: 'wake' });
+  stand(B, 0.6, 2.4);
+  room.handle(B, { t: 'use', kind: 'seat0' });
+  const t1 = ca.sent.slice(n1).find(m => m.t === 'toast' && /is driving/.test(m.text));
+  check(B.seat === 0 && holds(A) && t1 && !/grab the map/.test(t1.text), `map: a new driver with the map already out isn't asked for a reader ("${t1?.text}")`);
+  room.sim.free?.();
+}
+{
+  // alone on a trip there's nobody to read it to you: you may take it (out of the seat)
+  const room = new Room('MAP1', 4242);
+  const c = new FakeConn(), P = room.addPlayer(c, 'Solo').player;
+  room.welcome(P);
+  tick(room, 0.5);
+  const map = [...room.sim.props.values()].find(p => p.type === 'map'), t = map.body.translation();
+  room.onPose(P, { par: 1, x: -0.4, y: 0.05, z: 2.3, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+  room.handle(P, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 });
+  check(c.last('grabbed')?.ok === true && room.sim.holds.get(P.id)?.id === map.id, 'map: alone on a trip, you can take the map with nobody driving');
+  room.handle(P, { t: 'use', kind: 'seat0' });
+  check(P.seat === 0 && !room.sim.holds.has(P.id) && !c.has(m => m.t === 'toast' && /grab the map/.test(m.text)), 'map: ... and sitting at the wheel lets go of it (nobody is asked to grab it: there is nobody)');
+  room.sim.free?.();
+}
+
 // ---- in process: trip codes (GameHost) -----------------------------------------------------------------
 {
   const { GameHost } = await import('../server/host.js');

@@ -19,7 +19,7 @@ Then the roof. Then the RV.
 | ![climbing a canyon wall](docs/screenshots/climbing.jpg) | ![the code painted on the canyon rim](docs/screenshots/rim-code.jpg) |
 | **Climb anything steep**, on a stamina bar (PEAK rules). | **The ranger gate code** is painted up on the rim. Shout it down. |
 | ![carrying a CRT TV](docs/screenshots/carrying.jpg) | ![the paper road map](docs/screenshots/map.jpg) |
-| **Fragile physics loot.** Every bump costs money. | **One paper map.** Only whoever's holding it can read it. |
+| **Fragile physics loot.** Every bump costs money. | **One paper map, and the driver can't see it.** A passenger calls out the road. |
 | ![body-vote blackjack](docs/screenshots/casino.jpg) | ![the pawn counter](docs/screenshots/pawn.jpg) |
 | **The Lucky Slop.** Bet the *shared* bank, vote HIT/STAND with your body. | **Honest Ed's Pawn.** Put it on the counter, ring the bell (or park in his loading zone: he buys the whole load). |
 | ![the Repo Man](docs/screenshots/repo-man.jpg) | ![night at the campfire](docs/screenshots/night.jpg) |
@@ -120,7 +120,8 @@ on.
 | `MMB` · `1-6` | ping · emotes |
 | `V` · `M` · `T` | push-to-talk · mute · walkie-talkie |
 
-**A day:** leave camp → follow the road (the map is on the dash) → deal with
+**A day:** leave camp → follow the road (the driver can't see the map: a
+passenger reads it out, matching the odometer to its 100 m marks) → deal with
 what's broken (winch up the grade, push out of the mud, shove or winch the
 boulder, crack the ranger gate) → detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.
@@ -220,9 +221,10 @@ npm test
 - `test/smoke-browser.mjs` runs two real Chromium clients in one room. They
   join through the menu and see each other. One drives while the other rides
   inside, and the passenger stays glued in on both screens. They carry a TV,
-  climb a canyon wall, read the map, play blackjack by body-vote, talk over
-  proximity voice, drop and get their seat back. The test fails on any page
-  error.
+  climb a canyon wall, read the map to the driver (nobody can take it until
+  someone drives, and the driver's screen never shows it), play blackjack by
+  body-vote, talk over proximity voice, drop and get their seat back. The
+  test fails on any page error.
 - `npm run test:desktop` drives the real desktop app (needs a display, or
   `xvfb-run`): the locked-down shell, a trip, Quit, and two copies of the app
   joining each other over the stand-in Steam.
