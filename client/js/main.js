@@ -446,7 +446,7 @@ function doorNear() {
 
 function computeTarget() {
   if (!S.lw) return null;
-  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : '[E] get up (stand to read the map)' };
+  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : (mapWanted() ? '[E] get up (stand to read the map)' : '[E] get up') };
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
     const a = nearestAnchor();
@@ -462,8 +462,8 @@ function computeTarget() {
     const L = LOOT[p.type];
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
     if (p.type === 'map') return mapFree()
-      ? { kind: 'prop', id: p.id, hit, label: driverName() ? `[Hold LMB] take the road map and call out the road to ${driverName()}` : '[Hold LMB] take the road map' }
-      : { kind: 'mapwait', label: 'The road map. Someone has to be driving before you can take it.' };
+      ? { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }
+      : { kind: 'mapwait', label: (S.meta?.players.length ?? 1) < 2 ? 'The road map. It takes two: one drives, one reads it out.' : 'The road map. Someone has to be driving before you can take it.' };
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
     return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
@@ -508,9 +508,19 @@ function driverName() {
   if (!id || id === S.selfId) return null;
   return S.meta?.players.find(q => q.id === id)?.name || 'the driver';
 }
-// May I take the road map? The server's rule (server/room.js mayTakeMap): someone else is at the wheel, or
-// nobody else is on the trip. This only words the prompt and saves sending a grab it would refuse.
-const mapFree = () => !!driverName() || (S.meta?.players.length ?? 1) < 2;
+// May I take the road map? The server's rule (server/room.js mayTakeMap): someone else is at the wheel. This
+// only words the prompt and saves sending a grab it would refuse
+const mapFree = () => !!driverName();
+// should a passenger take the map now: someone else drives, the road ahead matters (camp, or the road before
+// town), and the map lies in the RV with nobody reading it
+function mapWanted() {
+  const g = S.g;
+  if (!g || !driverName() || !(g.ph === 'camp' || (g.ph === 'road' && !g.town)) || mapOut()) return false;
+  const mp = [...S.props.values()].find(p => p.type === 'map');
+  if (!mp?.pose || !S.rv) return false;
+  const l = toLocal(S.rv.p, S.rv.q, mp.pose.p);
+  return insideRV(l.x, l.y, l.z, 0.3);
+}
 // while a day loads, what the crosshair was on belongs to the old world (or none): nothing to grab, use or ping
 function onGrabPress() {
   if (worldBuilding) return;
@@ -1410,6 +1420,9 @@ requestAnimationFrame(frame);
     const s = rt != null ? S.interp.sampleProp(p.id, rt) : null;
     if (!s) continue;
     p.pose = s;
+    // (the map hides while it's read: on its reader's screen the sheet is up, everyone else sees it in
+    // their hands; held, it would float a metre ahead of them, in front of the windshield)
+    if (p.type === 'map') p.mesh.visible = !(me.holding?.id === p.id ? (me.holding.ok && mapRaised) : mapOut());
     p.mesh.position.set(s.p.x, s.p.y, s.p.z);
     p.mesh.quaternion.set(s.q.x, s.q.y, s.q.z, s.q.w);
     S.lw.setProp(p.id, s.p, s.q);
@@ -1719,7 +1732,7 @@ function mapOut() {
 function tutTip(g, town) {
   if (!settings.tutorial) return null;
   // someone else took the wheel and nobody has the map out: a passenger navigates
-  if (!tut.has('map') && driverName() && (g.ph === 'camp' || (g.ph === 'road' && !g.town)) && !mapOut()) return `Hint: ${driverName()} can't see the map. Grab it off the dash and call out what's coming`;
+  if (!tut.has('map') && mapWanted()) return `Hint: ${driverName()} can't see the map. Grab it off the dash and call out what's coming`;
   if (g.ph === 'camp') return tut.has('drive') ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';

@@ -121,7 +121,8 @@ on.
 | `V` · `M` · `T` | push-to-talk · mute · walkie-talkie |
 
 **A day:** leave camp → follow the road (the driver can't see the map: a
-passenger reads it out, matching the odometer to its 100 m marks) → deal with
+passenger reads it out, matching the odometer to its 100 m marks; alone, you
+drive without it) → deal with
 what's broken (winch up the grade, push out of the mud, shove or winch the
 boulder, crack the ranger gate) → detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.

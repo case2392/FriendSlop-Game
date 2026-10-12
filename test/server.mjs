@@ -377,7 +377,8 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   room.sim.free?.();
 }
 {
-  // alone on a trip there's nobody to read it to you: you may take it (out of the seat)
+  // alone (a host waiting for friends at camp, the clock stopped, is alone too): no driver, no map; and taking
+  // the wheel doesn't ask for a reader who isn't there
   const room = new Room('MAP1', 4242);
   const c = new FakeConn(), P = room.addPlayer(c, 'Solo').player;
   room.welcome(P);
@@ -385,9 +386,9 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const map = [...room.sim.props.values()].find(p => p.type === 'map'), t = map.body.translation();
   room.onPose(P, { par: 1, x: -0.4, y: 0.05, z: 2.3, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
   room.handle(P, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 });
-  check(c.last('grabbed')?.ok === true && room.sim.holds.get(P.id)?.id === map.id, 'map: alone on a trip, you can take the map with nobody driving');
+  check(c.last('grabbed')?.ok === false && !room.sim.holds.has(P.id), 'map: alone on a trip, nobody takes the map: there is nobody driving');
   room.handle(P, { t: 'use', kind: 'seat0' });
-  check(P.seat === 0 && !room.sim.holds.has(P.id) && !c.has(m => m.t === 'toast' && /grab the map/.test(m.text)), 'map: ... and sitting at the wheel lets go of it (nobody is asked to grab it: there is nobody)');
+  check(P.seat === 0 && !c.has(m => m.t === 'toast' && /grab the map/.test(m.text)), 'map: ... and taking the wheel alone doesn\'t ask for a reader');
   room.sim.free?.();
 }
 

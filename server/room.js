@@ -353,12 +353,10 @@ export class Room {
     const ok = this.sim.grab(p.id, p, m);
     this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id });
   }
-  // Someone else is in the driver's seat; or you're alone on the trip, with nobody to read it to you (you
-  // still take it standing: stopped, out of the seat). The client asks the same (main.js mapFree).
-  mayTakeMap(p) {
-    const live = [...this.players.values()].filter(q => q.connected);
-    return live.some(q => q.seat === 0 && q !== p) || (live.length === 1 && live[0] === p);
-  }
+  // Someone else is in the driver's seat (a dropped player's seat is freed at once: hold()). No exception for
+  // a player alone: every trip starts with its host alone while friends type the code in, the clock stopped
+  // in camp. Solo, there's nobody to read it to you. The client asks the same (main.js mapFree).
+  mayTakeMap(p) { return [...this.players.values()].some(q => q !== p && q.seat === 0); }
 
   onUse(p, m) {
     if (p.ko || !p.pos) return;
@@ -376,10 +374,12 @@ export class Room {
       if (idx === 0) sim.setDrive({ th: 0, st: 0, hb: 0 });
       this.send(p, { t: 'seat', seat: idx });
       if (idx === 0) {
-        // (the map is up for grabs now: say so, unless someone has it or there's nobody else to read it)
-        const map = [...sim.props.values()].find(q => q.type === 'map');
-        const crew = [...this.players.values()].filter(q => q.connected).length > 1;
-        this.toast(`${p.name} is driving. God help us.${crew && map && !map.holders.size ? ' Somebody grab the map.' : ''}`, p.color, 3);
+        // (the map is up for grabs now: say so while it lies in the RV with nobody reading it, there's somebody
+        // else to read it, and the road ahead matters)
+        const map = [...sim.props.values()].find(q => q.type === 'map'), ml = map && sim.rvToLocal(map.body.translation());
+        const ask = map && !map.holders.size && insideRV(ml.x, ml.y, ml.z, 0.3) && (this.phase === 'camp' || this.phase === 'road') && !this.inTown
+          && [...this.players.values()].filter(q => q.connected).length > 1;
+        this.toast(`${p.name} is driving. God help us.${ask ? ' Somebody grab the map.' : ''}`, p.color, 3);
       }
       return;
     }
