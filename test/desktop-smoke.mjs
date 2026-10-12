@@ -172,17 +172,20 @@ try {
     const wrong = code === '5000' ? '5001' : '5000';
     await guest.page.fill('#codeInput', wrong);
     await guest.page.click('#joinBtn');
-    const noTrip = await guest.page.waitForFunction(() => /No trip with code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 45000 })
+    // (polled every 100 ms: a window in the background gets few frames, and the 2 s below starts with the answer)
+    const noTrip = await guest.page.waitForFunction(() => /No trip with code/.test(document.getElementById('menuError').textContent) && !document.getElementById('joinBtn').disabled, null, { timeout: 45000, polling: 100 })
       .then(() => guest.page.evaluate(() => document.getElementById('menuError').textContent), () => null);
     check(noTrip, `a wrong trip code: "${noTrip}"`);
-    // the corrected code goes straight in (only the same code again rests for 2 s: its answer is up)
+    // the corrected code goes straight in (only the same code again rests for 2 s: its answer is up). The same
+    // code goes again from inside the page, at once: a Playwright click first waits for the button to settle,
+    // which on a busy machine can outlast the 2 s
     const searches = () => be.lists.filter(x => x.by === '76561190000000002').length;
     const before = searches();
-    await guest.page.click('#joinBtn');
-    const resting = await guest.page.evaluate(() => document.getElementById('menuError').textContent);
+    const resting = await guest.page.evaluate(() => { document.getElementById('joinBtn').click(); return document.getElementById('menuError').textContent; });
     await guest.page.fill('#codeInput', code);
     await guest.page.click('#joinBtn');
-    check(resting === noTrip && await until(() => searches() > before, 5000), 'the same wrong code again at once is left with its answer; the corrected one is searched for straight away');
+    const looked = await until(() => searches() > before, 5000);
+    check(resting === noTrip && looked, `the same wrong code again at once is left with its answer${resting === noTrip ? '' : ` (it showed "${resting}")`}; the corrected one is searched for straight away${looked ? '' : ' (no search within 5 s)'}`);
     await ready(guest.page);
     const gs = await guest.page.evaluate(() => ({ id: window.__nmd.selfId, code: window.__nmd.code, roster: window.__nmd.meta?.players.map(p => p.name), chip: document.getElementById('hCode').textContent }));
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);
