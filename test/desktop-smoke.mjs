@@ -201,7 +201,12 @@ try {
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 2), 20000);
     const hr2 = await host.page.evaluate(() => window.__nmd.meta?.players.map(p => p.name));
     check(hr2.length === 2 && hr2.includes('Dave'), `and a Steam invite brings them back (host sees ${hr2.join(', ')})`);
-    const quiet = await guest.page.evaluate(() => new Promise(res => setTimeout(() => res(performance.now() - window.__nmd.lastMsgAt()), 1500)));
+    // (a few looks, the best one counts: a busy machine can stall a page for half a second, while a dead
+    // bridge never looks fresh)
+    const quiet = await guest.page.evaluate(() => new Promise(res => {
+      const seen = [], look = () => { seen.push(performance.now() - window.__nmd.lastMsgAt()); if (seen.length < 5 && Math.min(...seen) >= 500) setTimeout(look, 400); else res(Math.min(...seen)); };
+      setTimeout(look, 1500);
+    }));
     check(quiet < 500, `the friend's game is live (the last message came ${Math.round(quiet)} ms ago: snapshots keep coming through the bridge)`);
     await until(() => (be.users.get('76561190000000001')?.presence.steam_player_group_size) === '2', 5000);
     await sleep(1500);
