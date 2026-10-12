@@ -2160,7 +2160,7 @@ export const FP = {
 };
 // Painted at twice the layout's size (FP and people.js's FPA stay in 256 units: the uvs are
 // proportional): your own gloves are the one thing on screen all the time.
-const FP_SC = 2;
+const FP_SC = 3;
 function paintHands(g, s, rnd, cv, color) {
   const c = muted(color), cb = brightDye(color);
   g.save(); g.setTransform(FP_SC, 0, 0, FP_SC, 0, 0);
