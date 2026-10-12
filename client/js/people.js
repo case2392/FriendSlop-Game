@@ -303,7 +303,7 @@ function faceRelief(th, dy, fem) {
   else fx += 0.013 * gauss(dy + 0.082, 0.013) * Math.exp(-Math.pow(th / 0.27, 4));                                           // a square chin with a flat front
   rr += (fem ? 0.0035 : 0.016) * gauss(dy - 0.047 + 0.008 * (a / 0.55) ** 2, 0.011) * gauss(th, 0.6);                        // brow ridge, arching down to the temples
   rr -= (fem ? 0.009 : 0.014) * gauss(dy - 0.024, 0.012) * gauss(a - 0.345, 0.185);                                          // eye sockets
-  rr += (fem ? 0.009 : 0.013) * gauss(dy + (fem ? -0.004 : 0.0), 0.013) * gauss(a - 0.76, 0.24);                             // cheekbones
+  rr += (fem ? 0.004 : 0.006) * gauss(dy + (fem ? -0.004 : 0.0), 0.02) * gauss(a - 0.76, 0.28);                              // cheekbones (broad and low: a steep one put its underside in a dark band)
   rr -= (fem ? 0.003 : 0.005) * gauss(dy + 0.045, 0.02) * gauss(a - 0.86, 0.26);                                             // hollows under them
   rr -= 0.009 * gauss(dy - 0.045, 0.028) * gauss(a - 1.08, 0.3);                                                             // temples
   rr += (fem ? 0.002 : 0.007) * gauss(dy + 0.072, 0.012) * gauss(a - 1.3, 0.24);                                             // square jaw corners
