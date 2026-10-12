@@ -20,7 +20,8 @@ import { THREE, painted, tex, canvasTex } from './gfx.js';
 import { atmo } from './atmosphere.js';
 import { canvasFor, meta, rngFrom } from './paint/index.js';
 import { mergeGeometries, toCreasedNormals } from '/vendor/BufferGeometryUtils.js';
-import { RV_DIM, RV_WHEELS, SUSP_REST, RV_WINCH, RV_PARTS } from '/shared/rv.js';
+import { RV_DIM, RV_WHEELS, SUSP_REST, RV_WINCH, RV_PARTS, RV_SEATS } from '/shared/rv.js';
+import { Hands } from './people.js';
 import { RV_ART as A, TRIM, SOFT, LAMPS, BODY, LETTER_FONT, GLASS_U, GINGHAM_PLEATS } from './paint/vehicle.js';
 
 const D = RV_DIM, PI = Math.PI, TAU = PI * 2;
@@ -1713,6 +1714,17 @@ function previewRV({ yaw = 0, door = false, night = false, parts = null, steer =
   return root;
 }
 export const PREVIEW = {
+  // the driver's view (tools/preview.mjs with band 'fp'): the RV round the camera, your hands on the wheel
+  ...Object.fromEntries([['fpdrive', 0], ['fpdrive_turn', 0.3]].map(([n, steer]) => [n, () => {
+    const root = new THREE.Group(), rvRoot = new THREE.Group(), v = new RVView(rvRoot), s = RV_SEATS[0];
+    root.userData.fp = true;
+    for (let i = 0; i < 30; i++) v.update(0.1, { p: { x: 0, y: 0, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 }, v: { x: 0, y: 0, z: 0 }, steer, wheels: [] }, false, false, null, 120, '9:41 AM');
+    rvRoot.rotation.y = PI; rvRoot.position.set(s.x, -s.y, s.z);   // the driver's eye at the origin, looking down -z
+    const cam = new THREE.Group(), h = new Hands(cam, '#00E5FF');
+    root.add(rvRoot, cam);
+    for (let i = 0; i < 40; i++) h.update(0.1, { mode: 'seat', seat: 0 }, false, false, v.steeringWheel);
+    return root;
+  }])),
   rv: () => previewRV(),
   rv_side: () => previewRV({ yaw: PI / 2 }),
   rv_rear: () => previewRV({ yaw: PI }),

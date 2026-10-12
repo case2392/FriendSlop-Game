@@ -55,6 +55,7 @@ export const REG = {
   metal: { x: 452, y: 464, w: 60,  h: 60 },     // top half brass, bottom half iron
   collar:{ x: 452, y: 528, w: 60,  h: 48 },
   paul:  { x: 0,   y: 564, w: 128, h: 64 },
+  thumb: { x: 136, y: 565, w: 56,  h: 11 },     // the third-person thumb: u around it, v from its root (0) to the tip (1)
   belt:  { x: 0,   y: 632, w: 128, h: 68 },
   hair:  { x: 132, y: 580, w: 124, h: 120 },
   acc:   { x: 260, y: 580, w: 192, h: 120 },    // hat: crown v .52-1, brim v 0-.45
@@ -84,21 +85,26 @@ export function headTh(u) {
 // column runs linearly (4.07 per unit dy) from the chin to the brow so the face paints
 // in even centimeters; people.js adds the nose, brow ridge, sockets and cheekbones.
 export const HEAD_RINGS = [
-  [-0.150, 0.066, 0.060, 0.066, 2.0, -0.016, 0.0],
-  [-0.125, 0.064, 0.060, 0.064, 2.0, -0.015, 0.035],
-  [-0.106, 0.062, 0.066, 0.064, 2.2, -0.010, 0.07],
-  [-0.096, 0.060, 0.084, 0.066, 2.6, -0.004, 0.095],
-  [-0.088, 0.058, 0.100, 0.068, 3.0, 0.000, 0.12],
-  [-0.075, 0.065, 0.105, 0.076, 2.8, 0.000, 0.173],
-  [-0.060, 0.073, 0.106, 0.082, 2.6, 0.000, 0.234],
-  [-0.046, 0.079, 0.106, 0.087, 2.4, 0.000, 0.291],
-  [-0.022, 0.084, 0.104, 0.093, 2.3, 0.000, 0.388],
+  [-0.175, 0.070, 0.060, 0.074, 2.0, -0.018, 0.0],
+  [-0.150, 0.064, 0.058, 0.066, 2.0, -0.016, 0.0],
+  [-0.125, 0.060, 0.057, 0.060, 2.0, -0.014, 0.035],
+  [-0.106, 0.059, 0.064, 0.058, 2.2, -0.009, 0.07],
+  [-0.096, 0.060, 0.082, 0.059, 2.6, -0.004, 0.095],
+  [-0.088, 0.062, 0.097, 0.062, 2.8, 0.000, 0.12],
+  [-0.075, 0.067, 0.102, 0.067, 2.6, 0.000, 0.173],
+  [-0.060, 0.073, 0.104, 0.073, 2.3, 0.000, 0.234],
+  [-0.046, 0.079, 0.105, 0.080, 2.2, 0.000, 0.291],
+  [-0.022, 0.084, 0.104, 0.090, 2.2, 0.000, 0.388],
   [0.000, 0.088, 0.102, 0.098, 2.2, 0.000, 0.478],
   [0.025, 0.091, 0.099, 0.101, 2.1, 0.000, 0.58],
-  [0.046, 0.093, 0.103, 0.102, 2.1, 0.000, 0.665],
-  [0.080, 0.090, 0.094, 0.101, 2.0, -0.004, 0.785],
-  [0.114, 0.076, 0.076, 0.090, 2.0, -0.008, 0.88],
-  [0.141, 0.051, 0.048, 0.062, 2.0, -0.010, 0.955],
+  [0.046, 0.093, 0.103, 0.103, 2.1, 0.000, 0.665],
+  [0.080, 0.090, 0.096, 0.102, 2.0, -0.004, 0.785],
+  [0.100, 0.086, 0.090, 0.097, 2.0, -0.006, 0.841],
+  [0.114, 0.079, 0.082, 0.089, 2.0, -0.008, 0.88],
+  [0.128, 0.068, 0.070, 0.077, 2.0, -0.009, 0.919],
+  [0.141, 0.052, 0.053, 0.060, 2.0, -0.010, 0.955],
+  [0.149, 0.036, 0.037, 0.042, 2.0, -0.010, 0.979],
+  [0.154, 0.020, 0.020, 0.023, 2.0, -0.010, 0.994],
   [0.156, 0.000, 0.000, 0.000, 2.0, -0.010, 1.00],
 ];
 // Hairline: [|theta| (0 = front, PI = back), dy]
@@ -119,7 +125,7 @@ export const hairWave = (th, hair) => (hair === 'short' || hair === 'long' ? 0.0
 export const EYE_DY = 0.025;
 const FACE_ARC = lerpTable(HEAD_RINGS, EYE_DY, 1) * HEAD_SCALE * 100;   // cm of face per radian at the front
 export const faceUV = (x, y) => [headU(-x / FACE_ARC), headV(EYE_DY + y / (100 * HEAD_SCALE))];
-export const EYE_X = 3.5;            // eye centers, cm from the midline
+export const EYE_X = 3.9;            // eye centers, cm from the midline (people.js models the sockets round them)
 // A full beard's top edge: [|theta|, dy] (unscaled), from under the lower lip, past the
 // mouth corners, up the cheeks to the sideburns. people.js models the beard sheet from it
 // and maps the sheet's texture onto the face (faceUV), where paintHead paints the beard.
@@ -177,14 +183,14 @@ const LOOKS = [
   { hair: 'short', hairColor: '#5c3a1f', facial: 'stubble', eyes: '#4a5c74', female: false },
   { hair: 'short', hairColor: '#231b1a', facial: 'mustache', eyes: '#4a3220', female: false },
   { hair: 'long', hairColor: '#3d2516', facial: 'beard', eyes: '#3f5236', female: false },
-  { hair: 'bald', hairColor: '#a29b92', facial: 'goatee', eyes: '#3e2a1a', female: false },
+  { hair: 'bald', hairColor: '#aa9b96', facial: 'goatee', eyes: '#3e2a1a', female: false },
   { hair: 'braid', hairColor: '#a3471f', facial: 'none', eyes: '#3f6348', female: true },
   { hair: 'bun', hairColor: '#1e1719', facial: 'none', eyes: '#3d2617', female: true },
 ];
 export const HATS = ['brim', 'bandana', 'cap', 'hood', 'straw', 'helm'];
 const OUTFITS = {
   player: { torso: 'tabard', arms: 'sleeve', hands: 'glove', legs: 'trousers', boots: 'tall', pauldrons: 'both', belt: true, skirt: true, collar: true, pack: true },
-  ed:     { torso: 'shirt', arms: 'rolled', hands: 'bare', legs: 'wool', boots: 'short', pauldrons: 'none', belt: false, apron: true, hat: 'none', bulk: 1.08, belly: 0.045, armBulk: 1.08, forearm: 1.15, look: { hair: 'bald', hairColor: '#8a7c6c', facial: 'beard', beard: 1.3, female: false } },
+  ed:     { torso: 'shirt', arms: 'rolled', hands: 'bare', legs: 'wool', boots: 'short', pauldrons: 'none', belt: false, apron: true, hat: 'none', bulk: 1.08, belly: 0.045, armBulk: 1.08, forearm: 1.15, look: { hair: 'bald', hairColor: '#a3918a', facial: 'beard', beard: 1.3, female: false } },
   clerk:  { torso: 'bodice', arms: 'blouse', hands: 'bare', legs: 'wool', boots: 'shoe', pauldrons: 'none', belt: false, dress: true, hat: 'none', armBulk: 0.84, collar: false, look: { hair: 'bun', hairColor: '#8e3a1c', female: true, facial: 'none' } },
   dealer: { torso: 'vest', arms: 'shirt', hands: 'bare', legs: 'black', boots: 'shoe', pauldrons: 'none', belt: true, hat: 'visor', armBulk: 0.86, shoulderK: 1.08, collar: true, look: { hair: 'slick', hairColor: '#17121a', facial: 'pencil', female: false, stern: true } },
   repo:   { torso: 'overalls', arms: 'flannel', hands: 'workglove', legs: 'overalls', boots: 'work', pauldrons: 'none', belt: false, hat: 'beanie', bulk: 1.12, brute: true, belly: 0.06, armBulk: 1.0, forearm: 1.14, chain: true, bib: true, shades: true, look: { hair: 'buzz', hairColor: '#1d1716', facial: 'stubble', female: false, stern: true } },
@@ -262,6 +268,7 @@ export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, sc
 
 // (the game's sun is warm and bright: browns paint darker and cooler than they read on screen)
 const LEATHER = '#5a3c26', LEATHER_D = '#3a2518', SUEDE = '#7a5636', TRIM = '#d6b46c', LINEN = '#ddcfb0', BRASS = '#b58c3c', IRON = '#7d8088';
+const GLOVE = '#6e4a2c';   // glove leather: your own first-person gloves and the ones friends see on you
 const TROUSER = '#4a392c';
 const INK = '#24192a';    // the darkest thing we ever paint (soft violet-brown, not black)
 
@@ -549,12 +556,18 @@ function fill0(g, r, c) { g.fillStyle = c; g.fillRect(r.x, r.y, r.w, r.h); }
 // ---- the head: skin, face, painted hair ---------------------------------------------------
 
 function toneOf(c) {
-  // warm skin: shadows lean red-brown (not violet-grey), pale skin lifts toward a peachy cream
-  const L = hsl(c).l, dk = Math.max(0, 0.42 - L) * 1.4, pale = Math.max(0, L - 0.6) * 3;
+  // Warm skin. The shadows keep their saturation and lean red: a greyed shadow under the olive ground
+  // bounce renders khaki, which reads as dirt or bruises. The lights are lifted in HSL, a smaller step
+  // on dark skin (a light mixed toward cream paints ash grey there). dark: 0 pale .. 1 dark skin.
+  const { h, s, l } = hsl(c), dark = sstepJS(0.5, 0.3, l), H = dh => (h + 1 + dh) % 1;
   return {
-    base: c, light: mix(lightOf(c, 0.32 + dk * 0.3), '#f4cfa4', 0.12 + 0.3 * pale), hi: mix(lightOf(c, 0.58 + dk * 0.45), '#f8d8b0', 0.2 + 0.2 * pale),
-    shadow: mix(shadowOf(c, 0.3 - dk * 0.1), '#8a4638', 0.16), deep: mix(shadowOf(c, 0.52 - dk * 0.25), '#5c2a26', 0.14),
-    cool: mix(shadowOf(c, 0.28), '#7a4a4c', 0.15), blush: mix(c, '#c8664c', 0.4), lip: mix(shadowOf(c, 0.15), '#a4484a', 0.4),
+    base: c, dark,
+    light: fromHsl(H(0.012 * dark), Math.min(0.85, s), l + (1 - l) * (0.3 - 0.13 * dark)),
+    hi: fromHsl(H(0.022 * dark), Math.min(0.85, s * 0.92), l + (1 - l) * (0.5 - 0.2 * dark)),
+    shadow: fromHsl(H(-0.028), Math.min(0.46, s * 0.62 + 0.06), l * 0.74),
+    deep: fromHsl(H(-0.04), Math.min(0.44, s * 0.6 + 0.06), l * 0.5),
+    cool: fromHsl(H(-0.06), Math.min(0.36, s * 0.5 + 0.04), l * 0.78),
+    blush: mix(c, '#c8664c', 0.4), lip: mix(fromHsl(H(-0.03), Math.min(0.5, s * 0.7 + 0.05), l * 0.82), '#a4484a', 0.4),
   };
 }
 
@@ -579,7 +592,7 @@ function faceKit(g, r) {
 function paintEye(g, K, s, S, glow) {
   const T = toneOf(S.tone), L = S.look, fem = L.female, { KX, KY } = K;
   const [cx, cy] = K.F(s * EYE_X, 0);
-  const ew = (fem ? 2.05 : 1.75) * KX, eh = (fem ? 0.7 : 0.5) * KY;
+  const ew = (fem ? 2.15 : 1.95) * KX, eh = (fem ? 0.75 : 0.62) * KY;
   const inner = [cx - s * ew, cy + eh * 0.25], outer = [cx + s * ew, cy - eh * (fem ? 0.3 : 0.05)];
   const almond = () => {
     g.beginPath(); g.moveTo(...inner);
@@ -588,14 +601,23 @@ function paintEye(g, K, s, S, glow) {
     g.closePath();
   };
   g.save();
-  almond(); g.fillStyle = glow ? mix('#d0b8a0', glow, 0.4) : mix('#d6c6b0', T.base, 0.25); g.fill();
+  // (a glowing eye, the Dealer's, is a dark eye round a hot red iris: two coals under the brows)
+  // (the white is no brighter than the skin round it, the iris big and dark: from across the fire an eye
+  // is a dark spot under the brow, not a pale slit)
+  almond(); g.fillStyle = glow ? mix('#2a1c1e', T.deep, 0.3) : mix(mix('#e2d6c4', T.base, 0.3), T.shadow, fem ? 0.12 : 0.22); g.fill();
   g.clip();
-  const ir = (fem ? 0.6 : 0.5), ix = cx + s * 0.08 * KX, iy = cy - eh * 0.05;
-  ellipse(g, ix, iy, ir * KX, ir * KY, 0, glow ? shadowOf(glow, 0.4) : shadowOf(L.eyes, 0.6));
-  ellipse(g, ix, iy + ir * KY * 0.12, ir * KX * 0.78, ir * KY * 0.74, 0, glow || L.eyes);
-  blob(g, ix, iy + ir * KY * 0.45, ir * KX * 0.6, ir * KY * 0.35, 0, glow ? '#ffb08a' : lightOf(L.eyes, 0.55), 0.6, 0.2);
-  ellipse(g, ix, iy, ir * KX * 0.36, ir * KY * 0.38, 0, glow ? '#4a0808' : '#1e1418');
-  gradV(g, cx - ew, cy - eh * 2.2, ew * 2, eh * 2.8, [[0, rgba(T.deep, 1)], [0.6, rgba(mix(T.deep, '#3a2026', 0.3), 0.75)], [1, rgba(T.deep, 0)]]);
+  const ir = glow ? 0.42 : fem ? 0.66 : 0.62, ix = cx + s * 0.08 * KX, iy = cy - eh * 0.05;
+  if (glow) {
+    ellipse(g, ix, iy, ir * KX, ir * KY, 0, glow);
+    ellipse(g, ix, iy, 0.14 * KX, 0.14 * KY, 0, '#2a0404');
+  } else {
+    ellipse(g, ix, iy, ir * KX, ir * KY, 0, shadowOf(L.eyes, 0.7));
+    ellipse(g, ix, iy + ir * KY * 0.12, ir * KX * 0.78, ir * KY * 0.74, 0, shadowOf(L.eyes, 0.2));
+    blob(g, ix, iy + ir * KY * 0.45, ir * KX * 0.6, ir * KY * 0.35, 0, lightOf(L.eyes, 0.55), 0.6, 0.2);
+    ellipse(g, ix, iy, ir * KX * 0.36, ir * KY * 0.38, 0, '#1e1418');
+  }
+  // the top of the eyeball in the lid's shadow (only the top: the white still reads from across the fire)
+  gradV(g, cx - ew, cy - eh * 2.2, ew * 2, eh * 2.8, [[0, rgba(T.deep, 0.75)], [0.42, rgba(T.deep, 0.3)], [0.66, rgba(T.deep, 0)]]);
   ellipse(g, ix - ir * KX * 0.32, iy - ir * KY * 0.12, ir * KX * 0.2, ir * KY * 0.2, 0, '#fff6e0', 0.95);
   g.restore();
   // the upper lid: thick and dark, heaviest toward the outer corner. A woman's sweeps on past the
@@ -603,16 +625,16 @@ function paintEye(g, K, s, S, glow) {
   const lid = fem ? '#3a2626' : '#2a1812';
   const up = [inner, [cx - s * ew * 0.35, cy - eh * 1.25], [cx + s * ew * 0.3, cy - eh * 1.4], outer];
   if (fem) {
-    stroke(g, up, 2.2, 5.6, lid, 0.97);
+    stroke(g, up, 2.8, 6.4, lid, 0.97);
     stroke(g, [[outer[0] - s * ew * 0.25, outer[1] - eh * 0.55], outer, [outer[0] + s * ew * 0.22, outer[1] - eh * 0.5], [outer[0] + s * ew * 0.38, outer[1] - eh * 1.05]], 5.2, 0.6, lid, 0.95);
-  } else stroke(g, [...up, [outer[0] + s * ew * 0.2, outer[1] + eh * 0.3]], 2.6, 4.6, lid, 0.97);
-  stroke(g, up.map(([x, y]) => [x, y - 2]), 2, 3, mix(T.deep, lid, 0.4), 0.45);
+  } else stroke(g, [...up, [outer[0] + s * ew * 0.2, outer[1] + eh * 0.3]], 3.4, 5.6, lid, 0.97);
+  stroke(g, up.map(([x, y]) => [x, y - 2]), 2, 3, mix(T.deep, lid, 0.4), 0.55);
   // the lid crease above, a lit fold of lid under the brow
-  stroke(g, curve(inner[0] + s * ew * 0.15, cy - eh * 2.5, outer[0] - s * ew * 0.05, cy - eh * 2.25, -s * eh * 0.6, 4), 2, 1.4, mix(T.deep, '#3a2026', 0.3), fem ? 0.45 : 0.6);
-  blob(g, cx + s * ew * 0.1, cy - eh * 3.3, ew * 0.9, eh * 0.7, 0, T.light, fem ? 0.5 : 0.28, 0.2);
-  // lower lid: a soft warm line, a bag of shadow (men), a lit cheek under it
-  stroke(g, [[inner[0] + s * ew * 0.2, inner[1] + eh * 0.3], [cx + s * ew * 0.2, cy + eh * 1.3], [outer[0], outer[1] + eh * 0.7]], 1.8, 1.2, mix(T.deep, T.blush, 0.3), fem ? 0.55 : 0.7);
-  if (!fem) blob(g, cx + s * 1.5, cy + eh * 2.2, ew * 0.75, eh * 0.7, 0, T.shadow, 0.3, 0.2);
+  stroke(g, curve(inner[0] + s * ew * 0.15, cy - eh * (fem ? 1.9 : 2.5), outer[0] - s * ew * 0.05, cy - eh * (fem ? 1.75 : 2.25), -s * eh * 0.6, 4), 2, 1.4, mix(T.deep, '#3a2026', 0.3), fem ? 0.3 : 0.6);
+  blob(g, cx + s * ew * 0.1, cy - eh * 3.3, ew * 0.9, eh * 0.7, 0, T.light, fem ? 0.4 : 0.2, 0.2);
+  // lower lid: one soft warm curve, a faint bag of shadow (men), a lit cheek under it
+  stroke(g, curve(inner[0] + s * ew * 0.2, inner[1] + eh * 0.3, outer[0], outer[1] + eh * 0.7, s * eh * 0.6, 5), 1.8, 1.2, mix(T.deep, T.blush, 0.3), fem ? 0.55 : 0.7);
+  if (!fem) blob(g, cx + s * 1.5, cy + eh * 2.2, ew * 0.75, eh * 0.7, 0, T.shadow, 0.15, 0.2);
 }
 
 // The face region of the jaw where stubble and beards grow (face cm).
@@ -642,101 +664,131 @@ function paintHead(g, r, S, rnd) {
   const K = faceKit(g, r), { B, S: St, F, E } = K;
   const yBrow = K.yOf(0.047), yNoseTip = K.yOf(-0.012), yNoseB = K.yOf(-0.022), yMouth = K.yOf(-0.047), yChin = K.yOf(-0.08), yJaw = K.yOf(-0.092);
   const P = (pts, c, a, blur = 2.5) => { g.save(); g.filter = `blur(${blur}px)`; g.globalAlpha = a; K.poly(chaikin(pts, 2)); g.fillStyle = c; g.fill(); g.restore(); };
-  const lit = s => s < 0 ? 1 : 0.72;
-  const warm = fem ? '#d0705a' : '#c8664c';
+  // light from the upper left, but people turn and the sun moves: the far side only a little darker
+  const lit = s => s < 0 ? 1 : 0.9;
+  // painted lights step down on dark skin (at full strength they read as ash-grey paint there)
+  const acc = 1 - 0.35 * T.dark;
+  const warm = mix(T.base, fem ? '#c04a4a' : '#b8503c', 0.35 - 0.12 * T.dark);
+  const weathered = !fem && (L.stern || L.hair === 'bald');
   clip(g, r, () => {
     // skin lit from above; under the jaw a soft warm shadow, never a dark band
     const vJ = headV(-0.094);
-    gradV(g, r.x, r.y, r.w, r.h, [[0, T.light], [1 - 0.8, mix(T.light, T.base, 0.35)], [1 - 0.62, T.base], [1 - vJ - 0.03, T.base], [1 - vJ + 0.04, mix(T.base, '#9a6450', 0.28)], [1, mix(T.base, T.shadow, 0.3)]]);
-    for (let i = 0; i < 16; i++) wblob(g, r, r.x + rnd() * r.w, r.y + rnd() * r.h * 0.85, range(rnd, 16, 40), range(rnd, 10, 22), rnd() * 3, pick(rnd, [T.light, T.shadow, T.blush]), 0.1, 0.1);
+    gradV(g, r.x, r.y, r.w, r.h, [[0, T.light], [1 - 0.8, mix(T.light, T.base, 0.35)], [1 - 0.62, T.base], [1 - vJ - 0.03, T.base], [1 - vJ + 0.04, mix(T.base, T.shadow, 0.3)], [1, mix(T.base, T.shadow, 0.45)]]);
+    // a little warmth and light round the back and sides; nothing blotchy on the face
+    for (let i = 0; i < 16; i++) {
+      const u = rnd(), y = r.y + rnd() * r.h * 0.85, rx = range(rnd, 16, 40), ry = range(rnd, 10, 22), rot = rnd() * 3, c = pick(rnd, [T.light, T.blush]);
+      if (u < 0.23 || u > 0.77) wblob(g, r, r.x + u * r.w, y, rx, ry, rot, c, 0.1, 0.1);
+    }
     weave(g, r.x, r.y, r.w, r.h, T.base, rnd, { a: 0.035, len: [2, 4], dir: 0.3 });     // faint brushwork in the skin
+    // (the modeled relief shades these already: the paint only helps it along, softly)
     for (const s of [-1, 1]) {
       const sp = pts => pts.map(([x, y]) => [x * s, y]);
       // the sides of the head turn away from the light: one broad plane from the temple to the jaw corner
-      P(sp([[8.6, 9], [9.9, 3.2], [9.4, -1.5], [10.3, -6.5], [12.3, -11.5], [14.6, -16], [36, -16], [36, 9]]), T.shadow, 0.3 + 0.14 * (1 - lit(s)), 4);
-      P(sp([[13.5, 6], [14.8, -2], [16.2, -10], [36, -10], [36, 6]]), T.cool, 0.2, 5);
-      // the cheekbone: a lit plane under the eye
-      P(sp([[2.6, -1.4], [5.2, -0.9], [7.8, -1.1], [8.8, -2.6], [7.2, -3.8], [4.2, -3.7], [2.6, -3.0]]), T.light, 0.48 * lit(s), 2.5);
+      P(sp([[8.6, 9], [9.9, 3.2], [9.4, -1.5], [10.3, -6.5], [12.3, -11.5], [14.6, -16], [36, -16], [36, 9]]), T.shadow, 0.16 + 0.06 * (1 - lit(s)), 6);
+      P(sp([[13.5, 6], [14.8, -2], [16.2, -10], [36, -10], [36, 6]]), T.cool, 0.1, 6);
+      // the cheekbone: a lit teardrop on the modeled bump, out and down from the eye
+      const fy = fem ? 0.6 : 0;
+      P(sp([[4.9, -2.4 + fy], [7.6, -2.0 + fy], [9.9, -2.8 + fy], [10.3, -4.2 + fy], [8.4, -5.0 + fy], [5.9, -4.4 + fy]]), T.light, 0.34 * lit(s) * acc, 5);
       // under it, a hollow running down to the jaw corner
-      P(sp([[5.6, -4.6], [8.8, -3.6], [10.2, -6.5], [11, -10.4], [8.4, -10.2], [6.2, -7.6]]), T.shadow, (fem ? 0.1 : 0.26) * (1.25 - 0.25 * lit(s)), 4);
-      // the eye socket: a soft pool from the brow down under the eye
-      P(sp([[1.3, 1.9], [3.5, 2.3], [5.9, 1.8], [6.4, 0.2], [5.4, -1.3], [3.4, -1.6], [1.6, -0.9], [1.1, 0.6]]), mix(T.shadow, T.cool, 0.4), fem ? 0.28 : 0.55, 2.2);
+      P(sp([[5.6, -4.6], [8.8, -3.6], [10.2, -6.5], [11, -10.4], [8.4, -10.2], [6.2, -7.6]]), T.shadow, (fem ? 0.08 : 0.14) * (1.25 - 0.25 * lit(s)), 5);
+      // the eye socket: a soft rosy pool from the brow down under the eye
+      P(sp([[1.45, 2.3], [3.9, 2.8], [6.6, 2.3], [7.2, 0.2], [6.05, -1.3], [3.8, -1.6], [1.8, -0.9], [1.25, 0.6]]), mix(T.shadow, T.cool, 0.5), fem ? 0.26 : 0.42, 2.2);
       // the brow ridge's lit top
-      P(sp([[1.0, 3.1], [3.4, 3.6], [6.0, 3.3], [6.3, 2.5], [3.4, 2.4], [1.2, 2.2]]), T.hi, (fem ? 0.28 : 0.52) * lit(s), 1.8);
+      P(sp([[1.1, 3.1], [3.8, 3.6], [6.7, 3.3], [7.05, 2.5], [3.8, 2.4], [1.35, 2.2]]), T.hi, (fem ? 0.28 : 0.52) * lit(s) * acc, 1.8);
       // the jaw: a shadow plane under the lit chin, out to the jaw's corner
-      P(sp([[2.7, -13.3], [6.5, -12.5], [10.5, -10.7], [12.7, -12.5], [11.5, -14.8], [6.5, -15.8], [2.7, -15.8]]), T.shadow, fem ? 0.26 : 0.44, 2.5);
+      P(sp([[2.7, -13.3], [6.5, -12.5], [11.5, -11.2], [13.8, -8.6], [15.6, -11], [13.6, -15.2], [6.5, -15.8], [2.7, -15.8]]), T.shadow, fem ? 0.2 : 0.34, 3.5);
       // the flank of the nose
-      P(sp(fem ? [[0.6, -0.5], [1.3, -1.6], [1.8, -4.0], [1.3, -5.0], [0.8, -4.2], [0.7, -2.0]] : [[0.75, 1.0], [1.5, 0.0], [2.0, -2.5], [2.4, -4.4], [1.6, -5.3], [0.9, -4.4], [0.8, -2.0]]), T.shadow, (s > 0 ? 0.52 : 0.28) * (fem ? 0.6 : 1), 1.8);
+      P(sp(fem ? [[0.6, -0.5], [1.3, -1.6], [1.8, -4.0], [1.3, -5.0], [0.8, -4.2], [0.7, -2.0]] : [[0.75, 1.0], [1.5, 0.0], [2.0, -2.5], [2.4, -4.4], [1.6, -5.3], [0.9, -4.4], [0.8, -2.0]]), T.shadow, 0.36 * (fem ? 0.6 : 1), 1.8);
       // warm color in the cheeks
       B(s * 5.2, -3.9, 2.5, 1.8, warm, fem ? 0.3 : 0.2, 0.2);
     }
-    // the forehead: a lit plane from the brows to the hairline, brightest top-left
-    P([[-7.4, 7.6], [7.4, 7.6], [8, 4.4], [6.2, 3.4], [1.4, 2.9], [-1.4, 2.9], [-6.2, 3.4], [-8, 4.4]], T.light, 0.48, 3);
-    P([[-6, 7.2], [1.5, 7.2], [1.0, 4.5], [-1, 3.7], [-5.6, 4.0]], T.hi, 0.32, 3);
-    B(-0.2, 1.9, 0.8, 1.2, T.light, 0.42, 0.25);                              // between the brows
-    if (S.hat === 'hood') P([[-12, 10], [12, 10], [12, 5.2], [6, 4.4], [-6, 4.4], [-12, 5.2]], '#2e2228', 0.42, 4);   // in the hood's shade
-    // the nose: a lit bridge down to a lit, warm tip; nostril wings; the shadow it casts on the lip
-    P(fem ? [[-0.7, 0.4], [0.35, 0.4], [0.45, -3.6], [-0.75, -3.8]] : [[-1.0, 1.8], [0.45, 1.8], [0.55, -2.6], [0.6, -4.0], [-0.9, -4.2], [-1.2, -2.6]], T.hi, fem ? 0.4 : 0.55, 1.6);
-    B(-0.25, yNoseTip + 0.25, 1.3, 0.9, T.hi, 0.66, 0.4);
-    B(-0.45, yNoseTip + 0.5, 0.45, 0.32, '#fff2dc', 0.35, 0.3);
+    // the forehead: a lit plane from the brows up, fading out below the hairline (a bald head's runs on up)
+    const top = L.hair === 'bald' ? 14 : 6.0;
+    P([[-7.4, top], [7.4, top], [8, 4.4], [6.2, 3.4], [1.4, 2.9], [-1.4, 2.9], [-6.2, 3.4], [-8, 4.4]], T.light, 0.42 * acc, 5);
+    P([[-6, top - 0.6], [1.5, top - 0.6], [1.0, 4.5], [-1, 3.7], [-5.6, 4.0]], T.hi, 0.28 * acc, 5);
+    B(-0.2, 1.9, 0.8, 1.2, T.light, 0.42 * acc, 0.25);                        // between the brows
+    B(0, 0.9, 0.9, 0.7, T.blush, 0.25, 0.3);                                   // the notch under them faces down: warm
+    if (S.hat === 'hood') {
+      // in the hood's shade from the brows up over the crown, and down the sides (the eyes, painted later, still glint)
+      const hs = mix(T.deep, '#2a1418', 0.4), [, y15] = F(0, 1.5), [, y9] = F(0, 9);
+      gradV(g, r.x, r.y, r.w, y15 - r.y, [[0, rgba(hs, 0.62)], [(y9 - r.y) / (y15 - r.y), rgba(hs, 0.55)], [1, rgba(hs, 0)]]);
+      for (const s of [-1, 1]) P([[s * 9, 10], [s * 36, 10], [s * 36, -6], [s * 9, -6]], T.deep, 0.25, 6);
+    }
+    // the nose: a lit bridge down to a lit, warm tip; nostril wings; one soft shadow tucked under it
+    P(fem ? [[-0.7, 0.4], [0.35, 0.4], [0.45, -3.6], [-0.75, -3.8]] : [[-1.0, 1.8], [0.45, 1.8], [0.55, -2.6], [0.6, -4.0], [-0.9, -4.2], [-1.2, -2.6]], T.hi, (fem ? 0.4 : 0.55) * acc, 1.6);
+    B(-0.25, yNoseTip + 0.25, 1.3, 0.9, T.hi, 0.66 * acc, 0.4);
+    B(-0.45, yNoseTip + 0.5, 0.45, 0.32, T.hi, 0.2, 0.3);
     B(0.1, yNoseTip - 0.3, 1.25, 0.6, warm, fem ? 0.32 : 0.26, 0.3);
     for (const s of [-1, 1]) {
-      B(s * 1.55, yNoseB + 0.75, 0.75, 0.75, T.shadow, 0.55, 0.3);
-      B(s * 1.4 - 0.15, yNoseB + 1.15, 0.4, 0.32, T.light, 0.38, 0.3);
+      B(s * 1.4, yNoseB + 0.65, 0.55, 0.6, T.shadow, fem ? 0.22 : 0.34, 0.3);
+      B(s * 1.4 - 0.15, yNoseB + 1.15, 0.4, 0.32, T.light, 0.15, 0.3);
       E(s * (fem ? 0.6 : 0.72), yNoseB + 0.15, fem ? 0.22 : 0.3, fem ? 0.17 : 0.24, mix(T.deep, '#3a1a1a', 0.4), fem ? 0.6 : 0.9, s * 0.4);
     }
-    P([[-1.9, yNoseB + 0.15], [2.1, yNoseB + 0.15], [1.6, yNoseB - 0.95], [-1.2, yNoseB - 0.95]], T.deep, fem ? 0.4 : 0.58, 1.6);
-    B(0, -7.3, 0.35, 0.9, T.shadow, 0.36, 0.3);                               // philtrum
-    for (const s of [-1, 1]) B(s * 0.55 - 0.1, -7.2, 0.18, 0.7, T.light, 0.28, 0.3);
-    // men: smile folds from the nose wings round the mouth, lit on the cheek side
-    if (!fem) for (const s of [-1, 1]) {
-      const fold = curve(s * 2.0, yNoseB + 0.6, s * 3.1, yMouth + 0.3, -s * 0.4, 4);
-      St(fold, 3.6, 1.2, T.shadow, 0.42);
-      St(fold.map(([x, y]) => [x + s * 0.5, y + 0.1]), 3.2, 1.2, T.light, 0.26);
+    B(0.1, yNoseB - 0.2, fem ? 1.0 : 1.3, 0.42, T.shadow, fem ? 0.16 : 0.28, 0.45);
+    B(0, -7.3, 0.35, 0.9, T.shadow, 0.2, 0.3);                                // philtrum
+    // weathered men: soft folds from the nose wings round toward the mouth corners
+    if (weathered) for (const s of [-1, 1]) {
+      g.save(); g.filter = 'blur(1.2px)';
+      St(curve(s * 2.0, yNoseB + 0.6, s * 3.1, yMouth + 1.0, -s * 0.4, 4), 7, 2.5, T.shadow, 0.2);
+      g.restore();
     }
     facialBase(g, K, S, T, rnd);
     // the mouth
-    const mw = fem ? 2.15 : 2.5, yM = yMouth;
+    const mw = fem ? 2.6 : 2.9, yM = yMouth;
     if (fem) {
-      // two filled lips: a darker upper lip, a fuller lower one with one cream highlight
+      // two filled lips in her own tones: a darker upper lip, a fuller lower one with a soft glint
       const fillP = (pts, c, a) => { g.save(); g.filter = 'blur(0.7px)'; g.globalAlpha = a; K.poly(pts); g.fillStyle = c; g.fill(); g.restore(); };
-      fillP([[-mw, yM + 0.05], [-mw * 0.55, yM + 0.62], [-0.3, yM + 0.44], [0, yM + 0.56], [0.3, yM + 0.44], [mw * 0.55, yM + 0.62], [mw, yM + 0.05], [mw * 0.4, yM - 0.06], [0, yM - 0.03], [-mw * 0.4, yM - 0.06]], '#a5504c', 0.92);
-      fillP([[-mw * 0.9, yM - 0.06], [0, yM - 0.1], [mw * 0.9, yM - 0.06], [mw * 0.55, yM - 0.88], [0, yM - 1.08], [-mw * 0.55, yM - 0.88]], '#c0625a', 0.92);
-      B(-0.35, yM - 0.46, 0.65, 0.2, '#f0c8b0', 0.75, 0.4);
-      St([[-mw, yM + 0.05], [-mw * 0.4, yM - 0.04], [0, yM - 0.01], [mw * 0.4, yM - 0.04], [mw, yM + 0.05]], 1.7, 1.3, '#6a2a2a', 0.8);
+      fillP([[-mw, yM + 0.05], [-mw * 0.55, yM + 0.62], [-0.3, yM + 0.44], [0, yM + 0.56], [0.3, yM + 0.44], [mw * 0.55, yM + 0.62], [mw, yM + 0.05], [mw * 0.4, yM - 0.06], [0, yM - 0.03], [-mw * 0.4, yM - 0.06]], mix(T.deep, '#9a3444', 0.35), 0.92);
+      fillP([[-mw * 0.9, yM - 0.06], [0, yM - 0.1], [mw * 0.9, yM - 0.06], [mw * 0.55, yM - 0.72], [0, yM - 0.9], [-mw * 0.55, yM - 0.72]], mix(T.lip, '#b04852', 0.3), 0.92);
+      B(-0.35, yM - 0.42, 0.65, 0.2, T.hi, 0.4, 0.4);
+      St([[-mw, yM + 0.05], [-mw * 0.4, yM - 0.04], [0, yM - 0.01], [mw * 0.4, yM - 0.04], [mw, yM + 0.05]], 1.7, 1.3, mix(T.deep, '#4a1a1e', 0.5), 0.8);
       for (const s of [-1, 1]) B(s * mw * 1.05, yM + 0.1, 0.28, 0.28, T.deep, 0.4, 0.3);
-      B(0, yM - 1.55, mw * 0.6, 0.45, T.shadow, 0.42, 0.3);
+      B(0, yM - 1.4, mw * 0.6, 0.45, T.shadow, 0.3, 0.3);
     } else {
       B(0, yM + 0.55, mw * 0.95, 0.5, mix(T.lip, T.shadow, 0.4), 0.72, 0.4);
       B(0, yM - 0.65, mw * 0.78, 0.6, T.lip, 0.6, 0.4);
-      B(-0.4, yM - 0.55, mw * 0.33, 0.2, T.hi, 0.45, 0.3);
+      B(-0.4, yM - 0.55, mw * 0.33, 0.2, T.hi, 0.45 * acc, 0.3);
       const corner = L.stern ? -0.3 : 0.2;
-      St([[-mw, yM + corner], [-mw * 0.45, yM + 0.08], [0, yM - 0.06], [mw * 0.45, yM + 0.08], [mw, yM + corner]], 2.8, 2.2, '#4a2622', 0.9);
+      St([[-mw, yM + corner], [-mw * 0.45, yM + 0.08], [0, yM - 0.06], [mw * 0.45, yM + 0.08], [mw, yM + corner]], 3.6, 2.8, mix(T.deep, '#2a1414', 0.5), 0.92);
       for (const s of [-1, 1]) B(s * mw * 1.08, yM + corner, 0.3, 0.3, T.deep, 0.45, 0.3);
-      B(0, yM - 1.55, mw * 0.72, 0.5, T.deep, 0.55, 0.3);
+      B(0, yM - 1.6, mw * 0.75, 0.65, T.shadow, 0.45, 0.3);
     }
     // the chin: a man's is a lit square plane, a woman's a small round one
-    if (fem) B(-0.2, yChin + 0.7, 1.9, 1.15, T.light, 0.5, 0.35);
-    else P([[-2.4, -11.2], [2.1, -11.2], [3.0, -12.4], [2.4, -14.0], [-2.6, -14.0], [-3.2, -12.4]], T.light, 0.42, 3);
-    if (!fem && S.skin === 0) St([[0, yChin + 1.3], [0, yChin + 0.3]], 1.8, 1.2, T.shadow, 0.45);
-    B(0, yJaw - 1.6, 9, 1.9, '#9a6450', 0.4, 0.3);                            // under the jaw: warm, soft
-    B(0, yJaw - 5.5, 2.6, 2.4, T.light, 0.2);                                  // the throat catches a little light
+    if (fem) B(-0.2, yChin + 0.7, 1.9, 1.15, T.light, 0.3 * acc, 0.35);
+    else P([[-2.4, -11.2], [2.1, -11.2], [3.0, -12.4], [2.4, -14.0], [-2.6, -14.0], [-3.2, -12.4]], T.light, 0.26 * acc, 6);
+    if (!fem && S.skin === 0) St([[0, yChin + 1.3], [0, yChin + 0.3]], 1.8, 1.2, T.shadow, 0.3);
+    B(0, yJaw - 1.6, 9, 1.9, T.shadow, 0.24, 0.3);                            // under the jaw: warm, soft
     // eyes & brows
     for (const s of [-1, 1]) paintEye(g, K, s, S, S.eyeGlow);
-    const browC = L.hair === 'bald' ? mix(L.hairColor, '#5a4a3e', 0.45) : mix(shadowOf(L.hairColor, 0.12), '#3a2a22', hsl(L.hairColor).l < 0.15 ? 0.4 : 0);
+    const browC = L.hair === 'bald' ? mix(L.hairColor, '#5a4446', 0.4) : mix(shadowOf(L.hairColor, 0.12), '#3a2a22', hsl(L.hairColor).l < 0.15 ? 0.4 : 0);
     for (const s of [-1, 1]) {
       const iy = yBrow - (L.stern ? 0.95 : 0.5);
-      const pts = [[s * 1.0, iy + (fem ? 0.15 : 0)], [s * 2.4, yBrow + (fem ? 0.22 : 0.05)], [s * 4.0, yBrow + (fem ? 0.3 : 0.25)], [s * 5.9, yBrow - (fem ? 0.35 : 0.5)]];
+      const pts = [[s * 1.1, iy + (fem ? 0.15 : 0)], [s * 2.7, yBrow + (fem ? 0.22 : 0.05)], [s * 4.5, yBrow + (fem ? 0.3 : 0.25)], [s * 6.6, yBrow - (fem ? 0.35 : 0.5)]];
       const fp = pts.map(([x, y]) => F(x, y));
       if (fem) { stroke(g, fp.map(([x, y]) => [x, y + 1.5]), 5, 1.6, T.shadow, 0.3); stroke(g, fp, 5.5, 1.8, browC, 0.95); continue; }
       stroke(g, fp.map(([x, y]) => [x + 1, y + 3]), 15, 5, mix(T.deep, INK, 0.2), 0.45);
       stroke(g, fp, 15, 5.5, browC, 0.97);
       for (let k = 0; k < 9; k++) {   // hairy strokes along the brow, lit on top
-        const t = k / 8, [px, py] = F(s * (1.1 + t * 4.6), yBrow - 0.45 + Math.sin(t * Math.PI) * 0.75 - (L.stern ? (1 - t) * 0.4 : 0));
+        const t = k / 8, [px, py] = F(s * (1.2 + t * 5.2), yBrow - 0.45 + Math.sin(t * Math.PI) * 0.75 - (L.stern ? (1 - t) * 0.4 : 0));
         stroke(g, [[px - s * 2, py + 3], [px + s * 4, py - 3]], 1.8, 0.7, lightOf(browC, 0.35), 0.45);
       }
     }
+    // the shade a brim, a peak or a helm's rim casts on the brow and the eyes (people never receive the
+    // sun's shadow, and at 5 cm a texel its map couldn't draw a brim's): soft, never hiding the eyes
+    const shade = { brim: [0.36, -0.2, 15], straw: [0.34, -0.2, 15], cap: [0.3, 2.2, 10], visor: [0.3, 2.2, 10], helm: [0.3, -0.3, 12] }[S.hat];
+    if (shade) {
+      const [a, yb, xw] = shade, sc = mix(T.deep, S.hat === 'visor' ? mix('#2e2228', '#2a5a3a', 0.35) : '#2e2228', 0.5);
+      P([[-xw, 13], [xw, 13], [xw, yb + 0.8], [6, yb], [0, yb + 0.4], [-6, yb], [-xw, yb + 0.8]], sc, a, 6);
+    }
     facialHair(g, K, S, T, rnd);
+    // the neck below the jaw, painted last: bare skin, in the jaw's shade at the top, the throat catching
+    // a little light (beards and goatees are modeled sheets that sample the face above the jaw line)
+    const [, yJ] = F(0, yJaw - 0.4);
+    clipRect(g, r.x, yJ, r.w, r.y + r.h - yJ, () => {
+      gradV(g, r.x, yJ, r.w, r.y + r.h - yJ, [[0, mix(T.base, T.shadow, 0.55)], [0.3, mix(T.base, T.shadow, 0.3)], [1, mix(T.base, T.shadow, 0.4)]]);
+      weave(g, r.x, yJ, r.w, r.y + r.h - yJ, T.base, rnd, { a: 0.035, len: [2, 4], dir: 0.3 });
+      B(0, yJaw - 5.5, 2.6, 2.4, T.light, 0.2);
+    });
     paintHairCap(g, r, S, rnd);
   });
 }
@@ -748,10 +800,11 @@ function facialBase(g, K, S, T, rnd) {
   beardPath(K, f === 'goatee' ? 0.6 : 1);
   g.clip();
   const sc = mix(mix(L.hairColor, T.shadow, 0.5), '#4a3a36', 0.2);
-  const amt = f === 'stubble' ? 0.42 : f === 'goatee' ? 0.26 : f === 'beard' ? 0.6 : 0.32;
+  const amt = f === 'stubble' ? 0.26 : f === 'goatee' ? 0.26 : f === 'beard' ? 0.6 : 0.32;
   K.B(0, -12, 13, 6, sc, amt, 0.4);
   K.B(0, -7.6, 3.2, 0.9, sc, amt * 0.85, 0.3);
   for (let i = 0; i < 14; i++) K.B(range(rnd, -13, 13), range(rnd, -15, -5), range(rnd, 1.2, 2.6), range(rnd, 0.8, 1.4), sc, amt * 0.22, 0.1);
+  if (f === 'stubble') for (let i = 0; i < 150; i++) { const [x, y] = K.F(range(rnd, -14, 14), range(rnd, -16, -5)); ellipse(g, x, y, range(rnd, 0.6, 1.2), range(rnd, 0.6, 1.2), 0, sc, 0.3); }
   g.restore();
 }
 
@@ -775,8 +828,8 @@ function paintMustache(g, K, hc, T, { droop = 0.6, curl = false, width = 1, line
     const ends = curl ? [[s * 3.6 * width, yM - 0.2], [s * 4.1 * width, yM + 0.7]] : [[s * 3.4 * width, yM - droop]];
     const pts = [[s * 0.2, yN - 0.15], [s * 1.5, yN - 0.75], [s * 2.6 * width, yM + 0.6], ...ends];
     K.S(pts.map(([x, y]) => [x + 0.1, y - 0.45]), 20, 6, T.deep, 0.32);
-    K.S(pts, 23, curl ? 6 : 8.5, dark, 1);
-    K.S(pts.map(([x, y]) => [x, y + 0.18]), 17, curl ? 4.5 : 6.5, base, 1);
+    K.S(pts.map(([x, y]) => [x, y - 0.35]), 18, 5, dark, 0.8);
+    K.S(pts, 20, curl ? 5 : 6, base, 1);
     K.B(s * 1.4, yN - 0.55, 1.1, 0.32, lit, 0.45, 0.3, s * 0.4);
   }
 }
@@ -800,10 +853,16 @@ function facialHair(g, K, S, T, rnd) {
   const L = S.look, f = L.facial;
   const topOf = tab => x => K.yOf(lerpTable(tab, Math.abs(x) / FACE_ARC, 1));
   if (f === 'mustache') paintMustache(g, K, L.hairColor, T, { line: MUSTACHES.mustache });
-  if (f === 'pencil') for (const s of [-1, 1]) { const pts = [[s * 0.25, K.yOf(-0.0265)], [s * 1.5, K.yOf(-0.0285)], [s * 2.6, K.yOf(-0.033)]]; K.S(pts.map(([x, y]) => [x, y - 0.35]), 4, 1.6, T.deep, 0.3); K.S(pts, 4.2, 1.6, mix(shadowOf(L.hairColor, 0.1), '#3a2a22', 0.3), 0.95); }
+  // a card sharp's pencil mustache: a thin line hugging the top of the upper lip out past the corners,
+  // parted under the nose (a block under the nose would read as something else entirely)
+  if (f === 'pencil') {
+    const yM = K.yOf(-0.047), ink = mix(shadowOf(L.hairColor, 0.1), '#3a2a22', 0.3);
+    for (const s of [-1, 1]) { const pts = [[s * 0.6, yM + 1.0], [s * 1.5, yM + 1.02], [s * 2.4, yM + 0.78], [s * 3.2, yM + 0.5]]; K.S(pts.map(([x, y]) => [x, y - 0.3]), 3.4, 1, T.deep, 0.22); K.S(pts, 3.6, 0.9, ink, 0.95); }
+    K.B(0, yM + 1.0, 0.5, 0.35, T.light, 0.3);   // bare skin between the halves
+  }
   if (f === 'goatee') {
     // a warm grey tuft on the chin and down the neck front, where the modeled wedge samples it
-    const hc = '#8d8478', ink = { gap: '#5e564c', lit: '#bdb5a6', mids: [hc, '#958c80', '#857c70'] };
+    const hc = '#a69690', ink = { gap: '#5c4a4a', lit: '#d6cac4', mids: [hc, '#ae9e98', '#9a8a84'] };
     g.save(); K.poly([[-4.6, -8.8], [4.6, -8.8], [5.0, -12], [3.4, -17], [0, -19.5], [-3.4, -17], [-5.0, -12]]); g.clip();
     K.B(0, -13, 5, 7, hc, 0.95, 0.6);
     beardClumps(g, K, rnd, { x0: -4.4, x1: 4.4, yTop: topOf(GOATEE_TOP), yBot: () => -19, n: 4, w: [2.4, 3.4], pull: 0.55, ink });
@@ -881,8 +940,11 @@ function paintHairCap(g, r, S, rnd) {
     for (let i = 0; i < 26; i++) wblob(g, r, r.x + rnd() * r.w, Y(0.3 + rnd() * 0.45), range(rnd, 6, 14), range(rnd, 3, 6), 0, pick(rnd, [shadowOf(hc, 0.3), lightOf(hc, 0.25)]), 0.3, 0.2);
     for (let i = 0; i < 70; i++) { const x = r.x + rnd() * r.w, y = Y(0.3 + rnd() * 0.45); stroke(g, [[x, y + 3], [x + range(rnd, -1.5, 1.5), y - 3]], 2.2, 0.6, pick(rnd, [shadowOf(hc, 0.35), lightOf(hc, 0.35)]), 0.4); }
     g.restore();
-    blob(g, XT(0.15), Y(0.93), r.w * 0.07, r.h * 0.06, 0, '#fff2d6', 0.45, 0.15);
-    blob(g, XT(0.3), Y(0.88), r.w * 0.025, r.h * 0.025, 0, '#fffaf0', 0.4, 0.3);
+    // a soft shine on the scalp (none in a hood's shade); the crown's top rows, where the lathe's rows
+    // all meet, kept plain so they don't streak
+    const T = toneOf(S.tone);
+    if (S.hat !== 'hood') { blob(g, XT(0.15), Y(0.93), r.w * 0.07, r.h * 0.06, 0, T.hi, 0.4, 0.15); blob(g, XT(0.3), Y(0.88), r.w * 0.025, r.h * 0.025, 0, '#fff0dc', 0.2, 0.3); }
+    g.fillStyle = mix(T.light, T.base, 0.5); g.fillRect(r.x, r.y, r.w, 4);
     return;
   }
   g.save(); capPath(); g.clip();
@@ -901,8 +963,12 @@ function paintHairCap(g, r, S, rnd) {
     });
   }
   g.restore();
-  // the hairline: hair casts a soft shadow onto the forehead; a few short wisps break the edge
-  g.save(); g.globalAlpha = 0.24; g.translate(0, 4); capPath(); g.fillStyle = shadowOf(S.tone, 0.55); g.fill(); g.restore();
+  // the hairline: hair casts a soft band of shadow onto the forehead; a few short wisps break the edge
+  g.save(); g.globalAlpha = 0.32; g.filter = 'blur(3px)'; g.translate(0, 6); capPath(); g.fillStyle = toneOf(S.tone).deep; g.fill(); g.restore();
+  if (['short', 'slick', 'bun', 'braid', 'long'].includes(L.hair)) for (let i = 0; i < 12; i++) {
+    const th = range(rnd, -1, 1), x = XT(th), y = Y(headV(lineDy(th)));
+    stroke(g, [[x, y - 4], [x + range(rnd, -2, 2), y + range(rnd, 1, 3)], [x + range(rnd, -3, 3), y + range(rnd, 6, 9)]], 5, 0.5, hc, 0.55);
+  }
   if (L.hair !== 'buzz') {
     if (!L.female) for (const s of [-1, 1]) {   // short sideburns, their lower edge feathered into the skin
       const th = s * 1.36, x = XT(th), y0 = Y(headV(0.012)), y1 = Y(headV(L.facial === 'beard' ? -0.05 : -0.004));
@@ -1123,7 +1189,7 @@ function paintArm(g, r, S, rnd) {
       // roll as a torus sampling armV(roll ± .012)); below it a bare, hairy forearm
       const top = LM.roll - 0.008;
       clipRect(g, r.x, AV(top), r.w, r.y + r.h - AV(top), () => {
-        gradV(g, r.x, AV(top), r.w, AV(LM.wrist) - AV(top), [[0, skin.light], [0.45, skin.base], [1, skin.shadow]]);
+        gradV(g, r.x, AV(top), r.w, AV(LM.wrist) - AV(top), [[0, skin.light], [0.45, skin.base], [1, mix(skin.base, skin.shadow, 0.35)]]);
         gradH(g, r.x, AV(top), r.w, AV(LM.wrist) - AV(top), [[0, rgba(INK, 0.08)], [0.25, rgba('#fff1c4', 0.16)], [0.75, rgba(skin.deep, 0.3)], [1, rgba(INK, 0.08)]]);
         blob(g, U(0.75), AV(LM.elbow), r.w * 0.12, 7, 0, skin.deep, 0.45, 0.3);                                  // the crook of the elbow
         blob(g, U(0.26), AV(LM.elbow + 0.005), r.w * 0.09, 6, 0, skin.hi, 0.4, 0.3);                              // the point of the elbow
@@ -1141,35 +1207,70 @@ function paintArm(g, r, S, rnd) {
       bandGrad(g, r, av(top - 0.025), av(top), rgba(skin.deep, 0.0), rgba(skin.deep, 0.45));   // the roll's shadow on the skin
       bandGrad(g, r, v1, av(LM.roll + 0.04), rgba(INK, 0.3), rgba(INK, 0));
     }
-    // hands: bare, or big gloves with a flared gauntlet cuff. Fingers lie side by side across
-    // the back (u .19 .25 .31) and the palm (u .69 .75 .81) and end at the bottom (v 0).
-    const fingers = (base, deep, light, tipC) => {
-      // (people.js grooves the hand at exactly these u: 1/6, 1/4, 1/3 on the back, 2/3, 3/4, 5/6 on the palm)
-      for (const u of [1 / 6, 0.25, 1 / 3]) { stroke(g, [[U(u), V(0.0)], [U(u), AV(LM.knuckle - 0.005)]], 2.4, 1.6, deep, 0.7); stroke(g, [[U(u) - 2, V(0.0)], [U(u) - 2, AV(LM.knuckle - 0.005)]], 1.4, 1, light, 0.35); }
-      for (const u of [2 / 3, 0.75, 5 / 6]) stroke(g, [[U(u), V(0.0)], [U(u), AV(-0.69)]], 2, 1.4, deep, 0.6);
-      for (const u of [0.115, 0.208, 0.292, 0.385]) { blob(g, U(u), AV(LM.knuckle + 0.004), 4, 3, 0, light, 0.7, 0.3); blob(g, U(u), AV(-0.725), 3.5, 2.5, 0, light, 0.4, 0.3); blob(g, U(u), V(0.03), 3.5, 2.6, 0, tipC, 0.6, 0.35); }
-      bandGrad(g, r, av(LM.knuckle - 0.016), av(LM.knuckle - 0.004), rgba(deep, 0), rgba(deep, 0.35));
-      blob(g, U(0.75), AV(-0.63), 12, 8, 0, deep, 0.4, 0.2);     // the palm in shade
-      bandGrad(g, r, 0, 0.035, rgba(INK, 0.3), rgba(INK, 0));
+    // hands: bare, or big gloves with a flared gauntlet cuff. people.js models the fingers: below the
+    // wrist the splits between them run down the back at u 1/8 1/4 3/8 and the palm at u 5/8 3/4 7/8,
+    // each finger's crown at u 1/16 3/16 5/16 7/16; the tips end at the bottom (v 0).
+    const CROWNS = [0.0625, 0.1875, 0.3125, 0.4375];
+    const splits = (deep, wB, wP, aB, aP) => {
+      for (const u of [0.125, 0.25, 0.375]) stroke(g, [[U(u), AV(-0.688)], [U(u), V(0.004)]], wB[0], wB[1], deep, aB);
+      for (const u of [0.625, 0.75, 0.875]) stroke(g, [[U(u), AV(-0.684)], [U(u), V(0.004)]], wP[0], wP[1], deep, aP);
     };
     if (!gloved) {
       const top = S.arms === 'rolled' ? LM.wrist + 0.03 : LM.wrist + 0.01;
+      const wristC = S.arms === 'rolled' ? mix(skin.base, skin.shadow, 0.35) : skin.light;
       clipRect(g, r.x, AV(top), r.w, r.y + r.h - AV(top), () => {
-        gradV(g, r.x, AV(top), r.w, r.y + r.h - AV(top), [[0, skin.light], [0.5, skin.base], [1, skin.shadow]]);
+        gradV(g, r.x, AV(top), r.w, r.y + r.h - AV(top), [[0, wristC], [0.3, skin.base], [0.85, skin.base], [1, mix(skin.base, skin.shadow, 0.45)]]);
         gradH(g, r.x, AV(top), r.w, r.y + r.h - AV(top), [[0, rgba(INK, 0.08)], [0.25, rgba('#fff1c4', 0.16)], [0.75, rgba(skin.blush, 0.25)], [1, rgba(INK, 0.08)]]);
-        fingers(skin.base, skin.deep, skin.hi, mix(skin.light, '#f4d8c8', 0.5));
-        for (const u of [0.115, 0.208, 0.292, 0.385]) blob(g, U(u), V(0.022), 2.6, 1.8, 0, mix(skin.hi, '#f8e4dc', 0.5), 0.75, 0.5);   // nails
+        blob(g, U(0.25), AV(-0.63), r.w * 0.14, 10, 0, skin.light, 0.45, 0.15);                 // the back of the hand catches the light
+        splits(skin.deep, [1, 2.6], [1, 2.4], 0.6, 0.5);
+        // knuckles: small lit bumps, and a lit stroke down each finger
+        for (const u of CROWNS) { blob(g, U(u), AV(-0.668), 3.2, 2.2, 0, skin.hi, 0.45, 0.3); stroke(g, [[U(u) - 0.6, AV(-0.69)], [U(u) - 0.6, V(0.04)]], 2.6, 1.8, skin.light, 0.3); }
+        stroke(g, curve(U(0.58), AV(-0.676), U(0.92), AV(-0.676), 1.5, 4), 1.6, 1.6, skin.deep, 0.45);   // the palm's crease
+        blob(g, U(0.75), AV(-0.64), 10, 7, 0, skin.deep, 0.25, 0.2);                            // the palm in shade
+        // nails on the backs of the fingertips, each with its cuticle
+        for (const u of CROWNS) { blob(g, U(u), AV(-0.757), 2.4, 2.2, 0, mix(skin.light, '#f0c8b8', 0.45), 0.55, 0.45); stroke(g, curve(U(u) - 2.4, AV(-0.7505), U(u) + 2.4, AV(-0.7505), -1, 3), 0.8, 0.8, skin.deep, 0.4); }
+        bandGrad(g, r, 0, 0.03, rgba(skin.deep, 0.15), rgba(skin.deep, 0));
       });
       if (S.arms === 'shirt') { band(g, r, av(LM.wrist + 0.005), av(LM.wrist + 0.035), '#efe6d2', 1); rivet(g, U(0.25), AV(LM.wrist + 0.02), 1.8, '#c8c8d0'); bandGrad(g, r, av(LM.wrist - 0.01), av(LM.wrist + 0.005), rgba(INK, 0), rgba(INK, 0.35)); }
     } else {
       const work = S.hands === 'workglove';
-      const gl = work ? '#a8834f' : '#6e4a2c', cuffC = work ? '#7a5a36' : SUEDE;
+      const gl = work ? '#a8834f' : GLOVE, cuffC = work ? '#7a5a36' : SUEDE;
       clipRect(g, r.x, AV(LM.wrist), r.w, r.y + r.h - AV(LM.wrist), () => {
-        leather(g, r, r.x, AV(LM.wrist), r.w, r.y + r.h - AV(LM.wrist), gl, rnd, { creases: 5, scuffs: 8, wrap: true, light: 0.4, sheen: 0.3 });
+        // (a work glove's creases stay on the back above the knuckles, not across the fingers)
+        leather(g, r, r.x, AV(LM.wrist), r.w, r.y + r.h - AV(LM.wrist), gl, rnd, { creases: work ? 0 : 5, scuffs: 8, wrap: true, light: 0.4, sheen: 0.3 });
         blob(g, U(0.25), AV(-0.63), r.w * 0.14, 12, 0, lightOf(gl, 0.45), 0.35, 0.15);     // the back of the hand catches the light
-        fingers(gl, shadowOf(gl, 0.6), lightOf(gl, 0.55), lightOf(gl, 0.35));
-        if (!work) stitches(g, [[U(0.15), AV(-0.6)], [U(0.35), AV(-0.6)], [U(0.35), AV(-0.65)], [U(0.15), AV(-0.65)], [U(0.15), AV(-0.6)]], '#e2c898', 0.55);
-        else stitches(g, [[U(0.12), AV(-0.6)], [U(0.38), AV(-0.6)]], '#5a4020', 0.6);
+        const deep = shadowOf(gl, 0.6), lt = lightOf(gl, 0.55);
+        blob(g, U(0.75), AV(-0.66), r.w * 0.2, 26, 0, INK, 0.3, 0.15);                       // the palm side in shade
+        if (work) {
+          // split leather on the palm, a shade darker, welted round its edge; seams down the splits
+          const px0 = U(0.53), px1 = U(0.97), py0 = AV(-0.6), py1 = V(0.0);
+          clipRect(g, px0, py0, px1 - px0, py1 - py0, () => leather(g, r, px0, py0, px1 - px0, py1 - py0, shadowOf(gl, 0.25), rnd, { creases: 0, scuffs: 4, light: 0.25 }));
+          stitches(g, [[px0, py1], [px0, py0], [px1, py0], [px1, py1]], '#5a4020', 0.6);
+          for (let i = 0; i < 3; i++) { const y = AV(-0.6 - i * 0.022), x = U(0.08 + 0.1 * i); sfold(g, [[x, y], [x + 9, y + range(rnd, -1.5, 1.5)]], 3, gl, 0.75, { dark: 0.55 }); }
+          splits(deep, [1, 2.2], [1, 2], 0.6, 0.5);
+          for (const u of [0.125, 0.25, 0.375]) stitches(g, [[U(u) + 1.6, AV(-0.684)], [U(u) + 1.6, V(0.01)]], '#5a4020', 0.55);
+        } else splits(deep, [1.2, 3.2], [1.4, 3], 0.8, 0.7);
+        for (const u of CROWNS) stroke(g, [[U(u) - 0.8, AV(-0.69)], [U(u) - 0.8, V(0.03)]], 3, 2, lt, 0.28);   // each finger lit along its crown
+        if (!work) stroke(g, curve(U(0.58), AV(-0.676), U(0.92), AV(-0.676), 1.5, 4), 2.2, 2.2, deep, 0.6);   // the palm's crease
+        bandGrad(g, r, 0, 0.03, rgba(INK, 0.22), rgba(INK, 0));
+        if (!work) {
+          // a padded knuckle guard with four brass studs and a strap in your colour, like your own first-person gloves
+          const kx0 = U(0.02), kx1 = U(0.46), ky0 = AV(-0.657), ky1 = AV(-0.687);
+          clipRect(g, kx0, ky0, kx1 - kx0, ky1 - ky0, () => {
+            leather(g, r, kx0, ky0, kx1 - kx0, ky1 - ky0, shadowOf(gl, 0.3), rnd, { creases: 1, scuffs: 2, light: 0.5 });
+            gradV(g, kx0, ky0, kx1 - kx0, ky1 - ky0, [[0, rgba('#ffe8b8', 0.35)], [0.35, rgba('#ffe8b8', 0)], [1, rgba(INK, 0.3)]]);
+          });
+          stitches(g, [[kx0, ky0 + 1], [kx1, ky0 + 1]], '#e2c898', 0.5);
+          bandGrad(g, r, av(-0.695), av(-0.687), rgba(INK, 0), rgba(INK, 0.3));
+          for (const u of CROWNS) rivet(g, U(u), AV(-0.672), 1.8, BRASS);
+          const sy0 = AV(-0.608), sy1 = AV(-0.628);
+          clipRect(g, U(0.07), sy0, U(0.4) - U(0.07), sy1 - sy0, () => {
+            g.fillStyle = c; g.fillRect(U(0.07), sy0, U(0.4) - U(0.07), sy1 - sy0);
+            gradV(g, U(0.07), sy0, U(0.4) - U(0.07), sy1 - sy0, [[0, rgba('#fff0c8', 0.3)], [1, rgba(INK, 0.35)]]);
+          });
+          stitches(g, [[U(0.07), sy0 + 1.2], [U(0.4), sy0 + 1.2]], '#f0dca8', 0.5); stitches(g, [[U(0.07), sy1 - 1.2], [U(0.4), sy1 - 1.2]], '#f0dca8', 0.5);
+          rivet(g, U(0.25), (sy0 + sy1) / 2, 2.2, BRASS);
+        } else stitches(g, [[U(0.12), AV(-0.6)], [U(0.38), AV(-0.6)]], '#5a4020', 0.6);
       });
       // the gauntlet: a rolled rim flaring over the forearm, a band of your color, riveted, tapering to the wrist
       clipRect(g, r.x, AV(LM.cuffTop), r.w, AV(LM.wrist) - AV(LM.cuffTop), () => {
@@ -1599,17 +1700,36 @@ function paintBeardRegion(g, r, S, rnd) {
 function paintEar(g, r, S) {
   const T = toneOf(S.tone), U = u => RX(r, u), V = v => RY(r, v);
   clip(g, r, () => {
-    gradV(g, r.x, r.y, r.w, r.h, [[0, T.light], [0.5, mix(T.base, T.blush, 0.4)], [1, T.shadow]]);
+    // (a shade under the head's side: an ear stands out into the sun, and a paler one reads as stuck on)
+    gradV(g, r.x, r.y, r.w, r.h, [[0, mix(T.base, T.shadow, 0.12)], [0.5, mix(T.base, T.shadow, 0.38)], [1, mix(T.base, T.shadow, 0.62)]]);
     for (const u of [0.25, 0.75]) {
-      blob(g, U(u), V(0.5), r.w * 0.17, r.h * 0.36, 0, T.light, 0.7, 0.5);         // the rim of the helix
-      blob(g, U(u + 0.02), V(0.47), r.w * 0.11, r.h * 0.26, 0, '#7a4438', 0.75, 0.35);   // the bowl
-      blob(g, U(u + 0.035), V(0.42), r.w * 0.04, r.h * 0.1, 0, '#5a2e28', 0.6, 0.3);
-      blob(g, U(u - 0.07), V(0.78), r.w * 0.08, r.h * 0.12, 0, T.hi, 0.5, 0.3);
+      blob(g, U(u), V(0.5), r.w * 0.17, r.h * 0.36, 0, T.base, 0.45, 0.5);         // the rim of the helix
+      blob(g, U(u + 0.02), V(0.47), r.w * 0.11, r.h * 0.26, 0, mix(T.deep, '#6a3430', 0.3), 0.75, 0.35);   // the bowl
+      blob(g, U(u + 0.035), V(0.42), r.w * 0.04, r.h * 0.1, 0, T.deep, 0.5, 0.3);
+      blob(g, U(u - 0.07), V(0.78), r.w * 0.08, r.h * 0.12, 0, T.light, 0.3, 0.3);
     }
-    blob(g, U(0.5), V(0.55), r.w * 0.5, r.h * 0.5, 0, S.look.female ? '#d0705a' : '#c8664c', 0.25, 0.2);
+    blob(g, U(0.5), V(0.55), r.w * 0.5, r.h * 0.5, 0, T.blush, 0.12, 0.2);
+    for (const u of [0, 1]) blob(g, U(u), V(0.5), r.w * 0.1, r.h * 0.5, 0, T.deep, 0.5, 0.3);   // the back edge, turned from the light
     bandGrad(g, r, 0.0, 0.2, rgba(T.deep, 0.45), rgba(T.deep, 0));
   });
 }
+// The third-person thumb (people.js armParts): u runs round it (u .5 its back, facing forward, where the
+// nail is; u 0 and 1 the pad, against the palm), v from its root in the heel of the palm (0) to the tip
+// (1). Glove leather or skin in the hand's mid-tone, the pad, the root and the tip a little darker: never
+// brighter than the back of the hand beside it.
+function paintThumb(g, r, S, rnd) {
+  const T = toneOf(S.tone), bare = S.hands === 'bare', U = u => RX(r, u), V = v => RY(r, v);
+  const base = bare ? T.base : S.hands === 'workglove' ? '#a8834f' : GLOVE;
+  clip(g, r, () => {
+    fill0(g, r, base);
+    if (!bare) leather(g, r, r.x, r.y, r.w, r.h, base, rnd, { creases: 1, scuffs: 2, wrap: true, light: 0.12, sheen: 0.12 });
+    gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(shadowOf(base, 0.4), 0.45)], [0.3, rgba(base, 0)], [0.7, rgba(base, 0)], [1, rgba(shadowOf(base, 0.4), 0.45)]]);
+    gradV(g, r.x, r.y, r.w, r.h, [[0, rgba(shadowOf(base, 0.5), 0.5)], [0.3, rgba(base, 0)], [0.75, rgba(base, 0)], [1, rgba(shadowOf(base, 0.5), 0.55)]]);
+    if (bare) blob(g, U(0.5), V(0.86), 4, 1.8, 0, mix(T.light, '#f0c8b8', 0.45), 0.6, 0.4);   // the nail
+    else stitches(g, [[r.x, V(0.14)], [r.x + r.w, V(0.14)]], S.hands === 'workglove' ? '#5a4020' : '#e2c898', 0.45);   // the welt round its root
+  });
+}
+
 // Fur (the mantle's collar, in the horn region, which only the horned helm uses): big soft clumps
 // of brown fur with lit tips, darker at the roots.
 function paintFur(g, r, rnd) {
@@ -1977,6 +2097,7 @@ function paintAtlas(g, s, rnd, cv, S) {
   paintLeg(g, REG.leg, S, rnd);
   paintFoot(g, REG.foot, S, rnd);
   paintEar(g, REG.ear, S);
+  paintThumb(g, REG.thumb, S, rnd);
   paintBeardRegion(g, REG.beard, S, rnd);
   paintSkirt(g, REG.skirt, S, rnd);
   paintFlap(g, REG.flap, S, rnd, false);
@@ -1995,7 +2116,10 @@ function paintAtlas(g, s, rnd, cv, S) {
   for (const k of ['torso', 'arm', 'leg', 'foot', 'paul', 'belt', 'acc', 'apron', 'beard', 'skirt', 'flap', 'flapB', 'collar', 'pack']) soften(cv, REG[k], 0.55);
   soften(cv, REG.hair, 0.45);
   soften(cv, REG.head, 0.35);
-  g.save(); g.globalCompositeOperation = 'soft-light'; g.globalAlpha = 0.12; g.fillStyle = '#ffd9a0'; g.fillRect(0, 0, AW, AH); g.restore();
+  g.save(); g.globalCompositeOperation = 'soft-light'; g.globalAlpha = 0.12;
+  g.fillStyle = '#ffc8b4'; g.fillRect(0, 0, AW, REG.head.h);
+  g.fillStyle = '#ffd9a0'; g.fillRect(0, REG.head.h, AW, AH - REG.head.h);
+  g.restore();
   for (const r of Object.values(REG)) bleed(g, cv, r, 2);
 }
 
@@ -2015,8 +2139,8 @@ export function charGlow(spec) {
       const r = REG.head, K = faceKit(g, r);
       for (const sd of [-1, 1]) {
         const [x, y] = K.F(sd * EYE_X, 0);
-        blob(g, x, y, 22, 8, 0, spec.eyeGlow, 0.5, 0.2);
-        blob(g, x + sd, y, 7, 5, 0, '#ffd0b0', 0.9, 0.4);
+        blob(g, x, y, 9, 4.5, 0, spec.eyeGlow, 0.55, 0.2);
+        blob(g, x + sd, y, 3, 2.5, 0, '#ff6a3a', 1, 0.4);
       }
     },
   });
@@ -2032,10 +2156,14 @@ export const FP = {
   finger: { x: 0, y: 128, w: 124, h: 60 },
   thumb: { x: 0, y: 192, w: 124, h: 64 },
 };
+// Painted at twice the layout's size (FP and people.js's FPA stay in 256 units: the uvs are
+// proportional): your own gloves are the one thing on screen all the time.
+const FP_SC = 2;
 function paintHands(g, s, rnd, cv, color) {
   const c = muted(color), cb = brightDye(color);
+  g.save(); g.setTransform(FP_SC, 0, 0, FP_SC, 0, 0);
   fill0(g, { x: 0, y: 0, w: 256, h: 256 }, '#5a3c26');
-  const GL = '#7a5232';
+  const GL = GLOVE;
   clip(g, FP.sleeve, () => {
     const r = FP.sleeve;
     cloth(g, r, r.x, r.y, r.w, r.h, c, rnd, { folds: 0, light: 0.4, wrap: true });
@@ -2058,7 +2186,7 @@ function paintHands(g, s, rnd, cv, color) {
   clip(g, FP.cuff, () => {
     const r = FP.cuff;
     leather(g, r, r.x, r.y, r.w, r.h, SUEDE, rnd, { creases: 6, scuffs: 12, wrap: true, light: 0.5 });
-    // your color: a wide dyed band under the rolled rim, piped in gold
+    // your color: a wide dyed band under the rolled rim, piped in gold (the band friends see on your gauntlet)
     band(g, r, 0.66, 0.9, cb, 1);
     bandGrad(g, r, 0.66, 0.9, rgba('#fff0c8', 0.35), rgba(INK, 0.35));
     trimH(g, r.x, r.x + r.w, RY(r, 0.91), r.h * 0.07);
@@ -2066,56 +2194,55 @@ function paintHands(g, s, rnd, cv, color) {
     gradV(g, r.x, RY(r, 1.0), r.w, RY(r, 0.93) - RY(r, 1.0), [[0, '#d8b888'], [1, '#6a4a2a']]);   // the rolled rim
     for (let k = 0; k < 7; k++) rivet(g, RX(r, (k + 0.5) / 7), RY(r, 0.4), 3, BRASS);
     for (let k = 0; k < 7; k++) sfold(g, [[RX(r, (k + 0.1) / 7), RY(r, 0.6)], [RX(r, (k + 0.15) / 7), RY(r, 0.08)]], 6, SUEDE, 0.55);
-    bandGrad(g, r, 0, 0.22, rgba(INK, 0.55), rgba(INK, 0));
+    bandGrad(g, r, 0, 0.1, rgba(INK, 0.35), rgba(INK, 0));
   });
   clip(g, FP.palm, () => {
     const r = FP.palm;
-    leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 7, scuffs: 14, light: 0.45, wrap: true, sheen: 0.3 });
-    // the back of the hand (u ~ .5): stitched seams running to each knuckle, a dyed strap with a brass stud
-    for (const u of [0.4, 0.47, 0.53, 0.6]) { stitches(g, [[RX(r, 0.5 + (u - 0.5) * 0.5), RY(r, 0.15)], [RX(r, u), RY(r, 0.8)]], '#e2c898', 0.55); sfold(g, [[RX(r, 0.5 + (u - 0.5) * 0.5) + 3, RY(r, 0.2)], [RX(r, u) + 3, RY(r, 0.78)]], 5, GL, 0.6); }
-    band(g, r, 0.46, 0.58, c, 0.95); bandGrad(g, r, 0.46, 0.58, rgba('#fff0c8', 0.3), rgba(INK, 0.35));
-    hstitch(g, r, 0.48, '#f0dca8', 0.5); hstitch(g, r, 0.56, '#f0dca8', 0.5);
-    rivet(g, RX(r, 0.5), RY(r, 0.52), 4);
-    // a padded knuckle ridge with four brass studs, dark creases where the fingers bend
-    band(g, r, 0.76, 0.9, shadowOf(GL, 0.15), 0.9);
-    bandGrad(g, r, 0.84, 0.92, rgba('#fff0c8', 0.0), rgba('#fff0c8', 0.35));
-    bandGrad(g, r, 0.7, 0.76, rgba(INK, 0), rgba(INK, 0.5));
-    for (const u of [0.38, 0.46, 0.54, 0.62]) { rivet(g, RX(r, u), RY(r, 0.83), 3.6, BRASS); blob(g, RX(r, u) - 1.2, RY(r, 0.83) - 1.4, 1.6, 1.2, 0, '#e8c878', 0.7, 0.4); }
-    for (const u of [0.42, 0.5, 0.58]) { stroke(g, curve(RX(r, u - 0.03), RY(r, 0.74), RX(r, u + 0.03), RY(r, 0.74), 2, 3), 2.4, 1.4, '#4a2e20', 0.6); blob(g, RX(r, u), RY(r, 0.92), 4, 3, 0, '#b08a64', 0.4, 0.3); }
-    for (const u of [0.42, 0.5, 0.58]) stroke(g, [[RX(r, u), RY(r, 0.97)], [RX(r, u), RY(r, 0.72)]], 2.4, 1.6, shadowOf(GL, 0.6), 0.6);    // the splits toward the fingers
-    blob(g, RX(r, 0.45), RY(r, 0.55), r.w * 0.12, r.h * 0.2, 0, lightOf(GL, 0.5), 0.35, 0.15);
+    leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 5, scuffs: 10, light: 0.45, wrap: true, sheen: 0.3 });
+    // the back of the hand (u .5): three fine lines of stitching toward the knuckles, your strap with one brass stud
+    for (const u of [0.44, 0.5, 0.56]) stitches(g, [[RX(r, 0.5 + (u - 0.5) * 0.55), RY(r, 0.2)], [RX(r, u), RY(r, 0.66)]], '#e2c898', 0.4, 2.2, 2.2, 1);
+    band(g, r, 0.44, 0.55, c, 0.95); bandGrad(g, r, 0.44, 0.55, rgba('#fff0c8', 0.3), rgba(INK, 0.35));
+    hstitch(g, r, 0.46, '#f0dca8', 0.45); hstitch(g, r, 0.53, '#f0dca8', 0.45);
+    rivet(g, RX(r, 0.5), RY(r, 0.495), 3.4);
+    // a padded knuckle plate on the back only (as friends see on your gloves): darker, lit along its top,
+    // stitched round, four brass studs
+    const px0 = RX(r, 0.32), px1 = RX(r, 0.68), py0 = RY(r, 0.93), py1 = RY(r, 0.7);
+    g.save(); g.beginPath(); g.roundRect(px0, py0, px1 - px0, py1 - py0, 5); g.fillStyle = shadowOf(GL, 0.12); g.fill(); g.clip();
+    gradV(g, px0, py0, px1 - px0, py1 - py0, [[0, rgba('#fff0c8', 0.28)], [0.35, rgba('#fff0c8', 0)], [0.8, rgba(INK, 0)], [1, rgba(INK, 0.4)]]);
+    g.restore();
+    g.save(); g.setLineDash([2, 2]); g.strokeStyle = '#e2c898'; g.globalAlpha = 0.45; g.lineWidth = 1; g.beginPath(); g.roundRect(px0 + 2.5, py0 + 2.5, px1 - px0 - 5, py1 - py0 - 5, 3.5); g.stroke(); g.restore();
+    for (const u of [0.39, 0.463, 0.537, 0.61]) rivet(g, RX(r, u), RY(r, 0.815), 2.8, BRASS);
+    bandGrad(g, r, 0.66, 0.7, rgba(INK, 0), rgba(INK, 0.3));
+    for (const u of [0.43, 0.5, 0.57]) stroke(g, [[RX(r, u), RY(r, 1.0)], [RX(r, u), RY(r, 0.94)]], 2, 1.2, shadowOf(GL, 0.6), 0.5);   // the splits toward the fingers
     // the palm (u 0 / 1): a darker padded patch in shade
     for (const u of [0.0, 1.0]) { blob(g, RX(r, u), RY(r, 0.5), r.w * 0.22, r.h * 0.4, 0, INK, 0.45, 0.1); stitches(g, [[RX(r, u) - 20, RY(r, 0.25)], [RX(r, u) + 20, RY(r, 0.25)]], '#c8a878', 0.4); }
-    bandGrad(g, r, 0, 0.1, rgba(INK, 0.45), rgba(INK, 0));
+    bandGrad(g, r, 0, 0.06, rgba(INK, 0.3), rgba(INK, 0));
   });
-  // fingers and thumb: tubes with the back of the finger at u .5, its sides (toward the next
-  // finger) at u .25 / .75 in a dark seam, the underside at u 0 / 1; v from the knuckle (0) to the
-  // tip (1), bending at v ~.42 and ~.72
+  // fingers and thumb: tubes with the back of the finger at u .5, its sides (toward the next finger) at
+  // u .25 / .75 in a dark seam, the underside at u 0 / 1; v from the knuckle (0) to the tip (1), bending
+  // at v ~.42 and ~.72 (the thumb at ~.55): a lit, worn knuckle and one soft crease past each joint
   for (const k of ['finger', 'thumb']) clip(g, FP[k], () => {
     const r = FP[k], X = u => RX(r, u), Y = v => RY(r, v);
     leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 3, scuffs: 6, light: 0.45, wrap: true });
-    blob(g, X(0.5), Y(0.5), r.w * 0.16, r.h * 0.5, 0, lightOf(GL, 0.4), 0.38, 0.2);                       // the back of the finger in the light
+    blob(g, X(0.5), Y(0.5), r.w * 0.16, r.h * 0.5, 0, lightOf(GL, 0.4), k === 'thumb' ? 0.16 : 0.32, 0.2);   // the back of the finger in the light
     for (const v of (k === 'finger' ? [0.42, 0.72] : [0.55])) {
-      // a knuckle: a lit ridge over the joint, dark creases in the leather either side of it, worn pale
-      blob(g, X(0.5), Y(v), r.w * 0.11, r.h * 0.07, 0, lightOf(GL, 0.65), 0.6, 0.3);
-      for (const dv of [-0.075, 0.075]) {
-        stroke(g, curve(X(0.33), Y(v + dv), X(0.67), Y(v + dv), dv > 0 ? -2 : 2, 4), 2.6, 1.6, '#4a2e20', 0.75);
-        stroke(g, curve(X(0.35), Y(v + dv) - 1.6, X(0.65), Y(v + dv) - 1.6, dv > 0 ? -2 : 2, 4), 1.4, 0.8, lightOf(GL, 0.55), 0.5);
-      }
-      blob(g, X(0.48), Y(v), r.w * 0.06, r.h * 0.045, 0, '#b08a64', 0.4, 0.3);
+      blob(g, X(0.5), Y(v), r.w * 0.12, r.h * 0.08, 0, lightOf(GL, 0.6), 0.5, 0.3);
+      stroke(g, curve(X(0.36), Y(v + 0.085), X(0.64), Y(v + 0.085), -2, 4), 1.8, 1.0, '#4a2e20', 0.42);
     }
     blob(g, X(0.5), Y(0.96), r.w * 0.12, r.h * 0.06, 0, '#b08a64', 0.4, 0.3);                            // the worn fingertip
     blob(g, X(0.5), Y(0.06), r.w * 0.16, r.h * 0.08, 0, INK, 0.3, 0.2);                                  // in the knuckle's shadow
     gradH(g, r.x, r.y, r.w, r.h, [[0, rgba(INK, 0.55)], [0.17, rgba(INK, 0.45)], [0.3, rgba(INK, 0)], [0.7, rgba(INK, 0)], [0.83, rgba(INK, 0.45)], [1, rgba(INK, 0.55)]]);
-    for (const u of [0.24, 0.76]) { stroke(g, [[X(u), r.y], [X(u), r.y + r.h]], 2.2, 2.2, shadowOf(GL, 0.7), 0.65); stitches(g, [[X(u + (u < 0.5 ? 0.05 : -0.05)), r.y], [X(u + (u < 0.5 ? 0.05 : -0.05)), r.y + r.h]], '#d8bc8a', 0.4, 2, 2); }   // the finger seams
+    for (const u of [0.24, 0.76]) stroke(g, [[X(u), r.y], [X(u), r.y + r.h]], 1.6, 1.6, shadowOf(GL, 0.7), 0.5);   // the finger seams
   });
-  for (const r of Object.values(FP)) soften(cv, r, 0.6);
-  g.save(); g.globalCompositeOperation = 'soft-light'; g.globalAlpha = 0.12; g.fillStyle = '#ffd9a0'; g.fillRect(0, 0, 256, 256); g.restore();
-  for (const r of Object.values(FP)) bleed(g, cv, r, 2);
+  g.restore();
+  const sr = r => ({ x: r.x * FP_SC, y: r.y * FP_SC, w: r.w * FP_SC, h: r.h * FP_SC });
+  for (const r of Object.values(FP)) soften(cv, sr(r), 0.9);
+  g.save(); g.globalCompositeOperation = 'soft-light'; g.globalAlpha = 0.12; g.fillStyle = '#ffd9a0'; g.fillRect(0, 0, 256 * FP_SC, 256 * FP_SC); g.restore();
+  for (const r of Object.values(FP)) bleed(g, cv, sr(r), 2 * FP_SC);
 }
 export function handsAtlas(color) {
   const name = `fphands_${muted(color).slice(1)}`;
-  if (!has(name)) register(name, { family: 'characters-live', size: 256, paint: (g, s, rnd, h, cv) => paintHands(g, s, rnd, cv, color) });
+  if (!has(name)) register(name, { family: 'characters-live', size: 256 * FP_SC, paint: (g, s, rnd, h, cv) => paintHands(g, s, rnd, cv, color) });
   return name;
 }
 
@@ -2138,4 +2265,4 @@ const SAMPLES = {
 for (const [name, [col, o]] of Object.entries(SAMPLES)) {
   register(name, { family: 'characters', w: AW, h: AH, note: 'atlas (not tiled)', paint: (g, s, rnd, h, cv) => paintAtlas(g, s, rnd, cv, resolveSpec(col, o)) });
 }
-register('fp_hands', { family: 'characters', size: 256, note: 'first-person gloves', paint: (g, s, rnd, h, cv) => paintHands(g, s, rnd, cv, '#00E5FF') });
+register('fp_hands', { family: 'characters', size: 256 * FP_SC, note: 'first-person gloves', paint: (g, s, rnd, h, cv) => paintHands(g, s, rnd, cv, '#00E5FF') });

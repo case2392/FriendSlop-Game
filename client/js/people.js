@@ -47,12 +47,13 @@
 // The head bone has a uniform local scale of 1 head unit:
 // HU = 0.025 × HS / 3.5 = 0.00886 m (× the character's scale). Everything on the head
 // scales with HS, so in head units the landmarks never move: the eyes sit at about
-// (11.5, 3.5, ±4), deep under the brow ridge; the nose bridge front at x ≈ 14 at eye
+// (11.5, 3.5, ±4.4), deep under the brow ridge; the nose bridge front at x ≈ 14 at eye
 // height and the nose tip at about (18.4, -1.8, 0); the skull half-width at the eyes is
-// ≈ 12.7, the crown at y ≈ 22, the chin at y ≈ -12. An accessory at (16.5, 4, 0) (the
-// old placeholder shades) still sits just in front of the eyes. Exception: the Repo Man's head
-// geometry is built 1.12× bigger about the head bone (the bone's scale is still HU), so his
-// landmarks are 1.12× these; he wears modeled brass aviators of his own.
+// ≈ 12.7, the crown at y ≈ 22, the chin at y ≈ -12, with a neck below it. An accessory at
+// (16.5, 4, 0) (the old placeholder shades) still sits just in front of the eyes. Exceptions: the
+// Repo Man's head geometry is built 1.12× bigger about the head bone (the bone's scale is still
+// HU), so his landmarks are 1.12× these, and he wears modeled brass aviators of his own; a woman's
+// is built 0.95× (WoW women carry a smaller, rounder head), her hair and hat with it.
 import { THREE, painted, tex, labelSprite, canvasTex } from './gfx.js';
 import * as C from '/shared/constants.js';
 import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
@@ -74,7 +75,7 @@ const LEG = s => s < 0 ? [B.legL, B.shinL, B.footL] : [B.legR, B.shinR, B.footR]
 // spine joints (meters, body space)
 // (thigh + shin = 0.82 m from the hip joint to the ankle: a long shin under a short thigh, so the
 // legs below the jerkin skirt read long, not as stubby tubes)
-const J = { hips: 0.95, spine: 1.06, chest: 1.25, neck: 1.475, head: 1.62, hipY: 0.92, upper: 0.3, fore: 0.275, thigh: 0.395, shin: 0.425 };
+const J = { hips: 0.95, spine: 1.06, chest: 1.25, neck: 1.487, head: 1.645, hipY: 0.92, upper: 0.3, fore: 0.275, thigh: 0.395, shin: 0.425 };
 const KNEE_Y = J.hipY - J.thigh;   // 0.525
 // limb joints depend on the build (s = -1 left, +1 right)
 function frameOf(S) {
@@ -266,10 +267,13 @@ function skull(th, dy) {
 }
 const HC = [-0.006 * HS, 0.025 * HS, 0];     // head center for radial offsets
 let femHead = false;   // true while a woman's head is built: shellPt / facePt follow her narrower jaw and neck
-const femY = dyU => femHead ? Math.max(0, -0.05 - dyU) * 0.08 * HS : 0;
+const femY = dyU => femHead ? Math.min(0.045, Math.max(0, -0.05 - dyU)) * 0.08 * HS : 0;
+let bruteHead = false;   // true while the Repo Man's head is built: his jaw and neck widen (bruteJaw)
+const bruteJaw = dy => 1 + 0.08 * sstep(-0.02, -0.09, dy);
 function shellPt(th, dy, off) {
   const p = skull(th, dy);
   if (femHead) { p[0] *= femNeck(dy / HS); p[1] += femY(dy / HS); p[2] *= femJaw(dy / HS); }
+  if (bruteHead) p[2] *= bruteJaw(dy / HS);
   const dx = p[0] - HC[0], dyy = p[1] - HC[1], dz = p[2] - HC[2];
   const l = Math.hypot(dx, dyy, dz) || 1;
   return [p[0] + dx / l * off, p[1] + dyy / l * off, p[2] + dz / l * off];
@@ -291,58 +295,58 @@ function faceRelief(th, dy, fem) {
   const a = Math.abs(th);
   let fx = 0, rr = 0;
   fx += (fem ? 0.011 : 0.017) * gauss(dy + 0.013, 0.011) * gauss(th, (fem ? 0.13 : 0.17) + 0.05 * sstep(0.01, -0.02, dy));   // nose tip: broad and blunt
-  fx += (fem ? 0.006 : 0.011) * sstep(0.032, 0.004, dy) * sstep(-0.028, -0.012, dy) * gauss(th, fem ? 0.1 : 0.12);       // bridge
-  fx += (fem ? 0.005 : 0.012) * gauss(dy + 0.019, 0.007) * gauss(a - (fem ? 0.13 : 0.17), 0.08);                           // nostril wings
+  fx += (fem ? 0.006 : 0.011) * sstep(0.032, 0.004, dy) * sstep(-0.028, -0.012, dy) * gauss(th, fem ? 0.1 : 0.12);           // bridge
+  fx += (fem ? 0.005 : 0.012) * gauss(dy + 0.019, 0.007) * gauss(a - (fem ? 0.145 : 0.19), 0.08);                            // nostril wings
   fx += 0.008 * gauss(dy + 0.045, 0.014) * gauss(th, 0.42);                                                                  // the mouth's muzzle
-  if (fem) fx += 0.012 * gauss(dy + 0.081, 0.01) * gauss(th, 0.24);                                                         // a small round chin
-  else fx += 0.021 * gauss(dy + 0.081, 0.012) * Math.exp(-Math.pow(th / 0.24, 4));                                          // a square chin with a flat front
-  rr += (fem ? 0.0035 : 0.016) * gauss(dy - 0.046, 0.011) * gauss(th, 0.78);                                                // brow ridge
-  rr -= (fem ? 0.009 : 0.014) * gauss(dy - 0.024, 0.012) * gauss(a - 0.3, 0.17);                                            // eye sockets
-  rr += (fem ? 0.0075 : 0.012) * gauss(dy + (fem ? -0.002 : 0.003), 0.015) * gauss(a - 0.64, 0.26);                        // cheekbones
-  rr -= (fem ? 0.0036 : 0.006) * gauss(dy + 0.04, 0.014) * gauss(a - 0.72, 0.25);                                          // hollows under them
-  rr -= 0.009 * gauss(dy - 0.045, 0.028) * gauss(a - 1.08, 0.3);                                                            // temples
-  rr += (fem ? 0 : 0.012) * gauss(dy + 0.076, 0.014) * gauss(a - 0.95, 0.28);                                               // square jaw corners
+  if (fem) fx += 0.006 * gauss(dy + 0.08, 0.01) * gauss(th, 0.22);                                                           // a small round chin
+  else fx += 0.013 * gauss(dy + 0.082, 0.013) * Math.exp(-Math.pow(th / 0.27, 4));                                           // a square chin with a flat front
+  rr += (fem ? 0.0035 : 0.016) * gauss(dy - 0.047 + 0.008 * (a / 0.55) ** 2, 0.011) * gauss(th, 0.6);                        // brow ridge, arching down to the temples
+  rr -= (fem ? 0.009 : 0.014) * gauss(dy - 0.024, 0.012) * gauss(a - 0.345, 0.185);                                          // eye sockets
+  rr += (fem ? 0.009 : 0.013) * gauss(dy + (fem ? -0.004 : 0.0), 0.013) * gauss(a - 0.76, 0.24);                             // cheekbones
+  rr -= (fem ? 0.005 : 0.0095) * gauss(dy + 0.042, 0.015) * gauss(a - 0.86, 0.22);                                           // hollows under them
+  rr -= 0.009 * gauss(dy - 0.045, 0.028) * gauss(a - 1.08, 0.3);                                                             // temples
+  rr += (fem ? 0.002 : 0.007) * gauss(dy + 0.072, 0.012) * gauss(a - 1.3, 0.24);                                             // square jaw corners
   return [fx * Math.max(0, Math.cos(th)), rr];
 }
 // a woman's head: a narrower, rounder jaw, a slimmer neck (z scale and x scale at height dy, unscaled)
-const femJaw = dy => 0.93 * (1 - 0.17 * sstep(-0.005, -0.075, dy)) * (1 - 0.06 * sstep(-0.1, -0.12, dy));
+const femJaw = dy => 0.95 * (1 - 0.13 * sstep(-0.005, -0.075, dy)) * (1 - 0.05 * sstep(-0.1, -0.12, dy));
 const femNeck = dy => 1 - 0.2 * sstep(-0.098, -0.118, dy);
 // a point on the face surface (head-local meters), pushed `off` further out
 function facePt(th, dyM, off, fem) {
   const p = skull(th, dyM), [fx, rr] = faceRelief(th, dyM / HS, fem), dy = dyM / HS;
-  const c = Math.cos(th), s = Math.sin(th), xk = fem ? femNeck(dy) : 1, zk = fem ? femJaw(dy) : 1;
-  return [(p[0] + (fx + rr * c) * HS) * xk + c * off, p[1] + (fem ? Math.max(0, -0.05 - dy) * 0.08 * HS : 0), (p[2] + rr * s * HS) * zk + s * off];
+  const c = Math.cos(th), s = Math.sin(th), xk = fem ? femNeck(dy) : 1, zk = (fem ? femJaw(dy) : 1) * (bruteHead ? bruteJaw(dy) : 1);
+  return [(p[0] + (fx + rr * c) * HS) * xk + c * off, p[1] + (fem ? Math.min(0.045, Math.max(0, -0.05 - dy)) * 0.08 * HS : 0), (p[2] + rr * s * HS) * zk + s * off];
 }
-const HEAD_DY = [-0.15, -0.125, -0.106, -0.096, -0.088, -0.079, -0.07, -0.061, -0.052, -0.044, -0.036, -0.028, -0.02, -0.012, -0.004, 0.004, 0.013, 0.021, 0.029, 0.037, 0.045, 0.054, 0.066, 0.08, 0.098, 0.116, 0.134, 0.147, 0.156];
+const HEAD_DY = [-0.175, -0.15, -0.125, -0.106, -0.096, -0.088, -0.079, -0.07, -0.061, -0.052, -0.044, -0.036, -0.028, -0.02, -0.012, -0.004, 0.004, 0.013, 0.021, 0.029, 0.037, 0.045, 0.054, 0.066, 0.08, 0.1, 0.114, 0.128, 0.141, 0.149, 0.154, 0.156];
 
 function headParts(S) {
-  femHead = !!S.look.female;
-  try { return headPartsOf(S); } finally { femHead = false; }
+  femHead = !!S.look.female; bruteHead = !!S.brute;
+  try { return headPartsOf(S); } finally { femHead = false; bruteHead = false; }
 }
 function headPartsOf(S) {
   const parts = [];
   const fem = S.look.female;
-  const rings = HEAD_DY.map(dy => ({ y: dy * HS, w: lerpTable(HEAD_RINGS, dy, 1) * HS, d: lerpTable(HEAD_RINGS, dy, 2) * HS, db: lerpTable(HEAD_RINGS, dy, 3) * HS, n: fem && dy < -0.04 ? 2 + (lerpTable(HEAD_RINGS, dy, 4) - 2) * 0.3 : lerpTable(HEAD_RINGS, dy, 4), cx: lerpTable(HEAD_RINGS, dy, 5) * HS, v: lerpTable(HEAD_RINGS, dy, 6) }));
+  const rings = HEAD_DY.map(dy => ({ y: dy * HS, w: lerpTable(HEAD_RINGS, dy, 1) * HS, d: lerpTable(HEAD_RINGS, dy, 2) * HS, db: lerpTable(HEAD_RINGS, dy, 3) * HS, n: fem && dy < 0.01 ? 2 + (lerpTable(HEAD_RINGS, dy, 4) - 2) * 0.3 : lerpTable(HEAD_RINGS, dy, 4), cx: lerpTable(HEAD_RINGS, dy, 5) * HS, v: lerpTable(HEAD_RINGS, dy, 6) }));
   parts.push(lathe(rings, {
-    seg: 28, thOf: headTh, reg: REG.head, bones: headWeights, xf: toHead,
+    seg: 36, thOf: headTh, reg: REG.head, bones: headWeights, xf: toHead,
     deform(p, th, r) {
       const dy = r.y / HS, [fx, rr] = faceRelief(th, dy, fem);
       const c = Math.cos(th), s = Math.sin(th);
-      const zk = fem ? femJaw(dy) : 1, xk = fem ? femNeck(dy) : 1;
-      return [(p[0] + (fx + rr * c) * HS) * xk, p[1] + (fem ? Math.max(0, -0.05 - dy) * 0.08 * HS : 0), (p[2] + rr * s * HS) * zk];
+      const zk = (fem ? femJaw(dy) : 1) * (bruteHead ? bruteJaw(dy) : 1), xk = fem ? femNeck(dy) : 1;
+      return [(p[0] + (fx + rr * c) * HS) * xk, p[1] + (fem ? Math.min(0.045, Math.max(0, -0.05 - dy)) * 0.08 * HS : 0), (p[2] + rr * s * HS) * zk];
     },
   }));
-  // ears: a cupped bowl inside a raised rim, the back edge flaring away from the head
-  for (const s of [-1, 1]) {
-    const er = [[-0.03, 0], [-0.027, 0.55], [-0.017, 0.9], [-0.002, 1], [0.013, 1], [0.024, 0.82], [0.031, 0]].map(([dy, k], i, a) => ({ y: dy * HS * (fem ? 0.86 : 1), w: 0.0088 * k * HS, d: 0.019 * k * HS * (fem ? 0.86 : 1), db: 0.014 * k * HS * (fem ? 0.86 : 1), cx: (-0.006 - dy * 0.2) * HS, v: i / (a.length - 1) }));
+  // ears: a cupped bowl inside a raised rim, the back edge flaring a little away from the head (none in a hood)
+  if (S.hat !== 'hood') for (const s of [-1, 1]) {
+    const er = [[-0.03, 0], [-0.028, 0.45], [-0.022, 0.78], [-0.012, 0.95], [0.0, 1], [0.012, 1], [0.021, 0.9], [0.028, 0.6], [0.031, 0]].map(([dy, k], i, a) => ({ y: dy * HS * (fem ? 0.86 : 1), w: 0.0068 * k * HS, d: 0.019 * k * HS * (fem ? 0.86 : 1), db: 0.014 * k * HS * (fem ? 0.86 : 1), cx: (-0.006 - dy * 0.2) * HS, v: i / (a.length - 1) }));
     parts.push(lathe(er, {
-      seg: 10, reg: REG.ear, bones: B.head,
+      seg: 14, reg: REG.ear, bones: B.head,
       deform: (p, th, r, u, v) => {
         let z = p[2];
-        if (z * s > 0) z *= 1 - 0.62 * gauss(th - s * Math.PI / 2, 0.8) * Math.pow(Math.sin(v * Math.PI), 1.5);
-        return [p[0], p[1], z + s * Math.max(0, -(p[0] - (r.cx || 0))) * 0.45];
+        if (z * s > 0) z *= 1 - 1.3 * gauss(th - s * Math.PI / 2, 0.62) * Math.pow(Math.sin(v * Math.PI), 2);
+        return [p[0], p[1], z + s * Math.max(0, -(p[0] - (r.cx || 0))) * 0.28];
       },
-      xf: p => toHead([p[0], p[1] + 0.008 * HS, p[2] + s * (fem ? 0.09 : 0.094) * HS]),
+      xf: p => toHead([p[0], p[1] + 0.008 * HS, p[2] + s * (fem ? 0.087 : 0.091) * HS]),
     }));
   }
   // hair shell
@@ -352,10 +356,10 @@ function headPartsOf(S) {
     parts.push(surf((u, v) => {
       const th = thOf(u);
       const h0 = (hairlineDy(th) + hairWave(th, L.hair)) * HS + (L.hair === 'slick' ? 0.006 : 0);
-      const dy = h0 + (CROWN + 0.002 - h0) * Math.pow(v, 0.8);
+      const dy = h0 + (CROWN - h0) * (1 - Math.pow(1 - v, 1.6));
       const tuft = L.hair === 'short' ? 0.005 * Math.sin(u * 37) * Math.sin(v * 9) : 0;
       return toHead(shellPt(th, dy, v === 0 ? 0 : vol * Math.min(1, v * 4) * (0.7 + 0.3 * Math.cos(th * 0.5) ** 2) + tuft));
-    }, 24, 7, { reg: REG.hair, bones: B.head, closed: true, inside: () => toHead(HC) }));
+    }, 24, 8, { reg: REG.hair, bones: B.head, closed: true, inside: () => toHead(HC) }));
   }
   if (L.hair === 'long') {
     // a mane hanging from the back of the head to the shoulders
@@ -426,7 +430,7 @@ function beardSurface(S, { thMax, top, bot, off0 = 0.003, off1 = 0.016, taper = 
     if (dy >= CH) return toHead(facePt(th, dy * HS, off, fem));
     const p0 = facePt(th, CH * HS, off, fem), t = (CH - dy) / 0.05;
     return toHead([p0[0] + 0.016 * t - 0.006 * t * t, dy * HS, p0[2] * (1 - taper * Math.min(1, t))]);
-  }, nu, 6, 0.008, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(u, v); return [headU(th), headV(dy)]; }, bones: B.head, inside: () => toHead(HC) });
+  }, nu, 6, 0.008, { reg: REG.head, uv: (u, v) => { const [th, dy] = at(u, v); return [headU(th), headV(dy >= CH ? dy : CH + (CH - dy) * 0.4)]; }, bones: B.head, inside: () => toHead(HC) });
 }
 // A mustache: a thick tapered roll under the nose sweeping out past the mouth corners
 // and drooping (or curling up at the ends: a handlebar). Textured from the face, where
@@ -442,7 +446,7 @@ function shadesParts() {
   const P = [], G = REG.gear;
   const lensUV = (u, v) => [u, 0.76 + v * 0.24], frameUV = (u, v) => [u, 0.63 + v * 0.1];
   for (const s of [-1, 1]) {
-    const thc = s * 0.3, dyc = 0.024 * HS;
+    const thc = s * 0.33, dyc = 0.024 * HS;
     P.push(...slab((u, v) => {
       const a = (u - 0.5) * 2, b = (v - 0.5) * 2;
       const r = Math.max(Math.abs(a) ** 3 + Math.abs(b) ** 3, 1e-6) ** (1 / 3);    // a rounded lens outline
@@ -500,7 +504,7 @@ function hatParts(S) {
     const off = { bandana: 0.012, beanie: 0.02, helm: 0.024, hood: 0.03, cap: 0.022 }[h];
     const low = th => {
       const a = Math.abs(th);
-      if (h === 'hood') return -0.12 * HS;
+      if (h === 'hood') return -0.14 * HS;
       if (h === 'helm') return (a < 0.9 ? 0.042 : lerpTable([[0.9, 0.042], [1.5, 0.0], [Math.PI, -0.035]], a)) * HS;
       if (h === 'beanie') return (a < 1.2 ? 0.062 : lerpTable([[1.2, 0.062], [1.6, 0.045], [Math.PI, 0.0]], a)) * HS;
       if (h === 'cap') return lerpTable([[0, 0.068], [1.5, 0.05], [Math.PI, 0.02]], a) * HS;
@@ -508,7 +512,7 @@ function hatParts(S) {
     };
     const shellFn = (u, v) => {
       const th = thOf(u);
-      const lo = low(th), dy = lo + (CROWN + 0.004 - lo) * Math.pow(v, 0.85);
+      const lo = low(th), dy = lo + (CROWN - lo) * (1 - Math.pow(1 - v, 1.6));
       const bulge = h === 'beanie' ? 0.012 * Math.sin(v * Math.PI) : 0;
       return toHead(shellPt(th, dy, off + bulge));
     };
@@ -517,7 +521,7 @@ function hatParts(S) {
       // other; v from the neck to the top. The opening shows the face to the ears and
       // closes over the forehead; the cloth hangs loose round the neck and droops into a
       // point at the back; a thick rolled lip edges the opening.
-      const lo = -0.116 * HS;
+      const lo = -0.136 * HS;
       const cowl = (u, v) => {
         const te = 1.36 * (1 - sstep(0.5, 1.0, v)) + 0.06, side = u < 0.5 ? 1 : -1, f = u < 0.5 ? u * 2 : (1 - u) * 2;
         const th = side * (te + (Math.PI - te) * f);
@@ -536,7 +540,7 @@ function hatParts(S) {
       P.push(tube(edge, () => 0.0125, 8, 20, { reg: ACC, uv: (u, v) => [v, 0.43 + u * 0.06], ref: [1, 0, 0], bones: p => headWeights(p) }));
       P.push(...capeletParts(S));
     } else {
-      P.push(surf(shellFn, 22, 6, { reg: ACC, uv: crownUV, bones: B.head, closed: true, inside: () => toHead(HC) }));
+      P.push(surf(shellFn, 22, 7, { reg: ACC, uv: crownUV, bones: B.head, closed: true, inside: () => toHead(HC) }));
     }
     if (h === 'helm' || h === 'beanie' || h === 'cap') {    // rim / cuff ring at the bottom edge
       const thick = h === 'helm' ? 0.014 : h === 'beanie' ? 0.014 : 0.006;
@@ -1007,19 +1011,25 @@ const ARM_GLOVE = [   // a gauntlet: a rolled rim flaring out over the forearm, 
   [-0.535, 0.058, 0.062, 0.055],
   [-0.575, 0.05, 0.054, 0.047],
 ];
-const ARM_BARE = [
+const ARM_BARE = [   // a bare forearm narrowing into a wrist slimmer than the hand
   [-0.48, 0.054, 0.057, 0.05],
-  [-0.53, 0.046, 0.049, 0.043],
-  [-0.575, 0.04, 0.044, 0.038],
+  [-0.53, 0.045, 0.048, 0.042],
+  [-0.575, 0.031, 0.04, 0.036],
 ];
-const HAND = [   // a hanging hand: slim across (the palm faces the leg), broad front to back, fingers curling in
-  [-0.598, 0.027, 0.047, 0.045],
-  [-0.632, 0.027, 0.052, 0.049],
-  [-0.67, 0.026, 0.053, 0.049],
-  [-0.705, 0.024, 0.051, 0.046],
-  [-0.738, 0.021, 0.045, 0.04],
-  [-0.764, 0.015, 0.033, 0.028],
-  [-0.778, 0.0, 0.0, 0.0],
+// A hanging hand: the palm faces the leg, broad front to back, the fingers curling in to a blunt row of
+// tips that rounds off first on the little finger's side. [dy, half-thickness, front (index), back
+// (little finger), centre shift toward the front]; the last row is a line, so the tips close flat.
+const HAND = [
+  [-0.598, 0.0225, 0.044, 0.041, 0],
+  [-0.622, 0.0235, 0.049, 0.046, 0],
+  [-0.648, 0.0225, 0.052, 0.048, 0],
+  [-0.672, 0.021, 0.052, 0.048, 0],
+  [-0.7, 0.019, 0.051, 0.045, 0],
+  [-0.728, 0.018, 0.049, 0.04, 0],
+  [-0.75, 0.017, 0.045, 0.031, 0.002],
+  [-0.765, 0.0148, 0.037, 0.021, 0.004],
+  [-0.774, 0.0095, 0.025, 0.01, 0.006],
+  [-0.778, 0.0, 0.022, 0.008, 0.006],
 ];
 // Hand size: k = across and front to back, kl = length below the wrist. Big WoW mitts that
 // carry the chunk of the pauldrons and boots on down past the elbow (a glove is a size up again).
@@ -1056,14 +1066,15 @@ function armParts(S, F, s) {
       const [sw, sd, sb] = swellAt(dy, F.fem);
       return [dy, w * ak * f * sw + roll, d * ak * f * sd + roll, db * ak * f * sb + roll];
     }),
-    ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => { const f = FK * (bare ? ak : 1); return [dy, w * f, d * f, db * f]; }),
-    ...HAND.map(([dy, w, d, db]) => [dy, w * hk, d * hk, db * hk]),
+    // (a bulky arm keeps only a third of its bulk at the wrist: Ed's hand isn't a flipper on a stump)
+    ...(bare ? ARM_BARE : ARM_GLOVE).map(([dy, w, d, db]) => { const f = FK * (bare ? (dy < -0.55 ? 1 + (ak - 1) * 0.35 : ak) : 1); return [dy, w * f, d * f, db * f]; }),
+    ...HAND.map(([dy, w, d, db, sx]) => [dy, w * hk, d * hk, db * hk, sx * hk]),
   ];
   // (the hand's rings stretch by kl below the wrist; their texture rows stay where they were)
   const hy = dy => dy < WRIST ? WRIST + (dy - WRIST) * kl : dy;
-  const rings = tab.map(([dy, w, d, db]) => {
+  const rings = tab.map(([dy, w, d, db, sx = 0]) => {
     const curl = dy < -0.66 ? (-0.66 - dy) / 0.12 : 0;
-    return { y: hy(dy), y0: dy, w, d, db, n: dy < -0.585 ? 2.6 : 2, cx: 0.008 * curl * hk, cz: -0.02 * curl * curl * hk, v: armV(dy) };
+    return { y: hy(dy), y0: dy, w, d, db, n: dy < -0.585 ? 2.6 : 2, cx: 0.008 * curl * hk + sx, cz: -0.02 * curl * curl * hk, curl, v: armV(dy) };
   });
   const wts = p => {
     const dy = p[1] - sh[1];
@@ -1073,15 +1084,43 @@ function armParts(S, F, s) {
     if (dy > -0.595) { const t = sstep(-0.555, -0.595, dy); return [[fa, 1 - t], [ha, t]]; }
     return [[ha, 1]];
   };
-  // below the knuckles, three grooves across the back and the palm split the hand into four fingers
-  // (with 12 segments there's a vertex column right on each groove: x = 0, +-d/2)
-  const fingers = (p, th, r) => {
-    if (r.y0 > ARM_LM.knuckle) return p;
-    const t = sstep(ARM_LM.knuckle, ARM_LM.knuckle - 0.03, r.y0), xr = p[0] - (r.cx || 0), xn = xr / ((xr >= 0 ? r.d : r.db) || 1);
-    const gr = gauss(xn + 0.5, 0.14) + gauss(xn, 0.14) + gauss(xn - 0.5, 0.14), cz = r.cz || 0;
-    return [p[0], p[1], cz + (p[2] - cz) * (1 - 0.24 * gr * t)];
+  // The fingers are modelled. Below the wrist the lathe's 16 columns slide to even steps across the
+  // back and the palm (xn -1..1: a crown on each finger at xn -0.75, -0.25, 0.25, 0.75, a column on each
+  // split at -0.5, 0, 0.5), the splits sink in from the knuckles down, and the tips notch (the little
+  // finger, at the back, shortest). The paint follows: splits at u 1/8 1/4 3/8 (back) and 5/8 3/4 7/8
+  // (palm), crowns at u 1/16 3/16 5/16 7/16.
+  const xnOf = u => u <= 0.5 ? -1 + 4 * u : 1 - 4 * (u - 0.5);
+  const hth = u => { const xn = xnOf(u), c = Math.sign(xn) * Math.pow(Math.abs(xn), 1.3), sn = Math.sqrt(Math.max(0, 1 - c * c)); return Math.atan2(u <= 0.5 ? sn : -sn, c); };
+  const fingers = (p, r, u) => {
+    if (r.y0 > ARM_LM.knuckle + 0.004) return p;
+    const t = sstep(ARM_LM.knuckle + 0.004, ARM_LM.knuckle - 0.02, r.y0), xn = xnOf(u);
+    const g = Math.abs(xn) < 0.9 ? Math.max(gauss(xn + 0.5, 0.09), gauss(xn, 0.09), gauss(xn - 0.5, 0.09)) : 0, cz = r.cz || 0;
+    const tip = sstep(-0.745, -0.776, r.y0);
+    return [p[0], p[1] + (0.008 * g + 0.012 * Math.max(0, -xn - 0.5)) * tip * kl, cz + (p[2] - cz) * (1 - 0.32 * g * t)];
   };
-  const P = [lathe(rings, { seg: 12, reg: REG.arm, bones: wts, deform: fingers, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] })];
+  // the curl turns each finger ring toward the palm instead of just sliding it (a bend, not a shear)
+  const bend = (p, r) => {
+    if (!r.curl) return p;
+    const a = Math.atan(0.333 * r.curl * hk / kl), cz = r.cz || 0, dz = p[2] - cz;
+    return [p[0], p[1] - dz * Math.sin(a), cz + dz * Math.cos(a)];
+  };
+  const deform = (p, th, r, u) => {
+    if (r.y0 < -0.578) {
+      const t = sstep(-0.578, -0.6, r.y0), thb = th + (hth(u) - th) * t, [x, z] = ringXZ(thb, r.w, r.d, r.db, r.n ?? 2);
+      p = [(r.cx || 0) + x, p[1], (r.cz || 0) + z];
+    }
+    return bend(fingers(p, r, u), r);
+  };
+  const arm = lathe(rings, { seg: 16, reg: REG.arm, bones: wts, deform, xf: p => [sh[0] + p[0], sh[1] + p[1], sh[2] + p[2] * s] });
+  {
+    // the tips close on a line: each pair of columns meeting there shares one normal (no crease)
+    const N = arm.attributes.normal, nu = 16, row = (rings.length - 1) * (nu + 1);
+    for (let j = 0; j <= nu / 2; j++) {
+      const a = row + j, b = row + nu - j, x = N.getX(a) + N.getX(b), y = N.getY(a) + N.getY(b), z = N.getZ(a) + N.getZ(b), l = Math.hypot(x, y, z) || 1;
+      N.setXYZ(a, x / l, y / l, z / l); N.setXYZ(b, x / l, y / l, z / l);
+    }
+  }
+  const P = [arm];
   if (rolled) {
     // the rolled sleeve: a fat torus of cloth round the upper arm, a little over halfway down
     const y0 = ROLL_DY, R = lerpTable(tab.map(r => [-r[0], r[1]]), -y0, 1), r0 = 0.018;
@@ -1090,10 +1129,13 @@ function armParts(S, F, s) {
   }
   // the thumb (front, toward the body)
   const k = hk;
-  // a proper thumb on the palm side of the front edge, angled forward and down, clear of the fingers
+  // a thumb rooted in the heel of the palm, laid along the index finger's side and ending against it
+  // below the knuckles, its tip a dome (its rings bunch toward the tip); its own patch of the atlas
   const T = (x, dy, zin) => [sh[0] + x * k, sh[1] + WRIST + (dy - WRIST) * kl, sh[2] - s * zin * k];
-  const path = bez(T(0.026, -0.59, 0.006), T(0.052, -0.608, 0.018), T(0.066, -0.638, 0.022), T(0.066, -0.672, 0.018));
-  P.push(tube(path, v => (0.019 - 0.004 * v) * k * Math.pow(Math.sin(Math.min(1, 0.12 + v * 0.88) * Math.PI), 0.4), 8, 7, { reg: REG.arm, uv: (u, v) => [0.55 + u * 0.4, armV(-0.62) - v * 0.12], ref: [0, 0, 1], bones: ha }));
+  const path = bez(T(0.02, -0.603, 0.006), T(0.046, -0.622, 0.017), T(0.057, -0.655, 0.018), T(0.051, -0.688, 0.012));
+  const Wp = v => 1 - Math.pow(1 - v, 1.5);
+  const rad = v => (0.0138 - 0.0022 * v) * k * (v > 0.78 ? Math.sqrt(Math.max(0, 1 - ((v - 0.78) / 0.22) ** 2)) : 1);
+  P.push(tube(v => path(Wp(v)), v => rad(Wp(v)), 8, 9, { reg: REG.thumb, uv: (u, v) => [u, Wp(v)], ref: [0, 0, 1], bones: ha }));
   return P;
 }
 
@@ -1354,6 +1396,8 @@ function charGeometry(S, F) {
     const head = headParts(S);
     // the Repo Man's head is a size up, so it isn't a pinhead on his bulk (scaled about the head bone)
     if (S.brute) for (const g of head) { g.translate(-HX, -J.head, 0); g.scale(1.12, 1.12, 1.12); g.translate(HX, J.head, 0); }
+    // a woman's head a size down, her hair and hat with it (WoW women carry a smaller, rounder head)
+    if (S.look.female) for (const g of head) { g.translate(-HX, -J.head, 0); g.scale(0.95, 0.95, 0.95); g.translate(HX, J.head, 0); }
     const parts = [...bodyParts(S, F), ...head].map(g => { for (const k of Object.keys(g.attributes)) if (!['position', 'normal', 'uv', 'skinIndex', 'skinWeight'].includes(k)) g.deleteAttribute(k); return g; });
     const geo = mergeGeometries(parts, false);
     geo.computeBoundingSphere();
@@ -1361,13 +1405,26 @@ function charGeometry(S, F) {
   }
   return geoCache.get(key);
 }
+// People take the sky's light as the world does, but a greyer, warmer bounce from the ground: under the
+// meadow's olive grass light the shaded half of a face (the cheek below the bone, under the jaw) went
+// khaki, like dirt. Skin and cloth in shade keep their own warm colour instead.
+const HEMI = 'irradiance += getHemisphereLightIrradiance( hemisphereLights[ i ], geometryNormal );';
+const WARM_HEMI = `{
+  HemisphereLight hl = hemisphereLights[ i ];
+  hl.groundColor = mix( hl.groundColor, dot( hl.groundColor, vec3( 0.3, 0.59, 0.11 ) ) * vec3( 1.16, 0.97, 0.84 ), 0.7 );
+  irradiance += getHemisphereLightIrradiance( hl, geometryNormal );
+}`;
+function warmBounce(m) {
+  m.onBeforeCompile = sh => { sh.fragmentShader = sh.fragmentShader.replace('#include <lights_fragment_begin>', THREE.ShaderChunk.lights_fragment_begin.replace(HEMI, WARM_HEMI)); };
+  m.customProgramCacheKey = () => 'people-warm-bounce';
+  return m;
+}
 const charMats = new Map();
 function charMaterial(S) {
   const name = charAtlas(S), glow = charGlow(S);
-  if (!glow) return painted(name);
   if (!charMats.has(name)) {
-    const m = new THREE.MeshLambertMaterial({ map: tex(name), emissive: new THREE.Color('#ffffff'), emissiveMap: tex(glow) });
-    charMats.set(name, m);
+    const m = glow ? new THREE.MeshLambertMaterial({ map: tex(name), emissive: new THREE.Color('#ffffff'), emissiveMap: tex(glow) }) : new THREE.MeshLambertMaterial({ map: tex(name) });
+    charMats.set(name, warmBounce(m));
   }
   return charMats.get(name);
 }
@@ -1553,7 +1610,9 @@ function playerPose(st, m) {
     // (raised overhead, a positive ab would tip the arms in over the head: they spread out in a V
     // instead, the forearms straight on, so the hands reach up outside even a wide brim)
     T.aL = 2.75 + c * 0.35; T.aR = 2.75 - c * 0.35; T.eL = 0.35 - c * 0.25; T.eR = 0.35 + c * 0.25; T.abL = T.abR = -0.25;
-    T.inL = T.inR = 0; T.wiL = T.wiR = 0;
+    // (the palms turn to the wall and the fingers hook toward it: from below you see the backs of the
+    // hands, not their thin edges)
+    T.inL = T.inR = 0; T.wiL = T.wiR = 0; T.wtL = T.wtR = 1.3; T.wristL = T.wristR = 0.45;
     T.lL = 0.55 + c * 0.4; T.lR = 0.55 - c * 0.4; T.kL = -0.9 - c * 0.4; T.kR = -0.9 + c * 0.4; T.lean = 0.1; T.head = -0.35;
   } else if (st.mode === M.AIR) {
     T.lL = 0.75; T.lR = -0.2; T.kL = -1.15; T.kR = -0.5; T.fL = 0.3; T.aL = 1.5; T.aR = 1.1; T.abL = T.abR = 0.5; T.eL = T.eR = 0.55; T.lean = 0.06;
@@ -1631,7 +1690,7 @@ export class PlayerView {
     this.tilt.add(this.ch.root);
     this.group.add(this.tilt);
     this.label = labelSprite(p.name, labelColor(p.color), 40);
-    this.label.position.y = ['brim', 'straw', 'helm'].includes(this.ch.spec.hat) ? 2.07 : 2.0;   // a hand above the hat
+    this.label.position.y = ['brim', 'straw', 'helm'].includes(this.ch.spec.hat) ? 2.09 : 2.02;   // a hand above the hat
     this.group.add(this.label);
     this.mic = labelSprite('🔊', '#fff', 60);
     this.mic.scale.set(0.9, 0.45, 1);
@@ -1713,29 +1772,59 @@ export class PlayerView {
 // origin), back of the hand up, thumb on the inner side (-x for the right hand).
 
 const FPA = [256, 256];
-function fpHandGeometry(side) {
+// A first-person hand: lathes (through xf: lathe-local (up, along, side) -> (x side, y up, z along)) and
+// tubes (already in x side, y up, z along), the hand running forward down -z, the back of the hand up,
+// the cuff, bracer and sleeve back toward the camera. `open` builds the very same mesh (the same
+// vertices in the same order) with the fingers and the thumb spread flat: the shape a carrying hand
+// eases into (a morph target).
+function fpHandGeometry(side, open = false) {
   const P = [];
   const k = 1.2;      // WoW-chunky
-  const xf = (p) => [p[2] * k, p[0] * k, p[1] * k];        // lathe local (front, along, side) -> (x side, y up, z along)
-  const seg = (rings, reg, n = 14) => lathe(rings, { seg: n, reg, atlas: FPA, xf });
+  const xf = (p) => [p[2] * k, p[0] * k, p[1] * k];
+  const seg = (rings, reg, n = 14, o = {}) => lathe(rings, { seg: n, reg, atlas: FPA, xf, ...o });
   // the gauntlet cuff (flared, with a rolled rim), the laced bracer, then the sleeve: lathes along +z (toward the camera)
   P.push(seg([[0.0, 0.046, 0.034, 0], [0.025, 0.05, 0.037, 0.18], [0.07, 0.062, 0.05, 0.5], [0.108, 0.078, 0.064, 0.82], [0.122, 0.083, 0.069, 0.93], [0.134, 0.08, 0.066, 1], [0.138, 0.06, 0.05, 1]].map(([y, w, d, v]) => ({ y, w, d, db: d * 1.05, v })), FP.cuff, 18));
   P.push(seg([[0.13, 0.058, 0.05, 0], [0.185, 0.062, 0.054, 0.5], [0.24, 0.061, 0.053, 1]].map(([y, w, d, v]) => ({ y, w, d, v })), FP.bracer));
   P.push(seg([[0.236, 0.065, 0.057, 0], [0.26, 0.07, 0.062, 0.12], [0.6, 0.076, 0.068, 1]].map(([y, w, d, v]) => ({ y, w, d, v })), FP.sleeve));
-  // the hand: a broad padded block down -z, back of the hand up, swelling at the knuckles
-  const HR = [[0.016, 0.044, 0.031, 0], [-0.02, 0.053, 0.036, 0.3], [-0.058, 0.057, 0.036, 0.6], [-0.078, 0.06, 0.041, 0.78], [-0.09, 0.059, 0.039, 0.88], [-0.1, 0.054, 0.03, 0.96], [-0.106, 0.0, 0.0, 1]];
-  P.push(seg(HR.map(([y, w, d, v]) => ({ y, w, d, db: d * 0.85, n: 2.8, v })), FP.palm, 18));
-  // fingers: thick and jointed, curled into a loose fist (the index least, the little finger most),
-  // each a little different, the tips tucked under the palm
-  const fx = [-0.04, -0.0135, 0.013, 0.039], len = [0.95, 1.0, 0.96, 0.82], curl = [0.72, 0.82, 0.9, 1.0];
+  // the hand: a flat padded back with a ridge over the knuckles, its front rolling down into the curl of
+  // the fingers (cx: down); its first rings round and inside the cuff's mouth; the heel of the thumb
+  // swelling on its side, low and near the wrist. [y, half-width, back, palm, cx, v, n]
+  const HR = [
+    [0.016, 0.04, 0.028, 0.026, 0, 0, 2.0],
+    [-0.01, 0.049, 0.031, 0.03, 0, 0.18, 2.3],
+    [-0.04, 0.056, 0.032, 0.031, 0, 0.4],
+    [-0.066, 0.059, 0.034, 0.03, 0, 0.62],
+    [-0.082, 0.06, 0.037, 0.029, 0, 0.76],
+    [-0.094, 0.057, 0.034, 0.034, -0.008, 0.86],
+    [-0.104, 0.051, 0.027, 0.036, -0.016, 0.94],
+    [-0.111, 0.036, 0.016, 0.028, -0.022, 0.98],
+    [-0.115, 0, 0, 0, -0.024, 1],
+  ];
+  const thenar = (p, th) => {
+    const a = 0.01 * Math.max(0, -Math.sin(th)) * Math.min(1, Math.max(0, 0.35 - Math.cos(th))) * gauss(p[1] + 0.035, 0.03);
+    return [p[0] - a * 0.5, p[1], p[2] - a];
+  };
+  P.push(seg(HR.map(([y, w, d, db, cx, v, n = 2.6]) => ({ y, w, d, db, cx: open ? 0 : cx, n, v })), FP.palm, 20, { deform: thenar }));
+  // inside the curl, the palm, so the fist is solid (plain leather from the side of the hand; flat
+  // against the palm when the hand opens)
+  const FR = [[-0.074, 0, 0, -0.027], [-0.08, 0.03, 0.012, -0.027], [-0.09, 0.044, 0.017, -0.029], [-0.104, 0.046, 0.019, -0.031], [-0.117, 0.038, 0.015, -0.031], [-0.124, 0, 0, -0.031]];
+  P.push(seg(FR.map(([y, w, d, cx], i, A) => open ? { y: y * 0.75, w: w * 0.5, d: d * 0.3, cx: -0.012, v: i / (A.length - 1) } : { y, w, d, cx, v: i / (A.length - 1) }), FP.palm, 12, { uv: (u, v) => [0.28 + 0.08 * u, 0.22 + 0.14 * v] }));
+  // fingers rooted flush with the back of the hand, curled into a tight fist, their tips against the
+  // palm (the little finger shorter and slimmer); open, spread a little and reaching forward
+  const fx = open ? [-0.043, -0.0142, 0.0136, 0.0415] : [-0.041, -0.0138, 0.0132, 0.0395];
+  const len = [0.94, 1.0, 0.96, 0.8], curl = [0.95, 0.95, 0.98, 1.0], rs = [1.0, 1.04, 0.98, 0.86];
   fx.forEach((x, i) => {
-    const L = len[i], c = curl[i], y0 = 0.004 - Math.abs(x) * 0.12, z0 = -0.086 + Math.abs(x) * 0.15;
-    const path = bez([x, y0, z0], [x * 1.02, y0 - 0.006, z0 - 0.05 * L], [x * 1.04, y0 - 0.058 * L * c, z0 - 0.062 * L], [x * 1.04, y0 - 0.07 * L * c, z0 - 0.022 * L / c]);
-    P.push(tube(v => path(v).map(q => q * k), v => (0.0158 - 0.0018 * v) * k * (1 + 0.1 * gauss(v - 0.42, 0.08) + 0.08 * gauss(v - 0.72, 0.07)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 8, 10, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
+    const L = len[i], c = curl[i], y0 = 0.02 - Math.abs(x) * 0.1, z0 = -0.078 + Math.abs(x) * 0.15, sp = 1 + 0.08 * (i - 1.5) / 1.5;
+    const path = open
+      ? bez([x, y0, z0], [x * 1.03 * sp, y0 - 0.004, z0 - 0.04 * L], [x * 1.07 * sp, y0 - 0.017, z0 - 0.074 * L], [x * 1.1 * sp, y0 - 0.034, z0 - 0.097 * L])
+      : bez([x, y0, z0], [x * 1.01, y0 - 0.008, z0 - 0.045 * L], [x * 1.03, y0 - 0.06 * L * c, z0 - 0.056 * L], [x * 1.03, y0 - 0.075 * L * c, z0 - 0.012 * L]);
+    P.push(tube(v => path(v).map(q => q * k), v => (0.0148 - 0.0016 * v) * rs[i] * k * (1 + 0.1 * gauss(v - 0.4, 0.08) + 0.08 * gauss(v - 0.7, 0.07)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 12, 14, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
   });
-  // the thumb, from the heel of the palm across to rest on the index finger's middle joint
-  const tp = bez([-0.044, -0.012, -0.015], [-0.07, -0.016, -0.052], [-0.064, -0.034, -0.1], [-0.047, -0.044, -0.128]);
-  P.push(tube(v => tp(v).map(q => q * k), v => (0.0185 - 0.003 * v) * k * (1 + 0.08 * gauss(v - 0.55, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.15 + v * 0.85) * Math.PI), 0.35), 8, 9, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
+  // the thumb, short, off the heel of the hand (its root buried in the palm), its tip pressed across the
+  // index finger's middle joint; open, it stands out to the side
+  const tp = open ? bez([-0.032, -0.02, -0.03], [-0.064, -0.022, -0.054], [-0.08, -0.026, -0.082], [-0.088, -0.03, -0.104])
+    : bez([-0.032, -0.02, -0.03], [-0.06, -0.026, -0.058], [-0.062, -0.036, -0.1], [-0.042, -0.04, -0.13]);
+  P.push(tube(v => tp(v).map(q => q * k), v => (0.0185 - 0.0055 * v) * k * (1 + 0.06 * gauss(v - 0.55, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.12 + v * 0.88) * Math.PI), 0.35), 12, 12, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
   const geo = mergeGeometries(P.map(g => { for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(a)) g.deleteAttribute(a); return g; }), false);
   if (side < 0) {   // mirror for the left hand
     geo.scale(-1, 1, 1);
@@ -1745,15 +1834,31 @@ function fpHandGeometry(side) {
   }
   return geo;
 }
+// a fist that can open: the open hand rides along as a morph target (built and mirrored on its own:
+// scale() doesn't touch morph attributes)
+function fpHand(side) {
+  const fist = fpHandGeometry(side), o = fpHandGeometry(side, true);
+  fist.morphAttributes.position = [o.attributes.position];
+  fist.morphAttributes.normal = [o.attributes.normal];
+  return fist;
+}
 
+// where a fist closes round a rod (the wheel's rim, the map's roller): its grip from the wrist, in the hand's frame
+const FP_GRIP = new THREE.Vector3(0, -0.042, -0.126);
+// a hand on the wheel, turned relative to the wheel: Euler(0.95, -0.45 s, -1.25 s) seen from the driver's seat,
+// where the wheel sits in the RV (turned PI to face the camera) tilted back 0.9
+const WHEEL_GRIP = Object.fromEntries([-1, 1].map(s => [s, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.9, Math.PI, 0, 'YXZ')).invert()
+  .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.95, -0.45 * s, -1.25 * s)))]));
+const MAP_W = 0.46, MAP_H = 0.34;   // the raised map sheet
+const _hv = new THREE.Vector3(), _hv2 = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hqc = new THREE.Quaternion(), _hqw = new THREE.Quaternion(), _he = new THREE.Euler();
 export class Hands {
   constructor(camera, color) {
     this.g = new THREE.Group();
     camera.add(this.g);
     this.color = color;
     const mat = painted(handsAtlas(color));
-    this.L = new THREE.Mesh(fpHandGeometry(-1), mat);
-    this.R = new THREE.Mesh(fpHandGeometry(1), mat);
+    this.L = new THREE.Mesh(fpHand(-1), mat);
+    this.R = new THREE.Mesh(fpHand(1), mat);
     for (const h of [this.L, this.R]) { h.frustumCulled = false; h.renderOrder = 2; }
     this.L.userData.side = -1; this.R.userData.side = 1;
     this.L.position.set(-0.26, -0.4, -0.36); this.R.position.set(0.26, -0.4, -0.36);
@@ -1773,7 +1878,7 @@ export class Hands {
     if (!this.map) {
       // a parchment sheet, gently curled, wound on a wooden roller at the top and the bottom
       this.mapTex = canvasTex(canvas);
-      const W = 0.46, H = 0.34, sheet = new THREE.PlaneGeometry(W, H, 8, 1), SP = sheet.attributes.position;
+      const W = MAP_W, H = MAP_H, sheet = new THREE.PlaneGeometry(W, H, 8, 1), SP = sheet.attributes.position;
       for (let i = 0; i < SP.count; i++) { const q = SP.getX(i) / (W / 2); SP.setZ(i, 0.022 * q * q); }
       sheet.computeVertexNormals();
       this.map = new THREE.Mesh(sheet, new THREE.MeshBasicMaterial({ map: this.mapTex, side: THREE.DoubleSide, fog: false, toneMapped: false }));
@@ -1799,7 +1904,8 @@ export class Hands {
   }
   hideMap() { if (this.map) this.map.visible = false; }
 
-  update(dt, me, moving, sprinting) {
+  // wheel: the RV's steering wheel (when you drive, your hands go on it)
+  update(dt, me, moving, sprinting, wheel = null) {
     this.t += dt * (sprinting ? 13 : 8.5);
     const t = this.t;
     const walk = moving ? 1 : 0;
@@ -1808,33 +1914,54 @@ export class Hands {
     const amp = sprinting ? 0.022 : 0.014;
     const bobL = Math.sin(t) * amp * w + idle, bobR = Math.sin(t + Math.PI) * amp * w + idle;
     const swayL = Math.cos(t) * 0.008 * w, swayR = Math.cos(t + Math.PI) * 0.008 * w;
-    const pose = (h, x, y, z, rx = 0, ry = 0, rz = 0) => {
-      const k = Math.min(1, dt * 14);
+    const k = Math.min(1, dt * 14), ko = Math.min(1, dt * 10);
+    // ease each hand toward a pose: its wrist and turn (camera space) and how open it is
+    const pose = (h, x, y, z, q, open) => {
       h.position.x += (x - h.position.x) * k; h.position.y += (y - h.position.y) * k; h.position.z += (z - h.position.z) * k;
-      h.rotation.x += (rx - h.rotation.x) * k; h.rotation.y += (ry - h.rotation.y) * k; h.rotation.z += (rz - h.rotation.z) * k;
+      h.quaternion.slerp(q, k);
+      h.morphTargetInfluences[0] += (open - h.morphTargetInfluences[0]) * ko;
     };
-    const st = me.mode;
+    const eul = (rx, ry, rz) => _hq.setFromEuler(_he.set(rx, ry, rz));
+    const st = me.mode, cam = this.g.parent;
+    const onWheel = st === 'seat' && me.seat === 0 && wheel && cam;
+    // a viewmodel: the hands (and the map) the same size on screen at any field of view; on the wheel,
+    // true to the world
+    const f = onWheel || !cam?.isPerspectiveCamera ? 1 : Math.tan(cam.fov * Math.PI / 360) / Math.tan(74 * Math.PI / 360);
+    this.fs = (this.fs ?? f) + (f - (this.fs ?? f)) * k;
+    this.g.scale.set(this.fs, this.fs, 1);
     this.g.visible = st !== 'ko';
     if (st === 'climb') {
-      const c = Math.sin(now * 6.2);
-      pose(this.L, -0.2, -0.1 + (moving ? c * 0.07 : 0), -0.36, 1.25, -0.15, 0.35);
-      pose(this.R, 0.2, -0.1 - (moving ? c * 0.07 : 0), -0.36, 1.25, 0.15, -0.35);
-    } else if (st === 'seat' && me.seat === 0) {
-      pose(this.L, -0.19, -0.3, -0.34, 0.75, -0.25, 1.0);
-      pose(this.R, 0.19, -0.3, -0.34, 0.75, 0.25, -1.0);
+      // fingers hooked on the rock, reaching up in turn as you climb, a slow sway while you hang
+      const c = moving ? Math.sin(now * 6.2) * 0.07 : Math.sin(now * 1.5) * 0.01;
+      pose(this.L, -0.21, -0.13 + c, -0.38, eul(1.25, -0.15, 0.35), 0.5);
+      pose(this.R, 0.21, -0.13 - c, -0.38, eul(1.25, 0.15, -0.35), 0.5);
+    } else if (onWheel) {
+      // both hands on the rim at ten to two: they turn with the wheel and ride with the RV
+      cam.getWorldQuaternion(_hqc).invert(); wheel.getWorldQuaternion(_hqw);
+      for (const [h, s] of [[this.L, -1], [this.R, 1]]) {
+        const q = _hq.copy(_hqc).multiply(_hqw).multiply(WHEEL_GRIP[s]);
+        const p = cam.worldToLocal(wheel.localToWorld(_hv.set(s * 0.18 * Math.sin(0.85), 0.18 * Math.cos(0.85), 0)));
+        p.sub(_hv2.copy(FP_GRIP).applyQuaternion(q));
+        pose(h, p.x / this.fs, p.y / this.fs, p.z, q, 0);
+      }
     } else if (me.holding?.type === 'map' && this.map?.visible) {
-      // gripping the bottom roller near both ends, fingers curled over it
-      pose(this.L, -0.205, -0.322 + bobL * 0.5, -0.385, 1.2, 0.25, 0.7);
-      pose(this.R, 0.205, -0.316 + bobR * 0.5, -0.385, 1.2, -0.25, -0.7);
+      // fists round the bottom roller near both ends (where it sits on the curled sheet)
+      for (const [h, s] of [[this.L, -1], [this.R, 1]]) {
+        const x = s * 0.19, q = eul(0.3, s * 0.06, 0);
+        const p = _hv.set(x, -MAP_H / 2 - 0.006, 0.006 + 0.022 * Math.min(1, (x / (MAP_W / 2)) ** 2)).applyEuler(this.map.rotation).add(this.map.position);
+        p.sub(_hv2.copy(FP_GRIP).applyQuaternion(q));
+        pose(h, p.x, p.y, p.z, q, 0);
+      }
     } else if (me.holding) {
-      pose(this.L, -0.2, -0.3 + bobL * 0.6, -0.4, 0.55, -0.85, 0.9);
-      pose(this.R, 0.2, -0.3 + bobR * 0.6, -0.4, 0.55, 0.85, -0.9);
+      // open hands reaching out round the load, palms in
+      pose(this.L, -0.25, -0.26 + bobL * 0.6, -0.46, eul(0.35, -0.35, 1.25), 1);
+      pose(this.R, 0.25, -0.255 + bobR * 0.6, -0.46, eul(0.35, 0.35, -1.25), 1);
     } else {
-      // loose fists low in the frame, knuckles forward and the backs of the hands turned up toward
-      // you; not mirror twins: the left rides a little lower and turned, and idles on its own beat
+      // loose fists low in the frame, the backs of the hands toward you (the knuckle plate, the studs,
+      // your strap); not mirror twins: the left rides a little lower and idles on its own beat
       const idleL = Math.sin(now * 1.3 + 1.7) * 0.004;
-      pose(this.L, -0.235 + swayL, -0.37 + bobL + idleL, -0.4, 0.62, -0.3, 0.5);
-      pose(this.R, 0.235 + swayR, -0.36 + bobR, -0.4, 0.6, 0.28, -0.46);
+      pose(this.L, -0.235 + swayL, -0.357 + bobL + idleL, -0.4, eul(0.62, -0.3, 0.2), 0.15);
+      pose(this.R, 0.235 + swayR, -0.348 + bobR, -0.4, eul(0.6, 0.28, -0.18), 0.15);
     }
   }
 }
@@ -1853,6 +1980,33 @@ function viewIn(id, st, { emote = null, speed = 0, frames = 90 } = {}) {
 }
 const M_ = C.MODE, F_ = C.FLAG;
 function turned(obj, a) { const g = new THREE.Group(); obj.rotation.y += a; g.add(obj); return g; }
+// everyone, as the game builds them: the crew by player id (PlayerView), the town folk as town3d.js does
+const FOLK = {
+  ...Object.fromEntries([0, 1, 2, 3, 4, 5].map(i => [i, () => buildCharacter(C.COLORS[i % C.COLORS.length], { hatIndex: i % 6, skinIndex: (i * 7) % 6, variant: i % 6 })])),
+  _ed: () => buildCharacter('#c0392b', { hatIndex: 2, skinIndex: 3 }),
+  _clerk: () => buildCharacter('#2e86ab', { hatIndex: 0, skinIndex: 4 }),
+  _dealer: () => buildCharacter('#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828' }),
+  _repo: () => buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }),
+};
+// standing still at rest, the head straight, turned by a
+function still(make, a = 0) { const ch = make(); ch.driven = true; applyPose(ch, restPose()); return turned(ch.root, a); }
+function fpView(me, color = '#00E5FF') {
+  const cam = new THREE.Group(), h = new Hands(cam, color);
+  if (me.holding?.type === 'map') {   // a stand-in sheet: parchment and one road
+    const cv = document.createElement('canvas'); cv.width = 512; cv.height = 384;
+    const g = cv.getContext('2d'); g.fillStyle = '#e8d8b0'; g.fillRect(0, 0, 512, 384);
+    g.strokeStyle = '#8a6a3a'; g.lineWidth = 6; g.beginPath(); g.moveTo(40, 300); g.bezierCurveTo(160, 100, 300, 360, 470, 80); g.stroke();
+    h.showMap(cv);
+  }
+  for (let i = 0; i < 4; i++) h.update(1, me, false, false);
+  cam.userData.fp = true;
+  return cam;
+}
+function threeWays(make, gap = 0.85) {
+  const g = new THREE.Group();
+  [0, Math.PI / 4, Math.PI / 2].forEach((a, i) => { const o = still(make, a); o.position.x = i * gap; g.add(o); });
+  return g;
+}
 export const PREVIEW = {
   player: () => buildCharacter('#7CFC00', { hatIndex: 0, skinIndex: 0 }).root,
   player2: () => buildCharacter('#FF6EC7', { hatIndex: 1, skinIndex: 1 }).root,
@@ -1884,6 +2038,12 @@ export const PREVIEW = {
   // and the town folk in profile
   ...Object.fromEntries([0, 1, 2, 3, 4, 5].flatMap(i => [[`side${i}`, () => turned(viewIn(i, {}), Math.PI / 2)], [`stand${i}`, () => viewIn(i, {})]])),
   back0: () => turned(viewIn(0, {}), Math.PI),
+  // close looks (tools/preview.mjs with a band): each person three ways, front, three-quarter and
+  // profile, standing still with the head straight. faceN / face_ed... with band=1.35,1.95 (the Repo
+  // Man's 1.7,2.45), the same rows with band=0.65,1.25 for the hands at rest
+  ...Object.fromEntries(Object.entries(FOLK).map(([n, make]) => [`face${n}`, () => threeWays(make, n === '_repo' ? 1.05 : 0.85)])),
+  // one person up close at one angle (band=y0,y1,tight): head0 front, head0q three-quarter, head0s profile
+  ...Object.fromEntries(Object.entries(FOLK).flatMap(([n, make]) => [['', 0], ['q', Math.PI / 4], ['s', Math.PI / 2]].map(([k, a]) => [`head${n}${k}`, () => still(make, a)]))),
   sidewalk: () => turned(viewIn(2, {}, { speed: 4.4, frames: 47 }), Math.PI / 2),
   sideko: () => turned(viewIn(0, { mode: M_.KO }), Math.PI / 2),
   sideed: () => turned(buildCharacter('#c0392b', { hatIndex: 2, skinIndex: 3 }).root, Math.PI / 2),
@@ -1894,5 +2054,10 @@ export const PREVIEW = {
   legs: () => { const g = new THREE.Group(); [viewIn(0, {}), turned(viewIn(2, {}), Math.PI / 2), turned(viewIn(1, {}), Math.PI * 0.8)].forEach((o, i) => { const w = new THREE.Group(); w.add(o); w.scale.setScalar(2); w.position.x = (i - 1) * 1.6; g.add(w); }); return g; },
   // ...and in motion, side on: walking, running, crouching, seated
   legposes: () => { const g = new THREE.Group(); [viewIn(2, {}, { speed: 4.4, frames: 47 }), viewIn(0, { flags: F_.SPRINT }, { speed: 7, frames: 52 }), viewIn(1, { flags: F_.CROUCH }), viewIn(5, { mode: M_.SEAT })].forEach((o, i) => { const w = new THREE.Group(); w.add(turned(o, Math.PI / 2)); w.scale.setScalar(2); w.position.x = (i - 1.5) * 2.0; g.add(w); }); return g; },
+  // the first-person hands as the player sees them (preview.html?cam=fp puts the camera where the game's is)
+  fpview: () => fpView({ mode: 'walk' }),
+  fpview_hold: () => fpView({ mode: 'walk', holding: { type: 'crate' } }),
+  fpview_map: () => fpView({ mode: 'walk', holding: { type: 'map' } }),
+  fpview_climb: () => fpView({ mode: 'climb' }),
   fphands: () => { const g = new THREE.Group(); const m = painted(handsAtlas('#00E5FF')); const L = new THREE.Mesh(fpHandGeometry(-1), m), R = new THREE.Mesh(fpHandGeometry(1), m); L.position.set(-0.16, 0, 0); R.position.set(0.16, 0, 0); for (const h of [L, R]) { h.rotation.x = 0.5; g.add(h); } g.rotation.y = Math.PI; g.scale.setScalar(3); return g; },
 };

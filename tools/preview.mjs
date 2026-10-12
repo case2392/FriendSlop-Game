@@ -1,9 +1,12 @@
-// Screenshot 3D assets:  node tools/preview.mjs oak,pine,rock [out.png] [biome] [hour] [WxH] [dist] [yaw]
+// Screenshot 3D assets:  node tools/preview.mjs oak,pine,rock [out.png] [biome] [hour] [WxH] [dist] [yaw] [band]
+//   band=y0,y1 frames that slice of height up close (faces: 1.35,1.95; hands: 0.7,1.15), with a long
+//   lens; band=y0,y1,tight fits the band alone (one person's face filling the frame); band=fp: the
+//   game's first-person camera (fpview, fpview_hold, fpview_map, fpview_climb, fpdrive, fpdrive_turn: your own hands)
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { chromium } from 'playwright-core';
-const [assets = '', out = 'test/screenshots/preview.png', biome = 'meadow', hour = '10', dims = '1200x700', dist = '1', yaw = '0.55'] = process.argv.slice(2);
+const [assets = '', out = 'test/screenshots/preview.png', biome = 'meadow', hour = '10', dims = '1200x700', dist = '1', yaw = '0.55', band = ''] = process.argv.slice(2);
 const [W, H] = dims.split('x').map(Number);
 fs.mkdirSync(path.dirname(out), { recursive: true });
 const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
@@ -16,7 +19,9 @@ const page = await browser.newPage({ viewport: { width: W, height: H } });
 const errors = [];
 page.on('pageerror', e => errors.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-await page.goto(`http://localhost:${PORT}/preview.html?assets=${assets}&biome=${biome}&hour=${hour}&dist=${dist}&yaw=${yaw}`);
+const [b0, b1, tight] = band.split(',');
+const view = band === 'fp' ? '&cam=fp' : band ? `&band=${b0},${b1}${tight ? '&tight=1' : ''}` : '';
+await page.goto(`http://localhost:${PORT}/preview.html?assets=${assets}&biome=${biome}&hour=${hour}&dist=${dist}&yaw=${yaw}${view}`);
 await page.waitForFunction(() => window.__previewDone, null, { timeout: 180000 });
 await page.waitForTimeout(300);
 await page.screenshot({ path: out });

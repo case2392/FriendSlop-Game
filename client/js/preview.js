@@ -1,4 +1,4 @@
-// Asset preview: /preview.html?assets=oak,rv,player&biome=meadow&hour=10&dist=1.0
+// Asset preview: /preview.html?assets=oak,rv,player&biome=meadow&hour=10&dist=1.0[&band=y0,y1[&tight=1][&fov=16]][&cam=fp]
 // Lays the named PREVIEW assets out in a row on a patch of biome ground under the
 // game's lighting, frames them, and sets window.__previewDone when rendered.
 import { THREE, initGfx, scene, camera, render, setTimeOfDay, updateSun, setBiome, painted } from './gfx.js';
@@ -14,6 +14,10 @@ try {
   const REG = Object.assign({}, ...settled.filter(r => r.status === 'fulfilled').map(r => r.value.PREVIEW || {}));
   const names = (q.get('assets') || Object.keys(REG).slice(0, 6).join(',')).split(',').filter(Boolean);
   const biome = q.get('biome') || 'meadow';
+  // band=y0,y1: a close look at that slice of height (faces about 1.35,1.95; hands 0.7,1.15): the row
+  // packed tight, the camera level with the band and just far enough back to fit it and the row
+  const band = (q.get('band') || '').split(',').map(Number);
+  const banded = band.length === 2 && band.every(Number.isFinite) && band[1] > band[0];
   const hour = Number(q.get('hour') || 10);
   initGfx(document.getElementById('c'));
   setBiome?.(biome);
@@ -26,6 +30,7 @@ try {
     if (!fn) { errEl.textContent += `unknown asset "${n}" (have: ${Object.keys(REG).join(', ')})\n`; continue; }
     const obj = fn({ biome });
     if (!obj) continue;
+    if (obj.userData.fp) { scene.add(obj); items.push({ n, obj, x: 0, w: 0, h: 0, fp: true }); continue; }   // (camera space: cam=fp)
     const box = new THREE.Box3().setFromObject(obj);
     const size = box.getSize(new THREE.Vector3());
     const w = Math.max(size.x, size.z, 0.6);
@@ -34,7 +39,7 @@ try {
     obj.position.y -= box.min.y;
     scene.add(obj);
     items.push({ n, obj, x: x + w / 2, w, h: size.y });
-    x += w + Math.max(0.6, w * 0.25);
+    x += w + (banded ? 0.12 : Math.max(0.6, w * 0.25));
   }
   const span = Math.max(1, x);
   const ground = new THREE.Mesh(new THREE.PlaneGeometry(span * 3 + 20, span * 2 + 20),
@@ -51,6 +56,26 @@ try {
   const yaw = Number(q.get('yaw') || 0.55);
   camera.position.set(center.x + Math.sin(yaw) * dist * 0.35, center.y + dist * 0.32 + maxH * 0.2, center.z + Math.cos(yaw) * dist);
   camera.lookAt(center);
+  if (banded) {
+    // a long lens from further back, so each item in the row is seen straight on (a close wide-angle
+    // camera sees the ones off to the side at a slant)
+    camera.fov = Number(q.get('fov') || 16);
+    camera.updateProjectionMatrix();
+    const [y0, y1] = band, t = Math.tan(camera.fov * Math.PI / 360);
+    // (tight=1: fit the band only; whatever is wider runs off the sides: one person's face up close)
+    const d = Number(q.get('dist') || 1) * 1.08 * Math.max((y1 - y0) / 2 / t, q.get('tight') ? 0 : span / 2 / (t * camera.aspect));
+    center.set(span / 2, (y0 + y1) / 2, 0);
+    camera.position.set(center.x + Math.sin(yaw) * d, center.y + d * 0.02, center.z + Math.cos(yaw) * d);
+    camera.lookAt(center);
+  }
+  // cam=fp: the game's first-person camera at the origin (eyes 1.6 m up), looking down -z; the
+  // camera-space items (the first-person hands) stay where they are, the ground lies below
+  if (q.get('cam') === 'fp') {
+    camera.fov = 72; camera.updateProjectionMatrix();
+    ground.position.y = -1.6;
+    camera.position.set(0, 0, 0); camera.lookAt(0, -0.05, -1);
+    center.set(0, -1.6, -3);
+  }
   updateSun(center);
   const labels = document.getElementById('labels');
   for (let f = 0; f < 3; f++) { render(); await new Promise(r => requestAnimationFrame(r)); }

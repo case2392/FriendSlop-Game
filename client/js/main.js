@@ -1484,7 +1484,7 @@ requestAnimationFrame(frame);
   updateCasino(dt);
 
   // hands & map
-  hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting);
+  hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
   if (me.holding?.type === 'map' && mapRaised) hands.showMap(S.mapCv); else hands.hideMap();
 
   // what am I looking at
