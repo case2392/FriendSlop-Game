@@ -1703,7 +1703,7 @@ function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
   const town = townName(S.W), L = [];
   const tip = tutTip(g, town);
-  if (tip) L.push([tip, 'tip']);
+  if (tip) L.push([tip, 'qt-tip']);   // (not 'tip': that's the silver tooltip frame, absolutely positioned)
   if (g.ph === 'camp') L.push(['Drive out of camp to start the clock', '']);
   else if (g.ph === 'road') {
     if (!g.town) {
