@@ -3,7 +3,7 @@
 //
 // Style: WoW Classic humans with a dash of OSRS chunk: big shoulders, a barrel chest, a leather
 // jerkin skirt with a tabard in the player's color hanging front and back, thick forearms and big
-// gloves with modeled fingers and a thumb laid along the first one (arms bowed at rest, knuckles forward), laced knee boots with a flared turned-down cuff cut into riveted tabs on a heavy separate sole with a heel block, padded knee guards, a bedroll on
+// gloves, padded mitts with their fingers painted, and a thumb laid along the first finger (bare hands get modeled fingers; arms bowed at rest, knuckles forward), laced knee boots with a flared turned-down cuff cut into riveted tabs on a heavy separate sole with a heel block, padded knee guards, a bedroll on
 // the back. Each person is ONE SkinnedMesh (one draw call + one in the shadow pass) on a 25-bone
 // skeleton, textured with ONE hand-painted 512×768 atlas from paint/characters.js. The face is
 // modeled (a broad blunt nose, a brow ridge arching over deep sockets, cheekbones, a jaw tapering
@@ -304,7 +304,7 @@ function faceRelief(th, dy, fem) {
   rr += (fem ? 0.0035 : 0.016) * gauss(dy - 0.047 + 0.008 * (a / 0.55) ** 2, 0.011) * gauss(th, 0.6);                        // brow ridge, arching down to the temples
   rr -= (fem ? 0.009 : 0.014) * gauss(dy - 0.024, 0.012) * gauss(a - 0.345, 0.185);                                          // eye sockets
   rr += (fem ? 0.009 : 0.013) * gauss(dy + (fem ? -0.004 : 0.0), 0.013) * gauss(a - 0.76, 0.24);                             // cheekbones
-  rr -= (fem ? 0.005 : 0.0095) * gauss(dy + 0.042, 0.015) * gauss(a - 0.86, 0.22);                                           // hollows under them
+  rr -= (fem ? 0.003 : 0.005) * gauss(dy + 0.045, 0.02) * gauss(a - 0.86, 0.26);                                             // hollows under them
   rr -= 0.009 * gauss(dy - 0.045, 0.028) * gauss(a - 1.08, 0.3);                                                             // temples
   rr += (fem ? 0.002 : 0.007) * gauss(dy + 0.072, 0.012) * gauss(a - 1.3, 0.24);                                             // square jaw corners
   return [fx * Math.max(0, Math.cos(th)), rr];
@@ -411,7 +411,7 @@ function headPartsOf(S) {
   }
   if (L.facial === 'goatee') {
     // a small tapered tuft hugging the chin
-    parts.push(...beardSurface(S, { thMax: 0.42, top: GOATEE_TOP, bot: a => -0.09 - 0.017 * (1 - (a / 0.42) ** 2), off1: 0.009, taper: 0.3, nu: 10 }));
+    parts.push(...beardSurface(S, { thMax: 0.36, top: GOATEE_TOP, bot: a => -0.095 - 0.022 * (1 - (a / 0.36) ** 1.5), off1: 0.009, taper: 0.6, nu: 10 }));
   }
   if (L.facial === 'mustache') parts.push(mustacheTube(S, MUSTACHES.mustache, 0.0145));
   if (S.shades) parts.push(...shadesParts());
@@ -422,7 +422,7 @@ function headPartsOf(S) {
 // A beard as a thick sheet over the jaw. u runs from the right sideburn round the front
 // to the left one; v from its top edge (top: [|th|, dy] table, unscaled) down to its
 // bottom edge (bot(|th|)). Below the chin it hangs free, tapering toward the point.
-function beardSurface(S, { thMax, top, bot, off0 = 0.003, off1 = 0.016, taper = 0.4, nu = 16 }) {
+function beardSurface(S, { thMax, top, bot, off0 = -0.001, off1 = 0.016, taper = 0.4, nu = 16 }) {
   const fem = S.look.female, CH = -0.088;
   const at = (u, v) => { const th = (0.5 - u) * 2 * thMax, a = Math.abs(th), dyT = lerpTable(top, a), dyB = bot(a); return [th, dyT + (dyB - dyT) * Math.pow(v, 0.9)]; };
   return slab((u, v) => {
@@ -692,8 +692,8 @@ function bodyParts(S, F) {
   // a rolled collar round the neck
   if (S.collar) {
     // a folded neckline: a low soft roll of cloth round the base of the neck
-    const prof = [[1.452, 0.0], [1.462, 0.7], [1.474, 1.0], [1.486, 0.75], [1.492, 0.3], [1.49, 0.0]];
-    const nk = S.look.female ? 0.86 : 1;
+    const prof = [[1.452, 0.0], [1.462, 0.7], [1.474, 1.0], [1.486, 0.75], [1.492, 0.3], [1.488, -0.9]];   // (the last row tucks inside the neck)
+    const nk = S.look.female ? 0.76 : 1;
     P.push(lathe(prof.map(([y, k], i) => ({ y, w: (0.086 + 0.016 * k) * nk, d: (0.082 + 0.014 * k) * nk, db: (0.084 + 0.016 * k) * nk, n: 2.1, cx: -0.004 + HX, v: 1 - i / (prof.length - 1) })), {
       seg: 18, reg: REG.collar, bones: p => { const t = sstep(1.46, 1.51, p[1]); return [[B.chest, 1 - t * 0.5], [B.neck, t * 0.5]]; },
     }));
@@ -1994,7 +1994,9 @@ const FOLK = {
   _repo: () => buildCharacter('#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25 }),
 };
 // standing still at rest, the head straight, turned by a
-function still(make, a = 0) { const ch = make(); ch.driven = true; applyPose(ch, restPose()); return turned(ch.root, a); }
+// at rest as in the game (a player's hands rolled knuckles-forward; the town folk's arms left down, so
+// their hands stay in the close-up's frame)
+function still(make, a = 0) { const ch = make(), P = restPose(); ch.driven = true; if (!STANCE[ch.spec.outfit]) P.wtL = P.wtR = HAND_ROLL; applyPose(ch, P); return turned(ch.root, a); }
 function fpView(me, color = '#00E5FF') {
   const cam = new THREE.Group(), h = new Hands(cam, color);
   if (me.holding?.type === 'map') {   // a stand-in sheet: parchment and one road

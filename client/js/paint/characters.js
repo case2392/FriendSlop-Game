@@ -689,9 +689,9 @@ function paintHead(g, r, S, rnd) {
       P(sp([[13.5, 6], [14.8, -2], [16.2, -10], [36, -10], [36, 6]]), T.cool, 0.1, 6);
       // the cheekbone: a lit teardrop on the modeled bump, out and down from the eye
       const fy = fem ? 0.6 : 0;
-      P(sp([[4.9, -2.4 + fy], [7.6, -2.0 + fy], [9.9, -2.8 + fy], [10.3, -4.2 + fy], [8.4, -5.0 + fy], [5.9, -4.4 + fy]]), T.light, 0.34 * lit(s) * acc, 5);
+      P(sp([[4.9, -2.4 + fy], [7.6, -2.0 + fy], [9.9, -2.8 + fy], [10.3, -4.2 + fy], [8.4, -5.0 + fy], [5.9, -4.4 + fy]]), mix(T.light, T.hi, T.dark), 0.34 * lit(s) * acc + 0.14 * T.dark, 5);
       // under it, a hollow running down to the jaw corner
-      P(sp([[5.6, -4.6], [8.8, -3.6], [10.2, -6.5], [11, -10.4], [8.4, -10.2], [6.2, -7.6]]), T.shadow, (fem ? 0.08 : 0.14) * (1.25 - 0.25 * lit(s)), 5);
+      P(sp([[5.6, -4.6], [8.8, -3.6], [10.2, -6.5], [11, -10.4], [8.4, -10.2], [6.2, -7.6]]), T.shadow, (fem ? 0.05 : 0.08) * (1.25 - 0.25 * lit(s)), 8);
       // the eye socket: a soft rosy pool from the brow down under the eye
       P(sp([[1.45, 2.3], [3.9, 2.8], [6.6, 2.3], [7.2, 0.2], [6.05, -1.3], [3.8, -1.6], [1.8, -0.9], [1.25, 0.6]]), mix(T.shadow, T.cool, 0.5), (fem ? 0.26 : 0.42) * (hatShade ? 0.85 : 1), 2.2);
       // the brow ridge's lit top
@@ -707,7 +707,7 @@ function paintHead(g, r, S, rnd) {
     const top = L.hair === 'bald' ? 14 : 6.0;
     P([[-7.4, top], [7.4, top], [8, 4.4], [6.2, 3.4], [1.4, 2.9], [-1.4, 2.9], [-6.2, 3.4], [-8, 4.4]], T.light, 0.42 * acc, 5);
     P([[-6, top - 0.6], [1.5, top - 0.6], [1.0, 4.5], [-1, 3.7], [-5.6, 4.0]], T.hi, 0.28 * acc, 5);
-    B(-0.2, 1.9, 0.8, 1.2, T.light, 0.42 * acc, 0.25);                        // between the brows
+    B(-0.2, 1.9, 0.8, 1.2, T.light, 0.22 * acc, 0.25);                        // between the brows
     B(0, 0.9, 0.9, 0.7, T.blush, 0.25, 0.3);                                   // the notch under them faces down: warm
     if (S.hat === 'hood') {
       // in the hood's shade from the brows up over the crown, and down the sides (the eyes, painted later, still glint)
@@ -716,8 +716,8 @@ function paintHead(g, r, S, rnd) {
       for (const s of [-1, 1]) P([[s * 9, 10], [s * 36, 10], [s * 36, -6], [s * 9, -6]], T.deep, 0.25, 6);
     }
     // the nose: a lit bridge down to a lit, warm tip; nostril wings; one soft shadow tucked under it
-    P(fem ? [[-0.7, 0.4], [0.35, 0.4], [0.45, -3.6], [-0.75, -3.8]] : [[-1.0, 1.8], [0.45, 1.8], [0.55, -2.6], [0.6, -4.0], [-0.9, -4.2], [-1.2, -2.6]], T.hi, (fem ? 0.4 : 0.55) * acc, 1.6);
-    B(-0.25, yNoseTip + 0.25, 1.3, 0.9, T.hi, 0.66 * acc, 0.4);
+    P(fem ? [[-0.7, 0.4], [0.35, 0.4], [0.45, -3.6], [-0.75, -3.8]] : [[-1.0, 0.6], [0.45, 0.6], [0.55, -2.6], [0.6, -4.0], [-0.9, -4.2], [-1.2, -2.6]], T.hi, (fem ? 0.28 : 0.34) * acc, 1.6);
+    B(-0.25, yNoseTip + 0.25, 1.3, 0.9, T.hi, 0.45 * acc, 0.4);
     B(-0.45, yNoseTip + 0.5, 0.45, 0.32, T.hi, 0.2, 0.3);
     B(0.1, yNoseTip - 0.3, 1.25, 0.6, warm, fem ? 0.32 : 0.26, 0.3);
     for (const s of [-1, 1]) {
@@ -740,8 +740,8 @@ function paintHead(g, r, S, rnd) {
       // two filled lips in her own tones: a darker upper lip, a fuller lower one with a soft glint
       const fillP = (pts, c, a) => { g.save(); g.filter = 'blur(0.7px)'; g.globalAlpha = a; K.poly(pts); g.fillStyle = c; g.fill(); g.restore(); };
       fillP([[-mw, yM + 0.05], [-mw * 0.55, yM + 0.62], [-0.3, yM + 0.44], [0, yM + 0.56], [0.3, yM + 0.44], [mw * 0.55, yM + 0.62], [mw, yM + 0.05], [mw * 0.4, yM - 0.06], [0, yM - 0.03], [-mw * 0.4, yM - 0.06]], mix(T.deep, '#9a3444', 0.35), 0.92);
-      fillP([[-mw * 0.9, yM - 0.06], [0, yM - 0.1], [mw * 0.9, yM - 0.06], [mw * 0.55, yM - 0.72], [0, yM - 0.9], [-mw * 0.55, yM - 0.72]], mix(T.lip, '#b04852', 0.3), 0.92);
-      B(-0.35, yM - 0.42, 0.65, 0.2, T.hi, 0.4, 0.4);
+      fillP([[-mw * 0.9, yM - 0.06], [0, yM - 0.1], [mw * 0.9, yM - 0.06], [mw * 0.55, yM - 0.72], [0, yM - 0.9], [-mw * 0.55, yM - 0.72]], mix(mix(T.lip, '#b04852', 0.3), '#c27a70', 0.35 * T.dark), 0.92);
+      B(-0.35, yM - 0.42, 0.65, 0.2, T.hi, 0.4 + 0.3 * T.dark, 0.4);
       St([[-mw, yM + 0.05], [-mw * 0.4, yM - 0.04], [0, yM - 0.01], [mw * 0.4, yM - 0.04], [mw, yM + 0.05]], 1.7, 1.3, mix(T.deep, '#4a1a1e', 0.5), 0.8);
       for (const s of [-1, 1]) B(s * mw * 1.05, yM + 0.1, 0.28, 0.28, T.deep, 0.4, 0.3);
       B(0, yM - 1.4, mw * 0.6, 0.45, T.shadow, 0.3, 0.3);
@@ -785,7 +785,7 @@ function paintHead(g, r, S, rnd) {
     // a little light (beards and goatees are modeled sheets that sample the face above the jaw line)
     const [, yJ] = F(0, yJaw - 0.4);
     clipRect(g, r.x, yJ, r.w, r.y + r.h - yJ, () => {
-      gradV(g, r.x, yJ, r.w, r.y + r.h - yJ, [[0, mix(T.base, T.shadow, 0.55)], [0.3, mix(T.base, T.shadow, 0.3)], [1, mix(T.base, T.shadow, 0.4)]]);
+      gradV(g, r.x, yJ, r.w, r.y + r.h - yJ, [[0, mix(T.base, T.shadow, 0.32)], [0.12, mix(T.base, T.shadow, 0.45)], [0.35, mix(T.base, T.shadow, 0.3)], [1, mix(T.base, T.shadow, 0.4)]]);
       weave(g, r.x, yJ, r.w, r.y + r.h - yJ, T.base, rnd, { a: 0.035, len: [2, 4], dir: 0.3 });
       B(0, yJaw - 5.5, 2.6, 2.4, T.light, 0.2);
     });
@@ -853,19 +853,20 @@ function facialHair(g, K, S, T, rnd) {
   const L = S.look, f = L.facial;
   const topOf = tab => x => K.yOf(lerpTable(tab, Math.abs(x) / FACE_ARC, 1));
   if (f === 'mustache') paintMustache(g, K, L.hairColor, T, { line: MUSTACHES.mustache });
-  // a card sharp's pencil mustache: a thin line hugging the top of the upper lip out past the corners,
-  // parted under the nose (a block under the nose would read as something else entirely)
+  // a card sharp's pencil mustache: a thin line halfway between the nose and the lip, parted under the
+  // nose, its tips flicked up (a block under the nose would read as something else entirely, and a line
+  // on the lip as a second mouth)
   if (f === 'pencil') {
     const yM = K.yOf(-0.047), ink = mix(shadowOf(L.hairColor, 0.1), '#3a2a22', 0.3);
-    for (const s of [-1, 1]) { const pts = [[s * 0.6, yM + 1.0], [s * 1.5, yM + 1.02], [s * 2.4, yM + 0.78], [s * 3.2, yM + 0.5]]; K.S(pts.map(([x, y]) => [x, y - 0.3]), 3.4, 1, T.deep, 0.22); K.S(pts, 3.6, 0.9, ink, 0.95); }
-    K.B(0, yM + 1.0, 0.5, 0.35, T.light, 0.3);   // bare skin between the halves
+    for (const s of [-1, 1]) { const pts = [[s * 0.55, yM + 1.55], [s * 1.5, yM + 1.6], [s * 2.4, yM + 1.45], [s * 3.25, yM + 1.7]]; K.S(pts.map(([x, y]) => [x, y - 0.3]), 3.4, 1, T.deep, 0.22); K.S(pts, 3.6, 0.9, ink, 0.95); }
+    K.B(0, yM + 1.55, 0.5, 0.35, T.light, 0.3);   // bare skin between the halves
   }
   if (f === 'goatee') {
     // a warm grey tuft on the chin and down the neck front, where the modeled wedge samples it
     const hc = '#a69690', ink = { gap: '#5c4a4a', lit: '#d6cac4', mids: [hc, '#ae9e98', '#9a8a84'] };
-    g.save(); K.poly([[-4.6, -8.8], [4.6, -8.8], [5.0, -12], [3.4, -17], [0, -19.5], [-3.4, -17], [-5.0, -12]]); g.clip();
-    K.B(0, -13, 5, 7, hc, 0.95, 0.6);
-    beardClumps(g, K, rnd, { x0: -4.4, x1: 4.4, yTop: topOf(GOATEE_TOP), yBot: () => -19, n: 4, w: [2.4, 3.4], pull: 0.55, ink });
+    g.save(); K.poly([[-4.0, -8.8], [4.0, -8.8], [4.3, -12], [3.0, -17], [0, -19.5], [-3.0, -17], [-4.3, -12]]); g.clip();
+    K.B(0, -13, 4.4, 7, hc, 0.95, 0.6);
+    beardClumps(g, K, rnd, { x0: -3.8, x1: 3.8, yTop: topOf(GOATEE_TOP), yBot: () => -19, n: 4, w: [2.4, 3.4], pull: 0.55, ink });
     g.restore();
     paintMustache(g, K, hc, T, { droop: 1.4, width: 0.95 });
   }
@@ -1207,12 +1208,13 @@ function paintArm(g, r, S, rnd) {
       bandGrad(g, r, av(top - 0.025), av(top), rgba(skin.deep, 0.0), rgba(skin.deep, 0.45));   // the roll's shadow on the skin
       bandGrad(g, r, v1, av(LM.roll + 0.04), rgba(INK, 0.3), rgba(INK, 0));
     }
-    // hands: bare, or big gloves with a flared gauntlet cuff. people.js models the fingers: below the
-    // wrist the splits between them run down the back at u 1/8 1/4 3/8 and the palm at u 5/8 3/4 7/8,
-    // each finger's crown at u 1/16 3/16 5/16 7/16; the tips end at the bottom (v 0).
+    // hands: bare, or big gloves with a flared gauntlet cuff. Below the wrist people.js lays the hand's
+    // columns evenly across it (and models a bare hand's fingers): the splits between the fingers run down
+    // the back at u 1/8 1/4 3/8 and the palm at u 5/8 3/4 7/8, each finger's crown at u 1/16 3/16 5/16
+    // 7/16; the tips end at the bottom (v 0).
     const CROWNS = [0.0625, 0.1875, 0.3125, 0.4375];
-    const splits = (deep, wB, wP, aB, aP) => {
-      for (const u of [0.125, 0.25, 0.375]) stroke(g, [[U(u), AV(-0.688)], [U(u), V(0.004)]], wB[0], wB[1], deep, aB);
+    const splits = (deep, wB, wP, aB, aP, from = -0.688) => {
+      for (const u of [0.125, 0.25, 0.375]) stroke(g, [[U(u), AV(from)], [U(u), V(0.004)]], wB[0], wB[1], deep, aB);
       for (const u of [0.625, 0.75, 0.875]) stroke(g, [[U(u), AV(-0.684)], [U(u), V(0.004)]], wP[0], wP[1], deep, aP);
     };
     if (!gloved) {
@@ -1246,15 +1248,16 @@ function paintArm(g, r, S, rnd) {
           const px0 = U(0.53), px1 = U(0.97), py0 = AV(-0.6), py1 = V(0.0);
           clipRect(g, px0, py0, px1 - px0, py1 - py0, () => leather(g, r, px0, py0, px1 - px0, py1 - py0, shadowOf(gl, 0.25), rnd, { creases: 0, scuffs: 4, light: 0.25 }));
           stitches(g, [[px0, py1], [px0, py0], [px1, py0], [px1, py1]], '#5a4020', 0.6);
-          for (let i = 0; i < 3; i++) { const y = AV(-0.6 - i * 0.022), x = U(0.08 + 0.1 * i); sfold(g, [[x, y], [x + 9, y + range(rnd, -1.5, 1.5)]], 3, gl, 0.75, { dark: 0.55 }); }
-          splits(deep, [1, 2.2], [1, 2], 0.6, 0.5);
-          for (const u of [0.125, 0.25, 0.375]) stitches(g, [[U(u) + 1.6, AV(-0.684)], [U(u) + 1.6, V(0.01)]], '#5a4020', 0.55);
-        } else splits(deep, [1.2, 3.2], [1.4, 3], 0.8, 0.7);
+          stroke(g, curve(U(0.04), AV(-0.668), U(0.46), AV(-0.668), 1.5, 5), 1.6, 1.6, deep, 0.5);   // the crease over the knuckles
+          splits(deep, [1.6, 2.6], [1.4, 2.4], 0.75, 0.6);
+        } else splits(deep, [1.2, 3.2], [1.4, 3], 0.8, 0.7, -0.7);
         for (const u of CROWNS) stroke(g, [[U(u) - 0.8, AV(-0.69)], [U(u) - 0.8, V(0.03)]], 3, 2, lt, 0.28);   // each finger lit along its crown
+        if (!work) for (const u of CROWNS) stroke(g, curve(U(u) - 4, AV(-0.724), U(u) + 4, AV(-0.724), 1.2, 3), 1.3, 1.3, deep, 0.5);   // the middle joints
         if (!work) stroke(g, curve(U(0.58), AV(-0.676), U(0.92), AV(-0.676), 1.5, 4), 2.2, 2.2, deep, 0.6);   // the palm's crease
         bandGrad(g, r, 0, 0.03, rgba(INK, 0.22), rgba(INK, 0));
         if (!work) {
-          // a padded knuckle guard with four brass studs and a strap in your colour, like your own first-person gloves
+          // a padded knuckle guard with four brass studs and a strap in your colour across the back, like your own
+          // first-person gloves
           const kx0 = U(0.02), kx1 = U(0.46), ky0 = AV(-0.657), ky1 = AV(-0.687);
           clipRect(g, kx0, ky0, kx1 - kx0, ky1 - ky0, () => {
             leather(g, r, kx0, ky0, kx1 - kx0, ky1 - ky0, shadowOf(gl, 0.3), rnd, { creases: 1, scuffs: 2, light: 0.5 });
@@ -1263,13 +1266,9 @@ function paintArm(g, r, S, rnd) {
           stitches(g, [[kx0, ky0 + 1], [kx1, ky0 + 1]], '#e2c898', 0.5);
           bandGrad(g, r, av(-0.695), av(-0.687), rgba(INK, 0), rgba(INK, 0.3));
           for (const u of CROWNS) rivet(g, U(u), AV(-0.672), 1.8, BRASS);
-          const sy0 = AV(-0.608), sy1 = AV(-0.628);
-          clipRect(g, U(0.07), sy0, U(0.4) - U(0.07), sy1 - sy0, () => {
-            g.fillStyle = c; g.fillRect(U(0.07), sy0, U(0.4) - U(0.07), sy1 - sy0);
-            gradV(g, U(0.07), sy0, U(0.4) - U(0.07), sy1 - sy0, [[0, rgba('#fff0c8', 0.3)], [1, rgba(INK, 0.35)]]);
-          });
-          stitches(g, [[U(0.07), sy0 + 1.2], [U(0.4), sy0 + 1.2]], '#f0dca8', 0.5); stitches(g, [[U(0.07), sy1 - 1.2], [U(0.4), sy1 - 1.2]], '#f0dca8', 0.5);
-          rivet(g, U(0.25), (sy0 + sy1) / 2, 2.2, BRASS);
+          const s0 = av(-0.636), s1 = av(-0.604);
+          clipRect(g, U(0), RY(r, s1), U(0.5) - U(0), RY(r, s0) - RY(r, s1), () => { band(g, r, s0, s1, shadowOf(c, 0.15), 1); bandGrad(g, r, s0, s1, rgba('#fff0c8', 0.3), rgba(INK, 0.35)); });
+          rivet(g, U(0.25), AV(-0.62), 2.4, BRASS);
         } else stitches(g, [[U(0.12), AV(-0.6)], [U(0.38), AV(-0.6)]], '#5a4020', 0.6);
       });
       // the gauntlet: a rolled rim flaring over the forearm, a band of your color, riveted, tapering to the wrist

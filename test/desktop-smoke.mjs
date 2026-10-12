@@ -32,6 +32,9 @@ const fail = m => { console.error('❌', m); failed = true; };
 const check = (c, m) => (c ? ok(m) : fail(m));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const until = async (fn, ms = 15000, step = 100) => { const t0 = Date.now(); while (Date.now() - t0 < ms) { try { if (await fn()) return true; } catch {} await sleep(step); } return false; };
+// back to the menu as the in-game menu does it. backToMenu ends by reloading the page, so the page's
+// context can go before an awaited answer comes back: start it, and don't wait on it in there
+const leaveToMenu = p => p.evaluate(() => { window.__nmd.backToMenu(null); }).catch(e => { if (!/context was destroyed|navigat/i.test(e.message)) throw e; });
 const BUILD = computeBuild();
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'nmd-desktop-'));
 const ARGS = [ROOT, '--no-sandbox', '--swiftshader', '--windowed'];
@@ -111,7 +114,7 @@ try {
   await page.click('#hostBtn');
   const again = await page.waitForFunction(() => window.__nmd.phase === 'game', null, { timeout: 120000 }).then(() => true, () => false);
   check(again, 'Leave Trip goes back to the menu, and the next trip starts');
-  await page.evaluate(() => window.__nmd.backToMenu(null));
+  await leaveToMenu(page);
   await page.waitForFunction(() => window.__nmd?.phase === 'menu', null, { timeout: 60000 });
 
   // a second copy hands over to the first and quits
@@ -186,7 +189,7 @@ try {
     check(asks.length >= 2 && asks.every(x => x.filters.distance === 3 && x.filters.strings?.[0]?.key === 'nmd_code'), `the desktop shell searched Steam worldwide for the code (${asks.length} searches: ${asks.map(x => x.filters.strings?.[0]?.value).join(', ')})`);
 
     // invites still work: the friend leaves, and a Steam invite brings them back while they sit on the menu
-    await guest.page.evaluate(() => window.__nmd.backToMenu(null));
+    await leaveToMenu(guest.page);
     await guest.page.waitForFunction(() => window.__nmd?.phase === 'menu', null, { timeout: 60000 });
     await until(() => host.page.evaluate(() => window.__nmd.meta?.players.length === 1), 20000);
     const inviter = await initFakeSteam({ port: be.port, steamId: 76561190000000009n, name: 'Steam' });
@@ -204,7 +207,7 @@ try {
     check(hp?.steam_display === '#Status_Camp' && gp?.steam_display === '#Status_Camp' && hp?.steam_player_group === String(L.id) && gp?.steam_player_group === String(L.id) && hp?.steam_player_group_size === '2', `rich presence for both, grouped by the lobby (${JSON.stringify(hp)})`);
 
     // the host leaves: the friend is told the trip is over, and goes back to the menu
-    await host.page.evaluate(() => window.__nmd.backToMenu(null));
+    await leaveToMenu(host.page);
     const told = await guest.page.waitForFunction(() => /The trip is over/.test(document.getElementById('netModal')?.textContent || ''), null, { timeout: 20000 }).then(() => guest.page.evaluate(() => document.getElementById('netModal').textContent), () => null);
     check(told && /Hosty ended the trip/.test(told), `when the host leaves, the friend is told: "${told}"`);
     await guest.page.click('#netModal button');
