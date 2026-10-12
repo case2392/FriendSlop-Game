@@ -153,7 +153,7 @@ attaches to neither, cut it.**
 | **PEAK** | Stamina climbing on any surface; physically helping friends; campfires as pacing and hangout; proximity voice; ping; daily seeded map | Climbing any steep rock on stamina; carrying weight drains stamina faster; standing on friends' heads to boost; KO and revive; campfire nights; a daily seeded trip | Hunger, cold and poison afflictions. Money is our pressure system. |
 | **R.V. There Yet?** | One shared vehicle; a physics winch with anchors; roles (driver, spotter, winch operator); a "funny and quite cozy" cab | The RV as a real raycast-wheel physics vehicle; carrying the winch hook to an anchor and reeling in; riding *inside* while it moves; driver blind spots | Fully linear levels (we generate roads); inventory-gated enemies (a reviewer complaint) |
 | **Gamble With Your Friends** | One bank, one debt, a daily quota on a hard clock; physical casino games; sketchy items to fight the odds | The shared wallet, the nightly payment, physical table games, odds-shifting items | The casino as the whole game. Here it's the town stop. |
-| **We Were Here / KTANE** | Separated players with asymmetric info and one radio channel | The paper map (only the holder sees it); gate codes posted where only a climber can read them; walkie-talkies as items; voice range as a puzzle | Single-use puzzle rooms, which have no replay value |
+| **We Were Here / KTANE** | Separated players with asymmetric info and one radio channel | The paper map (only the holder sees it, never the driver); gate codes posted where only a climber can read them; walkie-talkies as items; voice range as a puzzle | Single-use puzzle rooms, which have no replay value |
 | **REPO / Lethal Company** | Quota, fragile physics loot, extraction to the vehicle, the operator role | Loot that loses value on impact; hauling it into the RV; the CB radio at the dash as the operator seat | Horror. You asked for chill. |
 | **Meccha Chameleon** | One instantly legible verb that makes screenshots | **GRAB.** One button that does most of the game. | — |
 | **Chained Together** | Tether physics: every failure is shared | The winch cable; co-carrying heavy loot (two people on one safe) | A permanent chain |
@@ -288,7 +288,7 @@ it on the counter. That one rule produces endless comedy.
 
 The *Slopmaster 9000* is a real physics body, about 3 tons on four raycast
 wheels. Inside: the driver and passenger seats, a dash with the CB radio and
-the glovebox (where the map lives), a dinette, a kitchenette, a shower stall
+the road map lying on it, a dinette, a kitchenette, a shower stall
 that holds fragile loot, and bunks. The roof is walkable and is the best
 view in the game. Falling off it is the second-best clip in the game.
 
@@ -380,7 +380,8 @@ playtests with real friends before anyone trusts them (confidence: moderate).
 - **KO'd players** sound muffled, like talking face-down in the dirt,
   because they are.
 - **Information that only one person has:** the map (only its holder sees
-  it), gate codes (only the climber sees them), the road ahead (only the
+  it; nobody takes it until someone else is driving, and the driver never
+  can), gate codes (only the climber sees them), the road ahead (only the
   driver sees it, and badly), what's behind the RV (only the person on the
   roof).
 - There is no text chat. There are pings and emotes.

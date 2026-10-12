@@ -96,16 +96,28 @@ await wait(steve, 600);
 console.log('after riding: rv', JSON.stringify(await steve.evaluate(() => ({ z: window.__nmd.rv.p.z, v: Math.hypot(window.__nmd.rv.v.x, window.__nmd.rv.v.z) }))));
 
 }
-if (want('map')) { // 3. the map, from the passenger side
+if (want('map')) { // 3. the map, from the passenger side, with Dave at the wheel (nobody takes it until someone drives)
+await ev(dave, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.3, r.y + 0.1, r.z - 1.2, 0); });
+await wait(dave, 900);
+await ev(dave, () => window.__nmd.send({ t: 'use', kind: 'seat0' }));
+await dave.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 120000 }).catch(() => console.log('  (Dave never got into the driver\'s seat)'));
+await dave.keyboard.down(' ');   // on the brake: with someone in the seat the parking brake is off, and the RV creeps
+await steve.waitForFunction(() => !!window.__nmd.g?.drv && window.__nmd.g.drv !== window.__nmd.selfId, null, { timeout: 120000 }).catch(() => console.log('  (Steve never saw a driver)'));
 await ev(steve, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
 await wait(steve, 900);
 await ev(steve, () => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
 await wait(steve, 300);
 await ev(steve, () => window.__nmd.press('grab'));
-await wait(steve, 800);
-await ev(steve, () => { window.__nmd.me.pitch = 0.12; });
-await shot(steve, 'map');
+// (no map in hand, no shot: map.jpg stays as it was rather than show empty hands)
+if (await steve.waitForFunction(() => window.__nmd.me.holding?.ok === true, null, { timeout: 120000 }).then(() => true, () => false)) {
+  await wait(steve, 800);
+  await ev(steve, () => { window.__nmd.me.pitch = 0.12; });
+  await shot(steve, 'map');
+} else console.log('  (Steve never got the map: map.jpg left as it was)');
 await ev(steve, () => window.__nmd.press('release'));
+await dave.keyboard.up(' ');
+await ev(dave, () => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave him the server's driver)
+await dave.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 120000 }).catch(() => {});
 
 }
 if (want('carrying')) { // 4. carrying a TV down the road

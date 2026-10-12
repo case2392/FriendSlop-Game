@@ -187,17 +187,64 @@ try {
   await shot(host, 'climbing-fp');
   await host.mouse.up();
 
-  // ---- the map ----
+  // ---- the map: a passenger reads it to the driver ----
+  // nobody at the wheel: Steve can't take it off the dash (the prompt says why), and a grab sent anyway is refused
   await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
   await wait(host, 900);
-  await host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
+  const aimAtMap = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
+  const mapAt = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); return { p: m.pose.p, rv: { p: S.rv.p, q: S.rv.q } }; });
+  const toastSays = (pg, re) => pg.waitForFunction(src => [...document.querySelectorAll('.toast')].some(t => new RegExp(src).test(t.textContent)), re.source, { timeout: 24000 }).then(() => true, () => false);
+  await aimAtMap();
   await wait(host, 300);
+  const waitLabel = await host.evaluate(() => window.__nmd.target()?.label || '');
   await host.evaluate(() => window.__nmd.press('grab'));
+  const m0 = await mapAt();
+  const refusedToast = toastSays(host, /has to be driving/);
+  await host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.send({ t: 'grab', kind: 'prop', id: m.id, pt: [m.pose.p.x, m.pose.p.y, m.pose.p.z], d: 1.2 }); });
+  const refused = await refusedToast;
   await wait(host, 900);
-  check((await host.evaluate(() => window.__nmd.me.holding?.type)) === 'map', 'Steve took the road map off the dash');
+  await host.evaluate(() => window.__nmd.send({ t: 'rel' }));   // (had the server taken it)
+  const m1 = await mapAt(), l0 = toLocal(m0.rv.p, m0.rv.q, m0.p), l1 = toLocal(m1.rv.p, m1.rv.q, m1.p);
+  const slid = Math.hypot(l1.x - l0.x, l1.y - l0.y, l1.z - l0.z);
+  const early = await host.evaluate(() => ({ holding: window.__nmd.me.holding, up: window.__nmd.mapUp() }));
+  check(/has to be driving/.test(waitLabel) && !early.holding && !early.up && refused && slid < 0.05, `nobody at the wheel: the map stays on the dash ("${waitLabel}"; a grab sent anyway is refused: ${refused}; the map moved ${slid.toFixed(2)} m)`);
+  const route = await host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); let on = false; m.mesh.traverse(o => { if (o.material?.map?.image === S.mapCv) on = true; }); return on; });
+  check(!route, 'the map lying on the dash shows no route (only its reader\'s raised sheet does)');
+  // a grab the server refuses never puts the map up, not even while its answer is on the way (the hands
+  // take hold at once; the sheet waits for the server's yes)
+  const flash = await host.evaluate(async () => {
+    const S = window.__nmd, m = [...S.props.values()].find(p => p.type === 'map');
+    S.me.holding = { id: m.id, type: 'map' };
+    S.send({ t: 'grab', kind: 'prop', id: m.id, pt: [m.pose.p.x, m.pose.p.y, m.pose.p.z], d: 1.2 });
+    let up = false; const t0 = performance.now();
+    while (S.me.holding && performance.now() - t0 < 20000) { up ||= S.mapUp(); await new Promise(r => setTimeout(r, 16)); }
+    return { up, cleared: !S.me.holding };
+  });
+  check(!flash.up && flash.cleared, 'a refused grab never puts the map up, not even for the round trip');
+  // Dave takes the wheel and stands on the brake: now Steve takes the map, and only Steve's screen shows it
+  await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); });
+  await wait(joiner, 900);
+  const cue = toastSays(host, /Somebody grab the map/);
+  await joiner.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
+  await joiner.waitForFunction(() => window.__nmd.me.mode === 'seat' && window.__nmd.me.seat === 0, null, { timeout: 24000 });
+  await joiner.keyboard.down(' ');
+  const daveId = await joiner.evaluate(() => window.__nmd.selfId);
+  await host.waitForFunction(id => window.__nmd.g?.drv === id, daveId, { timeout: 24000 });
+  await aimAtMap();
+  await wait(host, 300);
+  const freeLabel = await host.evaluate(() => window.__nmd.target()?.label || '');
+  await host.evaluate(() => window.__nmd.press('grab'));
+  await host.waitForFunction(() => window.__nmd.me.holding?.ok === true, null, { timeout: 24000 }).catch(() => {});
+  await wait(host, 900);
+  const reading = await host.evaluate(() => ({ type: window.__nmd.me.holding?.type, ok: !!window.__nmd.me.holding?.ok, up: window.__nmd.mapUp() }));
+  const daveSees = await joiner.evaluate(() => window.__nmd.mapUp());
+  check(reading.type === 'map' && reading.ok && reading.up && !daveSees && (await cue) && /call out the road to Dave/.test(freeLabel), `with Dave at the wheel (the crew told to grab the map), Steve took the road map ("${freeLabel}") and reads it; Dave's screen shows none of it`);
   await host.evaluate(() => { window.__nmd.me.pitch = 0.1; });
   await shot(host, 'map');
   await host.evaluate(() => window.__nmd.press('release'));
+  await joiner.keyboard.up(' ');
+  await joiner.evaluate(() => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave him the server's driver)
+  await joiner.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 24000 });
 
   // ---- town ----
   await host.evaluate(() => { const S = window.__nmd; S.send({ t: 'dbg', op: 'tpRV', x: 0, z: S.W.LEN + 6, yaw: 0 }); S.send({ t: 'dbg', op: 'clock', h: 18.6 }); S.send({ t: 'dbg', op: 'phase', ph: 'road' }); S.send({ t: 'dbg', op: 'bank', v: 2600 }); });
@@ -311,6 +358,27 @@ try {
     const gaveUp = await p.waitForFunction(() => /No answer/.test(document.getElementById('menuError').textContent) && !document.getElementById('hostBtn').disabled, null, { timeout: 40000 }).then(() => true, () => false);
     check(lost && gaveUp, `a trip that drops before its welcome says so; one that never answers is given up on after ${((Date.now() - t0) / 1000).toFixed(0)} s; the buttons work after both`);
     await ctx.close(); wss.close();
+  }
+  // ---- a map held overnight stays behind: the next day starts with empty hands, its map on the dash ----
+  {
+    await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); });
+    await wait(joiner, 900);
+    await joiner.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
+    await joiner.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 24000 });
+    const drv = await joiner.evaluate(() => window.__nmd.selfId);
+    await host.waitForFunction(id => window.__nmd.g?.drv === id, drv, { timeout: 24000 });
+    await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
+    await wait(host, 900);
+    await aimAtMap();
+    await wait(host, 300);
+    await host.evaluate(() => window.__nmd.press('grab'));
+    const held = await host.waitForFunction(() => window.__nmd.me.holding?.ok === true, null, { timeout: 24000 }).then(() => true, () => false);
+    const built = await host.evaluate(() => window.__nmd.builtAt);
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'day', d: 2 }));
+    await host.waitForFunction(b => window.__nmd.builtAt !== b && (window.__nmd.frames || 0) > 5, built, { timeout: 240000 });
+    await wait(host, 900);
+    const dawn = await host.evaluate(() => ({ holding: window.__nmd.me.holding, up: window.__nmd.mapUp() }));
+    check(held && !dawn.holding && !dawn.up, `a map held overnight stays behind: day 2 starts with empty hands and no map up (held ${held}, then ${JSON.stringify(dawn.holding)}, map up ${dawn.up})`);
   }
   server.kill('SIGTERM');
   await joiner.waitForFunction(() => /The trip is over/.test(document.getElementById('netModal')?.textContent || ''), null, { timeout: 20000 });
