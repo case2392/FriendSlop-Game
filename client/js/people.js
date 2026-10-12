@@ -1812,7 +1812,7 @@ function fpHandGeometry(side, open = false) {
   P.push(seg(HR.map(([y, w, d, db, cx, v, n = 2.6]) => ({ y, w, d, db, cx: open ? 0 : cx, n, v })), FP.palm, 20, { deform: thenar }));
   // inside the curl, the palm, so the fist is solid (plain leather from the side of the hand; flat
   // against the palm when the hand opens)
-  const FR = [[-0.074, 0, 0, -0.027], [-0.08, 0.03, 0.012, -0.027], [-0.09, 0.044, 0.017, -0.029], [-0.104, 0.046, 0.019, -0.031], [-0.117, 0.038, 0.015, -0.031], [-0.124, 0, 0, -0.031]];
+  const FR = [[-0.074, 0, 0, -0.027], [-0.08, 0.04, 0.014, -0.033], [-0.09, 0.046, 0.018, -0.035], [-0.104, 0.046, 0.019, -0.031], [-0.117, 0.038, 0.015, -0.031], [-0.124, 0, 0, -0.031]];
   P.push(seg(FR.map(([y, w, d, cx], i, A) => open ? { y: y * 0.75, w: w * 0.5, d: d * 0.3, cx: -0.012, v: i / (A.length - 1) } : { y, w, d, cx, v: i / (A.length - 1) }), FP.palm, 12, { uv: (u, v) => [0.28 + 0.08 * u, 0.22 + 0.14 * v] }));
   // fingers rooted flush with the back of the hand, curled into a tight fist, their tips against the
   // palm (the little finger shorter and slimmer); open, spread a little and reaching forward
@@ -1822,14 +1822,14 @@ function fpHandGeometry(side, open = false) {
     const L = len[i], c = curl[i], y0 = 0.02 - Math.abs(x) * 0.1, z0 = -0.078 + Math.abs(x) * 0.15, sp = 1 + 0.08 * (i - 1.5) / 1.5;
     const path = open
       ? bez([x, y0, z0], [x * 1.03 * sp, y0 - 0.004, z0 - 0.04 * L], [x * 1.07 * sp, y0 - 0.017, z0 - 0.074 * L], [x * 1.1 * sp, y0 - 0.034, z0 - 0.097 * L])
-      : bez([x, y0, z0], [x * 1.01, y0 - 0.008, z0 - 0.045 * L], [x * 1.03, y0 - 0.06 * L * c, z0 - 0.056 * L], [x * 1.03, y0 - 0.075 * L * c, z0 - 0.012 * L]);
+      : bez([x, y0, z0], [x * 1.01, y0 - 0.008, z0 - 0.045 * L], [x * 1.03, y0 - 0.06 * L * c, z0 - 0.056 * L], [x * 0.97, y0 - 0.066 * L * c, z0 - 0.012 * L]);
     P.push(tube(v => path(v).map(q => q * k), v => (0.0148 - 0.0016 * v) * rs[i] * k * (1 + 0.1 * gauss(v - 0.4, 0.08) + 0.08 * gauss(v - 0.7, 0.07)) * Math.pow(Math.sin(Math.min(1, 0.1 + v * 0.9) * Math.PI), 0.3), 12, 14, { reg: FP.finger, atlas: FPA, ref: [1, 0, 0] }));
   });
   // the thumb, short, off the heel of the hand (its root buried in the palm), its tip pressed across the
   // index finger's middle joint; open, it stands out to the side
-  const tp = open ? bez([-0.032, -0.02, -0.03], [-0.064, -0.022, -0.054], [-0.08, -0.026, -0.082], [-0.088, -0.03, -0.104])
+  const tp = open ? bez([-0.026, -0.012, -0.034], [-0.06, -0.018, -0.056], [-0.08, -0.026, -0.082], [-0.088, -0.03, -0.104])
     : bez([-0.032, -0.02, -0.03], [-0.06, -0.026, -0.058], [-0.062, -0.036, -0.1], [-0.042, -0.04, -0.13]);
-  P.push(tube(v => tp(v).map(q => q * k), v => (0.0185 - 0.0055 * v) * k * (1 + 0.06 * gauss(v - 0.55, 0.1)) * Math.pow(Math.sin(Math.min(1, 0.12 + v * 0.88) * Math.PI), 0.35), 12, 12, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
+  P.push(tube(v => tp(v).map(q => q * k), v => (0.0185 - 0.0055 * v) * k * (1 + 0.06 * gauss(v - 0.55, 0.1)) * Math.pow(Math.sin(v * Math.PI), 0.35), 12, 12, { reg: FP.thumb, atlas: FPA, ref: [0, 1, 0] }));
   const geo = mergeGeometries(P.map(g => { for (const a of Object.keys(g.attributes)) if (!['position', 'normal', 'uv'].includes(a)) g.deleteAttribute(a); return g; }), false);
   if (side < 0) {   // mirror for the left hand
     geo.scale(-1, 1, 1);
@@ -1855,7 +1855,8 @@ const FP_GRIP = new THREE.Vector3(0, -0.042, -0.126);
 const WHEEL_GRIP = Object.fromEntries([-1, 1].map(s => [s, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.9, Math.PI, 0, 'YXZ')).invert()
   .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.95, -0.45 * s, -1.25 * s)))]));
 const MAP_W = 0.46, MAP_H = 0.34;   // the raised map sheet
-const _hv = new THREE.Vector3(), _hv2 = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hqc = new THREE.Quaternion(), _hqw = new THREE.Quaternion(), _he = new THREE.Euler();
+const _hv = new THREE.Vector3(), _hv2 = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hqc = new THREE.Quaternion(), _hqw = new THREE.Quaternion(), _hqs = new THREE.Quaternion(), _he = new THREE.Euler();
+const _Z = new THREE.Vector3(0, 0, 1);
 export class Hands {
   constructor(camera, color) {
     this.g = new THREE.Group();
@@ -1887,7 +1888,7 @@ export class Hands {
       for (let i = 0; i < SP.count; i++) { const q = SP.getX(i) / (W / 2); SP.setZ(i, 0.022 * q * q); }
       sheet.computeVertexNormals();
       this.map = new THREE.Mesh(sheet, new THREE.MeshBasicMaterial({ map: this.mapTex, side: THREE.DoubleSide, fog: false, toneMapped: false }));
-      this.map.position.set(0, -0.06, -0.42);
+      this.map.position.set(0, -0.01, -0.42);
       this.map.rotation.x = -0.12;
       // the rollers reuse the glove atlas (the dark bracer leather): no new texture
       const roll = new THREE.CylinderGeometry(0.013, 0.013, W + 0.05, 10, 4);
@@ -1941,11 +1942,14 @@ export class Hands {
       pose(this.L, -0.21, -0.13 + c, -0.38, eul(1.25, -0.15, 0.35), 0.5);
       pose(this.R, 0.21, -0.13 - c, -0.38, eul(1.25, 0.15, -0.35), 0.5);
     } else if (onWheel) {
-      // both hands on the rim at ten to two: they turn with the wheel and ride with the RV
+      // both hands on the rim at ten to two: they turn with the wheel (20 degrees either way; past that
+      // the rim slides through the fists) and ride with the RV
       cam.getWorldQuaternion(_hqc).invert(); wheel.getWorldQuaternion(_hqw);
+      const a = wheel.rotation.z, slip = a - Math.max(-0.35, Math.min(0.35, a));
+      _hqs.setFromAxisAngle(_Z, -slip);
       for (const [h, s] of [[this.L, -1], [this.R, 1]]) {
-        const q = _hq.copy(_hqc).multiply(_hqw).multiply(WHEEL_GRIP[s]);
-        const p = cam.worldToLocal(wheel.localToWorld(_hv.set(s * 0.18 * Math.sin(0.85), 0.18 * Math.cos(0.85), 0)));
+        const q = _hq.copy(_hqc).multiply(_hqw).multiply(_hqs).multiply(WHEEL_GRIP[s]);
+        const p = cam.worldToLocal(wheel.localToWorld(_hv.set(s * 0.18 * Math.sin(0.85), 0.18 * Math.cos(0.85), 0).applyQuaternion(_hqs)));
         p.sub(_hv2.copy(FP_GRIP).applyQuaternion(q));
         pose(h, p.x / this.fs, p.y / this.fs, p.z, q, 0);
       }

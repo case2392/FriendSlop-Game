@@ -22,7 +22,8 @@ import {
 
 // core's stroke() fills each segment separately, so a translucent stroke beads where the
 // segments overlap. Translucent strokes here are drawn opaque on a scratch canvas and then
-// laid down once at the wanted alpha.
+// laid down once at the wanted alpha (the scratch drawn at the target's own scale: the
+// first-person atlas paints at 2x, and its strokes stay as sharp as plain ones).
 let SCRATCH = null;
 function stroke(g, pts, w0, w1, color, alpha = 1) {
   if (alpha >= 0.97) return rawStroke(g, pts, w0, w1, color, alpha);
@@ -32,11 +33,13 @@ function stroke(g, pts, w0, w1, color, alpha = 1) {
   x0 = Math.floor(x0 - pad); y0 = Math.floor(y0 - pad);
   const W = Math.ceil(x1 + pad) - x0, H = Math.ceil(y1 + pad) - y0;
   if (!(W > 0 && H > 0)) return;
-  if (!SCRATCH || SCRATCH.width < W || SCRATCH.height < H) SCRATCH = makeCanvas(Math.max(W, SCRATCH?.width || 0), Math.max(H, SCRATCH?.height || 0));
+  const m = g.getTransform?.(), sx = m ? Math.hypot(m.a, m.b) : 1, sy = m ? Math.hypot(m.c, m.d) : 1;
+  const SW = Math.ceil(W * sx), SH = Math.ceil(H * sy);
+  if (!SCRATCH || SCRATCH.width < SW || SCRATCH.height < SH) SCRATCH = makeCanvas(Math.max(SW, SCRATCH?.width || 0), Math.max(SH, SCRATCH?.height || 0));
   const sg = SCRATCH.getContext('2d');
-  sg.setTransform(1, 0, 0, 1, 0, 0); sg.clearRect(0, 0, W, H); sg.translate(-x0, -y0);
+  sg.setTransform(1, 0, 0, 1, 0, 0); sg.clearRect(0, 0, SW, SH); sg.setTransform(sx, 0, 0, sy, -x0 * sx, -y0 * sy);
   rawStroke(sg, pts, w0, w1, color, 1);
-  g.save(); g.globalAlpha *= alpha; g.drawImage(SCRATCH, 0, 0, W, H, x0, y0, W, H); g.restore();
+  g.save(); g.globalAlpha *= alpha; g.drawImage(SCRATCH, 0, 0, SW, SH, x0, y0, W, H); g.restore();
 }
 
 export const AW = 512, AH = 768;
@@ -2225,8 +2228,9 @@ function paintHands(g, s, rnd, cv, color) {
     leather(g, r, r.x, r.y, r.w, r.h, GL, rnd, { creases: 3, scuffs: 6, light: 0.45, wrap: true });
     blob(g, X(0.5), Y(0.5), r.w * 0.16, r.h * 0.5, 0, lightOf(GL, 0.4), k === 'thumb' ? 0.16 : 0.32, 0.2);   // the back of the finger in the light
     for (const v of (k === 'finger' ? [0.42, 0.72] : [0.55])) {
-      blob(g, X(0.5), Y(v), r.w * 0.12, r.h * 0.08, 0, lightOf(GL, 0.6), 0.5, 0.3);
-      stroke(g, curve(X(0.36), Y(v + 0.085), X(0.64), Y(v + 0.085), -2, 4), 1.8, 1.0, '#4a2e20', 0.42);
+      blob(g, X(0.5), Y(v), r.w * 0.12, r.h * 0.08, 0, lightOf(GL, 0.6), 0.7, 0.3);
+      stroke(g, curve(X(0.3), Y(v + 0.08), X(0.7), Y(v + 0.08), -3, 4), 2.6, 1.4, '#3e2619', 0.75);           // the crease
+      stroke(g, curve(X(0.34), Y(v + 0.055), X(0.66), Y(v + 0.055), -3, 4), 1.4, 0.8, lightOf(GL, 0.5), 0.45);   // its lit lip
     }
     blob(g, X(0.5), Y(0.96), r.w * 0.12, r.h * 0.06, 0, '#b08a64', 0.4, 0.3);                            // the worn fingertip
     blob(g, X(0.5), Y(0.06), r.w * 0.16, r.h * 0.08, 0, INK, 0.3, 0.2);                                  // in the knuckle's shadow
