@@ -114,6 +114,9 @@ try {
   await page.click('#hostBtn');
   const again = await page.waitForFunction(() => window.__nmd.phase === 'game', null, { timeout: 120000 }).then(() => true, () => false);
   check(again, 'Leave Trip goes back to the menu, and the next trip starts');
+  // what this run painted goes into the cache before the page goes (part 2 checks it survived a restart;
+  // on a busy machine the writes can still be going when the trip ends)
+  await page.waitForFunction(() => window.__nmd.texCache.idle(), null, { timeout: 240000, polling: 1000 }).catch(() => {});
   await leaveToMenu(page);
   await page.waitForFunction(() => window.__nmd?.phase === 'menu', null, { timeout: 60000 });
 
