@@ -39,6 +39,8 @@ export class Room {
     this.snapN = 0;
     this.roles = { drv: 0, nav: 0 };   // the day's driver and navigator (player ids; 0: nobody)
     this.rolesCrew = '';               // the crew the roles were last settled for (a newcomer in camp draws again)
+    // the wildlife comes out once the RV leaves camp (FRIENDSLOP_NOMOBS=1, or the test lever, keeps it away)
+    this.mobsOn = typeof process === 'undefined' || process.env.FRIENDSLOP_NOMOBS !== '1';
     this.newRun(seed);
   }
 
@@ -395,7 +397,11 @@ export class Room {
       case 'hd': this.sim.holdDist(p.id, m.d); return;
       case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
       case 'drv': if (p.seat === 0) { p.drvAt = this.t; this.sim.setDrive(m); } return;
-      case 'horn': if (p.seat === 0) this.broadcast({ t: 'ev', list: [{ k: 'horn' }] }); return;
+      case 'horn':
+        if (p.seat !== 0) return;
+        this.broadcast({ t: 'ev', list: [{ k: 'horn' }] });
+        this.sim.mobs?.horn(this.sim.rv.translation());   // (it scatters ringtails, and wakes a grumphorn)
+        return;
       case 'use': return this.onUse(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       case 'ko': return this.onKO(p, m);
@@ -425,7 +431,21 @@ export class Room {
       if (pr) this.broadcast({ t: 'ev', list: [{ k: 'spawn', p: sim.describe(pr) }] });
       this.send(p, { t: 'dbg', op: 'spawned', id: pr?.id });
     }
+    // the wildlife: one critter where you say (its 'spawn' event goes out with the tick's events); the day's
+    // cast on or off (off also clears whatever is out); a critter's state forced
+    else if (m.op === 'mob') {
+      const mb = sim.ensureMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed }).spawn(String(m.type), +m.x, +m.z, { yaw: +m.yaw || 0, y: m.y != null ? +m.y : null, st: m.st != null ? +m.st | 0 : 0 });
+      this.send(p, { t: 'dbg', op: 'mob', id: mb?.id ?? null });
+    }
+    else if (m.op === 'mobs') {
+      this.mobsOn = !!m.on;
+      if (!this.mobsOn && sim.mobs) { sim.mobs.end(); sim.mobs = null; }
+    }
+    else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.setSt(mb, +m.st | 0); }
   }
+
+  // who's here and playing right now (the wildlife is sized for them)
+  liveCrew() { return Math.max(1, [...this.players.values()].filter(p => p.connected).length); }
 
   onPose(p, m) {
     const raw = { x: num(m.x, 1e5), y: num(m.y, 1e5), z: num(m.z, 1e5) }, par = m.par ? 1 : 0, yaw = num(m.yaw, 1e4), pitch = num(m.pitch, 1.6);
@@ -695,6 +715,7 @@ export class Room {
     // along), so nobody wakes up at the fire 100 m from it, next to the junkyard's decoys
     const lot = this.W.town.lot;
     if (!this.inTown) this.toast('You limped into town overnight.', '#fff', 4);
+    this.sim.endMobs();   // the wildlife goes to bed (before the RV moves: nothing rides along into town)
     this.sim.placeRV(lot.x, lot.z, lot.yaw);
     // and anyone knocked out comes round by the fire: no doctor's bill for sleeping through midnight
     for (const p of this.players.values()) if (p.ko) { p.ko = false; this.send(p, { t: 'revived' }); }
@@ -804,6 +825,8 @@ export class Room {
       this.toast(`ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
     }
     if (this.phase === 'road') {
+      // the wildlife: today's cast, sized for the crew that's here as the road begins
+      if (this.mobsOn && !sim.mobsDone && !sim.mobs?.started) sim.startMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed });
       this.clock += dt / C.HOUR_SEC;
       if (!this.inTown && rvp.z > this.W.LEN - 8) {
         this.inTown = true;
@@ -894,10 +917,22 @@ export class Room {
           pub.push({ k: 'thud', id: e.id, why });
         } else {
           if (e.k === 'break') { this.stats.broken += e.lost; this.dayStats.broken += e.lost; }
+          if (e.k === 'mob') this.onMobEvent(e);
           pub.push(e);
         }
       }
       if (pub.length) this.broadcast({ t: 'ev', list: pub });
+    }
+  }
+
+  // what the wildlife did, in words for the crew (the sounds and the rest are the pages' business)
+  onMobEvent(e) {
+    if (e.s === 'wake' && this.t - (this.beastToastAt ?? -99) > 10) {
+      this.beastToastAt = this.t;
+      this.toast('The Grumphorn is awake. Get off the road, or crouch and keep still.', '#ff8a65', 4);
+    } else if (e.s === 'leave') {
+      this.stats.beasts = (this.stats.beasts || 0) + 1;
+      this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
     }
   }
 

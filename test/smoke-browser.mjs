@@ -16,7 +16,7 @@ const ok = m => console.log('✅', m);
 const fail = m => { console.error('❌', m); failed = true; };
 const check = (c, m) => (c ? ok(m) : fail(m));
 
-const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
+const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_NOMOBS: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server never started')), 8000); });
 

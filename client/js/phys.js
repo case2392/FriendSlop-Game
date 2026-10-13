@@ -21,6 +21,7 @@ function shapeDesc(shape) {
   const [k, a, b, c] = shape;
   if (k === 'box') return RAPIER.ColliderDesc.cuboid(a, b, c);
   if (k === 'cyl') return RAPIER.ColliderDesc.cylinder(a, b);
+  if (k === 'cap') return RAPIER.ColliderDesc.capsule(a, b).setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 });   // lying along z
   return RAPIER.ColliderDesc.ball(a);
 }
 
@@ -118,7 +119,9 @@ export class LocalWorld {
     const L = LOOT[type];
     if (!L) return;
     const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z).setRotation(q));
-    const col = this.world.createCollider(shapeDesc(L.shape).setCollisionGroups(grp(G.PROP, 0xffff)), body);
+    // (a small critter is a sensor: you walk through it, the crosshair finds it)
+    const desc = L.sensor ? RAPIER.ColliderDesc.ball(L.sensor).setSensor(true) : shapeDesc(L.shape);
+    const col = this.world.createCollider(desc.setCollisionGroups(grp(G.PROP, 0xffff)), body);
     this.info.set(col.handle, { kind: 'prop', id });
     this.props.set(id, { body, col, type });
   }

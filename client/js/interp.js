@@ -60,7 +60,7 @@ export class Interp {
     for (const a of m.pr) {
       let buf = this.props.get(a[0]);
       if (!buf) { buf = []; this.props.set(a[0], buf); }
-      buf.push({ tm, p: { x: a[1], y: a[2], z: a[3] }, q: { x: a[4], y: a[5], z: a[6], w: a[7] } });
+      buf.push({ tm, p: { x: a[1], y: a[2], z: a[3] }, q: { x: a[4], y: a[5], z: a[6], w: a[7] }, st: a[8] });   // st: wildlife's state
       if (buf.length > KEEP) buf.shift();
     }
     for (const a of m.pl) {
@@ -71,9 +71,9 @@ export class Interp {
     }
   }
 
-  // seed a prop's pose (spawned, or from a full list)
-  seedProp(id, p, q) {
-    this.props.set(id, [{ tm: -1e12, p, q }]);
+  // seed a prop's pose (spawned, or from a full list); st: a critter's state
+  seedProp(id, p, q, st) {
+    this.props.set(id, [{ tm: -1e12, p, q, st }]);
   }
   dropProp(id) { this.props.delete(id); }
   dropPlayer(id) { this.players.delete(id); }
@@ -111,7 +111,9 @@ export class Interp {
     const b = buf && bracket(buf, t);
     if (!b) return null;
     const [a, c, k] = b;
-    return { p: { x: lerp(a.p.x, c.p.x, k), y: lerp(a.p.y, c.p.y, k), z: lerp(a.p.z, c.p.z, k) }, q: nlerpQ(a.q, c.q, k) };
+    // (a state doesn't blend: the nearer sample's, and a sleeping critter's last one carries on)
+    const st = k < 0.5 ? a.st ?? c.st : c.st ?? a.st;
+    return { p: { x: lerp(a.p.x, c.p.x, k), y: lerp(a.p.y, c.p.y, k), z: lerp(a.p.z, c.p.z, k) }, q: nlerpQ(a.q, c.q, k), st };
   }
 
   samplePlayer(id, t) {

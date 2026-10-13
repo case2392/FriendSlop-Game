@@ -19,6 +19,8 @@ import { Interp } from './interp.js';
 import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
+import { buildMob } from './mobs3d.js';
+import { RST, GST, ST_MASK, ST_CARRY } from '/shared/mobs.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
@@ -432,7 +434,7 @@ function nearestAnchor() {
     for (const p of S.props.values()) {
       if (LOOT[p.type].mass < 60 || !p.pose) continue;
       const d = Math.hypot(p.pose.p.x - me.pos.x, p.pose.p.z - me.pos.z);
-      if (d < (p.type === 'boulder' ? 3.4 : 2.0)) return { prop: p };
+      if (d < (p.type === 'boulder' ? 3.4 : LOOT[p.type].mob ? 2.6 : 2.0)) return { prop: p };
     }
   }
   return best;
@@ -461,6 +463,7 @@ function computeTarget() {
     if (!p) return null;
     const L = LOOT[p.type];
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
+    if (L.mob) return { kind: 'prop', id: p.id, hit, label: mobLabel(p) };
     if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }; }
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
@@ -506,6 +509,20 @@ function computeTarget() {
   if ((hit.kind === 'terrain' || hit.kind === 'static') && hit.normal.y < 0.79 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
   if (hit.kind === 'gate') return { kind: 'gate', label: 'Locked. The keypad wants a 4-digit code.' };
   return null;
+}
+
+// what the crosshair says about a critter (shared/mobs.js states)
+function mobLabel(p) {
+  const st = (p.st ?? 0) & ST_MASK;
+  if (p.type === 'ringtail') {
+    if ((p.st ?? 0) & ST_CARRY) return '[Hold LMB] grab the ringtail: it drops what it stole · [RMB] shove it';
+    if (st === RST.STUN || st === RST.FLUNG) return 'A dizzy ringtail. [Hold LMB] grab it · [RMB] shove it';
+    return '[Hold LMB] grab the ringtail · [RMB] shove it';
+  }
+  if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by.';
+  if (st === GST.LEFT || st === GST.LEAVE) return 'A Grumphorn that has had enough of you.';
+  if (st === GST.WINDED) return 'The Grumphorn is winded: pelt it, shove it, ram it. [Hold LMB] its horns';
+  return 'GRUMPHORN. Get out of its way!';
 }
 
 // who is at the wheel right now, if it's somebody else
@@ -792,15 +809,17 @@ const inOrder = fn => m => { if (worldBuilding) (S.pendingAfterWorld ||= []).pus
 
 function addProp(d) {
   if (S.props.has(d.id)) return;
-  const mesh = buildProp(d.type, S.W);
+  // wildlife: its own mesh and a view that poses it from its state (mobs3d.js)
+  const mob = LOOT[d.type]?.mob ? buildMob(d.type, S.W) : null;
+  const mesh = mob ? mob.obj : buildProp(d.type, S.W);
   const q = { x: d.q[0], y: d.q[1], z: d.q[2], w: d.q[3] };
   const p = { x: d.x, y: d.y, z: d.z };
   mesh.position.set(p.x, p.y, p.z);
   mesh.quaternion.set(q.x, q.y, q.z, q.w);
   scene.add(mesh);
-  S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q } });
+  S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q }, view: mob?.view || null, st: d.st ?? 0 });
   S.lw.addProp(d.id, d.type, p, q);
-  S.interp.seedProp(d.id, p, q);
+  S.interp.seedProp(d.id, p, q, d.st);
 }
 function removeProp(id, fx = null) {
   const p = S.props.get(id);
@@ -1067,6 +1086,8 @@ function onEvent(e) {
     case 'flip': sfx.coin(); break;
     case 'repo': shake(0.4); break;   // (the game-over screen that follows plays the Repo Man's sting)
     case 'thud': sfx.thunk(1); break;
+    // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
+    case 'gone': for (const id of e.ids || []) removeProp(id, { color: '#cdbb9a', n: 12, speed: 2.5 }); break;
     case 'shove': positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
   }
 }
@@ -1458,6 +1479,7 @@ requestAnimationFrame(frame);
     p.mesh.position.set(s.p.x, s.p.y, s.p.z);
     p.mesh.quaternion.set(s.q.x, s.q.y, s.q.z, s.q.w);
     S.lw.setProp(p.id, s.p, s.q);
+    if (p.view) { if (s.st != null) p.st = s.st; p.view.update(dt, time, p.st, camera.position); }
   }
   // other players
   const others = new Map();
@@ -1733,7 +1755,10 @@ function hud(rv) {
   let held = '';
   if (me.holding) {
     const p = S.props.get(me.holding.id);
-    held = p ? (p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop' : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`) : '';
+    held = !p ? '' : p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop'
+      : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [Q] let go`
+      : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off'
+      : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
   $('heldLabel').classList.toggle('hidden', !held);

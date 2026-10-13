@@ -190,7 +190,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(['Georgia', 'Liberation Serif', 'DejaVu Sans', 'Arial Black', 'serif', 'sans-serif'].every(n => faces.includes(n)) && !faces.some(n => /px|\$|\{/.test(n)), `textures: the system font faces the families name are found for the cache key (${faces.length}: ${faces.join(', ')})`);
 }
 
-const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
+const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1', FRIENDSLOP_NOMOBS: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server did not start')), 8000); });
 
