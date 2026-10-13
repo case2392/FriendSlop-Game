@@ -659,6 +659,8 @@ const TIPS = [
   'Each morning picks a driver and a navigator. The driver can\'t see the map: the navigator reads it out.',
   'Walk into the RV to push it out of the mud.',
   'Crouch in the RV to brace for a crash: braced, a crash can\'t knock you out.',
+  'A Grumphorn sleeps past an obstacle some days. Crouch past it, creep the RV by, or wear out its patience: ram it, winch it, throw junk at it.',
+  'Right mouse with empty hands shoves whatever is in front of you: friends, loot, wildlife.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
   'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
@@ -817,6 +819,7 @@ function addProp(d) {
   mesh.position.set(p.x, p.y, p.z);
   mesh.quaternion.set(q.x, q.y, q.z, q.w);
   scene.add(mesh);
+  if (mob) mob.view.onPuff = puff;
   S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q }, view: mob?.view || null, st: d.st ?? 0 });
   S.lw.addProp(d.id, d.type, p, q);
   S.interp.seedProp(d.id, p, q, d.st);
@@ -1088,7 +1091,22 @@ function onEvent(e) {
     case 'thud': sfx.thunk(1); break;
     // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
     case 'gone': for (const id of e.ids || []) removeProp(id, { color: '#cdbb9a', n: 12, speed: 2.5 }); break;
-    case 'shove': positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
+    case 'mob': onMobEvent(e); break;
+    case 'shove': S.lastShove = e; positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
+  }
+}
+
+// what the wildlife does, heard and seen (the server words the toasts)
+function onMobEvent(e) {
+  const p = S.props.get(e.id), at = p?.mesh.position;
+  const near = at ? at.distanceTo(camera.position) : 99;
+  switch (e.s) {
+    case 'wake': positional(at, () => sfx.bellow(), 90); break;
+    case 'glare': positional(at, () => sfx.snort(), 40); break;
+    case 'charge': positional(at, () => { sfx.stampede(); sfx.clang(); }, 70); if (near < 10) shake(0.35); break;
+    case 'toss': positional(at, () => sfx.thunk(1), 60); if (near < 12) shake(0.5); break;
+    case 'winded': positional(at, () => sfx.snort(), 30); if (at) puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#e8e4dc'); break;
+    case 'leave': positional(at, () => sfx.clang(), 60); tutDone('grumph'); break;
   }
 }
 
@@ -1143,14 +1161,16 @@ function showOver(m) {
 
 const particles = [];
 const chipGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);   // one shared shape (flat() caches the materials)
-function burst(at, color, n = 12, speed = 4) {
+function burst(at, color, n = 12, speed = 4, grav = 1, life = 1.2) {
   for (let i = 0; i < n; i++) {
     const m = new THREE.Mesh(chipGeo, flat(color));
     m.position.copy(at);
     scene.add(m);
-    particles.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed, (Math.random() - 0.5) * speed), life: 1.2 });
+    particles.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed, (Math.random() - 0.5) * speed), life, g: grav });
   }
 }
+// steam from a nostril, dust from a hoof: a few chips drifting up and away
+const puff = (at, color) => burst(at, color, 4, 0.9, -0.08, 0.9);
 const floaters = [];
 function floatText(at, text, color) {
   const s = labelSprite(text, color, 44);
@@ -1479,7 +1499,15 @@ requestAnimationFrame(frame);
     p.mesh.position.set(s.p.x, s.p.y, s.p.z);
     p.mesh.quaternion.set(s.q.x, s.q.y, s.q.z, s.q.w);
     S.lw.setProp(p.id, s.p, s.q);
-    if (p.view) { if (s.st != null) p.st = s.st; p.view.update(dt, time, p.st, camera.position); }
+    if (p.view) {
+      if (s.st != null) p.st = s.st;
+      p.view.update(dt, time, p.st, camera.position);
+      // a sleeping grumphorn snores (you hear it before you see it, within 25 m)
+      if (p.type === 'grumphorn' && (p.st & ST_MASK) === GST.SLEEP && (p.snoreT = (p.snoreT ?? Math.random() * 3) - dt) <= 0) {
+        p.snoreT = 3;
+        positional(p.mesh.position, () => sfx.snore(), 25);
+      }
+    }
   }
   // other players
   const others = new Map();
@@ -1588,7 +1616,7 @@ requestAnimationFrame(frame);
   // fx
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.life -= dt; p.v.y -= 9.8 * dt;
+    p.life -= dt; p.v.y -= 9.8 * (p.g ?? 1) * dt;
     p.m.position.addScaledVector(p.v, dt);
     p.m.rotation.x += dt * 8;
     if (p.life <= 0) { scene.remove(p.m); particles.splice(i, 1); }
@@ -1809,10 +1837,19 @@ function tutTip(g, town) {
   if (!tut.has('map') && mapWanted()) return `Hint: you navigate today. ${driverName()} can't see the map: grab it off the dash and call out what's coming`;
   if (g.ph === 'camp') return tut.has('drive') || (roleOf('drv') && roleOf('drv') !== S.selfId) ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
+  if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
   if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
   return null;
+}
+// a grumphorn (still in the road, not gone off for good) within r metres of me
+function beastNear(r) {
+  for (const p of S.props.values()) {
+    if (p.type !== 'grumphorn' || !p.pose || (p.st & ST_MASK) === GST.LEFT || (p.st & ST_MASK) === GST.LEAVE) continue;
+    if (Math.hypot(p.pose.p.x - me.pos.x, p.pose.p.z - me.pos.z) < r) return true;
+  }
+  return false;
 }
 function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }

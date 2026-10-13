@@ -6,7 +6,8 @@
 //
 // Views: camp road vista wall poi(=every stop on the leg) crash(on the mesa top) mesa(crash mesas from the road)
 //        boulder gate grade winch town pawn casino pawnin casinoin repo lot(town RV lot + parked RVs) rv rvin
-//        crew hands loot night fields fclose(day 2: each plot from the road edge / from inside it)   (or "all")
+//        crew hands loot night fields fclose(day 2: each plot from the road edge / from inside it)
+//        beast(days 2-5: the grumphorn asleep on the road, then awake and glaring)   (or "all")
 // SCENE_W=1920 SCENE_H=1080 renders at that size (Steam's store screenshots; slower on software GL).
 // Output: <outdir>/<view>-d<day>.png.  Day picks the biome: 1 meadow, 2 fields,
 // 3 snow, 4 badlands, 5 desert.  PROFILE=<dir> keeps one browser profile across runs (the
@@ -17,7 +18,7 @@ import fs from 'node:fs';
 import { chromium } from 'playwright-core';
 import { LOOT } from '../shared/loot.js';
 
-const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'crash', 'mesa', 'boulder', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night', 'fields', 'fclose'];
+const ALL = ['camp', 'road', 'vista', 'wall', 'poi', 'crash', 'mesa', 'boulder', 'gate', 'grade', 'winch', 'town', 'pawn', 'casino', 'pawnin', 'casinoin', 'repo', 'lot', 'rv', 'rvin', 'crew', 'hands', 'loot', 'night', 'fields', 'fclose', 'beast'];
 const [viewArg = 'camp,road,town', OUT = 'test/screenshots/scene', dayArg = '1', hourArg = '10', seed = '777'] = process.argv.slice(2);
 const views = viewArg === 'all' ? ALL : viewArg.split(',').filter(Boolean);
 const DAY = Math.max(1, Math.min(5, +dayArg | 0)), HOUR = +hourArg;
@@ -197,6 +198,20 @@ for (const v of views) {
       });
       await camAt(spot.x, spot.z, p.x, (await hy(p.x, p.z)) + 0.9, p.z);
       await shot(dave, v);
+    } else if (v === 'beast') {
+      // the road phase brings the wildlife out; from 11 m it sleeps on (it wakes within 8 m)
+      const beds = await steve.evaluate(() => (window.__nmd.W.beds || []).map(b => ({ ...b })));
+      if (!beds.length) { console.log('  (no grumphorn on this day)'); continue; }
+      await send({ t: 'dbg', op: 'phase', ph: 'road' });
+      await wait(steve, 1200);
+      const b = beds[0], z = b.z - 11, x = (await rx(z)) + 2.5;
+      await camAt(x, z, b.x, (await hy(b.x, b.z)) + 0.7, b.z);
+      await shot(dave, 'beast');
+      // step in: it wakes, rises and glares
+      await camAt(x - 1, b.z - 6.5, b.x, (await hy(b.x, b.z)) + 0.8, b.z);
+      await wait(dave, 2600, 3);
+      await camAt(x - 1, b.z - 6.5, b.x, (await hy(b.x, b.z)) + 0.8, b.z);
+      await shot(dave, 'beastawake', { settle: 300 });
     } else if (v === 'boulder') {
       const b = W.obstacles.find(o => o.type === 'boulder');
       if (!b) { console.log('  (no boulder on this day)'); continue; }

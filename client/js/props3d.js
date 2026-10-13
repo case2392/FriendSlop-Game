@@ -129,6 +129,31 @@ function limb(a, b, r0, r1 = r0, segs = 10) {
   return g;
 }
 const tube = (pts, r, n = 16, radial = 6) => new THREE.TubeGeometry(new THREE.CatmullRomCurve3(pts.map(p => new V3(...p))), n, r, radial, false);
+// A tube along a smooth curve through pts, its radius tapering from r0 to r1 (horns, tails): u along it
+// (0 at the first point), v round it.
+function taperTube(pts, r0, r1, n = 12, radial = 6) {
+  const curve = new THREE.CatmullRomCurve3(pts.map(p => new V3(...p)));
+  const frames = curve.computeFrenetFrames(n, false), pos = [], uv = [], idx = [], P = new V3();
+  for (let i = 0; i <= n; i++) {
+    const t = i / n, r = r0 + (r1 - r0) * t;
+    curve.getPointAt(t, P);
+    const N = frames.normals[i], Bn = frames.binormals[i];
+    for (let j = 0; j <= radial; j++) {
+      const a = j / radial * TAU, c = Math.cos(a), s = Math.sin(a);
+      pos.push(P.x + r * (c * N.x + s * Bn.x), P.y + r * (c * N.y + s * Bn.y), P.z + r * (c * N.z + s * Bn.z));
+      uv.push(t, j / radial);
+    }
+  }
+  for (let i = 0; i < n; i++) for (let j = 0; j < radial; j++) { const a = i * (radial + 1) + j, b = a + radial + 1; idx.push(a, b, a + 1, b, b + 1, a + 1); }
+  // a cap at the tip
+  const tip = pos.length / 3; curve.getPointAt(1, P); pos.push(P.x, P.y, P.z); uv.push(1, 0.5);
+  for (let j = 0; j < radial; j++) { const a = n * (radial + 1) + j; idx.push(a, tip, a + 1); }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setIndex(idx);
+  return g;
+}
 // A loft along z through superelliptic sections [{ z, w, top, bot }] (w = half width), closed at
 // both ends: for heads and snouts. u runs round the section, v along z.
 function loft(st, segs = 16, pw = 2.6) {
@@ -227,9 +252,10 @@ class Build {
   // o.uv: 'keep' (the geometry's 0..1 uvs) | 'box' (planar per face, faces: {px,nx,py,ny,pz,nz}) |
   //       'planar' (axis: 'x' | 'y' | 'z'; bounds = [minA, minB, maxA, maxB]) | 'fn' (o.fn(x,y,z,nx,ny,nz) → [u,v])
   // o.at: Matrix4; o.space: 'final' projects after placing ('fn' always does); o.box: [x0,y0,z0,x1,y1,z1]
-  // overrides the box projection's bounds; o.tint: number | [r,g,b]; o.crease: degrees; o.swap; o.warp(v)
+  // overrides the box projection's bounds; o.tint: number | [r,g,b]; o.crease: degrees; o.swap; o.warp(v);
+  // o.bone: the part hangs whole off that bone of a skinned mesh (mobs3d.js: give every part one)
   add(geo, reg, o = {}) {
-    const { uv = 'keep', at = null, tint = 1, crease = 50, faces = null, swap = false, warp = null, axis = 'z', bounds = null, flipU = false, space = 'local', box = null, fn = null } = o;
+    const { uv = 'keep', at = null, tint = 1, crease = 50, faces = null, swap = false, warp = null, axis = 'z', bounds = null, flipU = false, space = 'local', box = null, fn = null, bone = null } = o;
     const gg = geo.index ? geo.toNonIndexed() : geo.clone();
     if (!gg.attributes.normal && uv === 'box') gg.computeVertexNormals();
     const p = gg.attributes.position, n = p.count;
@@ -286,6 +312,12 @@ class Build {
     const col = new Float32Array(n * 3);
     for (let i = 0; i < n; i++) { col[i * 3] = T[0]; col[i * 3 + 1] = T[1]; col[i * 3 + 2] = T[2]; }
     out.setAttribute('color', new THREE.BufferAttribute(col, 3));
+    if (bone != null) {
+      const si = new Uint16Array(n * 4), sw = new Float32Array(n * 4);
+      for (let i = 0; i < n; i++) { si[i * 4] = bone; sw[i * 4] = 1; }
+      out.setAttribute('skinIndex', new THREE.BufferAttribute(si, 4));
+      out.setAttribute('skinWeight', new THREE.BufferAttribute(sw, 4));
+    }
     this.parts.push(out);
     return this;
   }
@@ -314,6 +346,9 @@ class Build {
     return m;
   }
 }
+
+// the kit, for the wildlife's builder (mobs3d.js)
+export { Build, lathe, sphere, limb, loft, mat4, lootMat, taperTube, rbox };
 
 // ---- the props --------------------------------------------------------------------------------------
 
@@ -464,6 +499,16 @@ const BUILDERS = {
     for (const sx of [-1, 1]) B.add(new THREE.TorusGeometry(0.022, 0.0065, 6, 12, Math.PI), sub(R.gilt, 0, 0.3, 1, 0.45), { at: mat4(sx * 0.068, 0.07, 0, 0, 0, sx > 0 ? -Math.PI / 2 : Math.PI / 2) });
     B.add(sphere(0.043, 16, 12), R.ball, { at: mat4(0, 0.172, 0, -0.45, 0.2, 0), crease: 80 });
     return B.done({ ao: 0.25, aoH: 0.05 });
+  },
+
+  // the brass cowbell a grumphorn leaves behind: a flared bell, dark inside with its clapper, on a strap loop
+  cowbell() {
+    const B = new Build();
+    B.add(lathe([[0.1, -0.13, 0], [0.106, -0.126, 0.04], [0.098, -0.1, 0.12], [0.086, -0.04, 0.35], [0.075, 0.02, 0.55], [0.068, 0.06, 0.72], [0.05, 0.085, 0.86], [0.022, 0.095, 0.95], [0, 0.097, 1]], 20), R.brass, { crease: 60 });
+    B.add(lathe([[0, 0.05], [0.058, 0.025], [0.083, -0.06], [0.095, -0.127]], 20), R.brass, { tint: 0.32 });
+    B.add(sphere(0.028, 10, 8), R.brass, { at: mat4(0, -0.104, 0), tint: 0.55 });
+    B.add(new THREE.TorusGeometry(0.035, 0.009, 6, 12, Math.PI), R.strap, { at: mat4(0, 0.094, 0) });
+    return B.done({ ao: 0.22, aoH: 0.06 });
   },
 
   vase() {
@@ -991,6 +1036,17 @@ function obstacleIcon(g, kind, x, y) {
   else if (kind === 'gate') { g.beginPath(); g.rect(-10, -3, 20, 5); g.fillStyle = '#e8d8b0'; g.fill(); g.stroke(); for (let k = -8; k < 10; k += 6) { g.beginPath(); g.moveTo(k, -3); g.lineTo(k + 3, 2); g.lineTo(k + 6, 2); g.lineTo(k + 3, -3); g.closePath(); g.fillStyle = '#c8402a'; g.fill(); } g.beginPath(); g.moveTo(-9, 2); g.lineTo(-9, 8); g.moveTo(9, 2); g.lineTo(9, 8); g.stroke(); }
   g.restore();
 }
+// a grumphorn on the map: a shaggy head with curled horns, in brown ink
+function beastIcon(g, x, y) {
+  g.save(); g.translate(x, y);
+  g.strokeStyle = '#3a2416'; g.lineWidth = 1.4; g.lineJoin = 'round'; g.lineCap = 'round';
+  g.beginPath(); g.ellipse(0, 1, 5, 6, 0, 0, TAU); g.fillStyle = '#7a5434'; g.fill(); g.stroke();
+  g.beginPath(); g.ellipse(0, 5, 3.4, 2.4, 0, 0, TAU); g.fillStyle = '#4a3020'; g.fill();
+  g.beginPath(); g.moveTo(-4, -3); g.quadraticCurveTo(-11, -6, -9, 1); g.moveTo(4, -3); g.quadraticCurveTo(11, -6, 9, 1); g.strokeStyle = '#e8d8b0'; g.lineWidth = 2.2; g.stroke();
+  g.strokeStyle = '#3a2416'; g.lineWidth = 0.8; g.stroke();
+  g.fillStyle = '#f2e2b8'; g.fillRect(-2.6, -0.5, 1.2, 1.2); g.fillRect(1.4, -0.5, 1.2, 1.2);
+  g.restore();
+}
 function tinyTree(g, kind, x, y, rnd, sc = 1) {
   const s = range(rnd, 0.8, 1.2) * sc;
   g.save(); g.translate(x, y); g.scale(s, s);
@@ -1242,15 +1298,20 @@ export function mapCanvas(W) {
     inkText(g, name, lx, ly - extra / 2, { size: lsize, color: '#1e3a5a', clear: 0.7 });
     if (extra) inkText(g, '(up the mesa)', lx, ly + 6, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
   }
-  // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader
+  // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader. Where
+  // a grumphorn sleeps past one, a horned head beside the sign and a pencilled call under the name
   for (const o of Wd.obstacles) {
-    const px = X(o.z), py = Y(o.z), name = (OBST_NAMES[o.type] || o.type).toUpperCase(), w = Math.max(30, textW(name, 9.5)) + 6;
-    const [cx, cy] = place(px, py, w, 30, [[0, -32], [0, 34], [w / 2 + 14, -26], [-w / 2 - 14, -26], [0, -52], [0, 54]]);
-    const iy = cy + (cy < py ? 6 : -6), ly = cy + (cy < py ? -8 : 9);
-    g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (cy < py ? -5 : 5)); g.lineTo(cx, iy + (cy < py ? 7 : -7)); g.stroke(); g.restore();
+    const beast = (Wd.beds || []).some(b => b.obz === o.z);
+    const call = 'GRUMPHORN · CREEP · NO HORN';
+    const px = X(o.z), py = Y(o.z), name = (OBST_NAMES[o.type] || o.type).toUpperCase(), w = Math.max(30, textW(name, 9.5), beast ? textW(call, 8) : 0) + 6;
+    const [cx, cy] = place(px, py, w, beast ? 42 : 30, beast ? [[0, -38], [0, 40], [w / 2 + 14, -30], [-w / 2 - 14, -30], [0, -58], [0, 60]] : [[0, -32], [0, 34], [w / 2 + 14, -26], [-w / 2 - 14, -26], [0, -52], [0, 54]]);
+    const up = cy < py, iy = cy + (up ? (beast ? 2 : 6) : (beast ? -12 : -6)), ly = cy + (up ? (beast ? -14 : -8) : (beast ? 3 : 9));
+    g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (up ? -5 : 5)); g.lineTo(cx, iy + (up ? 7 : -7)); g.stroke(); g.restore();
     claimLine(px, py, cx, iy);
-    obstacleIcon(g, o.type, cx, iy);
+    obstacleIcon(g, o.type, cx - (beast ? 10 : 0), iy);
+    if (beast) beastIcon(g, cx + 12, iy);
     inkText(g, name, cx, ly, { size: 9.5, color: '#8a1e14', clear: 0.7 });
+    if (beast) inkText(g, call, cx, ly + 11, { size: 8, color: '#4a3a30', italic: true, weight: 'normal', clear: 0.6 });
     g.save(); g.strokeStyle = '#a8241a'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); g.restore();
   }
   // landmarks
@@ -1702,11 +1763,11 @@ export function prewarm(W) {
 
 // ---- preview (tools/preview.mjs) ----
 export const PREVIEW = {
-  ...Object.fromEntries(Object.keys(LOOT).filter(k => k !== 'map' && k !== 'boulder').map(k => [k, () => buildProp(k, null)])),
+  ...Object.fromEntries(Object.keys(LOOT).filter(k => k !== 'map' && k !== 'boulder' && !LOOT[k].mob).map(k => [k, () => buildProp(k, null)])),
   boulder: (o = {}) => buildProp('boulder', { biome: o.biome || 'meadow' }),
   map: () => buildProp('map', null),
   // every item blown up to ~1.6 m, for judging the paint and the shape up close
-  ...Object.fromEntries(Object.keys(LOOT).filter(k => k !== 'boulder').map(k => [`x_${k}`, () => {
+  ...Object.fromEntries(Object.keys(LOOT).filter(k => k !== 'boulder' && !LOOT[k].mob).map(k => [`x_${k}`, () => {
     const o = buildProp(k, null), bb = new THREE.Box3().setFromObject(o), s = bb.getSize(new V3());
     const g = new THREE.Group(); g.add(o); o.scale.setScalar(1.6 / Math.max(s.x, s.y, s.z)); return g;
   }])),

@@ -25,6 +25,20 @@ payment and he takes the RV.
 | ![the Repo Man](docs/screenshots/repo-man.jpg) | ![night at the campfire](docs/screenshots/night.jpg) |
 | **The Repo Man** collects at midnight. | **Night.** Receipt, campfire, store, bunks, day 2. |
 
+## Wildlife
+
+From day 2 a **Grumphorn**, a one-ton shaggy beast with curled horns and a brass cowbell, sleeps on the
+road past one of the obstacles (two on day 5). A yellow sign warns you, the navigator's map marks it, and
+you hear it snoring. Walk up to it standing, sprint near it, drive past fast, stand up in the RV going
+by, or honk, and it wakes, glares, fixes a line and charges down it. The first person in its horns goes
+flying (knocked out: pick them up within 20 s or it's the doctor's bill); anyone else it brushes stumbles.
+
+It has no health bar, only **patience**. Sneak past crouched, creep the RV by, or wear it out: throw junk
+at it, shove it, ram it with the RV (everyone crouch to brace first), winch it. Each charge and each toss
+costs it patience too. When it runs out, it drops its cowbell (worth $205 to $320 at the pawn shop) and
+walks off the road for good. It never touches the bank, leaves alone anyone who is down (and whoever
+kneels by them), and knocks out at most one player per charge.
+
 ## Five days, five places
 
 Every day is a different biome with its own ground, sky, fog, rocks, plants
@@ -112,9 +126,9 @@ on.
 
 | | |
 |---|---|
-| `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch |
+| `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch (in the RV: **brace**, a crash can't knock you out) |
 | **hold `LMB`** | **GRAB**: loot, or any steep rock or wall to **climb** it (`Space` = lunge) |
-| `RMB` · `Q` · wheel | throw · drop · hold distance |
+| `RMB` · `Q` · wheel | throw (empty-handed: **shove**) · drop · hold distance |
 | `E` | use: driver seat, door, winch, pawn bell, casino buttons, keypad, bunk. Hold it on a knocked-out friend to pick them up. |
 | driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `E` get up (the RV keeps rolling) |
 | `MMB` · `1-6` | ping · emotes |
@@ -127,7 +141,8 @@ camp → follow the road (the driver can't see
 the map: the navigator reads it out, matching the odometer to its 100 m
 marks; alone, you drive without it) → deal with
 what's broken (winch up the grade, push out of the mud, shove or winch the
-boulder, crack the ranger gate) → detour to stops for loot → town: pawn it,
+boulder, crack the ranger gate) and with what lives there (see Wildlife below)
+→ detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.
 Five days, and the payment due at midnight grows each day ($1,000, $2,500,
 $4,500, $7,500, then the $15,000 balloon). Pay the balloon on day 5 and you own

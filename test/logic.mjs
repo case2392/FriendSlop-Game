@@ -288,6 +288,15 @@ try {
   ok('two players in the room, poses flowing');
 
   let W = generateLeg(SEED, 1);
+  {
+    // the shove, over the wire: Beans faces Hosty a step away and shoves; Hosty's page is told it was a shove
+    const x = W.camp.rv.x + 8, z = W.camp.rv.z - 3, y = W.heightAt(x, z);
+    A.at(x, y, z + 1.4, Math.PI); B.at(x, y, z, 0);
+    await sleep(200);
+    B.send({ t: 'shove' });
+    const k = await A.wait(m => m.t === 'knock', 4000, 'the shove\'s knock');
+    check(k.why === 'shove' && !k.ko && !k.rel && k.v[2] > 2, `a shove over the wire knocks the other player back along it (${JSON.stringify(k.v)}), says why (${k.why}), and never knocks them out`);
+  }
   // only the day's driver takes the wheel (drawn at random each morning: set here through the test lever, on
   // the driver's own socket, so it lands before their 'use')
   const roles = (drv, nav) => drv.send({ t: 'dbg', op: 'roles', drv: drv.id, nav: nav.id });

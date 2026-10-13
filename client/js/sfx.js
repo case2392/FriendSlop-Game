@@ -106,6 +106,13 @@ export const sfx = {
   lunge: () => noise(0.25, 1600, 0.35, 300),
   throw: () => noise(0.22, 3000, 0.3, 500, 'bandpass'),
   whoosh: () => { noise(0.2, 1400, 0.26, 500, 'bandpass'); noise(0.12, 3200, 0.08, 1200, 'bandpass', 0.03); },
+  // the grumphorn: snoring, a snort, the bellow when it wakes, hooves when it charges, its cowbell
+  snore: () => { noise(1.1, 240, 0.16, 110); tone(62, 1.1, 'sawtooth', 0.045, 48); noise(0.5, 900, 0.05, 300, 'bandpass', 0.7); },
+  snort: () => { noise(0.22, 1100, 0.32, 260); noise(0.18, 700, 0.22, 200, 'lowpass', 0.14); },
+  bellow: () => { tone(118, 1.3, 'sawtooth', 0.22, 74); tone(176, 1.0, 'square', 0.06, 110, 0.06); noise(1.1, 420, 0.14, 140); },
+  stampede: () => { for (let i = 0; i < 4; i++) { tone(58, 0.15, 'sine', 0.55, 34, i * 0.13); noise(0.11, 320, 0.3, 90, 'lowpass', i * 0.13); } },
+  clang: () => { tone(560, 0.45, 'square', 0.09); tone(845, 0.35, 'square', 0.06); tone(1250, 0.15, 'triangle', 0.04); },
+  bonk: () => { tone(330, 0.12, 'triangle', 0.3, 170); noise(0.08, 1300, 0.2); },
   thunk: (k = 1) => { tone(140, 0.12, 'sine', 0.35 * k, 60); noise(0.08, 700, 0.2 * k); },
   shatter: () => { noise(0.5, 6000, 0.6, 1500, 'highpass'); for (let i = 0; i < 6; i++) tone(2000 + Math.random() * 3000, 0.08, 'sine', 0.12, null, Math.random() * 0.25); },
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },

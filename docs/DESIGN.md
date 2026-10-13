@@ -32,9 +32,10 @@ Working title. The repo stays `FriendSlop-Game`. The menu calls it a
   a dropped vase means lost value, a bad bet is just a bad bet. Physical
   comedy feeds straight into money arguments, and the money arguments are
   the game.
-- **Chill by default.** There are no monsters and no permadeath. The danger
-  comes from gravity, the road, the clock, and your friend Steve at the
-  roulette table.
+- **Chill by default, wildlife on the side.** No permadeath, no health bars.
+  The danger comes from gravity, the road, the clock, your friend Steve at
+  the roulette table, and the wildlife (from day 2 a Grumphorn sleeps past an
+  obstacle): every toss costs time and, if nobody picks you up, a bill.
 
 ---
 
@@ -165,6 +166,8 @@ attaches to neither, cut it.**
 | WASD / Shift / Space / C | Walk, sprint (stamina), jump, crouch |
 | **Hold left mouse** | **GRAB**: loot, rock (climb), the winch hook, the RV bumper, a friend |
 | Right mouse (holding something) | Throw |
+| Right mouse (empty hands) | Shove: whatever is in a 2.4 m cone in front of you (a friend stumbles back, loot gets a push, wildlife reacts). Never knocks anyone out by itself |
+| C in the RV | Brace: crouched riders are never knocked out by a lurch (a stumble past 40 m/s²) |
 | Mouse wheel (holding) | Hold distance |
 | E | Use: seats, doors, the winch control, the pawn bell, casino buttons, keypads |
 | Q | Drop |
@@ -239,6 +242,7 @@ the difficulty curve stays in the quota.
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
 | *The Washout Gap* (M2) | A gap in the road | Carry planks from the junk pile and lay a bridge. The RV crosses on raycast wheels. | RVTY |
 | *Rockfall* (M2) | Falling rocks knock people over | Timing, and somebody's medical bill | PEAK |
+| **The Grumphorn** (days 2–5) | A one-ton beast asleep on the road past the mud (day 2), behind the ranger gate (3), past the boulder (4), or both (5). Woken, it charges a fixed line and tosses the first person in its horns | Sneak past crouched, creep the RV by, or wear out its patience: throw junk, shove, ram it with everyone braced, winch it. At zero it drops its cowbell and leaves for good | physics + headcount |
 
 **POIs** are worth the detour and cost time. Abandoned gas stations,
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get
@@ -411,8 +415,10 @@ Things the systems will produce without being scripted:
   everything, slowly), but the game is tuned for 2–4.
 - **Six separate chambers.** One spine.
 - **Text chat.** Voice, pings and emotes only.
-- **Combat and monsters.** Chill. The antagonists are the Repo Man and
-  gravity.
+- **Health bars, weapons, aim combat.** The wildlife is fought with the verbs
+  the game already has (grab, throw, shove, the RV, the winch, the horn), and
+  it costs time and loot, never the bank. The antagonists are still the Repo
+  Man and gravity.
 - **Cosmetic shop and progression unlocks.** Later, if ever.
 
 ---
