@@ -13,9 +13,8 @@ export const MAX_PLAYERS = 6;
 
 // ---- the run ----------------------------------------------------------------
 export const DAYS = 5;
-export const QUOTAS = [1000, 2500, 4500, 7500, 15000];   // due at midnight, per day
+export const QUOTAS = [1000, 2500, 4500, 7500, 15000];   // due at midnight, per day: miss one and the RV is gone
 export const DOCK_RATE = 0.8;                            // what Ed pays for the RV's load at his loading zone
-export const STRIKES_TO_LOSE = 3;                        // 3rd missed payment: the RV is gone
 export const HOUR_SEC = FAST ? 5 : 45;                   // real seconds per game hour
 export const DAY_START = 6;                              // 06:00
 export const MIDNIGHT = 24;
@@ -24,8 +23,12 @@ export const medBill = day => 250 + 50 * day;            // KO'd and nobody pick
 export const RV_HIT_BILL = 500;                          // got run over by your own RV
 export const NIGHT_MIN_SEC = FAST ? 1 : 6;               // the receipt stays up at least this long
 
-// what the Repo Man takes, in order, when you miss a payment
-export const REPO_PARTS = ['doors', 'roof', 'rv'];
+// ---- voice ----------------------------------------------------------------------
+// Proximity voice carries only so far: full volume within FULL m, fading to silence at RANGE m. Past that
+// only walkie-talkies get through (to anyone else holding one, any range). The host relays a voice frame
+// up to RELAY m (a little past RANGE: positions on a page trail the host's by a few frames)
+export const VOICE = { FULL: 4, RANGE: 25, RELAY: 27 };
+export const voiceGain = d => d < VOICE.FULL ? 1 : Math.pow(Math.max(0, 1 - (d - VOICE.FULL) / (VOICE.RANGE - VOICE.FULL)), 1.6);
 
 // ---- your body ----------------------------------------------------------------
 export const PLAYER = {

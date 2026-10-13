@@ -87,18 +87,12 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(ca.sent.filter(m => m.t === 'emote').length - before === 1, 'rooms: 200 emotes in one tick go out once');
 }
 {
-  // voice chat's signalling comes in a burst (an offer and a dozen ICE candidates at once): all of it
-  // gets through, while a flood of big messages is capped
+  // voice goes only through the host's proximity relay (host.js relayVoice): the old peer-to-peer signalling
+  // messages are not passed on to anyone, so a modified page can't carry voice past earshot that way
   const room = new Room('RTC', 4242);
   const A = room.addPlayer(new FakeConn(), 'Ann').player, D = room.addPlayer(new FakeConn(), 'Dee').player;
-  const rtcTo = c => c.sent.filter(m => m.t === 'rtc').length;
-  const r0 = rtcTo(D.conn);
-  room.handle(A, { t: 'rtc', to: D.id, data: { sdp: 'v=0 '.repeat(1000) } });
-  for (let i = 0; i < 14; i++) room.handle(A, { t: 'rtc', to: D.id, data: { cand: 'candidate:1 1 udp 2122260223 192.168.1.20 5' + i + ' typ host' } });
-  check(rtcTo(D.conn) - r0 === 15, `rooms: an offer and 14 ICE candidates in one tick all reach the other player (${rtcTo(D.conn) - r0}/15)`);
-  const r1 = rtcTo(D.conn);
-  for (let i = 0; i < 200; i++) room.handle(A, { t: 'rtc', to: D.id, data: 'x'.repeat(15000) });
-  check(rtcTo(D.conn) - r1 <= 7, `rooms: 200 big signalling messages at once are capped (${rtcTo(D.conn) - r1} relayed)`);
+  for (let i = 0; i < 5; i++) room.handle(A, { t: 'rtc', to: D.id, data: { sdp: 'v=0 '.repeat(100) } });
+  check(!D.conn.sent.some(m => m.t === 'rtc'), 'rooms: peer-to-peer signalling messages go nowhere (voice is relayed only within earshot)');
   // state is never dropped as spam: voice on and off in one tick ends off
   room.handle(A, { t: 'voice', on: true }); room.handle(A, { t: 'voice', on: false });
   check(A.voice === false, 'rooms: voice on then off in the same tick leaves the mic off');
@@ -740,13 +734,58 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   room.sim.free?.();
 }
 
+// ---- in process: one missed payment ends the run ------------------------------------------------------
+{
+  // short at midnight, on any day: no night, no receipt. The game-over says how short; the Repo Man can't
+  // be paid after; a late joiner sees the same game-over
+  const room = new Room('MISS', 4242);
+  const ca = new FakeConn(), A = room.addPlayer(ca, 'Ann').player;
+  room.welcome(A);
+  room.nextDay();   // day 2
+  room.phase = 'road'; room.bank = 100;
+  const n0 = ca.sent.length;
+  room.midnight();
+  const after = ca.sent.slice(n0), over = after.find(m => m.t === 'over');
+  check(room.day === 2 && room.phase === 'over' && over?.won === false && over.day === 2 && over.due === C.QUOTAS[1] && over.short === C.QUOTAS[1] - 100 && !after.some(m => m.t === 'receipt') && after.some(m => m.t === 'toast' && /short on the payment\. The Repo Man hooks the RV/.test(m.text)),
+    `payments: short $${over?.short} on day 2 → the run is over, no night (no receipt)`);
+  const pay = room.W.uses.findIndex(u => u.kind === 'pay'), u = room.W.uses[pay];
+  room.onPose(A, { par: 0, x: u.x + 1, y: u.y - 1.5, z: u.z, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+  room.bank = 50000;
+  room.handle(A, { t: 'use', id: pay });
+  check(!room.paid && room.bank === 50000 && ca.has(m => m.t === 'toast' && /Too late\. He already hooked the RV/.test(m.text)), 'payments: after the miss, the Repo Man can\'t be paid any more');
+  const cl = new FakeConn(), L = room.addPlayer(cl, 'Lou').player;
+  room.welcome(L);
+  check(cl.last('over')?.short === C.QUOTAS[1] - 100 && cl.last('over')?.day === 2, 'payments: someone joining during the game-over sees the same game-over');
+  // a new run: day 1, $200, and the walkies bought with the last run's money are gone
+  A.walkie = true;
+  room.newRun();
+  check(room.day === 1 && room.bank === 200 && !A.walkie && !L.walkie, 'payments: a new run starts on day 1 with $200, and buys its own walkies');
+  room.sim.free?.();
+}
+{
+  // money still on the casino tables at midnight goes back in the bank before the Repo Man counts it: a
+  // blackjack hand being voted on is called off (the stake returned), a coin flip in the air lands now
+  const room = new Room('TABLE', 4242);
+  const ca = new FakeConn(), A = room.addPlayer(ca, 'Ann').player;
+  room.welcome(A);
+  room.nextDay();   // day 2: $2,500 due
+  room.phase = 'road';
+  room.bank = 2600 - 300 - 200;   // $300 on the blackjack table, $200 in the air
+  room.bj.state = 'vote'; room.bj.stake = 300;
+  room.pendingFlip = { win: true, stake: 200, by: A, at: room.t + 5 };
+  room.midnight();
+  check(room.paid && room.phase === 'night' && room.bank === 2600 - 300 + 300 + 200 - C.QUOTAS[1] && room.bj.state === 'bet' && !room.pendingFlip && ca.has(m => m.t === 'toast' && /pushed the hand back: \$300/.test(m.text)),
+    `payments: a hand on the table and a coin in the air at midnight count toward the payment (bank after: $${room.bank})`);
+  room.sim.free?.();
+}
+
 // ---- in process: trip codes (GameHost) -----------------------------------------------------------------
 {
   const { GameHost } = await import('../server/host.js');
   const { EventEmitter } = await import('node:events');
   class Sock extends EventEmitter {
     constructor() { super(); this.readyState = 1; this.sent = []; this.closedWith = null; }
-    send(s) { if (typeof s === 'string') this.sent.push(JSON.parse(s)); }
+    send(s) { if (typeof s === 'string') this.sent.push(JSON.parse(s)); else (this.bin ||= []).push(s); }
     close(code) { this.closedWith = code; this.readyState = 3; }
     last(t) { return [...this.sent].reverse().find(m => m.t === t); }
     msg(m) { this.emit('message', JSON.stringify(m), false); }
@@ -831,6 +870,33 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const s6 = new Sock(); solo2.attach(s6, { kind: 'ws' }); s6.msg({ t: 'create', name: 'Lan', code: '4821' });
   const c5 = s5.last('welcome')?.code, c6 = s6.last('welcome')?.code;
   check(/^[1-9]\d{3}$/.test(c5) && c5 !== '1234' && /^[1-9]\d{3}$/.test(c6) && c6 !== '4821', `trip codes: a browser server, or a LAN socket, can't choose its code (${c5}, ${c6})`);
+  {
+    // proximity voice: the host passes a voice frame on only to players within earshot (C.VOICE.RELAY m,
+    // just past where the page's fade reaches silence), or to another walkie holder at any range
+    const vh = new GameHost({ build: 'x', log: () => {} });
+    const sa = new Sock(); vh.attach(sa, { kind: 'local' }); sa.msg({ t: 'create', name: 'Ann' });
+    const code = sa.last('welcome').code, room = vh.rooms.get(code);
+    const join = (name, addr) => { const s = new Sock(); vh.attach(s, { kind: 'ws', addr }); s.msg({ t: 'join', name, room: code }); return s; };
+    const sb = join('Bob', '10.0.0.2'), sc = join('Cat', '10.0.0.3');
+    for (const k of [sa, sb, sc]) k.msg({ t: 'voice', on: true });
+    const [A, B, Cc] = [sa, sb, sc].map(k => room.players.get(k.last('welcome').id));
+    const at = (p, x) => room.onPose(p, { par: 0, x, y: 0, z: 0, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+    at(A, 0); at(B, C.VOICE.RANGE + 1); at(Cc, C.VOICE.RELAY + 1);
+    const frame = (seq, walkie) => { const b = Buffer.alloc(40, 7); b[0] = 1; b[1] = walkie ? 1 : 0; b.writeUInt16LE(seq, 2); return b; };
+    sa.emit('message', frame(1, false), true);
+    const gotB = (sb.bin || []).length, gotC = (sc.bin || []).length;
+    A.walkie = true; Cc.walkie = true;
+    sa.emit('message', frame(2, true), true);
+    check(gotB === 1 && gotC === 0 && (sc.bin || []).length === 1 && (sb.bin || []).length === 2 && sb.bin[0][0] === 2 && sb.bin[0][1] === A.id,
+      `voice: heard ${C.VOICE.RANGE + 1} m away (${gotB} frame), not ${C.VOICE.RELAY + 1} m away (${gotC}); a walkie reaches a walkie past that, and still plays out loud nearby`);
+    vh.close();
+  }
+  {
+    // the page's fade: full volume within VOICE.FULL m, silent by VOICE.RANGE m, never louder farther out
+    const g = d => C.voiceGain(d), ds = Array.from({ length: 61 }, (_, i) => i * 0.5);
+    check(g(0) === 1 && g(C.VOICE.FULL) === 1 && g(C.VOICE.RANGE) === 0 && g(40) === 0 && ds.every((d, i) => !i || g(d) <= g(ds[i - 1])) && C.VOICE.RELAY > C.VOICE.RANGE,
+      `voice: full within ${C.VOICE.FULL} m, ${(g(10) * 100).toFixed(0)}% at 10 m, ${(g(20) * 100).toFixed(0)}% at 20 m, silent by ${C.VOICE.RANGE} m (relayed to ${C.VOICE.RELAY} m)`);
+  }
   for (const h of [host, solo, multi, solo2]) h.close();
 }
 

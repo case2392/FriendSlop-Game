@@ -281,15 +281,17 @@ try {
     for (const p of [near, far, talker]) p.send({ t: 'voice', on: true });
     const hp = room.players.get(talker.id).pos;
     near.poseFn = () => ({ x: hp.x + 3, y: hp.y, z: hp.z });
-    far.poseFn = () => ({ x: hp.x + 200, y: hp.y, z: hp.z });
+    far.poseFn = () => ({ x: hp.x + 30, y: hp.y, z: hp.z });   // (voices carry 25 m: C.VOICE)
     await sleep(500);
     const n0 = near.voiceIn.length, f0 = far.voiceIn.length;
     const frame = (seq, walkie) => { const b = Buffer.alloc(64, 7); b[0] = 1; b[1] = walkie ? 1 : 0; b.writeUInt16LE(seq, 2); return b; };
     for (let i = 0; i < 25; i++) { talker.ws.send(frame(i, false)); await sleep(20); }
     await sleep(500);
     const gotNear = near.voiceIn.length - n0, gotFar = far.voiceIn.length - f0;
-    check(gotNear >= 22 && gotFar === 0 && near.voiceIn.at(-1)?.[0] === 2 && near.voiceIn.at(-1)?.[1] === talker.id, `voice: 3 m away got ${gotNear}/25 frames (tagged with the speaker), 200 m away got ${gotFar}`);
+    check(gotNear >= 22 && gotFar === 0 && near.voiceIn.at(-1)?.[0] === 2 && near.voiceIn.at(-1)?.[1] === talker.id, `voice: 3 m away got ${gotNear}/25 frames (tagged with the speaker), 30 m away got ${gotFar}`);
     room.players.get(talker.id).walkie = true; room.players.get(far.id).walkie = true;
+    far.poseFn = () => ({ x: hp.x + 200, y: hp.y, z: hp.z });
+    await sleep(300);
     const f1 = far.voiceIn.length;
     for (let i = 0; i < 10; i++) { talker.ws.send(frame(100 + i, true)); await sleep(20); }
     await sleep(500);

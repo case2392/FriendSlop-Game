@@ -112,6 +112,7 @@ const T = W.town;
 
 for (const v of views) {
   try {
+    await setClock(HOUR);   // (a long run of views must not reach midnight: one missed payment ends the trip)
     if (v === 'fields') {
       // each Westfall plot (W.fields, day 2) from the road edge, as a driver sees it
       const F = await steve.evaluate(() => (window.__nmd.W.fields || []).map(f => ({ ...f })));

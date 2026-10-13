@@ -27,7 +27,7 @@ import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
   selfId: null, code: null, meta: null, g: null, W: null, lw: null, wv: null,
-  parts: { doors: true, roof: true }, door: false, phase: 'menu',
+  door: false, phase: 'menu',
   props: new Map(), views: new Map(), interp: new Interp(), me: new Me(),
   rv: null, hook: null, gatesOpen: new Set(), seq: 0, odoStart: 0,
 };
@@ -288,7 +288,7 @@ function askVoice() {
   if (asked || voice.V.on || !voice.V.supported || $('voiceAsk')) return;
   const el = document.createElement('div');
   el.id = 'voiceAsk'; el.className = 'voice-ask panel parchment';
-  el.innerHTML = '<b>Proximity voice chat</b><p>Hear whoever is near you in the game, from where they stand. Press Esc to use the mouse.</p><div class="row"><button class="btn small green" id="voiceAskYes">Use my mic</button><button class="btn small gray" id="voiceAskNo">Not now</button></div>';
+  el.innerHTML = '<b>Proximity voice chat</b><p>Hear whoever is within about 25 m of you in the game, from where they stand. Farther than that takes walkie-talkies. Press Esc to use the mouse.</p><div class="row"><button class="btn small green" id="voiceAskYes">Use my mic</button><button class="btn small gray" id="voiceAskNo">Not now</button></div>';
   $('game').appendChild(el);
   const done = () => { try { localStorage.setItem('nmdVoiceAsked', '1'); } catch {} el.remove(); };
   $('voiceAskYes').onclick = () => { done(); initAudio(); voice.joinVoice(); };
@@ -621,13 +621,14 @@ $('kpCancel').onclick = closeKeypad;
 // The loading screen (the boot bar, reused): shown from the world message until the new world has
 // drawn a frame; the bar follows the day's textures getting ready.
 const TIPS = [
-  'The Repo Man collects at midnight. Every night.',
+  'The Repo Man collects at midnight, every night. Miss one payment and he takes the RV.',
   'Loot loses value every time it gets knocked about. Carry it gently.',
   'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
   'Each morning picks a driver and a navigator. The driver can\'t see the map: the navigator reads it out.',
   'Walk into the RV to push it out of the mud.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
-  'Walkie-talkies reach anyone else holding one, at any range. $150 at the store.',
+  'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
+  'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
   'The winch: take the hook from the front bumper, clip it to a post, and the driver reels in with R.',
   'Everyone in a bunk starts the next day.',
   'The casino pays out to the whole crew. So do its losses.',
@@ -695,19 +696,17 @@ async function buildDay(m) {
   for (const p of S.props.values()) scene.remove(p.mesh);
   S.props.clear();
   S.W = W;
-  S.parts = m.parts;
   S.door = !!m.door;
   S.gatesOpen = new Set();
   // where campfires crackle (ambience.js)
   S.fires = [W.camp?.fire, W.town?.fire].filter(Boolean).map(f => ({ x: f.x, y: W.heightAt(f.x, f.z), z: f.z }));
   newDayMusic();
-  S.lw = new LocalWorld(W, S.parts);
+  S.lw = new LocalWorld(W);
   setBiome(W.biome);
   S.wv = buildWorld(W);
   scene.add(S.wv.group);
   S.mapCv = mapCanvas(W);
   prewarmProps(W);   // paint the loot atlas and build prop meshes while idle, so the first loot doesn't stall a frame
-  rvView.setParts(S.parts);
   S.interp.reset();
   S.dayLabel = m.day;
   zoneText(W.biomeName, `Day ${m.day} of ${C.DAYS}`);   // after the build: the fade starts on the next rendered frames
@@ -716,7 +715,7 @@ async function buildDay(m) {
   // the messages that came while the day loaded, in order (afterWorld); one that throws mustn't take
   // the rest, or the end of the build (the loading screen stays up), with it (it is still a page error:
   // the browser tests fail on it). What came for a world whose build was superseded (another world
-  // message came in mid-build) is dropped: its props list, events, teleport or parts were that world's,
+  // message came in mid-build) is dropped: its props list, events or teleport were that world's,
   // and the newer world's own came after it.
   const queued = S.pendingAfterWorld || [];
   S.pendingAfterWorld = [];
@@ -768,8 +767,7 @@ function onPhase(ph) {
 // wait for the new world and are then handled in the order they came, as when the build ran straight
 // after the world message. A prop that breaks or is pawned meanwhile must not be taken out of the old
 // world (or out of none, on a joiner) and then come back with the queued props list as a ghost with
-// a collider; a 'dmg' must not be lost; the parts in the world message must not overwrite a newer
-// 'parts'; a toast must not run out under the loading screen.
+// a collider; a 'dmg' must not be lost; a toast must not run out under the loading screen.
 // Each waits with the build it came during (seq), so a build that is superseded doesn't hand its
 // world's messages to the next world.
 const afterWorld = fn => { if (worldBuilding || !S.W) (S.pendingAfterWorld ||= []).push({ fn, seq: buildSeq }); else fn(); };
@@ -939,8 +937,7 @@ net.on('world', m => {
   // back after a dropped connection, on the same day: the world is already built (the props, the
   // teleport and the rest follow as usual)
   if (S.W && !worldBuilding && S.seed === m.seed && S.dayLabel === m.day) {
-    S.parts = m.parts; S.door = !!m.door;
-    rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door);
+    S.door = !!m.door;
     net.send({ t: 'ready' });
     return;
   }
@@ -1007,9 +1004,6 @@ net.on('grabbed', inOrder(m => { if (me.holding?.id !== m.id) return; if (m.ok) 
 net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));
 net.on('drink', inOrder(() => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); }));
 net.on('revived', inOrder(() => { me.revive(); sfx.wake(); }));
-// (a 'parts' that came before a newer world message is older than the parts that message brought:
-// afterWorld drops it)
-net.on('parts', m => afterWorld(() => { S.parts = m.parts; rvView.setParts(m.parts); S.lw?.setParts(m.parts, S.door); }));
 net.on('emote', inOrder(m => { const v = S.views.get(m.id); if (v) v.emote = { e: m.e, t: 3 }; if (m.id === S.selfId) toast(`you: ${m.e}`, '#fff', 1.5); }));
 net.on('ping', inOrder(addPing));
 net.on('receipt', inOrder(showReceipt));
@@ -1052,7 +1046,7 @@ function onEvent(e) {
     case 'throw': break;
     case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
     case 'flip': sfx.coin(); break;
-    case 'repo': sfx.repo(); shake(0.4); break;
+    case 'repo': shake(0.4); break;   // (the game-over screen that follows plays the Repo Man's sting)
     case 'thud': sfx.thunk(1); break;
   }
 }
@@ -1068,9 +1062,8 @@ function showReceipt(m) {
     ${row('Gambling', (m.gamble > 0 ? '+' : '') + fmt$(m.gamble), m.gamble > 0 ? 'good' : m.gamble < 0 ? 'bad' : '')}
     ${row('Medical bills', (m.bills ? '-' : '') + fmt$(m.bills), m.bills ? 'bad' : '')}
     ${row('Loot broken', fmt$(m.broken) + ' of stuff', m.broken ? 'bad' : '')}
-    ${row('Payment', m.paid ? `PAID ${fmt$(m.due)}` : `MISSED (${fmt$(m.due)})`, m.paid ? 'good' : 'bad')}
+    ${row('Payment', `PAID ${fmt$(m.due)}`, 'good')}
     ${row('Bank', fmt$(m.bank))}
-    ${!m.paid ? `<p class="bad">The Repo Man took: <b>${!m.parts.doors && m.parts.roof ? 'the doors' : !m.parts.roof ? 'the roof' : 'nothing (yet)'}</b></p>` : ''}
     <p class="hint">Campfire's lit. The store is open. When everyone's in a bunk (E on the bed in the RV), day ${m.day + 1} starts.</p>
     <button class="btn small green" id="receiptClose">[E] Okay</button>`;
   $('receipt').classList.remove('hidden');
@@ -1082,7 +1075,7 @@ function showOver(m) {
   const s = m.stats || {};
   $('overScreen').innerHTML = m.won
     ? `<h1 class="won">You Own the RV</h1><div class="filigree"></div><p>Five days, ${fmt$(s.sold || 0)} of pawned junk, and the Slopmaster 9000 is finally, legally, yours.</p>`
-    : `<h1 class="lost">Repo'd</h1><div class="filigree"></div><p>Day ${m.day}. The Repo Man hooks the Slopmaster and drives off into the sunset without you.</p>`;
+    : `<h1 class="lost">Repo'd</h1><div class="filigree"></div><p>Day ${m.day} of ${C.DAYS}. ${m.short > 0 ? `${fmt$(m.short)} short of the ${fmt$(m.due)} ${m.day >= C.DAYS ? 'balloon payment' : 'payment'} at midnight. ` : ''}The Repo Man hooks the Slopmaster and drives off into the sunset without you.</p>`;
   $('overScreen').innerHTML += `
     <div class="rrow"><span>Pawned in total</span><b>${fmt$(s.sold || 0)}</b></div>
     <div class="rrow"><span>Medical bills</span><b>${fmt$(s.bills || 0)}</b></div>
@@ -1432,7 +1425,7 @@ requestAnimationFrame(frame);
   S.rv = rv;
   S.hook = rt != null ? S.interp.sampleHook(rt) : null;
   if (rv) S.lw.setRV(rv.p, rv.q);
-  S.lw.setParts(S.parts, S.door);
+  S.lw.setDoor(S.door);
   S.lw.setHook(S.hook && S.hook.state !== 0 ? { x: S.hook.x, y: S.hook.y, z: S.hook.z } : null);
   for (const p of S.props.values()) {
     const s = rt != null ? S.interp.sampleProp(p.id, rt) : null;
@@ -1602,13 +1595,32 @@ function updateVoice(others) {
     const dx = head.x - eye.x, dy = head.y - eye.y, dz = head.z - eye.z;
     const d = Math.hypot(dx, dy, dz);
     let occluded = false;
-    if (d > 1.5 && d < 46) {
+    if (d > 1.5 && d < C.VOICE.RANGE + 1) {
       const hit = S.lw.ray(eye, { x: dx / d, y: dy / d, z: dz / d }, d - 0.6, G.WORLD | G.RV, null, false);
       occluded = !!hit;
     }
     const radio = !!(s.flags & C.FLAG.WALKIE_TX) && !!S.myWalkie;
     return { head, occluded, ko: s.mode === C.MODE.KO, radio };
   });
+  earshotNudge(eye, others);
+}
+// Talking, and nobody in voice is close enough to hear it (nor on a walkie line with me): say so, once a
+// day. Voices carry C.VOICE.RANGE m; past that only walkie-talkies get through
+let earshotDay = null;
+function earshotNudge(eye, others) {
+  const V = voice.V;
+  if (!V.speaking[V._selfId] || V.walkieKey || earshotDay === S.g?.day) return;
+  let heard = 0;
+  for (const p of S.meta?.players || []) {
+    if (p.id === S.selfId || !p.voice) continue;
+    const s = others.get(p.id);
+    if (!s) continue;
+    if (Math.hypot(s.pos.x - eye.x, s.pos.y + 1.6 - eye.y, s.pos.z - eye.z) < C.VOICE.RANGE || (S.myWalkie && p.walkie)) return;   // someone hears, or could on the walkie
+    heard++;
+  }
+  if (!heard) return;   // (nobody else in voice: nothing to say)
+  earshotDay = S.g?.day;
+  toast(`Nobody's close enough to hear you. Voices carry about ${C.VOICE.RANGE} m; walkie-talkies ($150 at the store) reach anyone else who has one.`, '#fff', 6);
 }
 
 // ---- the casino table -----------------------------------------------------------------------
@@ -1690,9 +1702,6 @@ function hud(rv) {
     $('hBank').classList.toggle('neg', g.bank < 0);
     $('hDue').textContent = g.paid ? `PAID ✓` : g.bank >= g.due ? `DUE ${fmt$(g.due)} · COVERED ✓` : `DUE ${fmt$(g.due)} @ MIDNIGHT`;
     $('hDue').classList.toggle('ok', !!g.paid || g.bank >= g.due);
-    $('hStrikes').textContent = `MISSED ${g.str}/${C.STRIKES_TO_LOSE}`;
-    $('hStrikes').classList.toggle('red', g.str > 0);
-    $('hStrikes').title = 'Missed payments: the first two take the doors and the roof, the third takes the RV.';
   }
   const pct = Math.max(0, me.stamina / C.STAMINA.MAX * 100);
   $('stamFill').style.width = `${pct}%`;
@@ -1722,7 +1731,7 @@ function hud(rv) {
 }
 
 // The quest tracker (top right, WoW's quest watch): the day's town as the title, then what to
-// do next. Objectives turn white when done, red when failed. Rewritten only when it changes.
+// do next. Objectives turn white when done. Rewritten only when it changes.
 let townOf = null, townNm = '', questKey = '';
 function townName(W) {
   if (townOf !== W) {
@@ -1780,7 +1789,7 @@ function questTracker(g) {
     L.push([`Money for the Repo Man: ${fmt$(Math.max(0, g.bank))}/${fmt$(g.due)}`, g.bank >= g.due ? 'done' : '']);
     L.push(['Pay the Repo Man before midnight', '']);
   } else if (g.ph === 'night') {
-    L.push([g.paid ? `Paid the Repo Man ${fmt$(g.due)}` : 'Missed the payment', g.paid ? 'done' : 'fail']);
+    L.push([`Paid the Repo Man ${fmt$(g.due)}`, 'done']);
     const n = S.meta?.players.length || 1, b = Math.min(n, g.beds?.length || 0);
     L.push([`Asleep in the RV's bunks: ${b}/${n}`, b >= n ? 'done' : '']);
   }
@@ -1789,7 +1798,7 @@ function questTracker(g) {
   if (key === questKey) return;
   questKey = key;
   $('qtTitle').textContent = title;
-  $('qtLines').innerHTML = L.map(([t, c]) => `<div class="qt-line${c ? ' ' + c : ''}">${c === 'done' ? '✓ ' : c === 'fail' ? '✗ ' : ''}${escapeHtml(t)}</div>`).join('');
+  $('qtLines').innerHTML = L.map(([t, c]) => `<div class="qt-line${c ? ' ' + c : ''}">${c === 'done' ? '✓ ' : ''}${escapeHtml(t)}</div>`).join('');
   $('tracker').classList.remove('hidden');
 }
 

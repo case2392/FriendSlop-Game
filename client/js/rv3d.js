@@ -9,10 +9,9 @@
 // awning, lanterns, a cask and a crate, tools, a round oak shield, a goblin advert, cargo all along
 // the roof. Inside: an inn room on wheels.
 //
-// Draw calls: everything static is merged per material, per group: the main body, the roof (a
-// Repo Man part), the rear wall and the door (the other Repo Man part). The wheels and the tow strap
-// are instanced. ~30 meshes in all. Interior furniture is a separate trim mesh that casts no shadow
-// while the roof is on. The interior matches shared/rv.js (RV_PARTS) box for box: walls, floor,
+// Draw calls: everything static is merged per material, per group: the main body, the roof, the rear
+// wall and the door. The wheels and the tow strap are instanced. ~30 meshes in all. Interior furniture
+// is a separate trim mesh that casts no shadow (the roof is over it). The interior matches shared/rv.js (RV_PARTS) box for box: walls, floor,
 // roof, door, dash, seats, table, benches, counter, shower stall, bunks, steps and bumpers.
 // Biome-dependent: the road grime's tint, the day-3 snow and icicles, and a small prop set per
 // biome (atmo.biome).
@@ -624,7 +623,7 @@ function buildShell(b) {
   b.panel.add(setUV(wallGeo(fi, 'z', HL - 0.1, -1), uvPanelX));
 
   // the timber frame: fat corner posts (one walnut grain the whole height, tapering 5%, an iron
-  // shoe and an iron band at the belt), wall plates (they cap the walls when the roof is gone)
+  // shoe and an iron band at the belt), wall plates (they cap the walls)
   for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
     const cx = sx * (HW - 0.02), cz = sz * (HL - 0.02), th = Math.atan2(sx, sz), y0 = A.y0 - 0.02, y1 = 2.16;
     b.trim.add(at(postGeo(0.19, 0.18, y1 - y0, th - 2.25, 4.5, 2 + sx + sz * 0.5), cx, (y0 + y1) / 2, cz));
@@ -1169,7 +1168,7 @@ const GAUGE = { y: 0.93, z: 3.53, tilt: 0.7 };
 const HEAD_Y = 0.3;
 const WHEEL_POS = { x: 0.62, y: 0.89, z: 3.22 };
 
-// ---- the roof (a Repo Man part) ------------------------------------------------------------------
+// ---- the roof -------------------------------------------------------------------------------------
 
 function buildRoof(b) {
   buildRoofShell(b);
@@ -1308,7 +1307,7 @@ function buildRoof(b) {
   buildRoofSnow(b);
 }
 
-// ---- the rear wall (a Repo Man part: "doors") ----------------------------------------------------
+// ---- the rear wall ---------------------------------------------------------------------------------
 
 function buildRear(b, wheel) {
   const rw = A.rearWin;
@@ -1449,7 +1448,6 @@ export class RVView {
     this.g = new THREE.Group();
     scene.add(this.g);
     const g = this.g;
-    this.parts = { doors: [], roof: [] };
     this.biome = null;
 
     const trim = painted('rv_trim');
@@ -1473,7 +1471,7 @@ export class RVView {
     mat.glass.depthWrite = false;
     this.mat = mat;
     const cast = { body: true, tin: true, trim: true, snow: true, ...Object.fromEntries(BIOMES.map(b => ['bio_' + b, true])) };
-    this.snowMeshes = []; this.glowMeshes = []; this.interior = [];
+    this.snowMeshes = []; this.glowMeshes = [];
     this.bioMeshes = Object.fromEntries(BIOMES.map(b => [b, []]));
     const emit = (parent, bk) => {
       for (const k of KINDS) {
@@ -1481,7 +1479,6 @@ export class RVView {
         if (!m) continue;
         if (k === 'snow') { m.visible = false; this.snowMeshes.push(m); }
         if (k === 'glow') { m.visible = false; this.glowMeshes.push(m); }
-        if (k === 'itrim') this.interior.push(m);
         if (k.startsWith('bio_')) { m.visible = false; this.bioMeshes[k.slice(4)].push(m); }
         if (k === 'glass' || k === 'grime' || k === 'glow') m.renderOrder = 2;
         parent.add(m);
@@ -1501,19 +1498,20 @@ export class RVView {
 
     const roof = new THREE.Group(), rb = buckets();
     buildRoof(rb); emit(roof, rb);
-    g.add(roof); this.parts.roof.push(roof);
+    g.add(roof);
 
     const rear = new THREE.Group(), qb = buckets();
     buildRear(qb, wheel);
     const rg = new THREE.Shape(); rg.moveTo(-HW, A.y0); rg.lineTo(HW, A.y0); rg.lineTo(HW, 1.02); rg.lineTo(-HW, 1.02); rg.closePath();
     qb.grime.add(setUV(wallGeo(rg, 'z', -HL - 0.004, -1), (x, y) => [(HW - x) / 2.5, 0.5 * GV(y)]));
     emit(rear, qb);
-    g.add(rear); this.parts.doors.push(rear);
+    g.add(rear);
+    this.cutaway = [roof, rear];   // (the art previews lift these off to see in)
 
     this.doorPivot = new THREE.Group();
     this.doorPivot.position.set(-1.2, 0, D.DOOR_Z - D.DOOR_HALF);
     const db = buckets(); buildDoor(db); emit(this.doorPivot, db);
-    g.add(this.doorPivot); this.parts.doors.push(this.doorPivot);
+    g.add(this.doorPivot); this.cutaway.push(this.doorPivot);
     this.doorAng = 0;
 
     // headlights' reach and the cabin's lantern glow
@@ -1577,13 +1575,6 @@ export class RVView {
     this._v = new V3(); this._dir = new V3(); this._up = new V3(0, 1, 0);
     this.setBiome(atmo.biome);
     repaintBodyWhenFontLoads();
-  }
-
-  setParts(parts) {
-    for (const p of this.parts.doors) p.visible = parts.doors !== false;
-    for (const p of this.parts.roof) p.visible = parts.roof !== false;
-    // with the roof gone the sun gets in: the furniture casts shadows again
-    for (const m of this.interior) m.castShadow = parts.roof === false;
   }
 
   setBiome(b) {
@@ -1694,18 +1685,19 @@ export class RVView {
 
 // ---- preview (tools/preview.mjs) ----
 // The RV, its hook and strap all go into one root (the preview frames whatever it is handed).
-function previewRV({ yaw = 0, door = false, night = false, parts = null, steer = 0.2, hook = null, colliders = false } = {}) {
+// cutaway: without the roof, the rear wall and the door, to see in
+function previewRV({ yaw = 0, door = false, night = false, cutaway = false, steer = 0.2, hook = null, colliders = false } = {}) {
   const root = new THREE.Group();
   const v = new RVView(root);
-  if (parts) v.setParts(parts);
+  if (cutaway) for (const g of v.cutaway) g.visible = false;
   const q = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
   for (let i = 0; i < 30; i++) v.update(0.1, { p: { x: 0, y: 1.36, z: 0 }, q, v: { x: 0, y: 0, z: 0 }, steer, wheels: [] }, door, night, hook, 120, '9:41 AM');
   v.g.name = 'rv';
   if (colliders) {
     // the physics boxes of shared/rv.js as wireframes, to check the art against them
     const wm = new THREE.LineBasicMaterial({ color: 0xff2060 });
-    for (const [, hx, hy, hz, cx, cy, cz, o] of RV_PARTS) {
-      if (o?.part && parts && parts[o.part] === false) continue;
+    for (const [, hx, hy, hz, cx, cy, cz] of RV_PARTS) {
+      if (cutaway && hy < 0.1 && cy > 2) continue;   // (the roof's box, which would hide the inside)
       const box = new THREE.LineSegments(new THREE.EdgesGeometry(new THREE.BoxGeometry(hx * 2, hy * 2, hz * 2)), wm);
       box.position.set(cx, cy, cz);
       v.g.add(box);
@@ -1729,7 +1721,7 @@ export const PREVIEW = {
   rv_side: () => previewRV({ yaw: PI / 2 }),
   rv_rear: () => previewRV({ yaw: PI }),
   rv_night: () => previewRV({ door: true, night: true }),
-  rv_bare: () => previewRV({ parts: { doors: false, roof: false }, door: false, yaw: PI * 0.75 }),
+  rv_bare: () => previewRV({ cutaway: true, door: false, yaw: PI * 0.75 }),
   rv_tow: () => previewRV({ hook: { state: 2, x: 1.2, y: 0.35, z: 11, len: 7.5 } }),
-  rv_colliders: () => previewRV({ parts: { doors: false, roof: false }, colliders: true }),
+  rv_colliders: () => previewRV({ cutaway: true, colliders: true }),
 };

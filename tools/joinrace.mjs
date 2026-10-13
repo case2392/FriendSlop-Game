@@ -1,12 +1,11 @@
 // A day takes seconds to load (its textures get ready before the build, main.js prepareDay), and the
 // messages that come in meanwhile must land on the new world in the order they came. Two rounds:
 //  1. a second player joins; while the joiner's day loads, a vase smashes, a safe takes a dent and
-//     the clock runs into midnight broke, so the Repo Man takes the RV's doors;
+//     the clock runs into midnight, so the Repo Man is paid and night falls (the receipt);
 //  2. a new day starts (day 3: not the day the night got ready, so it loads in full); while both
 //     clients load it, a vase and a safe dropped past the camp take dents (on snow the vase lives).
-// After each round, both clients must match the server (a probe socket joins and reads its props list
-// and parts): the same props (no ghost of the vase with a local collider), the same values, the same
-// parts. And the toasts that came during a load must go up after it, not run out under the loading
+// After each round, both clients must match the server (a probe socket joins and reads its props list):
+// the same props (no ghost of the vase with a local collider), the same values. And the toasts that came during a load must go up after it, not run out under the loading
 // screen. The drops and the clock come from a probe player's debug messages (the server runs with
 // FRIENDSLOP_TEST), aimed with the world generated here, so no client's main thread is involved.
 // Works on any checkout (it finds the world messages with a WebSocket hook), for before/after runs.
@@ -92,11 +91,11 @@ const serverState = async code => {
   const s = await socket(code);
   const world = await s.waitFor(m => m.t === 'world'), props = await s.waitFor(m => m.t === 'props');
   s.ws.close();
-  return { props: props.list.map(p => [p.id, Math.round(p.value)]).sort((a, b) => a[0] - b[0]), parts: world.parts };
+  return { props: props.list.map(p => [p.id, Math.round(p.value)]).sort((a, b) => a[0] - b[0]) };
 };
 const snap = p => p.evaluate(() => {
   const S = window.__nmd;
-  return { props: [...S.props.values()].map(p => [p.id, Math.round(p.value)]).sort((a, b) => a[0] - b[0]), lw: [...S.lw.props.keys()].sort((a, b) => a - b), parts: S.parts };
+  return { props: [...S.props.values()].map(p => [p.id, Math.round(p.value)]).sort((a, b) => a[0] - b[0]), lw: [...S.lw.props.keys()].sort((a, b) => a - b) };
 });
 // drop a vase from 25 m (it smashes after a dent or two) and a safe from 10 m (a dent) past the camp
 const drop = async (probe, W) => {
@@ -118,7 +117,7 @@ async function compare(round, clients, code, want) {
   for (let i = 0; i < 12; i++) {
     await sleep(1500);
     [sv, ...snaps] = await Promise.all([serverState(code), ...clients.map(([, p]) => snap(p))]);
-    if (snaps.every(c => J(c.props) === J(sv.props) && J(c.parts) === J(sv.parts))) break;
+    if (snaps.every(c => J(c.props) === J(sv.props))) break;
   }
   const sIds = sv.props.map(p => p[0]), svv = new Map(sv.props);
   for (const [k, [who, page]] of clients.entries()) {
@@ -128,7 +127,6 @@ async function compare(round, clients, code, want) {
     check(!ghosts.length && !missing.length, `${round}, ${who}: ${ids.length} props, the server ${sIds.length}; ghosts: [${ghosts.join(' ')}], missing: [${missing.join(' ')}]`);
     check(J(c.lw) === J(ids), `${round}, ${who}: the local colliders match the props (${c.lw.length})`);
     check(!stale.length, `${round}, ${who}: prop values match the server's${stale.length ? `; stale: ${stale.join(', ')}` : ''}`);
-    check(J(c.parts) === J(sv.parts), `${round}, ${who}: RV parts match the server's (${J(c.parts)} vs ${J(sv.parts)})`);
     const r = await page.evaluate(() => ({ ...window.__race, builtAt: window.__nmd.builtAt ?? null }));
     const w = r.msgs.filter(m => m.t === 'world').pop();
     if (r.builtAt == null) { console.log(`     ${who}: no builtAt on this checkout (its build runs straight after the world message)`); continue; }
@@ -156,14 +154,14 @@ await joiner.click('#joinBtn');
 let t0 = await w;
 await sleep(DELAY);
 let from = probe.seen.length, ids = await drop(probe, W1);
-probe.send({ t: 'dbg', op: 'bank', v: 0 });
+probe.send({ t: 'dbg', op: 'bank', v: 5000 });   // (enough to pay: one missed payment would end the run)
 probe.send({ t: 'dbg', op: 'phase', ph: 'road' });
 probe.send({ t: 'dbg', op: 'clock', h: 23.999 });
 await smashed(probe, ids, from, 'round 1', t0);
-await probe.waitFor(m => m.t === 'parts').catch(() => console.log('round 1: (the Repo Man took nothing)'));
+await probe.waitFor(m => m.t === 'receipt').catch(() => console.log('round 1: (no night came)'));
 await built(joiner, 1);
 await joiner.evaluate(() => { window.__nmd.noRender = true; });
-await compare('round 1 (join)', [['joiner', joiner], ['host', host]], code, { joiner: ['ev:break', 'ev:dmg', 'parts', 'toast'] });
+await compare('round 1 (join)', [['joiner', joiner], ['host', host]], code, { joiner: ['ev:break', 'ev:dmg', 'receipt', 'toast'] });
 
 // ---- round 2: a new day starts while things happen (the drops go out with the day change) ----
 const mark = await Promise.all([host, joiner].map(p => p.evaluate(() => window.__nmd.builtAt ?? -1)));

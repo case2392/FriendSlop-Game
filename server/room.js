@@ -3,8 +3,8 @@
 //   camp  — morning. the clock is frozen until the RV rolls out of camp. The day's roles are drawn
 //           (one driver, one navigator who reads the road map), and drawn again when a friend climbs aboard.
 //   road  — the clock runs, the roles are locked. scavenge, climb, winch, get to town, pawn, gamble.
-//   night — paid (or repo'd). campfire, store, everyone into a bunk = next day.
-//   over  — you own the RV, or the Repo Man owns you. then a fresh run.
+//   night — paid. campfire, store, everyone into a bunk = next day.
+//   over  — you own the RV, or the Repo Man owns you (one missed payment does it). then a fresh run.
 
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
@@ -26,9 +26,6 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
 const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25 };
-// voice-chat signalling comes in bursts (an offer and a dozen ICE candidates within milliseconds), so
-// it gets a byte budget instead: 48 KB a second, 96 KB at once
-const RTC_RATE = 48 * 1024, RTC_BURST = 96 * 1024;
 // a number from a client: finite and within +-lim, or 0
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
@@ -51,8 +48,7 @@ export class Room {
     this.seed = seed ?? (Math.floor(Math.random() * 1e9) >>> 0);
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
-    this.strikes = 0;
-    this.parts = { doors: true, roof: true };
+    for (const p of this.players.values()) p.walkie = false;   // a new trip buys its own walkies
     this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0 };
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
@@ -63,10 +59,9 @@ export class Room {
     // the old day's physics world lives in WASM memory that garbage collection gives back late or
     // never: free it, once the tick that replaced it (which may still hold it) has finished
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
-    // (a blackjack hand still being voted on when the day ends: the stake comes back)
-    if (this.bj?.state === 'vote' && this.bj.stake > 0) { this.bank += this.bj.stake; this.toast(`The dealer pushed the hand back: ${fmt$(this.bj.stake)} returned.`, '#fff', 4); }
+    this.settleTables();
     this.W = generateLeg(this.seed, this.day);
-    this.sim = new Sim(this.W, { parts: this.parts, carry });
+    this.sim = new Sim(this.W, { carry });
     this.phase = 'camp';
     this.clock = C.DAY_START;
     this.paid = false;
@@ -99,22 +94,26 @@ export class Room {
     this.broadcast(this.worldMsg());
     this.broadcast({ t: 'props', list: this.sim.allProps() });
     this.spawnStragglers();
-    this.toast(`DAY ${this.day} — ${fmt$(this.due)} due at midnight. The Repo Man is already on the road.`, '#ffd166', 7);
+    this.toast(`DAY ${this.day} — ${fmt$(this.due)} due at midnight. Miss it and the Repo Man takes the RV.`, '#ffd166', 7);
     if (this.rolesText()) this.toast(this.rolesText(), '#ffd166', 7);
     this.sendMeta();
   }
 
-  finish(won) {
+  // short: how much the missed payment was short by (the game-over screen says so)
+  finish(won, short = 0) {
     this.phase = 'over';
-    this.over = { won, at: this.t, day: Math.min(this.day, C.DAYS), stats: this.stats, bank: this.bank };
+    this.over = { won, at: this.t, day: Math.min(this.day, C.DAYS), due: this.due, short };
     this.broadcast(this.overMsg());
     this.sendMeta();
   }
 
-  overMsg() { return { t: 'over', won: this.over.won, day: this.over.day, stats: this.stats, bank: this.bank, strikes: this.strikes, next: Math.max(0, Math.round((C.FAST ? 3 : 25) - (this.t - this.over.at))) }; }
+  overMsg() {
+    const o = this.over;
+    return { t: 'over', won: o.won, day: o.day, due: o.due, short: o.short, stats: this.stats, next: Math.max(0, Math.round((C.FAST ? 3 : 25) - (this.t - o.at))) };
+  }
 
   worldMsg() {
-    return { t: 'world', seed: this.seed, day: this.day, parts: this.parts, door: this.sim.doorOpen };
+    return { t: 'world', seed: this.seed, day: this.day, door: this.sim.doorOpen };
   }
 
   // ---- membership --------------------------------------------------------------------
@@ -406,17 +405,6 @@ export class Room {
       }
       case 'voice': p.voice = !!m.on; this.sendMeta(); return;
       case 'dbg': if (C.TEST) this.debug(p, m); return;
-      case 'rtc': {
-        const target = this.players.get(Number(m.to));
-        const size = JSON.stringify(m.data ?? null).length;
-        if (!target || target === p || size > 20000) return;
-        p.rtcBudget = Math.min(RTC_BURST, (p.rtcBudget ?? RTC_BURST) + (this.t - (p.rtcAt ?? this.t)) * RTC_RATE);
-        p.rtcAt = this.t;
-        if (p.rtcBudget < size) return;
-        p.rtcBudget -= size;
-        this.send(target, { t: 'rtc', from: p.id, data: m.data });
-        return;
-      }
     }
   }
 
@@ -536,7 +524,6 @@ export class Room {
       return;
     }
     if (kind === 'door') {
-      if (!sim.parts.doors) { this.toast('There is no door. The Repo Man has the door.', '#ff8a80', 3, p); return; }
       if (rvLocal && Math.hypot(rvLocal.x + 1.2, rvLocal.z - RV_DIM.DOOR_Z) < 3.2) sim.setDoor(!sim.doorOpen);
       return;
     }
@@ -626,12 +613,16 @@ export class Room {
         return;
       }
       this.bank -= price;
-      if (what === 'walkie') { p.walkie = true; this.sendMeta(); this.toast(`${p.name} bought a walkie-talkie. Hold T to talk to anyone else with one.`, p.color, 4); }
+      if (what === 'walkie') {
+        p.walkie = true; this.sendMeta();
+        const others = [...this.players.values()].filter(q => q !== p && q.walkie).length;
+        this.toast(`${p.name} bought a walkie-talkie. Hold T to talk to anyone else with one, at any range.${others ? '' : ' (Nobody else has one yet.)'}`, p.color, 5);
+      }
       if (what === 'drink') { this.send(p, { t: 'drink' }); this.toast(`${p.name} chugged an energy drink.`, p.color, 3); }
     } else if (u.kind === 'pay') {
       if (this.paid) return this.toast('Already paid. He\'s just... watching you now.', '#fff', 3, p);
-      // past midnight he has already taken what he came for: today's payment can't be made any more
-      if (this.phase === 'night' || this.phase === 'over') return this.toast('Too late. He already came at midnight. Next payment is tomorrow.', '#ff8a80', 4, p);
+      // past midnight he has already taken the RV: there's no paying him now
+      if (this.phase === 'over') return this.toast('Too late. He already hooked the RV.', '#ff8a80', 4, p);
       if (this.bank < this.due) return this.toast(`The Repo Man wants ${fmt$(this.due)}. You have ${fmt$(this.bank)}.`, '#ff8a80', 4, p);
       this.pay(p);
     }
@@ -707,7 +698,7 @@ export class Room {
       const s = { x: f.x + Math.cos(a) * 3, z: f.z + Math.sin(a) * 3 };
       this.send(p, { t: 'tp', x: s.x, y: this.W.townY + 0.1, z: s.z, yaw: Math.atan2(f.x - s.x, f.z - s.z) });
     }
-    this.receipt = { t: 'receipt', day: this.day, paid: this.paid, due: this.due, bank: this.bank, strikes: this.strikes, parts: this.parts, ...this.dayStats };
+    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, ...this.dayStats };
     this.broadcast(this.receipt);
   }
 
@@ -746,26 +737,33 @@ export class Room {
     return total;
   }
 
+  // Midnight: Ed rings up what's still on his counter (and a docked load), money still on the casino tables
+  // comes back, and the Repo Man takes his payment. Short by a dollar, on any day, and he takes the RV:
+  // the trip is over.
   midnight() {
     if (this.paid) return;
+    this.settleTables();
     this.sellCounter(0, true);
     if (this.bank >= this.due) { this.pay(); return; }
-    // short. he takes everything you have, and a piece of the RV.
-    const part = C.REPO_PARTS[this.strikes];
-    this.strikes++;
-    const took = Math.max(0, this.bank);
+    const short = this.due - this.bank;
+    this.broadcast({ t: 'ev', list: [{ k: 'repo', took: Math.max(0, this.bank) }] });
     this.bank = Math.min(0, this.bank);
-    this.broadcast({ t: 'ev', list: [{ k: 'repo', part, took }] });
-    // the last day's balloon payment is all or nothing: short on it, the RV goes whatever the strikes
-    if (part === 'rv' || this.strikes >= C.STRIKES_TO_LOSE || this.day >= C.DAYS) {
-      this.toast(this.day >= C.DAYS && part !== 'rv' ? 'Short on the balloon payment. The Repo Man hooks the RV. It\'s over.' : 'The Repo Man hooks the RV. It\'s over.', '#ff5252', 8);
-      return this.finish(false);
+    this.toast(`MIDNIGHT. ${fmt$(short)} short on the ${this.day >= C.DAYS ? 'balloon payment' : 'payment'}. The Repo Man hooks the RV. It's over.`, '#ff5252', 8);
+    this.finish(false, short);
+  }
+
+  // money still on the casino tables goes back to the bank: a blackjack hand being voted on is called off
+  // (the stake returned), a coin flip in the air lands now. (At midnight, before the Repo Man counts it, and
+  // at dawn)
+  settleTables() {
+    const back = this.bj?.pushBack() || 0;
+    if (back > 0) { this.bank += back; this.toast(`The dealer pushed the hand back: ${fmt$(back)} returned.`, '#fff', 4); }
+    if (this.pendingFlip) {
+      const f = this.pendingFlip;
+      this.pendingFlip = null;
+      if (f.win) this.bank += f.stake * 2;
+      this.betResult(f.win ? f.stake : -f.stake, 'Double or Nothing', f.by);
     }
-    this.parts[part] = false;
-    this.sim.removePart(part);
-    this.broadcast({ t: 'parts', parts: this.parts });
-    this.toast(`MIDNIGHT. Short on the payment — the Repo Man took ${fmt$(took)} AND THE ${part.toUpperCase()}. Strike ${this.strikes}/${C.STRIKES_TO_LOSE - 1}.`, '#ff5252', 8);
-    this.beginNight();
   }
 
   // ---- simulation -------------------------------------------------------------------------
@@ -900,7 +898,7 @@ export class Room {
     if (this.docked()) for (const id of sim.cargo()) if (!pawnIds.includes(id)) dock += Math.round(sim.props.get(id).value * C.DOCK_RATE);
     return {
       ph: this.phase, day: this.day, clk: Math.round(this.clock * 100) / 100,
-      bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0, str: this.strikes,
+      bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0,
       town: this.inTown ? 1 : 0, door: sim.doorOpen ? 1 : 0,
       bj: this.bj.view(this.t), flip: this.flip.view(this.t), pawn, pawnIds, dock,
       gates: [...this.gatesOpen], beds: [...this.players.values()].filter(p => p.bed).map(p => p.id),

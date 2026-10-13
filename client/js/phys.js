@@ -25,7 +25,7 @@ function shapeDesc(shape) {
 }
 
 export class LocalWorld {
-  constructor(W, parts) {
+  constructor(W) {
     this.W = W;
     this.world = new RAPIER.World({ x: 0, y: -9.81, z: 0 });
     this.info = new Map();       // collider handle -> {kind, id, part, use}
@@ -77,7 +77,6 @@ export class LocalWorld {
       this.info.set(c.handle, { kind: 'rv', part: name, use: o.use || null });
       this.rvCols[name] = c;
     }
-    this.setParts(parts, false);
 
     // the winch hook (only when it's out)
     this.hook = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -100, 0));
@@ -99,14 +98,8 @@ export class LocalWorld {
 
   free() { try { this.world.free(); } catch { } }
 
-  setParts(parts, door) {
-    for (const [name, , , , , , , o] of RV_PARTS) {
-      const col = this.rvCols[name];
-      let on = !o.part || parts[o.part] !== false;
-      if (o.toggle && door) on = false;
-      col.setEnabled(on);
-    }
-  }
+  // the door's collider: there only while the door is shut
+  setDoor(open) { this.rvCols.door.setEnabled(!open); }
 
   openGate(id) {
     const c = this.gateCols.get(id);

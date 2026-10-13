@@ -7,7 +7,7 @@ A 1–6 player first-person co-op **road trip**: drive a dying RV across the
 desert to Lost Wages, scavenging junk to pawn, climbing cliffs to winch the RV
 over the parts of the road that don't exist anymore, and gambling the shared
 bank account at roadside casinos, all to make each night's payment before the
-Repo Man takes another piece of your RV.
+Repo Man takes the RV. Miss one and the trip is over.
 
 Working title. The repo stays `FriendSlop-Game`. The menu calls it a
 "friendslop road trip".
@@ -195,11 +195,11 @@ A run is **5 days**, about 60–90 minutes. Each day has three phases:
 - **Arriving early is a choice.** You can pay at the tow truck and leave,
   which ends the day early and safely. Or you can stay and gamble the
   surplus until midnight. That's push-your-luck.
-- **At midnight the Repo Man collects.** Short on the payment, he takes all
-  the money *and* a piece of the RV. On the third miss he takes the whole RV
-  and the run is over.
+- **At midnight the Repo Man collects.** Short on the payment by a dollar,
+  on any day, and he hooks the RV: the run is over. (Ed rings up whatever is
+  still on his counter first, and money on the casino tables comes back.)
 - **Day 5 is the balloon payment in Lost Wages.** Pay it and you own the RV.
-  Short on it at midnight and he takes the RV, strikes or not: there's no day 6.
+  Short on it at midnight and he takes the RV: there's no day 6.
   Credits roll as you drive into the sunset, over a recap: total medical
   bills, loot broken, the biggest bet, who lost it.
 
@@ -292,14 +292,9 @@ the road map lying on it, a dinette, a kitchenette, a shower stall
 that holds fragile loot, and bunks. The roof is walkable and is the best
 view in the game. Falling off it is the second-best clip in the game.
 
-**Repossession** is the failure ladder. Each missed payment takes a part:
-
-1. **The doors.** Loot flies out on turns.
-2. **The roof.** It's a convertible now, and everything's exposed.
-3. **The RV.** Run over.
-
-M2 adds more parts: a wheel (it pulls left), the windshield, the engine
-(−30% top speed), and the bunks (no night skip).
+**Repossession** is all or nothing: one missed payment and the Repo Man
+hooks the RV. (An earlier build took a part per miss, the doors, then the
+roof, then the RV; it made the first four days too forgiving.)
 
 ### 7.5 The Town
 
@@ -364,13 +359,14 @@ playtests with real friends before anyone trusts them (confidence: moderate).
 - Medical bill: $250 + $50 × day per KO, unless a friend picks you up.
   Getting run over by your own RV: $500. RV on its back for 7 seconds: an
   $800 tow.
-- Missing a payment: the Repo Man takes everything in the bank toward it,
-  plus a part.
+- Missing a payment: the Repo Man takes the RV. The run is over.
 
 ## 9. Voice and communication
 
 - **Proximity voice:** an HRTF panner placed at the speaker's head. Full
-  volume within about 2 m, fading to silence by about 45 m.
+  volume within 4 m, fading to silence by 25 m (`shared/constants.js` VOICE;
+  the host relays a voice to 27 m). Everyone in the RV hears everyone; a stop
+  can shout to the RV; across town, or up on the canyon rim, takes a walkie.
 - **Occlusion:** if terrain or the RV body sits between two heads, the voice
   is low-passed. Players inside the RV hear each other clearly and hear
   outsiders muffled.
@@ -396,8 +392,8 @@ Things the systems will produce without being scripted:
 - Falling off the roof at 50 km/h.
 - Running over your friend: a $500 bill, and the toast names the driver.
 - Going ALL IN on the coin flip with the payment money at 23:58.
-- Losing the doors to the Repo Man, then watching the safe slide out on the
-  next corner.
+- Going ALL IN on blackjack with the payment money at 23:58, and losing the
+  RV with it.
 - Two people carrying a safe up a mesa. One of them lets go.
 - The winch yanking the RV off the side of the grade.
 - Carrying your KO'd friend back to the RV like a sack of potatoes.
@@ -468,14 +464,14 @@ Things the systems will produce without being scripted:
 
 | Milestone | Contents |
 |---|---|
-| **M1: vertical slice** (this branch) | First-person body, grab/carry/throw, climbing and stamina, KO and bills; the RV with driving, riding, pushing and the winch; loot and fragility; five generated legs in five biomes with the Grade, Boulder, Mud and Ranger Gate; a hand-painted art pass; a town with pawn, blackjack, double-or-nothing and the Repo Man; 5 days with quotas; repossession; the paper map; walkies; spatial voice |
-| **M2: content** | Route forks, more biomes (the Strip, a swamp, a coast), the ledge road, the washout gap, rockfall, about 30 loot items, slots, physical roulette chips, store items, more RV parts, a fuel can loop, flat tires |
+| **M1: vertical slice** (this branch) | First-person body, grab/carry/throw, climbing and stamina, KO and bills; the RV with driving, riding, pushing and the winch; loot and fragility; five generated legs in five biomes with the Grade, Boulder, Mud and Ranger Gate; a hand-painted art pass; a town with pawn, blackjack, double-or-nothing and the Repo Man; 5 days with quotas; repossession on the first miss; the paper map; walkies; spatial voice |
+| **M2: content** | Route forks, more biomes (the Strip, a swamp, a coast), the ledge road, the washout gap, rockfall, about 30 loot items, slots, physical roulette chips, store items, a fuel can loop, flat tires |
 | **M3: feel** | Real ragdolls, a procedural radio with stations in the RV, better animation, weather (dust storms kill visibility, so there's more talking), night driving with headlights |
 | **M4: ship** | Steam build, Steam networking, achievements, daily trip seed leaderboard ("lowest medical bills"), a $5–8 price point |
 
 ### What M1 actually contains (as built, October 2026)
 
-All of this is implemented and covered by `test/logic.mjs` (31 server checks
+All of this is implemented and covered by `test/logic.mjs` (60 server checks
 over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
 
 - Seeded 5-day runs through five biomes (meadow, fields, snow, badlands,
@@ -498,12 +494,12 @@ over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
   pawn counter with appraisal.
 - Casino: body-vote blackjack and double-or-nothing. Store: walkie-talkies,
   energy drinks, bungee tie-downs.
-- The Repo Man, strikes, parts removal, night receipts, sleeping, and both
+- The Repo Man (one missed payment ends the run), night receipts, sleeping, and both
   endings.
 - Proximity voice with occlusion, KO muffling, and the walkie radio path.
 
 Not yet built (M2+): route forks, the ledge road, the washout gap and planks,
-rockfall, slots, physical roulette chips, odds-shifting items, more RV parts,
+rockfall, slots, physical roulette chips, odds-shifting items,
 fuel, weather, night driving beyond headlights, the radio, real ragdolls.
 
 ## 14. Risks
@@ -532,10 +528,10 @@ fuel, weather, night driving beyond headlights, the radio, real ragdolls.
    generated by the morning build, under the loading bar: generating it at
    night would be one long main-thread task, a hitch). Since a
    day now loads for seconds, the messages that come in meanwhile (loot
-   breaking or pawned, the Repo Man's parts, toasts, your seat) wait for the
+   breaking or pawned, toasts, your seat) wait for the
    new world and run in the order they came, as when the build ran straight
    after the world message; `tools/joinrace.mjs` checks a joining player and
-   a new day against the server's props and parts, and `tools/dayrace.mjs`
+   a new day against the server's props, and `tools/dayrace.mjs`
    a day that changes again mid-load (what came for the old day is dropped).
    A paint worker that is slow to start (a starved machine) doesn't hold the
    build up: the page paints meanwhile, and the worker joins the pool when it

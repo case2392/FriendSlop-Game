@@ -90,6 +90,14 @@ export class BJTable {
     return { delta: 0, msg: choice === 'hit' ? `HIT → ${this.hand.squadTotal()}` : null };
   }
 
+  // the day ends with a hand still being voted on: it's called off and the stake goes back (returned)
+  pushBack() {
+    if (this.state !== 'vote') return 0;
+    const back = this.stake;
+    this.state = 'bet'; this.hand = null; this.stake = 0; this.heldKey = null; this.votes = { hit: [], stand: [] };
+    return back;
+  }
+
   view(t) {
     const h = this.hand?.publicState();
     return {

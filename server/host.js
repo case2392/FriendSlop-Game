@@ -28,7 +28,6 @@ const CODE_COOLDOWN = 10 * 60 * 1000;   // a closed trip's code isn't handed out
 const MISS_LIMIT = 10;                  // wrong trip codes one connection may try before it is closed; and
 const MISS_REFILL = 30 * 1000;          //   one address, after which it gets one more try every 30 s
 const HOLD_SECS = 90;              // a dropped player's seat is kept this long (room.js does the keeping)
-const VOICE_RANGE = 45;            // voice.js spatialize(): the gain reaches 0 at 2.5 + 42.5 m
 const RATE = 120, BURST = 240;     // messages per second per connection, sustained / burst
 const VOICE_RATE = 60, VOICE_BURST = 120;   // voice frames (50 a second while talking) have their own
 const PING_MS = 5000, DEAD_MS = 15000;
@@ -218,7 +217,8 @@ export class GameHost {
     out[0] = 2; out[1] = p.id & 255; buf.copy(out, 2, 1);
     for (const q of room.players.values()) {
       if (q === p || !q.connected || !q.conn || q.conn.readyState !== 1 || !q.voice) continue;
-      const near = p.eye && q.eye && Math.hypot(p.eye.x - q.eye.x, p.eye.y - q.eye.y, p.eye.z - q.eye.z) < VOICE_RANGE;
+      // (C.VOICE: a voice fades out by RANGE m on the page; frames go a little past it, to RELAY m)
+      const near = p.eye && q.eye && Math.hypot(p.eye.x - q.eye.x, p.eye.y - q.eye.y, p.eye.z - q.eye.z) < C.VOICE.RELAY;
       if (!near && !(walkie && q.walkie)) continue;
       q.conn.send(out, { unreliable: true, voice: true, binary: true });
       this.stats.voiceOut++;

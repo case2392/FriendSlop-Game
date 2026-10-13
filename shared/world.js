@@ -1118,7 +1118,7 @@ export function generateLeg(seed, day) {
     tagNow = { town: 'store' };
     box(counter.x, y0 + 0.5, counter.z, 2.6, 0.5, 0.5, Math.PI / 2, 'wood', '#a0743c', 'counter');
     tagNow = null;
-    const w = F(-1.4, 1.1, -1.5); use('buy', w.x, y0 + 1.1, w.z, 'Walkie-talkie', 'walkie', 0.3);
+    const w = F(-1.4, 1.1, -1.5); use('buy', w.x, y0 + 1.1, w.z, 'Walkie-talkie: talk to anyone else with one, at any range', 'walkie', 0.3);
     const d = F(0.2, 1.1, -1.5); use('buy', d.x, y0 + 1.1, d.z, 'Energy drink', 'drink', 0.3);
     const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords', 'bungee', 0.3);
     town.store = { walkie: w, drink: d, bungee: r };
