@@ -70,6 +70,7 @@ const roadX = z => steve.evaluate(z => window.__nmd.W.roadX(z), z);
 const hAt = (x, z) => steve.evaluate(([x, z]) => window.__nmd.W.heightAt(x, z), [x, z]);
 
 if (want('camp')) { // 1. camp: the crew + the RV + the fire
+await roles(steve, dave);   // (the HUD shows the day's roles: the same every run)
 await ev(steve, () => { const S = window.__nmd; S.me.teleport(-4.2, 0.05, -45.5, 2.4); S.me.pitch = 0; });
 await ev(dave, () => { const S = window.__nmd; S.me.teleport(-13.5, 0.05, -52.5, 0); S.aimAt(-3, 1.4, -42); });
 await shot(dave, 'camp');

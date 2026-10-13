@@ -288,8 +288,9 @@ try {
   ok('two players in the room, poses flowing');
 
   let W = generateLeg(SEED, 1);
-  // only the day's driver takes the wheel (drawn at random each morning: set here through the test lever)
-  const roles = (drv, nav) => A.send({ t: 'dbg', op: 'roles', drv: drv.id, nav: nav.id });
+  // only the day's driver takes the wheel (drawn at random each morning: set here through the test lever, on
+  // the driver's own socket, so it lands before their 'use')
+  const roles = (drv, nav) => drv.send({ t: 'dbg', op: 'roles', drv: drv.id, nav: nav.id });
   // ---- drive ----------------------------------------------------------------------------
   roles(A, B);
   A.at(0.2, 0.05, 1.6, 0, 0.3, 1);
@@ -364,8 +365,12 @@ try {
   await A.wait(m => m.t === 'hooked' && !m.on, 4000, 'anchored');
   await A.until((g, s) => s.hk[0] === 2, 3000, 'hook anchored in snapshot');
   ok(`hooked the anchor post at the top of the grade (cable ${A.snap.hk[4].toFixed(1)} m)`);
-  roles(B, A);   // Beans drives while Hosty minds the hook
+  // today Hosty drives: Beans is refused the wheel, and told why
   B.at(0.6, 0.05, 2.85, 0, 0, 1);
+  B.send({ t: 'use', kind: 'seat0' });
+  await B.wait(m => m.t === 'toast' && /Hosty drives today\. Ride along/.test(m.text), 4000, 'refused the wheel');
+  ok('the day\'s roles: Beans is refused the wheel while Hosty drives today');
+  roles(B, A);   // Beans drives while Hosty minds the hook
   B.send({ t: 'use', kind: 'seat0' });
   await B.wait(m => m.t === 'seat' && m.seat === 0, 4000, 'B seat');
   B.send({ t: 'use', kind: 'reel' });

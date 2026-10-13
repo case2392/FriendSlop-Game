@@ -257,6 +257,20 @@ try {
   await joiner.keyboard.up(' ');
   await joiner.evaluate(() => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave him the server's driver)
   await joiner.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 24000 });
+  // the roles hold on screen: Steve's seat prompt says Dave drives (and Steve reads the map), and the server
+  // refuses him the wheel; Dave's map prompt says no peeking; each tracker says whose job is what
+  await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x + 0.25, r.y + 0.1, r.z + 2.0, 0); S.aimAt(r.x + 0.62, r.y + 0.4, r.z + 2.85); });
+  await wait(host, 900);
+  const seatLabel = await host.waitForFunction(() => window.__nmd.target()?.use === 'seat0' && window.__nmd.target().label, null, { timeout: 24000 }).then(h => h.jsonValue(), () => '');
+  const ride = toastSays(host, /Dave drives today\. Ride along/);
+  await host.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
+  const refusedSeat = (await ride) && (await host.evaluate(() => window.__nmd.me.mode)) !== 'seat';
+  await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
+  await wait(joiner, 600);
+  const peek = await joiner.evaluate(() => window.__nmd.target()?.label || '');
+  const qt = await Promise.all([host, joiner].map(p => p.evaluate(() => document.getElementById('qtLines').textContent)));
+  check(/Dave drives today\. You read the map/.test(seatLabel) && refusedSeat && /no peeking/.test(peek) && /You read the map today\. Dave drives/.test(qt[0]) && /You drive today\. Steve reads the map/.test(qt[1]),
+    `the roles hold on screen (seat: "${seatLabel}"; refused ${refusedSeat}; map: "${peek}"; trackers: ${qt.join(' | ')})`);
 
   // ---- town ----
   await host.evaluate(() => { const S = window.__nmd; S.send({ t: 'dbg', op: 'tpRV', x: 0, z: S.W.LEN + 6, yaw: 0 }); S.send({ t: 'dbg', op: 'clock', h: 18.6 }); S.send({ t: 'dbg', op: 'phase', ph: 'road' }); S.send({ t: 'dbg', op: 'bank', v: 2600 }); });
@@ -373,6 +387,8 @@ try {
   }
   // ---- a map held overnight stays behind: the next day starts with empty hands, its map on the dash ----
   {
+    await rolesNow(ids.dave, ids.steve);   // (still today's roles, set again after a reconnect and the town)
+    await host.waitForFunction(id => window.__nmd.meta?.roles?.drv === id, ids.dave, { timeout: 24000 });
     await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); });
     await wait(joiner, 900);
     await joiner.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));

@@ -416,6 +416,7 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const Cat = room.addPlayer(cs[2], 'Cat').player;
   room.welcome(Cat);
   check(room.phase === 'road' && room.roles.drv === locked.drv && room.roles.nav === locked.nav, 'roles: on the road they are locked: a newcomer is crew');
+  check(room.jobs.get(locked.drv)?.drv === 1 && room.jobs.get(locked.nav)?.nav === 1, 'roles: leaving camp counts the day\'s driver and navigator (the draw leans on these counts)');
   // crew can't drive or read the map
   room.onPose(Cat, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
   room.handle(Cat, { t: 'use', kind: 'seat0' });
@@ -425,7 +426,7 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   // the navigator leaves the trip: the crew member takes the map over
   const navWas = locked.nav, drvWas = locked.drv;
   room.removePlayer(navWas, 'left');
-  check(room.roles.nav === Cat.id && room.roles.drv === drvWas, 'roles: the navigator leaves the trip: Cat (crew) reads the map now');
+  check(room.roles.nav === Cat.id && room.roles.drv === drvWas && room.jobs.get(Cat.id)?.nav === 1, 'roles: the navigator leaves the trip: Cat (crew) reads the map now (and it counts as Cat\'s day)');
   // the next morning: drawn again between the two of them
   room.nextDay();
   check(room.phase === 'camp' && new Set([room.roles.drv, room.roles.nav, Cat.id, drvWas]).size === 2 && said(cs[2], /DAY 2/), `roles: drawn again in the morning (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
@@ -505,8 +506,74 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
     check(read && !drivers.has(B.id) && drivers.size === 2, `roles: drawn again in camp, the one who has read today's map never drives (drivers: ${[...drivers].map(id => room.players.get(id).name).join(', ')})`);
     // and a crew member leaving camp draws nothing again
     const before = { ...room.roles };
-    room.removePlayer([A, Cat].find(p => p.id !== before.drv && p.id !== before.nav)?.id ?? B.id, 'left');
-    check(room.phase === 'camp' && room.roles.drv === before.drv && (room.roles.nav === before.nav || !room.players.has(before.nav)), 'roles: in camp, someone leaving draws nothing again (a role is only handed on)');
+    let draws = 0;
+    const draw = room.drawRoles.bind(room);
+    room.drawRoles = () => { draws++; draw(); };
+    room.removePlayer([A, B, Cat].find(p => p.id !== before.drv && p.id !== before.nav).id, 'left');
+    check(room.phase === 'camp' && draws === 0 && room.roles.drv === before.drv && room.roles.nav === before.nav, 'roles: in camp, someone leaving draws nothing again (a role is only handed on)');
+    room.sim.free?.();
+  }
+  {
+    // a new draw in camp takes the wheel from the old driver and the map from the old navigator, and tells both
+    const room = new Room('REDRAW', 4242), cs = [new FakeConn(), new FakeConn(), new FakeConn()];
+    const A = room.addPlayer(cs[0], 'Ann').player, B = room.addPlayer(cs[1], 'Bob').player;
+    room.welcome(A); room.welcome(B);
+    tick(room, 0.5);
+    room.setRoles(A.id, B.id);
+    const map = [...room.sim.props.values()].find(p => p.type === 'map'), t = map.body.translation();
+    room.onPose(A, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+    room.handle(A, { t: 'use', kind: 'seat0' });
+    room.onPose(B, { par: 1, x: -0.4, y: 0.05, z: 2.3, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+    room.handle(B, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 });
+    tick(room, 0.3);
+    const before = A.seat === 0 && room.sim.holds.get(B.id)?.id === map.id;
+    const Cat = room.addPlayer(cs[2], 'Cat').player;
+    room.welcome(Cat);
+    room.setRoles(Cat.id, A.id);   // whatever the draw picked, both jobs move now
+    const st = cs[0].last('seat'), g = cs[1].last('grabbed');
+    check(before && A.seat === null && st?.seat === null && !!st?.exit && !room.sim.holds.has(B.id) && g?.ok === false && g?.id === map.id && map.holders.size === 0,
+      'roles: a new draw takes the wheel from the old driver and the map from the old navigator, and tells both');
+    room.sim.free?.();
+  }
+  {
+    // two on the road, and the driver quits: the navigator drives now, and the map leaves their hands (the
+    // driver never reads it)
+    const room = new Room('ALONE', 4242), ca = new FakeConn(), cb = new FakeConn();
+    const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player;
+    room.welcome(A); room.welcome(B);
+    room.setRoles(A.id, B.id);
+    tick(room, 0.5);
+    const z = room.W.camp.exitZ + 4;
+    room.sim.placeRV(room.W.roadX(z), z, 0);
+    tick(room, 0.2);
+    const map = [...room.sim.props.values()].find(p => p.type === 'map');
+    const stand = (p, x, z) => room.onPose(p, { par: 1, x, y: 0.05, z, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+    stand(A, 0.6, 2.4); room.handle(A, { t: 'use', kind: 'seat0' });
+    stand(B, -0.4, 2.3);
+    const t = map.body.translation();
+    room.handle(B, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 });
+    tick(room, 0.3);
+    const reading = room.sim.holds.get(B.id)?.id === map.id;
+    room.handle(A, { t: 'leave' });
+    const pulled = !room.sim.holds.has(B.id) && cb.last('grabbed')?.ok === false && map.holders.size === 0;
+    stand(B, 0.6, 2.4); room.handle(B, { t: 'use', kind: 'seat0' });
+    check(room.phase === 'road' && reading && pulled && room.roles.drv === B.id && !room.roles.nav && B.seat === 0 && cb.has(m => m.t === 'toast' && /Bob drives today\. With nobody to read it/.test(m.text)),
+      'roles: the driver quits and only the navigator is left: they take the wheel, and the map leaves their hands');
+    room.sim.free?.();
+  }
+  {
+    // in camp, the driver drops, Cat stands in at the wheel, and the driver never comes back: Cat keeps the
+    // wheel and the job (no draw again)
+    const room = new Room('STANDCAMP', 4242), cs = [0, 1, 2, 3].map(() => new FakeConn());
+    const [A, B, Cat, Dan] = ['Ann', 'Bob', 'Cat', 'Dan'].map((n, i) => room.addPlayer(cs[i], n).player);
+    for (const p of [A, B, Cat, Dan]) room.welcome(p);
+    room.setRoles(A.id, B.id);
+    tick(room, 0.5);
+    room.hold(A, 0.5);
+    room.onPose(Cat, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+    room.handle(Cat, { t: 'use', kind: 'seat0' });
+    tick(room, 0.8);
+    check(room.phase === 'camp' && !room.players.has(A.id) && Cat.seat === 0 && room.roles.drv === Cat.id && room.roles.nav === B.id, 'stand-ins in camp: the driver never comes back: the stand-in keeps the wheel and the job');
     room.sim.free?.();
   }
   {
