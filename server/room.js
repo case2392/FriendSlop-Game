@@ -59,7 +59,7 @@ export class Room {
     // the old day's physics world lives in WASM memory that garbage collection gives back late or
     // never: free it, once the tick that replaced it (which may still hold it) has finished
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
-    this.settleTables();
+    // (a new run drops whatever the last one left on the casino tables: it starts with $200, that's all)
     this.W = generateLeg(this.seed, this.day);
     this.sim = new Sim(this.W, { carry });
     this.phase = 'camp';
@@ -86,6 +86,7 @@ export class Room {
   }
 
   nextDay() {
+    this.settleTables();
     const carry = this.sim.carryOver();
     // who's riding along? their RV-local pose survives the teleport
     this.day++;
@@ -187,6 +188,7 @@ export class Room {
       if (p.key !== key) continue;
       if (p.connected) { const old = p.conn; this.hold(p, p.holdSecs || HOLD_SECS, true); try { old?.close?.(4002, 'replaced by a new connection'); } catch {} }
       p.conn = conn; p.connected = true; p.heldAt = null; p.rdy = !!opts.ready; p.activeAt = this.t;
+      p.voice = false;   // (a reloaded page isn't in voice yet; a page that is says so on its welcome: main.js)
       this.awaitReady(p);
       if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
       return p;
@@ -752,12 +754,15 @@ export class Room {
     this.finish(false, short);
   }
 
-  // money still on the casino tables goes back to the bank: a blackjack hand being voted on is called off
-  // (the stake returned), a coin flip in the air lands now. (At midnight, before the Repo Man counts it, and
-  // at dawn)
+  // money still on the casino tables when the day ends (at midnight, before the Repo Man counts it, and at
+  // dawn): a blackjack hand being voted on is played out as a stand, a coin flip in the air lands now
   settleTables() {
-    const back = this.bj?.pushBack() || 0;
-    if (back > 0) { this.bank += back; this.toast(`The dealer pushed the hand back: ${fmt$(back)} returned.`, '#fff', 4); }
+    const r = this.bj?.callIt(this.t);
+    if (r) {
+      this.bank += r.delta;
+      this.toast('Last call: the dealer plays out the hand on the table (you stand).', '#ffd166', 4);
+      this.betResult(r.won, 'Blackjack', null);
+    }
     if (this.pendingFlip) {
       const f = this.pendingFlip;
       this.pendingFlip = null;

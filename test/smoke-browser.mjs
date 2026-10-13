@@ -56,6 +56,14 @@ try {
   const code = await host.evaluate(() => window.__nmd.code);
   const chip = await host.evaluate(() => document.getElementById('hCode').textContent);
   check(/^[1-9]\d{3}$/.test(code) && chip.includes(code), `hosted a trip: trip code ${code}, shown on the HUD ("${chip}")`);
+  // the help page (it opens by itself on a first trip) fits a 1280x720 screen: its Got It button on it
+  const helpFit = await host.evaluate(() => {
+    const h = document.getElementById('help'); h.classList.remove('hidden');
+    const b = document.getElementById('helpOk').getBoundingClientRect(), fits = b.top >= 0 && b.bottom <= innerHeight;
+    h.classList.add('hidden');
+    return { fits, bottom: Math.round(b.bottom), h: innerHeight };
+  });
+  check(helpFit.fits, `the help page fits the screen: its Got It button ends at y ${helpFit.bottom} of ${helpFit.h}`);
   const joiner = await open('Dave');
   // note when a prop smashes on Dave's side (his socket opens on his first Join click)
   await joiner.evaluate(() => { const WS = window.WebSocket; window.__breakAt = []; window.WebSocket = class extends WS { constructor(...a) { super(...a); this.addEventListener('message', e => { if (String(e.data).includes('"k":"break"')) window.__breakAt.push(performance.now()); }); } }; });

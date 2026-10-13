@@ -886,6 +886,9 @@ net.on('welcome', m => {
   const back = S.phase === 'game';          // a reconnect: the game's screen is already up
   S.selfId = m.id; S.code = m.code;
   welcomeWait?.resolve(m);
+  // say whether this page is in voice: a reloaded page rejoins its seat out of voice (the host forgets it:
+  // room.js resume), a reconnected one that's still in voice says so again
+  net.send({ t: 'voice', on: !!voice.V.on });
   if (back) return;
   hostLeft = null;
   $('menuError').textContent = '';

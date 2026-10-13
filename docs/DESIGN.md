@@ -75,8 +75,8 @@ mesh works. As a design, though, it was doomed. In order of severity:
 7. **Polish went to the wrong layer.** The last five commits were graphics
    passes. Art doesn't rescue a game that has no verbs.
 
-What survives: the room-code server, the WebRTC voice mesh (which now gets
-spatialized), the no-build-step Three.js client, the faceted toy-diorama art
+What survives: the room-code server, the voice chat (now proximity voice,
+relayed by the host), the no-build-step Three.js client, the faceted toy-diorama art
 direction, and the blackjack engine.
 
 ---
@@ -442,9 +442,10 @@ Things the systems will produce without being scripted:
 - **Shared deterministic world generation** (`shared/world.js`): the server
   and every client build identical terrain from the seed. No meshes go over
   the wire.
-- **Voice** is a WebRTC P2P mesh signaled over the game WebSocket, then
-  routed through WebAudio: panner (HRTF), occlusion low-pass, and a radio
-  band-pass path for walkies.
+- **Voice** is Opus over the game's own connection (WebCodecs), relayed by
+  the host only to players within earshot (27 m) or on a walkie, then routed
+  through WebAudio: panner (HRTF), distance fade (silent by 25 m), occlusion
+  low-pass, and a radio band-pass path for walkies. Nothing peer-to-peer.
 - **Client:** Three.js, no build step, no assets. All geometry and textures
   are procedural, and sound is synthesized. The art target is a 2004
   hand-painted MMO (see [ART.md](ART.md)). Textures are painted on canvases

@@ -2,7 +2,8 @@
 //
 // Where it connects: ?ws=<url> (tools), the desktop shell's window.desktop.wsUrl (the host's own game in
 // a local process, or the bridge to a friend's game over Steam), or the page's own server (the browser
-// build). Binary frames are proximity voice (voice_relay.js); everything else is JSON.
+// build). Binary frames are proximity voice (voice.js; the host relays them: server/host.js relayVoice);
+// everything else is JSON.
 
 const handlers = {};
 let ws = null;
