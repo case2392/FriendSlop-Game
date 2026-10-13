@@ -886,12 +886,15 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
   tick(room, 0.5);
   for (const d of sim.mobs.dens.values()) Object.assign(d, { awake: true, awakeChecked: 1e9 });
   for (const m of sim.mobs.list.values()) if (m.type === 'grumphorn') { const p = sim.props.get(m.id); sim.mobs.ghWake(m, p, p.body.translation()); }
+  // (the day's first snapshot carries every prop once, the pages' first look at it: the budget is for the ones after)
+  room.snapshot();
   let max = 0, sum = 0, n = 0;
   driveAt(room, ps[0], 8, 20, i => {
     for (const [k, P] of ps.entries()) if (k) ride(room, P, 0, -1 + k, 0);
     if (i % 3 === 0) { const L = JSON.stringify(room.snapshot()).length; max = Math.max(max, L); sum += L; n++; }
   });
-  check(max <= 4752 && sum / n <= 2600, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
+  // (the mean: 2,520 B before the Hoard, whose six awake cost 150 B more than a den of three)
+  check(max <= 4752 && sum / n <= 2800, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
 }
 
 {
@@ -1196,6 +1199,130 @@ function byTheRV(day, names = ['Ann'], side = -1) {
     `beanings: a gnome thrown at Bob knocks him over (never out) and he drops the toaster; the crew hears who did it (${k ? (k.ko ? 'KO' : 'stumble') : 'missed'})`);
 }
 
+// ---- the Hoard, the store's hard hat and cheese, tipping, stones ---------------------------------------------
+{
+  // H1: day 5's Hoard: one den of them (none before), its pile four good things
+  const bad = [], seen = [];
+  for (const seed of [4242, 7, 777, 24757, 32676]) {
+    const W = generateLeg(seed, 5), H = W.dens.filter(d => d.hoard);
+    if (H.length !== 1) { bad.push(`${seed}: ${H.length} hoards`); continue; }
+    const h = H[0], poi = W.pois.find(p => p.id === h.poi);
+    const stash = h.stash.map(id => W.props.find(p => p.id === id)), total = stash.reduce((a, p) => a + (p?.value || 0), 0);
+    if (stash.length !== 4 || stash.some(p => !p) || total < 2000 || total > 3200) bad.push(`${seed}: stash of ${stash.length} worth $${total}`);
+    seen.push(`$${total} at the ${poi?.type}${W.pois.some(p => p.type === 'junk') ? ' (a junkyard that day)' : ''}`);
+    for (let day = 1; day <= 4; day++) if (generateLeg(seed, day).dens.some(d => d.hoard)) bad.push(`${seed}/${day} a hoard`);
+  }
+  check(!bad.length, `hoard: day 5 has one, and no day before it; its pile is four good things (${seen.join('; ')})${bad.length ? ': ' + bad.join('; ') : ''}`);
+}
+{
+  // H2: all of them at home: six ringtails at the Hoard for a crew of four
+  const { room, ps } = crew(['Ann', 'Bob', 'Cat', 'Dee']);
+  room.debug(ps[0], { op: 'day', d: 5 });
+  tick(room, 0.2);
+  room.mobsOn = true;
+  room.phase = 'road';
+  tick(room, 0.5);
+  const M = room.sim.mobs, h = [...(M?.dens.values() || [])].find(d => d.hoard);
+  const n = h ? [...M.list.values()].filter(m => m.den === h.id).length : 0;
+  check(h && n === 6 && h.stash.every(id => M.hoard.has(id)), `hoard: six ringtails at home for a crew of four (${n}), sitting on the pile`);
+}
+{
+  // S1: the hard hat: bought at the store (on the crew's roster), and it takes a knockout once
+  const { room, ps: [A, B] } = crew(['Ann', 'Bob']);
+  room.bank = 1000;
+  const u = room.W.uses.find(q => q.kind === 'buy' && q.arg === 'hardhat');
+  stand(room, A, u.x + 1.2, u.z, -Math.PI / 2);
+  room.handle(A, { t: 'use', id: u.id });
+  const meta = B.conn.last('meta'), bought = A.hat && room.bank === 920 && meta?.players.find(q => q.id === A.id)?.hat === 1;
+  room.handle(A, { t: 'use', id: u.id });   // (a second: no)
+  const once = room.bank === 920;
+  room.handle(A, { t: 'hat', why: 'fall' });
+  check(bought && once && !A.hat && B.conn.has(x => x.t === 'toast' && /Ann's hard hat took that one/.test(x.text)) && room.stats.kos === 0,
+    `store: a hard hat for $80, on the roster; one at a time; when it takes a knockout it's done for (bank $${room.bank})`);
+}
+{
+  // S2: the cheese wheel: on the counter when bought, and a den goes for it before a vase
+  const { room, ps: [A] } = crew(['Ann']);
+  room.bank = 1000;
+  const u = room.W.uses.find(q => q.kind === 'buy' && q.arg === 'cheese');
+  stand(room, A, u.x + 1.2, u.z, -Math.PI / 2);
+  room.handle(A, { t: 'use', id: u.id });
+  const ch = [...room.sim.props.values()].find(p => p.type === 'cheese'), t0 = ch && at(room, ch.id);
+  const onCounter = ch && Math.hypot(t0.x - u.x, t0.z - u.z) < 0.6 && room.bank === 970;
+  // (a wheel, lying flat on it: 14 cm tall, 32 cm across. Its collider was once stood on end, 32 cm tall)
+  tick(room, 1.5);
+  const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
+  const cq = ch?.body.rotation(), up = cq ? 1 - 2 * (cq.x * cq.x + cq.z * cq.z) : 0;
+  const under = ch && room.sim.world.castRay(new RAPIER.Ray(ch.body.translation(), { x: 0, y: -1, z: 0 }), 1, true, undefined, undefined, ch.col);
+  const flat = !!under && Math.abs(under.timeOfImpact - 0.07) < 0.02 && up > 0.9;
+  const r = thief(['Bob']);
+  stand(r.room, r.ps[0], r.g.x + 30, r.g.z, Math.PI / 2);
+  putLoot(r.room, 'vase', r.g.x - 8, r.g.z, 300);
+  const bait = r.room.sim.addProp('cheese', { x: r.g.x, y: r.room.W.heightAt(r.g.x, r.g.z + 9) + 0.3, z: r.g.z + 9 }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+  for (let i = 0; i < 60 * 25 && !mobEvs(r.ps[0], 'steal').length; i++) tick(r.room, 1 / 60);
+  const first = mobEvs(r.ps[0], 'steal')[0];
+  check(onCounter && flat && first?.item === bait.id && r.room.dayStats.stolen === 0, `store: a cheese wheel for $30 lands on the counter, lying flat (its middle ${under ? under.timeOfImpact.toFixed(3) : '?'} m up); a den goes for it before a $300 vase (it took the ${first ? (first.item === bait.id ? 'cheese' : 'vase') : 'nothing'})`);
+}
+{
+  // T1: asleep, two friends shoving its flank together tip it over: down for 12 s, then up; one shove on its
+  // own just wakes it a moment later
+  const out = {};
+  for (const two of [true, false]) {
+    const { room, ps: [A, B] } = crew(['Ann', 'Bob']);
+    room.mobsOn = false;
+    const g = openGround(room), id = mobAt(room, A, 'grumphorn', g.x, g.z, { yaw: 0, st: GST.SLEEP }), m = mobOf(room, id);
+    // (crept up crouched, side on to it, 1.6 m off its middle, facing it)
+    stand(room, A, g.x - 1.6, g.z + 0.4, Math.PI / 2, C.FLAG.CROUCH); stand(room, B, g.x - 1.6, g.z - 0.4, Math.PI / 2, C.FLAG.CROUCH);
+    tick(room, 0.5);
+    room.handle(A, { t: 'shove' });
+    tick(room, 0.3);
+    if (two) room.handle(B, { t: 'shove' });
+    tick(room, 1 / 60);
+    const st0 = m.st;
+    tick(room, 1);
+    const st1 = m.st;
+    if (two) { tick(room, GH.TIP_T); out.two = { st0, st1, after: m.st, ev: mobEvs(A, 'tip').length }; }
+    else out.one = { st0, st1 };
+  }
+  check(out.two.st0 === GST.TIPPED && out.two.st1 === GST.TIPPED && out.two.after !== GST.TIPPED && out.two.after !== GST.SLEEP && out.two.ev === 1
+    && out.one.st0 === GST.SLEEP && out.one.st1 !== GST.SLEEP,
+    `grumphorn: two friends shoving its side tip it over (${out.two.st0 === GST.TIPPED ? 'tipped' : out.two.st0}), it's up after ${GH.TIP_T} s; one shove alone wakes it a moment later (${JSON.stringify(out)})`);
+}
+{
+  // W1: stones heaped at the foot of each Grumphorn sign
+  const bad = [];
+  let n = 0;
+  for (const seed of [4242, 7, 777]) for (let day = 2; day <= 5; day++) {
+    const W = generateLeg(seed, day);
+    for (const sg of W.signs.filter(q => q.beast)) {
+      const k = W.props.filter(p => p.type === 'stone' && Math.hypot(p.x - sg.x, p.z - sg.z) < 3).length;
+      n += k;
+      if (k < 3) bad.push(`${seed}/${day}: ${k} stones`);
+    }
+  }
+  check(!bad.length, `grumphorn: a heap of stones by every warning sign (${n} over 3 seeds x days 2-5)${bad.length ? ': ' + bad.join('; ') : ''}`);
+}
+{
+  // W2: the stones stay in their heaps, asleep (they were balls and rolled off down the slope, 6 m and more;
+  // one rocking on a fold of the ground was sent in every snapshot for good)
+  const bad = [];
+  let n = 0;
+  for (const day of [2, 5]) {
+    const { room, ps: [A] } = crew(['Ann']);
+    room.debug(A, { op: 'day', d: day });
+    tick(room, 0.2);
+    room.phase = 'road';
+    const st = [...room.sim.props.values()].filter(p => p.type === 'stone'), at0 = st.map(p => ({ ...p.body.translation() }));
+    tick(room, 20);
+    n += st.length;
+    st.forEach((p, i) => {
+      const d = Math.hypot(p.body.translation().x - at0[i].x, p.body.translation().z - at0[i].z);
+      if (!p.body.isSleeping() || d > 0.3) bad.push(`day ${day} stone ${p.id}: ${p.body.isSleeping() ? 'asleep' : 'awake'}, moved ${d.toFixed(2)} m`);
+    });
+  }
+  check(n && !bad.length, `grumphorn: the ${n} stones by the signs stay in their heaps, asleep after 20 s (seed 4242, days 2 and 5)${bad.length ? ': ' + bad.join('; ') : ''}`);
+}
+
 // ---- world gen: the wildlife is placed last, from its own random stream: nothing else moves ---------------------
 {
   const { PLAN } = await import('../shared/mobs.js');
@@ -1225,7 +1352,7 @@ function byTheRV(day, names = ['Ann'], side = -1) {
       if (Math.abs(d.x - W.roadX(d.z)) < 14) bad.push(`${seed}/${day} den ${d.id} by the road`);
       if (W.obstacles.some(o => Math.abs(o.z - d.z) < 30)) bad.push(`${seed}/${day} den ${d.id} by an obstacle`);
       if (day === 1 && poi === first) bad.push(`${seed}/${day} den at the first stop`);
-      if (d.stash.length !== 1 || !W.props.some(p => p.id === d.stash[0] && p.id > maxOld)) bad.push(`${seed}/${day} den ${d.id} stash`);
+      if (d.stash.length !== (d.hoard ? 4 : 1) || d.stash.some(id => !W.props.some(p => p.id === id && p.id > maxOld))) bad.push(`${seed}/${day} den ${d.id} stash`);
     }
   }
   check(!bad.length, `world gen: the wildlife changes nothing else (3 seeds x 5 days), beds sit on the road past their obstacle, dens beside the stops${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);

@@ -18,6 +18,8 @@ import { inMud } from '../shared/world.js';
 import { Mobs } from './mobs.js';
 
 let ready = null;
+// a full snapshot resends at most this many things lying still (the rest in the next ones, in turn)
+const FULL_SHARE = 32;
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
 import { GROUPS } from './groups.js';
@@ -853,6 +855,15 @@ export class Sim {
       }
     }
 
+    // a stone or rock barely moving for a second is put to sleep: one rocking on a fold of the ground (between
+    // two of its triangles) never gets under the engine's own limits, and was sent in every snapshot for good
+    for (const p of this.props.values()) {
+      if (!LOOT[p.type].settle || p.holders.size || p.body.isSleeping()) continue;
+      const v = p.body.linvel(), w = p.body.angvel();
+      if (Math.hypot(v.x, v.y, v.z) > 0.12 || Math.hypot(w.x, w.y, w.z) > 1) { p.calm = 0; continue; }
+      if ((p.calm = (p.calm || 0) + dt) > 1) { p.body.sleep(); p.calm = 0; }
+    }
+
     // a thrown thing hitting a friend (not whoever threw it) beans them: a stumble, and they drop what they
     // carry. Never a knockout, never a bill
     for (const p of this.props.values()) {
@@ -942,16 +953,25 @@ export class Sim {
       wheels.push(r3(v.wheelSuspensionLength(i) ?? SUSP_REST), Math.round((v.wheelRotation(i) || 0) * 100) / 100);
     }
     const rv = [r3(t.x), r3(t.y), r3(t.z), r4(q.x), r4(q.y), r4(q.z), r4(q.w), r3(lv.x), r3(lv.y), r3(lv.z), r3(this.steer), ...wheels];
+    // (things lying still that the pages already have are left out; a full one every so often resends them, a
+    // share at a time, so it stays within the snapshot's size however much lies about)
     const props = [];
+    let k = 0;
+    const c0 = this.fullAt || 0;
     for (const p of this.props.values()) {
       const sleeping = p.body.isSleeping();
-      if (!full && sleeping && p.sentSleep) continue;
+      if (sleeping && p.sentSleep) {
+        if (!full) continue;
+        const i = k++;
+        if (i < c0 || i >= c0 + FULL_SHARE) continue;
+      }
       p.sentSleep = sleeping;
       const pt = p.body.translation(), pq = p.body.rotation();
       const e = [p.id, r3(pt.x), r3(pt.y), r3(pt.z), r4(pq.x), r4(pq.y), r4(pq.z), r4(pq.w)];
       if (p.mob) e.push(p.mob.wire());   // wildlife: its state (shared/mobs.js RST / GST, plus flag bits)
       props.push(e);
     }
+    if (full) this.fullAt = c0 + FULL_SHARE >= k ? 0 : c0 + FULL_SHARE;
     const H = this.hook;
     const hp = this.hookPos();
     const hook = [H.state === 'stowed' ? 0 : H.state === 'out' ? 1 : 2, r3(hp.x), r3(hp.y), r3(hp.z), r3(H.len), H.reeling ? 1 : 0, H.holder ?? 0];

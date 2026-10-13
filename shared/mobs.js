@@ -28,6 +28,7 @@ export const RT = {
   HORN_R: 20, HORN_DEAF: 15, SPOOK_T: 4,             // the horn scatters them (then they ignore it a while)
   STASH_R: 1.2, HOME_R: 3, COOLDOWN: [5, 9], TRAP_T: 8,
   RAID_R: 40, RAID_CLEAR: 6, RAID_T: 8, HOP_IN: [2.5, 5.6], HOP_OUT: [2.5, 2.5],   // raids on the RV left open
+  BAIT_V: 1500,                                      // a cheese wheel, to a ringtail picking what to go for
   NIP_R: 7, NIP_CD: 3, NIP_REST: 5,                  // a stranger at the den is nipped (each player every NIP_CD s)
 };
 export const GH = {
@@ -44,7 +45,9 @@ export const GH = {
   REVIVE_SAFE: 3.8, GRACE_T: 10, GRACE_R: 6,         // it leaves alone anyone near a downed friend (a revive reaches 3.5 m), and a toss's spot
   PATIENCE: 100,
   CREW: [0.7, 0.85, 1.0, 1.15, 1.3, 1.45],          // patience x this, for crews of 1..6
-  COST: { propJ: 0.1, propCap: 40, windedX: 2, shove: 2, rvPerMs: 20, winchPerS: 6, charge: 8, toss: 35 },
+  COST: { propJ: 0.1, propCap: 40, windedX: 2, shove: 2, rvPerMs: 20, winchPerS: 6, charge: 8, toss: 35, tip: 10 },
+  TIP_WIN: 1.0, TIP_T: 12, FLANK: 0.6,               // asleep, two friends shoving its flank within TIP_WIN s tip it over for TIP_T s
+  NOTICE: 1.5,                                       // someone crouched right by it: this long before it notices
   HIT_J: 10, HIT_V: 0.5,                             // a hit: a thing coming at it this fast, bringing this much momentum (kg m/s)
 };
 // rockfall (days 3-5, at the narrows): it comes down when the RV gets within NEAR m or the boulder is moved,
@@ -56,20 +59,23 @@ export const RF = { NEAR: 25, HONK_R: 60, WARN: 1.5, GAP: 0.3, PUSH: 2.5, KO_V: 
 // per day: ringtail dens (how many, ringtails in each, items each den may steal, how close a watcher scares
 // them off; whether they bite, nip strangers at the den and raid the RV left open), where the grumphorns
 // sleep (past which obstacle, how far) and how long one glares before it charges, and whether there's loose
-// rock on the narrows
+// rock on the narrows. Day 5's Hoard: one den is the ringtails' big pile (these four, and all of them home)
 export const PLAN = [
   { dens: 1, perDen: 2, cap: 2, fear: 6,   bites: false, raids: false, glare: 0,   rocks: false, beds: [] },
   { dens: 2, perDen: 3, cap: 3, fear: 5,   bites: true,  raids: true,  glare: 1.0, rocks: false, beds: [{ ob: 'mud', from: 'z1', dz: 12 }] },
   { dens: 2, perDen: 3, cap: 3, fear: 4,   bites: true,  raids: true,  glare: 0.9, rocks: true,  beds: [{ ob: 'gate', dz: 6.5 }] },
   { dens: 3, perDen: 3, cap: 3, fear: 4,   bites: true,  raids: true,  glare: 0.8, rocks: true,  beds: [{ ob: 'boulder', dz: 12 }] },
-  { dens: 3, perDen: 3, cap: 3, fear: 3.5, bites: true,  raids: true,  glare: 0.7, rocks: true,  beds: [{ ob: 'gate', dz: 6.5 }, { ob: 'boulder', dz: 12 }] },
+  { dens: 3, perDen: 3, cap: 3, fear: 3.5, bites: true,  raids: true,  glare: 0.7, rocks: true,  beds: [{ ob: 'gate', dz: 6.5 }, { ob: 'boulder', dz: 12 }],
+    hoard: { stash: ['painting', 'neon', 'guitar', 'trophy'] } },
 ];
 // states, sent in the snapshot (plus the bits below)
 export const RST = { DEN: 0, SNEAK: 1, SNATCH: 2, RUN: 3, STASH: 4, HELD: 5, STUN: 6, SPOOK: 7, FLUNG: 8, GONE: 9, TRAPPED: 10, RAID: 11, INRV: 12, NIP: 13 };
-export const GST = { SLEEP: 0, RISE: 1, GLARE: 2, CHARGE: 3, WINDED: 4, ROAM: 5, DOZE: 6, LEAVE: 7, LEFT: 8, HELD: 9 };
+export const GST = { SLEEP: 0, RISE: 1, GLARE: 2, CHARGE: 3, WINDED: 4, ROAM: 5, DOZE: 6, LEAVE: 7, LEFT: 8, HELD: 9, TIPPED: 10 };
 export const ST_CARRY = 32, ST_MOOD = 64, ST_MASK = 31;
 export const crewFactor = n => GH.CREW[Math.max(1, Math.min(6, n)) - 1];
 export const ringtailsPerDen = (day, n) => Math.max(1, Math.min(5, PLAN[day - 1].perDen + (n >= 5) + (n >= 6) - (n <= 1)));
+// the Hoard's: six of them (four against one player, five against two)
+export const hoardRingtails = n => n <= 1 ? 4 : n === 2 ? 5 : 6;
 export const STOP_NAMES = { gas: 'the gas station', semi: 'the wrecked semi', yard: 'the yard sale', junk: 'the junkyard', dino: 'the dinosaur' };
 // the brass cowbell a grumphorn leaves behind: ordinary loot, worth more each day
 export const cowbellValue = day => Math.round(170 * (1 + 0.22 * (day - 1)) / 5) * 5;

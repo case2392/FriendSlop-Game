@@ -29,11 +29,17 @@ export const LOOT = {
   // not loot: tools
   map:      { name: 'Road Map',         shape: ['box', 0.2, 0.02, 0.14],  mass: 0.4, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true },
   boulder:  { name: 'Boulder',          shape: ['box', 2.0, 1.3, 1.5],    mass: 1000,value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true },
-  // what comes down off the rim in a rockfall (and makes good ammunition after); adamp: it rolls to a stop
-  rock:     { name: 'Loose Rock',       shape: ['ball', 0.24],            mass: 40,  value: 0,    frag: 0,   cls: '2h',    tough: 99, tool: true, adamp: 1.6, bounce: 0.35 },
+  // what comes down off the rim in a rockfall (and makes good ammunition after); adamp: it rolls to a stop;
+  // settle: barely moving for a second, it's put to sleep (server/sim.js)
+  rock:     { name: 'Loose Rock',       shape: ['ball', 0.24],            mass: 40,  value: 0,    frag: 0,   cls: '2h',    tough: 99, tool: true, adamp: 1.6, bounce: 0.35, settle: true },
   // wildlife
   ringtail: { name: 'Ringtail',         shape: ['ball', 0.24],            mass: 12,  value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, mob: 'ringtail', sensor: 0.34 },
   grumphorn:{ name: 'Grumphorn',        shape: ['cap', 0.75, 0.7],        mass: 800, value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true, mob: 'grumphorn' },
+  // stones heaped by a grumphorn's warning sign: something to throw at it (a box, so it stays in its heap: a
+  // ball rolled off down the slope)
+  stone:    { name: 'Stone',            shape: ['box', 0.14, 0.105, 0.14], mass: 18, value: 0,    frag: 0,   cls: '2h',    tough: 99, tool: true, adamp: 1.6, bounce: 0.3, settle: true },
+  // from the store: bait (ringtails go for it before anything else about), worth nothing at the pawn shop
+  cheese:   { name: 'Cheese Wheel',     shape: ['cyl', 0.07, 0.16],       mass: 5,   value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, bait: true },
   // what a grumphorn leaves behind when it's had enough
   cowbell:  { name: 'Brass Cowbell',    shape: ['cyl', 0.13, 0.11],       mass: 3,   value: 170,  frag: 0.15,cls: '1h',    tough: 20 },
 };

@@ -8,7 +8,7 @@
 // body touched after it was freed throws, and that world's physics is broken for the rest of the day.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { LOOT } from '../shared/loot.js';
-import { RT, GH, RF, PLAN, GST, RST, ST_CARRY, ST_MOOD, crewFactor, cowbellValue, ringtailsPerDen } from '../shared/mobs.js';
+import { RT, GH, RF, PLAN, GST, RST, ST_CARRY, ST_MOOD, crewFactor, cowbellValue, ringtailsPerDen, hoardRingtails } from '../shared/mobs.js';
 import { FLAG, MODE } from '../shared/constants.js';
 import { toLocal, qRotate, insideRV, RV_DIM } from '../shared/rv.js';
 import { inMud, bedExit } from '../shared/world.js';
@@ -247,7 +247,7 @@ export class Mobs {
     }
     if (m.type === 'grumphorn') {
       // (its mind is made up once it glares: a hand on its horns doesn't stop the charge, or the toss)
-      if (m.st === GST.LEAVE || m.st === GST.LEFT || m.st === GST.GLARE || m.st === GST.CHARGE) return;
+      if (m.st === GST.LEAVE || m.st === GST.LEFT || m.st === GST.GLARE || m.st === GST.CHARGE || m.st === GST.TIPPED) return;
       // by the horns: it shakes you off in a moment
       const q = this.players?.get(pid);
       this.ghWake(m, p, q?.pos);
@@ -278,8 +278,31 @@ export class Mobs {
       p.body.applyImpulse(v3(fx * 4 * RT.MASS, 2 * RT.MASS, fz * 4 * RT.MASS), true);
       this.rtDrop(m, p);
       this.setSt(m, RST.FLUNG);
-    } else if (m.type === 'grumphorn') { this.ghWake(m, p, pl.pos); this.ghCost(m, p, GH.COST.shove); }
+    } else if (m.type === 'grumphorn') {
+      if (m.st === GST.TIPPED) return;
+      // asleep and shoved on its flank, it stirs (a moment before it's up): a second friend's shove on the
+      // flank in that moment tips it over (the brain wakes it if nobody does)
+      if ((m.st === GST.SLEEP || m.st === GST.DOZE) && this.ghFlank(p, fx, fz)) {
+        if (m.stir && this.t - m.stir.t <= GH.TIP_WIN && m.stir.by !== pl.id) { m.stir = null; this.ghTip(m, p, fx, fz); }
+        else if (!m.stir || this.t - m.stir.t > GH.TIP_WIN) m.stir = { t: this.t, by: pl.id, at: pl.pos ? v3(pl.pos.x, pl.pos.y, pl.pos.z) : null };
+      } else { this.ghWake(m, p, pl.pos); this.ghCost(m, p, GH.COST.shove); }
+    }
     this.wake(p);
+  }
+  // a shove along (fx, fz) side-on to it (not at its head or its rump)
+  ghFlank(p, fx, fz) {
+    const yaw = yawOf(p.body.rotation());
+    return Math.abs(fx * Math.sin(yaw) + fz * Math.cos(yaw)) < GH.FLANK * Math.hypot(fx, fz);
+  }
+  // over it goes, on its side, legs in the air: TIP_T s to get by, and then it's up (and not best pleased)
+  ghTip(m, p, fx, fz) {
+    for (const pid of [...p.holders]) { this.sim.release(pid); this.sim.out.push({ k: 'slip', id: m.id, by: pid }); }
+    const yaw = yawOf(p.body.rotation());
+    m.tipSide = Math.sign(fx * Math.cos(yaw) - fz * Math.sin(yaw)) || 1;   // (which way it fell: its right, or left)
+    p.col.setFriction(0.9);
+    this.setSt(m, GST.TIPPED);
+    this.sim.out.push({ k: 'mob', id: m.id, s: 'tip', side: m.tipSide });
+    this.ghCost(m, p, GH.COST.tip);
   }
   // the driver leaned on the horn (where the RV is): any grumphorn in earshot wakes, and goes for the RV; loose
   // rock up ahead comes down (early: on nobody, if they had the sense to honk well back)
@@ -487,7 +510,7 @@ export class Mobs {
     for (const o of this.list.values()) if (o !== m && o.st === RST.SNEAK && o.target != null) taken.add(o.target);
     for (const it of this.sim.props.values()) {
       const L = LOOT[it.type];
-      if (!L || L.tool || L.mob || L.mass > 15 || it.holders.size || this.sim.tied.has(it.id) || this.carriedBy.has(it.id) || this.hoard.has(it.id)) continue;
+      if (!L || (L.tool && !L.bait) || L.mob || L.mass > 15 || it.holders.size || this.sim.tied.has(it.id) || this.carriedBy.has(it.id) || this.hoard.has(it.id)) continue;
       if ((m.unreachable.get(it.id) || 0) > this.t || (den.balk?.get(it.id) || 0) > this.t || taken.has(it.id)) continue;
       const it_t = it.body.translation();
       // (up on a counter or a shelf: out of its reach)
@@ -498,7 +521,7 @@ export class Mobs {
       if (!this.seenFromDen(den, it, it_t)) continue;
       if (this.watched(it, players)) continue;
       const dropped = this.droppedByDowned.get(it.id);
-      const score = it.value / (8 + dm) * (dropped && dropped > this.t ? 1.5 : 1);
+      const score = (L.bait ? RT.BAIT_V : it.value) / (8 + dm) * (dropped && dropped > this.t ? 1.5 : 1);
       if (score > bs) { bs = score; best = it.id; }
     }
     return best;
@@ -527,7 +550,7 @@ export class Mobs {
   }
 
   rtSpawnDen(den) {
-    const n = ringtailsPerDen(this.day, this.crew), rec = { ...den, thefts: 0, awake: false, quietSince: this.t, seen: new Map() };
+    const n = den.hoard ? hoardRingtails(this.crew) : ringtailsPerDen(this.day, this.crew), rec = { ...den, thefts: 0, awake: false, quietSince: this.t, seen: new Map() };
     this.dens.set(den.id, rec);
     for (const id of den.stash || []) this.toHoard(id, den.id);
     for (let i = 0; i < n; i++) {
@@ -1071,13 +1094,18 @@ export class Mobs {
   // what (if anything) wakes it this tick: { at: where the noise came from, rv: it was the RV }, or null
   ghWaker(m, p, players) {
     const sim = this.sim;
+    let creeping = null;
     for (const q of players.values()) {
       if (!q.pos || q.ko || q.seat != null) continue;
       const d = this.ghDist(p, q.pos), crouch = (q.flags & FLAG.CROUCH) !== 0, sprint = (q.flags & FLAG.SPRINT) !== 0;
       // (in the RV only someone standing counts: crouched or seated riders never do)
       if (q.par) { if (!crouch && q.mode === MODE.WALK && d < GH.WAKE_RIDER) return { at: v3(q.pos.x, q.pos.y, q.pos.z), rv: false }; continue; }
-      if (d < (sprint ? GH.WAKE_SPRINT : crouch ? GH.WAKE_CROUCH : GH.WAKE_FOOT)) return { at: v3(q.pos.x, q.pos.y, q.pos.z), rv: false };
+      // (crouched right by it, it takes a moment to notice: long enough to creep up and tip it)
+      if (crouch && !sprint) { if (d < GH.WAKE_CROUCH) creeping = q; continue; }
+      if (d < (sprint ? GH.WAKE_SPRINT : GH.WAKE_FOOT)) return { at: v3(q.pos.x, q.pos.y, q.pos.z), rv: false };
     }
+    if (!creeping) m.creepAt = null;
+    else if ((m.creepAt ??= this.t) && this.t - m.creepAt >= GH.NOTICE) return { at: v3(creeping.pos.x, creeping.pos.y, creeping.pos.z), rv: false };
     const rt = sim.rv.translation(), rv = sim.rv.linvel();
     if (Math.hypot(rv.x, rv.z) > GH.WAKE_RV_V && this.ghDist(p, rt) < GH.WAKE_RV) return { at: v3(rt.x, rt.y, rt.z), rv: true };
     if (sim.hook.attach?.id === m.id) return { at: sim.winchWorld(), rv: true };
@@ -1192,7 +1220,13 @@ export class Mobs {
     // the winch reeling it in costs patience by the second (and wakes it)
     if (this.sim.hook.attach?.id === m.id && this.sim.hook.reeling) this.ghCost(m, p, GH.COST.winchPerS * 0.1);
     if (m.st === S.LEAVE || m.st === S.LEFT) return;
+    if (m.st === S.TIPPED) {
+      if (age >= GH.TIP_T) { m.noise = null; m.rvWoke = false; p.col.setFriction(0); this.setSt(m, S.RISE); this.sim.out.push({ k: 'mob', id: m.id, s: 'wake' }); }
+      return;
+    }
     if (m.st === S.SLEEP || m.st === S.DOZE) {
+      // stirred by a shove on its flank: a second friend's has TIP_WIN s to tip it, then it's up
+      if (m.stir) { if (now - m.stir.t > GH.TIP_WIN) { const at = m.stir.at; m.stir = null; this.ghWake(m, p, at); this.ghCost(m, p, GH.COST.shove); } return; }
       const w = this.ghWaker(m, p, players);
       if (w) { this.ghWake(m, p, w.at, w.rv); return; }
       if (m.st === S.DOZE && Math.hypot(bed.x - t.x, bed.z - t.z) < 1.5) { this.setSt(m, S.SLEEP); p.col.setFriction(0.9); }
@@ -1279,7 +1313,7 @@ export class Mobs {
         this.ghLegs(p, dx / d, dz / d, g !== ex || d > 0.5 ? GH.LEAVE : 0, dt);
         return;
       }
-      case S.RISE: case S.WINDED: case S.HELD: this.ghLegs(p, 0, 0, 0, dt); return;
+      case S.RISE: case S.WINDED: case S.HELD: case S.TIPPED: this.ghLegs(p, 0, 0, 0, dt); return;
       case S.GLARE: {
         const tp = this.targetPos(m.target, players);
         if (tp) this.face(p, Math.atan2(tp.x - t.x, tp.z - t.z), 3, dt);

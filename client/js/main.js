@@ -533,7 +533,8 @@ function mobLabel(p) {
     if (st === RST.STUN || st === RST.FLUNG) return 'A dizzy ringtail. [Hold LMB] grab it · [RMB] shove it';
     return '[Hold LMB] grab the ringtail · [RMB] shove it';
   }
-  if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by.';
+  if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by. (Two of you [RMB] shoving its side together tip it over.)';
+  if (st === GST.TIPPED) return 'A tipped-over Grumphorn! It\'s up in a moment: get by it now.';
   if (st === GST.LEFT || st === GST.LEAVE) return 'A Grumphorn that has had enough of you.';
   if (st === GST.WINDED) return 'The Grumphorn is winded: pelt it, shove it, ram it. [Hold LMB] its horns';
   return 'GRUMPHORN. Get out of its way!';
@@ -681,6 +682,9 @@ const TIPS = [
   'From day 2, leave the RV\'s door open with nobody by it and a ringtail may hop in and help itself. Shut the door, stay by it, or bungee the cargo down.',
   'From day 2, ringtails nip anyone who comes close to their den: you stumble and drop what you carry.',
   'From day 3, loose rock sits above the narrows. Honk at the yellow LOOSE ROCK sign and it comes down before you get there.',
+  'A hard hat from the store ($80) turns your next knockout into a knock.',
+  'Ringtails can\'t resist a cheese wheel ($30 at the store). Put it where you want them: away from your loot, or out past their den.',
+  'Day 5 has a Hoard: a den with six ringtails and the week\'s best stash. Bring friends.',
   'Throw junk at a friend and it knocks them over (never out). Everyone hears who did it.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
@@ -1033,7 +1037,7 @@ function onMeta(m) {
   voice.syncPeers(m.players.map(p => ({ ...p, connected: true })));
   renderVoiceUI();
   const mine = m.players.find(p => p.id === S.selfId);
-  if (mine) { hands.setColor(mine.color); S.myWalkie = mine.walkie; S.myColor = mine.color; }
+  if (mine) { hands.setColor(mine.color); S.myWalkie = mine.walkie; S.myColor = mine.color; me.hat = !!mine.hat; }
   // paint other players' looks while the browser is idle, so someone joining mid-game doesn't stall a frame
   const idle = window.requestIdleCallback || (f => setTimeout(f, 30));
   for (const p of m.players) {
@@ -1132,6 +1136,8 @@ function onMobEvent(e) {
     case 'toss': positional(at, () => sfx.thunk(1), 60); if (near < 12) shake(0.5); break;
     case 'winded': positional(at, () => sfx.snort(), 30); if (at) puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#e8e4dc'); break;
     case 'leave': positional(at, () => sfx.clang(), 60); tutDone('grumph'); break;
+    // tipped over by two friends: a thump, and it lies on that side for a while
+    case 'tip': { positional(at, () => sfx.thunk(1.3), 60); const p = S.props.get(e.id); if (p?.view) p.view.tipSide = e.side; break; }
     // the ringtails: a yoink as they make off with something (a STOLEN tag rides on it for a while), the
     // jaws letting go, a squeal when they're held, stunned or run over
     case 'steal': {
@@ -1636,6 +1642,7 @@ requestAnimationFrame(frame);
     else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
     else if (e.k === 'mantle') sfx.grab();
     else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
+    else if (e.k === 'hat') { net.send({ t: 'hat', why: e.why }); sfx.clang(); shake(0.35); }
     else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
     else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
   }
@@ -1674,6 +1681,7 @@ requestAnimationFrame(frame);
     if (!v) { v = new PlayerView(scene, p); S.views.set(id, v); }
     st.speaking = voice.V.speaking[id];
     st.walkieTx = !!(st.flags & C.FLAG.WALKIE_TX);
+    st.hat = !!p?.hat;
     v.update(dt, time, st);
   }
   for (const [id, v] of S.views) if (!others.has(id)) v.group.visible = false; else v.group.visible = true;

@@ -18,7 +18,7 @@ let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
 const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-const PRICES = { walkie: 150, drink: 40, bungee: 90 };
+const PRICES = { walkie: 150, drink: 40, bungee: 90, hardhat: 80, cheese: 30 };
 const HOLD_SECS = 90;            // a dropped player's seat (id, color, walkie) is kept this long
 const BED_WAIT = 45;             // once half the crew is in a bunk, the rest get this long
 const IDLE_SECS = 60;            // not moved, looked around or done anything for this long: away (AFK), for the roles
@@ -375,7 +375,7 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0 })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
     });
   }
@@ -410,6 +410,12 @@ export class Room {
       case 'use': return this.onUse(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       case 'ko': return this.onKO(p, m);
+      // the hard hat took a knockout (the page turned it into a knock): it's done for
+      case 'hat':
+        if (!p.hat) return;
+        p.hat = false; this.sendMeta();
+        this.toast(`${p.name}'s hard hat took that one. (It's done for.)`, '#ffd166', 3);
+        return;
       case 'wake': return this.onWake(p);
       case 'emote': if (C.EMOTES.includes(m.e)) this.broadcast({ t: 'emote', id: p.id, e: m.e }); return;
       case 'ping': {
@@ -633,6 +639,7 @@ export class Room {
       const what = u.arg, price = PRICES[what];
       if (this.bank < price) return this.toast(`${fmt$(price)}. The bank has ${fmt$(this.bank)}. No.`, '#ff8a80', 3, p);
       if (what === 'walkie' && p.walkie) return this.toast('You already have a walkie. Hold T to talk.', '#fff', 3, p);
+      if (what === 'hardhat' && p.hat) return this.toast('You\'ve got one on already.', '#fff', 3, p);
       if (what === 'bungee') {
         const n = sim.tieDown();
         if (!n) return this.toast('Nothing loose in the RV to tie down.', '#fff', 3, p);
@@ -647,6 +654,13 @@ export class Room {
         this.toast(`${p.name} bought a walkie-talkie. Hold T to talk to anyone else with one, at any range.${others ? '' : ' (Nobody else has one yet.)'}`, p.color, 5);
       }
       if (what === 'drink') { this.send(p, { t: 'drink' }); this.toast(`${p.name} chugged an energy drink.`, p.color, 3); }
+      if (what === 'hardhat') { p.hat = true; this.sendMeta(); this.toast(`${p.name} bought a hard hat. The next knockout is only a knock.`, p.color, 4); }
+      if (what === 'cheese') {
+        // on the counter, to carry out: ringtails go for it before anything else about
+        const c = sim.addProp('cheese', { x: u.x, y: u.y + 0.25, z: u.z }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+        if (c) sim.out.push({ k: 'spawn', p: sim.describe(c) });
+        this.toast(`${p.name} bought a cheese wheel. Ringtails can't resist it: put it where you want them.`, p.color, 4);
+      }
     } else if (u.kind === 'pay') {
       if (this.paid) return this.toast('Already paid. He\'s just... watching you now.', '#fff', 3, p);
       // past midnight he has already taken the RV: there's no paying him now

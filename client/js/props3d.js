@@ -511,6 +511,15 @@ const BUILDERS = {
     return B.done({ ao: 0.22, aoH: 0.06 });
   },
 
+  // bait from the store: a wheel of cheese in red wax (ringtails can't resist it), the top cut to show the cheese
+  cheese() {
+    const B = new Build();
+    B.add(lathe([[0.15, -0.07, 0], [0.158, -0.062, 0.15], [0.16, -0.04, 0.3], [0.16, 0.04, 0.7], [0.158, 0.062, 0.85], [0.15, 0.07, 1]], 24), R.red, { tint: [1.05, 0.62, 0.55], crease: 50 });
+    B.add(lathe([[0, -0.07], [0.15, -0.07]], 24), R.red, { tint: [0.8, 0.45, 0.4] });
+    B.add(lathe([[0.15, 0.07], [0.12, 0.071], [0, 0.072]], 24), R.toast, { tint: [1.45, 1.15, 0.45] });
+    return B.done({ ao: 0.2, aoH: 0.05 });
+  },
+
   vase() {
     const B = new Build();
     B.add(lathe(VASE_PROFILE, 18), R.porcelain);
@@ -1292,7 +1301,7 @@ export function mapCanvas(W) {
   const counts = {}, seen = {}; for (const s of stops) counts[s.type] = (counts[s.type] || 0) + 1;
   const legend = Object.keys(counts).filter(t => counts[t] > 1);
   const lsize = stops.length - legend.reduce((a, t) => a + counts[t], 0) > 6 ? 9 : 10.5;
-  const dens = (Wd.dens || []).map(d => ({ px: X(d.z), py: Y(d.z, d.x) })), rows = legend.length + (dens.length ? 1 : 0);
+  const dens = (Wd.dens || []).map(d => ({ px: X(d.z), py: Y(d.z, d.x), hoard: !!d.hoard })), rows = legend.length + (dens.length ? 1 : 0);
   if (rows) claim([12, CH - 56 - 14 * rows, 184, CH - 50]);
   for (const s of [...stops].sort((a, b) => a.z - b.z)) {
     seen[s.type] = (seen[s.type] || 0) + 1;
@@ -1311,7 +1320,13 @@ export function mapCanvas(W) {
     if (extra) inkText(g, '(up the mesa)', lx, ly + 6, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
   }
   // ringtail dens: paw prints out past their stop
-  for (const d of dens) { const [lx, ly] = place(d.px, d.py, 16, 14, [[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10], [14, 10], [-14, 10]]); pawIcon(g, lx, ly); }
+  for (const d of dens) {
+    if (!d.hoard) { const [lx, ly] = place(d.px, d.py, 16, 14, [[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10], [14, 10], [-14, 10]]); pawIcon(g, lx, ly); continue; }
+    // the Hoard: big paws, and its name in red ink
+    const w = textW('THE HOARD', 8.5) + 4, [lx, ly] = place(d.px, d.py, Math.max(24, w), 34, [[0, 0], [12, 0], [-12, 0], [0, 12], [0, -12]]);
+    pawIcon(g, lx, ly - 5, 1.45);
+    inkText(g, 'THE HOARD', lx, ly + 11, { size: 8.5, color: '#9a2a1e', clear: 0.6 });
+  }
   // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader. Where
   // a grumphorn sleeps past one, a horned head beside the sign; pencilled calls under the name for it, and for
   // loose rock on the rim (a honk well back brings it down first: far enough back not to wake the beast)
@@ -1771,10 +1786,12 @@ function rockGeo(biome) {
 }
 
 export function buildProp(type, W) {
-  if (type === 'rock') {
+  if (type === 'rock' || type === 'stone') {
     const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow', key = 'rock-' + biome;
     if (!geoCache.has(key)) geoCache.set(key, rockGeo(biome));
-    return shadowy(new THREE.Mesh(geoCache.get(key), painted(`loot_boulder_${biome}`, { vertexColors: true })));
+    const mesh = shadowy(new THREE.Mesh(geoCache.get(key), painted(`loot_boulder_${biome}`, { vertexColors: true })));
+    if (type === 'stone') mesh.scale.set(0.62, 0.55, 0.62);   // (a smaller, flatter one of the same, just round its box)
+    return mesh;
   }
   if (type === 'boulder') {
     const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow';

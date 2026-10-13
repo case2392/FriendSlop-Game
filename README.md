@@ -37,7 +37,9 @@ It has no health bar, only **patience**. Sneak past crouched, creep the RV by, o
 at it, shove it, ram it with the RV (everyone crouch to brace first), winch it. Each charge and each toss
 costs it patience too. When it runs out, it drops its cowbell (worth $205 to $320 at the pawn shop) and
 walks off the road for good. It never touches the bank, leaves alone anyone who is down (and whoever
-kneels by them), and knocks out at most one player per charge.
+kneels by them), and knocks out at most one player per charge. There's a heap of stones by its warning
+sign for throwing, and if two of you shove its side together while it sleeps, it tips over: it lies there
+kicking for 12 seconds, long enough to get the RV past, and then it's up and not best pleased.
 
 Every day, **Ringtails** (raccoon-sized bandits with black masks and ringed tails) live in dens beside
 some of the stops: one den on day 1, three by day 5, marked with paw prints on the map. They sneak up on
@@ -60,6 +62,12 @@ the rocks are just heavy stones, good for throwing at a Grumphorn.
 
 And mind your aim: junk you throw at a friend knocks them over (never out) and they drop what they hold.
 Everyone hears who did it, and the end of the run counts the beanings.
+
+Day 5 has **the Hoard**: one den (the junkyard's, when the day has one) where all six of them live, on a
+pile of the week's best stash (about $2,500 of it, marked on the map in red). Get it out past six sets of
+teeth and the balloon payment looks a lot closer. The store helps: a **hard hat** ($80) turns your next
+knockout into a knock, and a **cheese wheel** ($30) is bait they can't resist: put it where you want them,
+away from your loot or out past their den.
 
 ## Five days, five places
 
