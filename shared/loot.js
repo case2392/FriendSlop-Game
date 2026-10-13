@@ -6,6 +6,9 @@
 //   frag      how much a hard knock hurts its value (0 = indestructible)
 //   cls       '1h' sprintable · '2h' slow and blocks your view · 'heavy' drag or co-carry
 //   tough     g-force it shrugs off before it starts losing value
+//   mob       wildlife (shared/mobs.js): a body with a brain, carried in the prop list like the boulder.
+//             shape 'cap' = ['cap', halfLength, r]: a capsule lying along z. sensor: the client's collider
+//             is a ball of this radius you walk through (the crosshair still finds it)
 
 export const LOOT = {
   gnome:    { name: 'Garden Gnome',     shape: ['box', 0.14, 0.24, 0.14], mass: 4,   value: 70,   frag: 0.6, cls: '1h',    tough: 14 },
@@ -26,6 +29,11 @@ export const LOOT = {
   // not loot: tools
   map:      { name: 'Road Map',         shape: ['box', 0.2, 0.02, 0.14],  mass: 0.4, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true },
   boulder:  { name: 'Boulder',          shape: ['box', 2.0, 1.3, 1.5],    mass: 1000,value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true },
+  // wildlife
+  ringtail: { name: 'Ringtail',         shape: ['ball', 0.24],            mass: 12,  value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, mob: 'ringtail', sensor: 0.34 },
+  grumphorn:{ name: 'Grumphorn',        shape: ['cap', 0.75, 0.7],        mass: 800, value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true, mob: 'grumphorn' },
+  // what a grumphorn leaves behind when it's had enough
+  cowbell:  { name: 'Brass Cowbell',    shape: ['cyl', 0.13, 0.11],       mass: 3,   value: 170,  frag: 0.15,cls: '1h',    tough: 20 },
 };
 
 export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);

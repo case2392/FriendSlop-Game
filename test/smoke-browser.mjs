@@ -16,7 +16,7 @@ const ok = m => console.log('✅', m);
 const fail = m => { console.error('❌', m); failed = true; };
 const check = (c, m) => (c ? ok(m) : fail(m));
 
-const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
+const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_NOMOBS: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server never started')), 8000); });
 
@@ -336,6 +336,39 @@ try {
   const vs = await host.evaluate(() => { const V = window.__nmdVoice; return { on: V.on, err: V.err, decoded: V.stats.decoded, peers: [...V.peers.values()].map(p => !!p.panner) }; });
   const sent = await joiner.evaluate(() => ({ sent: window.__nmdVoice.stats.sent, err: window.__nmdVoice.err }));
   check(vs.on && vs.decoded > 20 && vs.peers.length === 1 && vs.peers[0], `proximity voice: Dave sent ${sent.sent} Opus frames, Steve decoded ${vs.decoded} into a 3D panner${vs.err || sent.err ? ` (${vs.err || sent.err})` : ''}`);
+
+  // ---- wildlife: a grumphorn drawn and labelled; the shove; bracing in the RV; knocks on riders ----
+  {
+    // (2.8 m ahead, slantwise: its flank about 2 m off, in reach of the crosshair (3 m) and a shove (2.4 m))
+    const spot = await host.evaluate(() => { const S = window.__nmd, y = S.me.yaw; return { x: S.me.pos.x + Math.sin(y) * 2.8, z: S.me.pos.z + Math.cos(y) * 2.8, yaw: y }; });
+    // (lying there for good: a body that won't get up and charge the rest of the test)
+    await host.evaluate(s => window.__nmd.send({ t: 'dbg', op: 'mob', type: 'grumphorn', x: s.x, z: s.z, yaw: s.yaw + 1.2, st: 8 }), spot);
+    await host.waitForFunction(() => [...window.__nmd.props.values()].some(p => p.type === 'grumphorn' && p.view && p.mesh.visible), null, { timeout: 60000 });
+    await wait(host, 400);
+    const mb = await host.evaluate(s => {
+      const S = window.__nmd, p = [...S.props.values()].find(q => q.type === 'grumphorn');
+      S.aimAt(p.pose.p.x, p.pose.p.y + 0.2, p.pose.p.z);
+      return { bones: p.view.b ? Object.keys(p.view.b).length : 0, skinned: !!p.view.mesh?.isSkinnedMesh };
+    }, spot);
+    await wait(host, 300);
+    const lbl = await host.evaluate(() => window.__nmd.target()?.label || '');
+    check(mb.skinned && mb.bones === 8 && /Grumphorn/.test(lbl), `a grumphorn is drawn (skinned ${mb.skinned}, on ${mb.bones} bones) and the crosshair names it ("${lbl}")`);
+    // the shove: right mouse with empty hands; the server says it hit something
+    await host.evaluate(() => { const S = window.__nmd; if (S.me.holding) S.press('release'); S.me.stamina = 100; S.press('throw'); });
+    const shoved = await host.waitForFunction(() => window.__nmd.lastShove?.by === window.__nmd.selfId, null, { timeout: 30000 }).then(() => host.evaluate(() => window.__nmd.lastShove), () => null);
+    check(shoved && shoved.hit >= 1, `right mouse with empty hands shoves (the server answered: hit ${shoved?.hit})`);
+    // bracing and knocks, on a stand-in body (Steve's own stays as it is)
+    const body = await host.evaluate(() => {
+      const S = window.__nmd, M = S.me.constructor, crash = { acc: { x: 60, y: 0, z: 0 }, p: { x: 0, y: 0, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 }, v: { x: 0, y: 0, z: 0 } };
+      const a = new M(); a.par = 1; a.mode = 'walk'; a.crouch = true; a.lurch(1 / 60, crash);
+      const b = new M(); b.par = 1; b.mode = 'walk'; b.crouch = false; b.lurch(1 / 60, crash);
+      const c = new M(); c.par = 1; c.mode = 'walk'; c.knock([0, 2, 3], false, 'shove', true, { v: { x: 10, y: 0, z: 0 } });
+      const d = new M(); d.mode = 'ko'; d.knock([0, 2, 0], true, 'mob');
+      return { braced: a.mode, standing: b.mode, riderVx: c.vel.x, riderPar: c.par, downStays: d.mode };
+    });
+    check(body.braced !== 'ko' && body.standing === 'ko', `a crash (60 m/s^2) knocks out a standing rider but not a crouched (braced) one (${body.standing} / ${body.braced})`);
+    check(body.riderVx === 10 && body.riderPar === 0 && body.downStays === 'ko', `a rider knocked off keeps the RV's speed (vx ${body.riderVx}); someone down stays down (${body.downStays})`);
+  }
 
   // ---- painted textures: got ready off the main thread, written to the cache, read back next time ----
   const tx = await host.evaluate(() => window.__nmd.texCache.stats());

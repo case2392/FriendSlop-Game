@@ -87,6 +87,11 @@ export const GRAB = {
 export const PUSH_FORCE_RV = 2600;      // per shoving player, newtons
 export const PUSH_FORCE_PROP = 520;
 
+// the shove: right mouse with empty hands. A cone in front of you (no aim needed): REACH m out, HALF_DEG
+// either side of where you look, at most MAX things. A friend gets a knock (never a KO by itself: a roof edge
+// can finish the job); loot a push of up to PROP_J N*s; wildlife its own reaction (server/mobs.js)
+export const SHOVE = { REACH: 2.4, HALF_DEG: 35, DY: 1.6, MAX: 3, STAMINA: 12, COOLDOWN: 0.6, FRIEND: 3.5, FRIEND_UP: 1.5, PROP_J: 36, PROP_PER_KG: 4 };
+
 // ---- the RV -------------------------------------------------------------------
 export const RV = {
   MASS: 3000,
@@ -115,4 +120,4 @@ export const EMOTES = ['😂', '😭', '💀', '🤬', '👑', '🤡'];
 // pose modes, sent as a small int
 export const MODE = { WALK: 0, CLIMB: 1, SEAT: 2, KO: 3, AIR: 4 };
 // pose flags (bitmask)
-export const FLAG = { SPRINT: 1, CROUCH: 2, HOLDING: 4, WALKIE_TX: 8, MAP: 16 };
+export const FLAG = { SPRINT: 1, CROUCH: 2, HOLDING: 4, WALKIE_TX: 8, MAP: 16, SHOVE: 32 };

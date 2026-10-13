@@ -8,7 +8,7 @@ const q = new URLSearchParams(location.search);
 const errEl = document.getElementById('err');
 try {
   // one module at a time, so a half-edited module elsewhere doesn't block your preview
-  const files = ['./nature3d.js', './roadside3d.js', './town3d.js', './people.js', './rv3d.js', './props3d.js'];
+  const files = ['./nature3d.js', './roadside3d.js', './town3d.js', './people.js', './rv3d.js', './props3d.js', './mobs3d.js'];
   const settled = await Promise.allSettled(files.map(m => import(m)));
   settled.forEach((r, i) => { if (r.status === 'rejected') console.warn(`preview: ${files[i]} failed to load: ${r.reason}`); });
   const REG = Object.assign({}, ...settled.filter(r => r.status === 'fulfilled').map(r => r.value.PREVIEW || {}));

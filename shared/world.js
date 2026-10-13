@@ -9,6 +9,7 @@
 import { mulberry32, fbm, noise2, smoothstep, clamp, lerp } from './rng.js';
 import { LOOT, POI_LOOT } from './loot.js';
 import { butteParts, butteMains, polyExit, sdPoly, partHull } from './butte.js';
+import { PLAN as MOB_PLAN } from './mobs.js';
 
 export const CELL = 2.5;
 export const HALF_W = 150;
@@ -87,7 +88,9 @@ function pickWeighted(rng, table) {
   return table[0][0];
 }
 
-export function generateLeg(seed, day) {
+// opts.mobs === false: the same world without its wildlife (dens, beds and what they add: test/mobs.mjs
+// checks nothing else moves)
+export function generateLeg(seed, day, opts = {}) {
   const rng = mulberry32((seed ^ Math.imul(day, 0x9E3779B1)) >>> 0);
   // dressing that came later (groves, rock shapes, town framing, junk fences, cairns) draws from its own
   // stream, so the original layout does not shift
@@ -1253,11 +1256,57 @@ export function generateLeg(seed, day) {
     return y;
   }
 
+  // ---- the wildlife (shared/mobs.js): where the grumphorns sleep and the ringtails den ----------------------
+  // Its own random stream, drawn last: nothing generated before it moves, and generateLeg(seed, day,
+  // {mobs:false}) is the same world without it (test/mobs.mjs checks).
+  function placeWildlife() {
+    const rngM = mulberry32((seed ^ Math.imul(day + 31, 0xC2B2AE35)) >>> 0);
+    const P = MOB_PLAN[Math.min(day, MOB_PLAN.length) - 1];
+    // flat enough to stand on, and near the height given
+    const flatAt = (x, z, ref, tol) => {
+      const h = heightAt(x, z);
+      if (Math.abs(h - ref) > tol) return false;
+      let s = 0;
+      for (const [dx, dz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]]) s = Math.max(s, Math.abs(heightAt(x + dx, z + dz) - h) / 1.2);
+      return s <= 0.36;
+    };
+    const beds = [];
+    for (const b of P.beds) {
+      const o = obstacles.find(q => q.type === b.ob);
+      if (!o) continue;
+      const z = (b.from === 'z1' ? o.z1 : o.z) + b.dz, x = roadX(z);
+      // asleep across the road, slantwise
+      const head = Math.atan2(roadX(z + 2) - roadX(z - 2), 4);
+      const ry = head + (rngM() < 0.5 ? -1 : 1) * (0.7 + 0.5 * rngM());
+      // where it walks off to when it has had enough: the first flat ground off the road
+      let exit = null;
+      find: for (const off of [7, 8, 6.5, 10, 12, 16, 22]) for (const sd of [1, -1]) {
+        const ez = z + 6, ex = roadX(ez) + sd * off;
+        if (flatAt(ex, ez, roadY(ez), 1.5)) { exit = { x: ex, y: heightAt(ex, ez), z: ez }; break find; }
+      }
+      if (!exit) { const ez = z + 6, ex = roadX(ez) + 7; exit = { x: ex, y: heightAt(ex, ez), z: ez }; }
+      beds.push({ id: beds.length, ob: o.type, obz: o.z, type: 'grumphorn', x, y: heightAt(x, z), z, ry, exit });
+      // the warning, short of the obstacle and across the road from that obstacle's own sign (the boulder's
+      // stands on the right, the mud's and the gate's on the left: a driver heading +z has +x on the left)
+      const side = o.type === 'boulder' ? 1 : -1;
+      let sx = roadX(o.z - 26) + side * 5.2, sz = o.z - 26;
+      find2: for (let dz = 26; dz <= 42; dz += 4) for (const off of [5.2, 4.6, 6]) {
+        const zz = o.z - dz, xx = roadX(zz) + side * off;
+        if (flatAt(xx, zz, roadY(zz), 0.4)) { sx = xx; sz = zz; break find2; }
+      }
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
+        lines: ['GRUMPHORN', 'CROSSING', 'LET IT SLEEP'], bg: '#f2c14e', fg: '#1d1d1d', post: true, beast: true });
+    }
+    return { dens: [], beds };
+  }
+  const wild = opts.mobs === false ? { dens: [], beds: [] } : placeWildlife();
+
   return {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
     roadX, roadY, heightAt, topAt, townY,
     obstacles, pois, mesas, statics, cyls, hulls, talus, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
+    dens: wild.dens, beds: wild.beds,
   };
 }
 

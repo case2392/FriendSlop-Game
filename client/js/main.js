@@ -19,6 +19,8 @@ import { Interp } from './interp.js';
 import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
+import { buildMob } from './mobs3d.js';
+import { RST, GST, ST_MASK, ST_CARRY } from '/shared/mobs.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
@@ -420,6 +422,18 @@ function excludeSet() {
   if (me.holding && S.lw) { const h = S.lw.propCollider(me.holding.id); if (h != null) s.add(h); }
   return s;
 }
+// what my own body walks through: that, and a grumphorn on the move. Who it hits is the server's business
+// (its horns toss, its flank stumbles, and it spares anyone down and whoever kneels by them); its capsule
+// here would only shove you along in front of it
+function moveExclude() {
+  const s = excludeSet();
+  if (S.lw) for (const p of S.props.values()) {
+    if (p.type !== 'grumphorn') continue;
+    const st = (p.st ?? 0) & ST_MASK;
+    if (st === GST.CHARGE || st === GST.WINDED || (p.view?.speed || 0) > 2) { const h = S.lw.propCollider(p.id); if (h != null) s.add(h); }
+  }
+  return s;
+}
 
 function nearestAnchor() {
   if (!S.W) return null;
@@ -432,7 +446,7 @@ function nearestAnchor() {
     for (const p of S.props.values()) {
       if (LOOT[p.type].mass < 60 || !p.pose) continue;
       const d = Math.hypot(p.pose.p.x - me.pos.x, p.pose.p.z - me.pos.z);
-      if (d < (p.type === 'boulder' ? 3.4 : 2.0)) return { prop: p };
+      if (d < (p.type === 'boulder' ? 3.4 : LOOT[p.type].mob ? 2.6 : 2.0)) return { prop: p };
     }
   }
   return best;
@@ -461,6 +475,7 @@ function computeTarget() {
     if (!p) return null;
     const L = LOOT[p.type];
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
+    if (L.mob) return { kind: 'prop', id: p.id, hit, label: mobLabel(p) };
     if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }; }
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
@@ -506,6 +521,20 @@ function computeTarget() {
   if ((hit.kind === 'terrain' || hit.kind === 'static') && hit.normal.y < 0.79 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
   if (hit.kind === 'gate') return { kind: 'gate', label: 'Locked. The keypad wants a 4-digit code.' };
   return null;
+}
+
+// what the crosshair says about a critter (shared/mobs.js states)
+function mobLabel(p) {
+  const st = (p.st ?? 0) & ST_MASK;
+  if (p.type === 'ringtail') {
+    if ((p.st ?? 0) & ST_CARRY) return '[Hold LMB] grab the ringtail: it drops what it stole · [RMB] shove it';
+    if (st === RST.STUN || st === RST.FLUNG) return 'A dizzy ringtail. [Hold LMB] grab it · [RMB] shove it';
+    return '[Hold LMB] grab the ringtail · [RMB] shove it';
+  }
+  if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by.';
+  if (st === GST.LEFT || st === GST.LEAVE) return 'A Grumphorn that has had enough of you.';
+  if (st === GST.WINDED) return 'The Grumphorn is winded: pelt it, shove it, ram it. [Hold LMB] its horns';
+  return 'GRUMPHORN. Get out of its way!';
 }
 
 // who is at the wheel right now, if it's somebody else
@@ -560,11 +589,25 @@ function onGrabRelease() {
   if (me.holding) { net.send({ t: 'rel' }); me.holding = null; }
 }
 function onThrow() {
-  if (!me.holding) return;
+  if (!me.holding) return onShove();
   const l = me.look();
   net.send({ t: 'rel', thr: 1, dir: [l.x, l.y + 0.15, l.z] });
   me.holding = null;
   sfx.throw();
+}
+// right mouse with empty hands: a two-handed shove at whatever is in front of you (the server decides what it
+// hits: server/sim.js shove). It costs stamina, so it can't be spammed
+function onShove() {
+  if (worldBuilding || me.mode !== 'walk' || me.hasHook) return;
+  const now = performance.now();
+  if (now < (S.shoveCd || 0) || me.stamina < C.SHOVE.STAMINA) return;
+  S.shoveCd = now + C.SHOVE.COOLDOWN * 1000;
+  S.shoveUntil = now + 300;
+  me.spend(C.SHOVE.STAMINA);
+  net.send({ t: 'shove' });
+  hands.shove();
+  sfx.whoosh();
+  tutDone('shove');
 }
 function onDrop() {
   if (me.holding) { net.send({ t: 'rel' }); me.holding = null; }
@@ -598,6 +641,7 @@ function onUse() {
 let keypadUse = null;
 function openKeypad(id) {
   keypadUse = id;
+  S.kpCrouch = me.crouch;   // crouched at the keypad stays crouched while typing (the mouse coming free lets go of every key)
   $('keypad').classList.remove('hidden');
   $('kpInput').value = '';
   document.exitPointerLock?.();
@@ -626,6 +670,9 @@ const TIPS = [
   'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
   'Each morning picks a driver and a navigator. The driver can\'t see the map: the navigator reads it out.',
   'Walk into the RV to push it out of the mud.',
+  'Crouch in the RV to brace for a crash: braced, a crash can\'t knock you out.',
+  'A Grumphorn sleeps past an obstacle some days. Crouch past it, creep the RV by, or wear out its patience: ram it, winch it, throw junk at it.',
+  'Right mouse with empty hands shoves whatever is in front of you: friends, loot, wildlife.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
   'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
@@ -693,7 +740,7 @@ async function buildDay(m) {
     S.wv.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh) o.skeleton?.dispose(); });
   }
   if (S.lw) S.lw.free();
-  for (const p of S.props.values()) scene.remove(p.mesh);
+  for (const p of S.props.values()) { scene.remove(p.mesh); p.view?.dispose(); }
   S.props.clear();
   S.W = W;
   S.door = !!m.door;
@@ -776,21 +823,25 @@ const inOrder = fn => m => { if (worldBuilding) (S.pendingAfterWorld ||= []).pus
 
 function addProp(d) {
   if (S.props.has(d.id)) return;
-  const mesh = buildProp(d.type, S.W);
+  // wildlife: its own mesh and a view that poses it from its state (mobs3d.js)
+  const mob = LOOT[d.type]?.mob ? buildMob(d.type, S.W) : null;
+  const mesh = mob ? mob.obj : buildProp(d.type, S.W);
   const q = { x: d.q[0], y: d.q[1], z: d.q[2], w: d.q[3] };
   const p = { x: d.x, y: d.y, z: d.z };
   mesh.position.set(p.x, p.y, p.z);
   mesh.quaternion.set(q.x, q.y, q.z, q.w);
   scene.add(mesh);
-  S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q } });
+  if (mob) mob.view.onPuff = puff;
+  S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q }, view: mob?.view || null, st: d.st ?? 0 });
   S.lw.addProp(d.id, d.type, p, q);
-  S.interp.seedProp(d.id, p, q);
+  S.interp.seedProp(d.id, p, q, d.st);
 }
 function removeProp(id, fx = null) {
   const p = S.props.get(id);
   if (!p) return;
   if (fx) burst(p.mesh.position, fx.color, fx.n, fx.speed);
   scene.remove(p.mesh);
+  p.view?.dispose();
   S.props.delete(id);
   S.lw?.removeProp(id);
   S.interp.dropProp(id);
@@ -997,7 +1048,7 @@ net.on('s', m => {
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
 net.on('toast', inOrder(m => toast(m.text, m.color, m.secs)));
-net.on('knock', inOrder(m => { me.knock(m.v, m.ko); sfx.knock(); shake(0.6); }));
+net.on('knock', inOrder(m => { me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv); if (m.why === 'shove' && !m.ko) { sfx.stumble(); shake(0.3); } else { sfx.knock(); shake(0.6); } }));
 net.on('seat', inOrder(m => {
   if (m.seat == null) { me.unsit(m.exit); }
   else { if (me.holding) onGrabRelease(); me.sit(m.seat); }
@@ -1050,7 +1101,26 @@ function onEvent(e) {
     case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
     case 'flip': sfx.coin(); break;
     case 'repo': shake(0.4); break;   // (the game-over screen that follows plays the Repo Man's sting)
-    case 'thud': sfx.thunk(1); break;
+    // somebody else knocked about: heard where they are (my own knock has its own sound)
+    case 'thud': { const o = e.id !== S.selfId && S.others?.get(e.id); if (o) positional(o.pos, () => sfx.thunk(e.why === 'shove' ? 0.5 : 1), 40); break; }
+    // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
+    case 'gone': for (const id of e.ids || []) removeProp(id, { color: '#cdbb9a', n: 12, speed: 2.5 }); break;
+    case 'mob': onMobEvent(e); break;
+    case 'shove': S.lastShove = e; positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
+  }
+}
+
+// what the wildlife does, heard and seen (the server words the toasts)
+function onMobEvent(e) {
+  const p = S.props.get(e.id), at = p?.mesh.position;
+  const near = at ? at.distanceTo(camera.position) : 99;
+  switch (e.s) {
+    case 'wake': positional(at, () => sfx.bellow(), 90); break;
+    case 'glare': positional(at, () => sfx.snort(), 40); break;
+    case 'charge': positional(at, () => { sfx.stampede(); sfx.clang(); }, 70); if (near < 10) shake(0.35); break;
+    case 'toss': positional(at, () => sfx.thunk(1), 60); if (near < 12) shake(0.5); break;
+    case 'winded': positional(at, () => sfx.snort(), 30); if (at) puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#e8e4dc'); break;
+    case 'leave': positional(at, () => sfx.clang(), 60); tutDone('grumph'); break;
   }
 }
 
@@ -1105,14 +1175,16 @@ function showOver(m) {
 
 const particles = [];
 const chipGeo = new THREE.BoxGeometry(0.06, 0.06, 0.06);   // one shared shape (flat() caches the materials)
-function burst(at, color, n = 12, speed = 4) {
+function burst(at, color, n = 12, speed = 4, grav = 1, life = 1.2) {
   for (let i = 0; i < n; i++) {
     const m = new THREE.Mesh(chipGeo, flat(color));
     m.position.copy(at);
     scene.add(m);
-    particles.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed, (Math.random() - 0.5) * speed), life: 1.2 });
+    particles.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * speed, Math.random() * speed, (Math.random() - 0.5) * speed), life, g: grav });
   }
 }
+// steam from a nostril, dust from a hoof: a few chips drifting up and away
+const puff = (at, color) => burst(at, color, 4, 0.9, -0.08, 0.9);
 const floaters = [];
 function floatText(at, text, color) {
   const s = labelSprite(text, color, 44);
@@ -1137,10 +1209,11 @@ function flash(text) {
   $('flash').style.animation = 'none'; void $('flash').offsetWidth; $('flash').style.animation = '';
   setTimeout(() => $('flash').classList.add('hidden'), 2600);
 }
-function positional(at, fn) {
+// range: how far off it can still be heard (a beast's bellow carries further than a thud)
+function positional(at, fn, range = 60) {
   if (!at) return fn();
   const d = Math.hypot(at.x - camera.position.x, at.y - camera.position.y, at.z - camera.position.z);
-  if (d < 60) sfxAt({ x: at.x, y: at.y, z: at.z }, fn);
+  if (d < range) sfxAt({ x: at.x, y: at.y, z: at.z }, fn);
 }
 
 
@@ -1440,6 +1513,15 @@ requestAnimationFrame(frame);
     p.mesh.position.set(s.p.x, s.p.y, s.p.z);
     p.mesh.quaternion.set(s.q.x, s.q.y, s.q.z, s.q.w);
     S.lw.setProp(p.id, s.p, s.q);
+    if (p.view) {
+      if (s.st != null) p.st = s.st;
+      p.view.update(dt, time, p.st, camera.position);
+      // a sleeping grumphorn snores (you hear it before you see it, within 25 m)
+      if (p.type === 'grumphorn' && (p.st & ST_MASK) === GST.SLEEP && (p.snoreT = (p.snoreT ?? Math.random() * 3) - dt) <= 0) {
+        p.snoreT = 3;
+        positional(p.mesh.position, () => sfx.snore(), 25);
+      }
+    }
   }
   // other players
   const others = new Map();
@@ -1454,6 +1536,7 @@ requestAnimationFrame(frame);
       S.lw.setPlayer(p.id, pos, s.mode === C.MODE.KO);
     }
   }
+  S.others = others;
   S.lw.step();
 
   // me
@@ -1463,9 +1546,9 @@ requestAnimationFrame(frame);
   inp.jump = !typing && !!keys[' '] && !S.jumpLatch;
   S.jumpLatch = !!keys[' '];
   inp.sprint = !!keys.shift;
-  inp.crouch = !!keys.control || !!keys.c;
+  inp.crouch = !!keys.control || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
-  me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, excludeSet());
+  me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
   for (const e of me.events) {
     if (e.k === 'step') sfx.step();
     else if (e.k === 'climbstep') sfx.climb();
@@ -1490,6 +1573,7 @@ requestAnimationFrame(frame);
     lastPose = now;
     const pose = me.pose(rv);
     if (voice.V.walkieKey && S.myWalkie) pose.f |= C.FLAG.WALKIE_TX;
+    if (now < (S.shoveUntil || 0)) pose.f |= C.FLAG.SHOVE;
     net.send(pose);
   }
 
@@ -1547,7 +1631,7 @@ requestAnimationFrame(frame);
   // fx
   for (let i = particles.length - 1; i >= 0; i--) {
     const p = particles[i];
-    p.life -= dt; p.v.y -= 9.8 * dt;
+    p.life -= dt; p.v.y -= 9.8 * (p.g ?? 1) * dt;
     p.m.position.addScaledVector(p.v, dt);
     p.m.rotation.x += dt * 8;
     if (p.life <= 0) { scene.remove(p.m); particles.splice(i, 1); }
@@ -1714,7 +1798,10 @@ function hud(rv) {
   let held = '';
   if (me.holding) {
     const p = S.props.get(me.holding.id);
-    held = p ? (p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop' : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`) : '';
+    held = !p ? '' : p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop'
+      : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [Q] let go`
+      : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off'
+      : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
   $('heldLabel').classList.toggle('hidden', !held);
@@ -1765,10 +1852,19 @@ function tutTip(g, town) {
   if (!tut.has('map') && mapWanted()) return `Hint: you navigate today. ${driverName()} can't see the map: grab it off the dash and call out what's coming`;
   if (g.ph === 'camp') return tut.has('drive') || (roleOf('drv') && roleOf('drv') !== S.selfId) ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
+  if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
   if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
   return null;
+}
+// a grumphorn (still in the road, not gone off for good) within r metres of me
+function beastNear(r) {
+  for (const p of S.props.values()) {
+    if (p.type !== 'grumphorn' || !p.pose || (p.st & ST_MASK) === GST.LEFT || (p.st & ST_MASK) === GST.LEAVE) continue;
+    if (Math.hypot(p.pose.p.x - me.pos.x, p.pose.p.z - me.pos.z) < r) return true;
+  }
+  return false;
 }
 function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }

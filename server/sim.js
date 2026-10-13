@@ -15,21 +15,12 @@ import {
   toWorld, toLocal, insideRV, qRotate,
 } from '../shared/rv.js';
 import { inMud } from '../shared/world.js';
+import { Mobs } from './mobs.js';
 
 let ready = null;
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
-// collision groups: (membership << 16) | filter
-const G_WORLD = 1, G_RV = 2, G_PROP = 4, G_HOOK = 8;
-const grp = (m, f) => ((m << 16) | f) >>> 0;
-const GROUPS = {
-  world: grp(G_WORLD, 0xffff),
-  rv: grp(G_RV, G_WORLD | G_RV | G_PROP),
-  rvStep: grp(G_RV, G_PROP),                 // the door steps hang 7 cm off the road: they'd snag the ground
-  prop: grp(G_PROP, 0xffff),
-  hook: grp(G_HOOK, G_WORLD | G_PROP),
-  flimsy: grp(G_WORLD, G_PROP | G_HOOK),     // cacti: they stop people, not a 3-ton RV
-};
+import { GROUPS } from './groups.js';
 
 // stuff people bump into but a 3-ton RV flattens
 const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
@@ -50,7 +41,13 @@ function shapeDesc(shape) {
   const [k, a, b, c] = shape;
   if (k === 'box') return RAPIER.ColliderDesc.cuboid(a, b, c);
   if (k === 'cyl') return RAPIER.ColliderDesc.cylinder(a, b);
+  if (k === 'cap') return RAPIER.ColliderDesc.capsule(a, b).setRotation({ x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 });   // lying along z
   return RAPIER.ColliderDesc.ball(a);
+}
+export function shapeVolume(shape) {
+  const [k, a, b, c] = shape;
+  return k === 'box' ? 8 * a * b * c : k === 'cyl' ? Math.PI * b ** 2 * 2 * a
+    : k === 'cap' ? Math.PI * b * b * 2 * a + 4 / 3 * Math.PI * b ** 3 : 4 / 3 * Math.PI * a ** 3;
 }
 
 export class Sim {
@@ -74,6 +71,9 @@ export class Sim {
     this.gatesOpen = new Set();
     this.knockCd = new Map();
     this.tied = new Map();           // prop id -> joint (bungee'd to the RV)
+    this.mobs = null;                // the wildlife (server/mobs.js), from when the RV leaves camp till nightfall
+    this.mobsDone = false;           // gone for the night: they don't come back the same day
+    this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
 
     this.buildTerrain();
     this.buildStatics();
@@ -171,34 +171,61 @@ export class Sim {
     if (!L) return null;
     id = id ?? this.nextPropId++;
     const bd = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setRotation(q)
-      .setLinearDamping(0.05).setAngularDamping(0.3).setCcdEnabled(L.mass < 60);
+      .setLinearDamping(0.05).setAngularDamping(L.mob ? 2 : 0.3).setCcdEnabled(L.mass < 60 || !!L.mob);
     const body = this.world.createRigidBody(bd);
-    const [k] = L.shape;
-    const vol = k === 'box' ? 8 * L.shape[1] * L.shape[2] * L.shape[3]
-      : k === 'cyl' ? Math.PI * L.shape[2] ** 2 * 2 * L.shape[1]
-        : 4 / 3 * Math.PI * L.shape[1] ** 3;
-    // the boulder: 1000 kg at friction 0.3 (0.6 against the ground's 0.9) slides at ~5.9 kN, more than
-    // one shoving player (~4.5 kN), less than two; alone, it's the RV's bumper or the winch
-    const col = this.world.createCollider(shapeDesc(L.shape)
-      .setDensity(L.mass / vol).setFriction(type === 'boulder' ? 0.3 : 0.6).setRestitution(0.1)
-      .setCollisionGroups(GROUPS.prop)
-      .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
-      .setContactForceEventThreshold(L.mass * L.tough * 9.81), body);
+    const vol = shapeVolume(L.shape);
+    let cd = shapeDesc(L.shape).setDensity(L.mass / vol).setRestitution(0.1);
+    if (L.mob) {
+      // wildlife walks on its own legs (a velocity servo in mobs.js): no friction to fight, whatever it
+      // stands on (Rapier averages the two frictions by default: 'Min' keeps it at 0). No contact-force
+      // events: its hits are read from its change of speed and what it touched (mobs.js)
+      cd = cd.setFriction(0).setFrictionCombineRule(RAPIER.CoefficientCombineRule.Min).setCollisionGroups(GROUPS.mob);
+    } else {
+      // the boulder: 1000 kg at friction 0.3 (0.6 against the ground's 0.9) slides at ~5.9 kN, more than
+      // one shoving player (~4.5 kN), less than two; alone, it's the RV's bumper or the winch
+      cd = cd.setFriction(type === 'boulder' ? 0.3 : 0.6).setCollisionGroups(GROUPS.prop)
+        .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
+        .setContactForceEventThreshold(L.mass * L.tough * 9.81);
+    }
+    const col = this.world.createCollider(cd, body);
+    if (L.mob === 'ringtail') body.lockRotations(true, true);                    // it turns by setRotation
+    else if (L.mob) body.setEnabledRotations(false, true, false, true);            // yaw only: it never tips
     const prop = { id, type, body, col, value, max: max ?? value, holders: new Set(), sentSleep: false, knockUntil: 0, knockG: 0 };
     this.props.set(id, prop);
     this.byCollider.set(col.handle, id);
+    if (L.mob) this.mobCols.add(col.handle);
     return prop;
   }
 
   removeProp(id) {
     const p = this.props.get(id);
     if (!p) return;
+    // (the wildlife lets go of it first: nothing may touch a body after it's freed, or this world's physics
+    // is broken for the rest of the day)
+    this.mobs?.onRemoved(id);
     for (const [pid, h] of this.holds) if (h.kind === 'prop' && h.id === id) this.holds.delete(pid);
     if (this.tied.has(id)) this.tied.delete(id);
     if (this.hook.attach && this.hook.attach.id === id) this.unhook();
     this.byCollider.delete(p.col.handle);
+    this.mobCols.delete(p.col.handle);
     this.world.removeRigidBody(p.body);
     this.props.delete(id);
+  }
+
+  // ---- the wildlife (server/mobs.js) ----------------------------------------------------------------
+  // the manager, made on first use (a test can spawn one critter without the day's whole cast)
+  ensureMobs(opts) { return (this.mobs ||= new Mobs(this, opts)); }
+  // the day's cast, once the RV leaves camp
+  startMobs(opts) {
+    if (this.mobsDone || this.mobs?.started) return;
+    this.ensureMobs(opts).start();
+  }
+  // nightfall: every critter goes (one 'gone' event), and none come back today
+  endMobs() {
+    this.mobsDone = true;
+    if (!this.mobs) return;
+    this.mobs.end();
+    this.mobs = null;
   }
 
   spawnMap() {
@@ -211,8 +238,10 @@ export class Sim {
 
   describe(p) {
     const t = p.body.translation(), q = p.body.rotation();
-    return { id: p.id, type: p.type, value: Math.round(p.value), max: Math.round(p.max),
+    const d = { id: p.id, type: p.type, value: Math.round(p.value), max: Math.round(p.max),
       x: r3(t.x), y: r3(t.y), z: r3(t.z), q: [r4(q.x), r4(q.y), r4(q.z), r4(q.w)] };
+    if (p.mob) d.st = p.mob.wire();
+    return d;
   }
 
   allProps() { return [...this.props.values()].map(p => this.describe(p)); }
@@ -289,7 +318,7 @@ export class Sim {
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const list = [];
     for (const p of this.props.values()) {
-      if (p.type === 'map' || p.type === 'boulder') continue;
+      if (p.type === 'map' || p.type === 'boulder' || LOOT[p.type].mob) continue;
       const l = toLocal(rp, rq, p.body.translation());
       if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) continue;
       list.push({ type: p.type, value: p.value, max: p.max, lx: l.x, ly: l.y, lz: l.z, q: mulQ(conjQ(rq), p.body.rotation()), tied: this.tied.has(p.id) });
@@ -319,6 +348,7 @@ export class Sim {
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();
       this.holds.set(pid, { kind: 'prop', id: p.id, local, dist, last: null });
+      this.mobs?.onGrabbed(p, pid);
       return true;
     }
     if (m.kind === 'rv') {
@@ -393,7 +423,7 @@ export class Sim {
     const p = this.props.get(h.id);
     if (!p) return;
     p.holders.delete(pid);
-    if (p.holders.size === 0) p.body.setAngularDamping(0.3);
+    if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].mob ? 2 : 0.3);
     if (throwDir) {
       const m = p.body.mass();
       const imp = Math.min(m * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP);
@@ -401,8 +431,10 @@ export class Sim {
       const n = len(d) || 1;
       p.body.applyImpulse(mul(d, imp / n), true);
       if (pl?.vel) p.body.applyImpulse(mul(pl.vel, m * 0.6), true);
+      p.thrownBy = pid; p.thrownAt = this.t;
       this.out.push({ k: 'throw', id: p.id, by: pid });
     }
+    this.mobs?.onReleased(p, pid, !!throwDir);
   }
 
   // A body pushing into the RV or a prop. The contact point comes from the client, so it has to be where
@@ -416,13 +448,69 @@ export class Sim {
     if (!pl?.pos || len(sub(pt, v3(pl.pos.x, pl.pos.y + 0.9, pl.pos.z))) > 2) return;
     if (m.kind === 'rv') {
       if (len(sub(pt, this.rv.translation())) > 7) return;
-      this.pushes.push({ body: this.rv, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
+      this.pushes.push({ id: null, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
     } else if (m.kind === 'prop') {
       const p = this.props.get(Number(m.id));
       if (!p || len(sub(pt, p.body.translation())) > 3) return;
       const f = p.type === 'boulder' ? C.PUSH_FORCE_RV : C.PUSH_FORCE_PROP;
-      this.pushes.push({ body: p.body, pt, f: mul(d, f / n), until: this.t + 0.16 });
+      this.pushes.push({ id: p.id, pt, f: mul(d, f / n), until: this.t + 0.16 });
+      if (p.mob) this.mobs?.onPushed(p, pid);
     }
+  }
+
+  // The shove (right mouse with empty hands): what's in a cone in front of the shover, nearest first, at most
+  // SHOVE.MAX of them, and nothing behind a wall (a ray against the world and the RV). A friend on foot gets a
+  // knock (never a KO by itself), a friend riding the RV the same knock on top of the RV's motion (rel: their
+  // page adds the RV's velocity), loot a push; wildlife answers in mobs.js. Never the RV, the boulder, the map,
+  // anything bungee'd down, or a friend who is down or seated. Returns how many things it hit.
+  shove(pl, players) {
+    if (!pl?.eye || !pl.look || this.holds.has(pl.id)) return 0;
+    const S = C.SHOVE, e = pl.eye, hl = Math.hypot(pl.look.x, pl.look.z);
+    if (hl < 1e-3) return 0;
+    const fx = pl.look.x / hl, fz = pl.look.z / hl, cosA = Math.cos(S.HALF_DEG * Math.PI / 180);
+    const cands = [];
+    const consider = (kind, ref, pt) => {
+      const dx = pt.x - e.x, dz = pt.z - e.z, d = Math.hypot(dx, dz);
+      if (d > S.REACH || Math.abs(pt.y - e.y) > S.DY) return;
+      if (d > 0.3 && (dx * fx + dz * fz) / d < cosA) return;
+      cands.push({ kind, ref, pt, d });
+    };
+    for (const q of players.values()) {
+      if (q.id === pl.id || !q.pos || q.ko || q.seat != null) continue;
+      consider('player', q, v3(q.pos.x, q.pos.y + 0.9, q.pos.z));
+    }
+    for (const p of this.props.values()) {
+      const L = LOOT[p.type];
+      if (!L || this.tied.has(p.id) || (L.tool && !L.mob)) continue;
+      // (to the nearest point of it: a grumphorn's flank is a metre and a half nearer than its middle)
+      const pr = p.col.projectPoint(e, true);
+      consider('prop', p, pr ? v3(pr.point.x, pr.point.y, pr.point.z) : p.body.translation());
+    }
+    cands.sort((a, b) => a.d - b.d);
+    let hit = 0;
+    for (const c of cands) {
+      if (hit >= S.MAX) break;
+      if (!this.clearLine(e, c.pt)) continue;
+      hit++;
+      if (c.kind === 'player') {
+        const q = c.ref;
+        this.out.push({ k: 'knock', id: q.id, v: [r3(fx * S.FRIEND), S.FRIEND_UP, r3(fz * S.FRIEND)], ko: false, why: 'shove', by: pl.id, rel: q.par ? 1 : 0 });
+      } else if (LOOT[c.ref.type].mob) {
+        this.mobs?.onShoved(c.ref, pl, fx, fz);
+      } else {
+        const p = c.ref, J = Math.min(S.PROP_J, S.PROP_PER_KG * p.body.mass()), n = Math.hypot(1, 0.3);
+        p.body.applyImpulse(v3(fx * J / n, 0.3 * J / n, fz * J / n), true);
+      }
+    }
+    this.out.push({ k: 'shove', by: pl.id, at: [r3(e.x), r3(e.y), r3(e.z)], hit });
+    return hit;
+  }
+
+  // nothing of the world or the RV between a and b (props and people don't count)
+  clearLine(a, b) {
+    const d = sub(b, a), L = len(d);
+    if (L < 0.3) return true;
+    return !this.world.castRay(new RAPIER.Ray(a, mul(d, 1 / L)), L - 0.25, true, undefined, GROUPS.solid);
   }
 
   setDrive(m) {
@@ -485,7 +573,7 @@ export class Sim {
     // any prop heavy enough to be worth winching (the boulder, a safe...)
     for (const p of this.props.values()) {
       if (p.body.mass() < 60) continue;
-      if (len(sub(p.body.translation(), hp)) < (p.type === 'boulder' ? 2.6 : 1.4)) {
+      if (len(sub(p.body.translation(), hp)) < (p.type === 'boulder' ? 2.6 : p.mob ? 2.2 : 1.4)) {
         this.world.removeRigidBody(H.body);
         H.body = null;
         H.state = 'anchored';
@@ -600,7 +688,7 @@ export class Sim {
     return n;
   }
   tieProp(p) {
-    if (this.tied.has(p.id) || p.type === 'map' || p.type === 'boulder') return false;
+    if (this.tied.has(p.id) || p.type === 'map' || p.type === 'boulder' || LOOT[p.type].mob) return false;
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const l = toLocal(rp, rq, p.body.translation());
     if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) return false;
@@ -704,12 +792,22 @@ export class Sim {
 
     // shoves
     this.pushes = this.pushes.filter(p => p.until > this.t);
-    for (const p of this.pushes) p.body.applyImpulseAtPoint(mul(p.f, dt), p.pt, true);
+    // (a push names its prop, fetched each step: one sold, broken or gone for the night since is skipped)
+    for (const p of this.pushes) (p.id == null ? this.rv : this.props.get(p.id)?.body)?.applyImpulseAtPoint(mul(p.f, dt), p.pt, true);
+
+    // the wildlife thinks and moves its legs (and jaws)
+    this.mobs?.preStep(dt, players);
 
     this.stepWinch(dt, players);
 
-    v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle));
+    // (the wheels don't see the wildlife: the RV would climb a critter like a kerb. Running one over is
+    // the RV's footprint passing over it, mobs.js)
+    v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle) && !this.mobCols.has(c.handle));
+    this.mobs?.beforePhysics();
     this.world.step(this.eq);
+    // the wildlife reads what just happened to it (hits, run over, stuck) and to its jaws: before the knocks
+    // below free anything that broke (a vase that shatters on a grumphorn still hit it)
+    this.mobs?.postStep(dt, players);
 
     // impacts: knock value off the loot. Each knock counts once, at its hardest: a thing landing touches
     // down at several points over a few steps, and every contact used to count every step (one pothole hit
@@ -767,7 +865,7 @@ export class Sim {
           const ko = rvs > 6.5;
           const kv = add(add(mul(rvv, 1.25), mul(out, 3.5)), v3(0, 5 + rvs * 0.25, 0));
           this.knockCd.set(pl.id, this.t + 1.5);
-          this.out.push({ k: 'knock', id: pl.id, v: [r3(kv.x), r3(kv.y), r3(kv.z)], ko, speed: r3(rvs) });
+          this.out.push({ k: 'knock', id: pl.id, v: [r3(kv.x), r3(kv.y), r3(kv.z)], ko, why: 'rv', speed: r3(rvs) });
         }
       }
     }
@@ -826,7 +924,9 @@ export class Sim {
       if (!full && sleeping && p.sentSleep) continue;
       p.sentSleep = sleeping;
       const pt = p.body.translation(), pq = p.body.rotation();
-      props.push([p.id, r3(pt.x), r3(pt.y), r3(pt.z), r4(pq.x), r4(pq.y), r4(pq.z), r4(pq.w)]);
+      const e = [p.id, r3(pt.x), r3(pt.y), r3(pt.z), r4(pq.x), r4(pq.y), r4(pq.z), r4(pq.w)];
+      if (p.mob) e.push(p.mob.wire());   // wildlife: its state (shared/mobs.js RST / GST, plus flag bits)
+      props.push(e);
     }
     const H = this.hook;
     const hp = this.hookPos();

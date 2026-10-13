@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 
 process.env.FRIENDSLOP_TEST = '1';
 process.env.FRIENDSLOP_FAST = '1';
+process.env.FRIENDSLOP_NOMOBS = '1';   // (the wildlife has its own suite: test/mobs.mjs)
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');

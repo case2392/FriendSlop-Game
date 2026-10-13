@@ -1661,6 +1661,11 @@ function playerPose(st, m) {
     if (map) { T.head = Math.max(T.head, 0.35); T.mapK = 1; }
     else T.bend -= 0.05;
   }
+  // a shove: both arms thrust out in front, leaning into it
+  if ((st.flags & F.SHOVE) && st.mode !== M.KO && st.mode !== M.CLIMB && st.mode !== M.SEAT) {
+    T.aL = T.aR = 1.45; T.eL = T.eR = 0.1; T.abL = T.abR = 0.15; T.inL = T.inR = 0.3; T.wristL = T.wristR = -0.5; T.wtL = T.wtR = 0;
+    T.bend -= 0.12; T.lean += 0.08;
+  }
   const e = m.emote;
   if (e) {
     if (e === '😂') { T.aL = 2.5 + Math.sin(t * 14) * 0.3; T.aR = 2.5 - Math.sin(t * 14) * 0.3; T.eL = T.eR = 0.6; T.abL = T.abR = -0.08; T.inL = T.inR = 0.06; T.bend = 0.15; T.head = -0.4; drop = Math.abs(Math.sin(t * 14)) * 0.06; }
@@ -1909,6 +1914,7 @@ export class Hands {
     this.map.visible = true;
   }
   hideMap() { if (this.map) this.map.visible = false; }
+  shove() { this.shoveT = 0.25; }
 
   // wheel: the RV's steering wheel (when you drive, your hands go on it)
   update(dt, me, moving, sprinting, wheel = null) {
@@ -1920,7 +1926,8 @@ export class Hands {
     const amp = sprinting ? 0.022 : 0.014;
     const bobL = Math.sin(t) * amp * w + idle, bobR = Math.sin(t + Math.PI) * amp * w + idle;
     const swayL = Math.cos(t) * 0.008 * w, swayR = Math.cos(t + Math.PI) * 0.008 * w;
-    const k = Math.min(1, dt * 14), ko = Math.min(1, dt * 10);
+    let k = Math.min(1, dt * 14);
+    const ko = Math.min(1, dt * 10);
     // ease each hand toward a pose: its wrist and turn (camera space) and how open it is
     const pose = (h, x, y, z, q, open) => {
       h.position.x += (x - h.position.x) * k; h.position.y += (y - h.position.y) * k; h.position.z += (z - h.position.z) * k;
@@ -1953,6 +1960,12 @@ export class Hands {
         p.sub(_hv2.copy(FP_GRIP).applyQuaternion(q));
         pose(h, p.x / this.fs, p.y / this.fs, p.z, q, 0);
       }
+    } else if ((this.shoveT = Math.max(0, (this.shoveT || 0) - dt)) > 0 && !me.holding) {
+      // a shove: both palms thrust out flat, straight ahead (fast: k is raised for it)
+      const kk = k; k = Math.min(1, dt * 30);
+      pose(this.L, -0.17, -0.2, -0.62, eul(1.45, -0.1, 0.25), 1);
+      pose(this.R, 0.17, -0.2, -0.62, eul(1.45, 0.1, -0.25), 1);
+      k = kk;
     } else if (me.holding?.type === 'map' && this.map?.visible) {
       // fists round the bottom roller near both ends (where it sits on the curled sheet)
       for (const [h, s] of [[this.L, -1], [this.R, 1]]) {

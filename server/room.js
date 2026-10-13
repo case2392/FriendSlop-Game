@@ -25,7 +25,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
 // a number from a client: finite and within +-lim, or 0
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
@@ -39,6 +39,8 @@ export class Room {
     this.snapN = 0;
     this.roles = { drv: 0, nav: 0 };   // the day's driver and navigator (player ids; 0: nobody)
     this.rolesCrew = '';               // the crew the roles were last settled for (a newcomer in camp draws again)
+    // the wildlife comes out once the RV leaves camp (FRIENDSLOP_NOMOBS=1, or the test lever, keeps it away)
+    this.mobsOn = typeof process === 'undefined' || process.env.FRIENDSLOP_NOMOBS !== '1';
     this.newRun(seed);
   }
 
@@ -289,9 +291,11 @@ export class Room {
   // anything else only fills or hands on a role (nobody is pulled off the wheel of a moving RV)
   checkRoles() {
     const was = { ...this.roles };
-    if (this.phase === 'camp' && this.newcomer() && Math.abs(this.sim.rvSpeed()) < 0.5) this.drawRoles();
+    // (a draw for a newcomer is always said, even when it lands on the same two: the newcomer hasn't heard it)
+    const draw = this.phase === 'camp' && this.newcomer() && Math.abs(this.sim.rvSpeed()) < 0.5;
+    if (draw) this.drawRoles();
     else { this.fillRoles(); if (this.phase === 'camp') this.rolesCrew = this.crewKey(); }
-    if ((was.drv !== this.roles.drv || was.nav !== this.roles.nav) && (this.phase === 'camp' || this.phase === 'road') && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
+    if ((draw || was.drv !== this.roles.drv || was.nav !== this.roles.nav) && (this.phase === 'camp' || this.phase === 'road') && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
   }
   // fill a role nobody has, or whose player left the trip: whoever stood in for them keeps it (at the wheel, or
   // holding the map); else the driver's first (without one nobody drives), from who's here and hasn't had
@@ -395,8 +399,13 @@ export class Room {
       case 'hd': this.sim.holdDist(p.id, m.d); return;
       case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
       case 'drv': if (p.seat === 0) { p.drvAt = this.t; this.sim.setDrive(m); } return;
-      case 'horn': if (p.seat === 0) this.broadcast({ t: 'ev', list: [{ k: 'horn' }] }); return;
+      case 'horn':
+        if (p.seat !== 0) return;
+        this.broadcast({ t: 'ev', list: [{ k: 'horn' }] });
+        this.sim.mobs?.horn(this.sim.rv.translation());   // (it scatters ringtails, and wakes a grumphorn)
+        return;
       case 'use': return this.onUse(p, m);
+      case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       case 'ko': return this.onKO(p, m);
       case 'wake': return this.onWake(p);
       case 'emote': if (C.EMOTES.includes(m.e)) this.broadcast({ t: 'emote', id: p.id, e: m.e }); return;
@@ -424,7 +433,21 @@ export class Room {
       if (pr) this.broadcast({ t: 'ev', list: [{ k: 'spawn', p: sim.describe(pr) }] });
       this.send(p, { t: 'dbg', op: 'spawned', id: pr?.id });
     }
+    // the wildlife: one critter where you say (its 'spawn' event goes out with the tick's events); the day's
+    // cast on or off (off also clears whatever is out); a critter's state forced
+    else if (m.op === 'mob') {
+      const mb = sim.ensureMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed }).spawn(String(m.type), +m.x, +m.z, { yaw: +m.yaw || 0, y: m.y != null ? +m.y : null, st: m.st != null ? +m.st | 0 : 0 });
+      this.send(p, { t: 'dbg', op: 'mob', id: mb?.id ?? null });
+    }
+    else if (m.op === 'mobs') {
+      this.mobsOn = !!m.on;
+      if (!this.mobsOn && sim.mobs) { sim.mobs.end(); sim.mobs = null; }
+    }
+    else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.force(mb, +m.st | 0); }
   }
+
+  // who's here and playing right now (the wildlife is sized for them)
+  liveCrew() { return Math.max(1, [...this.players.values()].filter(p => p.connected).length); }
 
   onPose(p, m) {
     const raw = { x: num(m.x, 1e5), y: num(m.y, 1e5), z: num(m.z, 1e5) }, par = m.par ? 1 : 0, yaw = num(m.yaw, 1e4), pitch = num(m.pitch, 1.6);
@@ -660,7 +683,12 @@ export class Room {
     this.sim.release(p.id);
     this.sim.dropHook(p.id);
     this.stats.kos++;
-    const how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)' }[m.why] || 'is down';
+    // what knocked them about in the last 3 s says how they went down (the page only knows it fell)
+    const k = p.lastKnock && this.t - p.lastKnock.t < 3 ? p.lastKnock : null;
+    const by = k?.by != null ? this.players.get(k.by)?.name : null;
+    let how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)', mob: 'got tossed by the Grumphorn' }[m.why] || 'is down';
+    if (k?.why === 'mob') how = 'got tossed by the Grumphorn';
+    else if (k?.why === 'shove' && by && m.why === 'fall') how = `ate dirt (${by} shoved them)`;
     this.toast(`${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
   }
 
@@ -689,6 +717,7 @@ export class Room {
     // along), so nobody wakes up at the fire 100 m from it, next to the junkyard's decoys
     const lot = this.W.town.lot;
     if (!this.inTown) this.toast('You limped into town overnight.', '#fff', 4);
+    this.sim.endMobs();   // the wildlife goes to bed (before the RV moves: nothing rides along into town)
     this.sim.placeRV(lot.x, lot.z, lot.yaw);
     // and anyone knocked out comes round by the fire: no doctor's bill for sleeping through midnight
     for (const p of this.players.values()) if (p.ko) { p.ko = false; this.send(p, { t: 'revived' }); }
@@ -798,6 +827,8 @@ export class Room {
       this.toast(`ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
     }
     if (this.phase === 'road') {
+      // the wildlife: today's cast, sized for the crew that's here as the road begins
+      if (this.mobsOn && !sim.mobsDone && !sim.mobs?.started) sim.startMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed });
       this.clock += dt / C.HOUR_SEC;
       if (!this.inTown && rvp.z > this.W.LEN - 8) {
         this.inTown = true;
@@ -873,20 +904,37 @@ export class Room {
       const pub = [];
       for (const e of evs) {
         if (e.k === 'knock') {
+          // why: 'rv' (run over), 'shove' (a friend), 'mob' (wildlife). Only your own RV running a friend
+          // over bills: the rest cost time and, if nobody picks you up, the usual doctor's bill. A player who
+          // is already down stays down (a knock would stand them up on their page)
           const pl = this.players.get(e.id);
-          if (!pl) continue;
-          this.send(pl, { t: 'knock', v: e.v, ko: e.ko });
-          if (e.ko) {
+          if (!pl || (pl.ko && e.why !== 'rv')) continue;
+          const why = e.why || 'rv';
+          this.send(pl, { t: 'knock', v: e.v, ko: !!e.ko, why, rel: e.rel ? 1 : 0 });
+          pl.lastKnock = { why, by: e.by ?? null, t: this.t };
+          if (e.ko && why === 'rv') {
             const drv = [...this.players.values()].find(q => q.seat === 0);
             this.bill(C.RV_HIT_BILL, `${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
           }
-          pub.push({ k: 'thud', id: e.id });
+          pub.push({ k: 'thud', id: e.id, why });
         } else {
           if (e.k === 'break') { this.stats.broken += e.lost; this.dayStats.broken += e.lost; }
+          if (e.k === 'mob') this.onMobEvent(e);
           pub.push(e);
         }
       }
       if (pub.length) this.broadcast({ t: 'ev', list: pub });
+    }
+  }
+
+  // what the wildlife did, in words for the crew (the sounds and the rest are the pages' business)
+  onMobEvent(e) {
+    if (e.s === 'wake' && this.t - (this.beastToastAt ?? -99) > 10) {
+      this.beastToastAt = this.t;
+      this.toast('The Grumphorn is awake. Get off the road, or crouch and keep still.', '#ff8a65', 4);
+    } else if (e.s === 'leave') {
+      this.stats.beasts = (this.stats.beasts || 0) + 1;
+      this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
     }
   }
 

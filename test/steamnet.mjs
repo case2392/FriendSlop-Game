@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import WebSocket from 'ws';
 
 process.env.FRIENDSLOP_TEST = '1';             // the room's dbg levers (move the RV) for the late-join case
+process.env.FRIENDSLOP_NOMOBS = '1';            // (no wildlife in the way of the scripted moves)
 const require = createRequire(import.meta.url);
 const { startBackend } = await import('./fakesteam/backend.mjs');
 const { initFakeSteam } = await import('./fakesteam/client.mjs');

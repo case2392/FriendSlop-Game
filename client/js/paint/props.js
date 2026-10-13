@@ -13,6 +13,7 @@
 //   gnomehat gnomecoat gnomebeard gnomeface gnomefur portrait paintback gold rosette glass brass bronze gilt
 //   tire rim screen steel bakelite toastplate red regdeck crest till plaque keys tvfront tvback
 //   strap fret guitar honey ball ivory rubber parchment lantern skin boot toast bulb tag
+//   hide horn hoof (the grumphorn: mobs3d.js)
 // Boulders (not in the atlas, they're 4 m wide): loot_boulder_<biome> (512×256, u wraps round
 // the rock, v runs ground → top; badlands and desert carry the strata of BOULDER_BANDS, whose
 // edges the slab geometry ledges on) is the stone; loot_cover_<biome> (alpha, seamless) is the
@@ -46,6 +47,8 @@ const PIECES = {
   strap: [256, 24], fret: [256, 24], guitar: [160, 256], honey: [96, 256], ball: [128, 64, 'wrap'], eye: [128, 64, 'wrap'],
   ivory: [64, 64, 'wrap'], rubber: [64, 64, 'wrap'], parchment: [64, 64], lantern: [64, 64], skin: [64, 64, 'wrap'],
   boot: [64, 64, 'wrap'], plaster: [64, 64], toast: [64, 64], bulb: [64, 64], tag: [64, 64],
+  // the wildlife (mobs3d.js): the grumphorn's shag, horn and hooves
+  hide: [256, 128, 'wrap'], horn: [128, 64, 'wrap'], hoof: [64, 64, 'wrap'],
 };
 export const ATLAS_W = 1024, PAD = 8;
 // skyline packing (tallest first, lowest spot, leftmost on ties): deterministic
@@ -2248,6 +2251,59 @@ register('loot_tag', {
 });
 
 // ---- the atlas -------------------------------------------------------------------------------------------
+
+// ---- the wildlife: the grumphorn's shag, horn and hooves ------------------------------------------------
+
+register('loot_hide', {
+  family: F, w: 256, h: 128, note: "the grumphorn's shaggy coat (u wraps, nose to tail along u; v from the spine down to the belly): dense overlapping locks hanging straight down, lit from the upper left, longer and darker toward the long belly fringe; tinted per biome on the mesh",
+  paint(g, w, rnd, h, cv) {
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#8a6644'], [0.35, '#6e4c30'], [0.75, '#523620'], [1, '#30200f']]); g.fillRect(0, 0, w, h);
+    // rows of locks from the spine down, each row overlapping the one above it
+    const rows = 9;
+    for (let r = 0; r < rows; r++) {
+      const t = r / (rows - 1), y0 = -6 + t * (h - 10), L = 13 + t * 20, n = 22 + Math.floor(rnd() * 4);
+      for (let i = 0; i < n; i++) {
+        const x = (i + rnd() * 0.8) / n * w, len = L * range(rnd, 0.8, 1.2), a = Math.PI + range(rnd, -0.12, 0.12), bend = range(rnd, -0.12, 0.12);
+        wrapX(w, x, 10, X => {
+          // the lock's own shadow, then its body, then light along its upper-left edge
+          blob(g, X + 2, y0 + len * 0.55, 5.5, len * 0.55, 0, '#1e1208', 0.22, 0.35);
+          for (let k = 0; k < 5; k++) blade(g, X + (k - 2) * 1.6, y0 + range(rnd, -2, 2), len * range(rnd, 0.85, 1.05), a, 2.4, pick(rnd, t < 0.5 ? ['#7a5636', '#8a6442', '#6a4a2e'] : ['#5a3c24', '#4a3020', '#644428']), 0.9, bend);
+          blade(g, X - 3, y0 + 1, len * 0.75, a + 0.04, 1.6, t < 0.5 ? '#c49a6a' : '#8a6644', 0.55, bend);
+          blade(g, X - 1.5, y0, len * 0.5, a, 1.1, '#e8c898', 0.3 * (1 - t), bend);
+        });
+      }
+    }
+    // the fringe's ragged, dark ends
+    for (let i = 0; i < 50; i++) { const x = rnd() * w; wrapX(w, x, 4, X => blade(g, X, h - range(rnd, 14, 24), range(rnd, 12, 24), Math.PI + range(rnd, -0.1, 0.1), 2.2, pick(rnd, ['#2e1e12', '#3a2616', '#24180c']), 0.75, range(rnd, -0.1, 0.1))); }
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#fff0d0', 0.12], [0.2, '#fff0d0', 0], [0.85, '#120a04', 0], [1, '#120a04', 0.3]]); g.fillRect(0, 0, w, h);
+    blurTile(cv, 0.35);
+  },
+});
+
+register('loot_horn', {
+  family: F, w: 128, h: 64, note: "a curled horn (a tube: u from the root to the tip, v round it): ridged pale root, smooth honey middle, a near-black tip; lit along the top",
+  paint(g, w, rnd, h, cv) {
+    g.fillStyle = lin(g, 0, 0, w, 0, [[0, '#cbb08a'], [0.35, '#e0c89e'], [0.7, '#9a7a52'], [0.9, '#3e2e22'], [1, '#2a2018']]); g.fillRect(0, 0, w, h);
+    // growth rings on the rough root half
+    for (let i = 0; i < 16; i++) { const x = (i / 16) * w * 0.55 + range(rnd, -1, 1), a = 0.55 * (1 - x / (w * 0.6)); line(g, [[x + 1, 0], [x + 1, h]], range(rnd, 1, 2.2), '#6a5038', a); line(g, [[x, 0], [x, h]], 0.8, '#f4e4c4', a * 0.6); }
+    for (let i = 0; i < 40; i++) { const x = rnd() * w, y = rnd() * h; line(g, [[x, y], [x + range(rnd, 4, 12), y + range(rnd, -0.5, 0.5)]], 0.7, pick(rnd, ['#5a4632', '#f0dcb8']), 0.25); }
+    // lit along the top of the tube, shadowed underneath (v round it: 0.25 is the top)
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#1a1008', 0.25], [0.25, '#fff4dc', 0.22], [0.5, '#1a1008', 0], [0.75, '#1a1008', 0.35], [1, '#1a1008', 0.25]]); g.fillRect(0, 0, w, h);
+    blurTile(cv, 0.4);
+  },
+});
+
+register('loot_hoof', {
+  family: F, size: 64, note: "a split hoof (u wraps): grey-black horn, vertical grain, a lighter rim at the top and a worn sole",
+  paint(g, s, rnd, h, cv) {
+    g.fillStyle = lin(g, 0, 0, 0, s, [[0, '#6a6058'], [0.25, '#3a3430'], [0.8, '#26201c'], [1, '#1a1612']]); g.fillRect(0, 0, s, s);
+    for (let i = 0; i < 26; i++) { const x = rnd() * s; wrapX(s, x, 2, X => line(g, [[X, s * 0.2], [X + range(rnd, -1, 1), s]], range(rnd, 0.6, 1.4), pick(rnd, ['#4a443e', '#14100c']), 0.4)); }
+    // the cleft, front and back
+    for (const x of [s * 0.25, s * 0.75]) line(g, [[x, s * 0.35], [x, s]], 1.6, '#0a0806', 0.7);
+    rect(g, 0, 0, s, 4, '#8a8076', 0.5);
+    blurTile(cv, 0.4);
+  },
+});
 
 register('loot_atlas', {
   family: F, w: ATLAS_W, h: ATLAS_H, note: 'every loot piece in one texture (one draw call per prop): 1:1 cells with 8 px dilated padding',
