@@ -1062,7 +1062,29 @@ net.on('s', m => {
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
 net.on('toast', inOrder(m => toast(m.text, m.color, m.secs)));
-net.on('knock', inOrder(m => { me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv); if ((m.why === 'shove' || m.why === 'nip' || m.why === 'bean') && !m.ko) { sfx.stumble(); shake(0.3); } else { sfx.knock(); shake(0.6); } }));
+net.on('knock', inOrder(m => {
+  const n = me.events.length;
+  me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv);
+  // (what the knock did, told now: the next frame's update starts a fresh list. A knockout from the server
+  // (a rock, a toss, the RV) never used to reach it: no pick-up, no bill, and a hard hat that never wore out)
+  for (const e of me.events.splice(n)) meEvent(e);
+  if ((m.why === 'shove' || m.why === 'nip' || m.why === 'bean') && !m.ko) { sfx.stumble(); shake(0.3); } else { sfx.knock(); shake(0.6); }
+}));
+// what my body did (this frame's update, or a knock just now): its sounds, and what the server must hear
+function meEvent(e) {
+  if (e.k === 'step') sfx.step();
+  else if (e.k === 'climbstep') sfx.climb();
+  else if (e.k === 'jump') sfx.jump();
+  else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); }
+  else if (e.k === 'grabwall') sfx.wall();
+  else if (e.k === 'lunge') sfx.lunge();
+  else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
+  else if (e.k === 'mantle') sfx.grab();
+  else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
+  else if (e.k === 'hat') { net.send({ t: 'hat', why: e.why }); sfx.clang(); shake(0.35); }
+  else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
+  else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
+}
 net.on('seat', inOrder(m => {
   if (m.seat == null) { me.unsit(m.exit); }
   else { if (me.holding) onGrabRelease(); me.sit(m.seat); }
@@ -1632,20 +1654,7 @@ requestAnimationFrame(frame);
   inp.crouch = !!keys.control || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
   me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
-  for (const e of me.events) {
-    if (e.k === 'step') sfx.step();
-    else if (e.k === 'climbstep') sfx.climb();
-    else if (e.k === 'jump') sfx.jump();
-    else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); }
-    else if (e.k === 'grabwall') sfx.wall();
-    else if (e.k === 'lunge') sfx.lunge();
-    else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
-    else if (e.k === 'mantle') sfx.grab();
-    else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
-    else if (e.k === 'hat') { net.send({ t: 'hat', why: e.why }); sfx.clang(); shake(0.35); }
-    else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
-    else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
-  }
+  for (const e of me.events) meEvent(e);
   for (const p of me.pushes) net.send({ t: 'push', ...p });
   if (me.pos.y < (S.W.heightAt(me.pos.x, me.pos.z) - 20)) {
     // fell through the world somehow

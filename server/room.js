@@ -51,7 +51,7 @@ export class Room {
     this.seed = seed ?? (Math.floor(Math.random() * 1e9) >>> 0);
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
-    for (const p of this.players.values()) p.walkie = false;   // a new trip buys its own walkies
+    for (const p of this.players.values()) p.walkie = p.hat = false;   // a new trip buys its own walkies (and hard hats)
     this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0 };
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
@@ -453,6 +453,9 @@ export class Room {
       if (!this.mobsOn && sim.mobs) { sim.mobs.end(); sim.mobs = null; }
     }
     else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.force(mb, +m.st | 0); }
+    // a knock as the physics sends one (a rock, a toss), through the same relay; a hard hat on or off
+    else if (m.op === 'knock') sim.out.push({ k: 'knock', id: p.id, v: [0, 2, 0], ko: !!m.ko, why: String(m.why || 'rock') });
+    else if (m.op === 'hat') { p.hat = !!m.on; this.sendMeta(); }
   }
 
   // who's here and playing right now (the wildlife is sized for them)
@@ -933,7 +936,8 @@ export class Room {
           const why = e.why || 'rv';
           this.send(pl, { t: 'knock', v: e.v, ko: !!e.ko, why, rel: e.rel ? 1 : 0 });
           pl.lastKnock = { why, by: e.by ?? null, t: this.t };
-          if (e.ko && why === 'rv') {
+          // (a hard hat takes it: the page turns it into a knock, and nobody was knocked out)
+          if (e.ko && why === 'rv' && !pl.hat) {
             const drv = [...this.players.values()].find(q => q.seat === 0);
             this.bill(C.RV_HIT_BILL, `${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
           }
@@ -962,8 +966,8 @@ export class Room {
     } else if (e.s === 'leave') {
       this.stats.beasts++;
       this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
-    } else if (e.s === 'unsteal') {
-      if (e.ours !== false) { this.stats.stolen -= e.value; this.dayStats.stolen -= e.value; }
+    } else if (e.s === 'steal' && e.bait) {
+      this.toast('A ringtail took the bait: off home with the cheese wheel.', '#ffd166', 3);
     } else if (e.s === 'steal' && !e.again) {
       if (e.ours) { this.stats.stolen += e.value; this.dayStats.stolen += e.value; }
       const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, ours: false, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };

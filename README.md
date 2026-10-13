@@ -51,8 +51,9 @@ there at its den: go and get it back. The tracker says what they're holding of y
 
 From day 2 they get bolder. Leave the RV parked with its door open and nobody near it, and one may hop in
 and run off with the best loose thing in the cabin: shut the door, stay by it, or bungee the cargo down
-($90 at the store). Walk up to a den and they come out to nip you: you stumble and drop whatever you carry
-(they leave alone anyone kneeling by a friend who is down).
+($90 at the store). Drive off with one inside and it lets go and jumps out. Walk up to a den and they come
+out to nip you: you stumble and drop whatever you carry (they leave alone anyone kneeling by a friend who
+is down, and anyone up out of reach).
 
 From day 3, **loose rock** sits on the rim above the narrows (the boulder and the ranger gate). A yellow
 LOOSE ROCK sign warns you and the navigator's map says "HONK FIRST". When the RV gets close, or someone

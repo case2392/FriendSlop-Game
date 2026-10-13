@@ -1301,6 +1301,7 @@ export function generateLeg(seed, day, opts = {}) {
         const a = rngX() * 6.283, r = 0.9 + rngX() * 1.6, x = sx + Math.cos(a) * r, z = sz + Math.sin(a) * r;
         if (Math.abs(x - roadX(z)) < 3.6 || !flatAt(x, z, roadY(z), 1)) continue;
         if (statics.some(b => b.mat !== 'invisible' && Math.hypot(b.x - x, b.z - z) < Math.max(b.hx, b.hz) + 0.5)) continue;
+        if (cyls.some(c => Math.hypot(c.x - x, c.z - z) < c.r + 0.3) || hulls.some(c => Math.hypot(c.x - x, c.z - z) < (c.r || 2) + 0.3)) continue;   // (a cairn, a rock)
         props.push({ id: propId++, type: 'stone', x, y: heightAt(x, z) + LOOT.stone.shape[2] + 0.03, z, ry: rngX() * 6.283, value: 0 });
         n++;
       }

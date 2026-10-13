@@ -382,13 +382,9 @@ export class Mobs {
       const inRV = (() => { const l = this.sim.rvToLocal(t); return insideRV(l.x, l.y, l.z, 0.05); })();
       // taken in a raid and it never got out of the RV (it lost its grip in the doorway): no theft after all
       if (st.raid && !st.left) {
-        if (!inRV) st.left = true;
+        if (!inRV) this.raidOut(id, st);
         else {
-          if (this.t - st.at > 2) {
-            this.stolen.delete(id);
-            if (den) den.thefts = Math.max(0, den.thefts - 1);
-            this.sim.out.push({ k: 'mob', id: st.mob, s: 'unsteal', item: id, value: st.value, ours: st.ours });
-          }
+          if (this.t - st.at > 2) { this.stolen.delete(id); if (den) den.thefts = Math.max(0, den.thefts - 1); }
           continue;
         }
       }
@@ -401,7 +397,7 @@ export class Mobs {
     }
   }
   // what the ringtails hold of yours right now (the tracker's "Ringtails have $X of your stuff")
-  stolenValue() { let v = 0; for (const [id, st] of this.stolen) { const it = this.get(id); if (it && st.ours) v += it.value; } return Math.round(v); }
+  stolenValue() { let v = 0; for (const [id, st] of this.stolen) { const it = this.get(id); if (it && st.ours && st.left) v += it.value; } return Math.round(v); }
   // someone knocked out let go of these: the ringtails' favourite pickings for a while
   onDowned(ids) { for (const id of ids) this.droppedByDowned.set(id, this.t + 20); }
 
@@ -536,12 +532,13 @@ export class Mobs {
   }
 
   // the legs: a horizontal velocity servo toward a point (capped at LEG_F), facing where it goes
-  rtLegs(p, goal, speed, dt) {
+  // base: the velocity of what it stands on (inside the RV, the RV's: it walks on the floor, not the road)
+  rtLegs(p, goal, speed, dt, base = null) {
     const t = p.body.translation(), v = p.body.linvel();
     const dx = goal ? goal.x - t.x : 0, dz = goal ? goal.z - t.z : 0, d = Math.hypot(dx, dz);
     const s = goal ? Math.min(speed, d * 3) : 0, ux = d > 1e-3 ? dx / d : 0, uz = d > 1e-3 ? dz / d : 0;
     const k = RT.MASS * RT.LEG_GAIN;
-    let fx = (ux * s - v.x) * k, fz = (uz * s - v.z) * k;
+    let fx = (ux * s + (base?.x || 0) - v.x) * k, fz = (uz * s + (base?.z || 0) - v.z) * k;
     const fl = Math.hypot(fx, fz);
     if (fl > RT.LEG_F) { fx *= RT.LEG_F / fl; fz *= RT.LEG_F / fl; }
     p.body.applyImpulse(v3(fx * dt, 0, fz * dt), true);
@@ -616,7 +613,9 @@ export class Mobs {
       case S.INRV: {
         if (!this.sim.doorOpen) { this.rtDrop(m, p); this.setSt(m, S.TRAPPED); this.sim.out.push({ k: 'mob', id: m.id, s: 'trapped' }); return; }
         const it = this.get(m.target);
-        if (Math.abs(this.sim.rvSpeed()) > 1 || now > m.raidBy + 10 || (!this.jaws.has(m.id) && (!it || it.holders.size || this.sim.tied.has(it.id)))) m.leave = true;
+        // (the RV driving off: it lets go of what it took and bails out, the crew's loot still aboard)
+        if (Math.abs(this.sim.rvSpeed()) > 1) { this.rtDrop(m, p); m.leave = true; }
+        if (now > m.raidBy + 10 || (!this.jaws.has(m.id) && (!it || it.holders.size || this.sim.tied.has(it.id)))) m.leave = true;
         if (!this.jaws.has(m.id) && !m.leave && it) {
           const mp = this.mouth(p, it.type), ip = it.body.translation();
           if (Math.hypot(mp.x - ip.x, mp.z - ip.z) < RT.REACH && Math.abs(mp.y - ip.y) < 0.8 && this.bite(m, it.id)) {
@@ -629,7 +628,7 @@ export class Mobs {
       // seeing off a stranger: the nip itself is in rtStep
       case S.NIP: {
         const q = players.get(m.nipAt);
-        if (!q?.pos || q.ko || q.seat != null || Math.hypot(q.pos.x - den.x, q.pos.z - den.z) > RT.NIP_R + 2 || this.nearDowned(q.pos, players) || age > 4) { m.nipCd = now + 1; this.setSt(m, S.SPOOK); }
+        if (!this.nippable(q) || Math.hypot(q.pos.x - den.x, q.pos.z - den.z) > RT.NIP_R + 2 || this.nearDowned(q.pos, players) || age > 4) { m.nipCd = now + 1; this.setSt(m, S.SPOOK); }
         return;
       }
       case S.SNEAK: {
@@ -704,10 +703,18 @@ export class Mobs {
   // own loot that nobody touched yet is taken all the same, but it was never theirs to lose (no theft in the
   // tally, nothing "got back")
   rtTake(m, it, den, raid) {
+    // the cheese wheel: bait, not loot. Off home with it, but nobody lost anything (and it's none of the day's thefts)
+    if (LOOT[it.type]?.bait) { this.sim.out.push({ k: 'mob', id: m.id, s: 'steal', item: it.id, value: 0, type: it.type, den: den.id, poi: den.poiType, raid, again: false, ours: false, bait: true }); return; }
     const again = this.stolen.get(it.id), value = Math.round(it.value), ours = !!it.ours || !!raid;
     if (!again) { den.thefts++; this.stolen.set(it.id, { den: den.id, value, at: this.t, mob: m.id, ours, raid, left: !raid }); }
     else { again.mob = m.id; again.den = den.id; }
-    this.sim.out.push({ k: 'mob', id: m.id, s: 'steal', item: it.id, value, type: it.type, den: den.id, poi: den.poiType, raid, again: !!again, ours: again ? again.ours : ours });
+    // (taken in a raid, the crew hears of it once it's out of the door: in the RV it may yet lose it, raidOut)
+    if (!raid || again) this.sim.out.push({ k: 'mob', id: m.id, s: 'steal', item: it.id, value, type: it.type, den: den.id, poi: den.poiType, raid, again: !!again, ours: again ? again.ours : ours });
+  }
+  raidOut(id, st) {
+    st.left = true;
+    const den = this.dens.get(st.den);
+    this.sim.out.push({ k: 'mob', id: st.mob, s: 'steal', item: id, value: st.value, type: this.get(id)?.type, den: st.den, poi: den?.poiType, raid: true, again: false, ours: st.ours });
   }
   // back to the den without loot (gave up)
   rtHome(m, spooked) { m.target = null; m.way = null; m.cd = this.t + this.cooldown(); this.setSt(m, spooked ? RST.SPOOK : RST.DEN); }
@@ -793,36 +800,41 @@ export class Mobs {
           // out: home with it (or without)
           m.outHop = false;
           const l = this.sim.rvToLocal(t);
-          if (!insideRV(l.x, l.y, l.z, 0)) { if (this.jaws.has(m.id)) { m.goT = this.t; m.prog = { x: t.x, z: t.z, t: this.t }; this.setSt(m, S.RUN); } else this.rtHome(m, false); }
+          if (!insideRV(l.x, l.y, l.z, 0)) {
+            const j = this.jaws.get(m.id), st = j && this.stolen.get(j.item);
+            if (st?.raid && !st.left) this.raidOut(j.item, st);
+            if (j) { m.goT = this.t; m.prog = { x: t.x, z: t.z, t: this.t }; this.setSt(m, S.RUN); } else this.rtHome(m, false);
+          }
           return;
         }
+        const base = this.sim.rv.velocityAtPoint(t);
         if (this.jaws.has(m.id) || m.leave) {
           // back to the doorway, and a hop down the steps; with the thing well in its jaws first (it lifts it
           // before it goes: hopping off with it still on the floor, it'd lose it)
           const j = this.jaws.get(m.id), it = j && this.get(j.item);
           let gap = 0;
           if (it) { const mp = this.mouth(p, it.type), ip = it.body.translation(); gap = Math.hypot(mp.x - ip.x, mp.y - ip.y, mp.z - ip.z); }
-          if (gap > 0.3 && this.t - (m.biteT ?? -99) < 2) { this.rtLegs(p, null, 0, dt); return; }
-          const d = this.rtLegs(p, this.sim.rvToWorld(v3(-0.75, 0, RV_DIM.DOOR_Z)), it ? RT.SNEAK * 0.6 : RT.RUN * 0.7, dt);
+          if (gap > 0.3 && this.t - (m.biteT ?? -99) < 2) { this.rtLegs(p, null, 0, dt, base); return; }
+          const d = this.rtLegs(p, this.sim.rvToWorld(v3(-0.75, 0, RV_DIM.DOOR_Z)), it ? RT.SNEAK * 0.6 : RT.RUN * 0.7, dt, base);
           if (d < 0.45 && gap < 0.45) {
             m.outHop = true; m.raidT = this.t;
             const out = qRotate(this.sim.rv.rotation(), v3(-1, 0, 0));
-            p.body.setLinvel(v3(out.x * RT.HOP_OUT[0], RT.HOP_OUT[1], out.z * RT.HOP_OUT[0]), true);
+            p.body.setLinvel(v3(base.x + out.x * RT.HOP_OUT[0], base.y + RT.HOP_OUT[1], base.z + out.z * RT.HOP_OUT[0]), true);
             p.body.setRotation(yawQ(Math.atan2(out.x, out.z)), true);
           }
-        } else { const it = this.get(m.target); if (it) this.rtLegs(p, it.body.translation(), RT.SNEAK, dt); }
+        } else { const it = this.get(m.target); if (it) this.rtLegs(p, it.body.translation(), RT.SNEAK, dt, base); }
         return;
       }
       case S.NIP: {
         const q = players.get(m.nipAt);
         if (!q?.pos) return;
         const d = this.rtLegs(p, v3(q.pos.x, q.pos.y, q.pos.z), RT.SPOOK, dt);
-        if (d < 0.75) this.rtNip(m, p, q);
+        if (d < 0.75 && Math.abs(q.pos.y - p.body.translation().y) < 1.2) this.rtNip(m, p, q);
         return;
       }
       case S.TRAPPED: {
         // out through the open door, or bouncing off the walls (knocking loose loot about)
-        if (this.sim.doorOpen) this.rtLegs(p, this.sim.rvToWorld(v3(-2.2, 0, 0.35)), RT.SPOOK, dt);
+        if (this.sim.doorOpen) this.rtLegs(p, this.sim.rvToWorld(v3(-2.2, 0, 0.35)), RT.SPOOK, dt, this.sim.rv.velocityAtPoint(p.body.translation()));
         else if (this.rng() < dt * 3) p.body.applyImpulse(v3((this.rng() - 0.5) * 60, 30, (this.rng() - 0.5) * 60), true);
         return;
       }
@@ -933,10 +945,11 @@ export class Mobs {
     let best = null, bv = 0;
     for (const it of sim.props.values()) {
       const L = LOOT[it.type];
-      if (!L || L.tool || L.mob || L.mass > 15 || it.holders.size || sim.tied.has(it.id) || this.carriedBy.has(it.id) || taken.has(it.id)) continue;
+      if (!L || (L.tool && !L.bait) || L.mob || L.mass > 15 || it.holders.size || sim.tied.has(it.id) || this.carriedBy.has(it.id) || taken.has(it.id)) continue;
       const l = sim.rvToLocal(it.body.translation());
       if (!insideRV(l.x, l.y, l.z, 0) || l.y > 1.5) continue;
-      if (it.value > bv) { bv = it.value; best = it.id; }
+      const v = L.bait ? RT.BAIT_V : it.value;
+      if (v > bv) { bv = v; best = it.id; }
     }
     return best;
   }
@@ -946,11 +959,16 @@ export class Mobs {
     let best = null, bd = RT.NIP_R;
     const busy = new Set([...this.list.values()].filter(o => o.st === RST.NIP).map(o => o.nipAt));
     for (const q of players.values()) {
-      if (!q.pos || q.ko || q.seat != null || q.par || busy.has(q.id) || (den.nipCd?.get(q.id) || 0) > this.t) continue;
+      if (!this.nippable(q) || busy.has(q.id) || (den.nipCd?.get(q.id) || 0) > this.t) continue;
       const d = Math.hypot(q.pos.x - den.x, q.pos.z - den.z);
       if (d < bd && !this.nearDowned(q.pos, players)) { bd = d; best = q; }
     }
     return best;
+  }
+  // on foot on the ground, where its teeth reach: not up a wall (knocked off, they'd fall), on a roof or a
+  // rock, or riding the RV
+  nippable(q) {
+    return !!q?.pos && !q.ko && q.seat == null && !q.par && q.mode !== MODE.CLIMB && q.pos.y - this.sim.W.heightAt(q.pos.x, q.pos.z) < 1.2;
   }
   // the nip: a stumble (never a knockout), and whatever they carried is dropped
   rtNip(m, p, q) {
@@ -1023,24 +1041,28 @@ export class Mobs {
         if (r.n >= r.rim.length) r.st = 'done';
       }
       // a rock still coming down fast knocks out whoever it hits; rolling, it bowls them over (not riders
-      // under the RV's roof)
+      // under the RV's roof; to one on it, it's how fast it comes at them there). Once someone has picked
+      // it up it's an ordinary stone: thrown, it beans like any junk (sim.js)
       for (const fr of r.rocks) {
         if (now - fr.at > RF.LIVE) continue;
         const p = this.get(fr.id);
         if (!p) continue;
-        const v = p.body.linvel(), sp = Math.hypot(v.x, v.y, v.z);
-        if (sp < RF.BUMP_V) continue;
-        const t = p.body.translation(), ko = sp >= RF.KO_V;
+        if (p.holders.size || p.thrownBy != null) { fr.at = -Infinity; continue; }
+        const v = p.body.linvel(), t = p.body.translation(), w = this.sim.rv.velocityAtPoint(t);
+        const rel = v3(v.x - w.x, v.y - w.y, v.z - w.z);
+        if (Math.hypot(v.x, v.y, v.z) < RF.BUMP_V && Math.hypot(rel.x, rel.y, rel.z) < RF.BUMP_V) continue;
         for (const q of players.values()) {
           if (!q.pos || q.ko || q.seat != null || (this.sim.knockCd.get(q.id) || 0) > now) continue;
+          const u = q.par ? rel : v, sp = Math.hypot(u.x, u.y, u.z);
+          if (sp < RF.BUMP_V) continue;
           const y = Math.max(q.pos.y + 0.3, Math.min(q.pos.y + 1.5, t.y));
           if (Math.hypot(t.x - q.pos.x, t.y - y, t.z - q.pos.z) > RF.HIT_R) continue;
           const l = this.sim.rvToLocal(v3(q.pos.x, q.pos.y + 0.9, q.pos.z));
           if (insideRV(l.x, l.y, l.z, 0)) continue;
           this.sim.knockCd.set(q.id, now + 1.5);
-          const k = (ko ? 3 : 2.5) / (Math.hypot(v.x, v.z) || 1);
+          const ko = sp >= RF.KO_V, k = (ko ? 3 : 2.5) / (Math.hypot(u.x, u.z) || 1);
           if (!ko) { const h = this.sim.holds.get(q.id); if (h) { this.sim.release(q.id); this.sim.out.push({ k: 'slip', id: h.kind === 'prop' ? h.id : null, by: q.id, why: 'rock' }); } }   // (bowled over: what they carried goes flying)
-          this.sim.out.push({ k: 'knock', id: q.id, v: [r3(v.x * k), ko ? 5 : 3, r3(v.z * k)], ko, why: 'rock' });
+          this.sim.out.push({ k: 'knock', id: q.id, v: [r3(u.x * k), ko ? 5 : 3, r3(u.z * k)], ko, why: 'rock', rel: q.par ? 1 : 0 });
           this.sim.out.push({ k: 'mob', id: fr.id, s: 'rockhit', by: q.id, ko });
         }
       }
@@ -1140,6 +1162,7 @@ export class Mobs {
 
   ghWake(m, p, from, rvWoke = false) {
     if (m.st !== GST.SLEEP && m.st !== GST.DOZE) return;
+    m.stir = null;   // (a flank shove still waiting on a second: whatever woke it first, it's up now)
     m.noise = from ? v3(from.x, from.y, from.z) : null;
     m.rvWoke = rvWoke;
     p.col.setFriction(0);

@@ -5,7 +5,7 @@ process.env.FRIENDSLOP_FAST = '1';
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
-const { toWorld } = await import('../shared/rv.js');
+const { toWorld, qRotate, insideRV } = await import('../shared/rv.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -1261,7 +1261,9 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   const bait = r.room.sim.addProp('cheese', { x: r.g.x, y: r.room.W.heightAt(r.g.x, r.g.z + 9) + 0.3, z: r.g.z + 9 }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
   for (let i = 0; i < 60 * 25 && !mobEvs(r.ps[0], 'steal').length; i++) tick(r.room, 1 / 60);
   const first = mobEvs(r.ps[0], 'steal')[0];
-  check(onCounter && flat && first?.item === bait.id && r.room.dayStats.stolen === 0, `store: a cheese wheel for $30 lands on the counter, lying flat (its middle ${under ? under.timeOfImpact.toFixed(3) : '?'} m up); a den goes for it before a $300 vase (it took the ${first ? (first.item === bait.id ? 'cheese' : 'vase') : 'nothing'})`);
+  // (and it's no theft: not one of the den's day, no "ran off with the Cheese Wheel ($0)")
+  const D = r.room.sim.mobs.denOf(r.m), told = r.ps[0].conn.has(x => x.t === 'toast' && /took the bait/.test(x.text)) && !r.ps[0].conn.has(x => x.t === 'toast' && /Cheese Wheel \(/.test(x.text));
+  check(onCounter && flat && first?.item === bait.id && r.room.dayStats.stolen === 0 && D.thefts === 0 && told, `store: a cheese wheel for $30 lands on the counter, lying flat (its middle ${under ? under.timeOfImpact.toFixed(3) : '?'} m up); a den goes for it before a $300 vase (it took the ${first ? (first.item === bait.id ? 'cheese' : 'vase') : 'nothing'}), and that's no theft (${D.thefts} counted)`);
 }
 {
   // T1: asleep, two friends shoving its flank together tip it over: down for 12 s, then up; one shove on its
@@ -1289,18 +1291,22 @@ function byTheRV(day, names = ['Ann'], side = -1) {
     `grumphorn: two friends shoving its side tip it over (${out.two.st0 === GST.TIPPED ? 'tipped' : out.two.st0}), it's up after ${GH.TIP_T} s; one shove alone wakes it a moment later (${JSON.stringify(out)})`);
 }
 {
-  // W1: stones heaped at the foot of each Grumphorn sign
+  // W1: stones heaped at the foot of each Grumphorn sign (seed 14's day 5 put one in a cairn by the road)
   const bad = [];
   let n = 0;
-  for (const seed of [4242, 7, 777]) for (let day = 2; day <= 5; day++) {
+  for (const seed of [4242, 7, 777, 14]) for (let day = 2; day <= 5; day++) {
     const W = generateLeg(seed, day);
     for (const sg of W.signs.filter(q => q.beast)) {
       const k = W.props.filter(p => p.type === 'stone' && Math.hypot(p.x - sg.x, p.z - sg.z) < 3).length;
       n += k;
       if (k < 3) bad.push(`${seed}/${day}: ${k} stones`);
     }
+    // (none inside a cairn or a rock)
+    for (const p of W.props.filter(q => q.type === 'stone')) {
+      if (W.cyls.some(c => Math.hypot(c.x - p.x, c.z - p.z) < c.r + 0.2) || W.hulls.some(c => Math.hypot(c.x - p.x, c.z - p.z) < (c.r || 2) + 0.2)) bad.push(`${seed}/${day}: a stone in a ${W.cyls.some(c => Math.hypot(c.x - p.x, c.z - p.z) < c.r + 0.2) ? 'cairn' : 'rock'}`);
+    }
   }
-  check(!bad.length, `grumphorn: a heap of stones by every warning sign (${n} over 3 seeds x days 2-5)${bad.length ? ': ' + bad.join('; ') : ''}`);
+  check(!bad.length, `grumphorn: a heap of stones by every warning sign, none in a cairn or a rock (${n} over 4 seeds x days 2-5)${bad.length ? ': ' + bad.join('; ') : ''}`);
 }
 {
   // W2: the stones stay in their heaps, asleep (they were balls and rolled off down the slope, 6 m and more;
@@ -1321,6 +1327,137 @@ function byTheRV(day, names = ['Ann'], side = -1) {
     });
   }
   check(n && !bad.length, `grumphorn: the ${n} stones by the signs stay in their heaps, asleep after 20 s (seed 4242, days 2 and 5)${bad.length ? ': ' + bad.join('; ') : ''}`);
+}
+
+// ---- the review's (each failed before its fix) ------------------------------------------------------------
+{
+  // V1: in the moving RV, junk lying still in the cabin isn't flying (it beaned a rider at the RV's own speed,
+  // and flung him back down the cabin); thrown at a rider there, it beans them, on top of the RV's motion
+  const { room, ps: [A, B, Cc] } = crew(['Ann', 'Bob', 'Cat']);
+  room.mobsOn = false;
+  const sim = room.sim, threw = it => Object.assign(it, { thrownBy: Cc.id, thrownAt: sim.t, beaned: false });
+  driveAt(room, A, 8, 6, i => {
+    ride(room, B, 0, -1, 0); ride(room, Cc, 0, 1.5, 0);
+    if (i === 60 * 4) {
+      // (a gnome Cat threw down by Bob's feet a moment ago, lying there now)
+      const w = toWorld(sim.rv.translation(), sim.rv.rotation(), { x: 0.3, y: 0.3, z: -1 }), g = threw(sim.addProp('gnome', w, sim.rv.rotation(), 70, 70));
+      g.body.setLinvel(sim.rv.velocityAtPoint(w), true);
+    }
+  });
+  const still = knocks(B).filter(k => k.why === 'bean').length, v0 = sim.rvSpeed();
+  let dir = null;
+  driveAt(room, A, 8, 2, i => {
+    ride(room, B, 0, -1, 0); ride(room, Cc, 0, 1.5, 0);
+    if (i === 30) {
+      const rq = sim.rv.rotation(), w = toWorld(sim.rv.translation(), rq, { x: 0, y: 1, z: 0.5 }), g = threw(sim.addProp('gnome', w, rq, 70, 70)), base = sim.rv.velocityAtPoint(w);
+      dir = qRotate(rq, { x: 0, y: 0, z: -1 });
+      g.body.setLinvel({ x: base.x + dir.x * 8, y: base.y, z: base.z + dir.z * 8 }, true);
+    }
+  });
+  const k = knocks(B).find(x => x.why === 'bean'), along = k && dir ? (k.v[0] * dir.x + k.v[2] * dir.z) / Math.hypot(k.v[0], k.v[2]) : 0;
+  check(v0 > 6 && still === 0 && k && k.rel === 1 && along > 0.9 && Math.abs(Math.hypot(k.v[0], k.v[2]) - 2.5) < 0.1,
+    `beanings in the moving RV (${v0.toFixed(1)} m/s): a gnome lying in the cabin beans nobody (${still}); one thrown at Bob beans him, the knock on top of the RV's motion (rel ${k?.rel}, ${k ? Math.hypot(k.v[0], k.v[2]).toFixed(2) : '?'} m/s down the cabin)`);
+}
+{
+  // V2: a raider in the RV when it drives off lets go of what it took and jumps out (its legs aimed for a
+  // speed over the road: it was pinned in the cabin with the loot, and the crew told it had run off with it).
+  // (Off it goes as soon as it's in: whether it has bitten yet or not, it's still in the cabin)
+  const { room, ps: [A], sim, m, vase } = byTheRV(2, ['Ann']);
+  for (let i = 0; i < 60 * 45 && m.st !== RST.INRV; i++) tick(room, 1 / 60);
+  let bit = false;
+  driveAt(room, A, 5, 12, () => { bit ||= sim.mobs.jaws.has(m.id); });
+  bit ||= mobEvs(A, 'drop').length > 0;
+  const rl = p => { const l = sim.rvToLocal(p.body.translation()); return insideRV(l.x, l.y, l.z, 0); };
+  const critter = sim.props.get(m.id), v = sim.props.get(vase.id);
+  check((!critter || !rl(critter)) && v && rl(v) && room.dayStats.stolen === 0 && sim.mobs.denOf(m).thefts === 0 && !A.conn.has(x => x.t === 'toast' && /ran off with/.test(x.text)),
+    `raids: the RV driving off with a raider inside, it lets go and jumps out (state ${m.st}, out ${critter ? !rl(critter) : 'gone'}, it had bitten ${bit}); the vase stays aboard (${v && rl(v)}), no theft, nobody told one (stolen $${room.dayStats.stolen})`);
+}
+{
+  // V3: the door shut on a raider with the vase in its teeth: no theft, and nobody was told of one (the toast
+  // went out as it bit)
+  const { room, ps: [A], sim, m } = byTheRV(2, ['Ann']);
+  for (let i = 0; i < 60 * 45 && !(m.st === RST.INRV && sim.mobs.jaws.has(m.id)); i++) tick(room, 1 / 60);
+  const bit = sim.mobs.jaws.has(m.id);
+  sim.setDoor(false);
+  tick(room, 5);
+  check(bit && m.st === RST.TRAPPED && room.dayStats.stolen === 0 && sim.mobs.denOf(m).thefts === 0 && !A.conn.has(x => x.t === 'toast' && /ran off with/.test(x.text)) && !mobEvs(A, 'steal').length,
+    `raids: the door shut on a raider with the vase in its teeth: trapped, no theft, and the crew wasn't told of one (stolen $${room.dayStats.stolen})`);
+}
+{
+  // V4: a fallen rock someone picked up and threw is an ordinary stone: at a friend it beans them (it used to
+  // knock them out as a "falling rock" for 8 s after it came down)
+  const { room, ps: [A, B], W, mobs } = narrows(4);
+  const rf = mobs.rockfalls[0], sim = room.sim, s = { x: W.roadX(rf.obz - 120), z: rf.obz - 120 };
+  stand(room, A, s.x, s.z, 0); stand(room, B, s.x, s.z + 3, Math.PI);
+  tick(room, 0.2);
+  const rock = sim.addProp('rock', { x: s.x, y: W.heightAt(s.x, s.z) + 1.2, z: s.z + 0.8 }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+  rf.rocks.push({ id: rock.id, at: mobs.t });   // (one that came down a moment ago)
+  Object.assign(rock, { thrownBy: A.id, thrownAt: sim.t, beaned: false });
+  rock.body.setLinvel({ x: 0, y: 1, z: 9 }, true);
+  tick(room, 1);
+  const k = knocks(B)[0];
+  check(k && !k.ko && k.why === 'bean' && evs(A.conn, 'bean').length === 1, `rockfall: a fallen rock picked up and thrown at a friend beans them, not a knockout (${k ? (k.ko ? 'KO' : 'stumble') + ', ' + k.why : 'missed'})`);
+}
+{
+  // V5: a flank shove waiting on a second, and something else wakes it first: once it dozes off again it
+  // stays asleep (the stale shove woke it again out of nowhere)
+  const { room, ps: [A, B] } = crew(['Ann', 'Bob']);
+  room.mobsOn = false;
+  const g = openGround(room), id = mobAt(room, A, 'grumphorn', g.x, g.z, { yaw: 0, st: GST.SLEEP }), m = mobOf(room, id), mobs = room.sim.mobs;
+  stand(room, A, g.x - 1.6, g.z + 0.4, Math.PI / 2, C.FLAG.CROUCH); stand(room, B, g.x + 60, g.z, 0);
+  tick(room, 0.5);
+  room.handle(A, { t: 'shove' });
+  tick(room, 0.2);
+  const stirred = !!m.stir;
+  mobs.horn({ x: g.x, y: room.W.heightAt(g.x, g.z), z: g.z + 10 });
+  stand(room, A, g.x - 70, g.z, 0);
+  let dozed = null, after = 0;
+  for (let i = 0; i < 60 * 60; i++) {
+    tick(room, 1 / 60);
+    if (dozed == null && (m.st === GST.DOZE || m.st === GST.SLEEP)) dozed = mobEvs(B, 'wake').length;
+    if (dozed != null && m.st !== GST.DOZE && m.st !== GST.SLEEP) after++;
+  }
+  check(stirred && dozed === 1 && after === 0 && mobEvs(B, 'wake').length === 1, `grumphorn: stirred by a shove and woken by the horn first, it dozes off again and stays down (woke ${mobEvs(B, 'wake').length} time(s), ${after ? 'up again' : 'asleep'})`);
+}
+{
+  // V6: nobody up a wall, or standing up high, is nipped (a nip knocked a climber 8 m off the wall: a knockout)
+  const c = crew(['Ann', 'Bob']);
+  c.room.debug(c.ps[0], { op: 'day', d: 2 }); tick(c.room, 0.2);
+  c.room.mobsOn = false;
+  const { room, ps: [A, B] } = c, W = room.W, g = openGround(room);
+  room.sim.ensureMobs({ day: 2, crew: 2, seed: room.seed }).rtSpawnDen({ id: 7, x: g.x, y: W.heightAt(g.x, g.z), z: g.z, ry: 0, stash: [] });
+  stand(room, B, g.x + 60, g.z, 0);
+  const pose = (m, up) => room.onPose(A, { x: g.x - 5, y: W.heightAt(g.x - 5, g.z) + up, z: g.z, yaw: Math.PI / 2, pitch: 0, m, f: 0, v: [0, 0, 0] });
+  const n = {};
+  for (const [k, m, up] of [['climbing', C.MODE.CLIMB, 3], ['up high', C.MODE.WALK, 2.2], ['on the ground', C.MODE.WALK, 0]]) {
+    const n0 = mobEvs(A, 'nip').length;
+    for (let i = 0; i < 60 * 8; i++) { pose(m, up); tick(room, 1 / 60); }
+    n[k] = mobEvs(A, 'nip').length - n0;
+  }
+  check(n.climbing === 0 && n['up high'] === 0 && n['on the ground'] >= 1, `nips: never someone climbing, or up out of reach; on the ground by the den, yes (${JSON.stringify(n)})`);
+}
+{
+  // V7: a hard hat on, the RV running you over is only a knock: no $500 knockout bill (it was billed, and the
+  // hat used up); V8: a new run starts without the last one's hats
+  const { room, ps: [A, B] } = crew(['Ann', 'Bob']);
+  const s = spot(room);
+  stand(room, A, s.x, s.z); stand(room, B, s.x + 2, s.z);
+  A.seat = 0; B.hat = true;
+  const bank = room.bank;
+  room.sim.out.push({ k: 'knock', id: B.id, v: [3, 6, 0], ko: true, why: 'rv' });
+  tick(room, 1 / 60);
+  const hatSaved = room.bank === bank && B.conn.last('knock')?.ko === true;
+  A.seat = null;
+  room.newRun(4242);
+  check(hatSaved && !B.hat, `store: with a hard hat on, the RV running you over bills nothing (bank ${bank} -> ${room.bank}); a new run starts without the last one's hats (${B.hat})`);
+}
+{
+  // V9: a raid goes for the cheese wheel before the vase (raids skipped it)
+  const { room, ps: [A], sim, m, vase, rp, rq } = byTheRV(2, ['Ann']);
+  const ch = sim.addProp('cheese', toWorld(rp, rq, { x: -0.3, y: 0.4, z: -2.2 }), { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+  for (let i = 0; i < 60 * 45 && !mobEvs(A, 'steal').length; i++) tick(room, 1 / 60);
+  const first = mobEvs(A, 'steal')[0];
+  check(first?.item === ch.id && first.bait && room.dayStats.stolen === 0, `raids: a raider takes the cheese wheel before the $300 vase (it took the ${first ? (first.item === ch.id ? 'cheese' : first.item === vase.id ? 'vase' : first.item) : 'nothing'})`);
 }
 
 // ---- world gen: the wildlife is placed last, from its own random stream: nothing else moves ---------------------

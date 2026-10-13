@@ -865,22 +865,25 @@ export class Sim {
     }
 
     // a thrown thing hitting a friend (not whoever threw it) beans them: a stumble, and they drop what they
-    // carry. Never a knockout, never a bill
+    // carry. Never a knockout, never a bill. To a rider it's how fast it comes at them in the RV (junk lying
+    // still in the cabin of a moving RV isn't flying), and the knock is on top of the RV's motion
     for (const p of this.props.values()) {
       if (p.thrownBy == null || p.beaned || this.t - p.thrownAt > 1.5) continue;
-      const v = p.body.linvel(), sp = Math.hypot(v.x, v.y, v.z);
-      if (sp < 5) continue;
-      const t = p.body.translation();
+      const t = p.body.translation(), v = p.body.linvel(), w = this.rv.velocityAtPoint(t);
+      const rel = { x: v.x - w.x, y: v.y - w.y, z: v.z - w.z };
+      if (Math.hypot(v.x, v.y, v.z) < 5 && Math.hypot(rel.x, rel.y, rel.z) < 5) continue;
       for (const pl of players.values()) {
         if (pl.id === p.thrownBy || !pl.pos || pl.ko || pl.seat != null || (this.knockCd.get(pl.id) || 0) > this.t) continue;
+        const u = pl.par ? rel : v;
+        if (Math.hypot(u.x, u.y, u.z) < 5) continue;
         const y = Math.max(pl.pos.y + 0.3, Math.min(pl.pos.y + 1.6, t.y));
         if (Math.hypot(t.x - pl.pos.x, t.y - y, t.z - pl.pos.z) > 0.6) continue;
         p.beaned = true;
         this.knockCd.set(pl.id, this.t + 1);
         const h = this.holds.get(pl.id);
         if (h) { this.release(pl.id); this.out.push({ k: 'slip', id: h.kind === 'prop' ? h.id : null, by: pl.id, why: 'bean' }); }
-        const k = 2.5 / (Math.hypot(v.x, v.z) || 1);
-        this.out.push({ k: 'knock', id: pl.id, v: [r3(v.x * k), 2, r3(v.z * k)], ko: false, why: 'bean', by: p.thrownBy });
+        const k = 2.5 / (Math.hypot(u.x, u.z) || 1);
+        this.out.push({ k: 'knock', id: pl.id, v: [r3(u.x * k), 2, r3(u.z * k)], ko: false, why: 'bean', by: p.thrownBy, rel: pl.par ? 1 : 0 });
         this.out.push({ k: 'bean', id: pl.id, by: p.thrownBy, item: p.id, type: p.type });
         break;
       }
