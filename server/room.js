@@ -168,7 +168,10 @@ export class Room {
     p.raw = null; p.pos = null; p.eye = null; p.par = 0; p.lp = null;
     if (this.hostId === p.id) this.hostId = [...this.players.values()].find(q => q.connected)?.id ?? null;
     if (!quiet && [...this.players.values()].some(q => q.connected)) {
-      this.toast(`${p.name} lost connection. Their seat is saved for ${secs} s.`, '#ffb4a2', 4);
+      // a dropped driver or navigator doesn't hold the crew up: anyone stands in till they're back (onUse, mapRefusal)
+      const road = this.phase === 'camp' || this.phase === 'road';
+      const job = !road ? '' : p.id === this.roles.drv ? ' Anyone can drive till they\'re back.' : p.id === this.roles.nav ? ' Anyone but the driver can read the map till they\'re back.' : '';
+      this.toast(`${p.name} lost connection. Their seat is saved for ${secs} s.${job}`, '#ffb4a2', job ? 6 : 4);
       this.sendMeta();
     }
   }
@@ -234,7 +237,9 @@ export class Room {
   // in onUse and onGrab). Everyone else is crew. Whoever has done a job least this trip gets it first (ties at
   // random), so it goes round. In camp a change of crew draws again (the host starts every trip alone while
   // friends type the code in); once the RV leaves camp the roles are locked till the next morning, and only
-  // a role whose player left the trip for good is handed on.
+  // a role whose player left the trip for good is handed on. While a role's player has dropped (their seat is
+  // kept: hold()), anyone stands in for them (the day's driver still never reads the map), so a lost
+  // connection doesn't stop the RV; if they never come back, whoever stood in keeps the job.
 
   drawRoles() {
     const live = [...this.players.values()].filter(p => p.connected);
@@ -258,8 +263,8 @@ export class Room {
     for (const p of this.players.values()) {
       // out of the driver's seat if today isn't your day to drive; the map out of your hands if it isn't yours to read
       if (p.seat === 0 && p.id !== this.roles.drv) { p.seat = null; this.send(p, { t: 'seat', seat: null, exit: RV_SEAT_EXIT[0] }); }
-      const h = this.sim.holds.get(p.id);
-      if (h?.kind === 'prop' && p.id !== this.roles.nav && this.sim.props.get(h.id)?.type === 'map') { this.sim.release(p.id); this.send(p, { t: 'grabbed', ok: false, kind: 'prop', id: h.id }); }
+      const mid = this.mapIn(p);
+      if (mid && p.id !== this.roles.nav) { this.sim.release(p.id); this.send(p, { t: 'grabbed', ok: false, kind: 'prop', id: mid }); }
     }
     this.sendMeta();
   }
@@ -276,17 +281,24 @@ export class Room {
     this.fillRoles();
     if ((drv !== this.roles.drv || nav !== this.roles.nav) && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
   }
-  // after camp: a role whose player left the trip is handed on (the driver's first: without one nobody drives;
-  // the navigator takes the wheel only if there's nobody else), and a newcomer fills a role nobody has
+  // after camp: a role whose player left the trip is handed on (to whoever stood in for them: at the wheel, or
+  // reading the map; else the driver's first: without one nobody drives, and the navigator takes the wheel only
+  // if there's nobody else), and a newcomer fills a role nobody has
   fillRoles() {
     let { drv, nav } = this.roles;
-    if (!this.players.has(nav)) nav = 0;
+    const live = [...this.players.values()].filter(p => p.connected);
+    if (!this.players.has(nav)) nav = live.find(p => p.id !== drv && this.mapIn(p))?.id || 0;
     if (!this.players.has(drv)) {
-      drv = this.pickFor('drv', [...this.players.values()].filter(p => p.connected && p.id !== nav)) || nav;
+      drv = live.find(p => p.seat === 0)?.id || this.pickFor('drv', live.filter(p => p.id !== nav)) || nav;
       if (drv === nav) nav = 0;
     }
-    if (!nav) nav = this.pickFor('nav', [...this.players.values()].filter(p => p.connected && p.id !== drv));
+    if (!nav) nav = this.pickFor('nav', live.filter(p => p.id !== drv));
     if (drv !== this.roles.drv || nav !== this.roles.nav) this.setRoles(drv, nav);
+  }
+  // the id of the road map if p is holding it (else 0)
+  mapIn(p) {
+    const h = this.sim.holds.get(p.id);
+    return h?.kind === 'prop' && this.sim.props.get(h.id)?.type === 'map' ? h.id : 0;
   }
   rolesText() {
     const d = this.players.get(this.roles.drv)?.name, v = this.players.get(this.roles.nav)?.name;
@@ -315,6 +327,7 @@ export class Room {
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles: this.roles,
       players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
+      away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
     });
   }
 
@@ -429,14 +442,16 @@ export class Room {
     const ok = this.sim.grab(p.id, p, m);
     this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id });
   }
-  // Why p may not take the road map now (null: they may): only today's navigator takes it, and only while the
-  // driver is at the wheel (a dropped player's seat is freed at once: hold()). Alone there's no navigator:
-  // nobody to read it to you. The client words its prompt the same way (main.js mapFree).
+  // Why p may not take the road map now (null: they may): only today's navigator takes it (or, while they've
+  // dropped, anyone but the day's driver), and only while somebody else is at the wheel (a dropped player's
+  // seat is freed at once: hold()). Alone there's no navigator: nobody to read it to you. The client words its
+  // prompt the same way (main.js mapNo).
   mapRefusal(p) {
-    const name = id => this.players.get(id)?.name;
-    if (!this.roles.nav) return 'It takes two: one drives, one reads the map.';
-    if (p.id !== this.roles.nav) return `Only ${name(this.roles.nav)} reads the map today.`;
-    if (![...this.players.values()].some(q => q !== p && q.seat === 0)) return `${name(this.roles.drv) || 'The driver'} has to be at the wheel before you take the map.`;
+    const { drv, nav } = this.roles, name = id => this.players.get(id)?.name, here = id => !!this.players.get(id)?.connected;
+    if (!nav) return 'It takes two: one drives, one reads the map.';
+    if (p.id === drv) return 'You drive today: no peeking.';
+    if (p.id !== nav && here(nav)) return `Only ${name(nav)} reads the map today.`;
+    if (![...this.players.values()].some(q => q !== p && q.seat === 0)) return `${here(drv) ? name(drv) : 'Somebody'} has to be at the wheel before you take the map.`;
     return null;
   }
 
@@ -451,7 +466,8 @@ export class Room {
       const idx = kind === 'seat0' ? 0 : 1;
       if (!inRV) return;
       if ([...this.players.values()].some(q => q.seat === idx && q !== p)) { this.toast('Somebody\'s already sitting there.', '#fff', 2, p); return; }
-      if (idx === 0 && this.roles.drv && p.id !== this.roles.drv) { this.toast(`${this.players.get(this.roles.drv)?.name || 'Somebody else'} drives today. Ride along.`, '#fff', 3, p); return; }
+      const drv = this.players.get(this.roles.drv);
+      if (idx === 0 && drv?.connected && p !== drv) { this.toast(`${drv.name} drives today. Ride along.`, '#fff', 3, p); return; }
       sim.release(p.id);
       p.seat = idx;
       if (idx === 0) sim.setDrive({ th: 0, st: 0, hb: 0 });
@@ -462,7 +478,8 @@ export class Room {
         const map = [...sim.props.values()].find(q => q.type === 'map'), ml = map && sim.rvToLocal(map.body.translation());
         const nav = this.players.get(this.roles.nav);
         const ask = nav?.connected && map && !map.holders.size && insideRV(ml.x, ml.y, ml.z, 0.3) && (this.phase === 'camp' || this.phase === 'road') && !this.inTown;
-        this.toast(`${p.name} is driving. God help us.${ask ? ` ${nav.name}, grab the map.` : ''}`, p.color, 3);
+        const sub = drv && p !== drv ? ` till ${drv.name} is back` : '';   // standing in for a driver who dropped
+        this.toast(`${p.name} is driving${sub}. God help us.${ask ? ` ${nav.name}, grab the map.` : ''}`, p.color, 3);
       }
       return;
     }

@@ -485,7 +485,10 @@ function computeTarget() {
     // the whole lower front of the RV is "the winch" if you're standing outside in front of it
     const lh = toLocal(S.rv.p, S.rv.q, hit.point);
     if (!u && !me.par && lh.z > 3.8 && lh.y < 1.1) u = 'winch';
-    if (u === 'seat0') return { kind: 'rvuse', use: 'seat0', label: roleOf('drv') && roleOf('drv') !== S.selfId ? `${roleName('drv')} drives today. You ride along.` : '[E] DRIVE' };
+    if (u === 'seat0') {
+      const d = roleOf('drv'), label = !d || d === S.selfId ? '[E] DRIVE' : roleAway('drv') ? `[E] DRIVE till ${roleName('drv')} is back` : `${roleName('drv')} drives today. You ride along.`;
+      return { kind: 'rvuse', use: 'seat0', label };
+    }
     if (u === 'seat1') return { kind: 'rvuse', use: 'seat1', label: '[E] ride shotgun' };
     if (u === 'door') return { kind: 'rvuse', use: 'door', label: '[E] open the door' };
     if (u === 'bunk') return { kind: 'rvuse', use: 'bunk', label: S.g?.ph === 'night' ? '[E] sleep (everyone in a bunk = next day)' : 'bunks (bedtime is after the Repo Man gets paid)' };
@@ -506,16 +509,19 @@ function driverName() {
   if (!id || id === S.selfId) return null;
   return S.meta?.players.find(q => q.id === id)?.name || 'the driver';
 }
-// the day's roles (server/room.js drawRoles): who drives and who reads the map today
+// the day's roles (server/room.js drawRoles): who drives and who reads the map today. While a role's player
+// has dropped (their seat is kept: meta.away), anyone stands in for them
 const roleOf = job => S.meta?.roles?.[job] || 0;
-const roleName = job => S.meta?.players.find(q => q.id === roleOf(job))?.name || (job === 'drv' ? 'Somebody else' : 'the navigator');
+const roleAway = job => !!roleOf(job) && !!S.meta?.away?.some(q => q.id === roleOf(job));
+const roleName = job => [...(S.meta?.players || []), ...(S.meta?.away || [])].find(q => q.id === roleOf(job))?.name || (job === 'drv' ? 'Somebody else' : 'the navigator');
 // Why I can't take the road map now (null: I can). The server's rule (server/room.js mapRefusal): only today's
-// navigator takes it, only while the driver is at the wheel. This only words the prompt: the server decides
+// navigator takes it (or anyone but the driver while the navigator has dropped), only while somebody else is
+// at the wheel. This only words the prompt: the server decides
 function mapNo() {
   if (!roleOf('nav')) return 'The road map. It takes two: one drives, one reads it out.';
   if (roleOf('drv') === S.selfId) return 'The road map. You drive today: no peeking.';
-  if (roleOf('nav') !== S.selfId) return `The road map. Only ${roleName('nav')} reads it today.`;
-  if (!driverName()) return `The road map. ${roleName('drv')} has to be at the wheel first.`;
+  if (roleOf('nav') !== S.selfId && !roleAway('nav')) return `The road map. Only ${roleName('nav')} reads it today.`;
+  if (!driverName()) return `The road map. ${roleAway('drv') ? 'Somebody' : roleName('drv')} has to be at the wheel first.`;
   return null;
 }
 // should I (today's navigator) take the map now: the driver is at the wheel, the road ahead matters (camp, or
@@ -1755,6 +1761,8 @@ function questTracker(g) {
   if (roleOf('drv') && (g.ph === 'camp' || g.ph === 'road')) {
     const d = roleOf('drv') === S.selfId, n = roleOf('nav') === S.selfId, nav = roleOf('nav') ? roleName('nav') : null;
     L.push([d ? `You drive today${nav ? `. ${nav} reads the map` : ''}` : n ? `You read the map today. ${roleName('drv')} drives` : `${roleName('drv')} drives today${nav ? `, ${nav} reads the map` : ''}`, '']);
+    if (roleAway('drv')) L.push([`${roleName('drv')} lost connection: anyone can drive till they're back`, '']);
+    if (roleAway('nav')) L.push([`${roleName('nav')} lost connection: anyone but the driver can read the map till they're back`, '']);
   }   // (not 'tip': that's the silver tooltip frame, absolutely positioned)
   if (g.ph === 'camp') L.push(['Drive out of camp to start the clock', '']);
   else if (g.ph === 'road') {

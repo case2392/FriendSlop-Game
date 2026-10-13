@@ -121,7 +121,8 @@ on.
 | `V` · `M` · `T` | push-to-talk · mute · walkie-talkie |
 
 **A day:** each morning picks a driver and a navigator at random, locked
-till the next morning → leave camp → follow the road (the driver can't see
+till the next morning (if one drops out, anyone stands in till they're
+back) → leave camp → follow the road (the driver can't see
 the map: the navigator reads it out, matching the odometer to its 100 m
 marks; alone, you drive without it) → deal with
 what's broken (winch up the grade, push out of the mud, shove or winch the

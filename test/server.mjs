@@ -359,7 +359,7 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   stand(A, 0.6, 2.4);
   tick(room, 0.3);
   grab(A);
-  check(A.seat === null && holds(B) && ca.last('grabbed')?.ok === false && !holds(A) && said(ca, /Only Bob reads the map/), 'map: the driver gets up: the navigator keeps it, and the driver still can\'t take it');
+  check(A.seat === null && holds(B) && ca.last('grabbed')?.ok === false && !holds(A) && said(ca, /You drive today: no peeking/), 'map: the driver gets up: the navigator keeps it, and the driver still can\'t take it');
   room.handle(B, { t: 'use', kind: 'seat0' });
   check(B.seat === null && holds(B) && said(cb, /Ann drives today/), 'roles: the navigator can\'t take the wheel (and is told who drives), and keeps the map');
   room.handle(A, { t: 'use', kind: 'seat0' });
@@ -430,6 +430,66 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   // old driver navigates
   room.nextDay();
   check(room.phase === 'camp' && room.roles.drv === Cat.id && room.roles.nav === drvWas, `roles: drawn again in the morning, the one who hasn't driven yet drives (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
+  room.sim.free?.();
+}
+{
+  // a role's player who drops (their seat kept) doesn't stop the RV: anyone stands in till they're back (the
+  // day's driver still never reads the map); back, they get the job again once the stand-in lets go; never
+  // back, the stand-in keeps the job
+  const room = new Room('STAND', 4242);
+  const cs = [new FakeConn(), new FakeConn(), new FakeConn(), new FakeConn()];
+  const [A, B, Cat, Dan] = ['Ann', 'Bob', 'Cat', 'Dan'].map((n, i) => room.addPlayer(cs[i], n).player);
+  A.key = 'tok:a';
+  for (const p of [A, B, Cat, Dan]) room.welcome(p);
+  room.setRoles(A.id, B.id);
+  tick(room, 0.5);
+  const W = room.W, sim = room.sim, z = W.camp.exitZ + 4;
+  sim.placeRV(W.roadX(z), z, 0);
+  tick(room, 0.2);
+  const said = (c, re) => c.has(m => m.t === 'toast' && re.test(m.text));
+  const map = [...sim.props.values()].find(p => p.type === 'map');
+  const stand = (p, x, z) => room.onPose(p, { par: 1, x, y: 0.05, z, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+  const grab = p => { const t = map.body.translation(); room.handle(p, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 }); };
+  const holds = p => sim.holds.get(p.id)?.id === map.id;
+  const sit = p => { stand(p, 0.6, 2.4); room.handle(p, { t: 'use', kind: 'seat0' }); };
+  const up = p => room.handle(p, { t: 'use', kind: 'unseat' });
+  sit(A);
+  check(room.phase === 'road' && A.seat === 0 && room.roles.drv === A.id && room.roles.nav === B.id, 'stand-ins: on the road, Ann drives and Bob navigates');
+  // the driver drops: anyone can drive till they're back, and the crew is told
+  room.hold(A, 5);
+  const meta = cs[2].last('meta');
+  check(A.seat === null && said(cs[2], /Ann lost connection.*Anyone can drive till they're back/) && meta.away?.some(q => q.id === A.id && q.name === 'Ann') && meta.roles.drv === A.id,
+    'stand-ins: the driver drops: the crew is told anyone can drive, and meta still names them (as away)');
+  sit(Cat);
+  check(Cat.seat === 0 && room.roles.drv === A.id && said(cs[1], /Cat is driving till Ann is back/), 'stand-ins: crew takes the wheel till the driver is back (still their job today)');
+  stand(B, -0.4, 2.3); grab(B); tick(room, 0.3);
+  check(holds(B), 'stand-ins: the navigator reads the map to whoever stands in at the wheel');
+  // the driver is back: Cat keeps driving till Cat gets up; then the wheel is the driver's alone again
+  const back = room.resume('tok:a', new FakeConn());
+  room.welcome(back);
+  check(back === A && Cat.seat === 0 && room.roles.drv === A.id && holds(B), 'stand-ins: the driver comes back: the stand-in keeps the wheel for now, the navigator the map');
+  up(Cat); sit(Cat);
+  check(Cat.seat === null && said(cs[2], /Ann drives today\. Ride along/), 'stand-ins: ... and once the stand-in gets up, only the driver takes the wheel again');
+  sit(A);
+  check(A.seat === 0, 'stand-ins: the driver back at the wheel');
+  // the navigator drops: Cat (crew) reads the map, Ann (the driver) never
+  room.hold(B, 0.5);
+  tick(room, 0.1);
+  check(!holds(B) && said(cs[2], /Bob lost connection.*Anyone but the driver can read the map/), 'stand-ins: the navigator drops (the map falls): the crew is told anyone but the driver can read it');
+  up(A); stand(A, 0.6, 2.4); grab(A);
+  check(!holds(A) && A.conn.last('grabbed')?.ok === false && A.conn.has(m => m.t === 'toast' && /no peeking/.test(m.text)), 'stand-ins: the driver still can\'t take the map');
+  sit(A);
+  stand(Cat, -0.4, 2.3); grab(Cat); tick(room, 0.3);
+  check(holds(Cat) && cs[2].last('grabbed')?.ok === true && room.roles.nav === B.id, 'stand-ins: crew reads the map while the navigator is away (still their job today)');
+  // the navigator never comes back: the stand-in keeps the map, and the job
+  tick(room, 0.6);
+  check(!room.players.has(B.id) && room.roles.nav === Cat.id && holds(Cat) && room.roles.drv === A.id, 'stand-ins: the navigator never comes back: the crew member reading the map keeps it, and the job');
+  // the driver drops and never comes back while Dan stands in at the wheel: Dan keeps the wheel and the job
+  room.hold(A, 0.5);
+  sit(Dan);
+  tick(room, 0.8);
+  check(!room.players.has(A.id) && room.roles.drv === Dan.id && Dan.seat === 0 && room.roles.nav === Cat.id && holds(Cat),
+    `stand-ins: the driver never comes back: the stand-in at the wheel keeps driving, and the job (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
   room.sim.free?.();
 }
 
