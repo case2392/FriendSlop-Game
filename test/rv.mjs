@@ -238,6 +238,30 @@ function gateRun(speed, driver) {
   check(rolled && lost > 0 && lost <= C.RVH.CAP && tows === 1 && room.stats.bills - bills === 800 && !sim.rvFlipped(),
     `rv: rolled at ${v.toFixed(1)} m/s: -${lost}% (${seen.filter(h => h.priced).length} hits, at most ${C.RVH.CAP}%) and one $800 tow`);
 }
+{
+  // a rock and then a swerve into the wall 0.5 s later: one incident, told as both, and it counts as a crash
+  const { room, ps: [A] } = crew(['Ann']);
+  A.seat = 0;
+  room.debug(A, { op: 'rvhit', why: 'rock', amt: 3 });
+  tick(room, 0.5);
+  room.debug(A, { op: 'rvhit', why: 'crash', dv: 8, what: 'the canyon wall' });
+  tick(room, 2.5);
+  A.seat = null;
+  const said = A.conn.all('toast').filter(m => /\(RV \d+%\)\.$/.test(m.text)), S = room.stats.rv;
+  check(said.length === 1 && said[0].text === 'CRUNCH. Ann put the RV into the canyon wall: -18%, plus rocks -3% (RV 79%).' && S.crashes === 1 && S.worst?.amt === 18 && S.worst?.what === 'the canyon wall' && room.dayStats.rv.src.Ann === 18 && room.dayStats.rv.src.rocks === 3,
+    `rv: a rock and then a crash 0.5 s apart: '${said[0]?.text}' (${S.crashes} crash, the worst -${S.worst?.amt}% into ${S.worst?.what})`);
+}
+{
+  // a 20% knock on an RV at 5% costs it the 5% it had: the float, the toast and the day's damage all say 5
+  const { room, ps: [A] } = crew(['Ann']);
+  room.debug(A, { op: 'rvhp', hp: 5 });
+  tick(room, 0.1);
+  room.debug(A, { op: 'rvhit', why: 'beast', amt: 20 });
+  tick(room, 2.5);
+  const ev = evs(A.conn, 'rvhit').at(-1), said = toasts(A.conn, /Grumphorn/);
+  check(room.rvc.hp === 0 && ev?.amt === 5 && room.dayStats.rv.dmg === 5 && room.stats.rv.dmg === 5 && said.length === 1 && /: -5% \(RV 0%\)\.$/.test(said[0].text),
+    `rv: a 20% knock on an RV at 5%: the float says -${ev?.amt}%, today -${room.dayStats.rv.dmg}%, '${said[0]?.text}'`);
+}
 
 // ---- RV5: the bands, on the road -------------------------------------------------------------------------
 {
@@ -467,6 +491,27 @@ function gateRun(speed, driver) {
   press(room, A, 'loan');
   check(R.hp === 40 && room.loanAdd === 415, 'rv: two presses 6 s apart only ask twice');
 }
+{
+  // night 4 with two at the bench: Bob's press after Ann's asks Bob (it doesn't sign Ann's), Ann's second
+  // signs hers, and Bob's second asks again, the balloon having moved since he was told it
+  const { room, ps: [A, B] } = crew(['Ann', 'Bob'], 4);
+  const R = room.rvc, asked = p => toasts(p.conn, /Press again to sign/).length;
+  payUp(room);
+  room.debug(A, { op: 'rvhp', hp: 40 });
+  press(room, A, 'loan');
+  tick(room, 1);
+  press(room, B, 'loan');
+  const bob = R.hp === 40 && room.loanAdd === 0 && asked(B) === 1;
+  tick(room, 1);
+  press(room, A, 'loan');
+  const ann = R.hp === 65 && room.loanAdd === 415;
+  press(room, B, 'loan');
+  const again = R.hp === 65 && room.loanAdd === 415 && asked(B) === 2;
+  tick(room, 1);
+  press(room, B, 'loan');
+  check(bob && ann && again && R.hp === 90 && room.loanAdd === 830,
+    `rv: night 4, two at Gus's bench: Bob's press asks Bob (${bob}), Ann's second signs hers (${ann}), Bob's next asks again at the new balloon (${again}), and his second signs: RV ${R.hp}%, ${room.loanAdd} on the balloon`);
+}
 
 // ---- RV9: never a way to lose ------------------------------------------------------------------------------
 {
@@ -502,6 +547,18 @@ function gateRun(speed, driver) {
   const r = A.conn.last('receipt');
   check(r?.rv && r.rv.hp === 77 && r.rv.today === 23 && r.rv.src.Ann === 20 && r.rv.src.rocks === 3 && r.rv.quote.pts === 23 && r.rv.quote.cash === C.repairQuote(1, 77).cash,
     `rv: the night's receipt: RV ${r?.rv?.hp}%, -${r?.rv?.today}% today (${JSON.stringify(r?.rv?.src)}), Gus's quote ${r?.rv?.quote?.pts}% for $${r?.rv?.quote?.cash}`);
+  {
+    // somebody joining tonight gets the RV as it is now (Gus may have fixed it since nightfall)
+    room.bank += 1000;
+    press(room, A, 'cash');
+    const c = new FakeConn(), late = room.addPlayer(c, 'Cal').player;
+    room.welcome(late);
+    const r2 = c.last('receipt');
+    check(room.rvc.hp === 100 && r2?.rv?.hp === 100 && r2.rv.quote.pts === 0 && r2.rv.today === 23 && A.conn.last('receipt')?.rv?.hp === 77,
+      `rv: somebody joining after Gus fixed it gets the RV as it is (${r2?.rv?.hp}%, Gus's next ${r2?.rv?.quote?.pts}%), not as it was at nightfall`);
+    room.removePlayer(late.id, 'left');
+    room.debug(A, { op: 'rvhp', hp: 77 });
+  }
   room.nextDay();
   tick(room, 0.2);
   check(room.rvc.hp === 77 && room.sim.rvMods.band === 'FINE' && room.dayStats.rv.dmg === 0, `rv: it wakes up as it went to bed: ${room.rvc.hp}% on day 2, today's damage back to 0`);

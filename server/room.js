@@ -56,7 +56,7 @@ export class Room {
       rv: { dmg: 0, crashes: 0, worst: null, cash: 0, loan: 0, breakdowns: 0, end: 100 } };
     // the RV's condition (a new trip, a new RV): the hit being added up, the day's breakdowns, the roadside
     // fix's progress, Gus's pending loan question; repairs put on the loan land on tomorrow's payment
-    this.rvc = { hp: 100, inc: null, brokeN: 0, fix: 0, gusAsk: null };
+    this.rvc = { hp: 100, inc: null, brokeN: 0, fix: 0, gusAsk: {} };
     this.loanAdd = 0;
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
@@ -75,7 +75,7 @@ export class Room {
     this.paid = false;
     this.due = C.QUOTAS[this.day - 1] + this.loanAdd;   // (Gus's repairs on the loan)
     this.loanAdd = 0;
-    this.rvc.inc = null; this.rvc.brokeN = 0; this.rvc.fix = 0; this.rvc.gusAsk = null;
+    this.rvc.inc = null; this.rvc.brokeN = 0; this.rvc.fix = 0; this.rvc.gusAsk = {};
     this.inTown = false;
     this.flippedT = 0;
     this.nightAt = 0;
@@ -243,7 +243,7 @@ export class Room {
     const s = this.spawnFor(p);
     this.send(p, { t: 'tp', ...s });
     // joining at night or after the run ended: what everyone else is looking at
-    if (this.phase === 'night' && this.receipt) this.send(p, this.receipt);
+    if (this.phase === 'night' && this.receipt) this.send(p, { ...this.receipt, rv: this.rvReceipt() });
     if (this.phase === 'over' && this.over) this.send(p, this.overMsg());
     this.checkRoles();
     this.sendMeta();
@@ -702,25 +702,33 @@ export class Room {
     const drv = [...this.players.values()].find(q => q.seat === 0);
     if (!R.inc || now - R.inc.last > C.RVH.GAP) {
       if (R.inc && !R.inc.told) this.tellIncident();
-      R.inc = { sum: 0, last: now, why: e.why, what: e.what || null, how: e.how || null, by: drv ? drv.name : null, popped: false, told: false };
+      R.inc = { sum: 0, last: now, parts: {}, first: {}, popped: false, told: false };
+    }
+    const I = R.inc;
+    I.last = now;
+    // no more than the incident's cap, nor than the RV has left (a 20% hit on an RV at 5% cost it 5%)
+    amt = Math.min(amt, C.RVH.CAP - I.sum, Math.ceil(R.hp));
+    if (amt <= 0) return false;
+    // each cause keeps its own share, and its first hit says who and what: a rock and then a swerve into the
+    // wall is told as both, and counts as a crash
+    if (!I.first[e.why]) {
+      I.first[e.why] = { what: e.what || null, how: e.how || null, by: drv ? drv.name : null };
       if (e.why === 'crash') this.stats.rv.crashes++;
     }
-    R.inc.last = now;
-    amt = Math.min(amt, C.RVH.CAP - R.inc.sum);
-    if (amt <= 0) return false;
-    R.inc.sum += amt;
+    I.parts[e.why] = (I.parts[e.why] || 0) + amt;
+    I.sum += amt;
     const before = C.rvBand(R.hp).name;
     R.hp = Math.max(0, R.hp - amt);
     this.sim.setRvCond(R.hp);
     const S = this.stats.rv, D = this.dayStats.rv;
     S.dmg += amt; D.dmg += amt;
-    const src = e.why === 'crash' ? (R.inc.by || 'nobody') : e.why === 'beast' ? 'the Grumphorn' : e.why === 'rock' ? 'rocks' : 'a ringtail';
+    const src = e.why === 'crash' ? (I.first.crash.by || 'nobody') : e.why === 'beast' ? 'the Grumphorn' : e.why === 'rock' ? 'rocks' : 'a ringtail';
     D.src[src] = (D.src[src] || 0) + amt;
-    if (e.why === 'crash' && (!S.worst || R.inc.sum > S.worst.amt)) S.worst = { amt: R.inc.sum, by: R.inc.by, what: R.inc.what, day: this.day };
+    if (e.why === 'crash' && (!S.worst || I.parts.crash > S.worst.amt)) S.worst = { amt: I.parts.crash, by: I.first.crash.by, what: I.first.crash.what, day: this.day };
     if (!C.TEST) console.log('[rv]', this.code, this.day, e.why, e.dv ?? '', e.what || '', amt, R.hp);
     Object.assign(e, { amt, hp: R.hp, by: e.why === 'crash' ? drv?.id ?? 0 : 0 });
     // a big incident throws the door open (E shuts it): loot slides out on a turn, ringtails come calling
-    if (R.inc.sum >= C.RVH.POP && !R.inc.popped && !this.sim.doorOpen) { R.inc.popped = true; this.sim.setDoor(true, true); this.toast('The door flew open!', '#ffb74d', 3); }
+    if (I.sum >= C.RVH.POP && !I.popped && !this.sim.doorOpen) { I.popped = true; this.sim.setDoor(true, true); this.toast('The door flew open!', '#ffb74d', 3); }
     const after = C.rvBand(R.hp).name;
     // limping, a knock stalls the engine for a moment
     if (after === 'LIMPING' && amt >= C.RVH.STALL_HIT) this.sim.rvMods.stallUntil = this.sim.t + C.RVH.STALL_T;
@@ -732,18 +740,23 @@ export class Room {
     }
     return true;
   }
-  // the incident's toast, once it's over: who did it and what to, and what it cost all told
+  // the incident's toast, once it's over: who did it and what to, and what it cost. The biggest share gets
+  // the sentence and any other cause rides along ('CRUNCH. Sam put the RV into the canyon wall: -18%, plus
+  // rocks -3% (RV 79%).')
   tellIncident() {
     const I = this.rvc.inc;
     if (!I || I.told) return;
     I.told = true;
-    const cost = `-${I.sum}% (RV ${Math.round(this.rvc.hp)}%)`;
+    const ks = Object.keys(I.parts).sort((a, b) => I.parts[b] - I.parts[a]);
+    if (!ks.length) return;
+    const k = ks[0], F = I.first[k];
     let text;
-    if (I.why === 'crash') text = I.by ? `CRUNCH. ${I.by} put the RV into ${I.what || 'something'}: ${cost}.` : `CRUNCH. The RV ran into ${I.what || 'something'} with nobody at the wheel: ${cost}.`;
-    else if (I.why === 'beast') text = I.how === 'charge' ? `The Grumphorn charged the RV: ${cost}.` : `${I.by || 'Somebody'} rammed the Grumphorn: ${cost}.`;
-    else if (I.why === 'rock') text = `Rocks on the RV: ${cost}.`;
-    else text = `A ringtail broke out through a window: ${cost}.`;
-    this.toast(text, '#ffb74d', 4);
+    if (k === 'crash') text = F.by ? `CRUNCH. ${F.by} put the RV into ${F.what || 'something'}` : `CRUNCH. The RV ran into ${F.what || 'something'} with nobody at the wheel`;
+    else if (k === 'beast') text = F.how === 'charge' ? 'The Grumphorn charged the RV' : `${F.by || 'Somebody'} rammed the Grumphorn`;
+    else if (k === 'rock') text = 'Rocks on the RV';
+    else text = 'A ringtail broke out through a window';
+    const also = ks.slice(1).map(j => `${j === 'crash' ? (I.first.crash.by ? `${I.first.crash.by}'s crash` : 'a crash') : j === 'beast' ? 'the Grumphorn' : j === 'rock' ? 'rocks' : 'a ringtail'} -${I.parts[j]}%`);
+    this.toast(`${text}: -${I.parts[k]}%${also.length ? `, plus ${also.join(' and ')}` : ''} (RV ${Math.round(this.rvc.hp)}%).`, '#ffb74d', 4);
   }
   // broken down: whoever holds E at the engine hatch (on foot, awake, within FIX_R m of it, the RV standing
   // still) works on it; up to FIX_HANDS share the work, and letting go keeps what's done. The day's first
@@ -779,12 +792,14 @@ export class Room {
     const q = C.repairQuote(this.day, R.hp), S = this.stats.rv, D = this.dayStats.rv;
     let paidHow;
     if (how === 'loan') {
-      const next = C.QUOTAS[this.day] + this.loanAdd;
-      if (this.day === C.DAYS - 1 && (R.gusAsk == null || this.t - R.gusAsk > C.RVH.LOAN_CONFIRM)) {
-        R.gusAsk = this.t;
+      const next = C.QUOTAS[this.day] + this.loanAdd, A = R.gusAsk[p.id];
+      // (night 4: each presser has their own ask, and it signs only the balloon they were told: if somebody
+      // signed since, or the price moved, it asks afresh)
+      if (this.day === C.DAYS - 1 && (!A || A.due !== next + q.loan || this.t - A.at > C.RVH.LOAN_CONFIRM)) {
+        R.gusAsk[p.id] = { at: this.t, due: next + q.loan };
         return this.toast(`Gus: "That puts ${fmt$(q.loan)} on the balloon: ${fmt$(next + q.loan)}. Press again to sign."`, '#ffd166', 5, p);
       }
-      R.gusAsk = null;
+      R.gusAsk = {};
       this.loanAdd += q.loan; S.loan += q.loan; D.loan += q.loan;
       paidHow = `on the loan (tomorrow's payment: ${fmt$(next + q.loan)})`;
     } else {
@@ -877,11 +892,15 @@ export class Room {
       const s = { x: f.x + Math.cos(a) * 3, z: f.z + Math.sin(a) * 3 };
       this.send(p, { t: 'tp', x: s.x, y: this.W.townY + 0.1, z: s.z, yaw: Math.atan2(f.x - s.x, f.z - s.z) });
     }
-    // (the RV: its condition, what it lost today and to whom, and what Gus would charge for the next 25%)
-    const D = this.dayStats.rv;
-    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, ...this.dayStats,
-      rv: { hp: Math.round(this.rvc.hp), today: D.dmg, src: D.src, quote: C.repairQuote(this.day, this.rvc.hp) } };
+    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, ...this.dayStats, rv: this.rvReceipt() };
     this.broadcast(this.receipt);
+  }
+
+  // the receipt's RV line: its condition, what it lost today and to whom, and what Gus would charge for the
+  // next 25% (built afresh for whoever joins at night: Gus may have fixed it since nightfall)
+  rvReceipt() {
+    const D = this.dayStats.rv;
+    return { hp: Math.round(this.rvc.hp), today: D.dmg, src: { ...D.src }, quote: C.repairQuote(this.day, this.rvc.hp) };
   }
 
   // the RV parked in Ed's loading zone, stopped: his bell buys its load too
