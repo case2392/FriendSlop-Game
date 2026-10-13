@@ -265,7 +265,8 @@ export class MobView {
     const tgt = { lift: 0, fold: 0, head: 0.05, headY: 0, tail: 0.15, fl: 0, fr: 0, bl: 0, br: 0, heave: 0, roll: 0 };
     if (s === S.TIPPED) {
       // over on its side, legs stuck out stiff and kicking now and then, head lolling
-      tgt.roll = 1.45 * (this.tipSide || 1); tgt.lift = -0.12; tgt.head = 0.1 + Math.sin(t * 2) * 0.1; tgt.headY = 0.3 * (this.tipSide || 1); tgt.tail = 0.4;
+      // (tipSide +1: shoved over toward its right, +x: the roll that lays its back over that way is negative)
+      tgt.roll = -1.45 * (this.tipSide || 1); tgt.lift = -0.12; tgt.head = 0.1 + Math.sin(t * 2) * 0.1; tgt.headY = -0.3 * (this.tipSide || 1); tgt.tail = 0.4;
       const kick = Math.max(0, Math.sin(t * 3)) * 0.25;
       tgt.fl = -0.3 - kick; tgt.fr = -0.3 + kick * 0.5; tgt.bl = 0.3 + kick; tgt.br = 0.3 - kick * 0.5;
     } else if (lying) { tgt.lift = -0.36; tgt.fold = 1; tgt.head = 0.32; tgt.tail = 0.5; tgt.heave = 0.02 * Math.sin(t * 1.3); }

@@ -660,7 +660,8 @@ export class Room {
       if (what === 'hardhat') { p.hat = true; this.sendMeta(); this.toast(`${p.name} bought a hard hat. The next knockout is only a knock.`, p.color, 4); }
       if (what === 'cheese') {
         // on the counter, to carry out: ringtails go for it before anything else about
-        const c = sim.addProp('cheese', { x: u.x, y: u.y + 0.25, z: u.z }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+        const at = this.W.town.store?.shelf || u;
+        const c = sim.addProp('cheese', { x: at.x, y: at.y + 0.25, z: at.z }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
         if (c) sim.out.push({ k: 'spawn', p: sim.describe(c) });
         this.toast(`${p.name} bought a cheese wheel. Ringtails can't resist it: put it where you want them.`, p.color, 4);
       }

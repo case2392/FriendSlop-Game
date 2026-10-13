@@ -1247,10 +1247,14 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   const u = room.W.uses.find(q => q.kind === 'buy' && q.arg === 'cheese');
   stand(room, A, u.x + 1.2, u.z, -Math.PI / 2);
   room.handle(A, { t: 'use', id: u.id });
-  const ch = [...room.sim.props.values()].find(p => p.type === 'cheese'), t0 = ch && at(room, ch.id);
-  const onCounter = ch && Math.hypot(t0.x - u.x, t0.z - u.z) < 0.6 && room.bank === 970;
+  const ch = [...room.sim.props.values()].find(p => p.type === 'cheese');
   // (a wheel, lying flat on it: 14 cm tall, 32 cm across. Its collider was once stood on end, 32 cm tall)
   tick(room, 1.5);
+  // (settled on the counter top, by the cheese's spot and clear of every buy spot's ball: inside one, the
+  // crosshair found only the spot, and E bought another)
+  const t0 = ch && at(room, ch.id), buys = room.W.uses.filter(q => q.kind === 'buy');
+  const clear = t0 && buys.every(q => Math.hypot(t0.x - q.x, t0.y - q.y, t0.z - q.z) > (q.r ?? 0.3) + 0.2);
+  const onCounter = ch && Math.abs(t0.y - 0.07 - (u.y - 0.1)) < 0.04 && Math.hypot(t0.x - u.x, t0.z - u.z) < 2 && clear && room.bank === 970;
   const RAPIER = (await import('@dimforge/rapier3d-compat')).default;
   const cq = ch?.body.rotation(), up = cq ? 1 - 2 * (cq.x * cq.x + cq.z * cq.z) : 0;
   const under = ch && room.sim.world.castRay(new RAPIER.Ray(ch.body.translation(), { x: 0, y: -1, z: 0 }), 1, true, undefined, undefined, ch.col);
@@ -1263,7 +1267,7 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   const first = mobEvs(r.ps[0], 'steal')[0];
   // (and it's no theft: not one of the den's day, no "ran off with the Cheese Wheel ($0)")
   const D = r.room.sim.mobs.denOf(r.m), told = r.ps[0].conn.has(x => x.t === 'toast' && /took the bait/.test(x.text)) && !r.ps[0].conn.has(x => x.t === 'toast' && /Cheese Wheel \(/.test(x.text));
-  check(onCounter && flat && first?.item === bait.id && r.room.dayStats.stolen === 0 && D.thefts === 0 && told, `store: a cheese wheel for $30 lands on the counter, lying flat (its middle ${under ? under.timeOfImpact.toFixed(3) : '?'} m up); a den goes for it before a $300 vase (it took the ${first ? (first.item === bait.id ? 'cheese' : 'vase') : 'nothing'}), and that's no theft (${D.thefts} counted)`);
+  check(onCounter && flat && first?.item === bait.id && r.room.dayStats.stolen === 0 && D.thefts === 0 && told, `store: a cheese wheel for $30 lands on the counter, clear of the buy spots (${clear}), lying flat (its middle ${under ? under.timeOfImpact.toFixed(3) : '?'} m up); a den goes for it before a $300 vase (it took the ${first ? (first.item === bait.id ? 'cheese' : 'vase') : 'nothing'}), and that's no theft (${D.thefts} counted)`);
 }
 {
   // T1: asleep, two friends shoving its flank together tip it over: down for 12 s, then up; one shove on its
@@ -1283,10 +1287,11 @@ function byTheRV(day, names = ['Ann'], side = -1) {
     const st0 = m.st;
     tick(room, 1);
     const st1 = m.st;
-    if (two) { tick(room, GH.TIP_T); out.two = { st0, st1, after: m.st, ev: mobEvs(A, 'tip').length }; }
+    // (down the whole TIP_T s: still over half a second before, up half a second after)
+    if (two) { tick(room, GH.TIP_T - 1.53); const late = m.st; tick(room, 1); out.two = { st0, st1, late, after: m.st, ev: mobEvs(A, 'tip').length }; }
     else out.one = { st0, st1 };
   }
-  check(out.two.st0 === GST.TIPPED && out.two.st1 === GST.TIPPED && out.two.after !== GST.TIPPED && out.two.after !== GST.SLEEP && out.two.ev === 1
+  check(out.two.st0 === GST.TIPPED && out.two.st1 === GST.TIPPED && out.two.late === GST.TIPPED && out.two.after !== GST.TIPPED && out.two.after !== GST.SLEEP && out.two.ev === 1
     && out.one.st0 === GST.SLEEP && out.one.st1 !== GST.SLEEP,
     `grumphorn: two friends shoving its side tip it over (${out.two.st0 === GST.TIPPED ? 'tipped' : out.two.st0}), it's up after ${GH.TIP_T} s; one shove alone wakes it a moment later (${JSON.stringify(out)})`);
 }
@@ -1362,15 +1367,18 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   // V2: a raider in the RV when it drives off lets go of what it took and jumps out (its legs aimed for a
   // speed over the road: it was pinned in the cabin with the loot, and the crew told it had run off with it).
   // (Off it goes as soon as it's in: whether it has bitten yet or not, it's still in the cabin)
-  const { room, ps: [A], sim, m, vase } = byTheRV(2, ['Ann']);
-  for (let i = 0; i < 60 * 45 && m.st !== RST.INRV; i++) tick(room, 1 / 60);
-  let bit = false;
-  driveAt(room, A, 5, 12, () => { bit ||= sim.mobs.jaws.has(m.id); });
-  bit ||= mobEvs(A, 'drop').length > 0;
-  const rl = p => { const l = sim.rvToLocal(p.body.translation()); return insideRV(l.x, l.y, l.z, 0); };
-  const critter = sim.props.get(m.id), v = sim.props.get(vase.id);
-  check((!critter || !rl(critter)) && v && rl(v) && room.dayStats.stolen === 0 && sim.mobs.denOf(m).thefts === 0 && !A.conn.has(x => x.t === 'toast' && /ran off with/.test(x.text)),
-    `raids: the RV driving off with a raider inside, it lets go and jumps out (state ${m.st}, out ${critter ? !rl(critter) : 'gone'}, it had bitten ${bit}); the vase stays aboard (${v && rl(v)}), no theft, nobody told one (stolen $${room.dayStats.stolen})`);
+  // (at road speed too: the steps brushing it on its way out were a hit, and it was stunned on them)
+  for (const speed of [5, 8.5]) {
+    const { room, ps: [A], sim, m, vase } = byTheRV(2, ['Ann']);
+    for (let i = 0; i < 60 * 45 && m.st !== RST.INRV; i++) tick(room, 1 / 60);
+    let bit = false;
+    driveAt(room, A, speed, 12, () => { bit ||= sim.mobs.jaws.has(m.id); });
+    bit ||= mobEvs(A, 'drop').length > 0;
+    const rl = p => { const l = sim.rvToLocal(p.body.translation()); return insideRV(l.x, l.y, l.z, 0); };
+    const critter = sim.props.get(m.id), v = sim.props.get(vase.id);
+    check((!critter || !rl(critter)) && v && rl(v) && room.dayStats.stolen === 0 && sim.mobs.denOf(m).thefts === 0 && !A.conn.has(x => x.t === 'toast' && /ran off with/.test(x.text)) && !mobEvs(A, 'stun').length,
+      `raids: the RV driving off at ${speed} m/s with a raider inside, it lets go and jumps out, unhurt (state ${m.st}, out ${critter ? !rl(critter) : 'gone'}, it had bitten ${bit}); the vase stays aboard (${v && rl(v)}), no theft, nobody told one (stolen $${room.dayStats.stolen})`);
+  }
 }
 {
   // V3: the door shut on a raider with the vase in its teeth: no theft, and nobody was told of one (the toast
@@ -1396,7 +1404,14 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   rock.body.setLinvel({ x: 0, y: 1, z: 9 }, true);
   tick(room, 1);
   const k = knocks(B)[0];
-  check(k && !k.ko && k.why === 'bean' && evs(A.conn, 'bean').length === 1, `rockfall: a fallen rock picked up and thrown at a friend beans them, not a knockout (${k ? (k.ko ? 'KO' : 'stumble') + ', ' + k.why : 'missed'})`);
+  // and one rolling on ahead of someone who walked into it and pushed it is no hit (it bowled the pusher over)
+  stand(room, B, s.x + 6, s.z, 0);
+  tick(room, 1.6);
+  const n0 = knocks(B).length, r2 = sim.addProp('rock', { x: s.x + 6, y: W.heightAt(s.x + 6, s.z + 0.6) + 0.3, z: s.z + 0.6 }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+  rf.rocks.push({ id: r2.id, at: mobs.t });
+  for (let i = 0; i < 30; i++) { r2.body.setLinvel({ x: 0, y: 0, z: 3 }, true); stand(room, B, s.x + 6, s.z + i * 0.05, 0); tick(room, 1 / 60); }
+  const pushed = knocks(B).length - n0;
+  check(k && !k.ko && k.why === 'bean' && evs(A.conn, 'bean').length === 1 && pushed === 0, `rockfall: a fallen rock picked up and thrown at a friend beans them, not a knockout (${k ? (k.ko ? 'KO' : 'stumble') + ', ' + k.why : 'missed'}); one rolling on ahead of whoever pushed it is no hit (${pushed})`);
 }
 {
   // V5: a flank shove waiting on a second, and something else wakes it first: once it dozes off again it

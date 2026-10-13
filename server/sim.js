@@ -16,6 +16,7 @@ import {
 } from '../shared/rv.js';
 import { inMud } from '../shared/world.js';
 import { Mobs } from './mobs.js';
+import { GST } from '../shared/mobs.js';
 
 let ready = null;
 // a full snapshot resends at most this many things lying still (the rest in the next ones, in turn)
@@ -244,6 +245,7 @@ export class Sim {
     const d = { id: p.id, type: p.type, value: Math.round(p.value), max: Math.round(p.max),
       x: r3(t.x), y: r3(t.y), z: r3(t.z), q: [r4(q.x), r4(q.y), r4(q.z), r4(q.w)] };
     if (p.mob) d.st = p.mob.wire();
+    if (p.mob?.tipSide && p.mob.st === GST.TIPPED) d.tip = p.mob.tipSide;   // (which side it lies on: a page that joins now)
     return d;
   }
 

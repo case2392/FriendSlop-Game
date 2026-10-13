@@ -1053,12 +1053,15 @@ export class Mobs {
         if (Math.hypot(v.x, v.y, v.z) < RF.BUMP_V && Math.hypot(rel.x, rel.y, rel.z) < RF.BUMP_V) continue;
         for (const q of players.values()) {
           if (!q.pos || q.ko || q.seat != null || (this.sim.knockCd.get(q.id) || 0) > now) continue;
-          const u = q.par ? rel : v, sp = Math.hypot(u.x, u.y, u.z);
-          if (sp < RF.BUMP_V) continue;
           const y = Math.max(q.pos.y + 0.3, Math.min(q.pos.y + 1.5, t.y));
-          if (Math.hypot(t.x - q.pos.x, t.y - y, t.z - q.pos.z) > RF.HIT_R) continue;
+          const dx = q.pos.x - t.x, dy = y - t.y, dz = q.pos.z - t.z, dl = Math.hypot(dx, dy, dz);
+          if (dl > RF.HIT_R) continue;
           const l = this.sim.rvToLocal(v3(q.pos.x, q.pos.y + 0.9, q.pos.z));
           if (insideRV(l.x, l.y, l.z, 0)) continue;
+          // how fast it comes at them (over the ground they stand on: a rider's is the RV): one rolling on
+          // ahead of someone who walked into it and pushed it is no hit
+          const u = q.par ? rel : v, sp = dl > 1e-3 ? (u.x * dx + u.y * dy + u.z * dz) / dl : Math.hypot(u.x, u.y, u.z);
+          if (sp < RF.BUMP_V) continue;
           this.sim.knockCd.set(q.id, now + 1.5);
           const ko = sp >= RF.KO_V, k = (ko ? 3 : 2.5) / (Math.hypot(u.x, u.z) || 1);
           if (!ko) { const h = this.sim.holds.get(q.id); if (h) { this.sim.release(q.id); this.sim.out.push({ k: 'slip', id: h.kind === 'prop' ? h.id : null, by: q.id, why: 'rock' }); } }   // (bowled over: what they carried goes flying)

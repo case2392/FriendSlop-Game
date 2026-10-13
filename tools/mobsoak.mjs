@@ -183,7 +183,7 @@ if (isMain) {
   if (args.includes('--raids')) {
     const R = [];
     for (let day = Math.max(2, d0); day <= (d1 || d0); day++) for (const seed of seeds) {
-      for (const r of soakRaids(seed, day)) {
+      for (const r of soakRaids(seed, day, args.includes('--secs') ? { secs } : {})) {   // (60 s each unless told)
         R.push(r);
         console.log(`seed ${seed} day ${day} den ${r.den}${r.turn ? ' (RV turned round)' : ''}: door ${r.door.toFixed(1)} m away, ${r.starts} raids, ${r.inrv} got in, ${r.took} took something, ${r.home} got it home`);
       }

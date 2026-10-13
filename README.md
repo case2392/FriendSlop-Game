@@ -64,9 +64,9 @@ the rocks are just heavy stones, good for throwing at a Grumphorn.
 And mind your aim: junk you throw at a friend knocks them over (never out) and they drop what they hold.
 Everyone hears who did it, and the end of the run counts the beanings.
 
-Day 5 has **the Hoard**: one den (the junkyard's, when the day has one) where all six of them live, on a
-pile of the week's best stash (about $2,500 of it, marked on the map in red). Get it out past six sets of
-teeth and the balloon payment looks a lot closer. The store helps: a **hard hat** ($80) turns your next
+Day 5 has **the Hoard**: one den (the junkyard's, when the day has one) where six of them live (four
+against a lone player, five against two), on a pile of the week's best stash (about $2,500 of it, marked
+on the map in red). Get it out past all those teeth and the balloon payment looks a lot closer. The store helps: a **hard hat** ($80) turns your next
 knockout into a knock, and a **cheese wheel** ($30) is bait they can't resist: put it where you want them,
 away from your loot or out past their den.
 

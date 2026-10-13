@@ -684,7 +684,7 @@ const TIPS = [
   'From day 3, loose rock sits above the narrows. Honk at the yellow LOOSE ROCK sign and it comes down before you get there.',
   'A hard hat from the store ($80) turns your next knockout into a knock.',
   'Ringtails can\'t resist a cheese wheel ($30 at the store). Put it where you want them: away from your loot, or out past their den.',
-  'Day 5 has a Hoard: a den with six ringtails and the week\'s best stash. Bring friends.',
+  'Day 5 has a Hoard: a den with up to six ringtails and the week\'s best stash. Bring friends.',
   'Throw junk at a friend and it knocks them over (never out). Everyone hears who did it.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
@@ -845,7 +845,7 @@ function addProp(d) {
   mesh.position.set(p.x, p.y, p.z);
   mesh.quaternion.set(q.x, q.y, q.z, q.w);
   scene.add(mesh);
-  if (mob) mob.view.onPuff = puff;
+  if (mob) { mob.view.onPuff = puff; if (d.tip) mob.view.tipSide = d.tip; }   // (a grumphorn tipped over before this page came)
   S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q }, view: mob?.view || null, st: d.st ?? 0 });
   S.lw.addProp(d.id, d.type, p, q);
   S.interp.seedProp(d.id, p, q, d.st);

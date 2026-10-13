@@ -1126,7 +1126,10 @@ export function generateLeg(seed, day, opts = {}) {
     const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords', 'bungee', 0.3);
     const hh = F(-2.3, 1.1, -1.5); use('buy', hh.x, y0 + 1.1, hh.z, 'Hard hat: your next knockout is only a knock', 'hardhat', 0.3);
     const ch = F(2.4, 1.1, -1.5); use('buy', ch.x, y0 + 1.1, ch.z, 'Cheese wheel: ringtails can\'t resist it', 'cheese', 0.3);
-    town.store = { walkie: w, drink: d, bungee: r, hardhat: hh, cheese: ch };
+    // (where a bought cheese wheel is put down: the bare counter between the drink and the bungees, clear of
+    // every buy spot: inside one's ball the crosshair saw only the spot, and E bought another)
+    const shelf = F(0.9, 1.1, -1.5);
+    town.store = { walkie: w, drink: d, bungee: r, hardhat: hh, cheese: ch, shelf: { x: shelf.x, y: y0 + 1.1, z: shelf.z } };
     const sg = F(0, 4.2, 4.1);
     signs.push({ x: sg.x, y: y0 + 4.2, z: sg.z, ry: Math.PI / 2, w: 4.4, h: 1.2, lines: ['GENERAL STORE', 'OPEN 24/7 (NOT 7)'], bg: '#ffffff', fg: '#1b4965' });
     town.clerk = F(0, 0, -3.0); town.clerk.y = y0; town.clerk.ry = Math.PI / 2;
