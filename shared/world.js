@@ -1255,8 +1255,9 @@ export function generateLeg(seed, day, opts = {}) {
     box(gx, townY + 0.45, gz, 0.6, 0.45, 0.3, ry, 'wood', '#7a5a3a', 'gus_bench');
     tagNow = null;
     signs.push({ x: gx - 1.2, y: townY + 2.3, z: gz, ry: Math.PI / 2, w: 2.6, h: 1.1, lines: ["GUS'S GARAGE", 'WE FIX RVs. MOSTLY.'], bg: '#2b2d42', fg: '#f4d35e', post: true });
-    use('repair', gx + 0.45, townY + 1.05, gz - 0.35, 'Gus: fix 25% (cash)', 'cash', 0.3);
-    use('repair', gx + 0.45, townY + 1.05, gz + 0.35, 'Gus: fix 25% (on the loan)', 'loan', 0.3);
+    // (his two buttons sit on the front of the bench's top, 0.4 m apart: small targets, so they never overlap)
+    use('repair', gx + 0.12, townY + 0.99, gz - 0.2, 'Gus: fix 25% (cash)', 'cash', 0.18);
+    use('repair', gx + 0.12, townY + 0.99, gz + 0.2, 'Gus: fix 25% (on the loan)', 'loan', 0.18);
   }
 
   // world edges

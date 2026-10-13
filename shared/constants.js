@@ -111,6 +111,7 @@ export const WINCH = {
   FORCE: 52000,             // max newtons on the cable
   STIFF: 42000,             // newtons per meter of stretch
   DAMP: 9000,
+  STALL: 0.5,               // the motor stalls against a load it can't move: at most this much stretch on the cable
   ANCHOR_REACH: 1.6,
 };
 

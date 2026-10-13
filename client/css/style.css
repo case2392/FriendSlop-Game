@@ -202,12 +202,20 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 #hClock::before { background-image: var(--tx-slot-hourglass, none); }
 #hBank::before { background-image: var(--tx-slot-coin, none); }
 #hDue::before { background-image: var(--tx-slot-scroll, none); }
+#hRV::before { background-image: var(--tx-slot-gear, none); }
 #hDay { color: var(--gold); }
 .pill.gold { color: var(--gold); }
 .pill.gold.neg { color: var(--red); }
 .pill.red { color: #ff9068; }
 .pill.red.ok { color: var(--green); }
 .pill.late { color: var(--red); animation: pulse 1s infinite; }
+/* the RV's condition: shown only once it's hurt; amber smoking, red limping, blinking broken down, a flash on a knock */
+.pill.rv { color: #e8dcc0; }
+.pill.rv.warn { color: #ffb74d; }
+.pill.rv.bad { color: var(--red); }
+.pill.rv.dead { animation: pulse 0.8s infinite; }
+.pill.rv.flash { animation: rvflash 0.7s ease-out; }
+@keyframes rvflash { 0% { color: #fff; text-shadow: 0 0 10px #ff5a3a, var(--outline); } 100% { text-shadow: var(--outline); } }
 @media (max-width: 1100px) {
   .hud-row { --wing: 54px; }
   .pill { padding: 3px 9px; gap: 5px; }

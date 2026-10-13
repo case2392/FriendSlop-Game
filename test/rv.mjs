@@ -85,7 +85,7 @@ const engineForce = sim => RV_WHEELS.reduce((s, w, i) => s + Math.abs(sim.vehicl
 const pedal = (room, A, th, secs, st = 0, hb = 0) => { A.seat = 0; for (let i = 0; i < Math.round(secs * HZ); i++) { room.handle(A, { t: 'drv', th, st, hb }); room.tick(1 / HZ); } };
 // Gus's two buttons (cash, loan), and a press of one from where it can be reached
 const gusUse = (room, arg) => room.W.uses.find(u => u.kind === 'repair' && u.arg === arg);
-const press = (room, p, arg) => { const u = gusUse(room, arg); stand(room, p, u.x - 0.9, u.z, 0); room.handle(p, { t: 'use', id: u.id }); tick(room, 1 / HZ); };
+const press = (room, p, arg) => { const u = gusUse(room, arg); stand(room, p, u.x + 1.0, u.z, -Math.PI / 2); room.handle(p, { t: 'use', id: u.id }); tick(room, 1 / HZ); };
 // the day paid and the night begun (the RV parked at the lot by the fire, 10 m from Gus)
 const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); tick(room, 0.1); };
 

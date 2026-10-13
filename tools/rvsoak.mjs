@@ -31,6 +31,7 @@ const SEEDS = opt("--seed", null) ? [Number(opt("--seed"))] : Array.from({ lengt
 const [D0, D1] = String(opt('--days', '1-5')).split('-').map(Number);
 const QUICK = args.includes('--quick'), TRACE = args.includes('--trace');
 const ONLY = new Set(String(opt('--only', 'soak,table,bound')).split(','));
+const POI = opt('--poi', null);   // (only this kind of stop's apron, traced with --trace)
 const HZ = C.SIM_HZ;
 
 class FakeConn { constructor() { this.readyState = 1; } send() {} close() {} }
@@ -152,8 +153,10 @@ function winch(ctx, ob, floored = true) {
   let best = -Infinity, bestAt = 0;
   for (let i = 0; i < 60 * HZ && sim.rv.translation().z - 2.6 < ob.z1 + 2 && (i < 3 * HZ || i - bestAt < 2 * HZ); i++) {
     step(ctx, roadAhead(W, sim.rv.translation()), 0, { th: 0.5 });
-    const z = sim.rv.translation().z;
-    if (z > best + 0.05) { best = z; bestAt = i; }
+    const z = sim.rv.translation().z, w = sim.winchWorld(), a = sim.hook.anchor;
+    // (a cable gone slack is the reel catching up, not a stall)
+    if (z > best + 0.05 || (a && Math.hypot(a.x - w.x, a.y - w.y, a.z - w.z) < sim.hook.len - 0.3)) { best = Math.max(best, z); bestAt = i; }
+    if (TRACE && (i % 30 === 0 || i > 11.5 * HZ && i % 3 === 0)) { const w = sim.winchWorld(), a = sim.hook.anchor, f = fwd(sim); console.log(`  [reel] ${(i / HZ).toFixed(1)} s z ${z.toFixed(2)} pitch ${(Math.asin(f.y) * 57.3).toFixed(0)} len ${sim.hook.len.toFixed(2)} dist ${a ? Math.hypot(a.x - w.x, a.y - w.y, a.z - w.z).toFixed(2) : '-'} v ${sim.rvSpeed().toFixed(2)}`); }
   }
   sim.hook.reeling = false;
   if (floored) {
@@ -168,15 +171,25 @@ function winch(ctx, ob, floored = true) {
 // a stop's apron: in at 4 m/s, 4 m short of whatever is ahead, back out 8 m, back onto the road
 function apron(ctx, poi) {
   const { room } = ctx, sim = room.sim, W = room.W;
-  const z0 = poi.z - Math.max(35, poi.off * 2);
+  // (from the road short of the stop, with no grade or mud in between: never put down on a grade's slope)
+  let z0 = poi.z - Math.max(35, poi.off * 2);
+  for (const o of W.obstacles) {
+    if (o.type !== 'grade' && o.type !== 'mud') continue;
+    const a = (o.z0 ?? o.z) - 6, b = (o.z1 ?? o.z) + 8;
+    if (b > z0 - 6 && a < poi.z) z0 = Math.max(z0, b);
+  }
+  if (z0 > poi.z - poi.off * 0.9 - 6) { ctx.notes.push(`the ${poi.type} at ${poi.z.toFixed(0)}: no clear road up to it`); return false; }
   sim.placeRV(W.roadX(z0), z0, roadYaw(W, z0));
   ctx.doing = 'placed'; settle(ctx, 1.5);
   ctx.doing = `apron ${poi.type}`;
   const turn = poi.z - poi.off * 0.9;
   for (let i = 0; i < 40 * HZ && sim.rv.translation().z < turn; i++) step(ctx, roadAhead(W, sim.rv.translation(), 8), 4);
-  let short = Infinity;
+  let short = Infinity, stuck = 0;
   for (let i = 0; i < 30 * HZ; i++) {
+    stuck = Math.abs(sim.rvSpeed()) < 0.3 && i > HZ ? stuck + 1 / HZ : 0;
+    if (stuck > 2) { ctx.notes.push(`the ${poi.type} at ${poi.z.toFixed(0)}: stuck on the way in`); break; }
     short = clearance(sim, W);
+    if (TRACE && i % 15 === 0) { const p = sim.rv.translation(), u = qRotate(sim.rv.rotation(), { x: 0, y: 1, z: 0 }), f = fwd(sim); console.log(`  [apron ${poi.type}] ${(i / HZ).toFixed(2)} s at ${p.x.toFixed(1)},${p.y.toFixed(1)},${p.z.toFixed(1)} ground ${W.heightAt(p.x, p.z).toFixed(1)} v ${sim.rvSpeed().toFixed(1)} pitch ${(Math.asin(f.y) * 57.3).toFixed(0)} tilt ${(Math.acos(Math.min(1, u.y)) * 57.3).toFixed(0)} clear ${short.toFixed(1)} to poi ${Math.hypot(poi.x - p.x, poi.z - p.z).toFixed(1)} hits ${ctx.hits.length}`); }
     if (short < 4 + Math.max(0, sim.rvSpeed()) * 0.4) break;
     const p = sim.rv.translation();
     if (Math.hypot(poi.x - p.x, poi.z - p.z) < 3) break;
@@ -239,9 +252,9 @@ if (ONLY.has('soak')) for (const seed of SEEDS) for (let day = D0; day <= Math.m
   let aprons = 0;
   if (!QUICK) for (const poi of W.pois) {
     if (poi.type === 'crash' || Math.abs((poi.padY ?? poi.y) - W.heightAt(W.roadX(poi.z), poi.z)) > 2.5) continue;
+    if (POI && poi.type !== POI) continue;
     room.clock = 9;
-    apron(ctx, poi);
-    aprons++;
+    if (apron(ctx, poi) !== false) aprons++;
   }
   const own = ctx.hits.filter(h => h.doing !== 'setup');
   days.push({ seed, day, made, roadT, aboard, docked: ctx.docked, aprons, hp: room.rvc.hp, priced: own.filter(h => h.priced), n: own.length, notes: ctx.notes });

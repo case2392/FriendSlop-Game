@@ -2,7 +2,7 @@
 import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
 import { LOOT, fmt$ } from '/shared/loot.js';
-import { RV_DIM, RV_SEATS, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
+import { RV_DIM, RV_SEATS, RV_HATCH, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
 import * as net from './net.js';
 import * as voice from './voice.js';
@@ -42,6 +42,7 @@ const keys = {};
 const inp = { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: false };
 let target = null;            // what the crosshair is on
 let reviveT = 0;
+let fixHeld = false;   // holding E at the engine hatch (the server counts the seconds: room.js fixStep)
 let mapRaised = true;
 let lastWalkieTx = new Set();
 let worldBuilding = false;
@@ -468,7 +469,9 @@ function computeTarget() {
   }
   const eye = me.eye(S.rv), look = me.look();
   const hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
-  if (!hit) return doorNear() ? { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` } : null;
+  // broken down, and standing behind it: the engine hatch (looking at the RV's back, the ground or the sky)
+  const fix = atHatch() ? { kind: 'fix', label: `[Hold E] fix the engine${S.g.fix ? ` (${S.g.fix}%)` : ''}` } : null;
+  if (!hit) return fix || (doorNear() ? { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` } : null);
   if (hit.kind === 'prop') {
     if (me.holding) return null;   // hands full: a grab would do nothing, so don't promise one
     const p = S.props.get(hit.id);
@@ -484,7 +487,7 @@ function computeTarget() {
   if (hit.kind === 'use') {
     const u = S.W.uses[hit.id];
     if (u.kind === 'keypad' && S.gatesOpen.has(u.arg)) return null;
-    return { kind: 'use', id: hit.id, u, label: `[E] ${u.label}` };
+    return { kind: 'use', id: hit.id, u, label: u.kind === 'repair' ? gusPrompt(u.arg) : `[E] ${u.label}` };
   }
   if (hit.kind === 'hook') {
     return { kind: 'hook', label: S.hook?.state === 2 ? '[E] unhook the winch' : '[E] pick up the winch hook' };
@@ -499,6 +502,7 @@ function computeTarget() {
     let u = hit.use;
     // the whole lower front of the RV is "the winch" if you're standing outside in front of it
     const lh = toLocal(S.rv.p, S.rv.q, hit.point);
+    if (fix && !u && lh.z < -3.7) return fix;
     if (!u && !me.par && lh.z > 3.8 && lh.y < 1.1) u = 'winch';
     if (u === 'seat0') {
       // (the server says who may take the wheel, room.js mayDrive: the day's driver; while they're away anyone,
@@ -517,10 +521,30 @@ function computeTarget() {
     if (Math.abs(hit.normal.y) < 0.6 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
     return null;
   }
+  if (fix && (hit.kind === 'terrain' || hit.kind === 'static')) return fix;
   if (doorNear()) return { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` };
   if ((hit.kind === 'terrain' || hit.kind === 'static') && hit.normal.y < 0.79 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
   if (hit.kind === 'gate') return { kind: 'gate', label: 'Locked. The keypad wants a 4-digit code.' };
   return null;
+}
+
+// broken down, and I'm on my feet outside, within reach of the engine hatch on its back wall, the RV standing
+// still: where holding E fixes it (the server checks the same: room.js fixStep)
+function atHatch() {
+  if (!S.g?.brk || !S.rv || me.par || me.mode !== 'walk') return false;
+  if (Math.hypot(S.rv.v.x, S.rv.v.z) >= C.RVH.FIX_V) return false;
+  const h = toWorld(S.rv.p, S.rv.q, RV_HATCH);
+  return Math.hypot(me.pos.x - h.x, me.pos.z - h.z) < C.RVH.FIX_R - 0.15 && Math.abs(me.pos.y - h.y) < 2;
+}
+// Gus's buttons: what the next press costs, live (the server says no with a reason when it can't)
+function gusPrompt(arg) {
+  const g = S.g;
+  if (!g) return '';
+  if ((g.rvh ?? 100) >= 100) return 'Gus: "Nothing to fix. She\'s running fine."';
+  if (g.ph !== 'night' || !g.paid) return '[E] Gus fixes the RV (once the Repo Man is paid)';
+  const q = C.repairQuote(g.day, g.rvh);
+  return arg === 'loan' ? `[E] Gus: fix ${q.pts}% for ${fmt$(q.loan)} on ${g.day === C.DAYS - 1 ? 'the balloon payment' : 'tomorrow\'s payment'}`
+    : `[E] Gus: fix ${q.pts}% for ${fmt$(q.cash)} cash`;
 }
 
 // what the crosshair says about a critter (shared/mobs.js states)
@@ -635,6 +659,7 @@ function onUse() {
   if (t.kind === 'door') { net.send({ t: 'use', kind: 'door' }); return; }
   if (t.kind === 'rvuse') { net.send({ t: 'use', kind: t.use }); return; }
   if (t.kind === 'revive') { reviveT = 0.0001; return; }
+  if (t.kind === 'fix') { fixHeld = true; net.send({ t: 'fix', on: 1 }); return; }
   if (t.kind === 'use') {
     if (t.u.kind === 'keypad') { openKeypad(t.id); return; }
     net.send({ t: 'use', id: t.id });
@@ -691,6 +716,8 @@ const TIPS = [
   'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
   'The winch: take the hook from the front bumper, clip it to a post, and the driver reels in with R.',
   'Everyone in a bunk starts the next day.',
+  'Crashes and the wildlife dent the RV. Worn down it\'s slower, and at 0% it breaks down: everyone out, and hold E at the engine hatch at the back.',
+  'Gus fixes the RV by the lot at night, once the Repo Man is paid: cash, or on tomorrow\'s payment.',
   'The casino pays out to the whole crew. So do its losses.',
 ];
 let tipN = Math.floor(Math.random() * TIPS.length);
@@ -1118,7 +1145,22 @@ function onEvent(e) {
     case 'sold': for (const id of e.ids) removeProp(id, { color: '#7CFC00', n: 10, speed: 3 }); sfx.kaching(); break;
     case 'bill': sfx.bill(); break;
     case 'horn': sfx.horn(); break;
-    case 'door': S.door = e.open; sfx.door(); break;
+    case 'door': S.door = e.open; sfx.door(); if (e.pop && S.rv) { positional(S.rv.p, () => sfx.thunk(0.7), 50); if (me.par) shake(0.3); } break;
+    // the RV took a knock (the server priced it): how much, where it landed, a thud, a jolt for whoever's aboard
+    case 'rvhit': {
+      const at = e.at ? { x: e.at[0], y: e.at[1], z: e.at[2] } : S.rv?.p;
+      if (at) floatText(at, `-${e.amt}% RV`, '#ff8a65');
+      positional(at, () => sfx.thunk(Math.min(1.4, 0.5 + e.amt / 20)), 70);
+      if (me.par || me.mode === 'seat') shake(Math.min(0.6, 0.12 + e.amt / 40));
+      rvFlash();
+      break;
+    }
+    case 'rvfix': {
+      const at = S.rv ? toWorld(S.rv.p, S.rv.q, RV_HATCH) : null;
+      if (at) { floatText(at, `RUNNING · RV ${e.hp}%`, '#7CFC00'); burst(at, '#cfcfcf', 10, 1.5, 0.2, 1.2); }
+      positional(at, () => { sfx.clang(); sfx.gate(); }, 50);
+      break;
+    }
     case 'hook':
       sfx.hook();
       if (e.what === 'yanked' && e.by === S.selfId) { me.hasHook = false; toast('The cable ran out — the hook got yanked out of your hands.', '#ffb4a2'); }
@@ -1213,13 +1255,19 @@ function showReceipt(m) {
     ${row('Medical bills', (m.bills ? '-' : '') + fmt$(m.bills), m.bills ? 'bad' : '')}
     ${row('Loot broken', fmt$(m.broken) + ' of stuff', m.broken ? 'bad' : '')}
     ${m.stolen ? row('Stolen by ringtails', `${fmt$(m.stolen)}${m.recovered ? ` (got ${fmt$(m.recovered)} back)` : ''}`, m.recovered >= m.stolen ? '' : 'bad') : ''}
+    ${m.rv ? row('The RV', `${m.rv.hp}%${m.rv.today ? ` (-${m.rv.today}% today: ${rvBlame(m.rv.src)})` : ''}`, m.rv.today ? 'bad' : '') : ''}
     ${row('Payment', `PAID ${fmt$(m.due)}`, 'good')}
     ${row('Bank', fmt$(m.bank))}
+    ${m.rv && m.rv.hp < 100 ? `<p class="hint">Gus fixes it by the lot tonight: ${m.rv.quote.pts}% for ${fmt$(m.rv.quote.cash)}, or ${fmt$(m.rv.quote.loan)} on ${m.day === C.DAYS - 1 ? 'the balloon payment' : 'tomorrow\'s payment'}.</p>` : ''}
     <p class="hint">Campfire's lit. The store is open. When everyone's in a bunk (E on the bed in the RV), day ${m.day + 1} starts.</p>
     <button class="btn small green" id="receiptClose">[E] Okay</button>`;
   $('receipt').classList.remove('hidden');
   $('receiptClose').onclick = () => $('receipt').classList.add('hidden');
   sfx.sleep();
+}
+// who and what dented the RV today, worst first ('Sam -18%, the Grumphorn -8%, rocks -9%')
+function rvBlame(src) {
+  return Object.entries(src || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${escapeHtml(k === 'nobody' ? 'nobody at the wheel' : k)} -${v}%`).join(', ');
 }
 let overTimer = 0;
 function showOver(m) {
@@ -1235,6 +1283,9 @@ function showOver(m) {
     ${s.stolen ? `<div class="rrow"><span>Stolen by ringtails</span><b>${fmt$(s.stolen)} (got ${fmt$(s.recovered || 0)} back)</b></div>` : ''}
     ${!m.won && m.short > 0 && s.stolen - (s.recovered || 0) >= m.short ? `<div class="rrow bad"><span>The ringtails cost you the RV.</span><b></b></div>` : ''}
     ${s.beasts ? `<div class="rrow good"><span>Grumphorns seen off</span><b>${s.beasts}</b></div>` : ''}
+    ${s.rv ? `<div class="rrow${s.rv.end <= 30 ? ' bad' : ''}"><span>The RV at the end</span><b>${s.rv.end}%${s.rv.breakdowns ? ` (broke down ${s.rv.breakdowns === 1 ? 'once' : `${s.rv.breakdowns} times`})` : ''}</b></div>` : ''}
+    ${s.rv?.crashes ? `<div class="rrow"><span>Crashes</span><b>${s.rv.crashes}${s.rv.worst ? ` (worst: ${escapeHtml(s.rv.worst.by || 'nobody')} into ${escapeHtml(s.rv.worst.what || 'something')}, -${s.rv.worst.amt}%)` : ''}</b></div>` : ''}
+    ${s.rv?.cash || s.rv?.loan ? `<div class="rrow"><span>Gus's repairs</span><b>${[s.rv.cash ? `${fmt$(s.rv.cash)} cash` : '', s.rv.loan ? `${fmt$(s.rv.loan)} on the loan` : ''].filter(Boolean).join(' + ')}</b></div>` : ''}
     ${s.beanings ? `<div class="rrow"><span>Friends beaned</span><b>${s.beanings}</b></div>` : ''}
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
@@ -1585,6 +1636,7 @@ function frameInner(now) {
   // test/debug hooks
 S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.y, dz = z - e.z; me.yaw = Math.atan2(dx, dz); me.pitch = -Math.atan2(dy, Math.hypot(dx, dz)); };
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
+S.key = (k, down) => { keys[k] = !!down; };   // (a key held or let go, for the tests: the E of a held fix)
 S.target = () => target;
 S.send = m => net.send(m);
 S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?
@@ -1719,8 +1771,10 @@ requestAnimationFrame(frame);
     reviveT += dt;
     if (reviveT >= C.PLAYER.REVIVE_HOLD) { net.send({ t: 'use', kind: 'revive', id: target.id }); reviveT = 0; }
   } else if (!keys.e) reviveT = 0;
-  $('holdBar').classList.toggle('hidden', !(reviveT > 0));
-  $('holdBar').firstElementChild.style.width = `${Math.min(100, reviveT / C.PLAYER.REVIVE_HOLD * 100)}%`;
+  // the roadside fix: E let go, or I walked off (or it's running again): stop
+  if (fixHeld && (!keys.e || target?.kind !== 'fix')) { fixHeld = false; net.send({ t: 'fix', on: 0 }); }
+  $('holdBar').classList.toggle('hidden', !(reviveT > 0 || fixHeld));
+  $('holdBar').firstElementChild.style.width = `${fixHeld ? Math.min(100, S.g?.fix || 0) : Math.min(100, reviveT / C.PLAYER.REVIVE_HOLD * 100)}%`;
 
   // fx
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -1873,6 +1927,11 @@ function updateCasino(dt) {
   w.coin.rotation.z += dt * (f.busy ? 25 : 0.6);
   const offer = (g.pawn || 0) + (g.dock || 0);
   w.pawnLabel.userData.set(offer ? `ED OFFERS ${fmt$(offer)}${g.dock ? ' FOR THE LOT' : ''} · ring the bell` : 'LOOT ON THE COUNTER, OR THE RV OUTSIDE', offer ? '#7CFC00' : '#ffe9a8');
+  if (w.gusLabel) {
+    const hp = g.rvh ?? 100, q = C.repairQuote(g.day, hp), open = g.ph === 'night' && g.paid;
+    w.gusLabel.userData.set(hp >= 100 ? 'SHE\'S RUNNING FINE' : !open ? `RV ${hp}% · OPEN ONCE THE REPO MAN'S PAID`
+      : `RV ${hp}% · ${q.pts}% FOR ${fmt$(q.cash)} · ${fmt$(q.loan)} ON THE ${g.day === C.DAYS - 1 ? 'BALLOON' : 'LOAN'}`, hp < 100 && open ? '#7CFC00' : '#ffe9a8');
+  }
   w.hitPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.sin(time * 6) * 0.2 : 0.15;
   w.standPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.cos(time * 6) * 0.2 : 0.15;
 }
@@ -1889,6 +1948,12 @@ function hud(rv) {
     $('hBank').classList.toggle('neg', g.bank < 0);
     $('hDue').textContent = g.paid ? `PAID ✓` : g.bank >= g.due ? `DUE ${fmt$(g.due)} · COVERED ✓` : `DUE ${fmt$(g.due)} @ MIDNIGHT`;
     $('hDue').classList.toggle('ok', !!g.paid || g.bank >= g.due);
+    // the RV's condition: out of sight at 100%; amber smoking, red limping, blinking broken down
+    const hp = g.rvh ?? 100, el = $('hRV');
+    el.textContent = hp >= 100 ? '' : g.brk ? 'RV BROKEN DOWN' : `RV ${hp}%`;
+    el.classList.toggle('warn', hp <= 60 && hp > 30);
+    el.classList.toggle('bad', hp <= 30);
+    el.classList.toggle('dead', !!g.brk);
   }
   const pct = Math.max(0, me.stamina / C.STAMINA.MAX * 100);
   $('stamFill').style.width = `${pct}%`;
@@ -1918,6 +1983,15 @@ function hud(rv) {
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
   rosterBars();
+}
+
+// the condition pill flashes when the RV takes a knock
+let rvFlashT = 0;
+function rvFlash() {
+  const el = $('hRV');
+  el.classList.remove('flash'); void el.offsetWidth; el.classList.add('flash');
+  clearTimeout(rvFlashT);
+  rvFlashT = setTimeout(() => el.classList.remove('flash'), 750);   // (then a broken-down pill blinks again)
 }
 
 // The quest tracker (top right, WoW's quest watch): the day's town as the title, then what to
@@ -2001,6 +2075,10 @@ function questTracker(g) {
     if (roleAway('drv')) L.push([away('drv', 'anyone can drive'), '']);
     if (roleAway('nav')) L.push([away('nav', 'anyone but the driver can read the map'), '']);
   }
+  // the RV's condition, while it matters: broken down (what to do), or worn
+  const hp = g.rvh ?? 100;
+  if ((g.ph === 'camp' || g.ph === 'road') && g.brk) L.push([keysIn('BROKEN DOWN: hold [E] at the engine hatch on the back of the RV'), 'warn']);
+  else if ((g.ph === 'camp' || g.ph === 'road') && hp <= 60) L.push([`RV ${hp}%: ${hp > 30 ? 'smoking, down on power' : 'limping, a knock stalls it'}`, 'warn']);
   if (g.ph === 'camp') L.push([roleOf('drv') && roleOf('drv') !== S.selfId && !roleAway('drv') ? `${roleName('drv')} drives out of camp to start the clock` : 'Drive out of camp to start the clock', '']);
   else if (g.ph === 'road') {
     if (!g.town) {
@@ -2014,6 +2092,11 @@ function questTracker(g) {
     L.push([`Paid the Repo Man ${fmt$(g.due)}`, 'done']);
     const n = S.meta?.players.length || 1, b = Math.min(n, g.beds?.length || 0);
     L.push([`Asleep in the RV's bunks: ${b}/${n}`, b >= n ? 'done' : '']);
+    if (hp < 100) {
+      const q = C.repairQuote(g.day, hp);
+      L.push([`RV ${hp}%: Gus fixes ${q.pts}% by the lot for ${fmt$(q.cash)}, or ${fmt$(q.loan)} on ${g.day === C.DAYS - 1 ? 'the balloon payment' : 'tomorrow\'s payment'}`, '']);
+    }
+    if (g.nxt) L.push([`Tomorrow's payment: ${fmt$(g.nxt)} (with Gus's repairs)`, 'warn']);
   }
   const title = `Day ${Math.min(g.day, C.DAYS)}: ${town}`;
   const key = title + JSON.stringify(L);

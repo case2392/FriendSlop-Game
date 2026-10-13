@@ -10,7 +10,7 @@
 // Static geometry is merged per material and per spatial cluster (the town, each roadside stop, each
 // lone sign), so far clusters are culled. Roadside stuff (POI furniture, gates, anchors, camp) is in
 // roadside3d.js.
-// API: buildStructures(W) -> { group, near, npcs, pawnLabel, bjLabel, flipLabel,
+// API: buildStructures(W) -> { group, near, npcs, pawnLabel, bjLabel, flipLabel, gusLabel,
 //      cardGroup, coin, hitPad, standPad, update(dt, t, camPos) } and PREVIEW.
 import { THREE, canvasTex, labelSprite, shadowy, tex } from './gfx.js';
 import { atmo } from './atmosphere.js';
@@ -758,6 +758,36 @@ function slotCabinet(K, hx, hz, top, st, tint, glows) {
   K.add(mat('wood_light'), new THREE.SphereGeometry(0.07, 8, 6), { uv: 'keep', at: matrix(hx + 0.14, top * 0.55 + 0.55, 0.05), tint: '#c03a2a' });
 }
 
+// Gus's workbench by the RV lot (its front faces the lot): a timber top on four legs over a shelf, a vise at
+// one end, his red toolbox at the other, a can of spanners, an oil can on the shelf, a tyre leaned on its end.
+// His two buttons sit on the front of the top (the 'repair' uses)
+function gusBench(K, s) {
+  const hx = s.hx, hz = s.hz, top = 2 * s.hy, wd = mat('timber_dark'), iron = mat('iron_wrought');
+  K.box(wd, 2 * hx + 0.08, 0.07, 2 * hz + 0.06, 0, top - 0.035, 0, { grain: 'x', tile: 1.2 });
+  for (const sx of [-1, 1]) for (const sz of [-1, 1]) K.box(wd, 0.08, top - 0.07, 0.08, sx * (hx - 0.06), (top - 0.07) / 2, sz * (hz - 0.06), { grain: 'y' });
+  K.box(wd, 2 * hx - 0.1, 0.04, 2 * hz - 0.08, 0, 0.22, 0, { grain: 'x', tile: 1 });
+  // the vise, bolted to the front corner (jaws a little open, a tommy bar through the screw)
+  const vx = -hx + 0.13, vz = hz - 0.09;
+  K.box(iron, 0.16, 0.06, 0.13, vx, top + 0.03, vz, { tile: 0.5 });
+  for (const dz of [-0.05, 0.05]) K.box(iron, 0.15, 0.09, 0.035, vx, top + 0.1, vz + dz, { tile: 0.5 });
+  K.cyl(iron, [vx, top + 0.09, vz + 0.07], [vx, top + 0.09, vz + 0.2], 0.012, 0.012, { sides: 6 });
+  K.cyl(iron, [vx - 0.09, top + 0.09, vz + 0.19], [vx + 0.09, top + 0.09, vz + 0.19], 0.009, 0.009, { sides: 5 });
+  // the toolbox at the far end, at the back, its lid a shade brighter
+  const tx = hx - 0.24, tz = -hz + 0.11;
+  K.box(mat('metal_red'), 0.36, 0.15, 0.17, tx, top + 0.075, tz, { uv: 'keep' });
+  K.box(mat('metal_red'), 0.37, 0.03, 0.18, tx, top + 0.165, tz, { uv: 'keep', tint: '#e05a46' });
+  K.cyl(iron, [tx - 0.09, top + 0.2, tz], [tx + 0.09, top + 0.2, tz], 0.01, 0.01, { sides: 5 });
+  for (const dx of [-0.09, 0.09]) K.cyl(iron, [tx + dx, top + 0.18, tz], [tx + dx, top + 0.2, tz], 0.008, 0.008, { sides: 4 });
+  // a coffee can full of spanners, at the back of the middle
+  K.cyl(mat('metal_green'), [-0.12, top, -hz + 0.1], [-0.12, top + 0.13, -hz + 0.1], 0.055, 0.055, { sides: 10, tint: '#9aa0a6' });
+  for (let i = 0; i < 4; i++) K.cyl(iron, [-0.14 + i * 0.013, top + 0.05, -hz + 0.09], [-0.17 + i * 0.022, top + 0.27, -hz + 0.07 + (i % 2) * 0.03], 0.008, 0.008, { sides: 4 });
+  // the oil can on the shelf, its spout cocked
+  K.cyl(mat('metal_green'), [0.3, 0.24, 0], [0.3, 0.42, 0], 0.07, 0.07, { sides: 10, tint: '#c8a030' });
+  K.cyl(iron, [0.3, 0.42, 0], [0.38, 0.53, 0], 0.012, 0.007, { sides: 5 });
+  // a bald tyre leaned on the end
+  K.add(iron, new THREE.TorusGeometry(0.3, 0.1, 8, 18), { uv: 'keep', at: matrix(hx + 0.15, 0.37, 0, Math.PI / 2, 0, -0.22), tint: '#2a2522' });
+}
+
 function furniture(s, batch, ctx) {
   const K = new Kit(batch, matrix(s.x, s.y - s.hy, s.z, s.ry), furnShade);
   const hx = s.hx, hy = s.hy, hz = s.hz, top = 2 * hy;
@@ -866,6 +896,7 @@ function furniture(s, batch, ctx) {
     return;
   }
   if (s.part === 'casino_bar') { casinoBar(K, s, ctx); return; }
+  if (s.part === 'gus_bench') { gusBench(K, s); return; }
   // anything else: a sturdy painted crate-box at the same footprint
   K.box(mat('crate'), 2 * hx, top, 2 * hz, 0, hy, 0, { uv: 'keep' });
 }
@@ -1391,6 +1422,22 @@ export function buildStructures(W) {
     }
   }
 
+  // Gus, behind his bench by the RV lot (off to the vise end, clear of his price label, which main.js rewrites)
+  let gusLabel = null;
+  if (T.gus) {
+    const g = T.gus, c = Math.cos(g.ry), sn = Math.sin(g.ry);
+    // (the bench's frame: its front, local +z, faces the lot; local x runs along it)
+    const at = (lx, lz) => ({ x: g.x + lx * c + lz * sn, z: g.z - lx * sn + lz * c });
+    const spot = at(-0.35, -0.8);
+    npc({ x: spot.x, y: g.y + 0.02, z: spot.z, ry: g.ry }, '#33506e', { hatIndex: 0, skinIndex: 2, outfit: 'clerk' }, 'GUS');
+    gusLabel = labelSprite('', '#ffe9a8', 30);
+    own(gusLabel.material.map, gusLabel.material);
+    const lp = at(0.1, 0.05);
+    gusLabel.position.set(lp.x, g.y + 1.62, lp.z);
+    gusLabel.scale.set(2.8, 0.48, 1);
+    local.add(gusLabel);
+  }
+
   const bj = T.bj;
   // hit / stand: round woven rugs that pulse (main.js drives emissiveIntensity)
   const pad = (z, name, color) => {
@@ -1468,6 +1515,10 @@ export function buildStructures(W) {
         K.cyl(mat('iron_wrought'), [0, 0, 0], [0, 0.8, 0.1], 0.035, 0.03, { sides: 6 });
         K.add(mat('wood_light'), new THREE.SphereGeometry(0.12, 10, 8), { uv: 'keep', at: matrix(0, 0.85, 0.11), tint: '#c03a2a' });
       } else { const s = button(u, u.arg === 'all' ? BTN.all : BTN.bet, u.label.replace('Stake ', ''), batch, 0, stagger.get(u) || 0); if (s) local.add(s); }
+    } else if (u.kind === 'repair') {
+      // Gus's two buttons on the front of his bench: green pays cash, gold puts it on the loan
+      const s = button(u, u.arg === 'cash' ? BTN.deal : BTN.bet, u.arg === 'cash' ? 'CASH' : 'ON THE LOAN', batch, 0, u.arg === 'cash' ? 0 : 0.12);
+      if (s) local.add(s);
     } else if (u.kind === 'buy') {
       const ry = store ? store.ry : 0;
       const K = new Kit(batch, matrix(u.x, u.y - 0.1, u.z, ry), () => 1);
@@ -1549,7 +1600,7 @@ export function buildStructures(W) {
       }
       if (gp) gp.material.uniforms.uOpacity.value = (0.16 + 0.84 * night) * (1 + 0.06 * Math.sin(t * 9.1) * Math.sin(t * 5.3));
     },
-    pawnLabel, bjLabel, flipLabel, cardGroup, coin, hitPad, standPad,
+    pawnLabel, bjLabel, flipLabel, gusLabel, cardGroup, coin, hitPad, standPad,
   };
 }
 

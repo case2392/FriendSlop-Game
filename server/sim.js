@@ -679,7 +679,10 @@ export class Sim {
     const d = len(delta) || 1e-4;
     const dir = mul(delta, 1 / d);
 
-    if (H.reeling) {
+    // (only while the load comes: against a snag the motor stalls, with the cable at most STALL m stretched,
+    // 21 kN, plenty for a grade, the mud or the boulder. It used to reel on regardless, storing a metre of
+    // stretch at the 52 kN cap, and flung the RV up a grade at 8 m/s when it broke free)
+    if (H.reeling && d - H.len < C.WINCH.STALL) {
       H.len = Math.max(0.6, H.len - C.WINCH.REEL_SPEED * dt);
     }
     // carried hook: the spool pays out freely
