@@ -39,7 +39,7 @@ const mul = (a, s) => v3(a.x * s, a.y * s, a.z * s);
 const len = a => Math.hypot(a.x, a.y, a.z);
 const r3 = n => Math.round(n * 1000) / 1000;
 // what a crash into the world's parts is called (the toast: "Sam put the RV into the ranger gate")
-const CYL_NAMES = { tree: 'a tree', deadtree: 'a dead tree', deadtree_decor: 'a dead tree', rock: 'a rock', post: 'a post', cactus: 'a cactus', haybale: 'a hay bale', cairn: 'a cairn' };
+const CYL_NAMES = { tree: 'a tree', deadtree: 'a dead tree', deadtree_decor: 'a dead tree', rock: 'a rock', post: 'a post', cactus: 'a cactus', haybale: 'a hay bale', cairn: 'a cairn', windmill: 'the windmill' };
 function staticName(s) {
   if (s.part === 'rim_slab') return 'the canyon wall';
   if (s.part === 'parked_rv') return 'a parked RV';
@@ -100,7 +100,7 @@ export class Sim {
     // the RV's condition, as it drives (the room keeps the number: shared/constants.js RVH), and the crash
     // being measured; nothing counts for the first moments of a day (or after a teleport)
     this.setRvCond(cond);
-    this.quietUntil = C.RVH.QUIET;
+    this.quietUntil = C.RVH.QUIET; this.quietMax = C.RVH.QUIET_MAX;
     this.hit = null;
     this.colTag = new Map();         // collider handle -> what a crash into it is called
 
@@ -316,8 +316,8 @@ export class Sim {
 
   // Teleport the RV (night parking, morning camp). Loot inside comes along.
   placeRV(x, z, yaw) {
-    // (a teleport is no crash: nothing counts for a moment while it settles where it was put)
-    this.quietUntil = this.t + C.RVH.QUIET;
+    // (a teleport is no crash: nothing counts till it has settled where it was put)
+    this.quietUntil = this.t + C.RVH.QUIET; this.quietMax = this.t + C.RVH.QUIET_MAX;
     this.hit = null;
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const riders = [];
@@ -679,10 +679,10 @@ export class Sim {
     const d = len(delta) || 1e-4;
     const dir = mul(delta, 1 / d);
 
-    // (only while the load comes: against a snag the motor stalls, with the cable at most STALL m stretched,
-    // 21 kN, plenty for a grade, the mud or the boulder. It used to reel on regardless, storing a metre of
-    // stretch at the 52 kN cap, and flung the RV up a grade at 8 m/s when it broke free)
-    if (H.reeling && d - H.len < C.WINCH.STALL) {
+    // (up to the motor's rated pull: against a load it can't move it stalls there, the cable FORCE / STIFF m
+    // stretched. It used to wind on regardless, storing metres of stretch, and flung the RV up a grade when it
+    // broke free; the drum's speed limit below keeps even a full stretch from doing that)
+    if (H.reeling && d - H.len < C.WINCH.FORCE / C.WINCH.STIFF) {
       H.len = Math.max(0.6, H.len - C.WINCH.REEL_SPEED * dt);
     }
     // carried hook: the spool pays out freely
@@ -711,6 +711,10 @@ export class Sim {
     const sep = (otherVel.x - rvVel.x) * dir.x + (otherVel.y - rvVel.y) * dir.y + (otherVel.z - rvVel.z) * dir.z;
     let T = C.WINCH.STIFF * (d - H.len) + C.WINCH.DAMP * Math.max(0, sep);
     T = Math.min(T, C.WINCH.FORCE);
+    // the drum winds no faster than REEL_SPEED: a load already coming faster than that (the RV breaking free
+    // of a snag, a loose hook flying home) pulls the cable along no harder, so the pull fades out over
+    // OVERRUN m/s past it, and the RV comes up a grade at about the drum's speed, never flung
+    if (-sep > C.WINCH.REEL_SPEED) T *= Math.max(0, 1 - (-sep - C.WINCH.REEL_SPEED) / C.WINCH.OVERRUN);
     if (H.state === 'out' && H.holder == null) {
       // loose hook: just drag it in, the RV doesn't care about a 9 kg hook
       H.body.applyImpulse(mul(dir, -Math.min(T, 900) * dt), true);
@@ -985,7 +989,12 @@ export class Sim {
   rvContact(dt, v0) {
     const v1 = this.rv.linvel(), q = this.rv.rotation();
     const d = qRotate(qConj(q), v3(v1.x - v0.x, v1.y - v0.y + 9.81 * dt, v1.z - v0.z)), h = Math.hypot(d.x, d.z);
-    if (this.t < this.quietUntil) { this.hit = null; return; }
+    // (put down somewhere, it's quiet till it has settled: QUIET s at least, QUIET_MAX at most. A tow set
+    // down on a slope lurches and drops before it sits still)
+    if (this.t < this.quietMax) {
+      if (this.t >= this.quietUntil && this.rvSettled()) this.quietMax = 0;
+      else { this.hit = null; return; }
+    }
     if (h >= C.RVH.GATE) {
       if (!this.hit) this.hit = { x: 0, z: 0, last: this.t, partner: this.rvPartner() };
       this.hit.x += d.x; this.hit.z += d.z; this.hit.last = this.t;
@@ -1033,11 +1042,60 @@ export class Sim {
     return up.y < 0.35;
   }
 
-  // Shove it back on its wheels (costs money — the room charges for the tow).
+  // sitting still on its wheels (at least three on the ground)
+  rvSettled() {
+    const v = this.rv.linvel(), w = this.rv.angvel();
+    let on = 0;
+    for (let i = 0; i < RV_WHEELS.length; i++) if (this.vehicle.wheelIsInContact(i)) on++;
+    return on >= 3 && Math.hypot(v.x, v.y, v.z) < 1 && Math.hypot(w.x, w.y, w.z) < 0.5;
+  }
+
+  // Shove it back on its wheels (costs money: the room charges for the tow). The tow truck drags it back onto
+  // the road nearby, facing up it: the nearest gentle stretch within 40 m, clear of the day's obstacles and on
+  // this side of them all (a tow is no way past a gate, the mud, the boulder or a grade). With none (in camp,
+  // in town), it's righted where it lies. Moved, the truck unhooks the winch first
   rightRV() {
-    const t = this.rv.translation();
+    const t = this.rv.translation(), W = this.W, z = this.towSpot(t.z);
+    if (z != null) {
+      if (this.hook.state !== 'stowed') this.stowHook();
+      this.placeRV(W.roadX(z), z, Math.atan2(W.roadX(z + 3) - W.roadX(z - 3), 6));
+      return;
+    }
     const yaw = Math.atan2(qRotate(this.rv.rotation(), v3(0, 0, 1)).x, qRotate(this.rv.rotation(), v3(0, 0, 1)).z);
     this.placeRV(t.x, t.z, yaw);
+  }
+
+  // where on the road (its z) the tow truck puts the RV, from z0, or null
+  towSpot(z0) {
+    const W = this.W, h = z => W.heightAt(W.roadX(z), z);
+    if (!(z0 > 10 && z0 < W.LEN - 10)) return null;
+    // the stretches a tow mustn't land on or cross (the boulder only while it's still on the road)
+    const spans = [];
+    for (const o of W.obstacles) {
+      if (o.type === 'gate') spans.push([o.z - 8, o.z + 8]);
+      else if (o.type === 'mud') spans.push([o.z0 - 5, o.z1 + 5]);
+      else if (o.type === 'grade') spans.push([o.z0 - 8, o.z1 + 14]);
+      else if (o.type === 'boulder') {
+        for (const p of this.props.values()) {
+          if (p.type !== 'boulder') continue;
+          const b = p.body.translation();
+          if (Math.abs(b.x - W.roadX(b.z)) < 6) spans.push([b.z - 7, b.z + 7]);
+        }
+      }
+    }
+    // (in one already, it goes back to before it, never on past it)
+    const inside = spans.find(([a, b]) => z0 >= a && z0 <= b), from = inside ? inside[0] - 0.01 : z0;
+    for (let k = 0; k <= 20; k++) {
+      for (const s of k ? [-1, 1] : [1]) {
+        const z = z0 + s * k * 2;
+        if (z < 10 || z > W.LEN - 10 || (inside && z > from)) continue;
+        if (spans.some(([a, b]) => b >= Math.min(z, from) && a <= Math.max(z, from) && (a !== inside?.[0] || b !== inside?.[1]))) continue;
+        if (spans.some(([a, b]) => z >= a && z <= b)) continue;
+        if (Math.abs(h(z + 4) - h(z - 4)) / 8 > 0.1) continue;
+        return z;
+      }
+    }
+    return null;
   }
 
   propsIn(box) {

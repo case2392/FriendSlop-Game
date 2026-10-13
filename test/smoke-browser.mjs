@@ -417,6 +417,8 @@ try {
     check(pills.every(Boolean), `the RV at 70%: the top bar says "RV 70%" on both pages (${pills.join(', ')})`);
     await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'rvhp', hp: 0 }));
     await host.waitForFunction(() => window.__nmd.g?.brk === 1, null, { timeout: 24000 });
+    // E already held before he gets there: the fix starts when he does, without a fresh press
+    await host.evaluate(() => window.__nmd.key('e', true));
     // Steve 1.5 m behind the engine hatch on the RV's back wall, facing it
     await host.evaluate(() => {
       const S = window.__nmd, { p, q } = S.rv;
@@ -429,11 +431,24 @@ try {
     });
     const fixLabel = await host.waitForFunction(() => window.__nmd.target()?.kind === 'fix' && window.__nmd.target().label, null, { timeout: 20000 }).then(h => h.jsonValue(), () => '');
     const t0 = Date.now();
-    await host.evaluate(() => { const S = window.__nmd; S.key('e', true); S.press('use'); });
+    const started = await host.waitForFunction(() => (window.__nmd.g?.fix || 0) > 0, null, { timeout: 8000, polling: 100 }).then(() => true, () => false);
+    // a TV dropped at his feet and a look at it: the crosshair is on the TV now, and his hands stay on the engine
+    const tvAt = await host.evaluate(() => {
+      const S = window.__nmd, { p, q } = S.rv;
+      const rot = v => { const x = q.y * v.z - q.z * v.y, y = q.z * v.x - q.x * v.z, z = q.x * v.y - q.y * v.x;
+        const x2 = q.y * z - q.z * y, y2 = q.z * x - q.x * z, z2 = q.x * y - q.y * x;
+        return { x: v.x + 2 * (q.w * x + x2), y: v.y + 2 * (q.w * y + y2), z: v.z + 2 * (q.w * z + z2) }; };
+      const b = rot({ x: 0.7, y: 0, z: -4.95 }), x = p.x + b.x, z = p.z + b.z, y = S.W.heightAt(x, z);
+      S.send({ t: 'dbg', op: 'spawn', type: 'tv', x, y: y + 0.5, z, value: 260 });
+      return { x, y, z };
+    });
+    await host.waitForTimeout(1500);
+    await host.evaluate(at => window.__nmd.aimAt(at.x, at.y + 0.2, at.z), tvAt);
+    const blocked = await host.waitForFunction(() => window.__nmd.target()?.kind === 'prop', null, { timeout: 10000, polling: 100 }).then(() => true, () => false);
     const fixed = await host.waitForFunction(() => window.__nmd.g?.rvh === 20 && !window.__nmd.g?.brk, null, { timeout: 20000, polling: 100 }).then(() => true, () => false);
     const took = (Date.now() - t0) / 1000;
     await host.evaluate(() => window.__nmd.key('e', false));
-    check(/\[Hold E\] fix the engine/.test(fixLabel) && fixed && took > 6 && took < 14, `broken down, behind the RV the crosshair says "${fixLabel}", and holding E gets it running again at 20% (${took.toFixed(1)} s)`);
+    check(/\[Hold E\] fix the engine/.test(fixLabel) && started && blocked && fixed && took > 6 && took < 14, `broken down, behind the RV the crosshair says "${fixLabel}"; E held from before he got there starts the fix (${started}), a TV dropped into his crosshair doesn't stop it (${blocked}), and it's running again at 20% (${took.toFixed(1)} s)`);
     await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'rvhp', hp: 100 }));
   }
 

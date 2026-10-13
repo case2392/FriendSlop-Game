@@ -451,9 +451,15 @@ export class Mobs {
     if (part.rv) {
       if (!m.rvTouch) {
         m.rvTouch = true;
+        // (along the ground, across where they touch: the contact's normal, pointed from the RV at the beast;
+        // the line between their middles only when the touch is on its roof or under it. A front corner
+        // brushing past its flank closes slowly across the touch, however fast the RV goes)
+        const rt = this.sim.rv.translation(), vr = this.vRV, N = part.rvN;
+        let nx = t.x - rt.x, nz = t.z - rt.z;
+        if (N && Math.hypot(N.x, N.z) > 0.3) { const s = N.x * nx + N.z * nz < 0 ? -1 : 1; nx = N.x * s; nz = N.z * s; }
+        const nl = Math.hypot(nx, nz) || 1;
         // a ram: what it costs goes by how fast the RV comes at it (the RV's own speed toward it: it charging
         // a parked RV, or into the back of one driving off, only winds itself)
-        const rt = this.sim.rv.translation(), vr = this.vRV, nx = t.x - rt.x, nz = t.z - rt.z, nl = Math.hypot(nx, nz) || 1;
         const at = Math.max(0, (vr.x * nx + vr.z * nz) / nl);
         // and what it costs the RV: how fast they close, just before they touched (the RV toward it, less
         // the RV away from it): a charge into a parked RV dents it, one into the back of an RV driving off
@@ -1414,18 +1420,18 @@ export class Mobs {
     }
   }
 
-  // what a critter is touching right now (a live contact, not just overlapping boxes): the RV, the solid
-  // world, and which props
+  // what a critter is touching right now (a live contact, not just overlapping boxes): the RV (and the
+  // contact's normal there, world space, either sign), the solid world, and which props
   partners(p) {
-    const out = { rv: false, statics: false, props: [] }, w = this.sim.world, rv = this.sim.rv.handle;
+    const out = { rv: false, rvN: null, statics: false, props: [] }, w = this.sim.world, rv = this.sim.rv.handle;
     w.contactPairsWith(p.col, c2 => {
       if (!c2) return;
-      let live = false;
-      w.contactPair(p.col, c2, man => { if (man.numContacts() > 0) live = true; });
+      let live = false, n = null;
+      w.contactPair(p.col, c2, man => { if (man.numContacts() > 0) { live = true; n ||= man.normal(); } });
       if (!live) return;
       const id = this.sim.byCollider.get(c2.handle);
       if (id != null) out.props.push(id);
-      else if (c2.parent()?.handle === rv) out.rv = true;
+      else if (c2.parent()?.handle === rv) { out.rv = true; out.rvN ||= n && { x: n.x, y: n.y, z: n.z }; }
       else out.statics = true;
     });
     return out;

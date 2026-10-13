@@ -312,8 +312,9 @@ unbraced rider is already thrown), then 3% per m/s; into the closed ranger
 gate at 8 m/s it's about 18%, and the toast names the driver ("CRUNCH. Sam
 put the RV into the ranger gate: -18%"). Everything within 2 s of the first
 hit is one incident, capped at 25% (a roll is one dent and the $800 tow).
-The wildlife dents it too: a Grumphorn by how fast they close (a charge into
-the parked RV about 8%; into the back of one driving off, nothing), a live
+The wildlife dents it too: a Grumphorn by how fast they close across where
+they touch (a charge into the parked RV about 8%; into the back of one
+driving off, or a corner brushing past its flank, little or nothing), a live
 rock landing on it 3%, a ringtail breaking out through a window 2%. Worn
 down it loses its top end, never its pull (FINE above 60%, 12.9 m/s;
 SMOKING to 31%, 12.1; LIMPING to 1%, 11.2, and a knock stalls the engine for
@@ -390,7 +391,8 @@ playtests with real friends before anyone trusts them (confidence: moderate).
   the coin flip 3%). The casino is variance you choose, never free money.
 - Medical bill: $250 + $50 × day per KO, unless a friend picks you up.
   Getting run over by your own RV: $500. RV on its back for 7 seconds: an
-  $800 tow.
+  $800 tow, and the truck sets it back on its wheels on the road nearby
+  (never past a gate, the mud, the boulder or a grade).
 - Missing a payment: the Repo Man takes the RV. The run is over.
 - Gus's repairs: 25% of the RV's condition a press, $8 a point rising 22% a
   day like the loot (days 1-4: $200 / $245 / $290 / $330 cash, or $250 /

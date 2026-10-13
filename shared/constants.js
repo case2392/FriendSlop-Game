@@ -111,7 +111,7 @@ export const WINCH = {
   FORCE: 52000,             // max newtons on the cable
   STIFF: 42000,             // newtons per meter of stretch
   DAMP: 9000,
-  STALL: 0.5,               // the motor stalls against a load it can't move: at most this much stretch on the cable
+  OVERRUN: 0.6,             // m/s: a load coming faster than the drum winds gets less pull, none this much faster
   ANCHOR_REACH: 1.6,
 };
 
@@ -122,7 +122,8 @@ export const WINCH = {
 // more; steps within WIN s are one hit, its size their summed change. Free up to FREE m/s (where an unbraced
 // rider is already thrown down the cabin), then K% a m/s. Everything from the first hit until GAP s pass with
 // none is one incident, capped at CAP% (a tumble is one bill: the $800 tow prices the rest). Nothing counts
-// for QUIET s after a teleport (night parking, the tow). A grumphorn: by closing speed, free under GH_FREE
+// after a teleport (night parking, the tow) until it has settled where it was put: QUIET s at least,
+// QUIET_MAX s at most. A grumphorn: by closing speed, free under GH_FREE
 // m/s, GH_K% a m/s, at most GH_CAP%. A live rock landing on it fast: ROCK%; a ringtail squeezing out of a
 // window: WINDOW%. An incident of POP% throws the door open; limping, a hit of STALL_HIT% stalls the engine
 // for STALL_T s. Broken down (0%): the roadside fix, FIX_T s for the day's 1st/2nd/3rd breakdown (shared by
@@ -131,7 +132,7 @@ export const WINCH = {
 // the loot does), cash, or LOAN_X times that on tomorrow's payment (night 4: on the balloon, a second press
 // within LOAN_CONFIRM s signs it)
 export const RVH = {
-  GATE: 0.4, WIN: 0.15, QUIET: 0.5, GAP: 2, FREE: 2, K: 3, CAP: 25,
+  GATE: 0.4, WIN: 0.15, QUIET: 0.5, QUIET_MAX: 4, GAP: 2, FREE: 2, K: 3, CAP: 25,
   GH_FREE: 3, GH_K: 1.2, GH_CAP: 20, ROCK: 3, WINDOW: 2, POP: 10, STALL_HIT: 3, STALL_T: 3,
   FIX_T: [8, 12, 16], FIX_HANDS: 3, FIX_R: 2.2, FIX_V: 1, FIX_TO: 20,
   PER_PT: 8, STEP: 25, LOAN_X: 1.25, LOAN_CONFIRM: 5, GUS_R: 15,

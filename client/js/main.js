@@ -347,7 +347,10 @@ document.addEventListener('pointerlockchange', () => {
 });
 // the driver's hands leave the controls: say so at once (a frozen or hidden page sends nothing at all,
 // and the server only lets go of a silent driver's throttle after a moment)
-function letGoOfTheWheel() { if (me.mode === 'seat' && me.seat === 0) net.send({ t: 'drv', th: 0, st: 0, hb: 0 }); }
+function letGoOfTheWheel() {
+  if (me.mode === 'seat' && me.seat === 0) net.send({ t: 'drv', th: 0, st: 0, hb: 0 });
+  if (fixHeld) { fixHeld = false; net.send({ t: 'fix', on: 0 }); }   // (and of the engine: a hidden tab runs no frames to say so)
+}
 // The wheel and the pedals go to the server 20 times a second on their own clock, not once a frame: on a
 // slow PC (a frame a second) the server would let go of a driver it hasn't heard from for a second
 setInterval(() => {
@@ -541,6 +544,7 @@ function gusPrompt(arg) {
   const g = S.g;
   if (!g) return '';
   if ((g.rvh ?? 100) >= 100) return 'Gus: "Nothing to fix. She\'s running fine."';
+  if (g.day >= C.DAYS || g.ph === 'over') return 'Gus: "Closed. Last day, kid: get her home."';
   if (g.ph !== 'night' || !g.paid) return '[E] Gus fixes the RV (once the Repo Man is paid)';
   const q = C.repairQuote(g.day, g.rvh);
   return arg === 'loan' ? `[E] Gus: fix ${q.pts}% for ${fmt$(q.loan)} on ${g.day === C.DAYS - 1 ? 'the balloon payment' : 'tomorrow\'s payment'}`
@@ -659,7 +663,6 @@ function onUse() {
   if (t.kind === 'door') { net.send({ t: 'use', kind: 'door' }); return; }
   if (t.kind === 'rvuse') { net.send({ t: 'use', kind: t.use }); return; }
   if (t.kind === 'revive') { reviveT = 0.0001; return; }
-  if (t.kind === 'fix') { fixHeld = true; net.send({ t: 'fix', on: 1 }); return; }
   if (t.kind === 'use') {
     if (t.u.kind === 'keypad') { openKeypad(t.id); return; }
     net.send({ t: 'use', id: t.id });
@@ -1771,8 +1774,11 @@ requestAnimationFrame(frame);
     reviveT += dt;
     if (reviveT >= C.PLAYER.REVIVE_HOLD) { net.send({ t: 'use', kind: 'revive', id: target.id }); reviveT = 0; }
   } else if (!keys.e) reviveT = 0;
-  // the roadside fix: E let go, or I walked off (or it's running again): stop
-  if (fixHeld && (!keys.e || target?.kind !== 'fix')) { fixHeld = false; net.send({ t: 'fix', on: 0 }); }
+  // the roadside fix: E held at the engine hatch. It starts with the hatch in view (its prompt up), however
+  // long E has been down, and goes on while E is down and I'm still at the hatch, whatever crosses the
+  // crosshair (a friend, a ringtail, loot); E let go, or I walked off (or it's running again): stop
+  const fixWant = !!keys.e && atHatch() && (fixHeld || target?.kind === 'fix');
+  if (fixWant !== fixHeld) { fixHeld = fixWant; net.send({ t: 'fix', on: fixWant ? 1 : 0 }); }
   $('holdBar').classList.toggle('hidden', !(reviveT > 0 || fixHeld));
   $('holdBar').firstElementChild.style.width = `${fixHeld ? Math.min(100, S.g?.fix || 0) : Math.min(100, reviveT / C.PLAYER.REVIVE_HOLD * 100)}%`;
 
@@ -1929,7 +1935,7 @@ function updateCasino(dt) {
   w.pawnLabel.userData.set(offer ? `ED OFFERS ${fmt$(offer)}${g.dock ? ' FOR THE LOT' : ''} · ring the bell` : 'LOOT ON THE COUNTER, OR THE RV OUTSIDE', offer ? '#7CFC00' : '#ffe9a8');
   if (w.gusLabel) {
     const hp = g.rvh ?? 100, q = C.repairQuote(g.day, hp), open = g.ph === 'night' && g.paid;
-    w.gusLabel.userData.set(hp >= 100 ? 'SHE\'S RUNNING FINE' : !open ? `RV ${hp}% · OPEN ONCE THE REPO MAN'S PAID`
+    w.gusLabel.userData.set(hp >= 100 ? 'SHE\'S RUNNING FINE' : g.day >= C.DAYS || g.ph === 'over' ? `RV ${hp}% · CLOSED: NO NIGHT ON THE LAST DAY` : !open ? `RV ${hp}% · OPEN ONCE THE REPO MAN'S PAID`
       : `RV ${hp}% · ${q.pts}% FOR ${fmt$(q.cash)} · ${fmt$(q.loan)} ON THE ${g.day === C.DAYS - 1 ? 'BALLOON' : 'LOAN'}`, hp < 100 && open ? '#7CFC00' : '#ffe9a8');
   }
   w.hitPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.sin(time * 6) * 0.2 : 0.15;

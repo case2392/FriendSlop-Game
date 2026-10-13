@@ -1465,7 +1465,7 @@ function makeSkeleton(F) {
 }
 
 // Root at the feet. Inner model faces local +x; root.rotation.y = -PI/2 turns it to face +z.
-// opts.outfit: 'player' | 'ed' | 'clerk' | 'dealer' | 'repo' (inferred from the old call
+// opts.outfit: 'player' | 'ed' | 'clerk' | 'dealer' | 'repo' | 'gus' (inferred from the old call
 // signatures in town3d.js when absent). opts.variant: a player's kit, 0-5 (defaults to hatIndex).
 export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null, variant = null } = {}) {
   const spec = resolveSpec(color, { hatIndex, skinIndex, scale, eyeColor, outfit, variant });

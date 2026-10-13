@@ -39,7 +39,7 @@ function crew(names, day = 1, seed = 4242) {
 // every hit the room is told of, priced or free (the published 'rvhit' events are only the ones that cost)
 function hits(room) {
   const seen = [], f = room.onRVHit.bind(room);
-  room.onRVHit = e => { const r = f(e); seen.push({ ...e, priced: r }); return r; };
+  room.onRVHit = e => { const r = f(e); seen.push({ ...e, priced: r, t: room.t }); return r; };
   return seen;
 }
 const worst = seen => seen.filter(h => h.why === 'crash').reduce((m, h) => Math.max(m, h.dv), 0);
@@ -150,6 +150,29 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
     `rv: put down elsewhere at 15 m/s (worst ${afterPlace.toFixed(2)} m/s) and set back on its wheels from its side (worst ${worst(righted).toFixed(2)} m/s): no crash`);
 }
 {
+  // on its side on the steepest bank by the road (day 1, about 45 degrees): after 7 s the tow truck puts it back
+  // on the road nearby, on its wheels and facing up it, and that costs the RV nothing (the $800 is the tow's)
+  const { room, ps: [A] } = crew(['Ann'], 1);
+  room.phase = 'road';
+  const W = room.W, sim = room.sim;
+  let best = null, bs = 0;
+  for (let zz = 150; zz < 500; zz += 3) for (let off = 6; off < 40; off++) for (const s of [-1, 1]) {
+    const xx = W.roadX(zz) + s * off, sl = Math.hypot(W.heightAt(xx + 1, zz) - W.heightAt(xx - 1, zz), W.heightAt(xx, zz + 1) - W.heightAt(xx, zz - 1)) / 2;
+    if (sl > bs && sl < 1.0) { bs = sl; best = { x: xx, z: zz }; }
+  }
+  const yaw = roadYaw(W, best.z) + Math.PI / 2;
+  sim.placeRV(best.x, best.z, yaw);
+  const t = sim.rv.translation(), yq = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) }, rq = { x: 0, y: 0, z: Math.sin(Math.PI / 4), w: Math.cos(Math.PI / 4) };
+  sim.rv.setTranslation({ x: t.x, y: t.y + 1.5, z: t.z }, true);
+  sim.rv.setRotation({ x: yq.w * rq.x + yq.x * rq.w + yq.y * rq.z - yq.z * rq.y, y: yq.w * rq.y - yq.x * rq.z + yq.y * rq.w + yq.z * rq.x, z: yq.w * rq.z + yq.x * rq.y - yq.y * rq.x + yq.z * rq.w, w: yq.w * rq.w - yq.x * rq.x - yq.y * rq.y - yq.z * rq.z }, true);
+  const seen = hits(room), bills = room.stats.bills;
+  let towAt = null;
+  for (let i = 0; i < 16 * HZ; i++) { const b = room.stats.bills; room.tick(1 / HZ); if (room.stats.bills > b && towAt == null) towAt = room.t; }
+  const after = seen.filter(h => h.priced && towAt != null && h.t > towAt), p = sim.rv.translation();
+  check(bs > 0.9 && towAt != null && room.stats.bills - bills === 800 && !after.length && !sim.rvFlipped() && Math.abs(p.x - W.roadX(p.z)) < 1 && Math.abs(p.z - best.z) <= 41,
+    `rv: towed off a ${(Math.atan(bs) * 180 / Math.PI).toFixed(0)}-degree bank: back on the road ${Math.abs(p.z - best.z).toFixed(0)} m along, on its wheels, and nothing more off the RV (${after.length} hits after the tow)`);
+}
+{
   // the winch hauling the RV up a grade, and flooring it against the cable still clipped to its post
   let day = 1;
   while (day < 5 && !generateLeg(4242, day).obstacles.some(o => o.type === 'grade')) day++;
@@ -172,6 +195,42 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
   for (let i = 0; i < 30 * HZ && !up; i++) { pedal(room, A, 0.5, 1 / HZ); up = sim.rv.translation().z > grade.z1 + 1.5; }
   check(held < 1.5 && up && worst(seen) <= C.RVH.FREE && room.rvc.hp === 100,
     `rv: day ${day}: flooring it against the clipped winch (it moved ${held.toFixed(2)} m) and winching up the ${grade.h.toFixed(1)} m grade: no crash (worst ${worst(seen).toFixed(2)} m/s)`);
+}
+{
+  // the steepest grade there is (day 5, seed 120: 14.5 m), three safes aboard (450 kg) and nobody at the
+  // wheel: the winch alone hauls it up. Then the cable snagged (the RV held fast) while the drum winds, and let
+  // go: the drum stalls at its rated pull, and the RV comes at about the drum's speed, not flung up the hill
+  const { room, ps: [A] } = crew(['Ann'], 5, 120);
+  const W = room.W, sim = room.sim, grade = W.obstacles.filter(o => o.type === 'grade').sort((a, b) => b.h - a.h)[0];
+  const rz = grade.z0 - 7;
+  sim.placeRV(W.roadX(rz), rz, roadYaw(W, rz));
+  tick(room, 1.5);
+  const top = { x: W.roadX(grade.z1), z: grade.z1 }, anc = W.anchors.reduce((b, a) => (Math.hypot(a.x - top.x, a.z - top.z) < Math.hypot(b.x - top.x, b.z - top.z) ? a : b));
+  const clip = () => { const w = sim.winchWorld(); Object.assign(sim.hook, { state: 'anchored', body: null, anchor: { x: anc.x, y: anc.y, z: anc.z }, attach: null, holder: null, reeling: true, len: Math.hypot(anc.x - w.x, anc.y - w.y, anc.z - w.z) + 0.2 }); };
+  const stretch = () => { const w = sim.winchWorld(); return Math.hypot(anc.x - w.x, anc.y - w.y, anc.z - w.z) - sim.hook.len; };
+  const seen = hits(room);
+  // the snag first, at the foot
+  clip();
+  sim.rv.lockTranslations(true, true); sim.rv.lockRotations(true, true);
+  tick(room, 4);
+  const held = stretch();
+  sim.rv.lockTranslations(false, true); sim.rv.lockRotations(false, true);
+  let vmax = 0;
+  for (let i = 0; i < 4 * HZ; i++) { room.tick(1 / HZ); const v = sim.rv.linvel(); vmax = Math.max(vmax, Math.hypot(v.x, v.z)); }
+  check(held > 1.1 && held < 1.4 && vmax < 3.3 && worst(seen) <= C.RVH.FREE,
+    `rv: the winch winding against a snag stalls at its rated pull (${held.toFixed(2)} m of stretch, ${(Math.min(held * C.WINCH.STIFF, C.WINCH.FORCE) / 1000).toFixed(0)} kN); let go, the RV comes at ${vmax.toFixed(2)} m/s at most, no crash`);
+  // then the climb with the safes aboard
+  sim.placeRV(W.roadX(rz), rz, roadYaw(W, rz));
+  tick(room, 1.5);
+  const rp = sim.rv.translation(), rq = sim.rv.rotation();
+  for (let k = 0; k < 3; k++) sim.addProp('safe', toWorld(rp, rq, { x: k % 2 ? 0.5 : -0.5, y: 0.5, z: -2.6 + Math.floor(k / 2) * 1.0 }), { x: 0, y: 0, z: 0, w: 1 }, 100, 100);
+  tick(room, 1.5);
+  clip();
+  A.seat = null;
+  let up = false, secs = 0;
+  for (let i = 0; i < 40 * HZ && !up; i++) { room.tick(1 / HZ); up = sim.rv.translation().z > grade.z1 + 1.5; secs = i / HZ; }
+  check(grade.h > 14 && up && worst(seen) <= C.RVH.FREE && room.rvc.hp === 100,
+    `rv: day 5's ${grade.h.toFixed(1)} m grade with three safes aboard and nobody driving: the winch alone gets it up (${up ? `${secs.toFixed(0)} s` : 'stuck'}), no crash`);
 }
 
 // ---- RV3: a crash --------------------------------------------------------------------------------------------

@@ -280,8 +280,9 @@ npm test
   connections, the goodbye when the server shuts down.
 - `test/rv.mjs` checks the RV's condition in process: what a crash costs and
   what must never count as one (keyboard driving, a handbrake stop with safes
-  aboard, teleports, the winch), the bands, the stall, the roadside fix, Gus,
-  and that it never ends a trip. `node tools/rvsoak.mjs` is its soak: a
+  aboard, teleports, the tow off a steep bank, the winch), the winch hauling
+  three safes up the steepest grade with nobody driving, the bands, the stall,
+  the roadside fix, Gus, and that it never ends a trip. `node tools/rvsoak.mjs` is its soak: a
   keyboard-style driver does all of it on 12 seeds x 5 days, plus every
   stop's apron, and prints every crash window for tuning.
 - `test/steamnet.mjs` plays over a stand-in for Steam (`test/fakesteam/`):

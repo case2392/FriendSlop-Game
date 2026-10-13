@@ -785,7 +785,21 @@ function gusBench(K, s) {
   K.cyl(mat('metal_green'), [0.3, 0.24, 0], [0.3, 0.42, 0], 0.07, 0.07, { sides: 10, tint: '#c8a030' });
   K.cyl(iron, [0.3, 0.42, 0], [0.38, 0.53, 0], 0.012, 0.007, { sides: 5 });
   // a bald tyre leaned on the end
-  K.add(iron, new THREE.TorusGeometry(0.3, 0.1, 8, 18), { uv: 'keep', at: matrix(hx + 0.15, 0.37, 0, Math.PI / 2, 0, -0.22), tint: '#2a2522' });
+  K.add(iron, new THREE.TorusGeometry(0.3, 0.1, 8, 18), { uv: 'keep', at: matrix(hx + 0.2, 0.37, 0, Math.PI / 2, -0.22), tint: '#9c968f' });
+  // three more stacked flat at the vise end, behind, beside Gus
+  for (let k = 0; k < 3; k++) K.add(iron, new THREE.TorusGeometry(0.28, 0.1, 8, 18), { uv: 'keep', at: matrix(-1.05 + (k % 2) * 0.04, 0.1 + k * 0.2, -0.62 - k * 0.025, 0, Math.PI / 2, 0), tint: k === 1 ? '#a8a29b' : '#948e88' });
+  // his pegboard behind him, on two battens across the posts of his sign: a ring spanner, a hammer, a saw,
+  // a coiled fan belt and a hubcap, each on its peg
+  const pz = -1.06, zf = pz + 0.0125;
+  for (const y of [0.86, 1.52]) K.box(wd, 2.9, 0.07, 0.04, 0, y, pz - 0.035, { grain: 'x' });
+  K.box(mat('board_rough'), 2.5, 0.82, 0.025, 0, 1.19, pz, { tile: 1.4, tint: '#b8946a' });
+  const peg = (x, y) => K.cyl(iron, [x, y, zf], [x, y, zf + 0.05], 0.008, 0.008, { sides: 4 });
+  peg(-1.05, 1.44); K.box(iron, 0.045, 0.3, 0.014, -1.05, 1.22, zf + 0.008, { tile: 0.5 });
+  K.add(iron, new THREE.TorusGeometry(0.04, 0.014, 4, 8), { uv: 'keep', at: matrix(-1.05, 1.4, zf + 0.008) });
+  peg(-0.72, 1.38); K.cyl(wd, [-0.72, 1.0, zf + 0.02], [-0.72, 1.34, zf + 0.02], 0.016, 0.014, { sides: 6 }); K.box(iron, 0.15, 0.05, 0.045, -0.72, 1.36, zf + 0.025, { tile: 0.5 });
+  peg(0.0, 1.42); K.box(iron, 0.44, 0.13, 0.006, 0.12, 1.33, zf + 0.006, { tile: 0.5, tint: '#c4c8cc' }); K.box(wd, 0.12, 0.11, 0.026, -0.14, 1.34, zf + 0.014, { grain: 'x' });
+  peg(0.6, 1.4); K.add(mat('metal_green'), new THREE.TorusGeometry(0.13, 0.02, 5, 16), { uv: 'keep', at: matrix(0.6, 1.27, zf + 0.022), tint: '#2a2522' });
+  peg(1.0, 1.2); K.cyl(iron, [1.0, 1.08, zf + 0.004], [1.0, 1.08, zf + 0.026], 0.12, 0.12, { sides: 14, tint: '#d0d4d8' });
 }
 
 function furniture(s, batch, ctx) {
@@ -1422,19 +1436,21 @@ export function buildStructures(W) {
     }
   }
 
-  // Gus, behind his bench by the RV lot (off to the vise end, clear of his price label, which main.js rewrites)
+  // Gus, behind his bench by the RV lot (off to the vise end). His price label (main.js rewrites it) hangs past
+  // the bench's far end at head height: clear of his face, of his nameplate above him and of the buttons'
+  // own labels over the bench
   let gusLabel = null;
   if (T.gus) {
     const g = T.gus, c = Math.cos(g.ry), sn = Math.sin(g.ry);
     // (the bench's frame: its front, local +z, faces the lot; local x runs along it)
     const at = (lx, lz) => ({ x: g.x + lx * c + lz * sn, z: g.z - lx * sn + lz * c });
     const spot = at(-0.35, -0.8);
-    npc({ x: spot.x, y: g.y + 0.02, z: spot.z, ry: g.ry }, '#33506e', { hatIndex: 0, skinIndex: 2, outfit: 'clerk' }, 'GUS');
+    npc({ x: spot.x, y: g.y + 0.02, z: spot.z, ry: g.ry }, '#33506e', { hatIndex: 0, skinIndex: 2, outfit: 'gus' }, 'GUS');
     gusLabel = labelSprite('', '#ffe9a8', 30);
     own(gusLabel.material.map, gusLabel.material);
-    const lp = at(0.1, 0.05);
-    gusLabel.position.set(lp.x, g.y + 1.62, lp.z);
-    gusLabel.scale.set(2.8, 0.48, 1);
+    const lp = at(1.3, 0.15);
+    gusLabel.position.set(lp.x, g.y + 1.9, lp.z);
+    gusLabel.scale.set(2.6, 0.45, 1);
     local.add(gusLabel);
   }
 
