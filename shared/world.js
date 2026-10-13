@@ -500,7 +500,11 @@ export function generateLeg(seed, day, opts = {}) {
   for (const o of obstacles) {
     const rx = roadX(o.z);
     if (o.type === 'grade') {
-      const zt = o.z1 + 9;
+      // (12 m past the top: the crest rounds off over 4-5 m, and the winch can only drag the RV's nose up to
+      // the posts. At 9 m it left the back wheels on the curve, where the RV can't pull itself over (it climbs
+      // about 6 degrees on its own) and rolled back down once unhooked; and the cable still reaches from the
+      // foot: 41 m of its 42 on the longest grade)
+      const zt = o.z1 + 12;
       const xt = roadX(zt);
       for (const s of [-1, 1]) {
         const ax = xt + s * 3.4, az = zt, ay = heightAt(ax, az);

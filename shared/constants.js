@@ -135,9 +135,10 @@ export const RVH = {
   FIX_T: [8, 12, 16], FIX_HANDS: 3, FIX_R: 2.2, FIX_V: 1, FIX_TO: 20,
   PER_PT: 8, STEP: 25, LOAN_X: 1.25, LOAN_CONFIRM: 5, GUS_R: 15,
 };
-// [lowest %, name, engine force x, knocks on loose loot riding inside x]
-export const RV_BANDS = [[61, 'FINE', 1, 0.5], [31, 'SMOKING', 0.85, 0.6], [1, 'LIMPING', 0.7, 0.7], [0, 'BROKEN DOWN', 0, 0.7]];
-export const rvBand = hp => { const b = RV_BANDS.find(x => hp >= x[0]) || RV_BANDS[RV_BANDS.length - 1]; return { min: b[0], name: b[1], engine: b[2], rattle: b[3] }; };
+// [lowest %, name, top end x (RV.TOP_SPEED: down on power at speed, pulling as hard as ever at a crawl),
+// knocks on loose loot riding inside x]
+export const RV_BANDS = [[61, 'FINE', 1, 0.5], [31, 'SMOKING', 0.92, 0.6], [1, 'LIMPING', 0.84, 0.7], [0, 'BROKEN DOWN', 0, 0.7]];
+export const rvBand = hp => { const b = RV_BANDS.find(x => hp >= x[0]) || RV_BANDS[RV_BANDS.length - 1]; return { min: b[0], name: b[1], top: b[2], rattle: b[3] }; };
 export const crashDamage = dv => dv <= RVH.FREE ? 0 : Math.round(RVH.K * (dv - RVH.FREE));
 export const beastDamage = v => v < RVH.GH_FREE ? 0 : Math.min(RVH.GH_CAP, Math.round(RVH.GH_K * v));
 // Gus's price for the next press (the day's price rise is the loot's: 22% a day)

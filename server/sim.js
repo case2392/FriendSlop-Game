@@ -749,16 +749,18 @@ export class Sim {
     const sp = this.rvSpeed();
     const { th, st, hb } = this.drive;
     let engine = 0, brake = 0.6;
+    // (a worn RV is down on power where it shows, at speed: its top end; crawling up a crest or out of the mud
+    // it pulls as hard as ever)
+    const top = C.RV.TOP_SPEED * this.rvMods.top;
     if (th > 0.05) {
       if (sp < -0.6) brake = C.RV.BRAKE;   // still rolling backwards: brake first
-      else { engine = th * C.RV.ENGINE * (1 - Math.max(0, Math.min(1, sp / C.RV.TOP_SPEED)) ** 2); brake = 0; }
+      else { engine = th * C.RV.ENGINE * (1 - Math.max(0, Math.min(1, sp / top)) ** 2); brake = 0; }
     } else if (th < -0.05) {
       if (sp > 0.6) { brake = C.RV.BRAKE; }
       else { engine = th * C.RV.REVERSE * (1 - Math.max(0, Math.min(1, -sp / 6))); brake = 0; }
     }
-    // a worn RV is down on power; broken down, or stalled, the engine gives nothing: it coasts, and S (no
-    // reverse gear to find) holds it on the brakes
-    engine *= this.rvMods.engine;
+    // broken down, or stalled, the engine gives nothing: it coasts, and S (no reverse gear to find) holds it on
+    // the brakes
     if (this.rvMods.dead || this.t < this.rvMods.stallUntil) { engine = 0; if (brake !== C.RV.BRAKE) brake = th < -0.05 ? C.RV.BRAKE : 0.6; }
     if (hb) { brake = C.RV.BRAKE * 1.6; engine = 0; }
     const steerTarget = st * C.RV.STEER_MAX * (1 - 0.5 * Math.min(1, Math.abs(sp) / C.RV.TOP_SPEED));
@@ -966,11 +968,11 @@ export class Sim {
   }
 
   // Is the RV upside-down / on its side?
-  // the RV's condition as the drive sees it (the room keeps the number): power, the rattle loose loot inside
-  // takes, broken down; a stall is set by the room (a knock while limping)
+  // the RV's condition as the drive sees it (the room keeps the number): its top end, the rattle loose loot
+  // inside takes, broken down; a stall is set by the room (a knock while limping)
   setRvCond(hp) {
     const b = C.rvBand(hp);
-    this.rvMods = { engine: b.engine, rattle: b.rattle, dead: hp <= 0, stallUntil: this.rvMods?.stallUntil || 0, band: b.name };
+    this.rvMods = { top: b.top, rattle: b.rattle, dead: hp <= 0, stallUntil: this.rvMods?.stallUntil || 0, band: b.name };
   }
   // A crash: how much the RV's velocity changed across the physics step itself (contacts only: the engine,
   // brakes, suspension, mud, the winch and pushes were all applied before it), gravity put back, along the

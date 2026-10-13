@@ -92,11 +92,11 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
 // ---- RV1: the rules on paper --------------------------------------------------------------------------------
 {
   const cd = [1.9, 2, 3, 5, 10].map(C.crashDamage), bd = [2.9, 3, 7, 30].map(C.beastDamage);
-  const bands = [100, 61, 60, 31, 30, 1, 0].map(h => C.rvBand(h).name), eng = [100, 60, 30, 0].map(h => C.rvBand(h).engine);
+  const bands = [100, 61, 60, 31, 30, 1, 0].map(h => C.rvBand(h).name), eng = [100, 60, 30, 0].map(h => C.rvBand(h).top);
   const q1 = C.repairQuote(2, 40), q2 = C.repairQuote(1, 90);
   check(cd.join() === '0,0,3,9,24' && bd.join() === '0,4,8,20', `rv: a crash costs ${cd.join('/')}% at 1.9/2/3/5/10 m/s, a grumphorn ${bd.join('/')}% at 2.9/3/7/30 m/s`);
-  check(bands.join() === 'FINE,FINE,SMOKING,SMOKING,LIMPING,LIMPING,BROKEN DOWN' && eng.join() === '1,0.85,0.7,0',
-    `rv: 100/61/60/31/30/1/0% read ${bands.join('/')}, the engine at x${eng.join('/x')}`);
+  check(bands.join() === 'FINE,FINE,SMOKING,SMOKING,LIMPING,LIMPING,BROKEN DOWN' && eng.join() === '1,0.92,0.84,0',
+    `rv: 100/61/60/31/30/1/0% read ${bands.join('/')}, its top end at x${eng.join('/x')}`);
   check(q1.pts === 25 && q1.cash === 245 && q1.loan === 305 && q2.pts === 10 && q2.cash === 80 && q2.loan === 100,
     `rv: Gus's next 25% on night 2 at 40% costs $${q1.cash} cash or $${q1.loan} on the loan; the last 10% on night 1, $${q2.cash} / $${q2.loan}`);
 }
@@ -508,7 +508,7 @@ function gateRun(speed, driver) {
   room.debug(A, { op: 'rvhp', hp: 50 });
   room.nextDay();
   tick(room, 0.2);
-  check(room.rvc.hp === 50 && room.sim.rvMods.band === 'SMOKING' && room.sim.rvMods.engine === 0.85, 'rv: a smoking RV is still smoking the next morning (the new day\'s physics knows)');
+  check(room.rvc.hp === 50 && room.sim.rvMods.band === 'SMOKING' && room.sim.rvMods.top === 0.92, 'rv: a smoking RV is still smoking the next morning (the new day\'s physics knows)');
   // a missed payment: the game-over carries the trip's RV
   room.bank = 0;
   room.phase = 'road';

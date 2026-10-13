@@ -220,6 +220,8 @@ if (isMain) {
   gate(T.nonFinite === 0, `${T.nonFinite} non-finite bodies`);
   gate(mean(T.stepMs) <= 0.3, `the wildlife's share of a step ${mean(T.stepMs).toFixed(3)} ms (<= 0.3)`);
   gate(beds.every(b => b.off <= 20), `grumphorn charges stay within 20 m of the road (worst ${Math.max(0, ...beds.map(b => b.off)).toFixed(1)} m)`);
-  gate(beds.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= 6.5), `every grumphorn that ran out of patience lay down by its exit, clear of the road (worst ${Math.max(0, ...beds.map(b => b.fromExit)).toFixed(2)} m from its spot, nearest ${Math.min(99, ...beds.map(b => b.fromRoad)).toFixed(1)} m from the road's middle; ${beds.filter(b => b.replan).length} couldn't get back to its own and took the nearest; ${beds.filter(b => b.st !== GST.LEFT).length} never did)`);
+  // (an exit is 7.5 m or more off the road's middle, which is 3 m either side; lying down within 1.2 m of it
+  // leaves it 6.3 m or more off the middle)
+  gate(beds.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= 6.3), `every grumphorn that ran out of patience lay down by its exit, clear of the road (worst ${Math.max(0, ...beds.map(b => b.fromExit)).toFixed(2)} m from its spot, nearest ${Math.min(99, ...beds.map(b => b.fromRoad)).toFixed(1)} m from the road's middle; ${beds.filter(b => b.replan).length} couldn't get back to its own and took the nearest; ${beds.filter(b => b.st !== GST.LEFT).length} never did)`);
   process.exit(failed ? 1 : 0);
 }
