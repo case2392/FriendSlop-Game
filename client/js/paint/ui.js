@@ -11,9 +11,9 @@
 //   9-slice:   ui_frame_gold (416, slice 80, middle repeats)  ui_trim_gold (288, slice 48)
 //              ui_frame_silver (96, slice 32)  ui_btn_red / ui_btn_stone (128x40, slice 14)  ui_editbox (64, slice 16)
 //   sprites:   ui_filigree (512x64)  ui_endcap (160x128)  ui_seal (96)  ui_ring (128)  ui_menu_bg (1280x720)
-//   icons 64:  ui_ico_<crown coin hourglass scroll hook key door sun mic micoff speaker
+//   icons 64:  ui_ico_<crown coin hourglass scroll key door sun mic micoff speaker
 //              speakeroff walkie gear close ping skull bolt>  (cut-out objects: world markers, ornaments)
-//   slots 64:  ui_slot_<sun hourglass coin scroll hook key door mic micoff speaker speakeroff gear
+//   slots 64:  ui_slot_<sun hourglass coin scroll key door mic micoff speaker speakeroff gear
 //              close walkie>  (full-bleed square icons for the HUD and the voice dock)
 //   title:     paintVista (backdrop stages, or the whole scene in 2D) + finishVista; labels.js
 //              renders the game's own 3D assets over the backdrop when it can
@@ -585,16 +585,6 @@ icon('scroll', 'payment due', (g, s, rnd) => {
   obj(g, rnd, PAL.red, mg => { mg.beginPath(); mg.arc(42, 42, 7, 0, Math.PI * 2); mg.fill(); }, { d: 1.4, glints: 1, bbox: [35, 35, 14, 14] });
 });
 
-icon('hook', 'repo strikes: the tow hook', (g, s, rnd) => {
-  obj(g, rnd, PAL.iron, mg => {
-    mg.lineWidth = 8;
-    mg.beginPath(); mg.moveTo(34, 18); mg.lineTo(34, 36); mg.arc(25, 38, 9, 0, Math.PI, false); mg.stroke();
-    mg.beginPath(); mg.moveTo(16, 38); mg.lineTo(11, 31); mg.lineTo(20, 33); mg.closePath(); mg.fill();
-    mg.lineWidth = 4.5; mg.beginPath(); mg.ellipse(34, 11, 4.5, 6.5, 0, 0, Math.PI * 2); mg.stroke();
-  }, { d: 1.6, glints: 3, bbox: [10, 4, 30, 48] });
-  for (let i = 0; i < 6; i++) blob(g, range(rnd, 18, 38), range(rnd, 24, 46), range(rnd, 1.5, 3), range(rnd, 1, 2), 0, '#7a3a14', 0.4, 0.3);
-});
-
 icon('key', 'room code', (g, s, rnd) => {
   obj(g, rnd, PAL.gold, mg => {
     mg.lineWidth = 6; mg.beginPath(); mg.arc(20, 22, 9, 0, Math.PI * 2); mg.stroke();
@@ -789,7 +779,7 @@ icon('bolt', 'stamina: a winged leather boot', (g, s, rnd) => {
 // left and a cool bounce from the lower right, then a gold hairline and a black inner edge.
 const SLOT = {            // [center hue, corner hue, nudge x, nudge y, scale]
   hourglass: ['#3e3424', '#120e08', -2, 0, 1.12], coin: ['#4a3418', '#140c05', -1, -1, 1.16], scroll: ['#4a1e16', '#150806', 0, 0, 1.1],
-  hook: ['#2e3640', '#0c0e12', 2, -1, 1.1], key: ['#22383c', '#081012', 2, 1, 1.08], mic: ['#2c3a26', '#0a1008', 0, 2, 0.98],
+  key: ['#22383c', '#081012', 2, 1, 1.08], mic: ['#2c3a26', '#0a1008', 0, 2, 0.98],
   micoff: ['#3a2622', '#120808', 0, 2, 0.98], speaker: ['#3a2a44', '#110b16', 3, 0, 0.96], speakeroff: ['#3a2a44', '#110b16', 1, 0, 0.94],
   gear: ['#30353c', '#0c0e10', 0, 0, 1.06], close: ['#4a1610', '#150604', 0, 0, 0.92], walkie: ['#1e3a42', '#071416', 0, 2, 0.96],
   door: ['#2a3442', '#0a0d12', 0, -1, 0.92],

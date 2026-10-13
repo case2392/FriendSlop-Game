@@ -90,6 +90,15 @@ export class BJTable {
     return { delta: 0, msg: choice === 'hit' ? `HIT → ${this.hand.squadTotal()}` : null };
   }
 
+  // the day ends with a hand still being voted on: the dealer calls it, as if the squad stood. (Calling
+  // it off instead would be a free surrender: deal all-in at 23:48, see the cards, step off the pads)
+  callIt(t) {
+    if (this.state !== 'vote') return null;
+    this.hand.act('stand');
+    this.heldKey = null;
+    return this.settle(t);
+  }
+
   view(t) {
     const h = this.hand?.publicState();
     return {

@@ -12,6 +12,7 @@
 // desktop build's app://), and WebCodecs' Opus is in Chromium (so Steam's build) and recent Firefox.
 
 import * as net from './net.js';
+import { voiceGain } from '/shared/constants.js';
 import { audioCtx, bus } from './audio.js';
 import { settings, setSetting } from './settings.js';
 
@@ -219,7 +220,7 @@ export function leaveVoice() {
 function makePeer(id) {
   ensureCtx();
   const peer = {
-    id, dec: null, playAt: 0, lastSeq: -1,
+    id, dec: null, playAt: 0, lastSeq: -1, lastAt: 0,
     vol: load('vol.' + nameOf(id), 1), muted: false,
   };
   peer.input = actx.createGain();
@@ -281,9 +282,12 @@ function onFrame(buf) {
   const s = b[3] | (b[4] << 8);
   const peer = V.peers.get(id) || makePeer(id);
   V.stats.recv++;
-  // a frame older than the last one played is late: drop it (16-bit sequence, wrapping)
-  if (peer.lastSeq >= 0 && ((s - peer.lastSeq) & 0xffff) > 0x8000) { V.stats.late++; return; }
-  peer.lastSeq = s;
+  // a frame older than the last one played is late: drop it (16-bit sequence, wrapping). After a pause
+  // (they stopped talking, or talked out of earshot) the count may have wrapped any number of times, so
+  // the first frame back starts it over: else ten minutes of talk out of earshot left them mute up close
+  const now = performance.now();
+  if (peer.lastSeq >= 0 && now - peer.lastAt < 1000 && ((s - peer.lastSeq) & 0xffff) > 0x8000) { V.stats.late++; return; }
+  peer.lastSeq = s; peer.lastAt = now;
   const dec = decoderFor(peer);
   if (!dec) return;
   try { dec.decode(new EncodedAudioChunk({ type: 'key', timestamp: s * 20000, data: b.subarray(5) })); }
@@ -330,7 +334,7 @@ export function spatialize(listener, info) {
     if (p.positionX) { p.positionX.value = s.head.x; p.positionY.value = s.head.y; p.positionZ.value = s.head.z; }
     else p.setPosition(s.head.x, s.head.y, s.head.z);
     const d = Math.hypot(s.head.x - listener.pos.x, s.head.y - listener.pos.y, s.head.z - listener.pos.z);
-    let g = d < 2.5 ? 1 : Math.pow(Math.max(0, 1 - (d - 2.5) / 42.5), 1.6);
+    let g = voiceGain(d);   // full within 4 m, gone by 25 m (shared/constants.js VOICE; the host relays to 27 m)
     if (s.occluded) g *= 0.6;
     peer.gSpatial.gain.setTargetAtTime(g, t, 0.08);
     peer.lp.frequency.setTargetAtTime(s.ko ? 520 : s.occluded ? 950 : 18000, t, 0.1);

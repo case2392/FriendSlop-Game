@@ -55,7 +55,7 @@ function shapeDesc(shape) {
 
 export class Sim {
   // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday
-  constructor(W, { parts = { doors: true, roof: true }, carry = [], spawnAt = null } = {}) {
+  constructor(W, { carry = [], spawnAt = null } = {}) {
     this.W = W;
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
@@ -69,7 +69,6 @@ export class Sim {
     this.out = [];                   // events for the room to broadcast
     this.drive = { th: 0, st: 0, hb: 0 };
     this.steer = 0;
-    this.parts = { ...parts };
     this.doorOpen = false;
     this.gateCols = new Map();
     this.gatesOpen = new Set();
@@ -149,9 +148,7 @@ export class Sim {
         .setCollisionGroups(o.step ? GROUPS.rvStep : GROUPS.rv);
       const col = this.world.createCollider(cd, this.rv);
       this.rvCols[name] = col;
-      if (o.part && !this.parts[o.part]) col.setEnabled(false);
     }
-    this.rvCols.door.setEnabled(this.parts.doors && !this.doorOpen);
 
     const v = this.world.createVehicleController(this.rv);
     v.indexUpAxis = 1;
@@ -239,17 +236,10 @@ export class Sim {
   }
 
   setDoor(open) {
-    if (!this.parts.doors) return;
     this.doorOpen = open;
     this.rvCols.door.setEnabled(!open);
     this.rv.wakeUp();
     this.out.push({ k: 'door', open });
-  }
-
-  removePart(part) {
-    this.parts[part] = false;
-    for (const [name, , , , , , , o] of RV_PARTS) if (o.part === part) this.rvCols[name].setEnabled(false);
-    this.rv.wakeUp();
   }
 
   openGate(id) {
@@ -347,7 +337,7 @@ export class Sim {
   // rams it into the floor's edge or the steps) and, if it's long, turned end-on to the doorway (1.3 m).
   // Heavy loot still needs two pairs of hands to get that high. atDoor: the prop's RV-local middle, or null.
   atDoor(p) {
-    if (!this.doorOpen && this.parts.doors) return null;
+    if (!this.doorOpen) return null;
     const l = this.rvToLocal(p.body.translation());
     if (l.x < -3.4 || l.x > -0.95 || Math.abs(l.z - RV_DIM.DOOR_Z) > RV_DIM.DOOR_HALF + 0.6 || l.y < -2.4 || l.y > 1.2) return null;
     return l;

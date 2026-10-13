@@ -59,7 +59,6 @@
       <div id="hClock" class="pill"></div>
       <div id="hBank" class="pill gold"></div>
       <div id="hDue" class="pill red"></div>
-      <div id="hStrikes" class="pill"></div>
     </div>
     <div id="hCode" class="pill code" title="invite code: click to copy"></div>
     <div id="tracker" class="tracker hidden"><div id="qtTitle" class="qt-title"></div><div id="qtLines" class="qt-lines"></div></div>
@@ -109,6 +108,8 @@
         <p><kbd>RMB</kbd> throw · <kbd>Q</kbd> drop · <kbd>wheel</kbd> hold distance</p>
         <p><kbd>E</kbd> use: seats, door, winch, bell, buttons, keypad, bunk · hold on a knocked-out friend to pick them up</p>
         <p><kbd>MMB</kbd> ping · <kbd>1-6</kbd> emotes</p>
+        <span class="hd">Talking</span>
+        <p>Use the game's voice chat, not a call: voices carry about 25 m, from where you stand, and walls muffle them. Past that, only <b>walkie-talkies</b> get through (<kbd>T</kbd>, any range, to anyone else with one: $150 each at the store).</p>
       </div>
       <div>
         <span class="hd">The RV</span>
@@ -116,10 +117,10 @@
         <p><b>Winch:</b> <kbd>E</kbd> the front bumper to take the hook, carry it to a post or dead tree, <kbd>E</kbd> to clip it, then the driver hits <kbd>R</kbd> to reel in.</p>
         <p>Walk into the RV to push it. The <b>road map</b> is on the dash, and the driver can't see it: once the driver is at the wheel, the navigator takes it (<kbd>F</kbd> raises and lowers it) and calls out what's coming. No GPS: ask the driver what the odometer says.</p>
         <span class="hd">The money</span>
-        <p>One shared bank. Pawn loot in town, gamble at the casino, pay the Repo Man by midnight. Miss it and he takes part of the RV.</p>
+        <p>One shared bank. Pawn loot in town, gamble at the casino, and pay the Repo Man by midnight, every night. Miss one payment and he takes the RV: the trip is over.</p>
       </div>
     </div>
-    <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (buy one at the store) · <kbd>F1</kbd> this page</p>
+    <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (any range; buy one at the store) · <kbd>F1</kbd> this page</p>
     <label class="sens">Mouse sensitivity <input id="sensInput" type="range" min="0.3" max="2.5" step="0.05"></label>
     <button id="helpOk" class="btn small green">Got It</button>
   </div>
@@ -136,7 +137,7 @@
   </div>
   <div id="voicePanel" class="panel voice-panel hidden">
     <h3>Voice Chat</h3>
-    <p class="voice-note">Proximity chat: the boys sound like they're where they are. Walls muffle. Walkie-talkies (<kbd>T</kbd>) reach anyone else who owns one.</p>
+    <p class="voice-note">Proximity chat: the boys sound like they're where they are, out to about 25 m. Walls muffle. Past that, only walkie-talkies (<kbd>T</kbd>, $150 at the store) get through, to anyone else who owns one.</p>
     <label class="vrow">Mic <select id="voiceMicSel"></select></label>
     <div class="vrow"><span>Mode</span>
       <label><input type="radio" name="voiceMode" value="open"> Open mic</label>

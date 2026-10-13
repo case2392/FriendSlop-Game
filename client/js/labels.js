@@ -75,9 +75,9 @@ const SKIN_REST = [
   ['parchment', 'ui_parchment'], ['wood', 'ui_wood'], ['leather', 'ui_leather'], ['bar', 'ui_bar'],
   ['trim-gold', 'ui_trim_gold'], ['frame-silver', 'ui_frame_silver'], ['btn-stone', 'ui_btn_stone'],
   ['endcap', 'ui_endcap'], ['seal', 'ui_seal'], ['ring', 'ui_ring'],
-  ...['crown', 'coin', 'hourglass', 'scroll', 'hook', 'door', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt', 'ping']
+  ...['crown', 'coin', 'hourglass', 'scroll', 'door', 'sun', 'mic', 'micoff', 'speaker', 'speakeroff', 'walkie', 'gear', 'close', 'skull', 'bolt', 'ping']
     .map(n => [`ico-${n}`, `ui_ico_${n}`]),
-  ...['sun', 'hourglass', 'coin', 'scroll', 'hook', 'door', 'mic', 'micoff', 'speaker', 'speakeroff', 'gear', 'close', 'walkie']
+  ...['sun', 'hourglass', 'coin', 'scroll', 'door', 'mic', 'micoff', 'speaker', 'speakeroff', 'gear', 'close', 'walkie']
     .map(n => [`slot-${n}`, `ui_slot_${n}`]),
 ];
 // as a blob URL, decoded before the custom property is set, so first use never paints empty
@@ -909,15 +909,15 @@ function occluders(W) {
   return L;
 }
 
-// The RV's hull (rv3d.js's layout): a face point is an opening if it's a window, the door while it's
-// open or gone, or the top while the roof is gone. a: the face's axis (0 sides, 1 top/bottom, 2 ends).
+// The RV's hull (rv3d.js's layout): a face point is an opening if it's a window, or the door while it's
+// open. a: the face's axis (0 sides, 1 top/bottom, 2 ends).
 const RV_OPEN = 0.04;
 const inRect = (u, v, u0, u1, v0, v1) => u > u0 - RV_OPEN && u < u1 + RV_OPEN && v > v0 - RV_OPEN && v < v1 + RV_OPEN;
 function rvOpen(S, a, sg, hx, hy, hz) {
-  if (a === 1) return sg > 0 && S.parts?.roof === false;
+  if (a === 1) return false;
   if (a === 2) { const w = sg > 0 ? RV_ART.shield : RV_ART.rearWin; return inRect(hx, hy, -w.x, w.x, w.y0, w.y1); }
   const D = RV_ART.door;
-  if (sg < 0 && (S.door || S.parts?.doors === false) && inRect(hz, hy, D.z0, D.z1, D.y0, D.y1)) return true;
+  if (sg < 0 && S.door && inRect(hz, hy, D.z0, D.z1, D.y0, D.y1)) return true;
   for (const w of sg > 0 ? RV_ART.winL : RV_ART.winR) {
     if (w.r ? !w.frost && Math.hypot(hz - w.z, hy - w.y) < w.r + RV_OPEN : inRect(hz, hy, w.z0, w.z1, w.y0, w.y1)) return true;
   }

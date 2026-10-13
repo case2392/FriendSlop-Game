@@ -175,7 +175,7 @@ as "a hand-painted early-2000s MMO look" and leave it there.
 - **Short description** (271 characters; Steam allows about 300):
   > You and up to five friends bought a $250,000 RV with no money down. Drive it across five days of
   > hand-painted road, haul fragile junk to the pawn shop, bet the shared bank at the casino, and pay
-  > the Repo Man by midnight, or he takes the doors. Then the roof. Then the RV.
+  > the Repo Man by midnight, every night. Miss one payment and he takes the RV.
 - **Features:** online co-op for 1-6 players; proximity voice chat (a microphone is optional);
   keyboard and mouse (a controller through Steam Input's template only, so don't tick full controller
   support); English.

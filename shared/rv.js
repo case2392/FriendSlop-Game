@@ -17,9 +17,8 @@ export const RV_DIM = {
 
 // Every collider: [name, hx, hy, hz, cx, cy, cz, opts]
 //   opts.mass   — kg contribution (the chassis carries almost all of it)
-//   opts.part   — removable by the Repo Man ('doors', 'roof')
 //   opts.use    — what pressing E on it does
-//   opts.toggle — door: present only while closed
+//   (the door is present only while closed: sim.setDoor, phys.js setDoor)
 const D = RV_DIM;
 const H = D.WALL_H / 2;
 const dz0 = D.DOOR_Z - D.DOOR_HALF, dz1 = D.DOOR_Z + D.DOOR_HALF;
@@ -32,10 +31,10 @@ export const RV_PARTS = [
   ['wallR_rear',0.05, H, rearSegHalf,  -1.2, H, rearSegC,  { mass: 30 }],
   ['wallR_front',0.05, H, frontSegHalf, -1.2, H, frontSegC, { mass: 30 }],
   ['doorHeader',0.05, 0.16, D.DOOR_HALF, -1.2, D.WALL_H - 0.16, D.DOOR_Z, { mass: 2 }],
-  ['door',      0.04, 1.02, D.DOOR_HALF - 0.02, -1.2, 1.04, D.DOOR_Z, { mass: 0, part: 'doors', toggle: true, use: 'door' }],
-  ['wallRear',  1.25, H, 0.05,      0, H, -3.95,      { mass: 40, part: 'doors' }],
+  ['door',      0.04, 1.02, D.DOOR_HALF - 0.02, -1.2, 1.04, D.DOOR_Z, { mass: 0, use: 'door' }],
+  ['wallRear',  1.25, H, 0.05,      0, H, -3.95,      { mass: 40 }],
   ['windshield',1.25, H, 0.05,      0, H, 3.95,       { mass: 40 }],
-  ['roof',      1.25, 0.05, D.HALF_L, 0, D.ROOF_Y - 0.05, 0, { mass: 80, part: 'roof' }],
+  ['roof',      1.25, 0.05, D.HALF_L, 0, D.ROOF_Y - 0.05, 0, { mass: 80 }],
   // the cockpit
   ['dash',      1.15, 0.28, 0.28,   0, 0.62, 3.62,    { mass: 20 }],
   ['seatDriver',0.28, 0.24, 0.28,   0.62, 0.24, 2.85, { mass: 10, use: 'seat0' }],
@@ -58,10 +57,10 @@ export const RV_PARTS = [
   // catch them, the lower one hangs 7 cm off the road)
   ['step0',     0.2, 0.04, D.DOOR_HALF - 0.04, -1.42, -0.46, D.DOOR_Z, { mass: 2, step: true }],
   ['step1',     0.2, 0.04, D.DOOR_HALF - 0.04, -1.64, -0.89, D.DOOR_Z, { mass: 2, step: true }],
-  // up top: the cab-over brow and the roof cargo (they go with the roof when the Repo Man takes it)
-  ['brow',      1.15, 0.04, 0.27,   0, 2.43, 4.27,    { mass: 5, part: 'roof' }],
-  ['rackLoad',  0.5, 0.2, 0.7,      0.05, 2.6, 3.15,  { mass: 5, part: 'roof' }],
-  ['cooler',    0.36, 0.13, 0.36,  -0.38, 2.53, -1.0, { mass: 3, part: 'roof' }],
+  // up top: the cab-over brow and the roof cargo
+  ['brow',      1.15, 0.04, 0.27,   0, 2.43, 4.27,    { mass: 5 }],
+  ['rackLoad',  0.5, 0.2, 0.7,      0.05, 2.6, 3.15,  { mass: 5 }],
+  ['cooler',    0.36, 0.13, 0.36,  -0.38, 2.53, -1.0, { mass: 3 }],
   // business end
   ['bumperF',   1.3, 0.18, 0.14,    0, -0.42, 4.08,   { mass: 30, use: 'winch' }],
   ['bumperR',   1.3, 0.16, 0.12,    0, -0.42, -4.06,  { mass: 25 }],

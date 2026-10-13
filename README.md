@@ -7,8 +7,8 @@ A 1–6 player **first-person co-op road trip**, built for proximity voice and
 bad decisions. Drive the Slopmaster 9000 across five days of procedurally
 generated road (green meadows, golden farmland, a snowbound pass, red canyon
 country, open desert), scavenge fragile junk, climb, winch, shove, gamble the
-shared bank account, and pay the Repo Man by midnight, or he takes the doors.
-Then the roof. Then the RV.
+shared bank account, and pay the Repo Man by midnight, every night. Miss one
+payment and he takes the RV.
 
 ![riding in the RV while your friend drives](docs/screenshots/riding.jpg)
 
@@ -129,18 +129,20 @@ marks; alone, you drive without it) → deal with
 what's broken (winch up the grade, push out of the mud, shove or winch the
 boulder, crack the ranger gate) → detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.
-Five days. Pay the $15,000 balloon on day 5 and you own the RV; come up short
-on it and he takes the RV, however many strikes you had left.
+Five days, and the payment due at midnight grows each day ($1,000, $2,500,
+$4,500, $7,500, then the $15,000 balloon). Pay the balloon on day 5 and you own
+the RV. Come up short on any night and he takes the RV: the trip is over.
 
 ## Voice
 
 Hit **JOIN VOICE**. It's **proximity chat**: each voice is Opus audio sent
 over the game's own connection, and the host passes it only to the players who
-can hear it, who hear it through a 3D HRTF panner at the speaker's head. It fades out by ~45 m, gets
+can hear it, who hear it through a 3D HRTF panner at the speaker's head. It's at full volume within
+4 m and gone by 25 m (everyone in the RV hears each other; across a stop or a town, nobody does), gets
 muffled when terrain or the RV is between you, and sounds face-down when
-someone's knocked out. **Walkie-talkies** ($150 at the general store) reach
+someone's knocked out. **Walkie-talkies** ($150 each at the general store) reach
 anyone else who owns one, at any range, through a crunchy radio filter. Hold
-`T`.
+`T`. Play on the game's voice, not a call: who hears you is half the game.
 
 Nothing is peer-to-peer, so nobody's router gets in the way and nobody sees
 anyone's IP address. In a browser, mics need a secure context (https or
@@ -210,12 +212,12 @@ npm test
   get into the text players can see (the store and the Steam agreement need
   everything shipped to be ours).
 - `test/logic.mjs` plays a whole run over real WebSockets with two fake
-  players and real physics (31 checks). It drives, carries and throws a vase
+  players and real physics (60 checks). It drives, carries and throws a vase
   (it chips), cracks the ranger gate, winches the RV up the grade, pawns a
   TV, wins or loses blackjack by standing on a pad, flips double-or-nothing,
   buys a walkie, pays the Repo Man, sleeps into day 2, gets billed for a KO,
-  gets revived for free, gets run over, loses the doors, the roof, then the
-  RV, starts over, and wins on day 5.
+  gets revived for free, gets run over, misses a payment and is repo'd on the
+  spot, starts over, and wins on day 5.
 - `test/server.mjs` checks what keeps an evening going when connections
   misbehave: kept seats, malformed frames, floods, a different build, silent
   connections, the goodbye when the server shuts down.

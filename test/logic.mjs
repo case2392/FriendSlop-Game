@@ -454,7 +454,7 @@ try {
   A.send({ t: 'use', id: pay.id });
   const rc = await A.wait(m => m.t === 'receipt', 4000, 'receipt');
   await A.until(g => g.ph === 'night' && g.bank === 250 && g.paid === 1, 3000, 'paid → night');
-  check(rc.paid, `paid the Repo Man $${QUOTAS[0]} → night (bank $${A.g().bank}, receipt: sold $${rc.sold}, bills $${rc.bills})`);
+  check(rc.due === QUOTAS[0], `paid the Repo Man $${QUOTAS[0]} → night (bank $${A.g().bank}, receipt: sold $${rc.sold}, bills $${rc.bills})`);
   A.at(0, 0.62, -3.3, 0, 0, 1); B.at(0.4, 0.62, -3.4, 0, 0, 1);
   await sleep(200);
   A.send({ t: 'use', kind: 'bunk' }); B.send({ t: 'use', kind: 'bunk' });
@@ -501,34 +501,18 @@ try {
   A.send({ t: 'use', kind: 'unseat' });
   await sleep(300);
 
-  // ---- missed payment → the Repo Man takes the doors -------------------------------------------------------
+  // ---- a missed payment, on any day, ends the run --------------------------------------------------------
   await A.until(g => g.ph === 'road', 4000, 'road (day 2: the knock test rolled us out of camp)');
+  A.drain();
   A.send({ t: 'dbg', op: 'bank', v: 100 });
   A.send({ t: 'dbg', op: 'clock', h: 23.95 });
-  const parts = await A.wait(m => m.t === 'parts', 6000, 'parts');
-  await A.until(g => g.str === 1 && g.ph === 'night', 3000, 'strike 1');
-  check(parts.parts.doors === false, 'missed midnight → strike 1, the Repo Man took the DOORS');
-
-  // ---- strike 3 = repo'd → over → fresh run -----------------------------------------------------------------
-  A.send({ t: 'dbg', op: 'day', d: 3 });
-  await A.wait(m => m.t === 'world' && m.day === 3, 6000, 'day 3');
-  await A.until(g => g.day === 3, 3000, 'day 3 state');
-  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
-  A.send({ t: 'dbg', op: 'bank', v: 0 });
-  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
-  const p2 = await A.wait(m => m.t === 'parts' && m.parts.roof === false, 6000, 'parts 2');
-  await A.until(g => g.str === 2, 3000, 'strike 2');
-  check(p2.parts.roof === false && p2.parts.doors === false, 'missed again → strike 2, the ROOF is gone (doors still gone)');
-  A.send({ t: 'dbg', op: 'day', d: 4 });
-  await A.wait(m => m.t === 'world' && m.day === 4, 6000, 'day 4');
-  await A.until(g => g.day === 4, 3000, 'day 4 state');
-  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
-  A.send({ t: 'dbg', op: 'bank', v: 0 });
-  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
   const over = await A.wait(m => m.t === 'over', 6000, 'over');
-  check(over.won === false, "third strike → REPO'D (game over)");
+  const repoEv = A.events.some(e => e.k === 'repo');
+  check(over.won === false && over.day === 2 && over.due === QUOTAS[1] && over.short === QUOTAS[1] - 100 && repoEv && !A.q.some(m => m.t === 'receipt'),
+    `missed the day-2 payment by $${over.short} → REPO'D on the spot: game over, no night (day ${over.day}, due $${over.due})`);
   const fresh = await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run');
-  check(fresh.day === 1 && fresh.parts.doors && fresh.parts.roof, 'a fresh run starts: new RV, doors and roof back');
+  await A.until(g => g.day === 1 && g.bank === 200, 3000, 'new run state');
+  check(fresh.day === 1 && A.g().bank === 200, 'a fresh run starts: day 1, a new RV, $200');
 
   // ---- win: pay the balloon on day 5 -------------------------------------------------------------------------
   A.send({ t: 'dbg', op: 'day', d: 5 });
@@ -543,8 +527,8 @@ try {
   const win = await A.wait(m => m.t === 'over', 6000, 'win');
   check(win.won === true, `paid the $${QUOTAS[4]} balloon on day 5 → YOU OWN THE RV`);
 
-  // ---- missing the balloon on day 5 loses the RV, whatever the strikes --------------------------------------
-  const run2 = await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run after the win');
+  // ---- short on the day-5 balloon: the RV is gone -----------------------------------------------------------
+  await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run after the win');
   A.send({ t: 'dbg', op: 'day', d: 5 });
   await A.wait(m => m.t === 'world' && m.day === 5, 6000, 'day 5 (run 2)');
   await A.until(g => g.day === 5, 3000, 'day 5 state (run 2)');
@@ -552,28 +536,7 @@ try {
   A.send({ t: 'dbg', op: 'bank', v: 0 });
   A.send({ t: 'dbg', op: 'clock', h: 23.95 });
   const lost = await A.wait(m => m.t === 'over', 6000, 'over (missed balloon)');
-  check(lost.won === false && lost.strikes === 1, `short on the day-5 balloon with no strikes yet → the RV is gone (won=${lost.won}, strikes=${lost.strikes})`);
-
-  // ---- after midnight's repo the Pay button can't take today's payment any more -----------------------------
-  const run3 = await A.wait(m => m.t === 'world' && m.day === 1, 10000, 'new run after the loss');
-  A.send({ t: 'dbg', op: 'day', d: 2 });
-  await A.wait(m => m.t === 'world' && m.day === 2, 6000, 'day 2 (run 3)');
-  await A.until(g => g.day === 2, 3000, 'day 2 state (run 3)');
-  A.send({ t: 'dbg', op: 'phase', ph: 'road' });
-  A.send({ t: 'dbg', op: 'bank', v: 0 });
-  A.send({ t: 'dbg', op: 'clock', h: 23.95 });
-  await A.until(g => g.str === 1 && g.ph === 'night', 6000, 'strike 1 (run 3)');
-  const W2 = generateLeg(run3.seed, 2), pay2 = W2.uses.find(u => u.kind === 'pay');
-  A.send({ t: 'dbg', op: 'bank', v: 50000 });
-  await A.until(g => g.bank === 50000, 3000, 'bank 50000');
-  await sleep(300);
-  A.at(pay2.x + 1, W2.townY + 0.05, pay2.z, 0, 0, 0);
-  await sleep(300);
-  A.drain();
-  A.send({ t: 'use', id: pay2.id });
-  const late = await A.wait(m => m.t === 'toast' && /Too late/.test(m.text), 3000, 'too-late toast').catch(() => null);
-  await sleep(400);
-  check(!!late && A.g().bank === 50000 && !A.g().paid, `paying after the Repo Man came at midnight is refused (bank $${A.g().bank}, paid ${A.g().paid})`);
+  check(lost.won === false && lost.day === 5 && lost.short === QUOTAS[4], `short on the day-5 balloon → the RV is gone (won=${lost.won}, $${lost.short} short)`);
 
   // ---- disconnect -----------------------------------------------------------------------------------------------
   B.ws.close();
