@@ -486,7 +486,12 @@ function computeTarget() {
     const lh = toLocal(S.rv.p, S.rv.q, hit.point);
     if (!u && !me.par && lh.z > 3.8 && lh.y < 1.1) u = 'winch';
     if (u === 'seat0') {
-      const d = roleOf('drv'), label = !d || d === S.selfId ? '[E] DRIVE' : roleAway('drv') ? `[E] DRIVE till ${roleName('drv')} is back` : `${roleName('drv')} drives today. You ride along.`;
+      // (the server says who may take the wheel, room.js mayDrive: the day's driver; while they're away anyone,
+      // somebody who hasn't seen the map first)
+      const d = roleOf('drv'), may = S.meta?.roles?.wheel?.includes(S.selfId) ?? true;
+      const label = !d || d === S.selfId ? '[E] DRIVE'
+        : !roleAway('drv') ? `${roleName('drv')} drives today. ${roleOf('nav') === S.selfId ? 'You read the map.' : 'You ride along.'}`
+        : may ? `[E] DRIVE till ${roleName('drv')} is back` : `${roleName('drv')} is away. Somebody who hasn't seen the map takes the wheel.`;
       return { kind: 'rvuse', use: 'seat0', label };
     }
     if (u === 'seat1') return { kind: 'rvuse', use: 'seat1', label: '[E] ride shotgun' };
@@ -510,9 +515,9 @@ function driverName() {
   return S.meta?.players.find(q => q.id === id)?.name || 'the driver';
 }
 // the day's roles (server/room.js drawRoles): who drives and who reads the map today. While a role's player
-// has dropped (their seat is kept: meta.away), anyone stands in for them
+// is away (dropped: their seat is kept, meta.away has their name; or not moved for a minute), anyone stands in
 const roleOf = job => S.meta?.roles?.[job] || 0;
-const roleAway = job => !!roleOf(job) && !!S.meta?.away?.some(q => q.id === roleOf(job));
+const roleAway = job => !!roleOf(job) && !!S.meta?.roles?.[job + 'Away'];
 const roleName = job => [...(S.meta?.players || []), ...(S.meta?.away || [])].find(q => q.id === roleOf(job))?.name || (job === 'drv' ? 'Somebody else' : 'the navigator');
 // Why I can't take the road map now (null: I can). The server's rule (server/room.js mapRefusal): only today's
 // navigator takes it (or anyone but the driver while the navigator has dropped), only while somebody else is
@@ -980,7 +985,7 @@ function onMeta(m) {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn"><span class="nm">${escapeHtml(p.name)}</span>${m.roles?.drv === p.id ? '<em class="role">driver</em>' : m.roles?.nav === p.id ? '<em class="role">navigator</em>' : ''}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
+  $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn"><span class="nm">${escapeHtml(p.name)}</span>${m.roles?.drv === p.id ? '<em class="role">driver</em>' : m.roles?.nav === p.id ? '<em class="role">map</em>' : ''}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
 }
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
@@ -1757,14 +1762,16 @@ function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
   const town = townName(S.W), L = [];
   const tip = tutTip(g, town);
-  if (tip) L.push([tip, 'qt-tip']);
+  if (tip) L.push([tip, 'qt-tip']);   // (not 'tip': that's the silver tooltip frame, absolutely positioned)
   if (roleOf('drv') && (g.ph === 'camp' || g.ph === 'road')) {
     const d = roleOf('drv') === S.selfId, n = roleOf('nav') === S.selfId, nav = roleOf('nav') ? roleName('nav') : null;
-    L.push([d ? `You drive today${nav ? `. ${nav} reads the map` : ''}` : n ? `You read the map today. ${roleName('drv')} drives` : `${roleName('drv')} drives today${nav ? `, ${nav} reads the map` : ''}`, '']);
-    if (roleAway('drv')) L.push([`${roleName('drv')} lost connection: anyone can drive till they're back`, '']);
-    if (roleAway('nav')) L.push([`${roleName('nav')} lost connection: anyone but the driver can read the map till they're back`, '']);
-  }   // (not 'tip': that's the silver tooltip frame, absolutely positioned)
-  if (g.ph === 'camp') L.push(['Drive out of camp to start the clock', '']);
+    L.push([d ? `You drive today${nav ? `. ${nav} reads the map` : ''}` : n ? `You read the map today. ${roleName('drv')} drives` : `You ride along today. ${roleName('drv')} drives${nav ? `, ${nav} reads the map` : ''}`, '']);
+    // a role's player who's away: anyone stands in (and if it's me: moving brings me back)
+    const away = (job, what) => roleOf(job) === S.selfId ? `You seem to be away: ${what} till you move` : `${roleName(job)} is away: ${what} till they're back`;
+    if (roleAway('drv')) L.push([away('drv', 'anyone can drive'), '']);
+    if (roleAway('nav')) L.push([away('nav', 'anyone but the driver can read the map'), '']);
+  }
+  if (g.ph === 'camp') L.push([roleOf('drv') && roleOf('drv') !== S.selfId && !roleAway('drv') ? `${roleName('drv')} drives out of camp to start the clock` : 'Drive out of camp to start the clock', '']);
   else if (g.ph === 'road') {
     if (!g.town) {
       const left = S.rv ? Math.max(0, S.W.LEN - 8 - S.rv.p.z) : 0;

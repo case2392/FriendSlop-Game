@@ -382,8 +382,8 @@ playtests with real friends before anyone trusts them (confidence: moderate).
 - **Information that only one person has:** the map (only its holder sees
   it; each morning draws the day's driver and navigator, locked till the
   next morning: only the navigator takes the map, only while the driver
-  drives, and the driver never sees it; if one of them drops out, anyone
-  stands in till they're back), gate codes (only the climber sees them), the road ahead (only the
+  drives, and the driver never sees it; if one of them drops out or goes
+  AFK, anyone stands in till they're back), gate codes (only the climber sees them), the road ahead (only the
   driver sees it, and badly), what's behind the RV (only the person on the
   roof).
 - There is no text chat. There are pings and emotes.

@@ -20,6 +20,7 @@ const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
 const PRICES = { walkie: 150, drink: 40, bungee: 90 };
 const HOLD_SECS = 90;            // a dropped player's seat (id, color, walkie) is kept this long
 const BED_WAIT = 45;             // once half the crew is in a bunk, the rest get this long
+const IDLE_SECS = 60;            // not moved, looked around or done anything for this long: away (AFK), for the roles
 const READY_WAIT = 60;           // snapshots wait this long at most for a client to finish building its world
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
@@ -82,8 +83,10 @@ export class Room {
     this.receipt = null;
     for (const p of this.players.values()) {
       if (p.seat != null) this.send(p, { t: 'seat', seat: null });
+      if (p.bed) p.activeAt = this.t;   // asleep in a bunk at dawn: here (the draw prefers who's here)
       p.bed = false; p.seat = null; p.ko = false; this.awaitReady(p);
     }
+    this.mapRead = new Set();   // who has had today's map in their hands
     this.drawRoles();   // a new morning, new roles
   }
 
@@ -97,7 +100,7 @@ export class Room {
     this.broadcast({ t: 'props', list: this.sim.allProps() });
     this.spawnStragglers();
     this.toast(`DAY ${this.day} — ${fmt$(this.due)} due at midnight. The Repo Man is already on the road.`, '#ffd166', 7);
-    this.toast(this.rolesText(), '#ffd166', 7);
+    if (this.rolesText()) this.toast(this.rolesText(), '#ffd166', 7);
     this.sendMeta();
   }
 
@@ -121,7 +124,7 @@ export class Room {
     if (this.players.size >= C.MAX_PLAYERS) {
       // a newcomer beats a seat that's being kept for someone who dropped
       const held = [...this.players.values()].filter(p => !p.connected).sort((a, b) => a.heldAt - b.heldAt)[0];
-      if (held) this.removePlayer(held.id, 'expired');
+      if (held) this.removePlayer(held.id, 'expired', false);   // (the newcomer's welcome sees to the roles)
     }
     if (this.players.size >= C.MAX_PLAYERS) return { error: 'This RV is full (6 seats, 2 of them real).', code: 'full' };
     const used = [...this.players.values()].map(p => p.color);
@@ -134,15 +137,16 @@ export class Room {
       color, conn, connected: true, slot, rdy: !!opts.ready, ready: false, waitAt: this.t,
       par: 0, lp: null, pos: null, eye: null, look: { x: 0, y: 0, z: 1 }, vel: { x: 0, y: 0, z: 0 },
       yaw: 0, pitch: 0, mode: 0, flags: 0, seat: null, ko: false, koAt: 0, bed: false,
-      walkie: false, voice: false, lastPush: 0, drvAt: 0, cd: {},
+      walkie: false, voice: false, lastPush: 0, drvAt: 0, activeAt: this.t, cd: {},
     };
     this.players.set(p.id, p);
     if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
     return { player: p };
   }
 
-  // why: 'left' (they chose to), 'expired' (dropped and never came back), or null (silent)
-  removePlayer(id, why = null) {
+  // why: 'left' (they chose to), 'expired' (dropped and never came back), or null (silent). roles: false when
+  // a newcomer is taking the seat (their welcome hands the roles on)
+  removePlayer(id, why = null, roles = true) {
     const p = this.players.get(id);
     if (!p) return;
     this.sim.release(id);
@@ -152,7 +156,7 @@ export class Room {
     if (this.players.size === 0) { this.closed = true; return; }
     if (why === 'left') this.toast(`${p.name} left the trip.`, '#ffb4a2', 4);
     else if (why === 'expired' && p.heldAt != null) this.toast(`${p.name} didn't make it back. Their seat is free.`, '#ffb4a2', 4);
-    this.checkRoles();
+    if (roles) this.checkRoles();
     this.sendMeta();
   }
 
@@ -183,7 +187,7 @@ export class Room {
     for (const p of this.players.values()) {
       if (p.key !== key) continue;
       if (p.connected) { const old = p.conn; this.hold(p, p.holdSecs || HOLD_SECS, true); try { old?.close?.(4002, 'replaced by a new connection'); } catch {} }
-      p.conn = conn; p.connected = true; p.heldAt = null; p.rdy = !!opts.ready;
+      p.conn = conn; p.connected = true; p.heldAt = null; p.rdy = !!opts.ready; p.activeAt = this.t;
       this.awaitReady(p);
       if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
       return p;
@@ -233,33 +237,43 @@ export class Room {
 
   // ---- the day's roles ------------------------------------------------------------------
   // Drawn at random each morning among the players here: the DRIVER (the only one who takes the wheel today)
-  // and the NAVIGATOR (the only one who takes the road map, and only while the driver drives: server-side
-  // in onUse and onGrab). Everyone else is crew. Whoever has done a job least this trip gets it first (ties at
-  // random), so it goes round. In camp a change of crew draws again (the host starts every trip alone while
-  // friends type the code in); once the RV leaves camp the roles are locked till the next morning, and only
-  // a role whose player left the trip for good is handed on. While a role's player has dropped (their seat is
-  // kept: hold()), anyone stands in for them (the day's driver still never reads the map), so a lost
-  // connection doesn't stop the RV; if they never come back, whoever stood in keeps the job.
+  // and the NAVIGATOR (the only one who takes the road map, and only while somebody else is at the wheel:
+  // server-side in onUse and onGrab). Everyone else is crew. Whoever has done a job less this trip is likelier
+  // to get it, so it goes round without being predictable, and nobody who has had today's map in their hands
+  // is drawn to drive. In camp, while the RV is parked, a newcomer draws the roles again (the host starts every
+  // trip alone while friends type the code in); once the RV leaves camp they're locked till the next morning.
+  // A role nobody has is filled (a player coming back to an empty one); a role whose player left the trip is
+  // handed on. While a role's player is AWAY (dropped, their seat kept: hold(); or not moved for IDLE_SECS),
+  // anyone stands in for them (the day's driver still never reads the map, and somebody who hasn't seen it
+  // takes the wheel first), so an AFK or lost player doesn't stop the RV; if they never come back, whoever
+  // stood in keeps the job.
 
   drawRoles() {
-    const live = [...this.players.values()].filter(p => p.connected);
-    const drv = this.pickFor('drv', live);
-    this.setRoles(drv, this.pickFor('nav', live.filter(p => p.id !== drv)));
+    const live = [...this.players.values()].filter(p => p.connected), here = live.filter(p => this.active(p));
+    const pool = here.length ? here : live, fresh = pool.filter(p => !this.mapRead.has(p.id));
+    const drv = this.pickFor('drv', fresh.length ? fresh : pool), navs = pool.filter(p => p.id !== drv);
+    this.setRoles(drv, this.pickFor('nav', navs.length ? navs : live.filter(p => p.id !== drv)));
     this.rolesCrew = this.crewKey();
   }
+  // at random, but weighted 1 / (1 + times done)^2: after a day at the wheel you're 4 times less likely to
+  // drive again than someone who hasn't yet
   pickFor(job, pool) {
     if (!pool.length) return 0;
-    const n = p => this.jobs.get(p.id)?.[job] || 0, least = Math.min(...pool.map(n)), c = pool.filter(p => n(p) === least);
-    return c[Math.floor(Math.random() * c.length)].id;
+    const w = pool.map(p => 1 / (1 + (this.jobs.get(p.id)?.[job] || 0)) ** 2);
+    let r = Math.random() * w.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < pool.length; i++) if ((r -= w[i]) < 0) return pool[i].id;
+    return pool[pool.length - 1].id;
   }
   // everyone on the trip, a kept seat included (a dropped connection coming back doesn't draw again)
   crewKey() { return [...this.players.keys()].sort((a, b) => a - b).join(','); }
+  newcomer() { const had = new Set(this.rolesCrew.split(',')); return [...this.players.keys()].some(id => !had.has(String(id))); }
   countJob(job, id) { if (!id) return; const j = this.jobs.get(id) || { drv: 0, nav: 0 }; j[job]++; this.jobs.set(id, j); }
 
   setRoles(drv, nav) {
     const was = this.roles;
     this.roles = { drv: drv || 0, nav: nav || 0 };
-    if (this.phase !== 'camp') { if (this.roles.drv !== was.drv) this.countJob('drv', this.roles.drv); if (this.roles.nav !== was.nav) this.countJob('nav', this.roles.nav); }
+    // (counted on the road only: a hand-over at night is nobody's day of work)
+    if (this.phase === 'road') { if (this.roles.drv !== was.drv) this.countJob('drv', this.roles.drv); if (this.roles.nav !== was.nav) this.countJob('nav', this.roles.nav); }
     for (const p of this.players.values()) {
       // out of the driver's seat if today isn't your day to drive; the map out of your hands if it isn't yours to read
       if (p.seat === 0 && p.id !== this.roles.drv) { p.seat = null; this.send(p, { t: 'seat', seat: null, exit: RV_SEAT_EXIT[0] }); }
@@ -269,30 +283,27 @@ export class Room {
     this.sendMeta();
   }
 
-  // someone climbed aboard, or left for good
+  // someone climbed aboard, came back, or left for good. A newcomer in camp, with the RV parked, draws again;
+  // anything else only fills or hands on a role (nobody is pulled off the wheel of a moving RV)
   checkRoles() {
-    if (this.phase === 'camp') {
-      if (this.crewKey() === this.rolesCrew) return;
-      this.drawRoles();
-      if (this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
-      return;
-    }
-    const { drv, nav } = this.roles;
-    this.fillRoles();
-    if ((drv !== this.roles.drv || nav !== this.roles.nav) && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
+    const was = { ...this.roles };
+    if (this.phase === 'camp' && this.newcomer() && Math.abs(this.sim.rvSpeed()) < 0.5) this.drawRoles();
+    else { this.fillRoles(); if (this.phase === 'camp') this.rolesCrew = this.crewKey(); }
+    if ((was.drv !== this.roles.drv || was.nav !== this.roles.nav) && (this.phase === 'camp' || this.phase === 'road') && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
   }
-  // after camp: a role whose player left the trip is handed on (to whoever stood in for them: at the wheel, or
-  // reading the map; else the driver's first: without one nobody drives, and the navigator takes the wheel only
-  // if there's nobody else), and a newcomer fills a role nobody has
+  // fill a role nobody has, or whose player left the trip: whoever stood in for them keeps it (at the wheel, or
+  // holding the map); else the driver's first (without one nobody drives), from who's here and hasn't had
+  // today's map in their hands; the navigator takes the wheel only if there's nobody else
   fillRoles() {
     let { drv, nav } = this.roles;
-    const live = [...this.players.values()].filter(p => p.connected);
+    const live = [...this.players.values()].filter(p => p.connected), here = live.filter(p => this.active(p)), pool = here.length ? here : live;
     if (!this.players.has(nav)) nav = live.find(p => p.id !== drv && this.mapIn(p))?.id || 0;
     if (!this.players.has(drv)) {
-      drv = live.find(p => p.seat === 0)?.id || this.pickFor('drv', live.filter(p => p.id !== nav)) || nav;
+      const others = pool.filter(p => p.id !== nav), fresh = others.filter(p => !this.mapRead.has(p.id));
+      drv = live.find(p => p.seat === 0)?.id || this.pickFor('drv', fresh.length ? fresh : others) || nav;
       if (drv === nav) nav = 0;
     }
-    if (!nav) nav = this.pickFor('nav', live.filter(p => p.id !== drv));
+    if (!nav) nav = this.pickFor('nav', pool.filter(p => p.id !== drv)) || this.pickFor('nav', live.filter(p => p.id !== drv));
     if (drv !== this.roles.drv || nav !== this.roles.nav) this.setRoles(drv, nav);
   }
   // the id of the road map if p is holding it (else 0)
@@ -300,10 +311,30 @@ export class Room {
     const h = this.sim.holds.get(p.id);
     return h?.kind === 'prop' && this.sim.props.get(h.id)?.type === 'map' ? h.id : 0;
   }
+  // is p here: connected, and at the wheel, holding the map, or moved or did something in the last IDLE_SECS?
+  active(p) { return !!p?.connected && (p.seat === 0 || !!this.mapIn(p) || this.t - (p.activeAt ?? -1e9) < IDLE_SECS); }
+  // may p take the wheel now? The day's driver; while they're away anyone, but somebody who hasn't seen today's
+  // map first (the navigator, or whoever stood in reading it, only when nobody else here can)
+  mayDrive(p) {
+    const d = this.players.get(this.roles.drv);
+    if (!d || p === d) return true;
+    if (this.active(d)) return false;
+    const seen = q => q.id === this.roles.nav || this.mapRead.has(q.id);
+    return !seen(p) || ![...this.players.values()].some(q => q !== p && q !== d && this.active(q) && !seen(q));
+  }
+  // the roles as the party sees them: who, whether they're away (then anyone stands in), who may take the wheel
+  metaRoles() {
+    const { drv, nav } = this.roles;
+    return {
+      drv, nav, drvAway: !!drv && !this.active(this.players.get(drv)), navAway: !!nav && !this.active(this.players.get(nav)),
+      wheel: [...this.players.values()].filter(p => p.connected && this.mayDrive(p)).map(p => p.id),
+    };
+  }
   rolesText() {
     const d = this.players.get(this.roles.drv)?.name, v = this.players.get(this.roles.nav)?.name;
     if (!d) return '';
-    return v ? `${d} drives today, and ${v} reads the map. No swapping till tomorrow.` : `${d} drives today. With nobody to read it, the map stays on the dash.`;
+    const lock = this.phase === 'camp' ? 'Locked in once the RV leaves camp.' : 'No swapping till tomorrow.';
+    return v ? `${d} drives today, and ${v} reads the map. ${lock}` : `${d} drives today. With nobody to read it, the map stays on the dash.`;
   }
 
   // ---- messaging ----------------------------------------------------------------------
@@ -324,8 +355,10 @@ export class Room {
     if (to) this.send(to, m); else this.broadcast(m);
   }
   sendMeta() {
+    const roles = this.metaRoles();
+    this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
-      t: 'meta', code: this.code, host: this.hostId, roles: this.roles,
+      t: 'meta', code: this.code, host: this.hostId, roles,
       players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
     });
@@ -346,7 +379,7 @@ export class Room {
     if (this.spam(p, m.t)) return;
     switch (m.t) {
       case 'p': return this.onPose(p, m);
-      case 'ready': p.ready = true; return;
+      case 'ready': p.ready = true; p.activeAt = this.t; return;
       case 'leave': this.removePlayer(p.id, 'left'); return;
       case 'grab': return this.onGrab(p, m);
       case 'rel': this.sim.release(p.id, m.thr ? m.dir : null, p); return;
@@ -396,11 +429,13 @@ export class Room {
   }
 
   onPose(p, m) {
-    p.par = m.par ? 1 : 0;
-    p.yaw = num(m.yaw, 1e4); p.pitch = num(m.pitch, 1.6);
+    const raw = { x: num(m.x, 1e5), y: num(m.y, 1e5), z: num(m.z, 1e5) }, par = m.par ? 1 : 0, yaw = num(m.yaw, 1e4), pitch = num(m.pitch, 1.6);
+    // moved or looked around: here, not AFK (the roles)
+    if (!p.raw || par !== p.par || Math.abs(raw.x - p.raw.x) + Math.abs(raw.z - p.raw.z) > 0.05 || Math.abs(yaw - p.yaw) + Math.abs(pitch - p.pitch) > 0.02) p.activeAt = this.t;
+    p.par = par;
+    p.yaw = yaw; p.pitch = pitch;
     p.mode = num(m.m, 99) | 0; p.flags = num(m.f, 1e6) | 0;
     p.vel = { x: num(m.v?.[0], 60), y: num(m.v?.[1], 60), z: num(m.v?.[2], 60) };
-    const raw = { x: num(m.x, 1e5), y: num(m.y, 1e5), z: num(m.z, 1e5) };
     p.lp = p.par ? raw : null;
     p.raw = raw;
     this.resolvePlayer(p);
@@ -432,6 +467,7 @@ export class Room {
   // and calls out the road. (The check comes before sim.grab, which lets go of what you hold first; a
   // refusal is answered, so the client drops the hold it took ahead of us.)
   onGrab(p, m) {
+    p.activeAt = this.t;
     if (p.ko || p.seat != null) return;
     const no = m.kind === 'prop' && this.sim.props.get(Number(m.id))?.type === 'map' && this.mapRefusal(p);
     if (no) {
@@ -440,14 +476,15 @@ export class Room {
       return;
     }
     const ok = this.sim.grab(p.id, p, m);
+    if (ok && m.kind === 'prop' && this.sim.props.get(Number(m.id))?.type === 'map') this.mapRead.add(p.id);   // (nobody who has, drives today)
     this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id });
   }
-  // Why p may not take the road map now (null: they may): only today's navigator takes it (or, while they've
-  // dropped, anyone but the day's driver), and only while somebody else is at the wheel (a dropped player's
-  // seat is freed at once: hold()). Alone there's no navigator: nobody to read it to you. The client words its
+  // Why p may not take the road map now (null: they may): only today's navigator takes it (or, while they're
+  // away, anyone but the day's driver), and only while somebody else is at the wheel (a dropped player's seat
+  // is freed at once: hold()). Alone there's no navigator: nobody to read it to you. The client words its
   // prompt the same way (main.js mapNo).
   mapRefusal(p) {
-    const { drv, nav } = this.roles, name = id => this.players.get(id)?.name, here = id => !!this.players.get(id)?.connected;
+    const { drv, nav } = this.roles, name = id => this.players.get(id)?.name, here = id => this.active(this.players.get(id));
     if (!nav) return 'It takes two: one drives, one reads the map.';
     if (p.id === drv) return 'You drive today: no peeking.';
     if (p.id !== nav && here(nav)) return `Only ${name(nav)} reads the map today.`;
@@ -456,6 +493,7 @@ export class Room {
   }
 
   onUse(p, m) {
+    p.activeAt = this.t;
     if (p.ko || !p.pos) return;
     const W = this.W, sim = this.sim;
     const kind = String(m.kind || '');
@@ -467,7 +505,7 @@ export class Room {
       if (!inRV) return;
       if ([...this.players.values()].some(q => q.seat === idx && q !== p)) { this.toast('Somebody\'s already sitting there.', '#fff', 2, p); return; }
       const drv = this.players.get(this.roles.drv);
-      if (idx === 0 && drv?.connected && p !== drv) { this.toast(`${drv.name} drives today. Ride along.`, '#fff', 3, p); return; }
+      if (idx === 0 && !this.mayDrive(p)) { this.toast(this.active(drv) ? `${drv.name} drives today. Ride along.` : `${drv.name} is away. Somebody who hasn't seen the map takes the wheel.`, '#fff', 3, p); return; }
       sim.release(p.id);
       p.seat = idx;
       if (idx === 0) sim.setDrive({ th: 0, st: 0, hb: 0 });
@@ -477,8 +515,8 @@ export class Room {
         // the road ahead matters)
         const map = [...sim.props.values()].find(q => q.type === 'map'), ml = map && sim.rvToLocal(map.body.translation());
         const nav = this.players.get(this.roles.nav);
-        const ask = nav?.connected && map && !map.holders.size && insideRV(ml.x, ml.y, ml.z, 0.3) && (this.phase === 'camp' || this.phase === 'road') && !this.inTown;
-        const sub = drv && p !== drv ? ` till ${drv.name} is back` : '';   // standing in for a driver who dropped
+        const ask = nav?.connected && nav !== p && map && !map.holders.size && insideRV(ml.x, ml.y, ml.z, 0.3) && (this.phase === 'camp' || this.phase === 'road') && !this.inTown;
+        const sub = drv && p !== drv ? ` till ${drv.name} is back` : '';   // standing in for a driver who's away
         this.toast(`${p.name} is driving${sub}. God help us.${ask ? ` ${nav.name}, grab the map.` : ''}`, p.color, 3);
       }
       return;
@@ -814,6 +852,8 @@ export class Room {
 
     // a kept seat whose player never came back is freed
     for (const p of [...this.players.values()]) if (!p.connected && this.t - p.heldAt > p.holdSecs) this.removePlayer(p.id, 'expired');
+    // a role's player who went quiet (or came back to life): the crew's prompts change (stand-ins)
+    if (JSON.stringify(this.metaRoles()) !== this.rolesKey) this.sendMeta();
 
     // physics events out (if a new day or run began in this tick, the old world's events would land on
     // the new one's props, whose ids start over: drop them)

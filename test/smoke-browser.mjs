@@ -196,7 +196,8 @@ try {
   // now Dave drives and Steve navigates (set through the test lever). Nobody at the wheel yet: Steve can't take
   // it off the dash (the prompt says why), and a grab sent anyway is refused
   await rolesNow(ids.dave, ids.steve);
-  await host.waitForFunction(id => window.__nmd.meta?.roles?.nav === id, ids.steve, { timeout: 24000 });
+  await joiner.evaluate(() => { window.__nmd.me.yaw += 0.2; });   // (Dave looks around: here, not away, so nobody stands in)
+  await host.waitForFunction(id => window.__nmd.meta?.roles?.nav === id && !window.__nmd.meta.roles.drvAway, ids.steve, { timeout: 24000 });
   await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
   await wait(host, 900);
   const aimAtMap = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
@@ -249,7 +250,7 @@ try {
   check(reading.type === 'map' && reading.ok && reading.up && !daveSees && (await cue) && /call out the road to Dave/.test(freeLabel), `with Dave at the wheel (and Steve called to grab the map), Steve took the road map ("${freeLabel}") and reads it; Dave's screen shows none of it`);
   // the roles hold: Steve (today's navigator) can't take the wheel, and Dave can't take the map
   const roster = await host.evaluate(() => [...document.querySelectorAll('#roster .pm')].map(e => e.querySelector('.pn')?.textContent));
-  check(roster.some(t => /^Dave\s*driver$/i.test(t)) && roster.some(t => /^Steve\s*navigator$/i.test(t)), `the party frames say who drives and who reads the map today (${roster.join(' | ')})`);
+  check(roster.some(t => /^Dave\s*driver$/i.test(t)) && roster.some(t => /^Steve\s*map$/i.test(t)), `the party frames say who drives and who reads the map today (${roster.join(' | ')})`);
   await host.evaluate(() => { window.__nmd.me.pitch = 0.1; });
   await shot(host, 'map');
   await host.evaluate(() => window.__nmd.press('release'));

@@ -402,7 +402,7 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const B = room.addPlayer(cs[1], 'Bob').player;
   room.welcome(B);
   const two = new Set([room.roles.drv, room.roles.nav]);
-  check(two.size === 2 && two.has(A.id) && two.has(B.id) && said(cs[0], /drives today, and .* reads the map/), 'roles: a friend climbs aboard in camp: drawn again, one drives and one navigates, and everyone is told');
+  check(two.size === 2 && two.has(A.id) && two.has(B.id) && said(cs[0], /drives today, and .* reads the map\. Locked in once the RV leaves camp/), 'roles: a friend climbs aboard in camp: drawn again, one drives and one navigates, and everyone is told (locked once the RV leaves camp)');
   check(cs[1].last('meta')?.roles?.drv === room.roles.drv && cs[1].last('meta')?.roles?.nav === room.roles.nav, 'roles: the party gets them with the player list (meta)');
   // drawn at random: over many draws in camp both of them get to drive
   const drivers = new Set();
@@ -426,11 +426,117 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const navWas = locked.nav, drvWas = locked.drv;
   room.removePlayer(navWas, 'left');
   check(room.roles.nav === Cat.id && room.roles.drv === drvWas, 'roles: the navigator leaves the trip: Cat (crew) reads the map now');
-  // the next morning: drawn again, whoever has done a job least first: Cat (who hasn't driven) drives, the
-  // old driver navigates
+  // the next morning: drawn again between the two of them
   room.nextDay();
-  check(room.phase === 'camp' && room.roles.drv === Cat.id && room.roles.nav === drvWas, `roles: drawn again in the morning, the one who hasn't driven yet drives (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
+  check(room.phase === 'camp' && new Set([room.roles.drv, room.roles.nav, Cat.id, drvWas]).size === 2 && said(cs[2], /DAY 2/), `roles: drawn again in the morning (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
   room.sim.free?.();
+}
+{
+  // the morning draw is random, but whoever has driven less this trip is likelier to drive: after a day at the
+  // wheel, a quarter as likely as someone who hasn't (1 / (1 + times)^2)
+  const room = new Room('DRAW', 4242);
+  const A = room.addPlayer(new FakeConn(), 'Ann').player, B = room.addPlayer(new FakeConn(), 'Bob').player;
+  room.welcome(A); room.welcome(B);
+  room.jobs.set(A.id, { drv: 1, nav: 0 });
+  let bob = 0;
+  for (let i = 0; i < 400; i++) { room.drawRoles(); if (room.roles.drv === B.id) bob++; }
+  check(bob > 280 && bob < 360 && room.roles.nav && room.roles.nav !== room.roles.drv, `roles: the morning draw leans to whoever has driven less, but stays random (Bob, who hasn't driven, drew the wheel ${bob} times in 400, Ann ${400 - bob})`);
+  room.sim.free?.();
+}
+{
+  // the review's cases: a player back to an empty role fills it; in camp only a newcomer to a parked RV draws
+  // again (nobody pulled off a moving wheel, nobody who has read today's map drawn to drive); hand-overs at
+  // night count nobody's day and say nothing; a full RV's newcomer is told the roles once
+  const said = (c, re) => c.has(m => m.t === 'toast' && re.test(m.text));
+  {
+    // at night Ann is in a bunk and Bob drops: morning comes at once and is drawn without him; back, he reads the map
+    const room = new Room('BACK', 4242);
+    const ca = new FakeConn(), cb = new FakeConn();
+    const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player;
+    B.key = 'tok:b';
+    room.welcome(A); room.welcome(B);
+    A.bed = true;
+    room.hold(B, 30);
+    room.nextDay();
+    const drawn = { ...room.roles };
+    room.welcome(room.resume('tok:b', new FakeConn()));
+    check(drawn.drv === A.id && !drawn.nav && room.roles.drv === A.id && room.roles.nav === B.id && said(ca, /Ann drives today, and Bob reads the map/), 'roles: a morning drawn while Bob was away leaves the map to nobody; back, he reads it (no draw again: Ann still drives)');
+    room.sim.free?.();
+  }
+  {
+    // in camp, Ann rolling out at the wheel when Cat climbs aboard: no draw again, Ann keeps the wheel
+    const room = new Room('ROLL', 4242);
+    const A = room.addPlayer(new FakeConn(), 'Ann').player, B = room.addPlayer(new FakeConn(), 'Bob').player;
+    room.welcome(A); room.welcome(B);
+    tick(room, 0.3);
+    room.setRoles(A.id, B.id);
+    room.onPose(A, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+    room.handle(A, { t: 'use', kind: 'seat0' });
+    let kept = 0;
+    for (let i = 0; i < 12; i++) {
+      room.sim.rv.setLinvel({ x: 0, y: 0, z: 4 }, true);
+      const Cat = room.addPlayer(new FakeConn(), 'Cat' + i).player;
+      room.welcome(Cat);
+      if (A.seat === 0 && room.roles.drv === A.id && room.roles.nav === B.id) kept++;
+      room.removePlayer(Cat.id, 'left');
+    }
+    check(room.phase === 'camp' && kept === 12 && A.seat === 0 && room.roles.drv === A.id, `roles: in camp, friends climbing aboard (or leaving) while the driver rolls out draw nothing again: the driver kept the wheel ${kept}/12 times`);
+    room.sim.free?.();
+  }
+  {
+    // in camp, parked, Ann at the wheel, Bob has read the map: Cat climbs aboard and the roles are drawn again,
+    // but never with Bob at the wheel
+    const room = new Room('READ', 4242);
+    const cs = [new FakeConn(), new FakeConn(), new FakeConn()];
+    const A = room.addPlayer(cs[0], 'Ann').player, B = room.addPlayer(cs[1], 'Bob').player;
+    room.welcome(A); room.welcome(B);
+    tick(room, 0.5);
+    room.setRoles(A.id, B.id);
+    const map = [...room.sim.props.values()].find(p => p.type === 'map'), t = map.body.translation();
+    room.onPose(A, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+    room.handle(A, { t: 'use', kind: 'seat0' });
+    room.onPose(B, { par: 1, x: -0.4, y: 0.05, z: 2.3, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
+    room.handle(B, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 });
+    const read = room.mapRead.has(B.id);
+    const Cat = room.addPlayer(cs[2], 'Cat').player;
+    room.welcome(Cat);
+    const drivers = new Set([room.roles.drv]);
+    for (let i = 0; i < 30; i++) { room.rolesCrew = ''; room.checkRoles(); drivers.add(room.roles.drv); }
+    check(read && !drivers.has(B.id) && drivers.size === 2, `roles: drawn again in camp, the one who has read today's map never drives (drivers: ${[...drivers].map(id => room.players.get(id).name).join(', ')})`);
+    // and a crew member leaving camp draws nothing again
+    const before = { ...room.roles };
+    room.removePlayer([A, Cat].find(p => p.id !== before.drv && p.id !== before.nav)?.id ?? B.id, 'left');
+    check(room.phase === 'camp' && room.roles.drv === before.drv && (room.roles.nav === before.nav || !room.players.has(before.nav)), 'roles: in camp, someone leaving draws nothing again (a role is only handed on)');
+    room.sim.free?.();
+  }
+  {
+    // at night the driver leaves: the role is handed on, but nobody is counted a day's drive, and nobody is told
+    // "No swapping till tomorrow" hours before the morning's draw
+    const room = new Room('NIGHT', 4242);
+    const cs = [new FakeConn(), new FakeConn(), new FakeConn()];
+    const [A, B, Cat] = ['Ann', 'Bob', 'Cat'].map((n, i) => room.addPlayer(cs[i], n).player);
+    for (const p of [A, B, Cat]) room.welcome(p);
+    room.setRoles(A.id, B.id);
+    room.phase = 'night';
+    const n0 = cs[2].sent.length;
+    room.removePlayer(A.id, 'left');
+    const jobs = JSON.stringify([...room.jobs]);
+    check(room.roles.drv === Cat.id && jobs === '[]' && !cs[2].sent.slice(n0).some(m => m.t === 'toast' && /drives today/.test(m.text)), `roles: handed on at night: Cat drives, but nobody is counted a day's drive (${jobs}) or told about it till morning`);
+    room.sim.free?.();
+  }
+  {
+    // the RV is full and one seat is kept for someone who dropped: a newcomer takes it and is told the roles once
+    const room = new Room('FULL', 4242);
+    const c0 = new FakeConn(), ps = [];
+    for (let i = 0; i < C.MAX_PLAYERS; i++) { const p = room.addPlayer(i ? new FakeConn() : c0, 'P' + i).player; room.welcome(p); ps.push(p); }
+    room.hold(ps[C.MAX_PLAYERS - 1], 60);
+    const n0 = c0.sent.length;
+    const late = room.addPlayer(new FakeConn(), 'Late').player;
+    room.welcome(late);
+    const told = c0.sent.slice(n0).filter(m => m.t === 'toast' && /drives today/.test(m.text)).length;
+    check(room.players.size === C.MAX_PLAYERS && told === 1, `roles: a newcomer taking a kept seat in a full RV is told the roles once (${told} toasts)`);
+    room.sim.free?.();
+  }
 }
 {
   // a role's player who drops (their seat kept) doesn't stop the RV: anyone stands in till they're back (the
@@ -458,8 +564,11 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   // the driver drops: anyone can drive till they're back, and the crew is told
   room.hold(A, 5);
   const meta = cs[2].last('meta');
-  check(A.seat === null && said(cs[2], /Ann lost connection.*Anyone can drive till they're back/) && meta.away?.some(q => q.id === A.id && q.name === 'Ann') && meta.roles.drv === A.id,
+  check(A.seat === null && said(cs[2], /Ann lost connection.*Anyone can drive till they're back/) && meta.away?.some(q => q.id === A.id && q.name === 'Ann') && meta.roles.drv === A.id && meta.roles.drvAway && meta.roles.wheel.includes(Cat.id),
     'stand-ins: the driver drops: the crew is told anyone can drive, and meta still names them (as away)');
+  // Bob (the navigator) doesn't take the wheel while Cat (who hasn't seen the map) is here
+  stand(B, 0.6, 2.4); room.handle(B, { t: 'use', kind: 'seat0' });
+  check(B.seat === null && said(cs[1], /Ann is away\. Somebody who hasn't seen the map takes the wheel/) && !meta.roles.wheel.includes(B.id), 'stand-ins: the navigator leaves the wheel to somebody who hasn\'t seen the map');
   sit(Cat);
   check(Cat.seat === 0 && room.roles.drv === A.id && said(cs[1], /Cat is driving till Ann is back/), 'stand-ins: crew takes the wheel till the driver is back (still their job today)');
   stand(B, -0.4, 2.3); grab(B); tick(room, 0.3);
@@ -490,6 +599,41 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   tick(room, 0.8);
   check(!room.players.has(A.id) && room.roles.drv === Dan.id && Dan.seat === 0 && room.roles.nav === Cat.id && holds(Cat),
     `stand-ins: the driver never comes back: the stand-in at the wheel keeps driving, and the job (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
+  room.sim.free?.();
+}
+{
+  // AFK: a driver still connected but not moved for a minute (walked off, alt-tabbed, stuck loading) is away
+  // too: the crew is told, and anyone stands in. Back at the keys, the wheel is theirs again once it's free
+  const room = new Room('AFK', 4242);
+  const cs = [new FakeConn(), new FakeConn(), new FakeConn()];
+  const [A, B, Cat] = ['Ann', 'Bob', 'Cat'].map((n, i) => room.addPlayer(cs[i], n).player);
+  for (const p of [A, B, Cat]) room.welcome(p);
+  room.setRoles(A.id, B.id);
+  tick(room, 0.5);
+  const W = room.W, z = W.camp.exitZ + 4;
+  room.sim.placeRV(W.roadX(z), z, 0);
+  tick(room, 0.2);
+  const pose = (p, x, z, yaw = 0) => room.onPose(p, { par: 1, x, y: 0.05, z, yaw, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+  pose(A, -0.4, 1.2); pose(B, -0.4, 2.3); pose(Cat, 0.6, 2.4);
+  room.handle(Cat, { t: 'use', kind: 'seat0' });
+  check(room.phase === 'road' && Cat.seat === null && !cs[2].last('meta').roles.drvAway, 'AFK: Ann, at the keys, drives today: Cat rides along');
+  // a minute on, Ann hasn't moved (Bob and Cat have)
+  A.activeAt = room.t - 61; B.activeAt = Cat.activeAt = room.t;
+  tick(room, 0.1);
+  const meta = cs[2].last('meta');
+  room.handle(Cat, { t: 'use', kind: 'seat0' });
+  check(meta.roles.drvAway && meta.roles.wheel.includes(Cat.id) && Cat.seat === 0 && room.roles.drv === A.id && cs[1].has(m => m.t === 'toast' && /Cat is driving till Ann is back/.test(m.text)),
+    'AFK: a driver who hasn\'t moved for a minute is away: the party is told (meta), and Cat takes the wheel till Ann is back');
+  // Ann moves again: still Ann's day; the wheel is hers once Cat gets up
+  pose(A, -0.2, 1.2, 0.3);
+  tick(room, 0.1);
+  room.handle(Cat, { t: 'use', kind: 'unseat' });
+  pose(Cat, 0.6, 2.4); room.handle(Cat, { t: 'use', kind: 'seat0' });
+  check(!cs[2].last('meta').roles.drvAway && Cat.seat === null && cs[2].has(m => m.t === 'toast' && /Ann drives today\. Ride along/.test(m.text)), 'AFK: Ann moves again: not away any more, and the wheel is hers again once Cat gets up');
+  // nobody else here but the navigator (Cat AFK too): then the navigator may stand in, so the RV still moves
+  A.activeAt = Cat.activeAt = room.t - 61;
+  pose(B, 0.6, 2.4, 0.4); room.handle(B, { t: 'use', kind: 'seat0' });
+  check(B.seat === 0, 'AFK: with the driver and the crew both away, the navigator takes the wheel rather than nobody');
   room.sim.free?.();
 }
 
