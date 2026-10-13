@@ -29,10 +29,6 @@ export const LOOT = {
 };
 
 export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);
-// the road map comes off the dash only while somebody else is driving (server/room.js onGrab): the driver
-// never reads it, a passenger does and calls out the road
-export const MAP_NO_DRIVER = 'Someone has to be driving before you can take the map.';
-
 // What each kind of stop tends to have lying around.
 export const POI_LOOT = {
   gas:   ['register', 'gnome', 'toaster', 'neon', 'tv', 'lamp', 'tire'],

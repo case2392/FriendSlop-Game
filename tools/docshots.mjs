@@ -63,17 +63,21 @@ await ready(dave);
 await quiet(steve); await quiet(dave);
 await dave.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
 const send = (m) => steve.evaluate(m => window.__nmd.send(m), m);
+// the day's roles are drawn at random: each shot that drives says who drives and who reads the map
+const roles = async (drv, nav) => send({ t: 'dbg', op: 'roles', drv: await ev(drv, () => window.__nmd.selfId), nav: await ev(nav, () => window.__nmd.selfId) });
 const W = await steve.evaluate(() => { const W = window.__nmd.W; return { LEN: W.LEN, town: W.town, obstacles: W.obstacles, anchors: W.anchors, camp: W.camp }; });
 const roadX = z => steve.evaluate(z => window.__nmd.W.roadX(z), z);
 const hAt = (x, z) => steve.evaluate(([x, z]) => window.__nmd.W.heightAt(x, z), [x, z]);
 
 if (want('camp')) { // 1. camp: the crew + the RV + the fire
+await roles(steve, dave);   // (the HUD shows the day's roles: the same every run)
 await ev(steve, () => { const S = window.__nmd; S.me.teleport(-4.2, 0.05, -45.5, 2.4); S.me.pitch = 0; });
 await ev(dave, () => { const S = window.__nmd; S.me.teleport(-13.5, 0.05, -52.5, 0); S.aimAt(-3, 1.4, -42); });
 await shot(dave, 'camp');
 
 }
 if (want('riding')) { // 2. riding: Steve drives, Dave stands at the dinette
+await roles(steve, dave);
 await ev(steve, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x + 0.25, r.y + 0.1, r.z + 2.0, 0); S.aimAt(r.x + 0.62, r.y + 0.4, r.z + 2.85); });
 await ev(dave, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.3, r.y + 0.1, r.z - 1.2, 0); S.me.pitch = 0.1; });
 await wait(steve, 900);
@@ -96,7 +100,8 @@ await wait(steve, 600);
 console.log('after riding: rv', JSON.stringify(await steve.evaluate(() => ({ z: window.__nmd.rv.p.z, v: Math.hypot(window.__nmd.rv.v.x, window.__nmd.rv.v.z) }))));
 
 }
-if (want('map')) { // 3. the map, from the passenger side, with Dave at the wheel (nobody takes it until someone drives)
+if (want('map')) { // 3. the map, from the passenger side: Dave drives today, Steve navigates (nobody takes it until the driver drives)
+await roles(dave, steve);
 await ev(dave, () => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.3, r.y + 0.1, r.z - 1.2, 0); });
 await wait(dave, 900);
 await ev(dave, () => window.__nmd.send({ t: 'use', kind: 'seat0' }));
@@ -116,7 +121,7 @@ if (await steve.waitForFunction(() => window.__nmd.me.holding?.ok === true, null
 } else console.log('  (Steve never got the map: map.jpg left as it was)');
 await ev(steve, () => window.__nmd.press('release'));
 await dave.keyboard.up(' ');
-await ev(dave, () => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave him the server's driver)
+await ev(dave, () => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave Dave the server's driver)
 await dave.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 120000 }).catch(() => {});
 
 }
