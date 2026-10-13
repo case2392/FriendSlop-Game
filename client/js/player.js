@@ -71,15 +71,19 @@ export class Me {
     return v3(Math.sin(this.yaw) * cp, -Math.sin(this.pitch), Math.cos(this.yaw) * cp);
   }
 
-  knock(v, ko) {
+  // Sent flying: by the RV running you over ('rv'), a friend's shove ('shove'), wildlife ('mob'). rel: the
+  // push is on top of the RV's motion (you were riding it: thrown off a moving RV, you keep its speed, you
+  // aren't left behind at it). Someone already down stays down.
+  knock(v, ko, why = 'rv', rel = false, rv = null) {
     if (this.mode === 'seat') return;
+    const down = this.mode === 'ko', base = rel && this.par && rv?.v ? rv.v : v3();
     this.unparent(null);
     this.par = 0; this.lp = null;
-    this.mode = 'walk';
+    if (!down) this.mode = 'walk';
     this.climb = null;
-    this.vel = v3(v[0], v[1], v[2]);
+    this.vel = v3(base.x + v[0], base.y + v[1], base.z + v[2]);
     this.grounded = false;
-    if (ko) this.ko('rv');
+    if (ko && !down) this.ko(why);
   }
 
   ko(why) {
@@ -169,18 +173,20 @@ export class Me {
 
   // Standing in the RV when it brakes hard (or hits a boulder) throws you around.
   // rv.acc comes from the server snapshots' own timestamps, so a frame hitch
-  // on your machine can't fake a crash.
+  // on your machine can't fake a crash. Crouched, you're braced: never knocked out
+  // by it, a stumble only past 40 m/s^2, and half the shove ("EVERYBODY CROUCH, I'M RAMMING IT").
   lurch(dt, rv) {
     if (!rv?.acc || dt <= 0) return;
-    const a = Math.hypot(rv.acc.x, rv.acc.z);
+    const a = Math.hypot(rv.acc.x, rv.acc.z), braced = this.crouch;
     this.lurchCd = Math.max(0, (this.lurchCd || 0) - dt);
     if (this.par && this.mode === 'walk' && a > 6 && a < 400 && this.lurchCd <= 0) {
-      this.vel.x -= rv.acc.x * 0.28; this.vel.z -= rv.acc.z * 0.28;
-      this.vel.y += Math.min(3, a * 0.08);
+      const k = braced ? 0.14 : 0.28;
+      this.vel.x -= rv.acc.x * k; this.vel.z -= rv.acc.z * k;
+      this.vel.y += Math.min(braced ? 1.5 : 3, a * (braced ? 0.04 : 0.08));
       this.lurchCd = 0.5;
       this.events.push({ k: 'lurch', a });
-      if (a > 45) { this.lastCrash = { a, acc: { ...rv.acc }, rvp: { ...rv.p }, lp: this.lp && { ...this.lp } }; this.ko('crash'); }
-      else if (a > 20) { this.spend(30); this.events.push({ k: 'stumble' }); }
+      if (a > 45 && !braced) { this.lastCrash = { a, acc: { ...rv.acc }, rvp: { ...rv.p }, lp: this.lp && { ...this.lp } }; this.ko('crash'); }
+      else if (a > (braced ? 40 : 20)) { this.spend(30); this.events.push({ k: 'stumble' }); }
     }
   }
 

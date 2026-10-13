@@ -930,7 +930,7 @@ const BIOME_INK = {
   meadow: { land: ['#b8c48a', '#a8b878', '#c8cc96'], hill: '#8a9a5a', tree: 'oak', stamps: ['round', 'round', 'peak'], water: '#8ab4c0', critter: 'serpent' },
   fields: { land: ['#e0c98a', '#d4b874', '#e8d49a'], hill: '#b89a5a', tree: 'wheat', stamps: ['round', 'low'], water: '#94b8c0', critter: 'serpent' },
   snow: { land: ['#e8ecee', '#d4dee6', '#f2f2ee'], hill: '#8a96a8', tree: 'pine', stamps: ['peak', 'peak', 'round'], water: '#d8e6ee', critter: 'ice' },
-  badlands: { land: ['#e0a878', '#d4946a', '#e8b888'], hill: '#a85a38', tree: 'dead', stamps: ['mesa', 'mesa', 'peak'], water: '#d4b088', critter: 'scorpid' },
+  badlands: { land: ['#e0a878', '#d4946a', '#e8b888'], hill: '#a85a38', tree: 'dead', stamps: ['mesa', 'mesa', 'peak'], water: '#d4b088', critter: 'scorpion' },
   desert: { land: ['#ecd4a0', '#e0c48c', '#f2dcae'], hill: '#c09a6a', tree: 'cactus', stamps: ['dune', 'dune', 'round'], water: '#7ab8b0', critter: 'worm' },
 };
 const POI_NAMES = { gas: 'Fuel Stop', semi: 'Overturned Wagon', yard: 'Yard Sale', crash: 'Crash Site', junk: 'Junkyard', dino: 'Dino Park' };
@@ -1074,7 +1074,7 @@ function doodle(g, kind, x, y, s, rnd) {
     g.beginPath(); g.moveTo(-21, 0); g.quadraticCurveTo(-24, -4, -22, -7); g.stroke();
     g.strokeStyle = kind === 'serpent' ? 'rgba(58,90,110,0.7)' : 'rgba(138,98,58,0.7)'; g.lineWidth = 1;
     for (const wx of [-26, -9, 3, 16, 26]) { g.beginPath(); g.moveTo(wx - 3, 1.5); g.quadraticCurveTo(wx, -0.5, wx + 3, 1.5); g.stroke(); }
-  } else if (kind === 'scorpid') {
+  } else if (kind === 'scorpion') {
     g.beginPath(); g.ellipse(0, 0, 7, 3.5, 0, 0, TAU); g.fillStyle = '#a8583a'; g.fill(); g.stroke();
     g.beginPath(); g.moveTo(-6, 0); g.quadraticCurveTo(-14, -2, -13, -9); g.quadraticCurveTo(-11, -12, -8, -9); g.stroke();
     for (const sy of [-1, 1]) { g.beginPath(); g.moveTo(6, sy * 2); g.lineTo(11, sy * 5); g.lineTo(14, sy * 3); g.moveTo(11, sy * 5); g.lineTo(14, sy * 7); g.stroke(); for (let k = -1; k <= 1; k++) { g.beginPath(); g.moveTo(k * 2.5, sy * 3); g.lineTo(k * 3.5, sy * 7); g.stroke(); } }

@@ -14,7 +14,7 @@ export const BANNED = [
   'Elwynn', 'Westfall', 'Dun Morogh', 'Kharanos', 'Goldshire', 'Tanaris', 'Gadgetzan', 'Steamwheedle', 'Barrens',
   'Durotar', 'Stranglethorn', 'Booty Bay', 'Ironforge', 'Stormwind', 'Orgrimmar', 'Azeroth', 'Kalimdor',
   'Thousand Needles', 'Lakeshire', 'Redridge', 'Duskwood', 'Northshire', 'Defias', 'Murloc', 'Hearthstone',
-  'Warcraft', 'Blizzard', 'Friz Quadrata',
+  'Warcraft', 'Blizzard', 'Friz Quadrata', 'Kobold', 'Gnoll', 'Kodo', 'Scorpid', 'Quilboar', 'Furbolg',
   // Jagex: RuneScape
   'RuneScape', 'OSRS', 'Lumbridge', 'Varrock', 'Falador', 'Gielinor', 'Jagex',
   // other games

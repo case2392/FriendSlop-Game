@@ -25,7 +25,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
 // a number from a client: finite and within +-lim, or 0
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
@@ -397,6 +397,7 @@ export class Room {
       case 'drv': if (p.seat === 0) { p.drvAt = this.t; this.sim.setDrive(m); } return;
       case 'horn': if (p.seat === 0) this.broadcast({ t: 'ev', list: [{ k: 'horn' }] }); return;
       case 'use': return this.onUse(p, m);
+      case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       case 'ko': return this.onKO(p, m);
       case 'wake': return this.onWake(p);
       case 'emote': if (C.EMOTES.includes(m.e)) this.broadcast({ t: 'emote', id: p.id, e: m.e }); return;
@@ -660,7 +661,12 @@ export class Room {
     this.sim.release(p.id);
     this.sim.dropHook(p.id);
     this.stats.kos++;
-    const how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)' }[m.why] || 'is down';
+    // what knocked them about in the last 3 s says how they went down (the page only knows it fell)
+    const k = p.lastKnock && this.t - p.lastKnock.t < 3 ? p.lastKnock : null;
+    const by = k?.by != null ? this.players.get(k.by)?.name : null;
+    let how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)', mob: 'got tossed by the Grumphorn' }[m.why] || 'is down';
+    if (k?.why === 'mob') how = 'got tossed by the Grumphorn';
+    else if (k?.why === 'shove' && by && m.why === 'fall') how = `ate dirt (${by} shoved them)`;
     this.toast(`${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
   }
 
@@ -873,14 +879,19 @@ export class Room {
       const pub = [];
       for (const e of evs) {
         if (e.k === 'knock') {
+          // why: 'rv' (run over), 'shove' (a friend), 'mob' (wildlife). Only your own RV running a friend
+          // over bills: the rest cost time and, if nobody picks you up, the usual doctor's bill. A player who
+          // is already down stays down (a knock would stand them up on their page)
           const pl = this.players.get(e.id);
-          if (!pl) continue;
-          this.send(pl, { t: 'knock', v: e.v, ko: e.ko });
-          if (e.ko) {
+          if (!pl || (pl.ko && e.why !== 'rv')) continue;
+          const why = e.why || 'rv';
+          this.send(pl, { t: 'knock', v: e.v, ko: !!e.ko, why, rel: e.rel ? 1 : 0 });
+          pl.lastKnock = { why, by: e.by ?? null, t: this.t };
+          if (e.ko && why === 'rv') {
             const drv = [...this.players.values()].find(q => q.seat === 0);
             this.bill(C.RV_HIT_BILL, `${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
           }
-          pub.push({ k: 'thud', id: e.id });
+          pub.push({ k: 'thud', id: e.id, why });
         } else {
           if (e.k === 'break') { this.stats.broken += e.lost; this.dayStats.broken += e.lost; }
           pub.push(e);

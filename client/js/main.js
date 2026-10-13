@@ -560,11 +560,25 @@ function onGrabRelease() {
   if (me.holding) { net.send({ t: 'rel' }); me.holding = null; }
 }
 function onThrow() {
-  if (!me.holding) return;
+  if (!me.holding) return onShove();
   const l = me.look();
   net.send({ t: 'rel', thr: 1, dir: [l.x, l.y + 0.15, l.z] });
   me.holding = null;
   sfx.throw();
+}
+// right mouse with empty hands: a two-handed shove at whatever is in front of you (the server decides what it
+// hits: server/sim.js shove). It costs stamina, so it can't be spammed
+function onShove() {
+  if (worldBuilding || me.mode !== 'walk' || me.hasHook) return;
+  const now = performance.now();
+  if (now < (S.shoveCd || 0) || me.stamina < C.SHOVE.STAMINA) return;
+  S.shoveCd = now + C.SHOVE.COOLDOWN * 1000;
+  S.shoveUntil = now + 300;
+  me.spend(C.SHOVE.STAMINA);
+  net.send({ t: 'shove' });
+  hands.shove();
+  sfx.whoosh();
+  tutDone('shove');
 }
 function onDrop() {
   if (me.holding) { net.send({ t: 'rel' }); me.holding = null; }
@@ -598,6 +612,7 @@ function onUse() {
 let keypadUse = null;
 function openKeypad(id) {
   keypadUse = id;
+  S.kpCrouch = me.crouch;   // crouched at the keypad stays crouched while typing (the mouse coming free lets go of every key)
   $('keypad').classList.remove('hidden');
   $('kpInput').value = '';
   document.exitPointerLock?.();
@@ -626,6 +641,7 @@ const TIPS = [
   'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
   'Each morning picks a driver and a navigator. The driver can\'t see the map: the navigator reads it out.',
   'Walk into the RV to push it out of the mud.',
+  'Crouch in the RV to brace for a crash: braced, a crash can\'t knock you out.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
   'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
@@ -997,7 +1013,7 @@ net.on('s', m => {
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
 net.on('toast', inOrder(m => toast(m.text, m.color, m.secs)));
-net.on('knock', inOrder(m => { me.knock(m.v, m.ko); sfx.knock(); shake(0.6); }));
+net.on('knock', inOrder(m => { me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv); if (m.why === 'shove' && !m.ko) { sfx.stumble(); shake(0.3); } else { sfx.knock(); shake(0.6); } }));
 net.on('seat', inOrder(m => {
   if (m.seat == null) { me.unsit(m.exit); }
   else { if (me.holding) onGrabRelease(); me.sit(m.seat); }
@@ -1051,6 +1067,7 @@ function onEvent(e) {
     case 'flip': sfx.coin(); break;
     case 'repo': shake(0.4); break;   // (the game-over screen that follows plays the Repo Man's sting)
     case 'thud': sfx.thunk(1); break;
+    case 'shove': positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
   }
 }
 
@@ -1137,10 +1154,11 @@ function flash(text) {
   $('flash').style.animation = 'none'; void $('flash').offsetWidth; $('flash').style.animation = '';
   setTimeout(() => $('flash').classList.add('hidden'), 2600);
 }
-function positional(at, fn) {
+// range: how far off it can still be heard (a beast's bellow carries further than a thud)
+function positional(at, fn, range = 60) {
   if (!at) return fn();
   const d = Math.hypot(at.x - camera.position.x, at.y - camera.position.y, at.z - camera.position.z);
-  if (d < 60) sfxAt({ x: at.x, y: at.y, z: at.z }, fn);
+  if (d < range) sfxAt({ x: at.x, y: at.y, z: at.z }, fn);
 }
 
 
@@ -1463,7 +1481,7 @@ requestAnimationFrame(frame);
   inp.jump = !typing && !!keys[' '] && !S.jumpLatch;
   S.jumpLatch = !!keys[' '];
   inp.sprint = !!keys.shift;
-  inp.crouch = !!keys.control || !!keys.c;
+  inp.crouch = !!keys.control || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
   me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, excludeSet());
   for (const e of me.events) {
@@ -1490,6 +1508,7 @@ requestAnimationFrame(frame);
     lastPose = now;
     const pose = me.pose(rv);
     if (voice.V.walkieKey && S.myWalkie) pose.f |= C.FLAG.WALKIE_TX;
+    if (now < (S.shoveUntil || 0)) pose.f |= C.FLAG.SHOVE;
     net.send(pose);
   }
 

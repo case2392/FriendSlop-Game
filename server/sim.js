@@ -401,6 +401,7 @@ export class Sim {
       const n = len(d) || 1;
       p.body.applyImpulse(mul(d, imp / n), true);
       if (pl?.vel) p.body.applyImpulse(mul(pl.vel, m * 0.6), true);
+      p.thrownBy = pid; p.thrownAt = this.t;
       this.out.push({ k: 'throw', id: p.id, by: pid });
     }
   }
@@ -423,6 +424,59 @@ export class Sim {
       const f = p.type === 'boulder' ? C.PUSH_FORCE_RV : C.PUSH_FORCE_PROP;
       this.pushes.push({ body: p.body, pt, f: mul(d, f / n), until: this.t + 0.16 });
     }
+  }
+
+  // The shove (right mouse with empty hands): what's in a cone in front of the shover, nearest first, at most
+  // SHOVE.MAX of them, and nothing behind a wall (a ray against the world and the RV). A friend on foot gets a
+  // knock (never a KO by itself), a friend riding the RV the same knock on top of the RV's motion (rel: their
+  // page adds the RV's velocity), loot a push; wildlife answers in mobs.js. Never the RV, the boulder, the map,
+  // anything bungee'd down, or a friend who is down or seated. Returns how many things it hit.
+  shove(pl, players) {
+    if (!pl?.eye || !pl.look || this.holds.has(pl.id)) return 0;
+    const S = C.SHOVE, e = pl.eye, hl = Math.hypot(pl.look.x, pl.look.z);
+    if (hl < 1e-3) return 0;
+    const fx = pl.look.x / hl, fz = pl.look.z / hl, cosA = Math.cos(S.HALF_DEG * Math.PI / 180);
+    const cands = [];
+    const consider = (kind, ref, pt) => {
+      const dx = pt.x - e.x, dz = pt.z - e.z, d = Math.hypot(dx, dz);
+      if (d > S.REACH || Math.abs(pt.y - e.y) > S.DY) return;
+      if (d > 0.3 && (dx * fx + dz * fz) / d < cosA) return;
+      cands.push({ kind, ref, pt, d });
+    };
+    for (const q of players.values()) {
+      if (q.id === pl.id || !q.pos || q.ko || q.seat != null) continue;
+      consider('player', q, v3(q.pos.x, q.pos.y + 0.9, q.pos.z));
+    }
+    for (const p of this.props.values()) {
+      const L = LOOT[p.type];
+      if (!L || this.tied.has(p.id) || (L.tool && !L.mob)) continue;
+      consider('prop', p, p.body.translation());
+    }
+    cands.sort((a, b) => a.d - b.d);
+    let hit = 0;
+    for (const c of cands) {
+      if (hit >= S.MAX) break;
+      if (!this.clearLine(e, c.pt)) continue;
+      hit++;
+      if (c.kind === 'player') {
+        const q = c.ref;
+        this.out.push({ k: 'knock', id: q.id, v: [r3(fx * S.FRIEND), S.FRIEND_UP, r3(fz * S.FRIEND)], ko: false, why: 'shove', by: pl.id, rel: q.par ? 1 : 0 });
+      } else if (LOOT[c.ref.type].mob) {
+        this.mobs?.onShoved(c.ref, pl, fx, fz);
+      } else {
+        const p = c.ref, J = Math.min(S.PROP_J, S.PROP_PER_KG * p.body.mass()), n = Math.hypot(1, 0.3);
+        p.body.applyImpulse(v3(fx * J / n, 0.3 * J / n, fz * J / n), true);
+      }
+    }
+    this.out.push({ k: 'shove', by: pl.id, at: [r3(e.x), r3(e.y), r3(e.z)], hit });
+    return hit;
+  }
+
+  // nothing of the world or the RV between a and b (props and people don't count)
+  clearLine(a, b) {
+    const d = sub(b, a), L = len(d);
+    if (L < 0.3) return true;
+    return !this.world.castRay(new RAPIER.Ray(a, mul(d, 1 / L)), L - 0.25, true, undefined, grp(0xffff, G_WORLD | G_RV));
   }
 
   setDrive(m) {
@@ -767,7 +821,7 @@ export class Sim {
           const ko = rvs > 6.5;
           const kv = add(add(mul(rvv, 1.25), mul(out, 3.5)), v3(0, 5 + rvs * 0.25, 0));
           this.knockCd.set(pl.id, this.t + 1.5);
-          this.out.push({ k: 'knock', id: pl.id, v: [r3(kv.x), r3(kv.y), r3(kv.z)], ko, speed: r3(rvs) });
+          this.out.push({ k: 'knock', id: pl.id, v: [r3(kv.x), r3(kv.y), r3(kv.z)], ko, why: 'rv', speed: r3(rvs) });
         }
       }
     }

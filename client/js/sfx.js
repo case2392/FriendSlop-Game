@@ -105,6 +105,7 @@ export const sfx = {
   letgo: () => tone(400, 0.12, 'triangle', 0.2, 250),
   lunge: () => noise(0.25, 1600, 0.35, 300),
   throw: () => noise(0.22, 3000, 0.3, 500, 'bandpass'),
+  whoosh: () => { noise(0.2, 1400, 0.26, 500, 'bandpass'); noise(0.12, 3200, 0.08, 1200, 'bandpass', 0.03); },
   thunk: (k = 1) => { tone(140, 0.12, 'sine', 0.35 * k, 60); noise(0.08, 700, 0.2 * k); },
   shatter: () => { noise(0.5, 6000, 0.6, 1500, 'highpass'); for (let i = 0; i < 6; i++) tone(2000 + Math.random() * 3000, 0.08, 'sine', 0.12, null, Math.random() * 0.25); },
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },
