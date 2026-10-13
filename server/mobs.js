@@ -9,7 +9,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { LOOT } from '../shared/loot.js';
 import { RT, GH, RF, PLAN, GST, RST, ST_CARRY, ST_MOOD, crewFactor, cowbellValue, ringtailsPerDen, hoardRingtails } from '../shared/mobs.js';
-import { FLAG, MODE } from '../shared/constants.js';
+import { FLAG, MODE, RVH, beastDamage } from '../shared/constants.js';
 import { toLocal, qRotate, insideRV, RV_DIM } from '../shared/rv.js';
 import { inMud, bedExit } from '../shared/world.js';
 import { mulberry32 } from '../shared/rng.js';
@@ -455,6 +455,13 @@ export class Mobs {
         // a parked RV, or into the back of one driving off, only winds itself)
         const rt = this.sim.rv.translation(), vr = this.vRV, nx = t.x - rt.x, nz = t.z - rt.z, nl = Math.hypot(nx, nz) || 1;
         const at = Math.max(0, (vr.x * nx + vr.z * nz) / nl);
+        // and what it costs the RV: how fast they close (the RV toward it, and it toward the RV just before
+        // they touched): a charge into a parked RV dents it, one into the back of an RV driving off doesn't
+        const vb = this.vPre.get(m.id), closing = at + (vb ? Math.max(0, -(vb.x * nx + vb.z * nz) / nl) : 0);
+        if (closing >= RVH.GH_FREE) {
+          const l = this.sim.rvToLocal(t), zone = l.z > 2.5 ? 'front' : l.z < -2.5 ? 'rear' : l.x > 0 ? 'left' : 'right';
+          this.sim.out.push({ k: 'rvhit', why: 'beast', amt: beastDamage(closing), zone, how: m.st === GST.CHARGE ? 'charge' : 'ram', at: [r3(t.x), r3(t.y + 0.8), r3(t.z)] });
+        }
         if (asleep) this.ghWake(m, p, rt, true);
         if (at >= 2) this.ghCost(m, p, GH.COST.rvPerMs * at);
         if (m.st === GST.CHARGE) { m.rvWoke = false; this.ghWinded(m, p, true); }
@@ -737,6 +744,8 @@ export class Mobs {
   // it's had enough for the day: a puff, and it's gone
   rtVanish(m, p, how = 'gone') {
     this.rtDrop(m, p);
+    // (out through a window: it cracks it)
+    if (how === 'window') { const t = p.body.translation(); this.sim.out.push({ k: 'rvhit', why: 'window', amt: RVH.WINDOW, zone: 'side', at: [r3(t.x), r3(t.y), r3(t.z)] }); }
     this.sim.out.push({ k: 'gone', ids: [m.id], how });
     this.sim.removeProp(m.id);
   }
@@ -1048,6 +1057,15 @@ export class Mobs {
         const p = this.get(fr.id);
         if (!p) continue;
         if (p.holders.size || p.thrownBy != null) { fr.at = -Infinity; continue; }
+        // one landing on the RV still coming down fast dents it (once a rock; how fast it was going as it hit)
+        if (!fr.rv && this.partners(p).rv) {
+          const vp = this.vPre.get(fr.id), vr = this.vRV;
+          if (vp && Math.hypot(vp.x - vr.x, vp.y - vr.y, vp.z - vr.z) >= RF.KO_V) {
+            fr.rv = true;
+            const pt = p.body.translation(), l = this.sim.rvToLocal(pt);
+            this.sim.out.push({ k: 'rvhit', why: 'rock', amt: RVH.ROCK, zone: l.y > RV_DIM.ROOF_Y - 0.3 ? 'roof' : 'side', at: [r3(pt.x), r3(pt.y), r3(pt.z)] });
+          }
+        }
         const v = p.body.linvel(), t = p.body.translation(), w = this.sim.rv.velocityAtPoint(t);
         const rel = v3(v.x - w.x, v.y - w.y, v.z - w.z);
         if (Math.hypot(v.x, v.y, v.z) < RF.BUMP_V && Math.hypot(rel.x, rel.y, rel.z) < RF.BUMP_V) continue;

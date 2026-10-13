@@ -9,7 +9,7 @@
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
 import { LOOT, fmt$ } from '../shared/loot.js';
-import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, toWorld, qRotate, insideRV } from '../shared/rv.js';
+import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, RV_HATCH, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
 import { STOP_NAMES } from '../shared/mobs.js';
 import { BJTable, FlipMachine } from './casino.js';
@@ -52,7 +52,12 @@ export class Room {
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
     for (const p of this.players.values()) p.walkie = p.hat = false;   // a new trip buys its own walkies (and hard hats)
-    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0 };
+    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0,
+      rv: { dmg: 0, crashes: 0, worst: null, cash: 0, loan: 0, breakdowns: 0, end: 100 } };
+    // the RV's condition (a new trip, a new RV): the hit being added up, the day's breakdowns, the roadside
+    // fix's progress, Gus's pending loan question; repairs put on the loan land on tomorrow's payment
+    this.rvc = { hp: 100, inc: null, brokeN: 0, fix: 0, gusAsk: null };
+    this.loanAdd = 0;
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.startDay([]);
@@ -64,15 +69,17 @@ export class Room {
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
     // (a new run drops whatever the last one left on the casino tables: it starts with $200, that's all)
     this.W = generateLeg(this.seed, this.day);
-    this.sim = new Sim(this.W, { carry });
+    this.sim = new Sim(this.W, { carry, cond: this.rvc.hp });   // (nothing heals it overnight but Gus)
     this.phase = 'camp';
     this.clock = C.DAY_START;
     this.paid = false;
-    this.due = C.QUOTAS[this.day - 1];
+    this.due = C.QUOTAS[this.day - 1] + this.loanAdd;   // (Gus's repairs on the loan)
+    this.loanAdd = 0;
+    this.rvc.inc = null; this.rvc.brokeN = 0; this.rvc.fix = 0; this.rvc.gusAsk = null;
     this.inTown = false;
     this.flippedT = 0;
     this.nightAt = 0;
-    this.dayStats = { sold: 0, bills: 0, broken: 0, gamble: 0, stolen: 0, recovered: 0 };
+    this.dayStats = { sold: 0, bills: 0, broken: 0, gamble: 0, stolen: 0, recovered: 0, rv: { dmg: 0, src: {}, cash: 0, loan: 0 } };
     this.theftQ = new Map();         // den -> the thefts its ringtails made that the crew hasn't been told of yet
     this.theftToastAt = new Map();   // den -> when the crew was last told
     this.bj = new BJTable(this.W.town.bj);
@@ -108,6 +115,7 @@ export class Room {
   // short: how much the missed payment was short by (the game-over screen says so)
   finish(won, short = 0) {
     this.phase = 'over';
+    this.stats.rv.end = Math.round(this.rvc.hp);
     this.over = { won, at: this.t, day: Math.min(this.day, C.DAYS), due: this.due, short };
     this.broadcast(this.overMsg());
     this.sendMeta();
@@ -171,7 +179,7 @@ export class Room {
   hold(p, secs = HOLD_SECS, quiet = false) {
     if (!p.connected) return;
     p.connected = false; p.conn = null; p.heldAt = this.t; p.holdSecs = secs; p.ready = false;
-    p.seat = null; p.bed = false; p.ko = false;
+    p.seat = null; p.bed = false; p.ko = false; p.fixing = false;
     this.sim.release(p.id);
     this.sim.dropHook(p.id);
     p.raw = null; p.pos = null; p.eye = null; p.par = 0; p.lp = null;
@@ -409,6 +417,8 @@ export class Room {
         return;
       case 'use': return this.onUse(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
+      // holding E at the engine hatch of a broken-down RV, or letting go (fixStep does the work)
+      case 'fix': p.activeAt = this.t; p.fixing = !!m.on; return;
       case 'ko': return this.onKO(p, m);
       // the hard hat took a knockout (the page turned it into a knock): it's done for
       case 'hat':
@@ -455,6 +465,9 @@ export class Room {
     else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.force(mb, +m.st | 0); }
     // a knock as the physics sends one (a rock, a toss), through the same relay; a hard hat on or off
     else if (m.op === 'knock') sim.out.push({ k: 'knock', id: p.id, v: [0, 2, 0], ko: !!m.ko, why: String(m.why || 'rock') });
+    // the RV's condition set outright, or a hit as the physics would send one
+    else if (m.op === 'rvhp') { this.rvc.hp = Math.max(0, Math.min(100, +m.hp || 0)); this.rvc.fix = 0; if (this.rvc.hp <= 0) this.rvc.brokeN = Math.max(1, this.rvc.brokeN); sim.setRvCond(this.rvc.hp); }
+    else if (m.op === 'rvhit') sim.out.push({ k: 'rvhit', why: String(m.why || 'crash'), amt: +m.amt || 0, dv: +m.dv || 0, what: m.what || 'the test lever', at: [0, 0, 0] });
     else if (m.op === 'hat') { p.hat = !!m.on; this.sendMeta(); }
   }
 
@@ -671,7 +684,117 @@ export class Room {
       if (this.phase === 'over') return this.toast('Too late. He already hooked the RV.', '#ff8a80', 4, p);
       if (this.bank < this.due) return this.toast(`The Repo Man wants ${fmt$(this.due)}. You have ${fmt$(this.bank)}.`, '#ff8a80', 4, p);
       this.pay(p);
+    } else if (u.kind === 'repair') {
+      this.repair(p, u.arg);
     }
+  }
+
+  // ---- the RV's condition ------------------------------------------------------------------------------
+  // A hit (sim.js: a crash; mobs.js: the wildlife), priced. Hits until GAP s pass with none are one incident,
+  // capped at CAP% (a tumble is one bill), told in one toast when it's over; the event goes out with what it
+  // cost (the pages float it and shake). A worn RV is down on power; limping, a knock stalls it; a big
+  // incident throws the door open; at 0% it breaks down. Never a way to lose: only a missed payment is
+  onRVHit(e) {
+    if (this.phase === 'over') return false;
+    const R = this.rvc, now = this.t;
+    let amt = e.why === 'crash' ? C.crashDamage(e.dv) : Math.round(e.amt || 0);
+    if (amt <= 0 || R.hp <= 0) return false;
+    const drv = [...this.players.values()].find(q => q.seat === 0);
+    if (!R.inc || now - R.inc.last > C.RVH.GAP) {
+      if (R.inc && !R.inc.told) this.tellIncident();
+      R.inc = { sum: 0, last: now, why: e.why, what: e.what || null, how: e.how || null, by: drv ? drv.name : null, popped: false, told: false };
+      if (e.why === 'crash') this.stats.rv.crashes++;
+    }
+    R.inc.last = now;
+    amt = Math.min(amt, C.RVH.CAP - R.inc.sum);
+    if (amt <= 0) return false;
+    R.inc.sum += amt;
+    const before = C.rvBand(R.hp).name;
+    R.hp = Math.max(0, R.hp - amt);
+    this.sim.setRvCond(R.hp);
+    const S = this.stats.rv, D = this.dayStats.rv;
+    S.dmg += amt; D.dmg += amt;
+    const src = e.why === 'crash' ? (R.inc.by || 'nobody') : e.why === 'beast' ? 'the Grumphorn' : e.why === 'rock' ? 'rocks' : 'a ringtail';
+    D.src[src] = (D.src[src] || 0) + amt;
+    if (e.why === 'crash' && (!S.worst || R.inc.sum > S.worst.amt)) S.worst = { amt: R.inc.sum, by: R.inc.by, what: R.inc.what, day: this.day };
+    if (!C.TEST) console.log('[rv]', this.code, this.day, e.why, e.dv ?? '', e.what || '', amt, R.hp);
+    Object.assign(e, { amt, hp: R.hp, by: e.why === 'crash' ? drv?.id ?? 0 : 0 });
+    // a big incident throws the door open (E shuts it): loot slides out on a turn, ringtails come calling
+    if (R.inc.sum >= C.RVH.POP && !R.inc.popped && !this.sim.doorOpen) { R.inc.popped = true; this.sim.setDoor(true, true); this.toast('The door flew open!', '#ffb74d', 3); }
+    const after = C.rvBand(R.hp).name;
+    // limping, a knock stalls the engine for a moment
+    if (after === 'LIMPING' && amt >= C.RVH.STALL_HIT) this.sim.rvMods.stallUntil = this.sim.t + C.RVH.STALL_T;
+    if (R.hp <= 0) {
+      R.brokeN++; S.breakdowns++; R.fix = 0;
+      this.toast('The RV broke down. Everybody out: hold E at the engine hatch at the back.', '#ff8a65', 6);
+    } else if (after !== before) {
+      this.toast(after === 'SMOKING' ? `The engine's smoking (RV ${R.hp}%). She's down on power.` : `The RV is limping (${R.hp}%): one more knock and the engine cuts out.`, '#ffb74d', 5);
+    }
+    return true;
+  }
+  // the incident's toast, once it's over: who did it and what to, and what it cost all told
+  tellIncident() {
+    const I = this.rvc.inc;
+    if (!I || I.told) return;
+    I.told = true;
+    const cost = `-${I.sum}% (RV ${Math.round(this.rvc.hp)}%)`;
+    let text;
+    if (I.why === 'crash') text = I.by ? `CRUNCH. ${I.by} put the RV into ${I.what || 'something'}: ${cost}.` : `CRUNCH. The RV ran into ${I.what || 'something'} with nobody at the wheel: ${cost}.`;
+    else if (I.why === 'beast') text = I.how === 'charge' ? `The Grumphorn charged the RV: ${cost}.` : `${I.by || 'Somebody'} rammed the Grumphorn: ${cost}.`;
+    else if (I.why === 'rock') text = `Rocks on the RV: ${cost}.`;
+    else text = `A ringtail broke out through a window: ${cost}.`;
+    this.toast(text, '#ffb74d', 4);
+  }
+  // broken down: whoever holds E at the engine hatch (on foot, awake, within FIX_R m of it, the RV standing
+  // still) works on it; up to FIX_HANDS share the work, and letting go keeps what's done. The day's first
+  // breakdown is quickest to fix, later ones slower; it comes back LIMPING, never better
+  fixStep(dt) {
+    const R = this.rvc;
+    if (R.hp > 0 || this.phase === 'over' || Math.abs(this.sim.rvSpeed()) >= C.RVH.FIX_V) return;
+    const hatch = this.sim.rvToWorld(RV_HATCH), names = [];
+    for (const p of this.players.values()) {
+      if (!p.fixing || !p.connected || p.ko || p.seat != null || p.par || !p.pos) continue;
+      if (Math.hypot(p.pos.x - hatch.x, p.pos.z - hatch.z) > C.RVH.FIX_R || Math.abs(p.pos.y - hatch.y) > 2) continue;
+      names.push(p.name);
+    }
+    if (!names.length) return;
+    R.fix += dt * Math.min(names.length, C.RVH.FIX_HANDS) / C.RVH.FIX_T[Math.max(1, Math.min(R.brokeN, C.RVH.FIX_T.length)) - 1];
+    if (R.fix < 1) return;
+    R.fix = 0; R.hp = C.RVH.FIX_TO;
+    this.sim.setRvCond(R.hp);
+    this.sim.out.push({ k: 'rvfix', hp: R.hp });
+    const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    this.toast(`${who} got it running with a coat hanger and a prayer. (RV ${R.hp}%.)`, '#7CFC00', 5);
+  }
+  // Gus, at the RV lot: STEP points a press, only once the day's payment is made (so it can never cost the
+  // payment, and day 5 has no night), for cash or on tomorrow's payment (night 4: on the balloon, the first
+  // press only says what it'll cost)
+  repair(p, how) {
+    const R = this.rvc;
+    if (this.phase === 'over') return;
+    if (!this.paid || this.phase !== 'night') return this.toast('Gus: "I don\'t touch an RV till the Repo Man\'s been paid."', '#fff', 3, p);
+    if (R.hp >= 100) return this.toast('Gus: "Nothing to fix. Go on."', '#fff', 3, p);
+    const gus = this.W.town.gus, rt = this.sim.rv.translation();
+    if (!gus || Math.hypot(rt.x - gus.x, rt.z - gus.z) > C.RVH.GUS_R) return this.toast('Gus: "Bring the RV round to the lot, then."', '#fff', 3, p);
+    const q = C.repairQuote(this.day, R.hp), S = this.stats.rv, D = this.dayStats.rv;
+    let paidHow;
+    if (how === 'loan') {
+      const next = C.QUOTAS[this.day] + this.loanAdd;
+      if (this.day === C.DAYS - 1 && (R.gusAsk == null || this.t - R.gusAsk > C.RVH.LOAN_CONFIRM)) {
+        R.gusAsk = this.t;
+        return this.toast(`Gus: "That puts ${fmt$(q.loan)} on the balloon: ${fmt$(next + q.loan)}. Press again to sign."`, '#ffd166', 5, p);
+      }
+      R.gusAsk = null;
+      this.loanAdd += q.loan; S.loan += q.loan; D.loan += q.loan;
+      paidHow = `on the loan (tomorrow's payment: ${fmt$(next + q.loan)})`;
+    } else {
+      if (this.bank < q.cash) return this.toast(`Gus wants ${fmt$(q.cash)} cash. (Or put it on the loan.)`, '#fff', 3, p);
+      this.bank -= q.cash; S.cash += q.cash; D.cash += q.cash;
+      paidHow = `for ${fmt$(q.cash)} cash`;
+    }
+    R.hp = Math.min(100, R.hp + q.pts); R.fix = 0;
+    this.sim.setRvCond(R.hp);
+    this.toast(`Gus fixed ${q.pts}% ${paidHow}. RV ${R.hp}%.`, '#7CFC00', 4);
   }
 
   applyBet(r, p, game) {
@@ -699,6 +822,7 @@ export class Room {
   onKO(p, m) {
     if (p.ko) return;
     p.ko = true;
+    p.fixing = false;
     p.koAt = this.t;
     p.seat = null;
     const h = this.sim.holds.get(p.id);
@@ -753,7 +877,10 @@ export class Room {
       const s = { x: f.x + Math.cos(a) * 3, z: f.z + Math.sin(a) * 3 };
       this.send(p, { t: 'tp', x: s.x, y: this.W.townY + 0.1, z: s.z, yaw: Math.atan2(f.x - s.x, f.z - s.z) });
     }
-    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, ...this.dayStats };
+    // (the RV: its condition, what it lost today and to whom, and what Gus would charge for the next 25%)
+    const D = this.dayStats.rv;
+    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, ...this.dayStats,
+      rv: { hp: Math.round(this.rvc.hp), today: D.dmg, src: D.src, quote: C.repairQuote(this.day, this.rvc.hp) } };
     this.broadcast(this.receipt);
   }
 
@@ -838,6 +965,9 @@ export class Room {
     // on its own timer, so even a PC drawing a frame a second keeps driving)
     if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
     sim.step(dt, this.players);
+    this.fixStep(dt);
+    // (an incident is told once it's over)
+    if (this.rvc.inc && !this.rvc.inc.told && this.t - this.rvc.inc.last > C.RVH.GAP) this.tellIncident();
     for (const p of this.players.values()) this.resolvePlayer(p);
     // the driver floors it against a winch cable still clipped to its post: say why nothing happens
     if (drv && sim.hook.state === 'anchored' && !sim.hook.reeling && Math.abs(sim.drive.th) > 0.3 && Math.abs(sim.rvSpeed()) < 0.4) {
@@ -907,6 +1037,8 @@ export class Room {
       if (this.flippedT > 7) {
         this.flippedT = 0;
         sim.rightRV();
+        if (this.rvc.inc && !this.rvc.inc.told) this.tellIncident();
+        this.rvc.inc = null;
         this.bill(800, 'The RV was on its back. Tow truck: $800.');
       }
     } else this.flippedT = 0;
@@ -943,6 +1075,8 @@ export class Room {
             this.bill(C.RV_HIT_BILL, `${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
           }
           pub.push({ k: 'thud', id: e.id, why });
+        } else if (e.k === 'rvhit') {
+          if (this.onRVHit(e)) pub.push(e);
         } else {
           if (e.k === 'break') { this.stats.broken += e.lost; this.dayStats.broken += e.lost; }
           if (e.k === 'bean') {
@@ -1022,6 +1156,10 @@ export class Room {
       mud: sim.mudWheels || 0,
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
       rfd: sim.mobs?.rockfalls.filter(r => r.st !== 'armed').map(r => r.id) || [],   // the loose rock that's come down
+      rvh: Math.round(this.rvc.hp),   // the RV's condition (and, only when they apply: broken down, the fix's progress, tomorrow's due with Gus's loan)
+      ...(this.rvc.hp <= 0 ? { brk: 1 } : {}),
+      ...(this.rvc.fix > 0 ? { fix: Math.round(this.rvc.fix * 100) } : {}),
+      ...(this.loanAdd > 0 ? { nxt: (C.QUOTAS[this.day] ?? 0) + this.loanAdd } : {}),
     };
   }
 

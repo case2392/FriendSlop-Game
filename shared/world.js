@@ -1242,6 +1242,19 @@ export function generateLeg(seed, day, opts = {}) {
     if (c) { const F = frame(c.x, c.y, c.z, c.ry); tagNow = { town: 'casino' }; lbox(F, c.ry + Math.PI / 2, 9.6, 0.55, 2.5, 2.5, 0.55, 0.35, 'wood', null, 'casino_bar'); tagNow = null; }
   }
 
+  // Gus's Garage: a workbench by the RV lot (10 m from where the RV parks at night) and his sign; he fixes the
+  // RV once the day's payment is made, for cash or on the loan (server/room.js repair)
+  {
+    const gx = -7.5, gz = T + 131, ry = Math.PI / 2;
+    town.gus = { x: gx, z: gz, y: townY, ry };
+    tagNow = { town: 'gus' };
+    box(gx, townY + 0.45, gz, 0.6, 0.45, 0.3, ry, 'wood', '#7a5a3a', 'gus_bench');
+    tagNow = null;
+    signs.push({ x: gx - 1.2, y: townY + 2.3, z: gz, ry: Math.PI / 2, w: 2.6, h: 1.1, lines: ["GUS'S GARAGE", 'WE FIX RVs. MOSTLY.'], bg: '#2b2d42', fg: '#f4d35e', post: true });
+    use('repair', gx + 0.45, townY + 1.05, gz - 0.35, 'Gus: fix 25% (cash)', 'cash', 0.3);
+    use('repair', gx + 0.45, townY + 1.05, gz + 0.35, 'Gus: fix 25% (on the loan)', 'loan', 0.3);
+  }
+
   // world edges
   const zMid = (Z0 + Z1) / 2, zHalf = (Z1 - Z0) / 2;
   box(-HALF_W + 1, 80, zMid, 1, 120, zHalf, 0, 'invisible');

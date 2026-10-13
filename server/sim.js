@@ -11,8 +11,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as C from '../shared/constants.js';
 import { LOOT } from '../shared/loot.js';
 import {
-  RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT,
-  toWorld, toLocal, insideRV, qRotate,
+  RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_HULL,
+  toWorld, toLocal, insideRV, qRotate, qConj, hitZone,
 } from '../shared/rv.js';
 import { inMud } from '../shared/world.js';
 import { Mobs } from './mobs.js';
@@ -38,6 +38,26 @@ const add = (a, b) => v3(a.x + b.x, a.y + b.y, a.z + b.z);
 const mul = (a, s) => v3(a.x * s, a.y * s, a.z * s);
 const len = a => Math.hypot(a.x, a.y, a.z);
 const r3 = n => Math.round(n * 1000) / 1000;
+// what a crash into the world's parts is called (the toast: "Sam put the RV into the ranger gate")
+const CYL_NAMES = { tree: 'a tree', deadtree: 'a dead tree', deadtree_decor: 'a dead tree', rock: 'a rock', post: 'a post', cactus: 'a cactus', haybale: 'a hay bale', cairn: 'a cairn' };
+function staticName(s) {
+  if (s.part === 'rim_slab') return 'the canyon wall';
+  if (s.part === 'parked_rv') return 'a parked RV';
+  if (s.part === 'keypad_post') return 'the keypad post';
+  if (s.part === 'log_seat') return 'the campfire logs';
+  if (s.poiType === 'junk') return 'the junk heap';
+  if (s.poiType === 'crash') return 'the wreck';
+  if (s.poiType === 'yard') return 'the yard sale';
+  if (s.poiType === 'gas') return 'the gas station';
+  if (s.poiType === 'semi') return 'the wrecked semi';
+  if (s.poiType === 'dino') return 'the dinosaur';
+  if (s.town === 'pawn') return "Ed's pawn shop";
+  if (s.town === 'store') return 'the general store';
+  if (s.town === 'casino') return 'the casino';
+  if (s.town === 'gus') return "Gus's bench";
+  if (s.mat === 'invisible') return 'the edge of the world';
+  return 'a building';
+}
 const r4 = n => Math.round(n * 10000) / 10000;
 
 function shapeDesc(shape) {
@@ -55,7 +75,7 @@ export function shapeVolume(shape) {
 
 export class Sim {
   // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday
-  constructor(W, { carry = [], spawnAt = null } = {}) {
+  constructor(W, { carry = [], spawnAt = null, cond = 100 } = {}) {
     this.W = W;
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
@@ -77,6 +97,12 @@ export class Sim {
     this.mobs = null;                // the wildlife (server/mobs.js), from when the RV leaves camp till nightfall
     this.mobsDone = false;           // gone for the night: they don't come back the same day
     this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
+    // the RV's condition, as it drives (the room keeps the number: shared/constants.js RVH), and the crash
+    // being measured; nothing counts for the first moments of a day (or after a teleport)
+    this.setRvCond(cond);
+    this.quietUntil = C.RVH.QUIET;
+    this.hit = null;
+    this.colTag = new Map();         // collider handle -> what a crash into it is called
 
     this.buildTerrain();
     this.buildStatics();
@@ -109,31 +135,35 @@ export class Sim {
       .setTranslation(X0 + nx * cell / 2, 0, Z0 + nz * cell / 2)
       .setFriction(0.9).setCollisionGroups(GROUPS.world);
     this.terrain = this.world.createCollider(desc, body);
+    this.colTag.set(this.terrain.handle, 'the ground');
   }
 
   buildStatics() {
     const W = this.W;
     this.statics = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
     for (const s of W.statics) {
-      this.world.createCollider(RAPIER.ColliderDesc.cuboid(s.hx, s.hy, s.hz)
+      const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(s.hx, s.hy, s.hz)
         .setTranslation(s.x, s.y, s.z).setRotation(yawQ(s.ry)).setFriction(0.8)
         .setCollisionGroups(GROUPS.world), this.statics);
+      this.colTag.set(col.handle, staticName(s));
     }
     this.flimsy = new Set();
     for (const c of W.cyls) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cylinder(c.hh, c.r)
         .setTranslation(c.x, c.y, c.z).setCollisionGroups(FLIMSY.has(c.mat) ? GROUPS.flimsy : GROUPS.world), this.statics);
       if (FLIMSY.has(c.mat)) this.flimsy.add(col.handle);
+      this.colTag.set(col.handle, CYL_NAMES[c.mat] || 'a post');
     }
     // convex rocks (the crash buttes' fallen blocks): world gen's points, the very ones the client draws
     for (const h of W.hulls || []) {
       const d = RAPIER.ColliderDesc.convexHull(h.pts);
-      if (d) this.world.createCollider(d.setTranslation(h.x, h.y, h.z).setFriction(0.8).setCollisionGroups(GROUPS.world), this.statics);
+      if (d) this.colTag.set(this.world.createCollider(d.setTranslation(h.x, h.y, h.z).setFriction(0.8).setCollisionGroups(GROUPS.world), this.statics).handle, 'a fallen rock');
     }
     for (const g of W.gates) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(g.hx, g.hy, g.hz)
         .setTranslation(g.x, g.y, g.z).setCollisionGroups(GROUPS.world), this.statics);
       this.gateCols.set(g.id, col);
+      this.colTag.set(col.handle, 'the ranger gate');
     }
   }
 
@@ -269,11 +299,11 @@ export class Sim {
     try { this.world.free(); } catch {}
   }
 
-  setDoor(open) {
+  setDoor(open, pop = false) {
     this.doorOpen = open;
     this.rvCols.door.setEnabled(!open);
     this.rv.wakeUp();
-    this.out.push({ k: 'door', open });
+    this.out.push({ k: 'door', open, ...(pop ? { pop: true } : {}) });   // (pop: a crash threw it open)
   }
 
   openGate(id) {
@@ -286,6 +316,9 @@ export class Sim {
 
   // Teleport the RV (night parking, morning camp). Loot inside comes along.
   placeRV(x, z, yaw) {
+    // (a teleport is no crash: nothing counts for a moment while it settles where it was put)
+    this.quietUntil = this.t + C.RVH.QUIET;
+    this.hit = null;
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const riders = [];
     for (const p of this.props.values()) {
@@ -723,6 +756,10 @@ export class Sim {
       if (sp > 0.6) { brake = C.RV.BRAKE; }
       else { engine = th * C.RV.REVERSE * (1 - Math.max(0, Math.min(1, -sp / 6))); brake = 0; }
     }
+    // a worn RV is down on power; broken down, or stalled, the engine gives nothing: it coasts, and S (no
+    // reverse gear to find) holds it on the brakes
+    engine *= this.rvMods.engine;
+    if (this.rvMods.dead || this.t < this.rvMods.stallUntil) { engine = 0; if (brake !== C.RV.BRAKE) brake = th < -0.05 ? C.RV.BRAKE : 0.6; }
     if (hb) { brake = C.RV.BRAKE * 1.6; engine = 0; }
     const steerTarget = st * C.RV.STEER_MAX * (1 - 0.5 * Math.min(1, Math.abs(sp) / C.RV.TOP_SPEED));
     this.steer += (steerTarget - this.steer) * Math.min(1, dt * 5);
@@ -810,7 +847,9 @@ export class Sim {
     // the RV's footprint passing over it, mobs.js)
     v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle) && !this.mobCols.has(c.handle));
     this.mobs?.beforePhysics();
+    const v0 = this.rv.linvel(), rvV0 = { x: v0.x, y: v0.y, z: v0.z };
     this.world.step(this.eq);
+    this.rvContact(dt, rvV0);
     // the wildlife reads what just happened to it (hits, run over, stuck) and to its jaws: before the knocks
     // below free anything that broke (a vase that shatters on a grumphorn still hit it)
     this.mobs?.postStep(dt, players);
@@ -845,7 +884,7 @@ export class Sim {
       p.knockG = g;
       let dmg = over * L.frag * 0.006 * p.max;
       if (p.holders.size) dmg *= 0.5;
-      { const l = toLocal(rp0, rq0, p.body.translation()); if (insideRV(l.x, l.y, l.z, 0.1)) dmg *= grade ? 0.33 : 0.5; }
+      { const l = toLocal(rp0, rq0, p.body.translation()); if (insideRV(l.x, l.y, l.z, 0.1)) dmg *= grade ? 0.33 : this.rvMods.rattle; }
       dmg = Math.min(dmg, p.max * 0.4);
       if (dmg < 1) continue;
       p.value -= dmg;
@@ -927,6 +966,63 @@ export class Sim {
   }
 
   // Is the RV upside-down / on its side?
+  // the RV's condition as the drive sees it (the room keeps the number): power, the rattle loose loot inside
+  // takes, broken down; a stall is set by the room (a knock while limping)
+  setRvCond(hp) {
+    const b = C.rvBand(hp);
+    this.rvMods = { engine: b.engine, rattle: b.rattle, dead: hp <= 0, stallUntil: this.rvMods?.stallUntil || 0, band: b.name };
+  }
+  // A crash: how much the RV's velocity changed across the physics step itself (contacts only: the engine,
+  // brakes, suspension, mud, the winch and pushes were all applied before it), gravity put back, along the
+  // ground in its own frame (up and down is the springs'). Steps of GATE m/s or more within WIN s of each
+  // other are one hit, its size their summed change; a hit goes out as an 'rvhit' for the room to price,
+  // named for what the RV touched most (a hit on the wildlife is the wildlife's to price: mobs.js)
+  rvContact(dt, v0) {
+    const v1 = this.rv.linvel(), q = this.rv.rotation();
+    const d = qRotate(qConj(q), v3(v1.x - v0.x, v1.y - v0.y + 9.81 * dt, v1.z - v0.z)), h = Math.hypot(d.x, d.z);
+    if (this.t < this.quietUntil) { this.hit = null; return; }
+    if (h >= C.RVH.GATE) {
+      if (!this.hit) this.hit = { x: 0, z: 0, last: this.t, partner: this.rvPartner() };
+      this.hit.x += d.x; this.hit.z += d.z; this.hit.last = this.t;
+    } else if (this.hit && this.t - this.hit.last > C.RVH.WIN) {
+      const hit = this.hit, dv = Math.hypot(hit.x, hit.z);
+      this.hit = null;
+      if (hit.partner === 'mob') return;
+      const t = this.rv.translation();
+      this.out.push({ k: 'rvhit', why: 'crash', dv: r3(dv), zone: hitZone(hit), what: hit.partner, at: [r3(t.x), r3(t.y + 1.2), r3(t.z)] });
+    }
+  }
+  // what the RV's outside is touching most (its loot riding inside aside): the name a crash goes by
+  rvPartner() {
+    const count = new Map(), w = this.world, rp = this.rv.translation(), rq = this.rv.rotation();
+    for (const name of RV_HULL) {
+      const col = this.rvCols[name];
+      if (!col) continue;
+      w.contactPairsWith(col, c2 => {
+        if (!c2) return;
+        let n = 0;
+        w.contactPair(col, c2, man => { n += man.numContacts(); });
+        if (n > 0) count.set(c2.handle, (count.get(c2.handle) || 0) + n);
+      });
+    }
+    let best = null, bn = 0;
+    for (const [hd, n] of count) {
+      let name = this.colTag.get(hd);
+      if (!name) {
+        if (this.mobCols.has(hd)) name = 'mob';
+        else {
+          const id = this.byCollider.get(hd), p = id != null && this.props.get(id);
+          if (!p) continue;
+          const l = toLocal(rp, rq, p.body.translation());
+          if (insideRV(l.x, l.y, l.z, 0.2)) continue;   // (its own cargo)
+          name = p.type === 'boulder' ? 'the boulder' : `the ${LOOT[p.type]?.name || 'thing'}`;
+        }
+      }
+      if (n > bn) { bn = n; best = name; }
+    }
+    return best || 'something';
+  }
+
   rvFlipped() {
     const up = qRotate(this.rv.rotation(), v3(0, 1, 0));
     return up.y < 0.35;

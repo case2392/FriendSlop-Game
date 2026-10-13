@@ -79,6 +79,16 @@ export const RV_SEAT_EXIT = [
 ];
 
 export const RV_WINCH = { x: 0, y: -0.42, z: 4.26 };
+// the engine hatch on the rear wall (the roadside fix, broken down), and the parts of the RV's outside that
+// name a crash (server/sim.js rvContact)
+export const RV_HATCH = { x: 0, y: 0.3, z: -4.15 };
+export const RV_HULL = ['chassis', 'wallL', 'wallR_rear', 'wallR_front', 'door', 'wallRear', 'windshield', 'roof', 'brow', 'bumperF', 'bumperR'];
+// which side of the RV a hit landed on, from the change of velocity it caused (in the RV's frame): the RV is
+// pushed away from what it hit
+export function hitZone(v) {
+  if (Math.abs(v.z) >= Math.abs(v.x)) return v.z < 0 ? 'front' : 'rear';
+  return v.x < 0 ? 'left' : 'right';
+}
 export const RV_MAP_SPOT = { x: -0.45, y: 0.95, z: 3.55 };   // on the dash, passenger side
 
 export const RV_WHEELS = [
