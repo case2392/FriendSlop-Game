@@ -1978,7 +1978,7 @@ function hud(rv) {
   }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.brk ? ' · BROKEN DOWN: somebody hold E at the engine hatch on the back' : ''}${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
