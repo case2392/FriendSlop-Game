@@ -27,6 +27,8 @@ export const RT = {
   BITE_T: 2.0, WRIGGLE_T: 3.0, BITE_STAMINA: 20,     // held by one person: bites (day 2 on) or wriggles free
   HORN_R: 20, HORN_DEAF: 15, SPOOK_T: 4,             // the horn scatters them (then they ignore it a while)
   STASH_R: 1.2, HOME_R: 3, COOLDOWN: [5, 9], TRAP_T: 8,
+  RAID_R: 40, RAID_CLEAR: 6, RAID_T: 8, HOP_IN: [2.5, 5.6], HOP_OUT: [2.5, 2.5],   // raids on the RV left open
+  NIP_R: 7, NIP_CD: 3, NIP_REST: 5,                  // a stranger at the den is nipped (each player every NIP_CD s)
 };
 export const GH = {
   HH: 0.75, R: 0.7, MASS: 800,                       // capsule lying along z: 2.9 m long, 1.4 m thick
@@ -45,18 +47,25 @@ export const GH = {
   COST: { propJ: 0.1, propCap: 40, windedX: 2, shove: 2, rvPerMs: 20, winchPerS: 6, charge: 8, toss: 35 },
   HIT_J: 10, HIT_V: 0.5,                             // a hit: a thing coming at it this fast, bringing this much momentum (kg m/s)
 };
+// rockfall (days 3-5, at the narrows): it comes down when the RV gets within NEAR m or the boulder is moved,
+// or early on a honk within HONK_R m; WARN s of rumble first, then a rock every GAP s breaks off the face at
+// PUSH m/s; a rock within HIT_R m of someone on foot knocks them out going faster than KO_V, and bowls them
+// over (a stumble: they drop what they hold) faster than BUMP_V, for LIVE s after it drops (then it's an
+// ordinary stone)
+export const RF = { NEAR: 25, HONK_R: 60, WARN: 1.5, GAP: 0.3, PUSH: 2.5, KO_V: 6, BUMP_V: 2.5, HIT_R: 0.9, LIVE: 8 };
 // per day: ringtail dens (how many, ringtails in each, items each den may steal, how close a watcher scares
-// them off, whether they bite), and where the grumphorns sleep (past which obstacle, how far) and how long
-// one glares before it charges
+// them off; whether they bite, nip strangers at the den and raid the RV left open), where the grumphorns
+// sleep (past which obstacle, how far) and how long one glares before it charges, and whether there's loose
+// rock on the narrows
 export const PLAN = [
-  { dens: 1, perDen: 2, cap: 2, fear: 6,   bites: false, glare: 0,   beds: [] },
-  { dens: 2, perDen: 3, cap: 3, fear: 5,   bites: true,  glare: 1.0, beds: [{ ob: 'mud', from: 'z1', dz: 12 }] },
-  { dens: 2, perDen: 3, cap: 3, fear: 4,   bites: true,  glare: 0.9, beds: [{ ob: 'gate', dz: 6.5 }] },
-  { dens: 3, perDen: 3, cap: 3, fear: 4,   bites: true,  glare: 0.8, beds: [{ ob: 'boulder', dz: 12 }] },
-  { dens: 3, perDen: 3, cap: 3, fear: 3.5, bites: true,  glare: 0.7, beds: [{ ob: 'gate', dz: 6.5 }, { ob: 'boulder', dz: 12 }] },
+  { dens: 1, perDen: 2, cap: 2, fear: 6,   bites: false, raids: false, glare: 0,   rocks: false, beds: [] },
+  { dens: 2, perDen: 3, cap: 3, fear: 5,   bites: true,  raids: true,  glare: 1.0, rocks: false, beds: [{ ob: 'mud', from: 'z1', dz: 12 }] },
+  { dens: 2, perDen: 3, cap: 3, fear: 4,   bites: true,  raids: true,  glare: 0.9, rocks: true,  beds: [{ ob: 'gate', dz: 6.5 }] },
+  { dens: 3, perDen: 3, cap: 3, fear: 4,   bites: true,  raids: true,  glare: 0.8, rocks: true,  beds: [{ ob: 'boulder', dz: 12 }] },
+  { dens: 3, perDen: 3, cap: 3, fear: 3.5, bites: true,  raids: true,  glare: 0.7, rocks: true,  beds: [{ ob: 'gate', dz: 6.5 }, { ob: 'boulder', dz: 12 }] },
 ];
 // states, sent in the snapshot (plus the bits below)
-export const RST = { DEN: 0, SNEAK: 1, SNATCH: 2, RUN: 3, STASH: 4, HELD: 5, STUN: 6, SPOOK: 7, FLUNG: 8, GONE: 9, TRAPPED: 10 };
+export const RST = { DEN: 0, SNEAK: 1, SNATCH: 2, RUN: 3, STASH: 4, HELD: 5, STUN: 6, SPOOK: 7, FLUNG: 8, GONE: 9, TRAPPED: 10, RAID: 11, INRV: 12, NIP: 13 };
 export const GST = { SLEEP: 0, RISE: 1, GLARE: 2, CHARGE: 3, WINDED: 4, ROAM: 5, DOZE: 6, LEAVE: 7, LEFT: 8, HELD: 9 };
 export const ST_CARRY = 32, ST_MOOD = 64, ST_MASK = 31;
 export const crewFactor = n => GH.CREW[Math.max(1, Math.min(6, n)) - 1];

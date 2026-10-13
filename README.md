@@ -47,6 +47,20 @@ with a friend); shove it or hit it with something and it's stunned; honk and the
 and it's squashed flat for a while. A den only steals so much a day, and everything it took is still
 there at its den: go and get it back. The tracker says what they're holding of yours.
 
+From day 2 they get bolder. Leave the RV parked with its door open and nobody near it, and one may hop in
+and run off with the best loose thing in the cabin: shut the door, stay by it, or bungee the cargo down
+($90 at the store). Walk up to a den and they come out to nip you: you stumble and drop whatever you carry
+(they leave alone anyone kneeling by a friend who is down).
+
+From day 3, **loose rock** sits on the rim above the narrows (the boulder and the ranger gate). A yellow
+LOOSE ROCK sign warns you and the navigator's map says "HONK FIRST". When the RV gets close, or someone
+shoves the boulder, the rim rumbles and the rocks come down: one still falling fast knocks out whoever it
+hits, a rolling one bowls you over. Honk at the sign and it all comes down before you get there. Afterwards
+the rocks are just heavy stones, good for throwing at a Grumphorn.
+
+And mind your aim: junk you throw at a friend knocks them over (never out) and they drop what they hold.
+Everyone hears who did it, and the end of the run counts the beanings.
+
 ## Five days, five places
 
 Every day is a different biome with its own ground, sky, fog, rocks, plants

@@ -172,10 +172,10 @@ export class Sim {
     if (!L) return null;
     id = id ?? this.nextPropId++;
     const bd = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setRotation(q)
-      .setLinearDamping(0.05).setAngularDamping(L.mob ? 2 : 0.3).setCcdEnabled(L.mass < 60 || !!L.mob);
+      .setLinearDamping(0.05).setAngularDamping(L.adamp ?? (L.mob ? 2 : 0.3)).setCcdEnabled(L.mass < 60 || !!L.mob);
     const body = this.world.createRigidBody(bd);
     const vol = shapeVolume(L.shape);
-    let cd = shapeDesc(L.shape).setDensity(L.mass / vol).setRestitution(0.1);
+    let cd = shapeDesc(L.shape).setDensity(L.mass / vol).setRestitution(L.bounce ?? 0.1);
     if (L.mob) {
       // wildlife walks on its own legs (a velocity servo in mobs.js): no friction to fight, whatever it
       // stands on (Rapier averages the two frictions by default: 'Min' keeps it at 0). No contact-force
@@ -425,7 +425,7 @@ export class Sim {
     const p = this.props.get(h.id);
     if (!p) return;
     p.holders.delete(pid);
-    if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].mob ? 2 : 0.3);
+    if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].adamp ?? (LOOT[p.type].mob ? 2 : 0.3));
     if (throwDir) {
       const m = p.body.mass();
       const imp = Math.min(m * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP);
@@ -433,7 +433,7 @@ export class Sim {
       const n = len(d) || 1;
       p.body.applyImpulse(mul(d, imp / n), true);
       if (pl?.vel) p.body.applyImpulse(mul(pl.vel, m * 0.6), true);
-      p.thrownBy = pid; p.thrownAt = this.t;
+      p.thrownBy = pid; p.thrownAt = this.t; p.beaned = false;
       this.out.push({ k: 'throw', id: p.id, by: pid });
     }
     this.mobs?.onReleased(p, pid, !!throwDir);
@@ -850,6 +850,28 @@ export class Sim {
         this.removeProp(p.id);
       } else {
         this.out.push({ k: 'dmg', id: p.id, value: Math.round(p.value), lost: Math.round(dmg) });
+      }
+    }
+
+    // a thrown thing hitting a friend (not whoever threw it) beans them: a stumble, and they drop what they
+    // carry. Never a knockout, never a bill
+    for (const p of this.props.values()) {
+      if (p.thrownBy == null || p.beaned || this.t - p.thrownAt > 1.5) continue;
+      const v = p.body.linvel(), sp = Math.hypot(v.x, v.y, v.z);
+      if (sp < 5) continue;
+      const t = p.body.translation();
+      for (const pl of players.values()) {
+        if (pl.id === p.thrownBy || !pl.pos || pl.ko || pl.seat != null || (this.knockCd.get(pl.id) || 0) > this.t) continue;
+        const y = Math.max(pl.pos.y + 0.3, Math.min(pl.pos.y + 1.6, t.y));
+        if (Math.hypot(t.x - pl.pos.x, t.y - y, t.z - pl.pos.z) > 0.6) continue;
+        p.beaned = true;
+        this.knockCd.set(pl.id, this.t + 1);
+        const h = this.holds.get(pl.id);
+        if (h) { this.release(pl.id); this.out.push({ k: 'slip', id: h.kind === 'prop' ? h.id : null, by: pl.id, why: 'bean' }); }
+        const k = 2.5 / (Math.hypot(v.x, v.z) || 1);
+        this.out.push({ k: 'knock', id: pl.id, v: [r3(v.x * k), 2, r3(v.z * k)], ko: false, why: 'bean', by: p.thrownBy });
+        this.out.push({ k: 'bean', id: pl.id, by: p.thrownBy, item: p.id, type: p.type });
+        break;
       }
     }
 

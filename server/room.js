@@ -52,7 +52,7 @@ export class Room {
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
     for (const p of this.players.values()) p.walkie = false;   // a new trip buys its own walkies
-    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0 };
+    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0 };
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.startDay([]);
@@ -693,7 +693,8 @@ export class Room {
     const by = k?.by != null ? this.players.get(k.by)?.name : null;
     let how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)', mob: 'got tossed by the Grumphorn' }[m.why] || 'is down';
     if (k?.why === 'mob') how = 'got tossed by the Grumphorn';
-    else if (k?.why === 'shove' && by && m.why === 'fall') how = `ate dirt (${by} shoved them)`;
+    else if (k?.why === 'rock') how = 'got hit by a falling rock';
+    else if ((k?.why === 'shove' || k?.why === 'bean') && by && m.why === 'fall') how = `ate dirt (${by} ${k.why === 'bean' ? 'beaned' : 'shoved'} them)`;
     this.toast(`${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
   }
 
@@ -925,6 +926,11 @@ export class Room {
           pub.push({ k: 'thud', id: e.id, why });
         } else {
           if (e.k === 'break') { this.stats.broken += e.lost; this.dayStats.broken += e.lost; }
+          if (e.k === 'bean') {
+            const a = this.players.get(e.by), b = this.players.get(e.id);
+            this.stats.beanings = (this.stats.beanings || 0) + 1;
+            if (a && b) this.toast(`${a.name} beaned ${b.name} with the ${LOOT[e.type]?.name || 'loot'}.`, '#ffd166', 3);
+          }
           if (e.k === 'mob') this.onMobEvent(e);
           pub.push(e);
         }
@@ -942,11 +948,17 @@ export class Room {
     } else if (e.s === 'leave') {
       this.stats.beasts++;
       this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
+    } else if (e.s === 'unsteal') {
+      if (e.ours !== false) { this.stats.stolen -= e.value; this.dayStats.stolen -= e.value; }
     } else if (e.s === 'steal' && !e.again) {
       if (e.ours) { this.stats.stolen += e.value; this.dayStats.stolen += e.value; }
       const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, ours: false, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };
-      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours;
+      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours; q.raid = q.raid || !!e.raid;
       this.theftQ.set(e.den, q);
+    } else if (e.s === 'rumble') {
+      const where = e.ob === 'gate' ? 'the ranger gate' : 'the boulder';
+      this.toast(e.why === 'horn' ? `The horn shook loose rock off the rim by ${where}. Let it come down before you go through.`
+        : `ROCKS! Loose rock is coming down by ${where}. Get away from the walls!`, '#ff8a65', 4);
     } else if (e.s === 'recovered') {
       this.stats.recovered += e.value; this.dayStats.recovered += e.value;
     } else if (e.s === 'bite') {
@@ -962,10 +974,11 @@ export class Room {
       this.theftToastAt.set(den, this.t);
       const where = q.poi ? ` at ${STOP_NAMES[q.poi] || 'the stop'}` : '';
       // (the stop's own loot nobody had touched yet: they beat you to it)
+      const from = q.raid ? ' out of the RV' : '';
       if (!q.ours) this.toast(q.n === 1 ? `A ringtail beat you to the ${q.what} (${fmt$(q.value)})${where}. Its den is close by.`
         : `Ringtails beat you to ${q.n} things (${fmt$(q.value)})${where}. Their den is close by.`, '#ffd166', 4);
-      else this.toast(q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${where}! Its den is close by.`
-        : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${where}! Their den is close by.`, '#ffb74d', 4);
+      else this.toast((q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${from}${where}! Its den is close by.`
+        : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${from}${where}! Their den is close by.`) + (q.raid ? ' Shut the door when you leave the RV.' : ''), '#ffb74d', 5);
     }
   }
 
@@ -989,6 +1002,7 @@ export class Room {
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
+      rfd: sim.mobs?.rockfalls.filter(r => r.st !== 'armed').map(r => r.id) || [],   // the loose rock that's come down
     };
   }
 

@@ -4,7 +4,8 @@
 //    home, what the loot loses on the way, and that no body ever goes non-finite;
 //  - every bed's grumphorn, woken by a fake player who keeps walking up to it: its charges stay by the
 //    road, and once its patience is gone it walks off and lies down within a metre of its spot.
-//   node tools/mobsoak.mjs [--seeds 12] [--days 1-5] [--secs 90] [--theft]     exit code 1 when a gate fails
+//  - with --raids instead: RV raids (day 2 on), see soakRaids.
+//   node tools/mobsoak.mjs [--seeds 12] [--days 1-5] [--secs 90] [--theft] [--raids]     exit code 1 when a gate fails
 // --theft also runs each day's dens guarded (the fake player at the stop, facing the loot) and prints
 // thefts careless vs guarded.
 // Gates: reach >= 95%, stash >= 85%, carried loss p90 <= $30, 0 non-finite, the wildlife's share of a
@@ -18,6 +19,8 @@ const imp = f => import(pathToFileURL(path.join(HERE, '..', f)).href);
 const { generateLeg } = await imp('shared/world.js');
 const { Sim, initPhysics } = await imp('server/sim.js');
 const { RST, GST, FLAG } = { ...(await imp('shared/mobs.js')), ...(await imp('shared/constants.js')) };
+const { LOOT } = await imp('shared/loot.js');
+const { toWorld, RV_DIM } = await imp('shared/rv.js');
 await initPhysics();
 
 const fake = (id, x, y, z, look) => ({ id, pos: { x, y: y + 0.9, z }, eye: { x, y: y + 1.6, z }, look, ko: false, par: 0, seat: null, flags: 0, mode: 0, name: `P${id}` });
@@ -114,6 +117,59 @@ export function soakBeds(seed, day, { secs = 60 } = {}) {
   return out;
 }
 
+// RV raids on (seed, day >= 2): for each den, the RV parked on the road by its stop (facing up the road, then
+// turned round: its door on one side, then the other), door open, three light things loose in the cabin,
+// the stop's loose loot cleared away (so the den has nothing else to go for) and nobody about but a fake
+// player 50 m out past the den. Of the raids started, how many get the thing home.
+export function soakRaids(seed, day, { secs = 60 } = {}) {
+  const W = generateLeg(seed, day);
+  const out = [];
+  for (const d of W.dens) for (const turn of [0, Math.PI]) {
+    const sim = new Sim(W);
+    for (const g of W.gates) sim.openGate(g.id);
+    const mobs = sim.ensureMobs({ day, crew: 4, seed });
+    mobs.rtSpawnDen(d);
+    const poi = W.pois.find(p => p.id === d.poi);
+    const z = poi?.z ?? d.z, x = W.roadX(z), yaw = Math.atan2(W.roadX(z + 1) - W.roadX(z - 1), 2) + turn;
+    sim.placeRV(x, z, yaw);
+    sim.setDrive({ th: 0, st: 0, hb: 1 });   // parked: the parking brake (the room sets it with nobody at the wheel)
+    if (!sim.doorOpen) sim.setDoor(true);
+    for (const p of [...sim.props.values()]) if (!p.mob && !mobs.hoard.has(p.id) && LOOT[p.type] && !LOOT[p.type].tool && Math.hypot(p.body.translation().x - d.x, p.body.translation().z - d.z) < 60) sim.removeProp(p.id);
+    const types = ['vase', 'painting', 'trophy', 'lamp', 'gnome', 'toaster'];
+    const rp = sim.rv.translation(), rq = sim.rv.rotation();
+    for (let k = 0; k < 3; k++) {
+      const t = types[(seed + day * 3 + d.id + k) % types.length];
+      sim.addProp(t, toWorld(rp, rq, { x: 0.35 - k * 0.35, y: 0.5, z: -1.4 + k * 1.1 }), { x: 0, y: 0, z: 0, w: 1 }, 200, 200);
+    }
+    const ax = d.x - (poi?.x ?? x), az = d.z - (poi?.z ?? d.z), l = Math.hypot(ax, az) || 1;
+    const fx = d.x + ax / l * 50, fz = d.z + az / l * 50;
+    const players = new Map([[1, fake(1, fx, W.heightAt(fx, fz), fz, { x: ax / l, y: 0, z: az / l })]]);
+    const r = { seed, day, den: d.id, turn, door: 0, starts: 0, inrv: 0, took: 0, home: 0, nonFinite: 0, losses: [] };
+    const door = sim.rvToWorld({ x: -1.6, y: 0, z: RV_DIM.DOOR_Z });
+    r.door = Math.hypot(door.x - d.x, door.z - d.z);
+    const last = new Map(), raided = new Map();
+    for (let i = 0; i < secs * 60; i++) {
+      sim.step(1 / 60, players);
+      for (const e of sim.out.splice(0)) {
+        if (e.k !== 'mob') continue;
+        if (e.s === 'steal' && e.raid && !e.again) { r.took++; raided.set(e.item, e.value); }
+        if (e.s === 'stash' && raided.has(e.item)) { r.home++; r.losses.push(raided.get(e.item) - (sim.props.get(e.item)?.value ?? 0)); }
+      }
+      for (const m of mobs.list.values()) {
+        if (m.type !== 'ringtail') continue;
+        const was = last.get(m.id);
+        if (was !== RST.RAID && m.st === RST.RAID) r.starts++;
+        if (was !== RST.INRV && m.st === RST.INRV) r.inrv++;
+        last.set(m.id, m.st);
+      }
+      if (i % 30 === 0) for (const id of mobs.list.keys()) { const p = sim.props.get(id); if (p && !finite(p.body.translation())) r.nonFinite++; }
+    }
+    sim.free();
+    out.push(r);
+  }
+  return out;
+}
+
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
 if (isMain) {
   const args = process.argv.slice(2);
@@ -124,6 +180,23 @@ if (isMain) {
   const theft = args.includes('--theft');
   let failed = false;
   const gate = (c, m) => { console.log(c ? 'ok  ' : 'FAIL', m); if (!c) failed = true; };
+  if (args.includes('--raids')) {
+    const R = [];
+    for (let day = Math.max(2, d0); day <= (d1 || d0); day++) for (const seed of seeds) {
+      for (const r of soakRaids(seed, day)) {
+        R.push(r);
+        console.log(`seed ${seed} day ${day} den ${r.den}${r.turn ? ' (RV turned round)' : ''}: door ${r.door.toFixed(1)} m away, ${r.starts} raids, ${r.inrv} got in, ${r.took} took something, ${r.home} got it home`);
+      }
+    }
+    const sum = k => R.reduce((a, r) => a + r[k], 0), dens = new Set(R.map(r => `${r.seed}/${r.day}/${r.den}`)), raided = new Set(R.filter(r => r.starts).map(r => `${r.seed}/${r.day}/${r.den}`));
+    const ls = R.flatMap(r => r.losses).sort((a, b) => a - b), q = f => ls.length ? ls[Math.min(ls.length - 1, Math.floor(f * ls.length))] : 0;
+    console.log(`\nraids: ${sum('starts')} started, ${sum('inrv')} got in, ${sum('took')} took something, ${sum('home')} got it home; what it lost on the way: median $${q(0.5).toFixed(0)}, p90 $${q(0.9).toFixed(0)}, worst $${(ls[ls.length - 1] ?? 0).toFixed(0)}`);
+    gate(sum('starts') > 0 && sum('home') / sum('starts') >= 0.8, `raids completing ${(100 * sum('home') / Math.max(1, sum('starts'))).toFixed(1)}% (>= 80%)`);
+    // (a den raids only when it sees the RV's door and a way home round it with the loot: not every stop)
+    gate(raided.size >= dens.size * 0.5, `dens that raid the RV parked by their stop, its door one way or the other: ${raided.size} of ${dens.size} (>= half)`);
+    gate(sum('nonFinite') === 0, `${sum('nonFinite')} non-finite bodies`);
+    process.exit(failed ? 1 : 0);
+  }
   const T = { picks: 0, steals: 0, stashes: 0, losses: [], nonFinite: 0, stepMs: [], guarded: 0, careless: 0 };
   const beds = [];
   for (let day = d0; day <= (d1 || d0); day++) {

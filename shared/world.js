@@ -1339,16 +1339,49 @@ export function generateLeg(seed, day, opts = {}) {
         decor.push({ k: 'rock', x: bx, y: heightAt(bx, bz), z: bz, s: 0.7, ry: rngM() * 6.283, den: true });
       }
     }
-    return { dens, beds };
+    // loose rock up on a rim of each narrows (the boulder's and the gate's), days 3-5: where a rockfall comes
+    // down from (server/mobs.js: the RV coming close, or the boulder disturbed, brings it down on whoever is
+    // there; a honk well back brings it down early, on nobody). Five or six rocks strung along the lip short
+    // of the obstacle, and a warning sign back down the road
+    const rockfalls = [];
+    if (P.rocks) for (const o of obstacles) {
+      if (o.type !== 'boulder' && o.type !== 'gate') continue;
+      const side = rngM() < 0.5 ? -1 : 1, n = 5 + (rngM() < 0.5 ? 1 : 0), rim = [];
+      for (let k = 0; k < n; k++) {
+        const z = o.z - 5 - k * 2.4 - rngM() * 1.2, ry = roadY(z);
+        // loose on the face itself, two thirds of the way up the wall, a hand's width out from it
+        const top = heightAt(roadX(z) + side * 25, z) - ry;
+        if (top < 6) continue;
+        let at = null;
+        for (let d = 6.5; d <= 25; d += 0.25) {
+          const x = roadX(z) + side * d;
+          if (heightAt(x, z) - ry > 0.66 * top) { at = { x: roadX(z) + side * (d - 0.5), z }; break; }
+        }
+        if (!at) continue;
+        rim.push({ x: at.x, y: heightAt(at.x, at.z) + 0.6, z: at.z });
+      }
+      if (rim.length < 3) continue;
+      const beast = beds.some(b => b.obz === o.z);
+      rockfalls.push({ id: rockfalls.length, ob: o.type, obz: o.z, side, rim, beast });
+      // the warning, back down the road on the same side as the loose rock
+      let sx = roadX(o.z - 40) + side * 5.2, sz = o.z - 40;
+      find: for (let dz = 40; dz <= 56; dz += 4) for (const off of [5.2, 4.6, 6]) {
+        const zz = o.z - dz, xx = roadX(zz) + side * off;
+        if (flatAt(xx, zz, roadY(zz), 0.4) && !signs.some(q => Math.hypot(q.x - xx, q.z - zz) < 4)) { sx = xx; sz = zz; break find; }
+      }
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
+        lines: ['LOOSE ROCK', beast ? 'HONK FROM HERE' : 'HONK FIRST', 'KEEP MOVING'], bg: '#f2c14e', fg: '#1d1d1d', post: true, rock: true });
+    }
+    return { dens, beds, rockfalls };
   }
-  const wild = opts.mobs === false ? { dens: [], beds: [] } : placeWildlife();
+  const wild = opts.mobs === false ? { dens: [], beds: [], rockfalls: [] } : placeWildlife();
 
   return {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
     roadX, roadY, heightAt, topAt, townY,
     obstacles, pois, mesas, statics, cyls, hulls, talus, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
-    dens: wild.dens, beds: wild.beds,
+    dens: wild.dens, beds: wild.beds, rockfalls: wild.rockfalls,
   };
 }
 

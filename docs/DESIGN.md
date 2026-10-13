@@ -34,10 +34,11 @@ Working title. The repo stays `FriendSlop-Game`. The menu calls it a
   the game.
 - **Chill by default, wildlife on the side.** No permadeath, no health bars.
   The danger comes from gravity, the road, the clock, your friend Steve at
-  the roulette table, and the wildlife (Ringtails steal from the stops, and
-  from day 2 a Grumphorn sleeps past an obstacle): every theft costs loot you
-  can go and take back, every toss costs time and, if nobody picks you up, a
-  bill.
+  the roulette table, and the wildlife and the road (Ringtails steal from the
+  stops and, from day 2, from an RV left open; from day 2 a Grumphorn sleeps
+  past an obstacle; from day 3 loose rock waits above the narrows): every
+  theft costs loot you can go and take back, every toss costs time and, if
+  nobody picks you up, a bill.
 
 ---
 
@@ -243,9 +244,9 @@ the difficulty curve stays in the quota.
 | **The Ranger Gate** | Locked gate, 4-digit keypad | The code is brushed on a slab of rock up on the canyon rim (a sign at the gate says which rim). Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
 | *The Washout Gap* (M2) | A gap in the road | Carry planks from the junk pile and lay a bridge. The RV crosses on raycast wheels. | RVTY |
-| *Rockfall* (M2) | Falling rocks knock people over | Timing, and somebody's medical bill | PEAK |
+| **Rockfall** (days 3–5) | Loose rock on the rim above the boulder and the gate narrows (a LOOSE ROCK sign, "HONK FIRST" on the map). The RV coming close, or a shove on the boulder, brings it down after a rumble: a rock falling fast knocks out whoever it hits, a rolling one bowls them over | Honk at the sign and it falls before you get there; or hear the rumble and get clear of the walls. Afterwards the rocks are ammunition | timing + the driver's horn |
 | **The Grumphorn** (days 2–5) | A one-ton beast asleep on the road past the mud (day 2), behind the ranger gate (3), past the boulder (4), or both (5). Woken, it charges a fixed line and tosses the first person in its horns | Sneak past crouched, creep the RV by, or wear out its patience: throw junk, shove, ram it with everyone braced, winch it. At zero it drops its cowbell and leaves for good | physics + headcount |
-| **Ringtails** (every day) | Masked thieves in dens beside the stops (1 den on day 1, 3 by day 5). They sneak up on loot nobody is watching and run it home to their pile | Watch your loot (stand facing it); grab the thief (it drops it; from day 2 it bites a lone holder, so hold it with a friend), shove it, throw something at it, honk, or raid the den and take it all back. A den steals at most 2–3 things a day | headcount + attention |
+| **Ringtails** (every day) | Masked thieves in dens beside the stops (1 den on day 1, 3 by day 5). They sneak up on loot nobody is watching and run it home to their pile. From day 2 they raid an RV left open with nobody by its door, and nip anyone at their den (a stumble, and you drop what you carry) | Watch your loot (stand facing it); grab the thief (it drops it; from day 2 it bites a lone holder, so hold it with a friend), shove it, throw something at it, honk, or raid the den and take it all back. Shut the RV's door or bungee the cargo. A den steals at most 2–3 things a day | headcount + attention |
 
 **POIs** are worth the detour and cost time. Abandoned gas stations,
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get
@@ -475,7 +476,7 @@ Things the systems will produce without being scripted:
 | Milestone | Contents |
 |---|---|
 | **M1: vertical slice** (this branch) | First-person body, grab/carry/throw, climbing and stamina, KO and bills; the RV with driving, riding, pushing and the winch; loot and fragility; five generated legs in five biomes with the Grade, Boulder, Mud and Ranger Gate; a hand-painted art pass; a town with pawn, blackjack, double-or-nothing and the Repo Man; 5 days with quotas; repossession on the first miss; the paper map; walkies; spatial voice |
-| **M2: content** | Route forks, more biomes (the Strip, a swamp, a coast), the ledge road, the washout gap, rockfall, about 30 loot items, slots, physical roulette chips, store items, a fuel can loop, flat tires |
+| **M2: content** | Route forks, more biomes (the Strip, a swamp, a coast), the ledge road, the washout gap, about 30 loot items, slots, physical roulette chips, store items, a fuel can loop, flat tires |
 | **M3: feel** | Real ragdolls, a procedural radio with stations in the RV, better animation, weather (dust storms kill visibility, so there's more talking), night driving with headlights |
 | **M4: ship** | Steam build, Steam networking, achievements, daily trip seed leaderboard ("lowest medical bills"), a $5–8 price point |
 
@@ -507,9 +508,12 @@ over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
 - The Repo Man (one missed payment ends the run), night receipts, sleeping, and both
   endings.
 - Proximity voice with occlusion, KO muffling, and the walkie radio path.
+- The wildlife and the road's dangers: the Grumphorn (days 2–5), Ringtails at
+  the stops (with RV raids and den nips from day 2), rockfall at the narrows
+  (days 3–5), the shove, bracing, and beanings when you hit a friend.
 
 Not yet built (M2+): route forks, the ledge road, the washout gap and planks,
-rockfall, slots, physical roulette chips, odds-shifting items,
+slots, physical roulette chips, odds-shifting items,
 fuel, weather, night driving beyond headlights, the radio, real ragdolls.
 
 ## 14. Risks

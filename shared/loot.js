@@ -29,6 +29,8 @@ export const LOOT = {
   // not loot: tools
   map:      { name: 'Road Map',         shape: ['box', 0.2, 0.02, 0.14],  mass: 0.4, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true },
   boulder:  { name: 'Boulder',          shape: ['box', 2.0, 1.3, 1.5],    mass: 1000,value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true },
+  // what comes down off the rim in a rockfall (and makes good ammunition after); adamp: it rolls to a stop
+  rock:     { name: 'Loose Rock',       shape: ['ball', 0.24],            mass: 40,  value: 0,    frag: 0,   cls: '2h',    tough: 99, tool: true, adamp: 1.6, bounce: 0.35 },
   // wildlife
   ringtail: { name: 'Ringtail',         shape: ['ball', 0.24],            mass: 12,  value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, mob: 'ringtail', sensor: 0.34 },
   grumphorn:{ name: 'Grumphorn',        shape: ['cap', 0.75, 0.7],        mass: 800, value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true, mob: 'grumphorn' },

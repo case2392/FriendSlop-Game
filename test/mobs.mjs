@@ -1012,6 +1012,190 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
     `ringtails: the stop's own vase taken before anyone touched it isn't a theft from the crew (told ${told}, tracker $${thf}, stolen $${room.dayStats.stolen}, got back $${room.dayStats.recovered})`);
 }
 
+// ---- rockfall ----------------------------------------------------------------------------------------------
+const { RF } = await import('../shared/mobs.js');
+// a crew on day `day` of seed 4242 with the road started (the rockfalls armed); the RV parked well back
+function narrows(day, names = ['Ann', 'Bob']) {
+  const c = crew(names);
+  c.room.debug(c.ps[0], { op: 'day', d: day });
+  tick(c.room, 0.2);
+  c.room.phase = 'road';
+  tick(c.room, 0.1);
+  return { ...c, W: c.room.W, mobs: c.room.sim.mobs };
+}
+// where its first rock lands: the same fall with nobody about (the sim is deterministic)
+function firstLanding(day) {
+  const { room, ps: [A, B], W, mobs } = narrows(day);
+  const rf = mobs.rockfalls[0];
+  stand(room, B, W.roadX(rf.obz - 150), rf.obz - 150, 0);
+  mobs.rfTrigger(rf, 'test');
+  for (let i = 0; i < 60 * 6; i++) {
+    tick(room, 1 / 60);
+    const p = rf.rocks[0] && room.sim.props.get(rf.rocks[0].id);
+    if (!p) continue;
+    const t = p.body.translation(), v = p.body.linvel();
+    if (t.y - W.heightAt(t.x, t.z) < 0.6 && Math.hypot(v.x, v.y, v.z) > RF.KO_V) return { x: t.x, z: t.z };
+  }
+  return null;
+}
+{
+  // RF1: standing where a rock lands: knocked out (no bill), the crew warned first and told what happened
+  const at = firstLanding(4);
+  const { room, ps: [A, B], mobs } = narrows(4);
+  const rf = mobs.rockfalls[0], bank = room.bank;
+  stand(room, A, room.W.roadX(rf.obz - 150), rf.obz - 150, 0);
+  mobs.rfTrigger(rf, 'test');
+  for (let i = 0; i < 60 * 6 && !knocks(B).length; i++) { stand(room, B, at.x, at.z, 0); tick(room, 1 / 60); }
+  const k = knocks(B)[0];
+  if (k?.ko) room.handle(B, { t: 'ko', why: 'fall' });
+  check(at && k?.ko && k.why === 'rock' && room.bank === bank && evs(A.conn, 'mob').some(e => e.s === 'rumble') && A.conn.has(x => x.t === 'toast' && /ROCKS!/.test(x.text)) && A.conn.has(x => x.t === 'toast' && /Bob got hit by a falling rock/.test(x.text)),
+    `rockfall: standing where a rock lands knocks you out (${k ? (k.ko ? 'KO' : 'stumble') : 'missed'}, why ${k?.why}), after the rumble and a warning, and bills nothing`);
+}
+{
+  // RF2: the RV coming within 25 m brings it down; a honk 50 m back brings it down early, and only once
+  for (const honk of [false, true]) {
+    const { room, ps: [A], W, mobs } = narrows(4, ['Ann']);
+    const rf = mobs.rockfalls.find(r => r.ob === 'boulder');
+    room.sim.placeRV(W.roadX(rf.obz - 70), rf.obz - 70, Math.atan2(W.roadX(rf.obz - 67) - W.roadX(rf.obz - 73), 6));
+    tick(room, 0.2);
+    let rumbleAt = null, honked = false;
+    driveAt(room, A, 4, 18, i => {
+      const z = room.sim.rv.translation().z;
+      if (honk && !honked && rf.obz - z < 52) { honked = true; room.handle(A, { t: 'horn' }); }
+      if (rumbleAt == null && rf.st !== 'armed') rumbleAt = rf.obz - z;
+      if (z > rf.obz - 18) room.handle(A, { t: 'drv', th: -1, st: 0, hb: 1 });
+    });
+    const rumbles = evs(A.conn, 'mob').filter(e => e.s === 'rumble' && e.rf === rf.id).length;
+    if (!honk) check(rumbleAt != null && rumbleAt <= RF.NEAR + 1 && rf.rocks.length >= 5 && rumbles === 1, `rockfall: the RV coming within ${RF.NEAR} m brings it down (at ${rumbleAt?.toFixed(1)} m, ${rf.rocks.length} rocks)`);
+    else check(rumbleAt != null && rumbleAt > 40 && rumbles === 1, `rockfall: a honk ${rumbleAt?.toFixed(0)} m back brings it down early, and driving up after doesn't bring down more (${rumbles} rumble)`);
+    A.seat = null;
+  }
+}
+{
+  // RF3: moving the boulder brings it down too
+  const { room, ps: [A], W, mobs } = narrows(4, ['Ann']);
+  const rf = mobs.rockfalls.find(r => r.ob === 'boulder'), b = room.sim.props.get(rf.boulder);
+  tick(room, 0.5);
+  const st0 = rf.st;
+  b.body.setTranslation({ x: rf.b0.x + 0.8, y: rf.b0.y, z: rf.b0.z }, true);
+  tick(room, 0.1);
+  check(st0 === 'armed' && rf.st === 'rumble', `rockfall: shoving the boulder aside brings it down (${st0} -> ${rf.st})`);
+}
+{
+  // RF4: where: days 3-5, on the face of a wall at each narrows (the boulder's, the gate's), 5-6 rocks; signs
+  const bad = [];
+  for (const seed of [4242, 7, 777]) for (let day = 1; day <= 5; day++) {
+    const W = generateLeg(seed, day), n = W.obstacles.filter(o => o.type === 'boulder' || o.type === 'gate').length;
+    if (day < 3 && W.rockfalls.length) bad.push(`${seed}/${day} rockfall before day 3`);
+    if (day >= 3 && W.rockfalls.length !== n) bad.push(`${seed}/${day} ${W.rockfalls.length} rockfalls for ${n} narrows`);
+    for (const r of W.rockfalls) {
+      if (r.rim.length < 5) bad.push(`${seed}/${day} ${r.rim.length} rocks`);
+      for (const p of r.rim) { const up = p.y - W.roadY(p.z), off = Math.abs(p.x - W.roadX(p.z)); if (up < 3 || up > 25 || off < 6 || off > 25 || p.z > r.obz - 3) bad.push(`${seed}/${day} rock at ${off.toFixed(1)} m out, ${up.toFixed(1)} m up`); }
+      if (!W.signs.some(q => q.rock && Math.abs(q.z - (r.obz - 48)) < 10)) bad.push(`${seed}/${day} no warning sign`);
+    }
+  }
+  check(!bad.length, `rockfall: loose rock on the walls of every narrows on days 3-5 (3 seeds), with a sign back down the road${bad.length ? ': ' + bad.slice(0, 5).join('; ') : ''}`);
+}
+
+// ---- raids, nips, beanings ---------------------------------------------------------------------------------
+// a ringtail with its den 14 m off the RV's door side (side -1; side 1: off the other side), the RV parked in
+// camp, on day `day`
+function byTheRV(day, names = ['Ann'], side = -1) {
+  const c = crew(names);
+  if (day !== 1) { c.room.debug(c.ps[0], { op: 'day', d: day }); tick(c.room, 0.2); }
+  c.room.mobsOn = false;
+  const sim = c.room.sim, rp = sim.rv.translation(), rq = sim.rv.rotation();
+  if (!sim.doorOpen) sim.setDoor(true);
+  const dp = toWorld(rp, rq, { x: 14 * side, y: 0, z: 2 });
+  const id = mobAt(c.room, c.ps[0], 'ringtail', dp.x, dp.z);
+  const far = toWorld(rp, rq, { x: 30, y: 0, z: 30 });
+  for (const P of c.ps) stand(c.room, P, far.x, far.z, 0);
+  const vase = c.room.sim.addProp('vase', toWorld(rp, rq, { x: 0.3, y: 0.5, z: -1.2 }), { x: 0, y: 0, z: 0, w: 1 }, 300, 300);
+  return { ...c, sim, id, m: mobOf(c.room, id), vase, rp, rq };
+}
+{
+  // P1: the RV parked with its door open and nobody by it: a ringtail hops in and takes the vase home. Its den
+  // off the far side, it goes under the RV to the door, and back round the RV with the vase
+  const res = [];
+  for (const side of [-1, 1]) {
+    const { room, ps: [A], sim, m, vase } = byTheRV(2, ['Ann'], side);
+    let home = false, dmg = 0;
+    for (let i = 0; i < 60 * 45 && !home; i++) { tick(room, 1 / 60); home = mobEvs(A, 'stash').some(e => e.item === vase.id); }
+    const t = at(room, vase.id), D = sim.mobs.denOf(m);
+    const ok = home && Math.hypot(t.x - D.x, t.z - D.z) < 3 && room.dayStats.stolen > 0 && room.dayStats.stolen <= 300 && D.thefts === 1 && A.conn.has(x => x.t === 'toast' && /out of the RV/.test(x.text) && /Shut the door/.test(x.text));
+    res.push(`${side < 0 ? 'door side' : 'far side'}: ${ok ? 'home' : 'FAILED'} (stolen $${room.dayStats.stolen}, counted ${D.thefts}, vase $${Math.round(sim.props.get(vase.id)?.value ?? 0)})`);
+  }
+  check(res.every(r => /: home/.test(r)), `raids: the RV left open with nobody by it, a ringtail takes the vase out of it and home, its den off either side (${res.join('; ')})`);
+}
+{
+  // P2: a shut door, a bungee'd vase, someone by the door, or day 1: nothing goes
+  const cases = [['door shut', r => r.sim.setDoor(false)], ['tied down', r => r.sim.tieDown()], ['guarded', r => { const d = toWorld(r.rp, r.rq, { x: -3, y: 0, z: 0.35 }); stand(r.room, r.ps[0], d.x, d.z, 0); }], ['day 1', null]];
+  const out = [];
+  for (const [name, fn] of cases) {
+    const r = byTheRV(name === 'day 1' ? 1 : 2);
+    fn?.(r);
+    const guard = name === 'guarded' ? toWorld(r.rp, r.rq, { x: -3, y: 0, z: 0.35 }) : null;
+    for (let i = 0; i < 60 * 30; i++) { if (guard) stand(r.room, r.ps[0], guard.x, guard.z, 0); tick(r.room, 1 / 60); }
+    out.push(`${name}: ${mobEvs(r.ps[0], 'steal').length ? 'RAIDED' : 'safe'}`);
+  }
+  check(out.every(o => o.endsWith('safe')), `raids: never through a shut door, never bungee'd cargo, never with someone by the door, never on day 1 (${out.join(', ')})`);
+}
+{
+  // P3: a stranger at a den, day 2 on: nipped (a stumble, never a knockout), and drops what they carry; day 1 never
+  const res = {};
+  for (const day of [1, 2]) {
+    const c = crew(['Ann', 'Bob']);
+    if (day > 1) { c.room.debug(c.ps[0], { op: 'day', d: day }); tick(c.room, 0.2); }
+    c.room.mobsOn = false;
+    const { room, ps: [A, B] } = c, W = room.W, g = openGround(room);
+    room.sim.ensureMobs({ day, crew: 2, seed: room.seed }).rtSpawnDen({ id: 7, x: g.x, y: W.heightAt(g.x, g.z), z: g.z, ry: 0, stash: [] });
+    stand(room, A, g.x - 20, g.z, Math.PI / 2); stand(room, B, g.x + 40, g.z, 0);
+    tick(room, 1);
+    const gn = room.sim.addProp('gnome', { x: g.x - 19, y: W.heightAt(g.x - 19, g.z) + 1, z: g.z }, { x: 0, y: 0, z: 0, w: 1 }, 70, 70);
+    tick(room, 0.2);
+    const gt = at(room, gn.id);
+    room.handle(A, { t: 'grab', kind: 'prop', id: gn.id, pt: [gt.x, gt.y, gt.z], d: 1.2 });
+    const held = room.sim.holds.has(A.id);
+    // walk in with it (a jump of 15 m would break the hold), then stand 5 m from the den
+    for (let i = 0; i < 60 * 10; i++) { stand(room, A, g.x - 20 + Math.min(15, i * 0.06), g.z, Math.PI / 2); tick(room, 1 / 60); }
+    const kn = knocks(A);
+    res[day] = { held, nips: mobEvs(A, 'nip').length, ko: kn.some(k => k.ko), dropped: evs(A.conn, 'slip').some(e => e.by === A.id && e.why === 'nip') && !room.sim.holds.has(A.id) };
+    // and nobody kneeling by a friend who is down is nipped
+    if (day === 2) {
+      room.handle(B, { t: 'ko', why: 'fall' });
+      stand(room, B, g.x - 5, g.z + 1, 0);
+      tick(room, 3.5);
+      const n0 = mobEvs(A, 'nip').length;
+      for (let i = 0; i < 60 * 6; i++) { stand(room, A, g.x - 5, g.z, Math.PI / 2); stand(room, B, g.x - 5, g.z + 1, 0); tick(room, 1 / 60); }
+      res.downed = mobEvs(A, 'nip').length - n0;
+    }
+  }
+  check(res[1].held && res[2].held && res[1].nips === 0 && res[2].nips >= 2 && res[2].nips <= 10 / RT.NIP_CD + 1 && !res[2].ko && res[2].dropped && res.downed === 0,
+    `nips: none on day 1; day 2, ${res[2].nips} in 10 s by a den (one every ${RT.NIP_CD} s at most), never a knockout, the gnome dropped; none by a friend who is down (${res.downed}) ${JSON.stringify(res)}`);
+}
+{
+  // P4: a gnome thrown at a friend beans them: a stumble, they drop what they hold, the toast names the thrower
+  const { room, ps: [A, B, Cc] } = crew(['Ann', 'Bob', 'Cat']);
+  room.mobsOn = false;
+  const s = spot(room), sim = room.sim;
+  // (Bob faces off to the side, the toaster held out there, clear of the gnome's line)
+  stand(room, A, s.x, s.z, 0); stand(room, B, s.x, s.z + 3, Math.PI / 2); stand(room, Cc, s.x + 20, s.z, 0);
+  const tv = sim.addProp('toaster', { x: s.x + 1, y: room.W.heightAt(s.x + 1, s.z + 3) + 1.4, z: s.z + 3 }, { x: 0, y: 0, z: 0, w: 1 }, 50, 50);
+  tick(room, 0.3);
+  const tt = at(room, tv.id);
+  room.handle(B, { t: 'grab', kind: 'prop', id: tv.id, pt: [tt.x, tt.y, tt.z], d: 1 });
+  const gn = sim.addProp('gnome', { x: s.x, y: room.W.heightAt(s.x, s.z) + 1.4, z: s.z + 0.8 }, { x: 0, y: 0, z: 0, w: 1 }, 70, 70);
+  tick(room, 0.1);
+  const g0 = at(room, gn.id);
+  room.handle(A, { t: 'grab', kind: 'prop', id: gn.id, pt: [g0.x, g0.y, g0.z], d: 1 });
+  tick(room, 0.1);
+  room.handle(A, { t: 'rel', thr: 1, dir: [0, 0.05, 1] });
+  tick(room, 1);
+  const k = knocks(B).find(x => x.why === 'bean');
+  check(k && !k.ko && !knocks(A).length && !sim.holds.has(B.id) && evs(B.conn, 'slip').some(e => e.why === 'bean') && Cc.conn.has(x => x.t === 'toast' && /Ann beaned Bob with the Garden Gnome/.test(x.text)) && room.stats.beanings === 1,
+    `beanings: a gnome thrown at Bob knocks him over (never out) and he drops the toaster; the crew hears who did it (${k ? (k.ko ? 'KO' : 'stumble') : 'missed'})`);
+}
+
 // ---- world gen: the wildlife is placed last, from its own random stream: nothing else moves ---------------------
 {
   const { PLAN } = await import('../shared/mobs.js');

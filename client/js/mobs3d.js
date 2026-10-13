@@ -231,12 +231,12 @@ export class MobView {
       tgt.headY = Math.sin(t * 0.8 + this.ph) * 0.8; tgt.tail = -0.6;
     } else if (s === S.SNATCH) {
       tgt.head = 0.55; tgt.lift = -0.03; tgt.tail = 0.3;
-    } else if (s === S.SNEAK) {
+    } else if (s === S.SNEAK || s === S.RAID || s === S.INRV) {
       // low, on its toes, head down, tail level
       gait(1.4 + v * 0.5, 0.35); tgt.lift -= 0.05; tgt.head = 0.25; tgt.tail = -0.1;
     } else {
       // milling about, running home (with it or spooked), trapped in the RV
-      const fast = s === S.RUN || s === S.SPOOK || s === S.GONE || s === S.TRAPPED;
+      const fast = s === S.RUN || s === S.SPOOK || s === S.GONE || s === S.TRAPPED || s === S.NIP;
       gait(fast ? 3.2 : 1.2 + v * 0.6, fast ? 0.75 : 0.4);
       tgt.head = carry ? -0.35 : fast ? 0.15 : 0.1;
       tgt.tail = fast ? 0.2 : 0; tgt.tailY = fast ? Math.sin(t * 13) * 0.45 : Math.sin(t * 2) * 0.15;
