@@ -11,6 +11,7 @@ import { generateLeg } from '../shared/world.js';
 import { LOOT, fmt$ } from '../shared/loot.js';
 import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
+import { STOP_NAMES } from '../shared/mobs.js';
 import { BJTable, FlipMachine } from './casino.js';
 
 let nextPlayerId = 1;
@@ -51,7 +52,7 @@ export class Room {
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
     for (const p of this.players.values()) p.walkie = false;   // a new trip buys its own walkies
-    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0 };
+    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0 };
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.startDay([]);
@@ -71,7 +72,9 @@ export class Room {
     this.inTown = false;
     this.flippedT = 0;
     this.nightAt = 0;
-    this.dayStats = { sold: 0, bills: 0, broken: 0, gamble: 0 };
+    this.dayStats = { sold: 0, bills: 0, broken: 0, gamble: 0, stolen: 0, recovered: 0 };
+    this.theftQ = new Map();         // den -> the thefts its ringtails made that the crew hasn't been told of yet
+    this.theftToastAt = new Map();   // den -> when the crew was last told
     this.bj = new BJTable(this.W.town.bj);
     this.flip = new FlipMachine();
     this.pendingFlip = null;
@@ -680,7 +683,9 @@ export class Room {
     p.ko = true;
     p.koAt = this.t;
     p.seat = null;
+    const h = this.sim.holds.get(p.id);
     this.sim.release(p.id);
+    if (h?.kind === 'prop') this.sim.mobs?.onDowned([h.id]);   // (what they dropped: the ringtails' favourite pickings)
     this.sim.dropHook(p.id);
     this.stats.kos++;
     // what knocked them about in the last 3 s says how they went down (the page only knows it fell)
@@ -747,6 +752,7 @@ export class Room {
     const sim = this.sim, ids = sim.propsIn(this.W.town.pawn);
     const load = this.docked() ? sim.cargo().filter(id => !ids.includes(id)) : [];
     if (!ids.length && !load.length) return 0;
+    sim.mobs?.onSold([...ids, ...load]);   // (a stolen thing sold counts as got back)
     let total = 0, lot = 0;
     const names = [];
     for (const id of ids) {
@@ -925,6 +931,7 @@ export class Room {
       }
       if (pub.length) this.broadcast({ t: 'ev', list: pub });
     }
+    if (this.theftQ.size) this.flushThefts();
   }
 
   // what the wildlife did, in words for the crew (the sounds and the rest are the pages' business)
@@ -933,8 +940,32 @@ export class Room {
       this.beastToastAt = this.t;
       this.toast('The Grumphorn is awake. Get off the road, or crouch and keep still.', '#ff8a65', 4);
     } else if (e.s === 'leave') {
-      this.stats.beasts = (this.stats.beasts || 0) + 1;
+      this.stats.beasts++;
       this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
+    } else if (e.s === 'steal' && !e.again) {
+      if (e.ours) { this.stats.stolen += e.value; this.dayStats.stolen += e.value; }
+      const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, ours: false, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };
+      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours;
+      this.theftQ.set(e.den, q);
+    } else if (e.s === 'recovered') {
+      this.stats.recovered += e.value; this.dayStats.recovered += e.value;
+    } else if (e.s === 'bite') {
+      const pl = this.players.get(e.by);
+      if (pl) this.toast(`The ringtail bit ${pl.name}. (Two of you hold one and it can't.)`, '#ffb4a2', 3);
+    }
+  }
+  // the crew hears of a den's thefts at most every 3 s (a raid of three is one line)
+  flushThefts() {
+    for (const [den, q] of [...this.theftQ]) {
+      if (this.t < q.at) continue;
+      this.theftQ.delete(den);
+      this.theftToastAt.set(den, this.t);
+      const where = q.poi ? ` at ${STOP_NAMES[q.poi] || 'the stop'}` : '';
+      // (the stop's own loot nobody had touched yet: they beat you to it)
+      if (!q.ours) this.toast(q.n === 1 ? `A ringtail beat you to the ${q.what} (${fmt$(q.value)})${where}. Its den is close by.`
+        : `Ringtails beat you to ${q.n} things (${fmt$(q.value)})${where}. Their den is close by.`, '#ffd166', 4);
+      else this.toast(q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${where}! Its den is close by.`
+        : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${where}! Their den is close by.`, '#ffb74d', 4);
     }
   }
 
@@ -957,6 +988,7 @@ export class Room {
       gates: [...this.gatesOpen], beds: [...this.players.values()].filter(p => p.bed).map(p => p.id),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,
+      thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
     };
   }
 

@@ -20,7 +20,7 @@ import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
 import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
 import { buildMob } from './mobs3d.js';
-import { RST, GST, ST_MASK, ST_CARRY } from '/shared/mobs.js';
+import { RST, GST, RT, ST_MASK, ST_CARRY } from '/shared/mobs.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
@@ -580,6 +580,7 @@ function onGrabPress() {
     const eye = me.eye(S.rv);
     S.holdDist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, t.hit.toi + 0.1));
     me.holding = { id: p.id, type: p.type };
+    if (p.type === 'ringtail') tutDone('ringtail');
     net.send({ t: 'grab', kind: 'prop', id: p.id, pt: [t.hit.point.x, t.hit.point.y, t.hit.point.z], d: S.holdDist });
     sfx.grab();
     inp.grab = false;   // holding something, not climbing
@@ -608,6 +609,7 @@ function onShove() {
   hands.shove();
   sfx.whoosh();
   tutDone('shove');
+  if (target?.kind === 'prop' && S.props.get(target.id)?.type === 'ringtail') tutDone('ringtail');
 }
 function onDrop() {
   if (me.holding) { net.send({ t: 'rel' }); me.holding = null; }
@@ -673,6 +675,7 @@ const TIPS = [
   'Crouch in the RV to brace for a crash: braced, a crash can\'t knock you out.',
   'A Grumphorn sleeps past an obstacle some days. Crouch past it, creep the RV by, or wear out its patience: ram it, winch it, throw junk at it.',
   'Right mouse with empty hands shoves whatever is in front of you: friends, loot, wildlife.',
+  'Ringtails steal loot nobody is watching and pile it at their den near the stop. Stand facing your pile, or go and take it back.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
   'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
@@ -1096,7 +1099,7 @@ function onEvent(e) {
     case 'creak': sfx.creak(); break;
     case 'gate': sfx.gate(); break;
     case 'buzz': sfx.buzz(); break;
-    case 'slip': if (e.by === S.selfId) { me.holding = null; toast('It slipped out of your hands.', '#ffb4a2', 2); } break;
+    case 'slip': if (e.by === S.selfId) { me.holding = null; toast(e.why === 'bite' ? 'OW. It bit you, and you let go.' : e.why === 'wriggle' ? 'It wriggled free.' : 'It slipped out of your hands.', '#ffb4a2', 2); } break;
     case 'throw': break;
     case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
     case 'flip': sfx.coin(); break;
@@ -1121,6 +1124,30 @@ function onMobEvent(e) {
     case 'toss': positional(at, () => sfx.thunk(1), 60); if (near < 12) shake(0.5); break;
     case 'winded': positional(at, () => sfx.snort(), 30); if (at) puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#e8e4dc'); break;
     case 'leave': positional(at, () => sfx.clang(), 60); tutDone('grumph'); break;
+    // the ringtails: a yoink as they make off with something (a STOLEN tag rides on it for a while), the
+    // jaws letting go, a squeal when they're held, stunned or run over
+    case 'steal': {
+      positional(at, () => sfx.yoink(), 45);
+      const it = S.props.get(e.item);
+      // (the stop's own loot that nobody had touched yet: not yours to lose, but there it goes)
+      if (it) { floatText(it.mesh.position, e.ours === false ? 'YOINK!' : `STOLEN ${fmt$(e.value)}`, '#ff6b5a'); markStolen(e.item); }
+      break;
+    }
+    case 'stash': case 'trapped': positional(at, () => sfx.chitter(), 25); break;
+    case 'drop': positional(at, () => sfx.snap(), 25); unmark(e.item); break;
+    case 'bite':
+      positional(at, () => { sfx.snap(); sfx.squeal(); }, 30);
+      if (e.by === S.selfId) { me.spend(RT.BITE_STAMINA); shake(0.25); }
+      break;
+    case 'wriggle': positional(at, () => sfx.squeal(), 30); break;
+    case 'stun': positional(at, () => sfx.bonk(), 30); break;
+    case 'squash': positional(at, () => { sfx.squeal(); sfx.thunk(0.5); }, 40); break;
+    case 'recovered': {
+      unmark(e.item);
+      const it = S.props.get(e.item);
+      if (it) floatText(it.mesh.position, `GOT IT BACK ${fmt$(e.value)}`, '#7CFC00');
+      break;
+    }
   }
 }
 
@@ -1135,6 +1162,7 @@ function showReceipt(m) {
     ${row('Gambling', (m.gamble > 0 ? '+' : '') + fmt$(m.gamble), m.gamble > 0 ? 'good' : m.gamble < 0 ? 'bad' : '')}
     ${row('Medical bills', (m.bills ? '-' : '') + fmt$(m.bills), m.bills ? 'bad' : '')}
     ${row('Loot broken', fmt$(m.broken) + ' of stuff', m.broken ? 'bad' : '')}
+    ${m.stolen ? row('Stolen by ringtails', `${fmt$(m.stolen)}${m.recovered ? ` (got ${fmt$(m.recovered)} back)` : ''}`, m.recovered >= m.stolen ? '' : 'bad') : ''}
     ${row('Payment', `PAID ${fmt$(m.due)}`, 'good')}
     ${row('Bank', fmt$(m.bank))}
     <p class="hint">Campfire's lit. The store is open. When everyone's in a bunk (E on the bed in the RV), day ${m.day + 1} starts.</p>
@@ -1154,6 +1182,9 @@ function showOver(m) {
     <div class="rrow"><span>Medical bills</span><b>${fmt$(s.bills || 0)}</b></div>
     <div class="rrow"><span>Loot destroyed</span><b>${fmt$(s.broken || 0)}</b></div>
     <div class="rrow"><span>Knockouts</span><b>${s.kos || 0}</b></div>
+    ${s.stolen ? `<div class="rrow"><span>Stolen by ringtails</span><b>${fmt$(s.stolen)} (got ${fmt$(s.recovered || 0)} back)</b></div>` : ''}
+    ${!m.won && m.short > 0 && s.stolen - (s.recovered || 0) >= m.short ? `<div class="rrow bad"><span>The ringtails cost you the RV.</span><b></b></div>` : ''}
+    ${s.beasts ? `<div class="rrow good"><span>Grumphorns seen off</span><b>${s.beasts}</b></div>` : ''}
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
     <p class="hint" id="overNext"></p>
@@ -1201,6 +1232,29 @@ function addPing(m) {
   floaters.push({ s, life: 5, ping: true });
   sfx.ping();
 }
+// a red $ riding on something a ringtail just took, for a few seconds (so you can see where it went)
+const marks = [];
+let markMat = null;
+function markStolen(id) {
+  if (!markMat) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const g = cv.getContext('2d');
+    g.font = 'bold 54px Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.lineWidth = 7; g.strokeStyle = '#3a0a06'; g.strokeText('$', 32, 34);
+    g.fillStyle = '#ff4a3a'; g.fillText('$', 32, 34);
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    markMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false });
+  }
+  unmark(id);
+  const sp = new THREE.Sprite(markMat);
+  sp.scale.set(0.4, 0.4, 1);
+  sp.renderOrder = 10;
+  scene.add(sp);
+  marks.push({ id, sp, until: performance.now() + 6000 });
+}
+function unmark(id) { for (let i = marks.length - 1; i >= 0; i--) if (marks[i].id === id) { scene.remove(marks[i].sp); marks.splice(i, 1); } }
 let shakeAmt = 0;
 function shake(a) { shakeAmt = Math.max(shakeAmt, a); }
 function flash(text) {
@@ -1643,6 +1697,12 @@ requestAnimationFrame(frame);
     f.s.material.opacity = Math.min(1, f.life);
     if (f.life <= 0) { scene.remove(f.s); f.s.material.map?.dispose(); f.s.material.dispose(); floaters.splice(i, 1); }   // each label has its own canvas texture
   }
+  for (let i = marks.length - 1; i >= 0; i--) {
+    const m = marks[i], p = S.props.get(m.id), now = performance.now();
+    if (!p || now > m.until) { scene.remove(m.sp); marks.splice(i, 1); continue; }
+    m.sp.position.copy(p.mesh.position);
+    m.sp.position.y += 0.75 + Math.sin(now / 160) * 0.06;
+  }
 
   // audio
   const drv = S.g?.drv;
@@ -1853,10 +1913,16 @@ function tutTip(g, town) {
   if (g.ph === 'camp') return tut.has('drive') || (roleOf('drv') && roleOf('drv') !== S.selfId) ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
   if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');
+  if (!tut.has('ringtail') && critterNear('ringtail', 15)) return keysIn('Hint: ringtails steal loot nobody is watching. Stand facing your pile, grab the thief (it drops it), or [RMB] shove it');
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
   if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
   return null;
+}
+// a critter of this type within r metres of me
+function critterNear(type, r) {
+  for (const p of S.props.values()) if (p.type === type && p.pose && Math.hypot(p.pose.p.x - me.pos.x, p.pose.p.z - me.pos.z) < r) return true;
+  return false;
 }
 // a grumphorn (still in the road, not gone off for good) within r metres of me
 function beastNear(r) {
@@ -1887,6 +1953,7 @@ function questTracker(g) {
     }
     L.push([`Money for the Repo Man: ${fmt$(Math.max(0, g.bank))}/${fmt$(g.due)}`, g.bank >= g.due ? 'done' : '']);
     L.push(['Pay the Repo Man before midnight', '']);
+    if (g.thf > 0) L.push([`Ringtails have ${fmt$(g.thf)} of your stuff at their den`, 'warn']);
   } else if (g.ph === 'night') {
     L.push([`Paid the Repo Man ${fmt$(g.due)}`, 'done']);
     const n = S.meta?.players.length || 1, b = Math.min(n, g.beds?.length || 0);

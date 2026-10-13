@@ -246,6 +246,7 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .qt-line { margin-top: 3px; padding-left: 12px; text-indent: -12px; text-wrap: pretty; font-size: 14px; line-height: 1.25; color: #ddd5c4; text-shadow: var(--qt-shadow); }
 .qt-line::before { content: '- '; }
 .qt-line.done { color: #ffffff; }
+.qt-line.warn { color: #ff9a7a; }
 .qt-line b { color: inherit; }
 /* a page open in the middle of the screen (help, receipt) covers the tracker's corner */
 #game:has(.panel:not(.hidden)) .tracker { visibility: hidden; }

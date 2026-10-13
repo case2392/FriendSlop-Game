@@ -8,10 +8,10 @@
 // body touched after it was freed throws, and that world's physics is broken for the rest of the day.
 import RAPIER from '@dimforge/rapier3d-compat';
 import { LOOT } from '../shared/loot.js';
-import { RT, GH, PLAN, GST, ST_CARRY, ST_MOOD, crewFactor, cowbellValue } from '../shared/mobs.js';
+import { RT, GH, PLAN, GST, RST, ST_CARRY, ST_MOOD, crewFactor, cowbellValue, ringtailsPerDen } from '../shared/mobs.js';
 import { FLAG, MODE } from '../shared/constants.js';
-import { toLocal, qRotate } from '../shared/rv.js';
-import { inMud } from '../shared/world.js';
+import { toLocal, qRotate, insideRV } from '../shared/rv.js';
+import { inMud, bedExit } from '../shared/world.js';
 import { mulberry32 } from '../shared/rng.js';
 import { GROUPS } from './groups.js';
 
@@ -47,8 +47,19 @@ export class Mobs {
     this.vPre = new Map();          // prop id -> its velocity right before the physics step (hits are read from the change)
     this.vRV = v3();                // the RV's, likewise
     this.plan = PLAN[this.day - 1];
+    this.dens = new Map();          // den id -> { ...world gen's den, thefts today, awake, seen (line-of-sight cache) }
+    this.stolen = new Map();        // item id -> { den, value, at }: taken by ringtails and not yet got back
+    this.hoard = new Map();         // item id -> den id: piled at a den (its stash, and what was brought home). Theirs
+                                    // till a player picks it up: they don't steal it again from each other, and
+                                    // step over it (it doesn't collide with critters: milling about the den would
+                                    // nudge the pile apart)
+    this.droppedByDowned = new Map();   // item id -> until when: let go of by someone knocked out (a ringtail's favourite)
+    this.sold = new Set();          // items sold this step (a stolen thing sold counts as got back; broken doesn't)
+    this.recT = 0;
     this.started = false;
   }
+  // how long a ringtail sits at its den between raids (5-9 s)
+  cooldown() { return RT.COOLDOWN[0] + this.rng() * (RT.COOLDOWN[1] - RT.COOLDOWN[0]); }
 
   get t() { return this.sim.t; }
   // a critter's or an item's prop (body and collider), or null once it's gone. Fetch it every step.
@@ -60,10 +71,12 @@ export class Mobs {
   start() {
     this.started = true;
     for (const b of this.sim.W.beds || []) this.spawn('grumphorn', b.x, b.z, { yaw: b.ry, st: GST.SLEEP, bed: b });
+    for (const d of this.sim.W.dens || []) this.rtSpawnDen(d);
   }
 
-  // bed: a grumphorn's spot (where it sleeps, and its way off the road); by default where it's put
-  spawn(type, x, z, { yaw = 0, y = null, st = 0, bed = null } = {}) {
+  // bed: a grumphorn's spot (where it sleeps, and its way off the road); by default where it's put. den: a
+  // ringtail's den id (by default a den of its own where it's put)
+  spawn(type, x, z, { yaw = 0, y = null, st = 0, bed = null, den = null } = {}) {
     const L = LOOT[type];
     if (!L?.mob) return null;
     const W = this.sim.W;
@@ -80,6 +93,13 @@ export class Mobs {
       m.hits = new Map();
       m.rvTouch = false;
       if (st === GST.SLEEP || st === GST.LEFT) p.col.setFriction(0.9);
+    }
+    if (type === 'ringtail') {
+      if (den == null) { den = 1000 + p.id; this.dens.set(den, { id: den, x, y: W.heightAt(x, z), z, ry: yaw, poiType: null, stash: [], thefts: 0, awake: false, quietSince: this.t, seen: new Map() }); }
+      m.den = den;
+      m.unreachable = new Map();
+      m.stuns = 0; m.hops = 0;
+      m.cd = this.t + this.cooldown();
     }
     p.mob = m;
     this.list.set(p.id, m);
@@ -108,6 +128,14 @@ export class Mobs {
       if (m) m.carry = false;
     }
     if (this.list.has(id)) { this.letGo(id); this.list.delete(id); }
+    const st = this.stolen.get(id);
+    if (st) {
+      this.stolen.delete(id);
+      if (this.sold.has(id)) this.sim.out.push({ k: 'mob', id: st.mob, s: 'recovered', item: id, value: Math.round(st.value) });
+    }
+    this.sold.delete(id);
+    this.hoard.delete(id);
+    this.droppedByDowned.delete(id);
     this.vPre.delete(id);
     for (const m of this.list.values()) if (m.target === id) m.target = null;
   }
@@ -123,8 +151,11 @@ export class Mobs {
   mouth(p, itemType) {
     const t = p.body.translation(), q = p.body.rotation(), yaw = yawOf(q);
     const mp = v3(t.x + Math.sin(yaw) * 0.34, t.y + 0.1, t.z + Math.cos(yaw) * 0.34);
-    const s = LOOT[itemType]?.shape, half = !s ? 0.2 : s[0] === 'box' ? s[2] : s[1];
-    mp.y = Math.max(mp.y, this.sim.W.heightAt(mp.x, mp.z) + half + RT.JAW_LIFT);
+    // carried high enough that no corner of it drags, however it swings (its bounding radius); put down on the
+    // pile lowered to the ground (its standing half-height), so it isn't dropped from a height
+    const s = LOOT[itemType]?.shape, g = this.sim.W.heightAt(mp.x, mp.z);
+    const half = !s ? 0.2 : s[0] === 'box' ? s[2] : s[1], R = !s ? 0.3 : s[0] === 'box' ? Math.hypot(s[1], s[2], s[3]) : s[0] === 'cyl' ? Math.hypot(s[1], s[2]) : s[1];
+    mp.y = p.mob?.st === RST.STASH ? g + half + 0.03 : Math.max(mp.y, g + R + RT.JAW_LIFT);
     return mp;
   }
   bite(m, itemId) {
@@ -150,11 +181,17 @@ export class Mobs {
       if (fl > RT.JAW_F) F = v3(F.x * RT.JAW_F / fl, F.y * RT.JAW_F / fl, F.z * RT.JAW_F / fl);
       it.body.applyImpulse(v3(F.x * dt, F.y * dt, F.z * dt), true);
       p.body.applyImpulse(v3(-F.x * dt, -F.y * dt * 0.5, -F.z * dt), true);
-      if (Math.hypot(mp.x - ip.x, mp.y - ip.y, mp.z - ip.z) > RT.JAW_SLIP) { this.letGo(mid); lost.push(mid); }
+      if (Math.hypot(mp.x - ip.x, mp.y - ip.y, mp.z - ip.z) > RT.JAW_SLIP) { this.balk(mid, j.item); this.letGo(mid); lost.push(mid); }
     }
     return lost;
   }
 
+  // it couldn't get that home (stuck with it, or it snagged out of its jaws): its den leaves it be a while
+  // (else they took it again and again, and lost it at the same spot every time)
+  balk(mid, itemId) {
+    const m = this.list.get(mid), den = m && this.denOf(m);
+    if (den) (den.balk ||= new Map()).set(itemId, this.t + RT.UNREACHABLE);
+  }
   // a critter lets go of what it carries: the item collides with critters again
   letGo(mid) {
     const j = this.jaws.get(mid);
@@ -175,8 +212,24 @@ export class Mobs {
 
   onGrabbed(p, pid) {
     const m = p.mob;
-    if (!m) return;
+    // a player took hold of what a ringtail carries: three times its grip, the jaws let go
+    if (!m) {
+      if (this.hoard.delete(p.id)) p.col.setCollisionGroups(GROUPS.prop);
+      if (this.stolen.get(p.id)?.ours === false) this.stolen.delete(p.id);
+      const mid = this.carriedBy.get(p.id), c = mid != null ? this.list.get(mid) : null;
+      if (c) { const cp = this.get(c.id); if (cp) this.rtSpook(c, cp); }
+      return;
+    }
     this.wake(p);
+    if (m.type === 'ringtail') {
+      // (off for good already: it can be carried about, but it's going all the same)
+      if (m.st === RST.GONE) return;
+      // caught: it lets go of what it stole at once, and squirms (a second pair of hands: it squirms on)
+      this.rtDrop(m, p);
+      m.target = null;
+      if (m.st !== RST.HELD) { m.soloAt = p.holders.size > 1 ? null : this.t; this.setSt(m, RST.HELD); }
+      return;
+    }
     if (m.type === 'grumphorn') {
       // (its mind is made up once it glares: a hand on its horns doesn't stop the charge, or the toss)
       if (m.st === GST.LEAVE || m.st === GST.LEFT || m.st === GST.GLARE || m.st === GST.CHARGE) return;
@@ -186,7 +239,15 @@ export class Mobs {
       this.setSt(m, GST.HELD);
     }
   }
-  onReleased(p, pid, thrown) { if (p.mob) this.wake(p); }
+  onReleased(p, pid, thrown) {
+    const m = p.mob;
+    if (!m) return;
+    this.wake(p);
+    if (m.type === 'ringtail' && m.st === RST.HELD) {
+      if (!p.holders.size) { if (thrown) this.setSt(m, RST.FLUNG); else this.rtLoose(m, p); }
+      else if (p.holders.size === 1) m.soloAt = this.t;
+    }
+  }
   // someone walked into it
   onPushed(p, pid) {
     const m = p.mob;
@@ -197,18 +258,30 @@ export class Mobs {
   onShoved(p, pl, fx, fz) {
     const m = p.mob;
     if (!m) return;
-    if (m.type === 'ringtail') p.body.applyImpulse(v3(fx * 4 * RT.MASS, 2 * RT.MASS, fz * 4 * RT.MASS), true);
-    else if (m.type === 'grumphorn') { this.ghWake(m, p, pl.pos); this.ghCost(m, p, GH.COST.shove); }
+    if (m.type === 'ringtail') {
+      if (m.st === RST.GONE || m.st === RST.HELD) return;
+      p.body.applyImpulse(v3(fx * 4 * RT.MASS, 2 * RT.MASS, fz * 4 * RT.MASS), true);
+      this.rtDrop(m, p);
+      this.setSt(m, RST.FLUNG);
+    } else if (m.type === 'grumphorn') { this.ghWake(m, p, pl.pos); this.ghCost(m, p, GH.COST.shove); }
     this.wake(p);
   }
   // the driver leaned on the horn (where the RV is): any grumphorn in earshot wakes, and goes for the RV
   horn(at) {
-    for (const m of this.list.values()) {
+    for (const m of [...this.list.values()]) {
       const p = this.get(m.id);
-      if (!p || m.type !== 'grumphorn') continue;
-      if (this.ghDist(p, at) < GH.WAKE_HORN) this.ghWake(m, p, at, true);
+      if (!p) continue;
+      if (m.type === 'grumphorn') { if (this.ghDist(p, at) < GH.WAKE_HORN) this.ghWake(m, p, at, true); continue; }
+      // ringtails near the RV drop what they carry and scatter (then pay the horn no mind for a while)
+      const t = p.body.translation();
+      if (Math.hypot(t.x - at.x, t.z - at.z) > RT.HORN_R || (m.deafUntil || 0) > this.t) continue;
+      if (m.st === RST.HELD || m.st === RST.STUN || m.st === RST.GONE || m.st === RST.FLUNG) continue;
+      m.deafUntil = this.t + RT.HORN_DEAF;
+      this.rtSpook(m, p);
     }
   }
+  // the room sold these (a stolen thing sold counts as got back)
+  onSold(ids) { for (const id of ids) this.sold.add(id); }
 
   // ---- the step -----------------------------------------------------------------------------------------
 
@@ -243,14 +316,41 @@ export class Mobs {
       if (m.think <= 0) { m.think += 0.1; this.brain(m, p, players); }
       if (!(p = this.get(m.id))) continue;
       if (m.type === 'grumphorn') this.ghStep(m, p, players, dt);
+      else this.rtStep(m, p, players, dt);
     }
     for (const mid of this.jawsStep(dt)) { const m = this.list.get(mid); if (m) this.lostGrip(m); }
+    if ((this.recT -= dt) <= 0) { this.recT = 0.5; this.recoveries(players); }
   }
   // its jaws lost what they carried (pulled away, or it broke)
-  lostGrip(m) {}
+  lostGrip(m) {
+    const p = this.get(m.id);
+    if (m.type === 'ringtail' && p && (m.st === RST.RUN || m.st === RST.SNATCH)) { this.sim.out.push({ k: 'mob', id: m.id, s: 'drop' }); this.setSt(m, RST.SPOOK); }
+    else if (m.type === 'ringtail' && p && m.st === RST.STASH) this.setSt(m, RST.DEN);
+  }
   brain(m, p, players) {
     if (m.type === 'grumphorn') this.grumphorn(m, p, players);
+    else this.ringtail(m, p, players);
   }
+  // stolen things got back: in the RV, or carried by a player more than 10 m from the den
+  recoveries(players) {
+    for (const [id, st] of [...this.stolen]) {
+      const it = this.get(id);
+      if (!it) { this.stolen.delete(id); continue; }
+      if (this.carriedBy.has(id)) continue;
+      const t = it.body.translation(), den = this.dens.get(st.den);
+      const inRV = (() => { const l = this.sim.rvToLocal(t); return insideRV(l.x, l.y, l.z, 0.05); })();
+      const held = it.holders.size && den && Math.hypot(t.x - den.x, t.z - den.z) > 10;
+      if (inRV || held) {
+        this.stolen.delete(id);
+        if (this.hoard.delete(id)) it.col.setCollisionGroups(GROUPS.prop);
+        if (st.ours) this.sim.out.push({ k: 'mob', id: st.mob, s: 'recovered', item: id, value: Math.round(it.value) });
+      }
+    }
+  }
+  // what the ringtails hold of yours right now (the tracker's "Ringtails have $X of your stuff")
+  stolenValue() { let v = 0; for (const [id, st] of this.stolen) { const it = this.get(id); if (it && st.ours) v += it.value; } return Math.round(v); }
+  // someone knocked out let go of these: the ringtails' favourite pickings for a while
+  onDowned(ids) { for (const id of ids) this.droppedByDowned.set(id, this.t + 20); }
 
   // right before the physics step: every awake body's velocity, to read hits from the change
   beforePhysics() {
@@ -269,8 +369,11 @@ export class Mobs {
   postStep(dt, players) {
     for (const m of [...this.list.values()]) {
       const p = this.get(m.id);
-      if (!p || p.body.isSleeping()) continue;
+      if (!p) continue;
+      // (a body at rest feels no hits; but the RV can roll over a ringtail sitting still without touching it)
+      if (p.body.isSleeping()) { if (m.type === 'ringtail') this.rtSquash(m, p); continue; }
       if (m.type === 'grumphorn') this.ghPost(m, p, players);
+      else this.rtPost(m, p, players);
     }
   }
 
@@ -312,6 +415,318 @@ export class Mobs {
     if (m.st === GST.CHARGE && part.statics && this.dv(p) >= 1.5) this.ghWinded(m, p, true);
   }
 
+  // ---- ringtails -----------------------------------------------------------------------------------------
+  // Masked thieves that live in a den beside a stop. They sneak up on loot nobody is watching, snatch it,
+  // run it home and pile it at the den (where it lies, a real prop, for you to take back). A den only steals
+  // so much a day (PLAN cap). Grab one and it drops what it carries (day 2 on, held by one person, it bites
+  // after 2 s); a shove or a good hit stuns it; the horn scatters them; the RV running one over squashes it.
+
+  // the den a ringtail belongs to (and its record: thefts today, awake, quiet since)
+  denOf(m) { return this.dens.get(m.den) || null; }
+
+  // is this item being watched: a player on foot (not down) within the day's fear radius of it, and either
+  // right next to it or facing it. Players in the RV count only right next to it.
+  watched(it, players) {
+    const t = it.body.translation(), fear = this.plan.fear;
+    for (const q of players.values()) {
+      if (!q.pos || q.ko) continue;
+      const dx = t.x - q.pos.x, dz = t.z - q.pos.z, d = Math.hypot(dx, dz);
+      if (q.par || q.seat != null) { if (d < 3) return true; continue; }
+      if (d > fear) continue;
+      if (d < 2.5) return true;
+      const lx = q.look?.x ?? 0, lz = q.look?.z ?? 1, ll = Math.hypot(lx, lz) || 1;
+      if ((dx * lx + dz * lz) / (d * ll) > Math.cos(Math.PI / 3)) return true;
+    }
+    return false;
+  }
+
+  // in the RV or on its roof (thieves leave the RV alone in Phase 1)
+  inRV(t) {
+    const l = this.sim.rvToLocal(t);
+    return Math.abs(l.x) < 1.55 && Math.abs(l.z) < 4.3 && l.y < 3.9 && l.y > -1.6;
+  }
+
+  // what this ringtail could go for right now, best first: light loot, loose (not held, tied, in the RV or
+  // in another's jaws), near the den, in sight of it, nobody watching, not already home
+  rtTarget(m, p, players) {
+    const den = this.denOf(m), t = p.body.translation();
+    if (!den) return null;
+    let best = null, bs = 0;
+    // (one thief per thing: what a pal is already sneaking up on is theirs)
+    const taken = new Set();
+    for (const o of this.list.values()) if (o !== m && o.st === RST.SNEAK && o.target != null) taken.add(o.target);
+    for (const it of this.sim.props.values()) {
+      const L = LOOT[it.type];
+      if (!L || L.tool || L.mob || L.mass > 15 || it.holders.size || this.sim.tied.has(it.id) || this.carriedBy.has(it.id) || this.hoard.has(it.id)) continue;
+      if ((m.unreachable.get(it.id) || 0) > this.t || (den.balk?.get(it.id) || 0) > this.t || taken.has(it.id)) continue;
+      const it_t = it.body.translation();
+      // (up on a counter or a shelf: out of its reach)
+      if (it_t.y - this.sim.W.heightAt(it_t.x, it_t.z) > RT.UP) continue;
+      const dd = Math.hypot(it_t.x - den.x, it_t.z - den.z), dm = Math.hypot(it_t.x - t.x, it_t.z - t.z);
+      if (dd > RT.RANGE || dm > RT.SEE || dd < RT.HOME_R) continue;
+      if (this.inRV(it_t)) continue;
+      if (!this.seenFromDen(den, it, it_t)) continue;
+      if (this.watched(it, players)) continue;
+      const dropped = this.droppedByDowned.get(it.id);
+      const score = it.value / (8 + dm) * (dropped && dropped > this.t ? 1.5 : 1);
+      if (score > bs) { bs = score; best = it.id; }
+    }
+    return best;
+  }
+  // a ray at 0.35 m from the den to the item clears the ground, the walls and the RV (cached 2 s per item)
+  seenFromDen(den, it, it_t) {
+    const c = den.seen.get(it.id);
+    if (c && c.until > this.t) return c.ok;
+    const ok = this.clear(v3(den.x, den.y + 0.35, den.z), v3(it_t.x, it_t.y + 0.05, it_t.z));
+    den.seen.set(it.id, { ok, until: this.t + 2 });
+    return ok;
+  }
+
+  // the legs: a horizontal velocity servo toward a point (capped at LEG_F), facing where it goes
+  rtLegs(p, goal, speed, dt) {
+    const t = p.body.translation(), v = p.body.linvel();
+    const dx = goal ? goal.x - t.x : 0, dz = goal ? goal.z - t.z : 0, d = Math.hypot(dx, dz);
+    const s = goal ? Math.min(speed, d * 3) : 0, ux = d > 1e-3 ? dx / d : 0, uz = d > 1e-3 ? dz / d : 0;
+    const k = RT.MASS * RT.LEG_GAIN;
+    let fx = (ux * s - v.x) * k, fz = (uz * s - v.z) * k;
+    const fl = Math.hypot(fx, fz);
+    if (fl > RT.LEG_F) { fx *= RT.LEG_F / fl; fz *= RT.LEG_F / fl; }
+    p.body.applyImpulse(v3(fx * dt, 0, fz * dt), true);
+    if (d > 0.2 && s > 0.2) p.body.setRotation(yawQ(Math.atan2(dx, dz)), true);
+    return d;
+  }
+
+  rtSpawnDen(den) {
+    const n = ringtailsPerDen(this.day, this.crew), rec = { ...den, thefts: 0, awake: false, quietSince: this.t, seen: new Map() };
+    this.dens.set(den.id, rec);
+    for (const id of den.stash || []) this.toHoard(id, den.id);
+    for (let i = 0; i < n; i++) {
+      const a = i / n * Math.PI * 2 + this.rng(), r = 0.6 + this.rng() * 0.8;
+      const m = this.spawn('ringtail', den.x + Math.cos(a) * r, den.z + Math.sin(a) * r, { yaw: this.rng() * 6.28, st: RST.DEN });
+      if (!m) continue;
+      m.den = den.id;
+      m.cd = this.t + this.cooldown();
+    }
+  }
+
+  // the brain, ten times a second
+  ringtail(m, p, players) {
+    const S = RST, den = this.denOf(m), now = this.t, age = now - m.stAt, t = p.body.translation();
+    if (!den) return;
+    // a den sleeps when nobody has been near it for a while (its critters cost nothing then)
+    if (!den.awakeChecked || den.awakeChecked < now) {
+      den.awakeChecked = now + 0.5;
+      const near = [...players.values()].some(q => q.pos && Math.hypot(q.pos.x - den.x, q.pos.z - den.z) < RT.WAKE)
+        || Math.hypot(this.sim.rv.translation().x - den.x, this.sim.rv.translation().z - den.z) < RT.WAKE;
+      if (near) { den.awake = true; den.quietSince = now; }
+      else if (den.awake && !([...players.values()].some(q => q.pos && Math.hypot(q.pos.x - den.x, q.pos.z - den.z) < RT.SLEEP)) && now - den.quietSince > 10) den.awake = false;
+    }
+    // carried off too far, or into town: gone
+    const fromDen = Math.hypot(t.x - den.x, t.z - den.z);
+    if (m.st !== S.GONE && (fromDen > RT.KIDNAP || t.z > this.sim.W.LEN - 20)) { this.rtGone(m, p); return; }
+    if (!den.awake && (m.st === S.DEN)) return;
+    switch (m.st) {
+      case S.DEN: {
+        // (the day's cap counts those of the den already out after something)
+        if (now < m.cd) return;
+        let out = 0;
+        for (const o of this.list.values()) if (o.den === den.id && o.st === S.SNEAK) out++;
+        if (den.thefts + out >= this.plan.cap) return;
+        const tg = this.rtTarget(m, p, players);
+        if (tg != null) { m.target = tg; m.goT = now; m.hops = 0; m.prog = { x: t.x, z: t.z, t: now }; this.setSt(m, S.SNEAK); }
+        return;
+      }
+      case S.SNEAK: {
+        const it = this.get(m.target);
+        if (!it || it.holders.size || this.sim.tied.has(it.id) || this.carriedBy.has(it.id) || this.inRV(it.body.translation()) || this.watched(it, players)) { this.rtHome(m, false); return; }
+        if (now - m.goT > RT.GIVE_UP) { m.unreachable.set(m.target, now + RT.UNREACHABLE); this.rtHome(m, false); return; }
+        const mp = this.mouth(p, it.type), ip = it.body.translation();
+        if (Math.hypot(mp.x - ip.x, mp.z - ip.z) < RT.REACH && Math.abs(mp.y - ip.y) < 0.8) {
+          if (this.bite(m, it.id)) { this.rtTake(m, it, den); this.setSt(m, S.SNATCH); }
+        }
+        return;
+      }
+      case S.SNATCH: if (age >= 0.35) { m.goT = now; m.prog = { x: t.x, z: t.z, t: now }; this.setSt(m, S.RUN); } return;
+      case S.RUN: {
+        if (!this.jaws.has(m.id)) { this.rtSpook(m, p); return; }
+        if (fromDen < RT.STASH_R) this.setSt(m, S.STASH);
+        return;
+      }
+      // home: it stops and puts the thing down on the pile
+      case S.STASH: {
+        if (age < 0.4) return;
+        const it = this.jaws.get(m.id)?.item;
+        this.letGo(m.id);
+        if (it != null) { this.toHoard(it, den.id); this.sim.out.push({ k: 'mob', id: m.id, s: 'stash', item: it, den: den.id }); }
+        m.cd = now + this.cooldown();
+        this.setSt(m, S.DEN);
+        return;
+      }
+      case S.HELD: {
+        if (!p.holders.size) { this.rtLoose(m, p); return; }
+        // (it bites one holder 2 s after it's down to one: a friend letting go doesn't get the other bitten at once)
+        if (p.holders.size > 1) m.soloAt = null;
+        else m.soloAt ??= now;
+        if (this.plan.bites && m.soloAt != null && now - m.soloAt >= RT.BITE_T) {
+          const pid = [...p.holders][0];
+          this.sim.release(pid);
+          this.sim.out.push({ k: 'slip', id: m.id, by: pid, why: 'bite' });
+          this.sim.out.push({ k: 'mob', id: m.id, s: 'bite', by: pid });
+          this.rtLoose(m, p);
+        } else if (!this.plan.bites && age >= RT.WRIGGLE_T) {
+          for (const pid of [...p.holders]) { this.sim.release(pid); this.sim.out.push({ k: 'slip', id: m.id, by: pid, why: 'wriggle' }); }
+          this.sim.out.push({ k: 'mob', id: m.id, s: 'wriggle' });
+          this.rtLoose(m, p);
+        }
+        return;
+      }
+      case S.FLUNG: {
+        // landed: touching something (the ground, the RV's floor, a crate) and no longer falling
+        if (age > 2.5) { this.rtStun(m, p); return; }
+        if (age > 0.15 && Math.abs(p.body.linvel().y) < 1.5) { const pt = this.partners(p); if (pt.statics || pt.rv || pt.props.length) this.rtStun(m, p); }
+        return;
+      }
+      case S.STUN: if (age >= RT.STUN_T) { if (m.stuns >= RT.GONE_AFTER) this.rtGone(m, p); else this.rtSpook(m, p); } return;
+      case S.SPOOK: if (age >= RT.SPOOK_T || fromDen < RT.STASH_R) { m.cd = now + this.cooldown(); this.setSt(m, S.DEN); } return;
+      case S.GONE: if (fromDen < 1.5 || age > 8) this.rtVanish(m, p); return;
+      case S.TRAPPED: {
+        if (!this.inRV(t)) { this.rtSpook(m, p); return; }
+        if (age > RT.TRAP_T && (!this.sim.doorOpen || age > RT.TRAP_T * 2)) this.rtVanish(m, p, 'window');
+        return;
+      }
+    }
+  }
+  // onto a den's pile (theirs now: see hoard)
+  toHoard(id, den) {
+    const it = this.get(id);
+    if (!it) return;
+    this.hoard.set(id, den);
+    it.col.setCollisionGroups(GROUPS.carried);
+  }
+  // a theft: counted once per thing (taken again before anyone got it back, it's the same theft, now this
+  // den's)
+  // ours: the crew had it (held it once, or it rode in the RV); the stop's own loot that nobody touched yet is
+  // taken all the same, but it was never theirs to lose (no theft in the tally, nothing "got back")
+  rtTake(m, it, den) {
+    const again = this.stolen.get(it.id), value = Math.round(it.value), ours = !!it.ours;
+    if (!again) { den.thefts++; this.stolen.set(it.id, { den: den.id, value, at: this.t, mob: m.id, ours }); }
+    else { again.mob = m.id; again.den = den.id; }
+    this.sim.out.push({ k: 'mob', id: m.id, s: 'steal', item: it.id, value, type: it.type, den: den.id, poi: den.poiType, again: !!again, ours: again ? again.ours : ours });
+  }
+  // back to the den without loot (gave up)
+  rtHome(m, spooked) { m.target = null; m.cd = this.t + this.cooldown(); this.setSt(m, spooked ? RST.SPOOK : RST.DEN); }
+  rtDrop(m, p) {
+    if (!this.jaws.has(m.id)) return;
+    const it = this.jaws.get(m.id).item;
+    this.letGo(m.id);
+    this.sim.out.push({ k: 'mob', id: m.id, s: 'drop', item: it });
+  }
+  rtSpook(m, p) { this.rtDrop(m, p); m.target = null; this.setSt(m, RST.SPOOK); }
+  rtStun(m, p) {
+    this.rtDrop(m, p);
+    m.stuns = (m.stuns || 0) + 1;
+    this.setSt(m, RST.STUN);
+    this.sim.out.push({ k: 'mob', id: m.id, s: 'stun' });
+  }
+  rtGone(m, p) { this.rtDrop(m, p); this.setSt(m, RST.GONE); }
+  // let go of: off home, or (after its third stun) off for good
+  rtLoose(m, p) { if ((m.stuns || 0) >= RT.GONE_AFTER) this.rtGone(m, p); else this.rtSpook(m, p); }
+  // it's had enough for the day: a puff, and it's gone
+  rtVanish(m, p, how = 'gone') {
+    this.rtDrop(m, p);
+    this.sim.out.push({ k: 'gone', ids: [m.id], how });
+    this.sim.removeProp(m.id);
+  }
+
+  // every step: the legs (and the TRAPPED scramble)
+  rtStep(m, p, players, dt) {
+    const S = RST, den = this.denOf(m);
+    if (!den) return;
+    const t = p.body.translation(), home = v3(den.x, den.y, den.z);
+    // (a den asleep: no legs, so its critters sit tight on the friction a sleeping grumphorn gets; else they
+    // slid downhill off the den)
+    const park = m.st === S.DEN && !den.awake;
+    if (park !== !!m.parked) { m.parked = park; p.col.setFriction(park ? 0.9 : 0); }
+    switch (m.st) {
+      case S.DEN: {
+        if (!den.awake) return;
+        // milling about the den
+        if (!m.mill || Math.hypot(m.mill.x - t.x, m.mill.z - t.z) < 0.3 || this.t > m.millT) {
+          const a = this.rng() * Math.PI * 2, r = this.rng() * 2;
+          m.mill = v3(den.x + Math.cos(a) * r, den.y, den.z + Math.sin(a) * r);
+          m.millT = this.t + 2 + this.rng() * 3;
+        }
+        this.rtLegs(p, m.mill, RT.MILL, dt);
+        return;
+      }
+      case S.SNEAK: { const it = this.get(m.target); if (it) this.rtGo(m, p, it.body.translation(), RT.SNEAK, dt, true); return; }
+      case S.SNATCH: case S.STASH: this.rtLegs(p, null, 0, dt); return;
+      case S.RUN: this.rtGo(m, p, home, RT.RUN, dt, false); return;
+      case S.SPOOK: case S.GONE: this.rtGo(m, p, home, RT.SPOOK, dt, true); return;
+      case S.TRAPPED: {
+        // out through the open door, or bouncing off the walls (knocking loose loot about)
+        if (this.sim.doorOpen) this.rtLegs(p, this.sim.rvToWorld(v3(-2.2, 0, 0.35)), RT.SPOOK, dt);
+        else if (this.rng() < dt * 3) p.body.applyImpulse(v3((this.rng() - 0.5) * 60, 30, (this.rng() - 0.5) * 60), true);
+        return;
+      }
+    }
+  }
+  // go somewhere: stuck for 1 s, hop (never with loot in its teeth: it drops it); leashed to its den
+  rtGo(m, p, goal, speed, dt, mayHop) {
+    const t = p.body.translation(), den = this.denOf(m);
+    if (den && Math.hypot(t.x - den.x, t.z - den.z) > RT.LEASH && m.st === RST.SNEAK) { this.rtHome(m, true); return; }
+    this.rtLegs(p, goal, speed, dt);
+    if (!m.prog) m.prog = { x: t.x, z: t.z, t: this.t };
+    if (this.t - m.prog.t >= 1) {
+      const moved = Math.hypot(t.x - m.prog.x, t.z - m.prog.z);
+      m.prog = { x: t.x, z: t.z, t: this.t };
+      if (moved < 0.4 && Math.hypot(goal.x - t.x, goal.z - t.z) > 1) {
+        if (this.jaws.has(m.id)) { this.balk(m.id, this.jaws.get(m.id).item); this.rtDrop(m, p); if (m.st === RST.RUN) this.rtSpook(m, p); }
+        else if (mayHop && (m.hops || 0) < RT.HOPS) {
+          m.hops = (m.hops || 0) + 1;
+          const dx = goal.x - t.x, dz = goal.z - t.z, d = Math.hypot(dx, dz) || 1;
+          p.body.applyImpulse(v3(dx / d * RT.HOP_FWD * RT.MASS, RT.HOP_UP * RT.MASS, dz / d * RT.HOP_FWD * RT.MASS), true);
+        }
+      }
+    }
+  }
+
+  // squashed: the RV rolling over it (anything over 2 m/s with it under the floor). Returns true if so
+  rtSquash(m, p) {
+    if (m.st === RST.STUN || m.st === RST.GONE || Math.hypot(this.vRV.x, this.vRV.z) <= RT.SQUASH_V) return false;
+    const l = this.sim.rvToLocal(p.body.translation());
+    if (!(Math.abs(l.x) < 1.15 && Math.abs(l.z) < 3.8 && l.y > -1.6 && l.y < -0.3)) return false;
+    this.sim.out.push({ k: 'mob', id: m.id, s: 'squash' });
+    this.rtStun(m, p);
+    return true;
+  }
+  // after the physics step: hit by something thrown (or the RV), squashed under the RV, trapped in the RV
+  rtPost(m, p, players) {
+    const S = RST;
+    if (m.st === S.GONE) return;
+    const part = this.partners(p);
+    let hit = 0;
+    // a hit is something moving into it (thrown, knocked flying, the RV going by): not its pals, and not
+    // a thing lying there that it ran into itself
+    for (const id of part.props) {
+      const q = this.get(id), vq = this.vPre.get(id);
+      if (!q || id === m.id || q.mob || this.carriedBy.has(id) || !vq) continue;
+      if (Math.hypot(vq.x, vq.y, vq.z) >= RT.HIT_V) hit = Math.max(hit, this.dv(p));
+    }
+    if (part.rv && Math.hypot(this.vRV.x, this.vRV.y, this.vRV.z) >= 1) hit = Math.max(hit, this.dv(p));
+    // (trapped in the RV it bounces off the walls on its own: that's no hit)
+    if (m.st === S.TRAPPED) hit = 0;
+    if (hit >= RT.STUN_DV && m.st !== S.STUN && m.st !== S.HELD) this.rtStun(m, p);
+    else if (hit >= RT.DROP_DV && (m.st === S.RUN || m.st === S.SNATCH || m.st === S.SNEAK)) this.rtSpook(m, p);
+    if (this.rtSquash(m, p)) return;
+    // inside the RV (thrown in, or it hopped in): out by the door, or it squeezes out a window
+    if (m.st !== S.TRAPPED && m.st !== S.HELD && m.st !== S.FLUNG) {
+      const l = this.sim.rvToLocal(p.body.translation());
+      if (insideRV(l.x, l.y, l.z, 0) && l.y > -0.2) { m.inSince = m.inSince ?? this.t; if (this.t - m.inSince > 1) { this.rtDrop(m, p); this.setSt(m, S.TRAPPED); this.sim.out.push({ k: 'mob', id: m.id, s: 'trapped' }); } }
+      else m.inSince = null;
+    }
+  }
+
   // ---- the grumphorn -----------------------------------------------------------------------------------
   // Asleep on the road past an obstacle. What wakes it: someone on foot close by (closer if they crouch,
   // much further if they sprint), someone standing in the RV going by, the RV coming past fast, the horn,
@@ -324,17 +739,7 @@ export class Mobs {
   bedFor(m) { return m.bed; }
   // where a grumphorn put down somewhere walks off to when it's had enough: flat ground off the road (as world
   // gen picks for its beds)
-  exitNear(x, z) {
-    const W = this.sim.W, ez = z + 6;
-    for (const off of [7, 8, 6.5, 10, 12, 16, 22]) for (const sd of [1, -1]) {
-      const ex = W.roadX(ez) + sd * off, h = W.heightAt(ex, ez);
-      if (Math.abs(h - W.roadY(ez)) > 1.5) continue;
-      let sl = 0;
-      for (const [dx, dz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]]) sl = Math.max(sl, Math.abs(W.heightAt(ex + dx, ez + dz) - h) / 1.2);
-      if (sl <= 0.36) return { x: ex, y: h, z: ez };
-    }
-    return { x: x + 8, y: W.heightAt(x + 8, z), z };
-  }
+  exitNear(x, z) { return bedExit(this.sim.W, z); }
 
   // how close counts as "next to it": the distance from its body's middle line (it's 2.9 m long)
   ghDist(p, pos) {
@@ -413,7 +818,7 @@ export class Mobs {
     for (const pid of [...p.holders]) { this.sim.release(pid); this.sim.out.push({ k: 'slip', id: m.id, by: pid }); }
     p.col.setFriction(0);
     this.setSt(m, GST.LEAVE);
-    m.mood = false;
+    m.mood = false; m.exit = null; m.lprog = null;
     // its cowbell drops where it stood: ordinary loot, beside it (on its exit's far side, clear of where it
     // slides to a stop and walks off)
     const t = p.body.translation(), yaw = yawOf(p.body.rotation()), ex = m.bed?.exit;
@@ -427,6 +832,9 @@ export class Mobs {
     this.sim.out.push({ k: 'mob', id: m.id, s: 'leave', bell: bell?.id ?? null, value: val });
   }
 
+  // where it goes off the road for good (world gen's first flat ground beside its bed; or, if it couldn't get
+  // back there, the nearest from where it got stuck)
+  ghExit(m, bed) { return m.exit || bed.exit || v3(bed.x + 8, bed.y, bed.z); }
   // legs: a horizontal velocity servo, capped at LEG_G of its weight (half speed in the mud)
   ghLegs(p, dx, dz, speed, dt) {
     const t = p.body.translation(), v = p.body.linvel();
@@ -454,8 +862,18 @@ export class Mobs {
     const bed = this.bedFor(m);
     if (m.st === S.LEFT) return;
     if (m.st === S.LEAVE) {
-      const ex = bed.exit || v3(bed.x + 8, bed.y, bed.z);
-      if (Math.hypot(ex.x - t.x, ex.z - t.z) < 1 || age > 30) { this.setSt(m, S.LEFT); p.col.setFriction(0.9); this.sim.out.push({ k: 'mob', id: m.id, s: 'left' }); }
+      const ex = this.ghExit(m, bed);
+      // no headway in 3 s (the boulder's in the way back, say): off the road at the nearest place from here
+      if (!m.lprog || now - m.lprog.t >= 3) {
+        if (m.lprog && !m.exit && Math.hypot(t.x - m.lprog.x, t.z - m.lprog.z) < 0.6) m.exit = bedExit(this.sim.W, t.z, true);
+        m.lprog = { x: t.x, z: t.z, t: now };
+      }
+      if (Math.hypot(ex.x - t.x, ex.z - t.z) < 1 || age > 45) {
+        // down for good, right here (it doesn't slide on into the road)
+        this.setSt(m, S.LEFT); p.col.setFriction(0.9);
+        const v = p.body.linvel(); p.body.setLinvel(v3(0, Math.min(0, v.y), 0), true);
+        this.sim.out.push({ k: 'mob', id: m.id, s: 'left' });
+      }
       return;
     }
     // the winch reeling it in costs patience by the second (and wakes it)
@@ -539,9 +957,13 @@ export class Mobs {
         return;
       }
       case S.LEAVE: {
-        const ex = bed.exit || v3(bed.x + 8, bed.y, bed.z), dx = ex.x - t.x, dz = ex.z - t.z, d = Math.hypot(dx, dz) || 1;
+        // back along the road till it's abreast of its way off, then off it (cutting across from wherever its
+        // charges left it, it slid along the canyon walls)
+        const ex = this.ghExit(m, bed), W = this.sim.W, side = Math.sign(ex.x - W.roadX(ex.z)) || 1;
+        const g = Math.abs(t.z - ex.z) > 2.5 && Math.abs(t.x - W.roadX(t.z)) < Math.abs(ex.x - W.roadX(ex.z)) - 1 ? v3(W.roadX(ex.z) + side * 2.5, 0, ex.z) : ex;
+        const dx = g.x - t.x, dz = g.z - t.z, d = Math.hypot(dx, dz) || 1;
         this.face(p, Math.atan2(dx, dz), 2, dt);
-        this.ghLegs(p, dx / d, dz / d, d > 0.5 ? GH.LEAVE : 0, dt);
+        this.ghLegs(p, dx / d, dz / d, g !== ex || d > 0.5 ? GH.LEAVE : 0, dt);
         return;
       }
       case S.RISE: case S.WINDED: case S.HELD: this.ghLegs(p, 0, 0, 0, dt); return;

@@ -89,6 +89,7 @@ export class Sim {
       const w = toWorld(rp, rq, v3(c.lx, c.ly + 0.04, c.lz));
       const q = mulQ(rq, c.q);
       const pr = this.addProp(c.type, w, q, c.value, c.max);
+      if (pr) pr.ours = true;   // (the crew's: it rode over in the RV)
       if (c.tied && pr) toTie.push(pr);
     }
     // (bungee cords stay on overnight: what was tied down yesterday still is)
@@ -345,6 +346,7 @@ export class Sim {
       local.y = Math.max(-1.2, Math.min(1.2, local.y));
       local.z = Math.max(-1.2, Math.min(1.2, local.z));
       p.holders.add(pid);
+      if (!p.mob) p.ours = true;   // (in the crew's hands once: theirs, so a ringtail taking it is a theft)
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();
       this.holds.set(pid, { kind: 'prop', id: p.id, local, dist, last: null });

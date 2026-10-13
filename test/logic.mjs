@@ -297,6 +297,24 @@ try {
     const k = await A.wait(m => m.t === 'knock', 4000, 'the shove\'s knock');
     check(k.why === 'shove' && !k.ko && !k.rel && k.v[2] > 2, `a shove over the wire knocks the other player back along it (${JSON.stringify(k.v)}), says why (${k.why}), and never knocks them out`);
   }
+  {
+    // a ringtail over the wire: Hosty grabs one and throws it; it lands stunned, and every page hears so
+    const x = W.camp.rv.x + 8, z = W.camp.rv.z - 3, y = W.heightAt(x, z);
+    A.at(x, y, z, 0); B.at(x + 6, y, z, 0);
+    await sleep(200);
+    A.send({ t: 'dbg', op: 'mob', type: 'ringtail', x, z: z + 1.4, yaw: Math.PI });
+    const mb = await A.wait(m => m.t === 'dbg' && m.op === 'mob', 4000, 'the ringtail');
+    await sleep(300);
+    A.send({ t: 'grab', kind: 'prop', id: mb.id, pt: [x, W.heightAt(x, z + 1.4) + 0.24, z + 1.4], d: 1.4 });
+    const gr = await A.wait(m => m.t === 'grabbed' && m.id === mb.id, 4000, 'grabbed');
+    check(gr.ok, 'a ringtail can be grabbed over the wire');
+    await sleep(300);
+    A.send({ t: 'rel', thr: 1, dir: [0, 0.5, 1] });
+    const st = await B.wait(m => m.t === 'ev' && m.list.some(e => e.k === 'mob' && e.id === mb.id && e.s === 'stun'), 4000, 'the stun').catch(() => null);
+    check(!!st, 'thrown, it lands stunned, and every page hears it');
+    A.send({ t: 'dbg', op: 'mobs', on: false });   // (that clears it away)
+    await sleep(100);
+  }
   // only the day's driver takes the wheel (drawn at random each morning: set here through the test lever, on
   // the driver's own socket, so it lands before their 'use')
   const roles = (drv, nav) => drv.send({ t: 'dbg', op: 'roles', drv: drv.id, nav: nav.id });

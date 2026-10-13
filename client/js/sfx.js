@@ -113,6 +113,11 @@ export const sfx = {
   stampede: () => { for (let i = 0; i < 4; i++) { tone(58, 0.15, 'sine', 0.55, 34, i * 0.13); noise(0.11, 320, 0.3, 90, 'lowpass', i * 0.13); } },
   clang: () => { tone(560, 0.45, 'square', 0.09); tone(845, 0.35, 'square', 0.06); tone(1250, 0.15, 'triangle', 0.04); },
   bonk: () => { tone(330, 0.12, 'triangle', 0.3, 170); noise(0.08, 1300, 0.2); },
+  // the ringtails: their chatter, the slide-whistle yoink of a theft, a squeal, the snap of their jaws
+  chitter: () => { for (let i = 0; i < 5; i++) tone(2100 + (i % 2) * 450, 0.045, 'square', 0.045, 1700, i * 0.06); },
+  yoink: () => { tone(480, 0.24, 'sine', 0.2, 1500); noise(0.1, 3000, 0.05, 1500, 'bandpass', 0.03); },
+  squeal: () => { tone(1700, 0.26, 'sawtooth', 0.06, 2600); tone(2300, 0.2, 'square', 0.025, 1500, 0.06); },
+  snap: () => { noise(0.05, 2600, 0.24, 1200, 'bandpass'); tone(900, 0.05, 'square', 0.07, 480); },
   thunk: (k = 1) => { tone(140, 0.12, 'sine', 0.35 * k, 60); noise(0.08, 700, 0.2 * k); },
   shatter: () => { noise(0.5, 6000, 0.6, 1500, 'highpass'); for (let i = 0; i < 6; i++) tone(2000 + Math.random() * 3000, 0.08, 'sine', 0.12, null, Math.random() * 0.25); },
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },
