@@ -269,7 +269,7 @@ const mobAt = (room, A, type, x, z, extra = {}) => { room.debug(A, { op: 'mob', 
 
 // ---- the grumphorn ----------------------------------------------------------------------------------------
 const { GST, GH, crewFactor, cowbellValue } = await import('../shared/mobs.js');
-const { yawOf } = await import('../server/mobs.js');
+const { yawOf, yawQ } = await import('../server/mobs.js');
 // a stretch of open road (z0 m out) and the yaw that faces along it
 const roadAt = (room, z) => ({ x: room.W.roadX(z), z, yaw: Math.atan2(room.W.roadX(z + 3) - room.W.roadX(z - 3), 6) });
 const mobOf = (room, id) => room.sim.mobs?.list.get(id);
@@ -344,15 +344,18 @@ function driveAt(room, A, speed, secs, onTick = null) {
   const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw });
   tick(room, 0.5);
   const fx = Math.sin(r.yaw), fz = Math.cos(r.yaw), sx = Math.cos(r.yaw), sz = -Math.sin(r.yaw);
-  stand(room, A, r.x + fx * 6 + sx * 0.5, r.z + fz * 6 + sz * 0.5, r.yaw + Math.PI);
-  stand(room, B, r.x + fx * 6 - sx * 0.5, r.z + fz * 6 - sz * 0.5, r.yaw + Math.PI);
+  stand(room, A, r.x + fx * 6, r.z + fz * 6, r.yaw + Math.PI);
+  stand(room, B, r.x + 30, r.z - 30, 0);
   const bank = room.bank;
-  for (let i = 0; i < 60 * 8 && !knocks(A).length && !knocks(B).length; i++) tick(room, 1 / 60);
+  // (Bob steps in beside Ann once its line is fixed on her: both are in its horns at once)
+  for (let i = 0; i < 60 * 8 && !evs(A.conn, 'mob').some(e => e.id === id && e.s === 'charge'); i++) tick(room, 1 / 60);
+  stand(room, B, r.x + fx * 6 + sx * 0.8, r.z + fz * 6 + sz * 0.8, r.yaw + Math.PI);
+  for (let i = 0; i < 60 * 4 && !(knocks(A).length && knocks(B).length); i++) tick(room, 1 / 60);
   tick(room, 0.3);
   const all = [...knocks(A), ...knocks(B)];
   const kos = all.filter(k => k.ko), stumbles = all.filter(k => !k.ko);
-  check(kos.length === 1 && kos[0].why === 'mob' && stumbles.length <= 1 && room.bank === bank,
-    `grumphorn: a charge knocks out one of two side by side (KOs ${kos.length}, stumbles ${stumbles.length}), and bills nothing (bank ${bank} -> ${room.bank})`);
+  check(kos.length === 1 && kos[0].why === 'mob' && stumbles.length === 1 && room.bank === bank,
+    `grumphorn: two in its horns at once: one is knocked out, the other stumbles (KOs ${kos.length}, stumbles ${stumbles.length}), and it bills nothing (bank ${bank} -> ${room.bank})`);
   check(evs(Cc.conn, 'mob').some(e => e.id === id && e.s === 'toss'), 'grumphorn: the crew hears the toss');
 }
 {
@@ -488,6 +491,160 @@ function driveAt(room, A, speed, secs, onTick = null) {
     tick(room, 3);
     check(evs(A.conn, 'mob').filter(e => e.id === m.id && e.s === 'glare').length > n0, 'grumphorn: with the gate open, it comes for you within 3 s');
   }
+}
+
+{
+  // safety: a push still in flight when nightfall takes the beast away touches nothing that's been freed
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const r = roadAt(room, 70);
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.LEFT });
+  tick(room, 0.3);
+  const t = room.sim.props.get(id).body.translation();
+  stand(room, A, t.x - 2.2, t.z, Math.PI / 2);
+  tick(room, 1 / 60);
+  room.handle(A, { t: 'push', kind: 'prop', id, pt: [t.x - 1.2, t.y, t.z], dir: [1, 0, 0] });
+  const pending = room.sim.pushes.length;
+  room.phase = 'road';
+  room.beginNight();
+  let threw = null;
+  try { tick(room, 2); room.snapshot(); } catch (e) { threw = e; }
+  check(pending === 1 && !threw && !room.sim.props.has(id), `grumphorn: a push still in flight at nightfall, when it's taken away, breaks nothing (${threw?.message || 'no error'})`);
+}
+// patience billed to it: (the amounts charged, before a winded beast's doubling)
+const billed = (room, fn) => { const M = room.sim.mobs, f = M.ghCost.bind(M), log = []; M.ghCost = (m, p, n) => { log.push(n); return f(m, p, n); }; fn(); M.ghCost = f; return log.reduce((a, b) => a + b, 0); };
+{
+  // things touching it cost patience once per hit, by the momentum they bring: the boulder shoved into it at
+  // a walk costs 40 at most; a TV left leaning on it, or a safe it walks into, nothing
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const sim = room.sim, r = roadAt(room, 70);
+  stand(room, A, r.x + 40, r.z - 40, 0);
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.ROAM });
+  const m = mobOf(room, id);
+  tick(room, 1);
+  const t = sim.props.get(id).body.translation(), yw = yawOf(sim.props.get(id).body.rotation()), sx = Math.cos(yw), sz = -Math.sin(yw);
+  // (the boulder 0.5 m off its flank, rolling at it at 1 m/s)
+  const bd = sim.addProp('boulder', { x: t.x + sx * 2.95, y: room.W.heightAt(t.x + sx * 2.95, t.z + sz * 2.95) + 1.35, z: t.z + sz * 2.95 }, yawQ(yw), 0, 0);
+  const boulder = billed(room, () => { sim.props.get(bd.id).body.setLinvel({ x: -sx, y: 0, z: -sz }, true); for (let i = 0; i < 120; i++) { const b = sim.props.get(bd.id)?.body; if (b && i < 60) { const v = b.linvel(); b.setLinvel({ x: -sx, y: v.y, z: -sz }, true); } tick(room, 1 / 60); } });
+  sim.removeProp(bd.id);
+  m.st = GST.ROAM; m.stAt = room.t;
+  tick(room, 0.5);
+  const t2 = sim.props.get(id).body.translation();
+  const tv = sim.addProp('tv', { x: t2.x - sx * 0.95, y: t2.y + 0.2, z: t2.z - sz * 0.95 }, { x: 0, y: 0, z: 0, w: 1 }, 200, 200);
+  const lean = billed(room, () => tick(room, 3));
+  sim.removeProp(tv.id);
+  // a safe in its way as it walks off toward a noise
+  m.st = GST.ROAM; m.stAt = room.t;
+  const t3 = sim.props.get(id).body.translation(), fx = Math.sin(yw), fz = Math.cos(yw);
+  sim.addProp('safe', { x: t3.x + fx * 2.6, y: room.W.heightAt(t3.x + fx * 2.6, t3.z + fz * 2.6) + 0.45, z: t3.z + fz * 2.6 }, yawQ(yw), 300, 300);
+  m.noise = { x: t3.x + fx * 12, y: t3.y, z: t3.z + fz * 12 };
+  const safe = billed(room, () => tick(room, 3));
+  check(boulder > 0 && boulder <= GH.COST.propCap + 1e-6 && lean < 1 && safe < 1, `grumphorn: the boulder rolled into it costs ${boulder.toFixed(1)} patience (40 at most), a TV leaning on it ${lean.toFixed(1)}, walking into a safe ${safe.toFixed(1)}`);
+}
+{
+  // the horn wakes it, and with nobody on foot it goes for the RV (parked: ramming it costs only the charge)
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const sim = room.sim, rp = sim.rv.translation(), rq = sim.rv.rotation();
+  const ahead = toWorld(rp, rq, { x: 0, y: 0, z: 12 });
+  const id = mobAt(room, A, 'grumphorn', ahead.x, ahead.z, { yaw: Math.atan2(rp.x - ahead.x, rp.z - ahead.z) + 1.2 });
+  const m = mobOf(room, id);
+  tick(room, 0.5);
+  A.seat = 0;
+  const p0 = m.patience;
+  room.handle(A, { t: 'horn' });
+  for (let i = 0; i < 60 * 8 && m.st !== GST.WINDED; i++) tick(room, 1 / 60);
+  const said = s => evs(A.conn, 'mob').some(e => e.id === id && e.s === s);
+  check(said('glare') && said('charge') && m.st === GST.WINDED && Math.abs(p0 - m.patience - GH.COST.charge) < 1e-6,
+    `grumphorn: honked at from the RV, it glares at the RV and charges it (patience ${p0} -> ${m.patience}: the charge's ${GH.COST.charge}, nothing for the parked RV)`);
+  A.seat = null;
+}
+{
+  // whoever revives a friend is left alone, from as far as a revive reaches (3.5 m)
+  const { room, ps: [A, B, Cc] } = crew(['Ann', 'Bob', 'Cat']);
+  room.mobsOn = false;
+  const r = roadAt(room, 70);
+  const fx = Math.sin(r.yaw), fz = Math.cos(r.yaw);
+  stand(room, A, r.x + 50, r.z - 50, 0);
+  stand(room, B, r.x + fx * 7, r.z + fz * 7, r.yaw + Math.PI);
+  stand(room, Cc, r.x + fx * 7 + 3.4, r.z + fz * 7, r.yaw + Math.PI);
+  room.handle(B, { t: 'ko', why: 'fall' });
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.ROAM });
+  tick(room, 12);
+  check(!knocks(Cc).length && !evs(A.conn, 'mob').some(e => e.id === id && e.s === 'charge'), `grumphorn: a friend reviving from 3.4 m away is left alone (state ${stOf(room, id)})`);
+}
+{
+  // a hand on its horns as it charges doesn't stop the toss
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const r = roadAt(room, 70);
+  const fx = Math.sin(r.yaw), fz = Math.cos(r.yaw);
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.ROAM });
+  stand(room, A, r.x + fx * 8, r.z + fz * 8, r.yaw + Math.PI);
+  let grabbed = false;
+  for (let i = 0; i < 60 * 10 && !knocks(A).some(k => k.ko); i++) {
+    tick(room, 1 / 60);
+    const t = room.sim.props.get(id).body.translation();
+    if (!grabbed && stOf(room, id) === GST.CHARGE && Math.hypot(t.x - A.pos.x, t.z - A.pos.z) < 3.2) {
+      room.handle(A, { t: 'grab', kind: 'prop', id, pt: [t.x, t.y, t.z], d: 2 });
+      grabbed = A.conn.last('grabbed')?.ok;
+    }
+  }
+  check(grabbed && knocks(A).some(k => k.ko && k.why === 'mob'), `grumphorn: grabbing its horns as it charges doesn't save you (grabbed ${grabbed}, tossed ${knocks(A).some(k => k.ko)})`);
+}
+{
+  // it has had enough while someone holds its horns: they're told they let go; its cowbell drops clear of its
+  // hooves (it isn't trampled as it slides to a stop out of a charge)
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  room.day = 2;
+  const sim = room.sim, r = roadAt(room, 70);
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.ROAM });
+  const m = mobOf(room, id);
+  tick(room, 0.5);
+  let t = sim.props.get(id).body.translation();
+  stand(room, A, t.x - 2.2, t.z, Math.PI / 2);
+  tick(room, 1 / 60);
+  room.handle(A, { t: 'grab', kind: 'prop', id, pt: [t.x - 0.9, t.y + 0.3, t.z], d: 1.4 });
+  tick(room, 0.2);
+  const held = m.st === GST.HELD;
+  sim.mobs.ghCost(m, sim.props.get(id), m.patience + 1);
+  tick(room, 1 / 60);
+  check(held && evs(A.conn, 'slip').some(e => e.id === id && e.by === A.id) && !sim.holds.has(A.id), 'grumphorn: if it gives up while you hold its horns, your hands are told they let go');
+  const r2 = crew(['Bob']);
+  r2.room.mobsOn = false; r2.room.day = 2;
+  const id2 = mobAt(r2.room, r2.ps[0], 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.CHARGE });
+  const m2 = mobOf(r2.room, id2);
+  tick(r2.room, 0.6);
+  r2.room.sim.mobs.ghCost(m2, r2.room.sim.props.get(id2), m2.patience + 1);
+  tick(r2.room, 4);
+  const bell = [...r2.room.sim.props.values()].find(p => p.type === 'cowbell');
+  check(bell && bell.value === cowbellValue(2), `grumphorn: giving up mid-charge, it doesn't trample its own cowbell ($${bell?.value?.toFixed(0)} of $${cowbellValue(2)})`);
+}
+{
+  // a vase that shatters on it still hit it (it wakes); the test levers can't wedge it (a forced charge runs
+  // its course, a forced breather ends)
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const sim = room.sim, r = roadAt(room, 70);
+  stand(room, A, r.x + 40, r.z - 40, 0);
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw + Math.PI / 2 });
+  tick(room, 0.5);
+  const t = sim.props.get(id).body.translation();
+  const vase = sim.addProp('vase', { x: t.x - 3, y: t.y + 0.3, z: t.z }, { x: 0, y: 0, z: 0, w: 1 }, 30, 300);
+  vase.body.applyImpulse({ x: vase.body.mass() * 9, y: 0.5, z: 0 }, true);
+  tick(room, 1);
+  check(!sim.props.has(vase.id) && evs(A.conn, 'mob').some(e => e.id === id && e.s === 'wake'), `grumphorn: a vase that shatters on it still wakes it (broke ${!sim.props.has(vase.id)}, state ${stOf(room, id)})`);
+  const r2 = roadAt(room, 140);
+  let threw = null, st = [];
+  try {
+    const i2 = mobAt(room, A, 'grumphorn', r2.x, r2.z, { yaw: r2.yaw, st: GST.CHARGE });
+    tick(room, 3); st.push(stOf(room, i2));
+    room.debug(A, { op: 'mobstate', id: i2, st: GST.WINDED });
+    tick(room, GH.WINDED_T + 0.5); st.push(stOf(room, i2));
+  } catch (e) { threw = e; }
+  check(!threw && st[0] !== GST.CHARGE && st[1] !== GST.WINDED, `grumphorn: a charge or a breather forced by the test lever ends as it should (states ${st.join(', ')}${threw ? ': ' + threw.message : ''})`);
 }
 
 // ---- world gen: the wildlife is placed last, from its own random stream: nothing else moves ---------------------

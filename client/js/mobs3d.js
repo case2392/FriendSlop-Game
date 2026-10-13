@@ -110,6 +110,12 @@ export class MobView {
     this.j = { lift: 0, fold: 0, head: 0, headY: 0, tail: 0, fl: 0, fr: 0, bl: 0, br: 0, heave: 0 };
     this.zzz = null; this.puffT = 0;
     this.onPuff = null;   // (main.js) where steam or dust puffs from
+    this.farT = 0; this.farSt = null; this.snap = false;
+  }
+  // gone (nightfall, a re-list, a new day): what it made for itself (the geometry is shared, cached per biome)
+  dispose() {
+    this.zzz?.userData.dispose?.();
+    this.mesh?.skeleton?.dispose();
   }
   // st: the snapshot's state (with its flag bits); camPos: where the camera is (nothing is posed far off)
   update(dt, t, st, camPos) {
@@ -121,11 +127,18 @@ export class MobView {
     this.prev = p.clone();
     const d = camPos ? p.distanceTo(camPos) : 0;
     this.obj.visible = d < 140;
-    if (d > 60 || dt <= 0) return;
+    if (dt <= 0 || d >= 140) return;
+    if (d > 60) {
+      // far off: posed four times a second and snapped (no easing), so it still lies down, gets up and runs
+      this.farT += dt;
+      if (this.farT < 0.25 && this.farSt === raw) return;
+      dt = this.farT; this.farT = 0; this.farSt = raw; this.snap = true;
+    } else { this.farT = 0; this.farSt = null; }
     if (this.type === 'grumphorn') this.grumphorn(dt, t, s, raw, d);
+    this.snap = false;
   }
   grumphorn(dt, t, s, raw, d) {
-    const S = GST, J = this.j, k = Math.min(1, dt * 7);
+    const S = GST, J = this.j, k = this.snap ? 1 : Math.min(1, dt * 7);
     const lying = s === S.SLEEP || s === S.LEFT || (s === S.DOZE && this.speed < 0.3);
     const tgt = { lift: 0, fold: 0, head: 0.05, headY: 0, tail: 0.15, fl: 0, fr: 0, bl: 0, br: 0, heave: 0 };
     if (lying) { tgt.lift = -0.36; tgt.fold = 1; tgt.head = 0.32; tgt.tail = 0.5; tgt.heave = 0.02 * Math.sin(t * 1.3); }
@@ -142,7 +155,7 @@ export class MobView {
       if (gallop) { tgt.fl = tgt.fr = sn * a; tgt.bl = tgt.br = -sn * a; tgt.lift = Math.abs(Math.cos(this.ph)) * 0.08; tgt.head = 0.42; tgt.tail = -0.3; }
       else { tgt.fl = tgt.br = sn * a; tgt.fr = tgt.bl = -sn * a; tgt.head = 0.12 + Math.sin(this.ph * 2) * 0.04; }
     }
-    for (const key in J) J[key] = ease(J[key], tgt[key], key === 'fl' || key === 'fr' || key === 'bl' || key === 'br' ? Math.min(1, dt * 18) : k);
+    for (const key in J) J[key] = ease(J[key], tgt[key], key === 'fl' || key === 'fr' || key === 'bl' || key === 'br' ? (this.snap ? 1 : Math.min(1, dt * 18)) : k);
     const b = this.b;
     b.root.position.y = J.lift;
     b.body.scale.set(1 + J.heave * 0.6, 1 + J.heave, 1);

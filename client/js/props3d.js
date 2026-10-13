@@ -1305,7 +1305,8 @@ export function mapCanvas(W) {
     const call = 'GRUMPHORN · CREEP · NO HORN';
     const px = X(o.z), py = Y(o.z), name = (OBST_NAMES[o.type] || o.type).toUpperCase(), w = Math.max(30, textW(name, 9.5), beast ? textW(call, 8) : 0) + 6;
     const [cx, cy] = place(px, py, w, beast ? 42 : 30, beast ? [[0, -38], [0, 40], [w / 2 + 14, -30], [-w / 2 - 14, -30], [0, -58], [0, 60]] : [[0, -32], [0, 34], [w / 2 + 14, -26], [-w / 2 - 14, -26], [0, -52], [0, 54]]);
-    const up = cy < py, iy = cy + (up ? (beast ? 2 : 6) : (beast ? -12 : -6)), ly = cy + (up ? (beast ? -14 : -8) : (beast ? 3 : 9));
+    // (above the obstacle: the name, the call, then the icons nearest it; below it: the icons, then the words)
+    const up = cy < py, iy = cy + (up ? (beast ? 13 : 6) : (beast ? -12 : -6)), ly = cy + (up ? (beast ? -12 : -8) : (beast ? 3 : 9));
     g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (up ? -5 : 5)); g.lineTo(cx, iy + (up ? 7 : -7)); g.stroke(); g.restore();
     claimLine(px, py, cx, iy);
     obstacleIcon(g, o.type, cx - (beast ? 10 : 0), iy);

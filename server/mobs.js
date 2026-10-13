@@ -83,6 +83,8 @@ export class Mobs {
     }
     p.mob = m;
     this.list.set(p.id, m);
+    // (put down mid-charge or winded: with what that state needs)
+    if (type === 'grumphorn' && (st === GST.CHARGE || st === GST.WINDED)) { m.st = GST.ROAM; this.force(m, st); }
     this.sim.out.push({ k: 'spawn', p: this.sim.describe(p) });
     return m;
   }
@@ -176,7 +178,8 @@ export class Mobs {
     if (!m) return;
     this.wake(p);
     if (m.type === 'grumphorn') {
-      if (m.st === GST.LEAVE || m.st === GST.LEFT) return;
+      // (its mind is made up once it glares: a hand on its horns doesn't stop the charge, or the toss)
+      if (m.st === GST.LEAVE || m.st === GST.LEFT || m.st === GST.GLARE || m.st === GST.CHARGE) return;
       // by the horns: it shakes you off in a moment
       const q = this.players?.get(pid);
       this.ghWake(m, p, q?.pos);
@@ -209,6 +212,17 @@ export class Mobs {
 
   // ---- the step -----------------------------------------------------------------------------------------
 
+  // the test lever: a state forced, with what that state needs (a charge its line, winded its breather)
+  force(m, st) {
+    const p = this.get(m.id);
+    if (!p) return;
+    if (m.type === 'grumphorn' && st === GST.CHARGE) {
+      const t = p.body.translation(), yaw = yawOf(p.body.rotation());
+      Object.assign(m, { line: { x: Math.sin(yaw), z: Math.cos(yaw) }, from: v3(t.x, t.y, t.z), tossed: false });
+    }
+    if (m.type === 'grumphorn' && st === GST.WINDED) { this.ghWinded(m, p, false); return; }
+    this.setSt(m, st);
+  }
   // a critter's state changed: the snapshot must carry it even if its body sleeps
   setSt(m, st) {
     if (m.st === st) return;
@@ -263,28 +277,34 @@ export class Mobs {
   // what hit the grumphorn this step: loot (and critters) thrown at it, the RV, a wall in its way
   ghPost(m, p, players) {
     if (m.st === GST.LEFT) return;
-    const part = this.partners(p), asleep = m.st === GST.SLEEP || m.st === GST.DOZE;
+    const part = this.partners(p), asleep = m.st === GST.SLEEP || m.st === GST.DOZE, t = p.body.translation(), now = this.t;
+    // a thing coming at it (thrown, rolled, shoved into it), billed once per touch: J is the momentum it
+    // brings, its mass times its own speed toward the beast as it touches. Loot leaning on it, or lying there
+    // as it walks or charges into it, costs nothing; a contact that keeps going is the same hit
     for (const id of part.props) {
       const q = this.get(id);
       if (!q || id === m.id) continue;
-      // J: the thing's own change of momentum (one hit can take a few steps: summed over 0.15 s, charged once)
-      let h = m.hits.get(id);
-      if (!h || h.until < this.t) { h = { J: 0, charged: 0, until: this.t + 0.15 }; m.hits.set(id, h); }
-      h.J += q.body.mass() * this.dv(q);
-      if (h.J >= 10) this.ghWake(m, p, q.body.translation());
-      const c = Math.min(GH.COST.propCap, h.J * GH.COST.propJ) - h.charged;
-      if (c >= 0.5) { h.charged += c; this.ghCost(m, p, c); }
+      const seen = m.hits.get(id);
+      m.hits.set(id, now);
+      if (seen != null && now - seen < 0.3) continue;
+      const vq = this.vPre.get(id);
+      if (!vq) continue;
+      const qt = q.body.translation(), dx = t.x - qt.x, dy = t.y - qt.y, dz = t.z - qt.z, d = Math.hypot(dx, dy, dz) || 1;
+      const v = (vq.x * dx + vq.y * dy + vq.z * dz) / d, J = q.body.mass() * v;
+      if (v < GH.HIT_V || J < GH.HIT_J) continue;
+      this.ghWake(m, p, qt);
+      this.ghCost(m, p, Math.min(GH.COST.propCap, J * GH.COST.propJ));
     }
-    if (m.hits.size > 16) for (const [id, h] of m.hits) if (h.until < this.t) m.hits.delete(id);
+    if (m.hits.size > 32) for (const [id, at] of m.hits) if (now - at > 1) m.hits.delete(id);
     if (part.rv) {
       if (!m.rvTouch) {
         m.rvTouch = true;
-        // a ram: what it costs goes by the closing speed, but only the RV coming at it counts (it charging a
-        // parked RV only winds itself)
-        const vb = this.vPre.get(m.id) || v3(), vr = this.vRV;
-        const closing = Math.hypot(vr.x - vb.x, vr.z - vb.z), rvMoving = Math.hypot(vr.x, vr.z) >= 2;
-        if (asleep) this.ghWake(m, p, this.sim.rv.translation(), true);
-        if (rvMoving) this.ghCost(m, p, GH.COST.rvPerMs * closing);
+        // a ram: what it costs goes by how fast the RV comes at it (the RV's own speed toward it: it charging
+        // a parked RV, or into the back of one driving off, only winds itself)
+        const rt = this.sim.rv.translation(), vr = this.vRV, nx = t.x - rt.x, nz = t.z - rt.z, nl = Math.hypot(nx, nz) || 1;
+        const at = Math.max(0, (vr.x * nx + vr.z * nz) / nl);
+        if (asleep) this.ghWake(m, p, rt, true);
+        if (at >= 2) this.ghCost(m, p, GH.COST.rvPerMs * at);
         if (m.st === GST.CHARGE) { m.rvWoke = false; this.ghWinded(m, p, true); }
       }
     } else m.rvTouch = false;
@@ -362,7 +382,7 @@ export class Mobs {
     }
     if (best) return best;
     const rt = this.sim.rv.translation(), rv = this.sim.rv.linvel();
-    if (Math.hypot(rt.x - t.x, rt.z - t.z) < GH.SEE && (Math.hypot(rv.x, rv.z) > 1 || m.rvWoke) && this.clear(eye, v3(rt.x, rt.y, rt.z))) return { kind: 'rv' };
+    if (Math.hypot(rt.x - t.x, rt.z - t.z) < GH.SEE && (Math.hypot(rv.x, rv.z) > 1 || m.rvWoke) && this.clear(eye, v3(rt.x, rt.y, rt.z), this.sim.rv)) return { kind: 'rv' };
     return null;
   }
   targetPos(tg, players) {
@@ -390,13 +410,17 @@ export class Mobs {
     if (m.patience <= 0) this.ghLeave(m, p);
   }
   ghLeave(m, p) {
-    for (const pid of [...p.holders]) this.sim.release(pid);
+    for (const pid of [...p.holders]) { this.sim.release(pid); this.sim.out.push({ k: 'slip', id: m.id, by: pid }); }
     p.col.setFriction(0);
     this.setSt(m, GST.LEAVE);
     m.mood = false;
-    // its cowbell drops where it stood: ordinary loot
-    const t = p.body.translation(), yaw = yawOf(p.body.rotation());
-    const at = v3(t.x + Math.sin(yaw) * 1.6, this.sim.W.heightAt(t.x + Math.sin(yaw) * 1.6, t.z + Math.cos(yaw) * 1.6) + 0.3, t.z + Math.cos(yaw) * 1.6);
+    // its cowbell drops where it stood: ordinary loot, beside it (on its exit's far side, clear of where it
+    // slides to a stop and walks off)
+    const t = p.body.translation(), yaw = yawOf(p.body.rotation()), ex = m.bed?.exit;
+    let sx = Math.cos(yaw), sz = -Math.sin(yaw);
+    if (ex && sx * (ex.x - t.x) + sz * (ex.z - t.z) > 0) { sx = -sx; sz = -sz; }
+    const bx = t.x + sx * 1.5, bz = t.z + sz * 1.5;
+    const at = v3(bx, this.sim.W.heightAt(bx, bz) + 0.3, bz);
     const val = cowbellValue(this.day);
     const bell = this.sim.addProp('cowbell', at, yawQ(yaw), val, val);
     if (bell) this.sim.out.push({ k: 'spawn', p: this.sim.describe(bell) });
@@ -580,6 +604,7 @@ export class Mobs {
   partners(p) {
     const out = { rv: false, statics: false, props: [] }, w = this.sim.world, rv = this.sim.rv.handle;
     w.contactPairsWith(p.col, c2 => {
+      if (!c2) return;
       let live = false;
       w.contactPair(p.col, c2, man => { if (man.numContacts() > 0) live = true; });
       if (!live) return;
@@ -598,10 +623,11 @@ export class Mobs {
     return Math.hypot(b.x - a.x, b.y - a.y + 9.81 * this.sim.world.timestep, b.z - a.z);
   }
   // nothing solid (the ground, walls, the RV) between a and b
-  clear(a, b) {
+  // (except: a body that doesn't count, e.g. the RV's own shell round its middle when it's the RV in sight)
+  clear(a, b, except = undefined) {
     const d = v3(b.x - a.x, b.y - a.y, b.z - a.z), L = Math.hypot(d.x, d.y, d.z);
     if (L < 0.3) return true;
-    return !this.sim.world.castRay(new RAPIER.Ray(a, v3(d.x / L, d.y / L, d.z / L)), L - 0.3, true, undefined, GROUPS.solid);
+    return !this.sim.world.castRay(new RAPIER.Ray(a, v3(d.x / L, d.y / L, d.z / L)), L - 0.3, true, undefined, GROUPS.solid, undefined, except);
   }
 }
 

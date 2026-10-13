@@ -422,6 +422,18 @@ function excludeSet() {
   if (me.holding && S.lw) { const h = S.lw.propCollider(me.holding.id); if (h != null) s.add(h); }
   return s;
 }
+// what my own body walks through: that, and a grumphorn on the move. Who it hits is the server's business
+// (its horns toss, its flank stumbles, and it spares anyone down and whoever kneels by them); its capsule
+// here would only shove you along in front of it
+function moveExclude() {
+  const s = excludeSet();
+  if (S.lw) for (const p of S.props.values()) {
+    if (p.type !== 'grumphorn') continue;
+    const st = (p.st ?? 0) & ST_MASK;
+    if (st === GST.CHARGE || st === GST.WINDED || (p.view?.speed || 0) > 2) { const h = S.lw.propCollider(p.id); if (h != null) s.add(h); }
+  }
+  return s;
+}
 
 function nearestAnchor() {
   if (!S.W) return null;
@@ -728,7 +740,7 @@ async function buildDay(m) {
     S.wv.group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.isSkinnedMesh) o.skeleton?.dispose(); });
   }
   if (S.lw) S.lw.free();
-  for (const p of S.props.values()) scene.remove(p.mesh);
+  for (const p of S.props.values()) { scene.remove(p.mesh); p.view?.dispose(); }
   S.props.clear();
   S.W = W;
   S.door = !!m.door;
@@ -829,6 +841,7 @@ function removeProp(id, fx = null) {
   if (!p) return;
   if (fx) burst(p.mesh.position, fx.color, fx.n, fx.speed);
   scene.remove(p.mesh);
+  p.view?.dispose();
   S.props.delete(id);
   S.lw?.removeProp(id);
   S.interp.dropProp(id);
@@ -1088,7 +1101,8 @@ function onEvent(e) {
     case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
     case 'flip': sfx.coin(); break;
     case 'repo': shake(0.4); break;   // (the game-over screen that follows plays the Repo Man's sting)
-    case 'thud': sfx.thunk(1); break;
+    // somebody else knocked about: heard where they are (my own knock has its own sound)
+    case 'thud': { const o = e.id !== S.selfId && S.others?.get(e.id); if (o) positional(o.pos, () => sfx.thunk(e.why === 'shove' ? 0.5 : 1), 40); break; }
     // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
     case 'gone': for (const id of e.ids || []) removeProp(id, { color: '#cdbb9a', n: 12, speed: 2.5 }); break;
     case 'mob': onMobEvent(e); break;
@@ -1522,6 +1536,7 @@ requestAnimationFrame(frame);
       S.lw.setPlayer(p.id, pos, s.mode === C.MODE.KO);
     }
   }
+  S.others = others;
   S.lw.step();
 
   // me
@@ -1533,7 +1548,7 @@ requestAnimationFrame(frame);
   inp.sprint = !!keys.shift;
   inp.crouch = !!keys.control || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
-  me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, excludeSet());
+  me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
   for (const e of me.events) {
     if (e.k === 'step') sfx.step();
     else if (e.k === 'climbstep') sfx.climb();

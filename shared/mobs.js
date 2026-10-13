@@ -38,10 +38,11 @@ export const GH = {
   RISE_T: 1.2, WINDED_T: 2.5, WINDED_HIT_T: 4, DOZE_T: 15,
   SEE: 16, LEASH: 50, HELD_T: 1.5,
   TOSS_V: 7, TOSS_UP: 6.5, STUMBLE_V: 3,             // what a toss does to you (and a brush with it)
-  REVIVE_SAFE: 3, GRACE_T: 10, GRACE_R: 6,           // it leaves alone anyone near a downed friend, and a toss's spot
+  REVIVE_SAFE: 3.8, GRACE_T: 10, GRACE_R: 6,         // it leaves alone anyone near a downed friend (a revive reaches 3.5 m), and a toss's spot
   PATIENCE: 100,
   CREW: [0.7, 0.85, 1.0, 1.15, 1.3, 1.45],          // patience x this, for crews of 1..6
   COST: { propJ: 0.1, propCap: 40, windedX: 2, shove: 2, rvPerMs: 20, winchPerS: 6, charge: 8, toss: 35 },
+  HIT_J: 10, HIT_V: 0.5,                             // a hit: a thing coming at it this fast, bringing this much momentum (kg m/s)
 };
 // per day: ringtail dens (how many, ringtails in each, items each den may steal, how close a watcher scares
 // them off, whether they bite), and where the grumphorns sleep (past which obstacle, how far) and how long

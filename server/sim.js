@@ -448,12 +448,12 @@ export class Sim {
     if (!pl?.pos || len(sub(pt, v3(pl.pos.x, pl.pos.y + 0.9, pl.pos.z))) > 2) return;
     if (m.kind === 'rv') {
       if (len(sub(pt, this.rv.translation())) > 7) return;
-      this.pushes.push({ body: this.rv, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
+      this.pushes.push({ id: null, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
     } else if (m.kind === 'prop') {
       const p = this.props.get(Number(m.id));
       if (!p || len(sub(pt, p.body.translation())) > 3) return;
       const f = p.type === 'boulder' ? C.PUSH_FORCE_RV : C.PUSH_FORCE_PROP;
-      this.pushes.push({ body: p.body, pt, f: mul(d, f / n), until: this.t + 0.16 });
+      this.pushes.push({ id: p.id, pt, f: mul(d, f / n), until: this.t + 0.16 });
       if (p.mob) this.mobs?.onPushed(p, pid);
     }
   }
@@ -792,7 +792,8 @@ export class Sim {
 
     // shoves
     this.pushes = this.pushes.filter(p => p.until > this.t);
-    for (const p of this.pushes) p.body.applyImpulseAtPoint(mul(p.f, dt), p.pt, true);
+    // (a push names its prop, fetched each step: one sold, broken or gone for the night since is skipped)
+    for (const p of this.pushes) (p.id == null ? this.rv : this.props.get(p.id)?.body)?.applyImpulseAtPoint(mul(p.f, dt), p.pt, true);
 
     // the wildlife thinks and moves its legs (and jaws)
     this.mobs?.preStep(dt, players);
@@ -804,6 +805,9 @@ export class Sim {
     v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle) && !this.mobCols.has(c.handle));
     this.mobs?.beforePhysics();
     this.world.step(this.eq);
+    // the wildlife reads what just happened to it (hits, run over, stuck) and to its jaws: before the knocks
+    // below free anything that broke (a vase that shatters on a grumphorn still hit it)
+    this.mobs?.postStep(dt, players);
 
     // impacts: knock value off the loot. Each knock counts once, at its hardest: a thing landing touches
     // down at several points over a few steps, and every contact used to count every step (one pothole hit
@@ -865,9 +869,6 @@ export class Sim {
         }
       }
     }
-
-    // the wildlife reads what just happened to it (hits, run over, stuck) and to its jaws
-    this.mobs?.postStep(dt, players);
 
     // anything that fell out of the world goes back to the road (and anything whose motion went
     // non-finite, which nothing else would ever fix: the test is written so NaN fails it)

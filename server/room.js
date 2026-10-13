@@ -291,9 +291,11 @@ export class Room {
   // anything else only fills or hands on a role (nobody is pulled off the wheel of a moving RV)
   checkRoles() {
     const was = { ...this.roles };
-    if (this.phase === 'camp' && this.newcomer() && Math.abs(this.sim.rvSpeed()) < 0.5) this.drawRoles();
+    // (a draw for a newcomer is always said, even when it lands on the same two: the newcomer hasn't heard it)
+    const draw = this.phase === 'camp' && this.newcomer() && Math.abs(this.sim.rvSpeed()) < 0.5;
+    if (draw) this.drawRoles();
     else { this.fillRoles(); if (this.phase === 'camp') this.rolesCrew = this.crewKey(); }
-    if ((was.drv !== this.roles.drv || was.nav !== this.roles.nav) && (this.phase === 'camp' || this.phase === 'road') && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
+    if ((draw || was.drv !== this.roles.drv || was.nav !== this.roles.nav) && (this.phase === 'camp' || this.phase === 'road') && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
   }
   // fill a role nobody has, or whose player left the trip: whoever stood in for them keeps it (at the wheel, or
   // holding the map); else the driver's first (without one nobody drives), from who's here and hasn't had
@@ -441,7 +443,7 @@ export class Room {
       this.mobsOn = !!m.on;
       if (!this.mobsOn && sim.mobs) { sim.mobs.end(); sim.mobs = null; }
     }
-    else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.setSt(mb, +m.st | 0); }
+    else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.force(mb, +m.st | 0); }
   }
 
   // who's here and playing right now (the wildlife is sized for them)
