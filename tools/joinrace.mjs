@@ -107,8 +107,9 @@ const drop = async (probe, W) => {
   }
   return ids;
 };
+// (true if it did: a vase dropped on grass doesn't always smash, and then there's no break to race)
 const smashed = (probe, ids, from, round, t0) => probe.waitFor(m => m.t === 'ev' && m.list.some(e => e.k === 'break' && e.id === ids.vase) && probe.seen.indexOf(m) >= from)
-  .then(() => console.log(`${round}: vase ${ids.vase} smashed ${((Date.now() - t0) / 1000).toFixed(1)} s after the joiner's world message (safe ${ids.safe})`), () => console.log(`${round}: (the vase did not smash)`));
+  .then(() => (console.log(`${round}: vase ${ids.vase} smashed ${((Date.now() - t0) / 1000).toFixed(1)} s after the joiner's world message (safe ${ids.safe})`), true), () => (console.log(`${round}: (the vase did not smash)`), false));
 
 // both clients against the server, once the props have settled (a dent in flight lands on each a
 // moment apart); then what came in while each client loaded, and when its toasts went up
@@ -157,11 +158,11 @@ let from = probe.seen.length, ids = await drop(probe, W1);
 probe.send({ t: 'dbg', op: 'bank', v: 5000 });   // (enough to pay: one missed payment would end the run)
 probe.send({ t: 'dbg', op: 'phase', ph: 'road' });
 probe.send({ t: 'dbg', op: 'clock', h: 23.999 });
-await smashed(probe, ids, from, 'round 1', t0);
+const broke1 = await smashed(probe, ids, from, 'round 1', t0);
 await probe.waitFor(m => m.t === 'receipt').catch(() => console.log('round 1: (no night came)'));
 await built(joiner, 1);
 await joiner.evaluate(() => { window.__nmd.noRender = true; });
-await compare('round 1 (join)', [['joiner', joiner], ['host', host]], code, { joiner: ['ev:break', 'ev:dmg', 'receipt', 'toast'] });
+await compare('round 1 (join)', [['joiner', joiner], ['host', host]], code, { joiner: [...(broke1 ? ['ev:break'] : []), 'ev:dmg', 'receipt', 'toast'] });
 
 // ---- round 2: a new day starts while things happen (the drops go out with the day change) ----
 const mark = await Promise.all([host, joiner].map(p => p.evaluate(() => window.__nmd.builtAt ?? -1)));
