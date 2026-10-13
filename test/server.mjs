@@ -602,6 +602,42 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   room.sim.free?.();
 }
 {
+  // a role handed on elsewhere doesn't pull a stand-in off the wheel or out of the map
+  const room = new Room('KEEP', 4242);
+  const cs = [new FakeConn(), new FakeConn(), new FakeConn(), new FakeConn()];
+  const [A, B, Cat, Dan] = ['Ann', 'Bob', 'Cat', 'Dan'].map((n, i) => room.addPlayer(cs[i], n).player);
+  for (const p of [A, B, Cat, Dan]) room.welcome(p);
+  room.setRoles(A.id, B.id);
+  tick(room, 0.5);
+  const W = room.W, sim = room.sim, z = W.camp.exitZ + 4;
+  sim.placeRV(W.roadX(z), z, 0);
+  tick(room, 0.2);
+  const map = [...sim.props.values()].find(p => p.type === 'map');
+  const pose = (p, x, z, pitch = 0) => room.onPose(p, { par: 1, x, y: 0.05, z, yaw: 0, pitch, m: 0, f: 0, v: [0, 0, 0] });
+  const grab = p => { const t = map.body.translation(); room.handle(p, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 }); };
+  // Ann (the driver) drops and Cat drives in Ann's place; then Bob (the navigator) leaves the trip: Dan reads
+  // the map now, and Cat keeps the wheel
+  room.hold(A, 30);
+  pose(Cat, 0.6, 2.4); room.handle(Cat, { t: 'use', kind: 'seat0' });
+  room.removePlayer(B.id, 'left');
+  check(room.phase === 'road' && Cat.seat === 0 && room.roles.drv === A.id && room.roles.nav === Dan.id, 'stand-ins: the navigator leaving hands the map on, and doesn\'t pull the stand-in off the wheel');
+  // Ann never comes back: Cat keeps the wheel, and the job
+  tick(room, 31);
+  check(!room.players.has(A.id) && room.roles.drv === Cat.id && Cat.seat === 0 && room.roles.nav === Dan.id, `stand-ins: the driver never comes back: the stand-in keeps the wheel and the job (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
+  // a stand-in reading the map keeps it when the driver's job is handed on: Dan (the navigator) drops, Eve reads
+  // the map for Dan while Cat drives; then Cat leaves the trip and Fay (who hasn't seen the map) drives: Eve
+  // keeps the map
+  const [Eve, Fay] = ['Eve', 'Fay'].map(n => room.addPlayer(new FakeConn(), n).player);
+  room.welcome(Eve); room.welcome(Fay);
+  room.hold(Dan, 30);
+  pose(Eve, -0.4, 2.3, 0.5); grab(Eve);
+  tick(room, 0.3);
+  const reading = sim.holds.get(Eve.id)?.id === map.id;
+  room.removePlayer(Cat.id, 'left');
+  check(reading && sim.holds.get(Eve.id)?.id === map.id && room.roles.nav === Dan.id && room.roles.drv === Fay.id, `stand-ins: the driver's job handed on doesn't take the map from whoever reads it for an away navigator (driver ${room.players.get(room.roles.drv)?.name}, Eve reading ${reading})`);
+  room.sim.free?.();
+}
+{
   // AFK: a driver still connected but not moved for a minute (walked off, alt-tabbed, stuck loading) is away
   // too: the crew is told, and anyone stands in. Back at the keys, the wheel is theirs again once it's free
   const room = new Room('AFK', 4242);

@@ -1,7 +1,7 @@
 // A room = one crew, one RV, one run of five days.
 //
 //   camp  — morning. the clock is frozen until the RV rolls out of camp. The day's roles are drawn
-//           (one driver, one navigator who reads the road map), and drawn again if the crew changes.
+//           (one driver, one navigator who reads the road map), and drawn again when a friend climbs aboard.
 //   road  — the clock runs, the roles are locked. scavenge, climb, winch, get to town, pawn, gamble.
 //   night — paid (or repo'd). campfire, store, everyone into a bunk = next day.
 //   over  — you own the RV, or the Repo Man owns you. then a fresh run.
@@ -41,7 +41,7 @@ export class Room {
     this.t = 0;
     this.snapN = 0;
     this.roles = { drv: 0, nav: 0 };   // the day's driver and navigator (player ids; 0: nobody)
-    this.rolesCrew = '';               // who was on the trip when they were drawn
+    this.rolesCrew = '';               // the crew the roles were last settled for (a newcomer in camp draws again)
     this.newRun(seed);
   }
 
@@ -274,11 +274,12 @@ export class Room {
     this.roles = { drv: drv || 0, nav: nav || 0 };
     // (counted on the road only: a hand-over at night is nobody's day of work)
     if (this.phase === 'road') { if (this.roles.drv !== was.drv) this.countJob('drv', this.roles.drv); if (this.roles.nav !== was.nav) this.countJob('nav', this.roles.nav); }
+    // a new driver: whoever else is at the wheel gets up; a new role: whoever may not read the map lets go
+    // (a stand-in for a player who's away keeps the wheel or the map: a hand-on elsewhere doesn't pull them off)
     for (const p of this.players.values()) {
-      // out of the driver's seat if today isn't your day to drive; the map out of your hands if it isn't yours to read
-      if (p.seat === 0 && p.id !== this.roles.drv) { p.seat = null; this.send(p, { t: 'seat', seat: null, exit: RV_SEAT_EXIT[0] }); }
+      if (this.roles.drv !== was.drv && p.seat === 0 && !this.mayDrive(p)) { p.seat = null; this.send(p, { t: 'seat', seat: null, exit: RV_SEAT_EXIT[0] }); }
       const mid = this.mapIn(p);
-      if (mid && p.id !== this.roles.nav) { this.sim.release(p.id); this.send(p, { t: 'grabbed', ok: false, kind: 'prop', id: mid }); }
+      if ((this.roles.drv !== was.drv || this.roles.nav !== was.nav) && mid && !this.mayRead(p)) { this.sim.release(p.id); this.send(p, { t: 'grabbed', ok: false, kind: 'prop', id: mid }); }
     }
     this.sendMeta();
   }
@@ -303,7 +304,11 @@ export class Room {
       drv = live.find(p => p.seat === 0)?.id || this.pickFor('drv', fresh.length ? fresh : others) || nav;
       if (drv === nav) nav = 0;
     }
-    if (!nav) nav = this.pickFor('nav', pool.filter(p => p.id !== drv)) || this.pickFor('nav', live.filter(p => p.id !== drv));
+    if (!nav) {
+      // (not whoever is at the wheel, standing in for an away driver: they can't read it while they drive)
+      const navs = pool.filter(p => p.id !== drv), walking = navs.filter(p => p.seat !== 0);
+      nav = this.pickFor('nav', walking.length ? walking : navs) || this.pickFor('nav', live.filter(p => p.id !== drv));
+    }
     if (drv !== this.roles.drv || nav !== this.roles.nav) this.setRoles(drv, nav);
   }
   // the id of the road map if p is holding it (else 0)
@@ -322,6 +327,9 @@ export class Room {
     const seen = q => q.id === this.roles.nav || this.mapRead.has(q.id);
     return !seen(p) || ![...this.players.values()].some(q => q !== p && q !== d && this.active(q) && !seen(q));
   }
+  // may p hold the road map? Today's navigator; while they're away, anyone but the day's driver (somebody
+  // else must be at the wheel to take it: mapRefusal)
+  mayRead(p) { const { drv, nav } = this.roles; return !!nav && p.id !== drv && (p.id === nav || !this.active(this.players.get(nav))); }
   // the roles as the party sees them: who, whether they're away (then anyone stands in), who may take the wheel
   metaRoles() {
     const { drv, nav } = this.roles;
@@ -487,7 +495,7 @@ export class Room {
     const { drv, nav } = this.roles, name = id => this.players.get(id)?.name, here = id => this.active(this.players.get(id));
     if (!nav) return 'It takes two: one drives, one reads the map.';
     if (p.id === drv) return 'You drive today: no peeking.';
-    if (p.id !== nav && here(nav)) return `Only ${name(nav)} reads the map today.`;
+    if (!this.mayRead(p)) return `Only ${name(nav)} reads the map today.`;
     if (![...this.players.values()].some(q => q !== p && q.seat === 0)) return `${here(drv) ? name(drv) : 'Somebody'} has to be at the wheel before you take the map.`;
     return null;
   }
