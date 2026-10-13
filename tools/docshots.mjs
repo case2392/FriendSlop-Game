@@ -121,7 +121,7 @@ if (await steve.waitForFunction(() => window.__nmd.me.holding?.ok === true, null
 } else console.log('  (Steve never got the map: map.jpg left as it was)');
 await ev(steve, () => window.__nmd.press('release'));
 await dave.keyboard.up(' ');
-await ev(dave, () => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave him the server's driver)
+await ev(dave, () => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave Dave the server's driver)
 await dave.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 120000 }).catch(() => {});
 
 }

@@ -4,7 +4,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 import { chromium } from 'playwright-core';
-import { insideRV, toLocal } from '../shared/rv.js';
+import { insideRV, toLocal, toWorld } from '../shared/rv.js';
 
 const UNSAFE_PORTS = new Set([3659, 4045, 4190, 5060, 5061, 6000, 6566, 6665, 6666, 6667, 6668, 6669, 6679, 6697]);   // Chromium refuses these
 let PORT; do PORT = 4700 + Math.floor(Math.random() * 400); while (UNSAFE_PORTS.has(PORT));
@@ -255,19 +255,26 @@ try {
   await shot(host, 'map');
   await host.evaluate(() => window.__nmd.press('release'));
   await joiner.keyboard.up(' ');
-  await joiner.evaluate(() => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave him the server's driver)
+  await joiner.evaluate(() => window.__nmd.press('use'));   // Dave gets up (a teleport alone would leave Dave the server's driver)
   await joiner.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 24000 });
-  // the roles hold on screen: Steve's seat prompt says Dave drives (and Steve reads the map), and the server
-  // refuses him the wheel; Dave's map prompt says no peeking; each tracker says whose job is what
-  await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x + 0.25, r.y + 0.1, r.z + 2.0, 0); S.aimAt(r.x + 0.62, r.y + 0.4, r.z + 2.85); });
-  await wait(host, 900);
-  const seatLabel = await host.waitForFunction(() => window.__nmd.target()?.use === 'seat0' && window.__nmd.target().label, null, { timeout: 24000 }).then(h => h.jsonValue(), () => '');
+  // the roles hold on screen: Dave's map prompt says no peeking; Steve's seat prompt says Dave drives (and Steve
+  // reads the map), and the server refuses Steve the wheel; each tracker says whose job is what. (Both move
+  // first: just up from the wheel, Dave stands in Steve's line to the seat, and Steve where Dave reads the map
+  // from. By now the RV has driven and turned a little, so both stand in the RV's own frame)
+  const rvNow = await host.evaluate(() => ({ p: window.__nmd.rv.p, q: window.__nmd.rv.q }));
+  const inRV = (x, y, z) => toWorld(rvNow.p, rvNow.q, { x, y, z });
+  await host.evaluate(([a, t]) => { const S = window.__nmd; S.me.teleport(a.x, a.y, a.z, 0); S.aimAt(t.x, t.y, t.z); }, [inRV(0.25, 0.1, 2.0), inRV(0.62, 0.4, 2.85)]);
+  await joiner.evaluate(a => { const S = window.__nmd; S.me.teleport(a.x, a.y, a.z, 0); }, inRV(-0.1, 0.1, 2.25));
+  await wait(joiner, 600);
+  await joiner.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
+  await wait(joiner, 600);
+  await wait(host, 300);
+  const what = p => p.evaluate(() => JSON.stringify(window.__nmd.target() && { kind: window.__nmd.target().kind, label: window.__nmd.target().label }));
+  const peek = await joiner.evaluate(() => window.__nmd.target()?.label || '') || `(${await what(joiner)})`;
+  const seatLabel = await host.waitForFunction(() => window.__nmd.target()?.use === 'seat0' && window.__nmd.target().label, null, { timeout: 24000 }).then(h => h.jsonValue(), async () => `(no seat: ${await what(host)})`);
   const ride = toastSays(host, /Dave drives today\. Ride along/);
   await host.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
   const refusedSeat = (await ride) && (await host.evaluate(() => window.__nmd.me.mode)) !== 'seat';
-  await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
-  await wait(joiner, 600);
-  const peek = await joiner.evaluate(() => window.__nmd.target()?.label || '');
   const qt = await Promise.all([host, joiner].map(p => p.evaluate(() => document.getElementById('qtLines').textContent)));
   check(/Dave drives today\. You read the map/.test(seatLabel) && refusedSeat && /no peeking/.test(peek) && /You read the map today\. Dave drives/.test(qt[0]) && /You drive today\. Steve reads the map/.test(qt[1]),
     `the roles hold on screen (seat: "${seatLabel}"; refused ${refusedSeat}; map: "${peek}"; trackers: ${qt.join(' | ')})`);
