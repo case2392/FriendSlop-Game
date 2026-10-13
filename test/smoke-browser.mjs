@@ -339,7 +339,8 @@ try {
 
   // ---- wildlife: a grumphorn drawn and labelled; the shove; bracing in the RV; knocks on riders ----
   {
-    const spot = await host.evaluate(() => { const S = window.__nmd, y = S.me.yaw; return { x: S.me.pos.x + Math.sin(y) * 6, z: S.me.pos.z + Math.cos(y) * 6, yaw: y }; });
+    // (2.8 m ahead, slantwise: its flank about 2 m off, in reach of the crosshair (3 m) and a shove (2.4 m))
+    const spot = await host.evaluate(() => { const S = window.__nmd, y = S.me.yaw; return { x: S.me.pos.x + Math.sin(y) * 2.8, z: S.me.pos.z + Math.cos(y) * 2.8, yaw: y }; });
     // (lying there for good: a body that won't get up and charge the rest of the test)
     await host.evaluate(s => window.__nmd.send({ t: 'dbg', op: 'mob', type: 'grumphorn', x: s.x, z: s.z, yaw: s.yaw + 1.2, st: 8 }), spot);
     await host.waitForFunction(() => [...window.__nmd.props.values()].some(p => p.type === 'grumphorn' && p.view && p.mesh.visible), null, { timeout: 60000 });
@@ -351,7 +352,7 @@ try {
     }, spot);
     await wait(host, 300);
     const lbl = await host.evaluate(() => window.__nmd.target()?.label || '');
-    check(mb.skinned && mb.bones === 8 && /Grumphorn/.test(lbl), `a grumphorn is drawn (a skinned mesh on ${mb.bones} bones) and the crosshair names it ("${lbl}")`);
+    check(mb.skinned && mb.bones === 8 && /Grumphorn/.test(lbl), `a grumphorn is drawn (skinned ${mb.skinned}, on ${mb.bones} bones) and the crosshair names it ("${lbl}")`);
     // the shove: right mouse with empty hands; the server says it hit something
     await host.evaluate(() => { const S = window.__nmd; if (S.me.holding) S.press('release'); S.me.stamina = 100; S.press('throw'); });
     const shoved = await host.waitForFunction(() => window.__nmd.lastShove?.by === window.__nmd.selfId, null, { timeout: 30000 }).then(() => host.evaluate(() => window.__nmd.lastShove), () => null);

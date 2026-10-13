@@ -441,6 +441,19 @@ function driveAt(room, A, speed, secs, onTick = null) {
     tick(room, 0.8);
     return p0 - m.patience;
   };
+  // a shove reaches its flank (2 m off, its middle nearer 3): it costs it a little patience and wakes it
+  {
+    const t = sim.props.get(id).body.translation(), yw = yawOf(sim.props.get(id).body.rotation());
+    const sx = Math.cos(yw), sz = -Math.sin(yw);   // square off its flank
+    stand(room, A, t.x + sx * 2.65, t.z + sz * 2.65, Math.atan2(-sx, -sz));
+    tick(room, 0.2);
+    const p0 = m.patience;
+    room.handle(A, { t: 'shove' });
+    tick(room, 1 / 60);
+    check(p0 - m.patience >= GH.COST.shove - 1e-9 && m.st !== GST.SLEEP, `grumphorn: a shove from 2 m off its flank reaches it (patience ${p0} -> ${m.patience}, state ${m.st})`);
+    stand(room, A, r.x + 30, r.z - 30, 0);
+    m.st = GST.ROAM; m.stAt = room.t; m.patience = p0;
+  }
   const tv = throwAt('tv');
   m.st = GST.ROAM; m.stAt = room.t;   // (not winded: that would double it)
   const gnome = throwAt('gnome');

@@ -482,7 +482,9 @@ export class Sim {
     for (const p of this.props.values()) {
       const L = LOOT[p.type];
       if (!L || this.tied.has(p.id) || (L.tool && !L.mob)) continue;
-      consider('prop', p, p.body.translation());
+      // (to the nearest point of it: a grumphorn's flank is a metre and a half nearer than its middle)
+      const pr = p.col.projectPoint(e, true);
+      consider('prop', p, pr ? v3(pr.point.x, pr.point.y, pr.point.z) : p.body.translation());
     }
     cands.sort((a, b) => a.d - b.d);
     let hit = 0;
