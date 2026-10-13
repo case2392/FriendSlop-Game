@@ -37,7 +37,9 @@ It has no health bar, only **patience**. Sneak past crouched, creep the RV by, o
 at it, shove it, ram it with the RV (everyone crouch to brace first), winch it. Each charge and each toss
 costs it patience too. When it runs out, it drops its cowbell (worth $205 to $320 at the pawn shop) and
 walks off the road for good. It never touches the bank, leaves alone anyone who is down (and whoever
-kneels by them), and knocks out at most one player per charge.
+kneels by them), and knocks out at most one player per charge. There's a heap of stones by its warning
+sign for throwing, and if two of you shove its side together while it sleeps, it tips over: it lies there
+kicking for 12 seconds, long enough to get the RV past, and then it's up and not best pleased.
 
 Every day, **Ringtails** (raccoon-sized bandits with black masks and ringed tails) live in dens beside
 some of the stops: one den on day 1, three by day 5, marked with paw prints on the map. They sneak up on
@@ -46,6 +48,27 @@ their distance. Catch one and it drops what it took (from day 2 it bites if you 
 with a friend); shove it or hit it with something and it's stunned; honk and they scatter; run one over
 and it's squashed flat for a while. A den only steals so much a day, and everything it took is still
 there at its den: go and get it back. The tracker says what they're holding of yours.
+
+From day 2 they get bolder. Leave the RV parked with its door open and nobody near it, and one may hop in
+and run off with the best loose thing in the cabin: shut the door, stay by it, or bungee the cargo down
+($90 at the store). Drive off with one inside and it lets go and jumps out. Walk up to a den and they come
+out to nip you: you stumble and drop whatever you carry (they leave alone anyone kneeling by a friend who
+is down, and anyone up out of reach).
+
+From day 3, **loose rock** sits on the rim above the narrows (the boulder and the ranger gate). A yellow
+LOOSE ROCK sign warns you and the navigator's map says "HONK FIRST". When the RV gets close, or someone
+shoves the boulder, the rim rumbles and the rocks come down: one still falling fast knocks out whoever it
+hits, a rolling one bowls you over. Honk at the sign and it all comes down before you get there. Afterwards
+the rocks are just heavy stones, good for throwing at a Grumphorn.
+
+And mind your aim: junk you throw at a friend knocks them over (never out) and they drop what they hold.
+Everyone hears who did it, and the end of the run counts the beanings.
+
+Day 5 has **the Hoard**: one den (the junkyard's, when the day has one) where six of them live (four
+against a lone player, five against two), on a pile of the week's best stash (about $2,500 of it, marked
+on the map in red). Get it out past all those teeth and the balloon payment looks a lot closer. The store helps: a **hard hat** ($80) turns your next
+knockout into a knock, and a **cheese wheel** ($30) is bait they can't resist: put it where you want them,
+away from your loot or out past their den.
 
 ## Five days, five places
 

@@ -18,7 +18,7 @@ let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
 const dist2 = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const dist3 = (a, b) => Math.hypot(a.x - b.x, a.y - b.y, a.z - b.z);
-const PRICES = { walkie: 150, drink: 40, bungee: 90 };
+const PRICES = { walkie: 150, drink: 40, bungee: 90, hardhat: 80, cheese: 30 };
 const HOLD_SECS = 90;            // a dropped player's seat (id, color, walkie) is kept this long
 const BED_WAIT = 45;             // once half the crew is in a bunk, the rest get this long
 const IDLE_SECS = 60;            // not moved, looked around or done anything for this long: away (AFK), for the roles
@@ -51,8 +51,8 @@ export class Room {
     this.seed = seed ?? (Math.floor(Math.random() * 1e9) >>> 0);
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
-    for (const p of this.players.values()) p.walkie = false;   // a new trip buys its own walkies
-    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0 };
+    for (const p of this.players.values()) p.walkie = p.hat = false;   // a new trip buys its own walkies (and hard hats)
+    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0 };
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.startDay([]);
@@ -375,7 +375,7 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0 })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
     });
   }
@@ -410,6 +410,12 @@ export class Room {
       case 'use': return this.onUse(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       case 'ko': return this.onKO(p, m);
+      // the hard hat took a knockout (the page turned it into a knock): it's done for
+      case 'hat':
+        if (!p.hat) return;
+        p.hat = false; this.sendMeta();
+        this.toast(`${p.name}'s hard hat took that one. (It's done for.)`, '#ffd166', 3);
+        return;
       case 'wake': return this.onWake(p);
       case 'emote': if (C.EMOTES.includes(m.e)) this.broadcast({ t: 'emote', id: p.id, e: m.e }); return;
       case 'ping': {
@@ -447,6 +453,9 @@ export class Room {
       if (!this.mobsOn && sim.mobs) { sim.mobs.end(); sim.mobs = null; }
     }
     else if (m.op === 'mobstate') { const mb = sim.mobs?.list.get(+m.id); if (mb) sim.mobs.force(mb, +m.st | 0); }
+    // a knock as the physics sends one (a rock, a toss), through the same relay; a hard hat on or off
+    else if (m.op === 'knock') sim.out.push({ k: 'knock', id: p.id, v: [0, 2, 0], ko: !!m.ko, why: String(m.why || 'rock') });
+    else if (m.op === 'hat') { p.hat = !!m.on; this.sendMeta(); }
   }
 
   // who's here and playing right now (the wildlife is sized for them)
@@ -633,6 +642,7 @@ export class Room {
       const what = u.arg, price = PRICES[what];
       if (this.bank < price) return this.toast(`${fmt$(price)}. The bank has ${fmt$(this.bank)}. No.`, '#ff8a80', 3, p);
       if (what === 'walkie' && p.walkie) return this.toast('You already have a walkie. Hold T to talk.', '#fff', 3, p);
+      if (what === 'hardhat' && p.hat) return this.toast('You\'ve got one on already.', '#fff', 3, p);
       if (what === 'bungee') {
         const n = sim.tieDown();
         if (!n) return this.toast('Nothing loose in the RV to tie down.', '#fff', 3, p);
@@ -647,6 +657,14 @@ export class Room {
         this.toast(`${p.name} bought a walkie-talkie. Hold T to talk to anyone else with one, at any range.${others ? '' : ' (Nobody else has one yet.)'}`, p.color, 5);
       }
       if (what === 'drink') { this.send(p, { t: 'drink' }); this.toast(`${p.name} chugged an energy drink.`, p.color, 3); }
+      if (what === 'hardhat') { p.hat = true; this.sendMeta(); this.toast(`${p.name} bought a hard hat. The next knockout is only a knock.`, p.color, 4); }
+      if (what === 'cheese') {
+        // on the counter, to carry out: ringtails go for it before anything else about
+        const at = this.W.town.store?.shelf || u;
+        const c = sim.addProp('cheese', { x: at.x, y: at.y + 0.25, z: at.z }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+        if (c) sim.out.push({ k: 'spawn', p: sim.describe(c) });
+        this.toast(`${p.name} bought a cheese wheel. Ringtails can't resist it: put it where you want them.`, p.color, 4);
+      }
     } else if (u.kind === 'pay') {
       if (this.paid) return this.toast('Already paid. He\'s just... watching you now.', '#fff', 3, p);
       // past midnight he has already taken the RV: there's no paying him now
@@ -693,7 +711,8 @@ export class Room {
     const by = k?.by != null ? this.players.get(k.by)?.name : null;
     let how = { fall: 'ate dirt', rv: 'got run over', crash: 'went through the windshield (almost)', mob: 'got tossed by the Grumphorn' }[m.why] || 'is down';
     if (k?.why === 'mob') how = 'got tossed by the Grumphorn';
-    else if (k?.why === 'shove' && by && m.why === 'fall') how = `ate dirt (${by} shoved them)`;
+    else if (k?.why === 'rock') how = 'got hit by a falling rock';
+    else if ((k?.why === 'shove' || k?.why === 'bean') && by && m.why === 'fall') how = `ate dirt (${by} ${k.why === 'bean' ? 'beaned' : 'shoved'} them)`;
     this.toast(`${p.name} ${how}. Hold E on them to pick them up.`, '#ffb4a2', 4);
   }
 
@@ -918,13 +937,19 @@ export class Room {
           const why = e.why || 'rv';
           this.send(pl, { t: 'knock', v: e.v, ko: !!e.ko, why, rel: e.rel ? 1 : 0 });
           pl.lastKnock = { why, by: e.by ?? null, t: this.t };
-          if (e.ko && why === 'rv') {
+          // (a hard hat takes it: the page turns it into a knock, and nobody was knocked out)
+          if (e.ko && why === 'rv' && !pl.hat) {
             const drv = [...this.players.values()].find(q => q.seat === 0);
             this.bill(C.RV_HIT_BILL, `${drv ? drv.name : 'The RV'} ran over ${pl.name}. ${fmt$(C.RV_HIT_BILL)}.`);
           }
           pub.push({ k: 'thud', id: e.id, why });
         } else {
           if (e.k === 'break') { this.stats.broken += e.lost; this.dayStats.broken += e.lost; }
+          if (e.k === 'bean') {
+            const a = this.players.get(e.by), b = this.players.get(e.id);
+            this.stats.beanings = (this.stats.beanings || 0) + 1;
+            if (a && b) this.toast(`${a.name} beaned ${b.name} with the ${LOOT[e.type]?.name || 'loot'}.`, '#ffd166', 3);
+          }
           if (e.k === 'mob') this.onMobEvent(e);
           pub.push(e);
         }
@@ -942,11 +967,17 @@ export class Room {
     } else if (e.s === 'leave') {
       this.stats.beasts++;
       this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
+    } else if (e.s === 'steal' && e.bait) {
+      this.toast('A ringtail took the bait: off home with the cheese wheel.', '#ffd166', 3);
     } else if (e.s === 'steal' && !e.again) {
       if (e.ours) { this.stats.stolen += e.value; this.dayStats.stolen += e.value; }
       const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, ours: false, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };
-      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours;
+      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours; q.raid = q.raid || !!e.raid;
       this.theftQ.set(e.den, q);
+    } else if (e.s === 'rumble') {
+      const where = e.ob === 'gate' ? 'the ranger gate' : 'the boulder';
+      this.toast(e.why === 'horn' ? `The horn shook loose rock off the rim by ${where}. Let it come down before you go through.`
+        : `ROCKS! Loose rock is coming down by ${where}. Get away from the walls!`, '#ff8a65', 4);
     } else if (e.s === 'recovered') {
       this.stats.recovered += e.value; this.dayStats.recovered += e.value;
     } else if (e.s === 'bite') {
@@ -962,10 +993,11 @@ export class Room {
       this.theftToastAt.set(den, this.t);
       const where = q.poi ? ` at ${STOP_NAMES[q.poi] || 'the stop'}` : '';
       // (the stop's own loot nobody had touched yet: they beat you to it)
+      const from = q.raid ? ' out of the RV' : '';
       if (!q.ours) this.toast(q.n === 1 ? `A ringtail beat you to the ${q.what} (${fmt$(q.value)})${where}. Its den is close by.`
         : `Ringtails beat you to ${q.n} things (${fmt$(q.value)})${where}. Their den is close by.`, '#ffd166', 4);
-      else this.toast(q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${where}! Its den is close by.`
-        : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${where}! Their den is close by.`, '#ffb74d', 4);
+      else this.toast((q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${from}${where}! Its den is close by.`
+        : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${from}${where}! Their den is close by.`) + (q.raid ? ' Shut the door when you leave the RV.' : ''), '#ffb74d', 5);
     }
   }
 
@@ -989,6 +1021,7 @@ export class Room {
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
+      rfd: sim.mobs?.rockfalls.filter(r => r.st !== 'armed').map(r => r.id) || [],   // the loose rock that's come down
     };
   }
 

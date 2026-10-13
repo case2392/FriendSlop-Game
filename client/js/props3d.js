@@ -511,6 +511,15 @@ const BUILDERS = {
     return B.done({ ao: 0.22, aoH: 0.06 });
   },
 
+  // bait from the store: a wheel of cheese in red wax (ringtails can't resist it), the top cut to show the cheese
+  cheese() {
+    const B = new Build();
+    B.add(lathe([[0.15, -0.07, 0], [0.158, -0.062, 0.15], [0.16, -0.04, 0.3], [0.16, 0.04, 0.7], [0.158, 0.062, 0.85], [0.15, 0.07, 1]], 24), R.red, { tint: [1.05, 0.62, 0.55], crease: 50 });
+    B.add(lathe([[0, -0.07], [0.15, -0.07]], 24), R.red, { tint: [0.8, 0.45, 0.4] });
+    B.add(lathe([[0.15, 0.07], [0.12, 0.071], [0, 0.072]], 24), R.toast, { tint: [1.45, 1.15, 0.45] });
+    return B.done({ ao: 0.2, aoH: 0.05 });
+  },
+
   vase() {
     const B = new Build();
     B.add(lathe(VASE_PROFILE, 18), R.porcelain);
@@ -1292,7 +1301,7 @@ export function mapCanvas(W) {
   const counts = {}, seen = {}; for (const s of stops) counts[s.type] = (counts[s.type] || 0) + 1;
   const legend = Object.keys(counts).filter(t => counts[t] > 1);
   const lsize = stops.length - legend.reduce((a, t) => a + counts[t], 0) > 6 ? 9 : 10.5;
-  const dens = (Wd.dens || []).map(d => ({ px: X(d.z), py: Y(d.z, d.x) })), rows = legend.length + (dens.length ? 1 : 0);
+  const dens = (Wd.dens || []).map(d => ({ px: X(d.z), py: Y(d.z, d.x), hoard: !!d.hoard })), rows = legend.length + (dens.length ? 1 : 0);
   if (rows) claim([12, CH - 56 - 14 * rows, 184, CH - 50]);
   for (const s of [...stops].sort((a, b) => a.z - b.z)) {
     seen[s.type] = (seen[s.type] || 0) + 1;
@@ -1311,22 +1320,32 @@ export function mapCanvas(W) {
     if (extra) inkText(g, '(up the mesa)', lx, ly + 6, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
   }
   // ringtail dens: paw prints out past their stop
-  for (const d of dens) { const [lx, ly] = place(d.px, d.py, 16, 14, [[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10], [14, 10], [-14, 10]]); pawIcon(g, lx, ly); }
+  for (const d of dens) {
+    if (!d.hoard) { const [lx, ly] = place(d.px, d.py, 16, 14, [[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10], [14, 10], [-14, 10]]); pawIcon(g, lx, ly); continue; }
+    // the Hoard: big paws, and its name in red ink
+    const w = textW('THE HOARD', 8.5) + 4, [lx, ly] = place(d.px, d.py, Math.max(24, w), 34, [[0, 0], [12, 0], [-12, 0], [0, 12], [0, -12]]);
+    pawIcon(g, lx, ly - 5, 1.45);
+    inkText(g, 'THE HOARD', lx, ly + 11, { size: 8.5, color: '#9a2a1e', clear: 0.6 });
+  }
   // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader. Where
-  // a grumphorn sleeps past one, a horned head beside the sign and a pencilled call under the name
+  // a grumphorn sleeps past one, a horned head beside the sign; pencilled calls under the name for it, and for
+  // loose rock on the rim (a honk well back brings it down first: far enough back not to wake the beast)
   for (const o of Wd.obstacles) {
-    const beast = (Wd.beds || []).some(b => b.obz === o.z);
-    const call = 'GRUMPHORN · CREEP · NO HORN';
-    const px = X(o.z), py = Y(o.z), name = (OBST_NAMES[o.type] || o.type).toUpperCase(), w = Math.max(30, textW(name, 9.5), beast ? textW(call, 8) : 0) + 6;
-    const [cx, cy] = place(px, py, w, beast ? 42 : 30, beast ? [[0, -38], [0, 40], [w / 2 + 14, -30], [-w / 2 - 14, -30], [0, -58], [0, 60]] : [[0, -32], [0, 34], [w / 2 + 14, -26], [-w / 2 - 14, -26], [0, -52], [0, 54]]);
-    // (above the obstacle: the name, the call, then the icons nearest it; below it: the icons, then the words)
-    const up = cy < py, iy = cy + (up ? (beast ? 13 : 6) : (beast ? -12 : -6)), ly = cy + (up ? (beast ? -12 : -8) : (beast ? 3 : 9));
+    const beast = (Wd.beds || []).some(b => b.obz === o.z), rock = (Wd.rockfalls || []).some(r => r.obz === o.z);
+    const calls = beast && rock ? ['LOOSE ROCK · HONK FAR BACK', 'GRUMPHORN · THEN CREEP'] : beast ? ['GRUMPHORN · CREEP · NO HORN'] : rock ? ['LOOSE ROCK · HONK FIRST'] : [];
+    const n = calls.length, px = X(o.z), py = Y(o.z), name = (OBST_NAMES[o.type] || o.type).toUpperCase();
+    const w = Math.max(30, textW(name, 9.5), ...calls.map(c => textW(c, 8))) + 6, e = 12 * n;
+    const [cx, cy] = place(px, py, w, 30 + e, n ? [[0, -26 - e], [0, 28 + e], [w / 2 + 14, -18 - e], [-w / 2 - 14, -18 - e], [0, -46 - e], [0, 48 + e]] : [[0, -32], [0, 34], [w / 2 + 14, -26], [-w / 2 - 14, -26], [0, -52], [0, 54]]);
+    // (above the obstacle: the name, the calls, then the icons nearest it; below it: the icons, then the words)
+    const up = cy < py;
+    const ly = n ? (up ? cy - 6 - 6 * n : cy + 3 - 6 * (n - 1)) : cy + (up ? -8 : 9);
+    const iy = n ? (up ? ly + 11 * n + 15 : ly - 15) : cy + (up ? 6 : -6);
     g.save(); g.strokeStyle = 'rgba(138,30,20,0.7)'; g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.moveTo(px, py + (up ? -5 : 5)); g.lineTo(cx, iy + (up ? 7 : -7)); g.stroke(); g.restore();
     claimLine(px, py, cx, iy);
     obstacleIcon(g, o.type, cx - (beast ? 10 : 0), iy);
     if (beast) beastIcon(g, cx + 12, iy);
     inkText(g, name, cx, ly, { size: 9.5, color: '#8a1e14', clear: 0.7 });
-    if (beast) inkText(g, call, cx, ly + 11, { size: 8, color: '#4a3a30', italic: true, weight: 'normal', clear: 0.6 });
+    calls.forEach((c, i) => inkText(g, c, cx, ly + 11 * (i + 1), { size: 8, color: '#4a3a30', italic: true, weight: 'normal', clear: 0.6 }));
     g.save(); g.strokeStyle = '#a8241a'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); g.restore();
   }
   // landmarks
@@ -1747,7 +1766,33 @@ function geoOf(type) {
 }
 const BIOMES = ['meadow', 'fields', 'snow', 'badlands', 'desert'];
 
+// a rock off the rim (a rockfall): a knobbly lump the size of its ball collider, in the biome's boulder stone,
+// darker underneath. Faceted (flat shaded), its bumps a smooth function of direction so the faces stay shut
+function rockGeo(biome) {
+  const rnd = rngFrom('rock-' + biome), ph = Array.from({ length: 6 }, () => rnd() * 6.283), R = LOOT.rock.shape[1] * 1.08;
+  const g = new THREE.IcosahedronGeometry(1, 1), p = g.attributes.position, uv = [], col = [];
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const k = 1 + 0.13 * Math.sin(x * 2.3 + ph[0]) * Math.cos(z * 1.9 + ph[1]) + 0.09 * Math.sin(y * 3.1 + ph[2]) + 0.06 * Math.cos((x + z) * 2.7 + ph[3]);
+    p.setXYZ(i, x * R * k, y * R * k * 0.86, z * R * k);
+    uv.push(Math.atan2(z, x) / 6.283 + 0.5, y * 0.5 + 0.5);
+    const c = 0.7 + 0.3 * (y * 0.5 + 0.5);
+    col.push(c, c, c);
+  }
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  g.computeVertexNormals();
+  return g;
+}
+
 export function buildProp(type, W) {
+  if (type === 'rock' || type === 'stone') {
+    const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow', key = 'rock-' + biome;
+    if (!geoCache.has(key)) geoCache.set(key, rockGeo(biome));
+    const mesh = shadowy(new THREE.Mesh(geoCache.get(key), painted(`loot_boulder_${biome}`, { vertexColors: true })));
+    if (type === 'stone') mesh.scale.set(0.62, 0.55, 0.62);   // (a smaller, flatter one of the same, just round its box)
+    return mesh;
+  }
   if (type === 'boulder') {
     const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow';
     const key = 'boulder-' + biome;

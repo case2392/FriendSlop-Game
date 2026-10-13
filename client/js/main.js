@@ -528,10 +528,13 @@ function mobLabel(p) {
   const st = (p.st ?? 0) & ST_MASK;
   if (p.type === 'ringtail') {
     if ((p.st ?? 0) & ST_CARRY) return '[Hold LMB] grab the ringtail: it drops what it stole · [RMB] shove it';
+    if (st === RST.NIP) return 'An angry ringtail, seeing you off its den. [RMB] shove it · [Hold LMB] grab it';
+    if (st === RST.RAID || st === RST.INRV) return 'A ringtail after what\'s in the RV! [Hold LMB] grab it · [RMB] shove it';
     if (st === RST.STUN || st === RST.FLUNG) return 'A dizzy ringtail. [Hold LMB] grab it · [RMB] shove it';
     return '[Hold LMB] grab the ringtail · [RMB] shove it';
   }
-  if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by.';
+  if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by. (Two of you [RMB] shoving its side together tip it over.)';
+  if (st === GST.TIPPED) return 'A tipped-over Grumphorn! It\'s up in a moment: get by it now.';
   if (st === GST.LEFT || st === GST.LEAVE) return 'A Grumphorn that has had enough of you.';
   if (st === GST.WINDED) return 'The Grumphorn is winded: pelt it, shove it, ram it. [Hold LMB] its horns';
   return 'GRUMPHORN. Get out of its way!';
@@ -676,6 +679,13 @@ const TIPS = [
   'A Grumphorn sleeps past an obstacle some days. Crouch past it, creep the RV by, or wear out its patience: ram it, winch it, throw junk at it.',
   'Right mouse with empty hands shoves whatever is in front of you: friends, loot, wildlife.',
   'Ringtails steal loot nobody is watching and pile it at their den near the stop. Stand facing your pile, or go and take it back.',
+  'From day 2, leave the RV\'s door open with nobody by it and a ringtail may hop in and help itself. Shut the door, stay by it, or bungee the cargo down.',
+  'From day 2, ringtails nip anyone who comes close to their den: you stumble and drop what you carry.',
+  'From day 3, loose rock sits above the narrows. Honk at the yellow LOOSE ROCK sign and it comes down before you get there.',
+  'A hard hat from the store ($80) turns your next knockout into a knock.',
+  'Ringtails can\'t resist a cheese wheel ($30 at the store). Put it where you want them: away from your loot, or out past their den.',
+  'Day 5 has a Hoard: a den with up to six ringtails and the week\'s best stash. Bring friends.',
+  'Throw junk at a friend and it knocks them over (never out). Everyone hears who did it.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Voices carry about 25 m. Past that you need walkie-talkies: $150 each at the store, and it takes two.',
   'Use the game\'s own voice chat, not a call: who hears you depends on where you stand.',
@@ -727,6 +737,7 @@ async function buildDay(m) {
   texPrep.building(true);   // no texture-cache writes competing with the build
   const biome = BIOMES[BIOME_BY_DAY[Math.min(m.day, BIOME_BY_DAY.length) - 1]];
   loadingDay = `Day ${m.day} of ${C.DAYS} · ${biome?.name || 'the road'}`;
+  S.rockDown = null;   // (yesterday's rockfalls)
   $('loading').dataset.tip = '';
   loadingBar(true, 0, loadingDay);
   await physReady;
@@ -834,7 +845,7 @@ function addProp(d) {
   mesh.position.set(p.x, p.y, p.z);
   mesh.quaternion.set(q.x, q.y, q.z, q.w);
   scene.add(mesh);
-  if (mob) mob.view.onPuff = puff;
+  if (mob) { mob.view.onPuff = puff; if (d.tip) mob.view.tipSide = d.tip; }   // (a grumphorn tipped over before this page came)
   S.props.set(d.id, { id: d.id, type: d.type, value: d.value, max: d.max, mesh, pose: { p, q }, view: mob?.view || null, st: d.st ?? 0 });
   S.lw.addProp(d.id, d.type, p, q);
   S.interp.seedProp(d.id, p, q, d.st);
@@ -1026,7 +1037,7 @@ function onMeta(m) {
   voice.syncPeers(m.players.map(p => ({ ...p, connected: true })));
   renderVoiceUI();
   const mine = m.players.find(p => p.id === S.selfId);
-  if (mine) { hands.setColor(mine.color); S.myWalkie = mine.walkie; S.myColor = mine.color; }
+  if (mine) { hands.setColor(mine.color); S.myWalkie = mine.walkie; S.myColor = mine.color; me.hat = !!mine.hat; }
   // paint other players' looks while the browser is idle, so someone joining mid-game doesn't stall a frame
   const idle = window.requestIdleCallback || (f => setTimeout(f, 30));
   for (const p of m.players) {
@@ -1051,7 +1062,29 @@ net.on('s', m => {
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
 net.on('toast', inOrder(m => toast(m.text, m.color, m.secs)));
-net.on('knock', inOrder(m => { me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv); if (m.why === 'shove' && !m.ko) { sfx.stumble(); shake(0.3); } else { sfx.knock(); shake(0.6); } }));
+net.on('knock', inOrder(m => {
+  const n = me.events.length;
+  me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv);
+  // (what the knock did, told now: the next frame's update starts a fresh list. A knockout from the server
+  // (a rock, a toss, the RV) never used to reach it: no pick-up, no bill, and a hard hat that never wore out)
+  for (const e of me.events.splice(n)) meEvent(e);
+  if ((m.why === 'shove' || m.why === 'nip' || m.why === 'bean') && !m.ko) { sfx.stumble(); shake(0.3); } else { sfx.knock(); shake(0.6); }
+}));
+// what my body did (this frame's update, or a knock just now): its sounds, and what the server must hear
+function meEvent(e) {
+  if (e.k === 'step') sfx.step();
+  else if (e.k === 'climbstep') sfx.climb();
+  else if (e.k === 'jump') sfx.jump();
+  else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); }
+  else if (e.k === 'grabwall') sfx.wall();
+  else if (e.k === 'lunge') sfx.lunge();
+  else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
+  else if (e.k === 'mantle') sfx.grab();
+  else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
+  else if (e.k === 'hat') { net.send({ t: 'hat', why: e.why }); sfx.clang(); shake(0.35); }
+  else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
+  else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
+}
 net.on('seat', inOrder(m => {
   if (m.seat == null) { me.unsit(m.exit); }
   else { if (me.holding) onGrabRelease(); me.sit(m.seat); }
@@ -1099,7 +1132,7 @@ function onEvent(e) {
     case 'creak': sfx.creak(); break;
     case 'gate': sfx.gate(); break;
     case 'buzz': sfx.buzz(); break;
-    case 'slip': if (e.by === S.selfId) { me.holding = null; toast(e.why === 'bite' ? 'OW. It bit you, and you let go.' : e.why === 'wriggle' ? 'It wriggled free.' : 'It slipped out of your hands.', '#ffb4a2', 2); } break;
+    case 'slip': if (e.by === S.selfId) { me.holding = null; toast({ bean: 'Beaned! You dropped it.', bite: 'OW. It bit you, and you let go.', wriggle: 'It wriggled free.', nip: 'A ringtail nipped you, and you dropped it. Keep away from their den, or see them off first.', rock: 'A rock bowled you over, and you dropped it.' }[e.why] || 'It slipped out of your hands.', '#ffb4a2', e.why === 'nip' ? 4 : 2); } break;
     case 'throw': break;
     case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
     case 'flip': sfx.coin(); break;
@@ -1109,6 +1142,7 @@ function onEvent(e) {
     // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
     case 'gone': for (const id of e.ids || []) removeProp(id, { color: '#cdbb9a', n: 12, speed: 2.5 }); break;
     case 'mob': onMobEvent(e); break;
+    case 'bean': { const o = S.others?.get(e.id); positional(e.id === S.selfId ? null : o?.pos, () => sfx.bonk(), 40); break; }
     case 'shove': S.lastShove = e; positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
   }
 }
@@ -1124,6 +1158,8 @@ function onMobEvent(e) {
     case 'toss': positional(at, () => sfx.thunk(1), 60); if (near < 12) shake(0.5); break;
     case 'winded': positional(at, () => sfx.snort(), 30); if (at) puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#e8e4dc'); break;
     case 'leave': positional(at, () => sfx.clang(), 60); tutDone('grumph'); break;
+    // tipped over by two friends: a thump, and it lies on that side for a while
+    case 'tip': { positional(at, () => sfx.thunk(1.3), 60); const p = S.props.get(e.id); if (p?.view) p.view.tipSide = e.side; break; }
     // the ringtails: a yoink as they make off with something (a STOLEN tag rides on it for a while), the
     // jaws letting go, a squeal when they're held, stunned or run over
     case 'steal': {
@@ -1141,7 +1177,21 @@ function onMobEvent(e) {
       break;
     case 'wriggle': positional(at, () => sfx.squeal(), 30); break;
     case 'stun': positional(at, () => sfx.bonk(), 30); break;
+    case 'nip': positional(at, () => { sfx.snap(); sfx.chitter(); }, 30); if (e.by === S.selfId) tutDone('den'); break;
     case 'squash': positional(at, () => { sfx.squeal(); sfx.thunk(0.5); }, 40); break;
+    // a rockfall: the rumble and dust off the lip (a moment to get clear), each rock cracking loose, a hit
+    case 'rumble': {
+      (S.rockDown ||= new Set()).add(e.rf);
+      tutDone('rock');
+      const rim = (e.rim || []).map(([x, y, z]) => new THREE.Vector3(x, y, z)), mid = rim[Math.floor(rim.length / 2)];
+      if (!mid) break;
+      positional(mid, () => sfx.rumble(), 110);
+      if (mid.distanceTo(camera.position) < 45) shake(0.3);
+      for (let k = 0; k < 3; k++) setTimeout(() => { for (const p of rim) burst(p, '#a8957a', 5, 1.6, 0.3, 1.4); }, k * 450);
+      break;
+    }
+    case 'rockfall': positional(at, () => sfx.crack(), 70); if (at) burst(at, '#a8957a', 6, 2, 0.5); break;
+    case 'rockhit': positional(at, () => sfx.thunk(1), 50); break;
     case 'recovered': {
       unmark(e.item);
       const it = S.props.get(e.item);
@@ -1185,6 +1235,7 @@ function showOver(m) {
     ${s.stolen ? `<div class="rrow"><span>Stolen by ringtails</span><b>${fmt$(s.stolen)} (got ${fmt$(s.recovered || 0)} back)</b></div>` : ''}
     ${!m.won && m.short > 0 && s.stolen - (s.recovered || 0) >= m.short ? `<div class="rrow bad"><span>The ringtails cost you the RV.</span><b></b></div>` : ''}
     ${s.beasts ? `<div class="rrow good"><span>Grumphorns seen off</span><b>${s.beasts}</b></div>` : ''}
+    ${s.beanings ? `<div class="rrow"><span>Friends beaned</span><b>${s.beanings}</b></div>` : ''}
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
     <p class="hint" id="overNext"></p>
@@ -1603,19 +1654,7 @@ requestAnimationFrame(frame);
   inp.crouch = !!keys.control || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
   me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
-  for (const e of me.events) {
-    if (e.k === 'step') sfx.step();
-    else if (e.k === 'climbstep') sfx.climb();
-    else if (e.k === 'jump') sfx.jump();
-    else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); }
-    else if (e.k === 'grabwall') sfx.wall();
-    else if (e.k === 'lunge') sfx.lunge();
-    else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
-    else if (e.k === 'mantle') sfx.grab();
-    else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
-    else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
-    else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
-  }
+  for (const e of me.events) meEvent(e);
   for (const p of me.pushes) net.send({ t: 'push', ...p });
   if (me.pos.y < (S.W.heightAt(me.pos.x, me.pos.z) - 20)) {
     // fell through the world somehow
@@ -1651,6 +1690,7 @@ requestAnimationFrame(frame);
     if (!v) { v = new PlayerView(scene, p); S.views.set(id, v); }
     st.speaking = voice.V.speaking[id];
     st.walkieTx = !!(st.flags & C.FLAG.WALKIE_TX);
+    st.hat = !!p?.hat;
     v.update(dt, time, st);
   }
   for (const [id, v] of S.views) if (!others.has(id)) v.group.visible = false; else v.group.visible = true;
@@ -1914,10 +1954,26 @@ function tutTip(g, town) {
   if (g.ph !== 'road') return null;
   if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');
   if (!tut.has('ringtail') && critterNear('ringtail', 15)) return keysIn('Hint: ringtails steal loot nobody is watching. Stand facing your pile, grab the thief (it drops it), or [RMB] shove it');
+  if (!tut.has('rock') && rockAhead(90)) return keysIn('Hint: loose rock above the narrows ahead. The driver honks [H] at the LOOSE ROCK sign, and it comes down before you get there');
+  if (!tut.has('den') && S.W.day >= 2 && denNear(14)) return keysIn('Hint: ringtails nip anyone who comes close to their den, and you drop what you carry. [RMB] shove them off, or be quick');
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
   if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
   return null;
+}
+// loose rock still up on the narrows ahead of me, within r metres
+function rockAhead(r) {
+  for (const f of S.W.rockfalls || []) {
+    if (S.rockDown?.has(f.id) || S.g?.rfd?.includes(f.id)) continue;
+    const dz = f.obz - me.pos.z;
+    if (dz > 0 && dz < r && Math.abs(me.pos.x - S.W.roadX(me.pos.z)) < 25) return true;
+  }
+  return false;
+}
+// a ringtail den within r metres of me
+function denNear(r) {
+  for (const d of S.W.dens || []) if (Math.hypot(d.x - me.pos.x, d.z - me.pos.z) < r) return true;
+  return false;
 }
 // a critter of this type within r metres of me
 function critterNear(type, r) {

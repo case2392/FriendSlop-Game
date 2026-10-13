@@ -1295,7 +1295,7 @@ export function buildStructures(W) {
   // price boards for the store's goods go into the sign atlas
   const tags = [];
   const store = W.buildings.find(b => b.kind === 'store');
-  for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90' }[u.arg] || ''], w: 0.46, h: 0.26 });
+  for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES', hardhat: 'HARD HAT', cheese: 'CHEESE' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90', hardhat: '$80', cheese: '$30' }[u.arg] || ''], w: 0.46, h: 0.26 });
   const entry = T && W.signs.find(s => s.post && Math.abs(s.z - (T.z + 6)) < 3 && Math.abs(s.x - 7.5) < 3);
   const sctx = { attached, onCanopy, bInfo, glows, tags, plaques: plaqueSpots(W, T), style: S, styleName: style, tagRy: store ? store.ry : 0, townZ: T.z, entry };
   buildSigns(W, batch, group, near, sctx);
@@ -1482,6 +1482,16 @@ export function buildStructures(W) {
         K.cyl(gm, [0, 0.14, 0], [0, 0.22, 0], 0.025, 0.022, { sides: 8, tint: '#a8e898' });
         K.cyl(mat('wood_light'), [0, 0.22, 0], [0, 0.26, 0], 0.028, 0.028, { sides: 8 });
         glows.push({ p: V3(0, 0.08, 0).applyMatrix4(K.root), s: 0.5, col: '#80ff60' });
+      } else if (u.arg === 'hardhat') {
+        // a yellow hard hat: a dome with a ridge down the crown, and a brim
+        const hm = mat('metal_green');
+        K.add(hm, new THREE.SphereGeometry(0.12, 14, 8, 0, Math.PI * 2, 0, Math.PI / 2), { uv: 'keep', at: matrix(0, 0.02, 0, 0, 0, 0, new THREE.Vector3(1, 0.85, 1.12)), tint: '#f2c230' });
+        K.add(hm, new THREE.CylinderGeometry(0.15, 0.155, 0.014, 18), { uv: 'keep', at: matrix(0, 0.02, 0.012, 0, 0, 0, new THREE.Vector3(1, 1, 1.18)), tint: '#e8b828' });
+        K.box(hm, 0.018, 0.012, 0.13, 0, 0.12, 0, { uv: 'keep', tint: '#f5cc40' });
+      } else if (u.arg === 'cheese') {
+        // a wheel of cheese in red wax, a wedge cut out to show the yellow inside
+        K.add(mat('wood_light'), new THREE.CylinderGeometry(0.13, 0.13, 0.11, 22, 1, false, 0.5, Math.PI * 2 - 1.0), { uv: 'keep', at: matrix(0, 0.055, 0), tint: '#c8322a' });
+        K.add(mat('wood_light'), new THREE.CylinderGeometry(0.122, 0.122, 0.112, 22, 1, false, 0.5 + Math.PI * 2 - 1.0, 1.0), { uv: 'keep', at: matrix(0, 0.055, 0), tint: '#f2c94c' });
       } else {
         K.add(mat('wood_light'), new THREE.TorusGeometry(0.1, 0.035, 6, 14), { uv: 'keep', at: matrix(0, 0.04, 0, 0, Math.PI / 2), tint: '#d89040' });
         K.add(mat('wood_light'), new THREE.TorusGeometry(0.07, 0.03, 6, 12), { uv: 'keep', at: matrix(0.02, 0.09, 0, 0, Math.PI / 2 + 0.2), tint: '#c07838' });

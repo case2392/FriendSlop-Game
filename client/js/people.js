@@ -1712,6 +1712,12 @@ export class PlayerView {
     this.walkie.position.y = 2.65;
     this.walkie.visible = false;
     this.group.add(this.walkie);
+    // a hard hat on (the store's): a badge over the name, till it takes a knockout
+    this.hardhat = labelSprite('⛑️', '#fff', 60);
+    this.hardhat.scale.set(0.7, 0.35, 1);
+    this.hardhat.position.y = this.label.position.y + 0.32;
+    this.hardhat.visible = false;
+    this.group.add(this.hardhat);
     this.phase = 0;
     this.s = {};
     this.P = restPose();
@@ -1726,7 +1732,7 @@ export class PlayerView {
   dispose(scene) {
     scene.remove(this.group);
     this.ch.mesh.skeleton.dispose();     // (the geometry and the atlas are shared and cached: keep them)
-    for (const s of [this.label, this.mic, this.walkie]) { s.material.map?.dispose(); s.material.dispose(); }
+    for (const s of [this.label, this.mic, this.walkie, this.hardhat]) { s.material.map?.dispose(); s.material.dispose(); }
   }
 
   sp(key, target, dt, k = 170, d = 11) { const s = this.s[key] || (this.s[key] = { a: target, v: 0 }); return spring(s, target, dt, k, d); }
@@ -1767,6 +1773,7 @@ export class PlayerView {
     this.tilt.position.y = dropNow;
     this.mic.visible = !!st.speaking && !st.walkieTx;
     this.walkie.visible = !!st.walkieTx;
+    this.hardhat.visible = !!st.hat && !this.mic.visible && !this.walkie.visible;
     if (this.mic.visible || this.walkie.visible) {
       const k = 0.9 + Math.sin(t * 10) * 0.08;
       (this.mic.visible ? this.mic : this.walkie).scale.set(k, k / 2, 1);
@@ -1997,7 +2004,7 @@ function viewIn(id, st, { emote = null, speed = 0, frames = 90 } = {}) {
   const S = { pos: { x: 0, y: 0, z: 0 }, yaw: 0, pitch: 0, mode: C.MODE.WALK, flags: 0, ...st };
   for (let i = 0; i < frames; i++) { S.pos = { x: 0, y: 0, z: S.pos.z + speed / 30 }; v.update(1 / 30, i / 30, S); }
   v.group.position.set(0, 0, 0);
-  for (const o of [v.label, v.mic, v.walkie]) o.visible = false;
+  for (const o of [v.label, v.mic, v.walkie, v.hardhat]) o.visible = false;
   return v.group;
 }
 const M_ = C.MODE, F_ = C.FLAG;

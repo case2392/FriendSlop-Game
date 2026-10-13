@@ -1124,7 +1124,12 @@ export function generateLeg(seed, day, opts = {}) {
     const w = F(-1.4, 1.1, -1.5); use('buy', w.x, y0 + 1.1, w.z, 'Walkie-talkie: talk to anyone else with one, at any range', 'walkie', 0.3);
     const d = F(0.2, 1.1, -1.5); use('buy', d.x, y0 + 1.1, d.z, 'Energy drink', 'drink', 0.3);
     const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords', 'bungee', 0.3);
-    town.store = { walkie: w, drink: d, bungee: r };
+    const hh = F(-2.3, 1.1, -1.5); use('buy', hh.x, y0 + 1.1, hh.z, 'Hard hat: your next knockout is only a knock', 'hardhat', 0.3);
+    const ch = F(2.4, 1.1, -1.5); use('buy', ch.x, y0 + 1.1, ch.z, 'Cheese wheel: ringtails can\'t resist it', 'cheese', 0.3);
+    // (where a bought cheese wheel is put down: the bare counter between the drink and the bungees, clear of
+    // every buy spot: inside one's ball the crosshair saw only the spot, and E bought another)
+    const shelf = F(0.9, 1.1, -1.5);
+    town.store = { walkie: w, drink: d, bungee: r, hardhat: hh, cheese: ch, shelf: { x: shelf.x, y: y0 + 1.1, z: shelf.z } };
     const sg = F(0, 4.2, 4.1);
     signs.push({ x: sg.x, y: y0 + 4.2, z: sg.z, ry: Math.PI / 2, w: 4.4, h: 1.2, lines: ['GENERAL STORE', 'OPEN 24/7 (NOT 7)'], bg: '#ffffff', fg: '#1b4965' });
     town.clerk = F(0, 0, -3.0); town.clerk.y = y0; town.clerk.ry = Math.PI / 2;
@@ -1261,6 +1266,9 @@ export function generateLeg(seed, day, opts = {}) {
   // {mobs:false}) is the same world without it (test/mobs.mjs checks).
   function placeWildlife() {
     const rngM = mulberry32((seed ^ Math.imul(day + 31, 0xC2B2AE35)) >>> 0);
+    // (the stones by the signs and the Hoard's pile draw from their own stream: the dens and beds come out
+    // where they did before those were added)
+    const rngX = mulberry32((seed ^ Math.imul(day + 57, 0x27D4EB2F)) >>> 0);
     const P = MOB_PLAN[Math.min(day, MOB_PLAN.length) - 1];
     // flat enough to stand on, and near the height given
     const flatAt = (x, z, ref, tol) => {
@@ -1291,6 +1299,15 @@ export function generateLeg(seed, day, opts = {}) {
       }
       signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
         lines: ['GRUMPHORN', 'CROSSING', 'LET IT SLEEP'], bg: '#f2c14e', fg: '#1d1d1d', post: true, beast: true });
+      // ammunition: a heap of stones at the foot of the sign (to carry up and throw at it, from a safe way off)
+      for (let k = 0, n = 0; k < 16 && n < 5; k++) {
+        const a = rngX() * 6.283, r = 0.9 + rngX() * 1.6, x = sx + Math.cos(a) * r, z = sz + Math.sin(a) * r;
+        if (Math.abs(x - roadX(z)) < 3.6 || !flatAt(x, z, roadY(z), 1)) continue;
+        if (statics.some(b => b.mat !== 'invisible' && Math.hypot(b.x - x, b.z - z) < Math.max(b.hx, b.hz) + 0.5)) continue;
+        if (cyls.some(c => Math.hypot(c.x - x, c.z - z) < c.r + 0.3) || hulls.some(c => Math.hypot(c.x - x, c.z - z) < (c.r || 2) + 0.3)) continue;   // (a cairn, a rock)
+        props.push({ id: propId++, type: 'stone', x, y: heightAt(x, z) + LOOT.stone.shape[2] + 0.03, z, ry: rngX() * 6.283, value: 0 });
+        n++;
+      }
     }
     // ringtail dens: beside the ground stops (never up a crash butte), 10-18 m past the stop on the side away
     // from the road (out of voice range of a parked RV). The stops with the most light loot about them are
@@ -1315,6 +1332,32 @@ export function generateLeg(seed, day, opts = {}) {
       return null;
     };
     const green = biome === 'meadow' || biome === 'fields' || biome === 'snow';
+    // day 5's Hoard: the junkyard's den (else the stop with the most light loot about it), its pile the
+    // ringtails' haul of the week (four good things, about $2,500), and all of them at home to guard it
+    if (P.hoard) {
+      const order = pool.slice().sort((a, b) => (b.p.type === 'junk') - (a.p.type === 'junk') || b.w - a.w);
+      for (const c of order) {
+        const sp = denSpot(c.p);
+        if (!sp) continue;
+        pool.splice(pool.indexOf(c), 1);
+        const fx = Math.sin(sp.ry), fz = Math.cos(sp.ry), sx = fz, sz = -fx, stash = [];
+        P.hoard.stash.forEach((type, k) => {
+          // a fan of them in front of the den, toward the stop
+          const L = LOOT[type], a = (k - (P.hoard.stash.length - 1) / 2) * 1.05, half = L.shape[0] === 'box' ? L.shape[2] : L.shape[1];
+          const ix = sp.x + fx * (1.2 + Math.abs(a) * 0.3) + sx * a, iz = sp.z + fz * (1.2 + Math.abs(a) * 0.3) + sz * a, id = propId++;
+          const value = Math.round(L.value * (1 + 0.22 * (day - 1)) * (0.9 + rngX() * 0.2) / 5) * 5;
+          props.push({ id, type, x: ix, y: heightAt(ix, iz) + half + 0.06, z: iz, ry: rngX() * 6.283, value });
+          stash.push(id);
+        });
+        dens.push({ id: dens.length, poi: c.p.id, poiType: c.p.type, x: sp.x, y: sp.y, z: sp.z, ry: sp.ry, stash, hoard: true });
+        // dressed like a den, and then some: bones and rocks about it
+        for (const [k, dx, dz, s] of [['bones', -1.0, -0.6, 1], ['rock', -0.9, 0.8, 0.8], ['bones', 1.2, -0.9, 0.8], ['rock', 0.2, -1.4, 0.6], ['rock', -1.6, 0.1, 0.5]]) {
+          const x = sp.x + sx * dx - fx * (0.8 - dz), z = sp.z + sz * dx - fz * (0.8 - dz);
+          decor.push({ k, x, y: heightAt(x, z), z, s, ry: rngX() * 6.283, den: true });
+        }
+        break;
+      }
+    }
     while (dens.length < P.dens && pool.length) {
       let r = rngM() * pool.reduce((a, c) => a + c.w, 0), i = 0;
       for (; i < pool.length - 1; i++) { r -= pool[i].w; if (r < 0) break; }
@@ -1339,16 +1382,49 @@ export function generateLeg(seed, day, opts = {}) {
         decor.push({ k: 'rock', x: bx, y: heightAt(bx, bz), z: bz, s: 0.7, ry: rngM() * 6.283, den: true });
       }
     }
-    return { dens, beds };
+    // loose rock up on a rim of each narrows (the boulder's and the gate's), days 3-5: where a rockfall comes
+    // down from (server/mobs.js: the RV coming close, or the boulder disturbed, brings it down on whoever is
+    // there; a honk well back brings it down early, on nobody). Five or six rocks strung along the lip short
+    // of the obstacle, and a warning sign back down the road
+    const rockfalls = [];
+    if (P.rocks) for (const o of obstacles) {
+      if (o.type !== 'boulder' && o.type !== 'gate') continue;
+      const side = rngM() < 0.5 ? -1 : 1, n = 5 + (rngM() < 0.5 ? 1 : 0), rim = [];
+      for (let k = 0; k < n; k++) {
+        const z = o.z - 5 - k * 2.4 - rngM() * 1.2, ry = roadY(z);
+        // loose on the face itself, two thirds of the way up the wall, a hand's width out from it
+        const top = heightAt(roadX(z) + side * 25, z) - ry;
+        if (top < 6) continue;
+        let at = null;
+        for (let d = 6.5; d <= 25; d += 0.25) {
+          const x = roadX(z) + side * d;
+          if (heightAt(x, z) - ry > 0.66 * top) { at = { x: roadX(z) + side * (d - 0.5), z }; break; }
+        }
+        if (!at) continue;
+        rim.push({ x: at.x, y: heightAt(at.x, at.z) + 0.6, z: at.z });
+      }
+      if (rim.length < 3) continue;
+      const beast = beds.some(b => b.obz === o.z);
+      rockfalls.push({ id: rockfalls.length, ob: o.type, obz: o.z, side, rim, beast });
+      // the warning, back down the road on the same side as the loose rock
+      let sx = roadX(o.z - 40) + side * 5.2, sz = o.z - 40;
+      find: for (let dz = 40; dz <= 56; dz += 4) for (const off of [5.2, 4.6, 6]) {
+        const zz = o.z - dz, xx = roadX(zz) + side * off;
+        if (flatAt(xx, zz, roadY(zz), 0.4) && !signs.some(q => Math.hypot(q.x - xx, q.z - zz) < 4)) { sx = xx; sz = zz; break find; }
+      }
+      signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
+        lines: ['LOOSE ROCK', beast ? 'HONK FROM HERE' : 'HONK FIRST', 'KEEP MOVING'], bg: '#f2c14e', fg: '#1d1d1d', post: true, rock: true });
+    }
+    return { dens, beds, rockfalls };
   }
-  const wild = opts.mobs === false ? { dens: [], beds: [] } : placeWildlife();
+  const wild = opts.mobs === false ? { dens: [], beds: [], rockfalls: [] } : placeWildlife();
 
   return {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
     roadX, roadY, heightAt, topAt, townY,
     obstacles, pois, mesas, statics, cyls, hulls, talus, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
-    dens: wild.dens, beds: wild.beds,
+    dens: wild.dens, beds: wild.beds, rockfalls: wild.rockfalls,
   };
 }
 

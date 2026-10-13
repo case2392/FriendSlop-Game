@@ -171,7 +171,7 @@ export class MobView {
     this.prev = null; this.speed = 0;
     this.j = type === 'ringtail'
       ? { lift: 0, pitch: 0, roll: 0, head: 0, headY: 0, tail: 0, tailY: 0, fl: 0, fr: 0, bl: 0, br: 0 }
-      : { lift: 0, fold: 0, head: 0, headY: 0, tail: 0, fl: 0, fr: 0, bl: 0, br: 0, heave: 0 };
+      : { lift: 0, fold: 0, head: 0, headY: 0, tail: 0, fl: 0, fr: 0, bl: 0, br: 0, heave: 0, roll: 0 };
     this.zzz = null; this.puffT = 0; this.stars = null;
     this.onPuff = null;   // (main.js) where steam or dust puffs from
     this.farT = 0; this.farSt = null; this.snap = false;
@@ -231,12 +231,12 @@ export class MobView {
       tgt.headY = Math.sin(t * 0.8 + this.ph) * 0.8; tgt.tail = -0.6;
     } else if (s === S.SNATCH) {
       tgt.head = 0.55; tgt.lift = -0.03; tgt.tail = 0.3;
-    } else if (s === S.SNEAK) {
+    } else if (s === S.SNEAK || s === S.RAID || s === S.INRV) {
       // low, on its toes, head down, tail level
       gait(1.4 + v * 0.5, 0.35); tgt.lift -= 0.05; tgt.head = 0.25; tgt.tail = -0.1;
     } else {
       // milling about, running home (with it or spooked), trapped in the RV
-      const fast = s === S.RUN || s === S.SPOOK || s === S.GONE || s === S.TRAPPED;
+      const fast = s === S.RUN || s === S.SPOOK || s === S.GONE || s === S.TRAPPED || s === S.NIP;
       gait(fast ? 3.2 : 1.2 + v * 0.6, fast ? 0.75 : 0.4);
       tgt.head = carry ? -0.35 : fast ? 0.15 : 0.1;
       tgt.tail = fast ? 0.2 : 0; tgt.tailY = fast ? Math.sin(t * 13) * 0.45 : Math.sin(t * 2) * 0.15;
@@ -262,8 +262,14 @@ export class MobView {
   grumphorn(dt, t, s, raw, d) {
     const S = GST, J = this.j, k = this.snap ? 1 : Math.min(1, dt * 7);
     const lying = s === S.SLEEP || s === S.LEFT || (s === S.DOZE && this.speed < 0.3);
-    const tgt = { lift: 0, fold: 0, head: 0.05, headY: 0, tail: 0.15, fl: 0, fr: 0, bl: 0, br: 0, heave: 0 };
-    if (lying) { tgt.lift = -0.36; tgt.fold = 1; tgt.head = 0.32; tgt.tail = 0.5; tgt.heave = 0.02 * Math.sin(t * 1.3); }
+    const tgt = { lift: 0, fold: 0, head: 0.05, headY: 0, tail: 0.15, fl: 0, fr: 0, bl: 0, br: 0, heave: 0, roll: 0 };
+    if (s === S.TIPPED) {
+      // over on its side, legs stuck out stiff and kicking now and then, head lolling
+      // (tipSide +1: shoved over toward its right, +x: the roll that lays its back over that way is negative)
+      tgt.roll = -1.45 * (this.tipSide || 1); tgt.lift = -0.12; tgt.head = 0.1 + Math.sin(t * 2) * 0.1; tgt.headY = -0.3 * (this.tipSide || 1); tgt.tail = 0.4;
+      const kick = Math.max(0, Math.sin(t * 3)) * 0.25;
+      tgt.fl = -0.3 - kick; tgt.fr = -0.3 + kick * 0.5; tgt.bl = 0.3 + kick; tgt.br = 0.3 - kick * 0.5;
+    } else if (lying) { tgt.lift = -0.36; tgt.fold = 1; tgt.head = 0.32; tgt.tail = 0.5; tgt.heave = 0.02 * Math.sin(t * 1.3); }
     else if (s === S.RISE) { const f = Math.min(1, this.stT / 1.2); tgt.lift = -0.36 * (1 - f); tgt.fold = 1 - f; tgt.head = 0.32 - 0.5 * f; }
     else if (s === S.GLARE) { tgt.head = 0.45; tgt.fr = Math.max(0, Math.sin(t * 9)) * -0.6; tgt.tail = 0.6 + Math.sin(t * 12) * 0.3; }
     else if (s === S.HELD) { tgt.headY = Math.sin(t * 13) * 0.5; tgt.head = 0.2 + Math.sin(t * 9) * 0.2; }
@@ -280,6 +286,7 @@ export class MobView {
     for (const key in J) J[key] = ease(J[key], tgt[key], key === 'fl' || key === 'fr' || key === 'bl' || key === 'br' ? (this.snap ? 1 : Math.min(1, dt * 18)) : k);
     const b = this.b;
     b.root.position.y = J.lift;
+    b.root.rotation.z = J.roll;
     b.body.scale.set(1 + J.heave * 0.6, 1 + J.heave, 1);
     b.head.rotation.set(J.head, J.headY, 0);
     b.tail.rotation.set(J.tail, 0, 0);

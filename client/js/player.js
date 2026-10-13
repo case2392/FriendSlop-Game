@@ -88,6 +88,8 @@ export class Me {
 
   ko(why) {
     if (this.mode === 'ko') return;
+    // a hard hat on: it takes the knockout (once), and you just stagger
+    if (this.hat && this.mode !== 'seat') { this.hat = false; this.events.push({ k: 'hat', why }); return; }
     (this.koLog ||= []).push({ why, pos: { ...this.pos }, vel: { ...this.vel }, par: this.par, mode: this.mode, t: performance.now() });
     if (this.mode === 'seat') this.seat = null;
     this.mode = 'ko';

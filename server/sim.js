@@ -16,8 +16,11 @@ import {
 } from '../shared/rv.js';
 import { inMud } from '../shared/world.js';
 import { Mobs } from './mobs.js';
+import { GST } from '../shared/mobs.js';
 
 let ready = null;
+// a full snapshot resends at most this many things lying still (the rest in the next ones, in turn)
+const FULL_SHARE = 32;
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
 import { GROUPS } from './groups.js';
@@ -172,10 +175,10 @@ export class Sim {
     if (!L) return null;
     id = id ?? this.nextPropId++;
     const bd = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setRotation(q)
-      .setLinearDamping(0.05).setAngularDamping(L.mob ? 2 : 0.3).setCcdEnabled(L.mass < 60 || !!L.mob);
+      .setLinearDamping(0.05).setAngularDamping(L.adamp ?? (L.mob ? 2 : 0.3)).setCcdEnabled(L.mass < 60 || !!L.mob);
     const body = this.world.createRigidBody(bd);
     const vol = shapeVolume(L.shape);
-    let cd = shapeDesc(L.shape).setDensity(L.mass / vol).setRestitution(0.1);
+    let cd = shapeDesc(L.shape).setDensity(L.mass / vol).setRestitution(L.bounce ?? 0.1);
     if (L.mob) {
       // wildlife walks on its own legs (a velocity servo in mobs.js): no friction to fight, whatever it
       // stands on (Rapier averages the two frictions by default: 'Min' keeps it at 0). No contact-force
@@ -242,6 +245,7 @@ export class Sim {
     const d = { id: p.id, type: p.type, value: Math.round(p.value), max: Math.round(p.max),
       x: r3(t.x), y: r3(t.y), z: r3(t.z), q: [r4(q.x), r4(q.y), r4(q.z), r4(q.w)] };
     if (p.mob) d.st = p.mob.wire();
+    if (p.mob?.tipSide && p.mob.st === GST.TIPPED) d.tip = p.mob.tipSide;   // (which side it lies on: a page that joins now)
     return d;
   }
 
@@ -425,7 +429,7 @@ export class Sim {
     const p = this.props.get(h.id);
     if (!p) return;
     p.holders.delete(pid);
-    if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].mob ? 2 : 0.3);
+    if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].adamp ?? (LOOT[p.type].mob ? 2 : 0.3));
     if (throwDir) {
       const m = p.body.mass();
       const imp = Math.min(m * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP);
@@ -433,7 +437,7 @@ export class Sim {
       const n = len(d) || 1;
       p.body.applyImpulse(mul(d, imp / n), true);
       if (pl?.vel) p.body.applyImpulse(mul(pl.vel, m * 0.6), true);
-      p.thrownBy = pid; p.thrownAt = this.t;
+      p.thrownBy = pid; p.thrownAt = this.t; p.beaned = false;
       this.out.push({ k: 'throw', id: p.id, by: pid });
     }
     this.mobs?.onReleased(p, pid, !!throwDir);
@@ -853,6 +857,40 @@ export class Sim {
       }
     }
 
+    // a stone or rock barely moving for a second is put to sleep: one rocking on a fold of the ground (between
+    // two of its triangles) never gets under the engine's own limits, and was sent in every snapshot for good
+    for (const p of this.props.values()) {
+      if (!LOOT[p.type].settle || p.holders.size || p.body.isSleeping()) continue;
+      const v = p.body.linvel(), w = p.body.angvel();
+      if (Math.hypot(v.x, v.y, v.z) > 0.12 || Math.hypot(w.x, w.y, w.z) > 1) { p.calm = 0; continue; }
+      if ((p.calm = (p.calm || 0) + dt) > 1) { p.body.sleep(); p.calm = 0; }
+    }
+
+    // a thrown thing hitting a friend (not whoever threw it) beans them: a stumble, and they drop what they
+    // carry. Never a knockout, never a bill. To a rider it's how fast it comes at them in the RV (junk lying
+    // still in the cabin of a moving RV isn't flying), and the knock is on top of the RV's motion
+    for (const p of this.props.values()) {
+      if (p.thrownBy == null || p.beaned || this.t - p.thrownAt > 1.5) continue;
+      const t = p.body.translation(), v = p.body.linvel(), w = this.rv.velocityAtPoint(t);
+      const rel = { x: v.x - w.x, y: v.y - w.y, z: v.z - w.z };
+      if (Math.hypot(v.x, v.y, v.z) < 5 && Math.hypot(rel.x, rel.y, rel.z) < 5) continue;
+      for (const pl of players.values()) {
+        if (pl.id === p.thrownBy || !pl.pos || pl.ko || pl.seat != null || (this.knockCd.get(pl.id) || 0) > this.t) continue;
+        const u = pl.par ? rel : v;
+        if (Math.hypot(u.x, u.y, u.z) < 5) continue;
+        const y = Math.max(pl.pos.y + 0.3, Math.min(pl.pos.y + 1.6, t.y));
+        if (Math.hypot(t.x - pl.pos.x, t.y - y, t.z - pl.pos.z) > 0.6) continue;
+        p.beaned = true;
+        this.knockCd.set(pl.id, this.t + 1);
+        const h = this.holds.get(pl.id);
+        if (h) { this.release(pl.id); this.out.push({ k: 'slip', id: h.kind === 'prop' ? h.id : null, by: pl.id, why: 'bean' }); }
+        const k = 2.5 / (Math.hypot(u.x, u.z) || 1);
+        this.out.push({ k: 'knock', id: pl.id, v: [r3(u.x * k), 2, r3(u.z * k)], ko: false, why: 'bean', by: p.thrownBy, rel: pl.par ? 1 : 0 });
+        this.out.push({ k: 'bean', id: pl.id, by: p.thrownBy, item: p.id, type: p.type });
+        break;
+      }
+    }
+
     // the RV runs people over
     const rvv = this.rv.linvel();
     const rvs = Math.hypot(rvv.x, rvv.z);
@@ -920,16 +958,25 @@ export class Sim {
       wheels.push(r3(v.wheelSuspensionLength(i) ?? SUSP_REST), Math.round((v.wheelRotation(i) || 0) * 100) / 100);
     }
     const rv = [r3(t.x), r3(t.y), r3(t.z), r4(q.x), r4(q.y), r4(q.z), r4(q.w), r3(lv.x), r3(lv.y), r3(lv.z), r3(this.steer), ...wheels];
+    // (things lying still that the pages already have are left out; a full one every so often resends them, a
+    // share at a time, so it stays within the snapshot's size however much lies about)
     const props = [];
+    let k = 0;
+    const c0 = this.fullAt || 0;
     for (const p of this.props.values()) {
       const sleeping = p.body.isSleeping();
-      if (!full && sleeping && p.sentSleep) continue;
+      if (sleeping && p.sentSleep) {
+        if (!full) continue;
+        const i = k++;
+        if (i < c0 || i >= c0 + FULL_SHARE) continue;
+      }
       p.sentSleep = sleeping;
       const pt = p.body.translation(), pq = p.body.rotation();
       const e = [p.id, r3(pt.x), r3(pt.y), r3(pt.z), r4(pq.x), r4(pq.y), r4(pq.z), r4(pq.w)];
       if (p.mob) e.push(p.mob.wire());   // wildlife: its state (shared/mobs.js RST / GST, plus flag bits)
       props.push(e);
     }
+    if (full) this.fullAt = c0 + FULL_SHARE >= k ? 0 : c0 + FULL_SHARE;
     const H = this.hook;
     const hp = this.hookPos();
     const hook = [H.state === 'stowed' ? 0 : H.state === 'out' ? 1 : 2, r3(hp.x), r3(hp.y), r3(hp.z), r3(H.len), H.reeling ? 1 : 0, H.holder ?? 0];

@@ -383,10 +383,30 @@ try {
       const b = new M(); b.par = 1; b.mode = 'walk'; b.crouch = false; b.lurch(1 / 60, crash);
       const c = new M(); c.par = 1; c.mode = 'walk'; c.knock([0, 2, 3], false, 'shove', true, { v: { x: 10, y: 0, z: 0 } });
       const d = new M(); d.mode = 'ko'; d.knock([0, 2, 0], true, 'mob');
-      return { braced: a.mode, standing: b.mode, riderVx: c.vel.x, riderPar: c.par, downStays: d.mode };
+      // a hard hat on: the knockout is only a knock (once), and the page tells the server it's used up
+      const h = new M(); h.mode = 'walk'; h.hat = true; h.knock([0, 2, 0], true, 'mob');
+      const h2 = { mode: h.mode, hat: h.hat, told: h.events.some(e => e.k === 'hat') };
+      h.knock([0, 2, 0], true, 'mob');
+      return { braced: a.mode, standing: b.mode, riderVx: c.vel.x, riderPar: c.par, downStays: d.mode, hat: h2, hatThen: h.mode };
     });
     check(body.braced !== 'ko' && body.standing === 'ko', `a crash (60 m/s^2) knocks out a standing rider but not a crouched (braced) one (${body.standing} / ${body.braced})`);
     check(body.riderVx === 10 && body.riderPar === 0 && body.downStays === 'ko', `a rider knocked off keeps the RV's speed (vx ${body.riderVx}); someone down stays down (${body.downStays})`);
+    check(body.hat.mode !== 'ko' && !body.hat.hat && body.hat.told && body.hatThen === 'ko', `a hard hat turns a knockout into a knock, once (${body.hat.mode}, then ${body.hatThen})`);
+    // a knockout the server sends (a rock, a toss, the RV) reaches it: the hard hat takes the first, the
+    // second puts Steve down where the crew can see it, and waking up alone bills the ambulance. The page
+    // used to drop them: its next frame cleared what the knock had queued
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'hat', on: 1 }));
+    await host.waitForFunction(() => window.__nmd.me.hat === true, null, { timeout: 24000 });
+    const hatToast = toastSays(host, /Steve's hard hat took that one/);
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'knock', ko: 1, why: 'rock' }));
+    const hatOk = await hatToast, hatMode = await host.evaluate(() => window.__nmd.me.mode);
+    const downToast = toastSays(host, /Steve got hit by a falling rock/);
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'knock', ko: 1, why: 'rock' }));
+    const down = await downToast;
+    const wokeToast = toastSays(host, /Steve woke up alone/);
+    await host.evaluate(() => { window.__nmd.me.koT = 0.05; });
+    const woke = await wokeToast;
+    check(hatOk && hatMode !== 'ko' && down && woke, `a knockout from the server reaches it: the hard hat takes the first (${hatOk}, ${hatMode}); the second puts Steve down for the crew to see (${down}); waking up alone bills the ambulance (${woke})`);
   }
 
   // ---- painted textures: got ready off the main thread, written to the cache, read back next time ----

@@ -113,6 +113,9 @@ export const sfx = {
   stampede: () => { for (let i = 0; i < 4; i++) { tone(58, 0.15, 'sine', 0.55, 34, i * 0.13); noise(0.11, 320, 0.3, 90, 'lowpass', i * 0.13); } },
   clang: () => { tone(560, 0.45, 'square', 0.09); tone(845, 0.35, 'square', 0.06); tone(1250, 0.15, 'triangle', 0.04); },
   bonk: () => { tone(330, 0.12, 'triangle', 0.3, 170); noise(0.08, 1300, 0.2); },
+  // a rockfall: a long low rumble, then each rock cracking off the lip
+  rumble: () => { noise(1.6, 160, 0.5, 60, 'lowpass'); tone(42, 1.4, 'sine', 0.3, 30); noise(1.2, 900, 0.08, 300, 'bandpass', 0.3); },
+  crack: () => { noise(0.12, 2400, 0.35, 700, 'bandpass'); tone(95, 0.25, 'sine', 0.3, 50, 0.02); },
   // the ringtails: their chatter, the slide-whistle yoink of a theft, a squeal, the snap of their jaws
   chitter: () => { for (let i = 0; i < 5; i++) tone(2100 + (i % 2) * 450, 0.045, 'square', 0.045, 1700, i * 0.06); },
   yoink: () => { tone(480, 0.24, 'sine', 0.2, 1500); noise(0.1, 3000, 0.05, 1500, 'bandpass', 0.03); },
