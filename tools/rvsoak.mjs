@@ -74,13 +74,20 @@ function stop(ctx) {
 }
 const roadAhead = (W, p, d = 10) => ({ x: W.roadX(p.z + d), z: p.z + d });
 
-// the roadside kit's distance from the RV's nose (its two front corners and the middle) to the nearest
-// solid thing ahead of it: the world's boxes and posts, within 25 m
-function clearance(sim, W) {
-  const rp = sim.rv.translation(), f = fwd(sim);
-  const nose = [-1.2, 0, 1.2].map(x => toWorld(rp, sim.rv.rotation(), { x, y: 0, z: 4.4 }));
+// the distance from the RV's nose (dir 1: its two front corners and the middle) or its tail (dir -1) to the
+// nearest solid thing that way: the world's boxes and posts, and loot lying about, within 25 m
+function clearance(sim, W, dir = 1) {
+  const rp = sim.rv.translation(), f0 = fwd(sim), f = { x: f0.x * dir, z: f0.z * dir };
+  const nose = [-1.2, 0, 1.2].map(x => toWorld(rp, sim.rv.rotation(), { x, y: 0, z: 4.4 * dir }));
   let best = Infinity;
   const ahead = (x, z) => (x - rp.x) * f.x + (z - rp.z) * f.z > 4;
+  for (const p of sim.props.values()) {
+    const t = p.body.translation();
+    if (Math.hypot(t.x - rp.x, t.z - rp.z) > 26 || !ahead(t.x, t.z)) continue;
+    const l = sim.rvToLocal(t);
+    if (Math.abs(l.x) < 1.3 && Math.abs(l.z) < 4.5) continue;   // (aboard)
+    for (const n of nose) best = Math.min(best, Math.hypot(n.x - t.x, n.z - t.z) - 0.4);
+  }
   for (const s of W.statics) {
     if (Math.hypot(s.x - rp.x, s.z - rp.z) > 25 + Math.max(s.hx, s.hz) || s.mat === 'invisible') continue;
     const c = Math.cos(-(s.ry || 0)), sn = Math.sin(-(s.ry || 0));
@@ -196,8 +203,9 @@ function apron(ctx, poi) {
     step(ctx, { x: poi.x, z: poi.z }, 4);
   }
   stop(ctx);
+  // back out 8 m (looking behind: stopping 3 m short of anything there)
   const at = sim.rv.translation();
-  for (let i = 0; i < 12 * HZ && Math.hypot(sim.rv.translation().x - at.x, sim.rv.translation().z - at.z) < 8; i++) step(ctx, null, -3, { st: 0 });
+  for (let i = 0; i < 12 * HZ && Math.hypot(sim.rv.translation().x - at.x, sim.rv.translation().z - at.z) < 8 && clearance(sim, W, -1) > 3 + Math.max(0, -sim.rvSpeed()) * 0.4; i++) step(ctx, null, -3, { st: 0 });
   stop(ctx);
   for (let i = 0; i < 25 * HZ; i++) {
     const p = sim.rv.translation(), f = fwd(sim);

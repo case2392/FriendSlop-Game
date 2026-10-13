@@ -25,6 +25,17 @@ payment and he takes the RV.
 | ![the Repo Man](docs/screenshots/repo-man.jpg) | ![night at the campfire](docs/screenshots/night.jpg) |
 | **The Repo Man** collects at midnight. | **Night.** Receipt, campfire, store, bunks, day 2. |
 
+## The RV takes a beating
+
+The RV has a **condition**, shown in the top bar once it's hurt. Crashes dent it: run it into the ranger
+gate at 8 m/s and it's about 18% gone, and everyone hears who was driving ("CRUNCH. Sam put the RV into
+the ranger gate: -18%"). A Grumphorn's charge, a rock landing on the roof and a ringtail breaking out
+through a window dent it too. Worn down it gets slower (smoking, then limping, when a knock stalls the
+engine), a big hit throws the door open, and at 0% it **breaks down**: everybody out, and hold `E` at the
+engine hatch on its back until it coughs back to life (one of you takes 8 seconds, three take under 3).
+**Gus** fixes it by the RV lot in town at night, once the Repo Man is paid: 25% a press, for cash or on
+tomorrow's payment. It never ends a trip by itself: only a missed payment does.
+
 ## Wildlife
 
 From day 2 a **Grumphorn**, a one-ton shaggy beast with curled horns and a brass cowbell, sleeps on the
@@ -267,6 +278,12 @@ npm test
 - `test/server.mjs` checks what keeps an evening going when connections
   misbehave: kept seats, malformed frames, floods, a different build, silent
   connections, the goodbye when the server shuts down.
+- `test/rv.mjs` checks the RV's condition in process: what a crash costs and
+  what must never count as one (keyboard driving, a handbrake stop with safes
+  aboard, teleports, the winch), the bands, the stall, the roadside fix, Gus,
+  and that it never ends a trip. `node tools/rvsoak.mjs` is its soak: a
+  keyboard-style driver does all of it on 12 seeds x 5 days, plus every
+  stop's apron, and prints every crash window for tuning.
 - `test/steamnet.mjs` plays over a stand-in for Steam (`test/fakesteam/`):
   invites, the version check, a dropped link coming back to its seat, voice,
   packet loss, the host quitting or crashing.
