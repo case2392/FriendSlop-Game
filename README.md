@@ -39,6 +39,14 @@ costs it patience too. When it runs out, it drops its cowbell (worth $205 to $32
 walks off the road for good. It never touches the bank, leaves alone anyone who is down (and whoever
 kneels by them), and knocks out at most one player per charge.
 
+Every day, **Ringtails** (raccoon-sized bandits with black masks and ringed tails) live in dens beside
+some of the stops: one den on day 1, three by day 5, marked with paw prints on the map. They sneak up on
+loot nobody is watching, grab it and run it home to their pile. Stand facing your loot and they keep
+their distance. Catch one and it drops what it took (from day 2 it bites if you hold it alone: hold it
+with a friend); shove it or hit it with something and it's stunned; honk and they scatter; run one over
+and it's squashed flat for a while. A den only steals so much a day, and everything it took is still
+there at its den: go and get it back. The tracker says what they're holding of yours.
+
 ## Five days, five places
 
 Every day is a different biome with its own ground, sky, fog, rocks, plants

@@ -357,6 +357,22 @@ try {
     await host.evaluate(() => { const S = window.__nmd; if (S.me.holding) S.press('release'); S.me.stamina = 100; S.press('throw'); });
     const shoved = await host.waitForFunction(() => window.__nmd.lastShove?.by === window.__nmd.selfId, null, { timeout: 30000 }).then(() => host.evaluate(() => window.__nmd.lastShove), () => null);
     check(shoved && shoved.hit >= 1, `right mouse with empty hands shoves (the server answered: hit ${shoved?.hit})`);
+    // a ringtail behind Steve: drawn, named by the crosshair, and a shove sends it flying (it lands stunned)
+    const rs = await host.evaluate(() => { const S = window.__nmd, y = S.me.yaw + Math.PI; return { x: S.me.pos.x + Math.sin(y) * 1.5, z: S.me.pos.z + Math.cos(y) * 1.5 }; });
+    await host.evaluate(s => window.__nmd.send({ t: 'dbg', op: 'mob', type: 'ringtail', x: s.x, z: s.z }), rs);
+    await host.waitForFunction(() => [...window.__nmd.props.values()].some(p => p.type === 'ringtail' && p.view && p.mesh.visible), null, { timeout: 60000 });
+    // (it mills about its den: keep the crosshair on it)
+    const aimRt = () => { const S = window.__nmd, p = [...S.props.values()].find(q => q.type === 'ringtail'); S.aimAt(p.pose.p.x, p.pose.p.y, p.pose.p.z); return p; };
+    const named = await host.waitForFunction(`(${aimRt})() && /ringtail/.test(window.__nmd.target()?.label || '')`, null, { timeout: 20000, polling: 50 }).then(() => true, () => false);
+    const rt = await host.evaluate(() => { const p = [...window.__nmd.props.values()].find(q => q.type === 'ringtail'); return { bones: p.view.b ? Object.keys(p.view.b).length : 0, skinned: !!p.view.mesh?.isSkinnedMesh }; });
+    check(named && rt.skinned && rt.bones === 8, `a ringtail is drawn (skinned ${rt.skinned}, on ${rt.bones} bones) and the crosshair names it`);
+    let flung = false;
+    for (let i = 0; i < 4 && !flung; i++) {
+      await wait(host, 700);
+      await host.evaluate(`(() => { (${aimRt})(); const S = window.__nmd; S.me.stamina = 100; S.press('throw'); })()`);
+      flung = await host.waitForFunction(() => { const p = [...window.__nmd.props.values()].find(q => q.type === 'ringtail'); return p && [6, 8].includes((p.st ?? 0) & 31); }, null, { timeout: 4000, polling: 50 }).then(() => true, () => false);
+    }
+    check(flung, 'a shove sends a ringtail flying (its state reads flung or stunned)');
     // bracing and knocks, on a stand-in body (Steve's own stays as it is)
     const body = await host.evaluate(() => {
       const S = window.__nmd, M = S.me.constructor, crash = { acc: { x: 60, y: 0, z: 0 }, p: { x: 0, y: 0, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 }, v: { x: 0, y: 0, z: 0 } };

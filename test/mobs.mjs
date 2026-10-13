@@ -647,6 +647,243 @@ const billed = (room, fn) => { const M = room.sim.mobs, f = M.ghCost.bind(M), lo
   check(!threw && st[0] !== GST.CHARGE && st[1] !== GST.WINDED, `grumphorn: a charge or a breather forced by the test lever ends as it should (states ${st.join(', ')}${threw ? ': ' + threw.message : ''})`);
 }
 
+// ---- ringtails ------------------------------------------------------------------------------------------------
+const { RST, RT, PLAN: RPLAN, ringtailsPerDen } = await import('../shared/mobs.js');
+// flat open ground well off the road, no loot or buildings within 40 m (and no den of the day's within 60)
+function openGround(room) {
+  const W = room.W;
+  for (let z = 150; z < W.LEN - 150; z += 7) for (const off of [30, -30, 40, -40]) {
+    const x = W.roadX(z) + off, h = W.heightAt(x, z);
+    let ok = true;
+    for (let dx = -10; dx <= 10 && ok; dx += 2.5) for (let dz = -10; dz <= 10 && ok; dz += 2.5) if (Math.abs(W.heightAt(x + dx, z + dz) - h) > 1.2) ok = false;
+    if (ok && !W.props.some(p => Math.hypot(p.x - x, p.z - z) < 40) && !W.statics.some(b => Math.hypot(b.x - x, b.z - z) < 15) && !(W.dens || []).some(d => Math.hypot(d.x - x, d.z - z) < 60)) return { x, z };
+  }
+  return null;
+}
+const putLoot = (room, type, x, z, value = 300) => room.sim.addProp(type, { x, y: room.W.heightAt(x, z) + 0.5, z }, { x: 0, y: 0, z: 0, w: 1 }, value, value);
+const at = (room, id) => room.sim.props.get(id)?.body.translation();
+const mobEvs = (p, s) => evs(p.conn, 'mob').filter(e => e.s === s);
+// a ringtail of its own (its den where it's put), in a fresh room on `day`
+function thief(names, day = 1) {
+  const c = crew(names);
+  if (day !== 1) { c.room.debug(c.ps[0], { op: 'day', d: day }); tick(c.room, 0.2); }
+  c.room.mobsOn = false;
+  const g = openGround(c.room);
+  const id = mobAt(c.room, c.ps[0], 'ringtail', g.x, g.z);
+  return { ...c, g, id, m: mobOf(c.room, id) };
+}
+const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1.2, t.z, Math.PI / 2); tick(room, 1 / 60); room.handle(P, { t: 'grab', kind: 'prop', id, pt: [t.x, t.y, t.z], d: 1.4 }); };
+{
+  // R1: loot left lying 8 m from a den is stolen and piled at the den, unharmed, and the day's tally counts it
+  const { room, ps: [A], g, id, m } = thief(['Ann']);
+  stand(room, A, g.x + 25, g.z, Math.PI / 2);
+  const vase = putLoot(room, 'vase', g.x - 8, g.z);
+  let stealAt = null, stashAt = null;
+  const t0 = room.t;
+  for (let i = 0; i < 60 * 25 && stashAt == null; i++) {
+    tick(room, 1 / 60);
+    if (stealAt == null && mobEvs(A, 'steal').length) stealAt = room.t - t0;
+    if (stashAt == null && mobEvs(A, 'stash').length) stashAt = room.t - t0;
+  }
+  tick(room, 2);
+  const t = at(room, vase.id), val = room.sim.props.get(vase.id)?.value;
+  check(stealAt != null && stashAt != null && Math.hypot(t.x - g.x, t.z - g.z) < 2.5 && val >= 0.95 * 300 && room.dayStats.stolen >= 300,
+    `ringtails: a vase left 8 m from a den is stolen (${stealAt?.toFixed(1)} s) and piled at the den (${stashAt?.toFixed(1)} s, ${t && Math.hypot(t.x - g.x, t.z - g.z).toFixed(1)} m from it, $${val?.toFixed(0)} of $300; stolen today $${room.dayStats.stolen})`);
+  check(A.conn.has(x => x.t === 'toast' && /ringtail ran off with the Ming-ish Vase \(\$300\)/.test(x.text)) && room.gameState().thf === Math.round(val),
+    `ringtails: the crew is told, and the tracker knows what they hold ($${room.gameState().thf})`);
+  tick(room, 30);
+  check(mobEvs(A, 'steal').length === 1, `ringtails: what they piled at the den they leave there (${mobEvs(A, 'steal').length} thefts in 30 s more)`);
+}
+{
+  // R2: watched loot is safe; turned away (or too far for the day's nerve) it isn't
+  const { room, ps: [A], g } = thief(['Ann']);
+  putLoot(room, 'vase', g.x - 8, g.z);
+  stand(room, A, g.x - 10, g.z, Math.PI / 2);   // 2 m from it, facing it
+  tick(room, 20);
+  check(!mobEvs(A, 'steal').length, 'ringtails: a vase someone stands by, facing it, is left alone for 20 s');
+  const r = thief(['Bob'], 5);
+  putLoot(r.room, 'vase', r.g.x - 8, r.g.z);
+  stand(r.room, r.ps[0], r.g.x - 12.5, r.g.z, -Math.PI / 2);   // 4.5 m off, back turned
+  tick(r.room, 20);
+  check(mobEvs(r.ps[0], 'steal').length === 1, `ringtails: day 5, with your back turned 4.5 m away (their nerve: ${RPLAN[4].fear} m), it's stolen within 20 s`);
+}
+{
+  // R3: grab what it carries: your grip beats its jaws
+  const { room, ps: [A], g, id, m } = thief(['Ann']);
+  stand(room, A, g.x + 25, g.z, Math.PI / 2);
+  const vase = putLoot(room, 'vase', g.x - 8, g.z);
+  for (let i = 0; i < 60 * 25; i++) { tick(room, 1 / 60); const t = at(room, vase.id); if (m.st === RST.RUN && Math.hypot(t.x - g.x, t.z - g.z) < 6.5) break; }
+  const running = m.st === RST.RUN && room.sim.mobs.carriedBy.has(vase.id);
+  grabIt(room, A, vase.id);
+  let freeAt = null;
+  const t0 = room.t;
+  for (let i = 0; i < 60; i++) { tick(room, 1 / 60); if (!room.sim.mobs.carriedBy.has(vase.id)) { freeAt = room.t - t0; break; } }
+  check(running && freeAt != null && freeAt < 1 && room.sim.props.get(vase.id).holders.has(A.id) && mobEvs(A, 'drop').length === 1,
+    `ringtails: grabbing the vase it runs off with takes it back (its jaws let go in ${freeAt?.toFixed(2)} s)`);
+}
+{
+  // R4: held: day 2 on, one person holding it is bitten at 2 s (and lets go); two can hold it; day 1 it wriggles free at 3 s
+  for (const [day, n, want] of [[2, 1, 'bite'], [2, 2, null], [1, 1, 'wriggle']]) {
+    const { room, ps: [A, B], id } = thief(['Ann', 'Bob'], day);
+    tick(room, 0.3);
+    grabIt(room, A, id);
+    if (n === 2) { const t = at(room, id); stand(room, B, t.x + 1.2, t.z, -Math.PI / 2); tick(room, 1 / 60); room.handle(B, { t: 'grab', kind: 'prop', id, pt: [t.x, t.y, t.z], d: 1.4 }); }
+    const t0 = room.t;
+    let bite = null, wr = null;
+    for (let i = 0; i < 60 * 4.5; i++) {
+      tick(room, 1 / 60);
+      if (bite == null && mobEvs(A, 'bite').length) bite = room.t - t0;
+      if (wr == null && mobEvs(A, 'wriggle').length) wr = room.t - t0;
+    }
+    if (want === 'bite') check(bite != null && Math.abs(bite - RT.BITE_T) <= 0.12 && !room.sim.holds.has(A.id) && evs(A.conn, 'slip').length === 1 && A.conn.has(x => x.t === 'toast' && /bit Ann/.test(x.text)),
+      `ringtails: day 2, held by one person it bites at ${bite?.toFixed(2)} s and is let go`);
+    else if (want === 'wriggle') check(bite == null && wr != null && Math.abs(wr - RT.WRIGGLE_T) <= 0.12 && !room.sim.holds.has(A.id),
+      `ringtails: day 1 it never bites; it wriggles free at ${wr?.toFixed(2)} s`);
+    else check(bite == null && wr == null && room.sim.holds.has(A.id) && room.sim.holds.has(B.id), 'ringtails: held by two it can\'t bite (4.5 s)');
+  }
+}
+{
+  // R5: a TV thrown at it from 3 m: stunned at once, up again in a few seconds; the TV takes its knock
+  const { room, ps: [A], id, m, g } = thief(['Ann']);
+  stand(room, A, g.x + 25, g.z, Math.PI / 2);
+  tick(room, 0.5);
+  const sim = room.sim, t = at(room, id);
+  const tv = sim.addProp('tv', { x: t.x - 3, y: t.y + 0.5, z: t.z }, { x: 0, y: 0, z: 0, w: 1 }, 200, 200);
+  const imp = Math.min(tv.body.mass() * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP), t2 = at(room, id), d = Math.hypot(t2.x - t.x + 3, t2.z - t.z);
+  tv.body.applyImpulse({ x: imp * (t2.x - t.x + 3) / d, y: imp * 0.12, z: imp * (t2.z - t.z) / d }, true);
+  const t0 = room.t;
+  let stun = null, up = null;
+  for (let i = 0; i < 60 * 5; i++) {
+    tick(room, 1 / 60);
+    if (stun == null && m.st === RST.STUN) stun = room.t - t0;
+    if (stun != null && up == null && m.st !== RST.STUN) up = room.t - t0;
+  }
+  check(stun != null && stun <= 0.3 && up != null && up <= 4 && sim.props.get(tv.id).value < 200 && mobEvs(A, 'stun').length === 1,
+    `ringtails: a TV thrown from 3 m stuns it (${stun?.toFixed(2)} s), up again at ${up?.toFixed(2)} s; the TV took a knock ($${sim.props.get(tv.id).value.toFixed(0)})`);
+}
+{
+  // R6: the horn: ringtails near the RV drop what they carry and scatter; a second honk soon after does nothing
+  const { room, ps: [A, B] } = crew(['Ann', 'Bob']);
+  room.mobsOn = false;
+  const sim = room.sim, rp = sim.rv.translation(), rq = sim.rv.rotation();
+  const a = toWorld(rp, rq, { x: 7, y: 0, z: 2 }), b = toWorld(rp, rq, { x: -9, y: 0, z: -4 });
+  const i1 = mobAt(room, A, 'ringtail', a.x, a.z), i2 = mobAt(room, A, 'ringtail', b.x, b.z);
+  stand(room, B, a.x + 40, a.z + 40, 0);
+  tick(room, 0.5);
+  const M1 = mobOf(room, i1), M2 = mobOf(room, i2), t1 = at(room, i1);
+  const gnome = sim.addProp('gnome', { x: t1.x + 0.3, y: t1.y + 0.2, z: t1.z }, { x: 0, y: 0, z: 0, w: 1 }, 70, 70);
+  sim.mobs.bite(M1, gnome.id); sim.mobs.setSt(M1, RST.RUN);
+  tick(room, 0.3);
+  A.seat = 0;
+  room.handle(A, { t: 'horn' });
+  tick(room, 1 / 60);
+  check(M1.st === RST.SPOOK && M2.st === RST.SPOOK && !sim.mobs.carriedBy.has(gnome.id) && mobEvs(B, 'drop').length === 1, 'ringtails: the horn makes them drop what they carry and scatter');
+  tick(room, 5);
+  sim.mobs.setSt(M1, RST.DEN); sim.mobs.setSt(M2, RST.DEN);
+  room.handle(A, { t: 'horn' });
+  tick(room, 1 / 60);
+  check(M1.st === RST.DEN && M2.st === RST.DEN, `ringtails: honk again within ${RT.HORN_DEAF} s and they pay it no mind`);
+  A.seat = null;
+}
+{
+  // R7: the RV at 4 m/s over one: squashed (stunned), and nobody pays for it
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const sim = room.sim, W = room.W;
+  sim.placeRV(W.roadX(40), 40, Math.atan2(W.roadX(43) - W.roadX(37), 6));
+  const bank = room.bank;
+  let id = null, M1 = null, squash = false;
+  driveAt(room, A, 4.3, 22, () => {
+    if (id == null && sim.rvSpeed() > 3.4) {
+      const w = toWorld(sim.rv.translation(), sim.rv.rotation(), { x: 0.3, y: 0, z: 9 });
+      id = mobAt(room, A, 'ringtail', w.x, w.z); M1 = mobOf(room, id);
+      const D = sim.mobs.denOf(M1); D.awakeChecked = 1e9; D.awake = false;   // (its den asleep: it sits still)
+    }
+    if (id != null && mobEvs(A, 'squash').some(e => e.id === id)) squash = true;
+  });
+  A.seat = null;
+  const t = at(room, id);
+  check(squash && mobEvs(A, 'stun').some(e => e.id === id) && room.bank === bank && t && Number.isFinite(t.x + t.y + t.z), `ringtails: the RV at 4 m/s over one squashes it flat (stunned), and bills nothing (bank ${bank} -> ${room.bank})`);
+}
+{
+  // R8: one in the RV with the door shut is trapped, and squeezes out a window within 10 s; with the door open it leaves by it
+  for (const open of [false, true]) {
+    const { room, ps: [A] } = crew(['Ann']);
+    room.mobsOn = false;
+    const sim = room.sim;
+    if (sim.doorOpen !== open) sim.setDoor(open);
+    const rp = sim.rv.translation(), rq = sim.rv.rotation(), w = toWorld(rp, rq, { x: 0, y: 0.6, z: -1.5 });
+    const id = mobAt(room, A, 'ringtail', w.x, w.z, { y: w.y }), M1 = mobOf(room, id), D = sim.mobs.denOf(M1);
+    const dp = toWorld(rp, rq, { x: -12, y: 0, z: 0 });
+    Object.assign(D, { x: dp.x, y: room.W.heightAt(dp.x, dp.z), z: dp.z });   // (its den out past the door)
+    sim.mobs.setSt(M1, RST.FLUNG);   // (thrown in)
+    const t0 = room.t;
+    let trapped = null, gone = null, out = null;
+    for (let i = 0; i < 60 * 12; i++) {
+      tick(room, 1 / 60);
+      if (trapped == null && M1.st === RST.TRAPPED) trapped = room.t - t0;
+      if (gone == null && !sim.props.has(id)) gone = room.t - t0;
+      if (out == null && trapped != null && sim.props.has(id) && M1.st !== RST.TRAPPED) out = room.t - t0;
+    }
+    if (!open) check(trapped != null && gone != null && gone <= 10 && evs(A.conn, 'gone').some(e => e.ids.includes(id) && e.how === 'window'),
+      `ringtails: thrown into the RV with the door shut it's trapped (${trapped?.toFixed(1)} s) and squeezes out a window (${gone?.toFixed(1)} s)`);
+    else check(trapped != null && out != null && gone == null && !sim.mobs.inRV(at(room, id)), `ringtails: with the door open it leaves by it (${out?.toFixed(1)} s)`);
+  }
+}
+{
+  // R9: a den steals only so much a day: day 1's takes at most 2 things in 5 minutes, with 6 left out
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const g = openGround(room), mobs = room.sim.ensureMobs({ day: 1, crew: 1, seed: room.seed });
+  mobs.rtSpawnDen({ id: 7, x: g.x, y: room.W.heightAt(g.x, g.z), z: g.z, ry: 0, stash: [] });
+  stand(room, A, g.x + 30, g.z, Math.PI / 2);
+  for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; putLoot(room, ['vase', 'gnome', 'toaster', 'lamp', 'vase', 'gnome'][i], g.x + Math.cos(a) * 9, g.z + Math.sin(a) * 9, 100); }
+  tick(room, 300);
+  check(mobEvs(A, 'steal').length === RPLAN[0].cap && mobEvs(A, 'stash').length === RPLAN[0].cap, `ringtails: a day-1 den steals ${mobEvs(A, 'steal').length} things in 5 minutes with 6 left out (its cap: ${RPLAN[0].cap})`);
+}
+{
+  // R10: what you take back counts: a stolen vase picked up off the pile and put in the RV
+  const { room, ps: [A], g } = thief(['Ann']);
+  stand(room, A, g.x + 25, g.z, Math.PI / 2);
+  const vase = putLoot(room, 'vase', g.x - 8, g.z);
+  for (let i = 0; i < 60 * 25 && !mobEvs(A, 'stash').length; i++) tick(room, 1 / 60);
+  grabIt(room, A, vase.id);
+  tick(room, 0.2);
+  room.handle(A, { t: 'rel' });
+  const sim = room.sim, w = toWorld(sim.rv.translation(), sim.rv.rotation(), { x: 0, y: 0.5, z: 1 });
+  sim.props.get(vase.id).body.setTranslation(w, true);
+  tick(room, 1.2);
+  check(mobEvs(A, 'recovered').some(e => e.item === vase.id) && room.dayStats.recovered > 0 && room.gameState().thf === 0,
+    `ringtails: a stolen vase taken back to the RV counts as got back (recovered today $${room.dayStats.recovered})`);
+}
+{
+  // R11: a mini-soak, every den of seed 4242's five days left alone with its stop's loot for 90 s
+  const { soakDens } = await import('../tools/mobsoak.mjs');
+  const T = { picks: 0, steals: 0, stashes: 0, nonFinite: 0 };
+  for (let day = 1; day <= 5; day++) { const r = soakDens(4242, day, { secs: 90 }); for (const k in T) T[k] += r[k]; }
+  check(T.picks > 0 && T.steals / T.picks >= 0.95 && T.stashes / T.steals >= 0.85 && T.nonFinite === 0,
+    `ringtails: over 5 days they reach ${T.steals} of the ${T.picks} things they go for and get ${T.stashes} home; nothing goes non-finite`);
+}
+{
+  // R12: the snapshot budget: day 5, every critter out and awake, 20 loose things in the driving RV
+  const { room, ps } = crew(['Ann', 'Bob', 'Cat', 'Dee']);
+  room.debug(ps[0], { op: 'day', d: 5 });
+  tick(room, 0.2);
+  room.mobsOn = true;
+  const sim = room.sim, rp = sim.rv.translation(), rq = sim.rv.rotation();
+  for (let i = 0; i < 20; i++) sim.addProp(['gnome', 'toaster', 'lamp', 'trophy', 'vase'][i % 5], toWorld(rp, rq, { x: -0.8 + (i % 4) * 0.5, y: 0.5 + Math.floor(i / 8) * 0.4, z: -3 + Math.floor(i / 4) * 1.2 }), { x: 0, y: 0, z: 0, w: 1 }, 100, 100);
+  room.phase = 'road';
+  tick(room, 0.5);
+  for (const d of sim.mobs.dens.values()) Object.assign(d, { awake: true, awakeChecked: 1e9 });
+  for (const m of sim.mobs.list.values()) if (m.type === 'grumphorn') { const p = sim.props.get(m.id); sim.mobs.ghWake(m, p, p.body.translation()); }
+  let max = 0, sum = 0, n = 0;
+  driveAt(room, ps[0], 8, 20, i => {
+    for (const [k, P] of ps.entries()) if (k) ride(room, P, 0, -1 + k, 0);
+    if (i % 3 === 0) { const L = JSON.stringify(room.snapshot()).length; max = Math.max(max, L); sum += L; n++; }
+  });
+  check(max <= 4752 && sum / n <= 2600, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
+}
+
 // ---- world gen: the wildlife is placed last, from its own random stream: nothing else moves ---------------------
 {
   const { PLAN } = await import('../shared/mobs.js');
@@ -667,8 +904,19 @@ const billed = (room, fn) => { const M = room.sim.mobs, f = M.ghCost.bind(M), lo
       if (Math.abs(b.exit.x - W.roadX(b.exit.z)) < 6) bad.push(`${seed}/${day} the way off the road is on it`);
     }
     if (O.dens.length || O.beds.length) bad.push(`${seed}/${day} {mobs:false} still has wildlife`);
+    // dens: beside a ground stop (10-18 m out, away from the road), never at day 1's first stop, with a stash
+    if (!W.dens.length || W.dens.length > PLAN[day - 1].dens) bad.push(`${seed}/${day} ${W.dens.length} dens`);
+    const first = W.pois.filter(p => p.type !== 'crash').sort((a, b) => a.z - b.z)[0];
+    for (const d of W.dens) {
+      const poi = W.pois.find(p => p.id === d.poi), r = poi && Math.hypot(d.x - poi.x, d.z - poi.z);
+      if (!poi || poi.type === 'crash' || r < 9.9 || r > 18.1) bad.push(`${seed}/${day} den ${d.id} not by a ground stop (${r?.toFixed(1)} m)`);
+      if (Math.abs(d.x - W.roadX(d.z)) < 14) bad.push(`${seed}/${day} den ${d.id} by the road`);
+      if (W.obstacles.some(o => Math.abs(o.z - d.z) < 30)) bad.push(`${seed}/${day} den ${d.id} by an obstacle`);
+      if (day === 1 && poi === first) bad.push(`${seed}/${day} den at the first stop`);
+      if (d.stash.length !== 1 || !W.props.some(p => p.id === d.stash[0] && p.id > maxOld)) bad.push(`${seed}/${day} den ${d.id} stash`);
+    }
   }
-  check(!bad.length, `world gen: the wildlife changes nothing else (3 seeds x 5 days), beds sit on the road past their obstacle${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
+  check(!bad.length, `world gen: the wildlife changes nothing else (3 seeds x 5 days), beds sit on the road past their obstacle, dens beside the stops${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
 }
 
 if (failed) { console.error('\nSome wildlife checks FAILED'); process.exit(1); }

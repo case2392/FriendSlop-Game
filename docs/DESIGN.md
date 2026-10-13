@@ -34,8 +34,10 @@ Working title. The repo stays `FriendSlop-Game`. The menu calls it a
   the game.
 - **Chill by default, wildlife on the side.** No permadeath, no health bars.
   The danger comes from gravity, the road, the clock, your friend Steve at
-  the roulette table, and the wildlife (from day 2 a Grumphorn sleeps past an
-  obstacle): every toss costs time and, if nobody picks you up, a bill.
+  the roulette table, and the wildlife (Ringtails steal from the stops, and
+  from day 2 a Grumphorn sleeps past an obstacle): every theft costs loot you
+  can go and take back, every toss costs time and, if nobody picks you up, a
+  bill.
 
 ---
 
@@ -243,6 +245,7 @@ the difficulty curve stays in the quota.
 | *The Washout Gap* (M2) | A gap in the road | Carry planks from the junk pile and lay a bridge. The RV crosses on raycast wheels. | RVTY |
 | *Rockfall* (M2) | Falling rocks knock people over | Timing, and somebody's medical bill | PEAK |
 | **The Grumphorn** (days 2–5) | A one-ton beast asleep on the road past the mud (day 2), behind the ranger gate (3), past the boulder (4), or both (5). Woken, it charges a fixed line and tosses the first person in its horns | Sneak past crouched, creep the RV by, or wear out its patience: throw junk, shove, ram it with everyone braced, winch it. At zero it drops its cowbell and leaves for good | physics + headcount |
+| **Ringtails** (every day) | Masked thieves in dens beside the stops (1 den on day 1, 3 by day 5). They sneak up on loot nobody is watching and run it home to their pile | Watch your loot (stand facing it); grab the thief (it drops it; from day 2 it bites a lone holder, so hold it with a friend), shove it, throw something at it, honk, or raid the den and take it all back. A den steals at most 2–3 things a day | headcount + attention |
 
 **POIs** are worth the detour and cost time. Abandoned gas stations,
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get

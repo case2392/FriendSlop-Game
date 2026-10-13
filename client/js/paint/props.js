@@ -13,7 +13,7 @@
 //   gnomehat gnomecoat gnomebeard gnomeface gnomefur portrait paintback gold rosette glass brass bronze gilt
 //   tire rim screen steel bakelite toastplate red regdeck crest till plaque keys tvfront tvback
 //   strap fret guitar honey ball ivory rubber parchment lantern skin boot toast bulb tag
-//   hide horn hoof (the grumphorn: mobs3d.js)
+//   hide horn hoof (the grumphorn: mobs3d.js) · fur mask tailring (the ringtail)
 // Boulders (not in the atlas, they're 4 m wide): loot_boulder_<biome> (512×256, u wraps round
 // the rock, v runs ground → top; badlands and desert carry the strata of BOULDER_BANDS, whose
 // edges the slab geometry ledges on) is the stone; loot_cover_<biome> (alpha, seamless) is the
@@ -47,8 +47,9 @@ const PIECES = {
   strap: [256, 24], fret: [256, 24], guitar: [160, 256], honey: [96, 256], ball: [128, 64, 'wrap'], eye: [128, 64, 'wrap'],
   ivory: [64, 64, 'wrap'], rubber: [64, 64, 'wrap'], parchment: [64, 64], lantern: [64, 64], skin: [64, 64, 'wrap'],
   boot: [64, 64, 'wrap'], plaster: [64, 64], toast: [64, 64], bulb: [64, 64], tag: [64, 64],
-  // the wildlife (mobs3d.js): the grumphorn's shag, horn and hooves
+  // the wildlife (mobs3d.js): the grumphorn's shag, horn and hooves; the ringtail's fur, face and tail
   hide: [256, 128, 'wrap'], horn: [128, 64, 'wrap'], hoof: [64, 64, 'wrap'],
+  fur: [256, 128, 'wrap'], mask: [128, 64], tailring: [128, 64, 'wrap'],
 };
 export const ATLAS_W = 1024, PAD = 8;
 // skyline packing (tallest first, lowest spot, leftmost on ties): deterministic
@@ -2305,6 +2306,55 @@ register('loot_hoof', {
   },
 });
 
+// ---- the wildlife: the ringtail's fur, its bandit mask, its ringed tail ---------------------------------
+
+register('loot_fur', {
+  family: F, w: 256, h: 128, note: "the ringtail's coat (u wraps, nose to tail along u; v from the spine down to the belly): short grizzled grey-brown fur, a darker saddle along the spine, a pale belly; tinted per biome on the mesh",
+  paint(g, w, rnd, h, cv) {
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#5e564e'], [0.3, '#7a7068'], [0.7, '#8e847a'], [1, '#c8beb0']]); g.fillRect(0, 0, w, h);
+    // short tufts, light-tipped (grizzled), lying back along the body
+    for (let i = 0; i < 900; i++) {
+      const x = rnd() * w, y = rnd() * h, t = y / h, L = range(rnd, 3, 6);
+      const c = rnd() < 0.3 ? pick(rnd, ['#d8d0c4', '#b8b0a4']) : pick(rnd, t < 0.4 ? ['#4a4440', '#5a524a', '#686058'] : ['#8a8278', '#9a9086', '#7a7268']);
+      wrapX(w, x, 6, X => blade(g, X, y, L, -Math.PI / 2 + range(rnd, -0.5, 0.5) + Math.PI * 0.85, 1.2, c, 0.7, range(rnd, -0.2, 0.2)));
+    }
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#120e0c', 0.25], [0.2, '#120e0c', 0], [0.85, '#fff8ec', 0], [1, '#fff8ec', 0.2]]); g.fillRect(0, 0, w, h);
+    blurTile(cv, 0.3);
+  },
+});
+
+register('loot_mask', {
+  family: F, w: 128, h: 64, note: "the ringtail's face (u round the head, 0.5 the middle of the face; v from the back of the head to the nose): grey crown, white brows and muzzle, the black bandit mask across the eyes with a glint in each, a dark nose tip",
+  paint(g, w, rnd, h, cv) {
+    rect(g, 0, 0, w, h, '#7a7068');
+    for (let i = 0; i < 200; i++) blade(g, rnd() * w, rnd() * h, range(rnd, 2, 4), Math.PI / 2 + range(rnd, -0.4, 0.4), 1, pick(rnd, ['#5e564e', '#8e847a', '#c8beb0']), 0.6, 0.1);
+    // white brows and cheeks round the mask
+    blob(g, w * 0.5, h * 0.42, w * 0.34, h * 0.2, 0, '#ece6dc', 0.95, 0.5);
+    // the mask: a black band across the eyes, wider at the cheeks
+    g.save(); g.fillStyle = '#1a1614'; g.beginPath();
+    g.moveTo(w * 0.1, h * 0.5); g.quadraticCurveTo(w * 0.3, h * 0.3, w * 0.5, h * 0.42); g.quadraticCurveTo(w * 0.7, h * 0.3, w * 0.9, h * 0.5);
+    g.quadraticCurveTo(w * 0.72, h * 0.66, w * 0.5, h * 0.54); g.quadraticCurveTo(w * 0.28, h * 0.66, w * 0.1, h * 0.5); g.fill(); g.restore();
+    // a white stripe down the snout, and the snout's grey toward the nose
+    rect(g, w * 0.47, h * 0.5, w * 0.06, h * 0.3, '#e0dad0', 0.8);
+    g.fillStyle = lin(g, 0, h * 0.75, 0, h, [[0, '#4a4440', 0], [1, '#1a1614', 0.9]]); g.fillRect(0, h * 0.75, w, h * 0.25);
+    // the eyes: dark, a ring of amber and a glint (the glow atlas gives them a little eyeshine)
+    for (const x of [0.25, 0.75]) { ellipse(g, w * x, h * 0.37, 3.4, 3.4, 0, '#7a5a20'); ellipse(g, w * x, h * 0.37, 2.5, 2.5, 0, '#1a1208'); ellipse(g, w * x - 0.8, h * 0.35, 1, 1, 0, '#fffbe8'); }
+    blurTile(cv, 0.3);
+  },
+});
+
+register('loot_tailring', {
+  family: F, w: 128, h: 64, note: "the ringtail's tail (a tube: u from the root to the tip, v round it): six dark rings on grey-buff fur, a dark tip, lit along the top",
+  paint(g, w, rnd, h, cv) {
+    rect(g, 0, 0, w, h, '#a89a88');
+    for (let k = 0; k < 6; k++) { const x0 = (k + 0.45) / 6.3 * w; rect(g, x0, 0, w / 13, h, '#2a2420', 0.92); }
+    rect(g, w * 0.93, 0, w * 0.07, h, '#1a1614');
+    for (let i = 0; i < 260; i++) { const x = rnd() * w, y = rnd() * h; blade(g, x, y, range(rnd, 2, 5), Math.PI / 2 + range(rnd, -0.3, 0.3), 1, pick(rnd, ['#8a7c6a', '#c0b29e', '#3a3430']), 0.5, 0.1); }
+    g.fillStyle = lin(g, 0, 0, 0, h, [[0, '#120e0c', 0.3], [0.25, '#fff4dc', 0.2], [0.5, '#120e0c', 0], [0.75, '#120e0c', 0.35], [1, '#120e0c', 0.3]]); g.fillRect(0, 0, w, h);
+    blurTile(cv, 0.3);
+  },
+});
+
 register('loot_atlas', {
   family: F, w: ATLAS_W, h: ATLAS_H, note: 'every loot piece in one texture (one draw call per prop): 1:1 cells with 8 px dilated padding',
   paint(g, w, rnd, h) {
@@ -2338,6 +2388,10 @@ register('loot_glow', {
     };
     put('glass', 0.42); put('lantern', 0.9); put('bulb', 1); put('screen', 0.18); put('bulbs', 0.4);
     put('slot', 0.3, 0, 0, 1, 0.2); put('slot', 0.2, 0.06, 0.24, 0.88, 0.28); put('slotback', 0.25, 0, 0, 1, 0.2);
+    // the ringtail's eyes catch the light (just the eye spots: the mask round them stays dark)
+    { const R = REGIONS.mask, cx = (R.x + PAD) / 4, cy = (R.y + PAD) / 4, cw = R.cw / 4, ch = R.ch / 4;
+      g.fillStyle = 'rgba(240,216,112,0.5)';
+      for (const x of [0.25, 0.75]) { g.beginPath(); g.arc(cx + cw * x, cy + ch * 0.37, 1.4, 0, TAU); g.fill(); } }
   },
 });
 

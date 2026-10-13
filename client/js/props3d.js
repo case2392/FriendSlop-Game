@@ -1047,6 +1047,17 @@ function beastIcon(g, x, y) {
   g.fillStyle = '#f2e2b8'; g.fillRect(-2.6, -0.5, 1.2, 1.2); g.fillRect(1.4, -0.5, 1.2, 1.2);
   g.restore();
 }
+// a ringtail den on the map: two little paw prints in dark ink
+function pawIcon(g, x, y, sc = 1) {
+  g.save(); g.translate(x, y); g.scale(sc, sc); g.fillStyle = '#4a3a30';
+  for (const [ox, oy, a] of [[-3, 2.5, -0.3], [3, -2.5, 0.3]]) {
+    g.save(); g.translate(ox, oy); g.rotate(a); g.scale(0.75, 0.75);
+    g.beginPath(); g.ellipse(0, 1.5, 3, 2.4, 0, 0, TAU); g.fill();
+    for (const [dx, dy] of [[-3.2, -1.8], [-1.1, -3.6], [1.1, -3.6], [3.2, -1.8]]) { g.beginPath(); g.ellipse(dx, dy, 1, 1.3, 0, 0, TAU); g.fill(); }
+    g.restore();
+  }
+  g.restore();
+}
 function tinyTree(g, kind, x, y, rnd, sc = 1) {
   const s = range(rnd, 0.8, 1.2) * sc;
   g.save(); g.translate(x, y); g.scale(s, s);
@@ -1281,7 +1292,8 @@ export function mapCanvas(W) {
   const counts = {}, seen = {}; for (const s of stops) counts[s.type] = (counts[s.type] || 0) + 1;
   const legend = Object.keys(counts).filter(t => counts[t] > 1);
   const lsize = stops.length - legend.reduce((a, t) => a + counts[t], 0) > 6 ? 9 : 10.5;
-  if (legend.length) claim([12, CH - 56 - 14 * legend.length, 184, CH - 50]);
+  const dens = (Wd.dens || []).map(d => ({ px: X(d.z), py: Y(d.z, d.x) })), rows = legend.length + (dens.length ? 1 : 0);
+  if (rows) claim([12, CH - 56 - 14 * rows, 184, CH - 50]);
   for (const s of [...stops].sort((a, b) => a.z - b.z)) {
     seen[s.type] = (seen[s.type] || 0) + 1;
     const name = POI_NAMES[s.type] || s.type;
@@ -1298,6 +1310,8 @@ export function mapCanvas(W) {
     inkText(g, name, lx, ly - extra / 2, { size: lsize, color: '#1e3a5a', clear: 0.7 });
     if (extra) inkText(g, '(up the mesa)', lx, ly + 6, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
   }
+  // ringtail dens: paw prints out past their stop
+  for (const d of dens) { const [lx, ly] = place(d.px, d.py, 16, 14, [[0, 0], [10, 0], [-10, 0], [0, 10], [0, -10], [14, 10], [-14, 10]]); pawIcon(g, lx, ly); }
   // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader. Where
   // a grumphorn sleeps past one, a horned head beside the sign and a pencilled call under the name
   for (const o of Wd.obstacles) {
@@ -1346,6 +1360,11 @@ export function mapCanvas(W) {
     mapIcon(g, t, 22, y, 0.45);
     inkText(g, `${ROMAN[0]}\u2013${ROMAN[n - 1]}  ${POI_NAMES[t] || t}${n > 1 ? 's' : ''}`, 33, y + 0.5, { size: 9.5, color: '#1e3a5a', align: 'left', clear: 0.6 });
   });
+  if (dens.length) {
+    const y = CH - 62 - 14 * legend.length;
+    pawIcon(g, 22, y, 0.75);
+    inkText(g, 'ringtail den: watch your loot', 33, y + 0.5, { size: 9.5, color: '#4a3a30', align: 'left', italic: true, weight: 'normal', clear: 0.6 });
+  }
   // the title on a scroll banner with curled ends
   {
     const x0 = 24, x1 = x0 + bannerW, y0 = 16, h = 50, wv = x => Math.sin((x - x0) / bannerW * Math.PI * 2) * 2.5;

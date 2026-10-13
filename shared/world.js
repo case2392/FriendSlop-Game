@@ -1280,11 +1280,11 @@ export function generateLeg(seed, day, opts = {}) {
       const ry = head + (rngM() < 0.5 ? -1 : 1) * (0.7 + 0.5 * rngM());
       // where it walks off to when it has had enough: the first flat ground off the road
       let exit = null;
-      find: for (const off of [7, 8, 6.5, 10, 12, 16, 22]) for (const sd of [1, -1]) {
+      find: for (const off of [8, 9, 7.5, 10, 12, 16, 22]) for (const sd of [1, -1]) {
         const ez = z + 6, ex = roadX(ez) + sd * off;
         if (flatAt(ex, ez, roadY(ez), 1.5)) { exit = { x: ex, y: heightAt(ex, ez), z: ez }; break find; }
       }
-      if (!exit) { const ez = z + 6, ex = roadX(ez) + 7; exit = { x: ex, y: heightAt(ex, ez), z: ez }; }
+      if (!exit) { const ez = z + 6, ex = roadX(ez) + 8; exit = { x: ex, y: heightAt(ex, ez), z: ez }; }
       beds.push({ id: beds.length, ob: o.type, obz: o.z, type: 'grumphorn', x, y: heightAt(x, z), z, ry, exit });
       // the warning, short of the obstacle and across the road from that obstacle's own sign (the boulder's
       // stands on the right, the mud's and the gate's on the left: a driver heading +z has +x on the left)
@@ -1297,7 +1297,54 @@ export function generateLeg(seed, day, opts = {}) {
       signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.8, h: 1.3,
         lines: ['GRUMPHORN', 'CROSSING', 'LET IT SLEEP'], bg: '#f2c14e', fg: '#1d1d1d', post: true, beast: true });
     }
-    return { dens: [], beds };
+    // ringtail dens: beside the ground stops (never up a crash butte), 10-18 m past the stop on the side away
+    // from the road (out of voice range of a parked RV). The stops with the most light loot about them are
+    // likelier to have one; on day 1 never the first stop
+    const dens = [];
+    let stops = pois.filter(p => p.type !== 'crash').sort((a, b) => a.z - b.z);
+    if (day === 1) stops = stops.slice(1);
+    const light = p => props.reduce((a, q) => a + (LOOT[q.type] && !LOOT[q.type].tool && LOOT[q.type].mass <= 15 && Math.hypot(q.x - p.x, q.z - p.z) < 12 ? q.value : 0), 0);
+    const pool = stops.map(p => ({ p, w: light(p) + 50 }));
+    const denSpot = p => {
+      const away = Math.sign(p.x - roadX(p.z)) || 1;
+      for (const r of [12, 14, 10, 16, 18]) for (const a of [0, -0.45, 0.45, -0.8, 0.8]) {
+        const x = p.x + away * Math.cos(a) * r, z = p.z + Math.sin(a) * r;
+        if (Math.abs(x - roadX(z)) < 14 || !flatAt(x, z, p.padY, 2.5)) continue;
+        if (statics.some(b => b.mat !== 'invisible' && Math.hypot(b.x - x, b.z - z) < Math.max(b.hx, b.hz) + 2)) continue;
+        if (cyls.some(c => Math.hypot(c.x - x, c.z - z) < c.r + 2)) continue;
+        if (hulls.some(c => Math.hypot(c.x - x, c.z - z) < (c.r || 2) + 2)) continue;
+        if (obstacles.some(o => Math.abs(o.z - z) < 30)) continue;
+        if (pois.some(q => q !== p && Math.hypot(q.x - x, q.z - z) < 14)) continue;
+        return { x, y: heightAt(x, z), z, ry: Math.atan2(p.x - x, p.z - z) };   // (facing the stop)
+      }
+      return null;
+    };
+    const green = biome === 'meadow' || biome === 'fields' || biome === 'snow';
+    while (dens.length < P.dens && pool.length) {
+      let r = rngM() * pool.reduce((a, c) => a + c.w, 0), i = 0;
+      for (; i < pool.length - 1; i++) { r -= pool[i].w; if (r < 0) break; }
+      const { p } = pool.splice(i, 1)[0];
+      const sp = denSpot(p);
+      if (!sp) continue;
+      // the den's stash: one light thing of the stop's kind, already dragged home, a step toward the stop
+      const kinds = (POI_LOOT[p.type] || ['gnome']).filter(k => LOOT[k].mass <= 15);
+      const type = kinds[Math.floor(rngM() * kinds.length)], L = LOOT[type];
+      const value = Math.round(L.value * (1 + 0.22 * (day - 1)) * (0.85 + rngM() * 0.4) / 5) * 5;
+      const fx = Math.sin(sp.ry), fz = Math.cos(sp.ry), half = L.shape[0] === 'box' ? L.shape[2] : L.shape[1];
+      const ix = sp.x + fx * 0.9, iz = sp.z + fz * 0.9, id = propId++;
+      props.push({ id, type, x: ix, y: heightAt(ix, iz) + half + 0.06, z: iz, ry: rngM() * 6.283, value });
+      dens.push({ id: dens.length, poi: p.id, poiType: p.type, x: sp.x, y: sp.y, z: sp.z, ry: sp.ry, stash: [id] });
+      // dressing (to look at only): a big stump and a bush, or bones and a rock out in the dry country
+      const bx = sp.x - fx * 0.9, bz = sp.z - fz * 0.9, sx = fz, sz = -fx;
+      if (green) {
+        decor.push({ k: 'stump', x: bx, y: heightAt(bx, bz), z: bz, s: 1.4, ry: rngM() * 6.283, den: true });
+        decor.push({ k: 'bush', x: bx + sx * 1.3, y: heightAt(bx + sx * 1.3, bz + sz * 1.3), z: bz + sz * 1.3, s: 0.9, ry: rngM() * 6.283, den: true });
+      } else {
+        decor.push({ k: 'bones', x: bx + sx * 0.8, y: heightAt(bx + sx * 0.8, bz + sz * 0.8), z: bz + sz * 0.8, s: 1, ry: rngM() * 6.283, den: true });
+        decor.push({ k: 'rock', x: bx, y: heightAt(bx, bz), z: bz, s: 0.7, ry: rngM() * 6.283, den: true });
+      }
+    }
+    return { dens, beds };
   }
   const wild = opts.mobs === false ? { dens: [], beds: [] } : placeWildlife();
 

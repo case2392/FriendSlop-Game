@@ -22,6 +22,7 @@ export const RT = {
   HOP_UP: 4.6, HOP_FWD: 2.5, HOPS: 4,                // stuck: hop (empty-handed only)
   GIVE_UP: 6, UNREACHABLE: 30,                       // can't get there in 6 s: forget that item for 30 s
   DROP_DV: 0.9, STUN_DV: 2.4, STUN_T: 2.5, GONE_AFTER: 3,   // a hit this hard drops the loot / stuns it
+  HIT_V: 1.5, UP: 0.9,                               // a hit: by a thing moving this fast; loot higher than UP is out of reach
   SQUASH_V: 2.0,                                     // the RV over it at this speed squashes it
   BITE_T: 2.0, WRIGGLE_T: 3.0, BITE_STAMINA: 20,     // held by one person: bites (day 2 on) or wriggles free
   HORN_R: 20, HORN_DEAF: 15, SPOOK_T: 4,             // the horn scatters them (then they ignore it a while)
