@@ -455,9 +455,10 @@ export class Mobs {
         // a parked RV, or into the back of one driving off, only winds itself)
         const rt = this.sim.rv.translation(), vr = this.vRV, nx = t.x - rt.x, nz = t.z - rt.z, nl = Math.hypot(nx, nz) || 1;
         const at = Math.max(0, (vr.x * nx + vr.z * nz) / nl);
-        // and what it costs the RV: how fast they close (the RV toward it, and it toward the RV just before
-        // they touched): a charge into a parked RV dents it, one into the back of an RV driving off doesn't
-        const vb = this.vPre.get(m.id), closing = at + (vb ? Math.max(0, -(vb.x * nx + vb.z * nz) / nl) : 0);
+        // and what it costs the RV: how fast they close, just before they touched (the RV toward it, less
+        // the RV away from it): a charge into a parked RV dents it, one into the back of an RV driving off
+        // at 5 m/s closes at only 2 m/s, and doesn't
+        const vb = this.vPre.get(m.id) || v3(), closing = Math.max(0, ((vr.x - vb.x) * nx + (vr.z - vb.z) * nz) / nl);
         if (closing >= RVH.GH_FREE) {
           const l = this.sim.rvToLocal(t), zone = l.z > 2.5 ? 'front' : l.z < -2.5 ? 'rear' : l.x > 0 ? 'left' : 'right';
           this.sim.out.push({ k: 'rvhit', why: 'beast', amt: beastDamage(closing), zone, how: m.st === GST.CHARGE ? 'charge' : 'ram', at: [r3(t.x), r3(t.y + 0.8), r3(t.z)] });
@@ -467,8 +468,9 @@ export class Mobs {
         if (m.st === GST.CHARGE) { m.rvWoke = false; this.ghWinded(m, p, true); }
       }
     } else m.rvTouch = false;
-    // a charge into a wall or the gate's bars stops it short
-    if (m.st === GST.CHARGE && part.statics && this.dv(p) >= 1.5) this.ghWinded(m, p, true);
+    // a charge into a wall or the gate's bars stops it short (along the ground: a fold in the road it runs
+    // over bumps it up, which is no wall)
+    if (m.st === GST.CHARGE && part.statics && this.dv(p, true) >= 1.5) this.ghWinded(m, p, true);
   }
 
   // ---- ringtails -----------------------------------------------------------------------------------------
@@ -1428,12 +1430,12 @@ export class Mobs {
     });
     return out;
   }
-  // how much a body's velocity changed in the last step (gravity's share taken out)
-  dv(p) {
+  // how much a body's velocity changed in the last step (gravity's share taken out); flat: along the ground only
+  dv(p, flat = false) {
     const a = this.vPre.get(p.id);
     if (!a) return 0;
     const b = p.body.linvel();
-    return Math.hypot(b.x - a.x, b.y - a.y + 9.81 * this.sim.world.timestep, b.z - a.z);
+    return Math.hypot(b.x - a.x, flat ? 0 : b.y - a.y + 9.81 * this.sim.world.timestep, b.z - a.z);
   }
   // nothing solid (the ground, walls, the RV) between a and b
   // (except: a body that doesn't count, e.g. the RV's own shell round its middle when it's the RV in sight)

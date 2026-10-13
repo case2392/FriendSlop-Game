@@ -23,6 +23,12 @@ class FakeConn {
 }
 const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); i++) room.tick(1 / C.SIM_HZ); };
 const evs = (conn, k) => conn.sent.filter(m => m.t === 'ev').flatMap(m => m.list).filter(e => e.k === k);
+// every hit on the RV the room is told of, priced or free (the RV's own rules: test/rv.mjs)
+function rvHits(room) {
+  const seen = [], f = room.onRVHit.bind(room);
+  room.onRVHit = e => { const r = f(e); seen.push({ ...e, priced: r }); return r; };
+  return seen;
+}
 // a crew in a fresh room, parked in camp (nobody drives: the RV sits on its handbrake)
 function crew(names, seed = 4242) {
   const room = new Room('MOBS', seed);
@@ -387,9 +393,14 @@ function driveAt(room, A, speed, secs, onTick = null) {
   const m = mobOf(room, id);
   check(Math.abs(m.patience - GH.PATIENCE * crewFactor(3)) < 1e-6, `grumphorn: a crew of 3 meets it at ${m.patience} patience`);
   let leftAt = null;
+  const seen = rvHits(room);
   driveAt(room, A, 7.5, 16, i => { if (leftAt == null && m.st === GST.LEAVE) leftAt = i / 60; });
   const bell = [...sim.props.values()].find(p => p.type === 'cowbell');
   check(leftAt != null && bell && bell.value === cowbellValue(2) && bell.value === 205, `grumphorn: rammed, it gives up and drops a $${bell?.value} cowbell`);
+  // MRV2: and the RV takes the knock: one hit, by how fast they closed, none of it counted as a crash too
+  const bh = seen.filter(h => h.why === 'beast');
+  check(bh.length === 1 && bh[0].amt >= 7 && bh[0].amt <= 11 && bh[0].how === 'ram' && bh[0].zone === 'front' && !seen.some(h => h.why === 'crash' && h.priced) && room.rvc.hp === 100 - bh[0].amt,
+    `grumphorn: rammed at 7.5 m/s it costs the RV ${bh[0]?.amt}% (${bh.length} hit, the ${bh[0]?.zone}), and no crash on top`);
   A.seat = null;
   tick(room, 30);
   const t = sim.props.get(id).body.translation(), ex = m.bed.exit || { x: m.bed.x + 8, z: m.bed.z };
@@ -561,12 +572,34 @@ const billed = (room, fn) => { const M = room.sim.mobs, f = M.ghCost.bind(M), lo
   const m = mobOf(room, id);
   tick(room, 0.5);
   A.seat = 0;
-  const p0 = m.patience;
+  const p0 = m.patience, seen = rvHits(room);
   room.handle(A, { t: 'horn' });
   for (let i = 0; i < 60 * 8 && m.st !== GST.WINDED; i++) tick(room, 1 / 60);
   const said = s => evs(A.conn, 'mob').some(e => e.id === id && e.s === s);
   check(said('glare') && said('charge') && m.st === GST.WINDED && Math.abs(p0 - m.patience - GH.COST.charge) < 1e-6,
     `grumphorn: honked at from the RV, it glares at the RV and charges it (patience ${p0} -> ${m.patience}: the charge's ${GH.COST.charge}, nothing for the parked RV)`);
+  // MRV1: the charge dents the parked RV, once, and the jolt it gives the RV isn't a crash as well
+  tick(room, 0.5);
+  const bh = seen.filter(h => h.why === 'beast');
+  check(bh.length === 1 && bh[0].amt >= 6 && bh[0].amt <= 10 && bh[0].how === 'charge' && !seen.some(h => h.why === 'crash') && evs(A.conn, 'rvhit').length === 1,
+    `grumphorn: its charge into the parked RV costs ${bh[0]?.amt}% (${bh.length} hit, the ${bh[0]?.zone}), and no crash`);
+  A.seat = null;
+}
+{
+  // MRV3: a charge into the back of an RV driving off at 5 m/s closes at 2 m/s: no damage
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const sim = room.sim, r = roadAt(room, 60), seen = rvHits(room);
+  sim.placeRV(r.x, r.z, r.yaw);
+  tick(room, 0.5);
+  driveAt(room, A, 5, 4);
+  const rp = sim.rv.translation(), rq = sim.rv.rotation(), back = toWorld(rp, rq, { x: 0, y: 0, z: -7.5 }), f = qRotate(rq, { x: 0, y: 0, z: 1 });
+  const id = mobAt(room, A, 'grumphorn', back.x, back.z, { yaw: Math.atan2(f.x, f.z), st: GST.ROAM }), m = mobOf(room, id);
+  sim.mobs.force(m, GST.CHARGE);
+  sim.props.get(id).body.setLinvel({ x: f.x * GH.CHARGE, y: 0, z: f.z * GH.CHARGE }, true);
+  let touched = false, v = 0;
+  driveAt(room, A, 5, 3, () => { if (m.rvTouch && !touched) { touched = true; v = sim.rvSpeed(); } });
+  check(touched && v > 4 && room.rvc.hp === 100 && !seen.some(h => h.priced), `grumphorn: charging into the back of the RV driving off at ${v.toFixed(1)} m/s costs nothing (RV ${room.rvc.hp}%)`);
   A.seat = null;
 }
 {
@@ -827,7 +860,7 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
     const dp = toWorld(rp, rq, { x: -12, y: 0, z: 0 });
     Object.assign(D, { x: dp.x, y: room.W.heightAt(dp.x, dp.z), z: dp.z });   // (its den out past the door)
     sim.mobs.setSt(M1, RST.FLUNG);   // (thrown in)
-    const t0 = room.t;
+    const t0 = room.t, seen = rvHits(room);
     let trapped = null, gone = null, out = null;
     for (let i = 0; i < 60 * 12; i++) {
       tick(room, 1 / 60);
@@ -835,9 +868,16 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
       if (gone == null && !sim.props.has(id)) gone = room.t - t0;
       if (out == null && trapped != null && sim.props.has(id) && M1.st !== RST.TRAPPED) out = room.t - t0;
     }
-    if (!open) check(trapped != null && gone != null && gone <= 10 && evs(A.conn, 'gone').some(e => e.ids.includes(id) && e.how === 'window'),
-      `ringtails: thrown into the RV with the door shut it's trapped (${trapped?.toFixed(1)} s) and squeezes out a window (${gone?.toFixed(1)} s)`);
-    else check(trapped != null && out != null && gone == null && !sim.mobs.inRV(at(room, id)), `ringtails: with the door open it leaves by it (${out?.toFixed(1)} s)`);
+    if (!open) {
+      check(trapped != null && gone != null && gone <= 10 && evs(A.conn, 'gone').some(e => e.ids.includes(id) && e.how === 'window'),
+        `ringtails: thrown into the RV with the door shut it's trapped (${trapped?.toFixed(1)} s) and squeezes out a window (${gone?.toFixed(1)} s)`);
+      // MRV5: and cracks it on the way: 2%
+      check(seen.length === 1 && seen[0].why === 'window' && seen[0].amt === 2 && room.rvc.hp === 98 && evs(A.conn, 'rvhit').length === 1,
+        `ringtails: out through a window it costs the RV ${seen[0]?.amt}% (RV ${room.rvc.hp}%)`);
+    } else {
+      check(trapped != null && out != null && gone == null && !sim.mobs.inRV(at(room, id)), `ringtails: with the door open it leaves by it (${out?.toFixed(1)} s)`);
+      check(!seen.length && room.rvc.hp === 100, 'ringtails: out by the open door it costs the RV nothing');
+    }
   }
 }
 {
@@ -886,6 +926,12 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
   tick(room, 0.5);
   for (const d of sim.mobs.dens.values()) Object.assign(d, { awake: true, awakeChecked: 1e9 });
   for (const m of sim.mobs.list.values()) if (m.type === 'grumphorn') { const p = sim.props.get(m.id); sim.mobs.ghWake(m, p, p.body.translation()); }
+  // (the RV's condition at its longest: a worn RV being fixed, a loan on tomorrow's payment, broken down)
+  Object.assign(room.rvc, { hp: 40, fix: 0.55 });
+  room.loanAdd = 415;
+  sim.setRvCond(40);
+  const gs = room.gameState.bind(room);
+  room.gameState = () => ({ ...gs(), brk: 1 });
   // (the day's first snapshot carries every prop once, the pages' first look at it: the budget is for the ones after)
   room.snapshot();
   let max = 0, sum = 0, n = 0;
@@ -893,7 +939,8 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
     for (const [k, P] of ps.entries()) if (k) ride(room, P, 0, -1 + k, 0);
     if (i % 3 === 0) { const L = JSON.stringify(room.snapshot()).length; max = Math.max(max, L); sum += L; n++; }
   });
-  // (the mean: 2,520 B before the Hoard, whose six awake cost 150 B more than a den of three)
+  // (the mean: 2,520 B before the Hoard, whose six awake cost 150 B more than a den of three; the RV's
+  // condition, 40 B more)
   check(max <= 4752 && sum / n <= 2800, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
 }
 
@@ -1073,6 +1120,27 @@ function firstLanding(day) {
     else check(rumbleAt != null && rumbleAt > 40 && rumbles === 1, `rockfall: a honk ${rumbleAt?.toFixed(0)} m back brings it down early, and driving up after doesn't bring down more (${rumbles} rumble)`);
     A.seat = null;
   }
+}
+{
+  // MRV4: a rockfall over the parked RV: 3% for each rock that lands on it still coming down fast, once a
+  // rock; brought down by a honk 55 m back, nothing reaches it
+  const at0 = firstLanding(4);
+  const { room, ps: [A], W, mobs } = narrows(4, ['Ann']);
+  const rf = mobs.rockfalls[0], seen = rvHits(room);
+  room.sim.placeRV(at0.x, at0.z, Math.atan2(W.roadX(at0.z + 3) - W.roadX(at0.z - 3), 6));
+  tick(room, 1);
+  mobs.rfTrigger(rf, 'test');
+  tick(room, 8);
+  const rh = seen.filter(h => h.why === 'rock'), dented = rf.rocks.filter(r => r.rv).length;
+  check(rh.length >= 1 && rh.length === dented && rh.length <= rf.rocks.length && rh.every(h => h.amt === 3) && room.rvc.hp === 100 - 3 * rh.length && !seen.some(h => h.why === 'crash' && h.priced),
+    `rockfall: on the parked RV, ${rh.length} of ${rf.rocks.length} rocks land on it fast: -${3 * rh.length}% (3% a rock, once each), and no crash on top`);
+  const h2 = narrows(4, ['Ann']), rf2 = h2.mobs.rockfalls[0], seen2 = rvHits(h2.room);
+  h2.room.sim.placeRV(h2.W.roadX(rf2.obz - 55), rf2.obz - 55, Math.atan2(h2.W.roadX(rf2.obz - 52) - h2.W.roadX(rf2.obz - 58), 6));
+  tick(h2.room, 1);
+  h2.ps[0].seat = 0;
+  h2.room.handle(h2.ps[0], { t: 'horn' });
+  tick(h2.room, 8);
+  check(rf2.st !== 'armed' && rf2.rocks.length >= 5 && !seen2.length && h2.room.rvc.hp === 100, `rockfall: brought down by a honk 55 m back, none of its ${rf2.rocks.length} rocks reach the RV`);
 }
 {
   // RF3: moving the boulder brings it down too
