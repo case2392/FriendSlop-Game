@@ -1,13 +1,14 @@
 // A room = one crew, one RV, one run of five days.
 //
-//   camp  — morning. the clock is frozen until the RV rolls out of camp.
-//   road  — the clock runs. scavenge, climb, winch, get to town, pawn, gamble.
+//   camp  — morning. the clock is frozen until the RV rolls out of camp. The day's roles are drawn
+//           (one driver, one navigator who reads the road map), and drawn again if the crew changes.
+//   road  — the clock runs, the roles are locked. scavenge, climb, winch, get to town, pawn, gamble.
 //   night — paid (or repo'd). campfire, store, everyone into a bunk = next day.
 //   over  — you own the RV, or the Repo Man owns you. then a fresh run.
 
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
-import { LOOT, fmt$, MAP_NO_DRIVER } from '../shared/loot.js';
+import { LOOT, fmt$ } from '../shared/loot.js';
 import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
 import { BJTable, FlipMachine } from './casino.js';
@@ -38,6 +39,8 @@ export class Room {
     this.closed = false;
     this.t = 0;
     this.snapN = 0;
+    this.roles = { drv: 0, nav: 0 };   // the day's driver and navigator (player ids; 0: nobody)
+    this.rolesCrew = '';               // who was on the trip when they were drawn
     this.newRun(seed);
   }
 
@@ -51,6 +54,7 @@ export class Room {
     this.parts = { doors: true, roof: true };
     this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0 };
     this.over = null;
+    this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.startDay([]);
   }
 
@@ -80,6 +84,7 @@ export class Room {
       if (p.seat != null) this.send(p, { t: 'seat', seat: null });
       p.bed = false; p.seat = null; p.ko = false; this.awaitReady(p);
     }
+    this.drawRoles();   // a new morning, new roles
   }
 
   nextDay() {
@@ -92,6 +97,7 @@ export class Room {
     this.broadcast({ t: 'props', list: this.sim.allProps() });
     this.spawnStragglers();
     this.toast(`DAY ${this.day} — ${fmt$(this.due)} due at midnight. The Repo Man is already on the road.`, '#ffd166', 7);
+    this.toast(this.rolesText(), '#ffd166', 7);
     this.sendMeta();
   }
 
@@ -146,6 +152,7 @@ export class Room {
     if (this.players.size === 0) { this.closed = true; return; }
     if (why === 'left') this.toast(`${p.name} left the trip.`, '#ffb4a2', 4);
     else if (why === 'expired' && p.heldAt != null) this.toast(`${p.name} didn't make it back. Their seat is free.`, '#ffb4a2', 4);
+    this.checkRoles();
     this.sendMeta();
   }
 
@@ -217,7 +224,74 @@ export class Room {
     // joining at night or after the run ended: what everyone else is looking at
     if (this.phase === 'night' && this.receipt) this.send(p, this.receipt);
     if (this.phase === 'over' && this.over) this.send(p, this.overMsg());
+    this.checkRoles();
     this.sendMeta();
+  }
+
+  // ---- the day's roles ------------------------------------------------------------------
+  // Drawn at random each morning among the players here: the DRIVER (the only one who takes the wheel today)
+  // and the NAVIGATOR (the only one who takes the road map, and only while the driver drives: server-side
+  // in onUse and onGrab). Everyone else is crew. Whoever has done a job least this trip gets it first (ties at
+  // random), so it goes round. In camp a change of crew draws again (the host starts every trip alone while
+  // friends type the code in); once the RV leaves camp the roles are locked till the next morning, and only
+  // a role whose player left the trip for good is handed on.
+
+  drawRoles() {
+    const live = [...this.players.values()].filter(p => p.connected);
+    const drv = this.pickFor('drv', live);
+    this.setRoles(drv, this.pickFor('nav', live.filter(p => p.id !== drv)));
+    this.rolesCrew = this.crewKey();
+  }
+  pickFor(job, pool) {
+    if (!pool.length) return 0;
+    const n = p => this.jobs.get(p.id)?.[job] || 0, least = Math.min(...pool.map(n)), c = pool.filter(p => n(p) === least);
+    return c[Math.floor(Math.random() * c.length)].id;
+  }
+  // everyone on the trip, a kept seat included (a dropped connection coming back doesn't draw again)
+  crewKey() { return [...this.players.keys()].sort((a, b) => a - b).join(','); }
+  countJob(job, id) { if (!id) return; const j = this.jobs.get(id) || { drv: 0, nav: 0 }; j[job]++; this.jobs.set(id, j); }
+
+  setRoles(drv, nav) {
+    const was = this.roles;
+    this.roles = { drv: drv || 0, nav: nav || 0 };
+    if (this.phase !== 'camp') { if (this.roles.drv !== was.drv) this.countJob('drv', this.roles.drv); if (this.roles.nav !== was.nav) this.countJob('nav', this.roles.nav); }
+    for (const p of this.players.values()) {
+      // out of the driver's seat if today isn't your day to drive; the map out of your hands if it isn't yours to read
+      if (p.seat === 0 && p.id !== this.roles.drv) { p.seat = null; this.send(p, { t: 'seat', seat: null, exit: RV_SEAT_EXIT[0] }); }
+      const h = this.sim.holds.get(p.id);
+      if (h?.kind === 'prop' && p.id !== this.roles.nav && this.sim.props.get(h.id)?.type === 'map') { this.sim.release(p.id); this.send(p, { t: 'grabbed', ok: false, kind: 'prop', id: h.id }); }
+    }
+    this.sendMeta();
+  }
+
+  // someone climbed aboard, or left for good
+  checkRoles() {
+    if (this.phase === 'camp') {
+      if (this.crewKey() === this.rolesCrew) return;
+      this.drawRoles();
+      if (this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
+      return;
+    }
+    const { drv, nav } = this.roles;
+    this.fillRoles();
+    if ((drv !== this.roles.drv || nav !== this.roles.nav) && this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
+  }
+  // after camp: a role whose player left the trip is handed on (the driver's first: without one nobody drives;
+  // the navigator takes the wheel only if there's nobody else), and a newcomer fills a role nobody has
+  fillRoles() {
+    let { drv, nav } = this.roles;
+    if (!this.players.has(nav)) nav = 0;
+    if (!this.players.has(drv)) {
+      drv = this.pickFor('drv', [...this.players.values()].filter(p => p.connected && p.id !== nav)) || nav;
+      if (drv === nav) nav = 0;
+    }
+    if (!nav) nav = this.pickFor('nav', [...this.players.values()].filter(p => p.connected && p.id !== drv));
+    if (drv !== this.roles.drv || nav !== this.roles.nav) this.setRoles(drv, nav);
+  }
+  rolesText() {
+    const d = this.players.get(this.roles.drv)?.name, v = this.players.get(this.roles.nav)?.name;
+    if (!d) return '';
+    return v ? `${d} drives today, and ${v} reads the map. No swapping till tomorrow.` : `${d} drives today. With nobody to read it, the map stays on the dash.`;
   }
 
   // ---- messaging ----------------------------------------------------------------------
@@ -239,7 +313,7 @@ export class Room {
   }
   sendMeta() {
     this.broadcast({
-      t: 'meta', code: this.code, host: this.hostId,
+      t: 'meta', code: this.code, host: this.hostId, roles: this.roles,
       players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice })),
     });
   }
@@ -300,6 +374,7 @@ export class Room {
     else if (m.op === 'bank') this.bank = +m.v;
     else if (m.op === 'phase') this.phase = m.ph;
     else if (m.op === 'day') { this.day = Math.max(0, (+m.d | 0) - 1); this.nextDay(); }
+    else if (m.op === 'roles') { this.setRoles(+m.drv || 0, +m.nav || 0); this.rolesCrew = this.crewKey(); }
     else if (m.op === 'spawn') {
       const pr = sim.addProp(m.type, { x: +m.x, y: +m.y, z: +m.z }, { x: 0, y: 0, z: 0, w: 1 }, +m.value || 100, +m.value || 100);
       if (pr) this.broadcast({ t: 'ev', list: [{ k: 'spawn', p: sim.describe(pr) }] });
@@ -345,18 +420,25 @@ export class Room {
   // refusal is answered, so the client drops the hold it took ahead of us.)
   onGrab(p, m) {
     if (p.ko || p.seat != null) return;
-    if (m.kind === 'prop' && this.sim.props.get(Number(m.id))?.type === 'map' && !this.mayTakeMap(p)) {
+    const no = m.kind === 'prop' && this.sim.props.get(Number(m.id))?.type === 'map' && this.mapRefusal(p);
+    if (no) {
       this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id });
-      this.toast(MAP_NO_DRIVER, '#fff', 3, p);
+      this.toast(no, '#fff', 3, p);
       return;
     }
     const ok = this.sim.grab(p.id, p, m);
     this.send(p, { t: 'grabbed', ok, kind: m.kind, id: m.id });
   }
-  // Someone else is in the driver's seat (a dropped player's seat is freed at once: hold()). No exception for
-  // a player alone: every trip starts with its host alone while friends type the code in, the clock stopped
-  // in camp. Solo, there's nobody to read it to you. The client asks the same (main.js mapFree).
-  mayTakeMap(p) { return [...this.players.values()].some(q => q !== p && q.seat === 0); }
+  // Why p may not take the road map now (null: they may): only today's navigator takes it, and only while the
+  // driver is at the wheel (a dropped player's seat is freed at once: hold()). Alone there's no navigator:
+  // nobody to read it to you. The client words its prompt the same way (main.js mapFree).
+  mapRefusal(p) {
+    const name = id => this.players.get(id)?.name;
+    if (!this.roles.nav) return 'It takes two: one drives, one reads the map.';
+    if (p.id !== this.roles.nav) return `Only ${name(this.roles.nav)} reads the map today.`;
+    if (![...this.players.values()].some(q => q !== p && q.seat === 0)) return `${name(this.roles.drv) || 'The driver'} has to be at the wheel before you take the map.`;
+    return null;
+  }
 
   onUse(p, m) {
     if (p.ko || !p.pos) return;
@@ -369,17 +451,18 @@ export class Room {
       const idx = kind === 'seat0' ? 0 : 1;
       if (!inRV) return;
       if ([...this.players.values()].some(q => q.seat === idx && q !== p)) { this.toast('Somebody\'s already sitting there.', '#fff', 2, p); return; }
+      if (idx === 0 && this.roles.drv && p.id !== this.roles.drv) { this.toast(`${this.players.get(this.roles.drv)?.name || 'Somebody else'} drives today. Ride along.`, '#fff', 3, p); return; }
       sim.release(p.id);
       p.seat = idx;
       if (idx === 0) sim.setDrive({ th: 0, st: 0, hb: 0 });
       this.send(p, { t: 'seat', seat: idx });
       if (idx === 0) {
-        // (the map is up for grabs now: say so while it lies in the RV with nobody reading it, there's somebody
-        // else to read it, and the road ahead matters)
+        // (the map is up for grabs now: tell the navigator, while it lies in the RV with nobody reading it and
+        // the road ahead matters)
         const map = [...sim.props.values()].find(q => q.type === 'map'), ml = map && sim.rvToLocal(map.body.translation());
-        const ask = map && !map.holders.size && insideRV(ml.x, ml.y, ml.z, 0.3) && (this.phase === 'camp' || this.phase === 'road') && !this.inTown
-          && [...this.players.values()].filter(q => q.connected).length > 1;
-        this.toast(`${p.name} is driving. God help us.${ask ? ' Somebody grab the map.' : ''}`, p.color, 3);
+        const nav = this.players.get(this.roles.nav);
+        const ask = nav?.connected && map && !map.holders.size && insideRV(ml.x, ml.y, ml.z, 0.3) && (this.phase === 'camp' || this.phase === 'road') && !this.inTown;
+        this.toast(`${p.name} is driving. God help us.${ask ? ` ${nav.name}, grab the map.` : ''}`, p.color, 3);
       }
       return;
     }
@@ -645,6 +728,7 @@ export class Room {
     const rvp = sim.rv.translation();
     if (this.phase === 'camp' && rvp.z > this.W.camp.exitZ) {
       this.phase = 'road';
+      this.countJob('drv', this.roles.drv); this.countJob('nav', this.roles.nav);   // locked now: counted
       this.toast(`ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
     }
     if (this.phase === 'road') {
@@ -677,6 +761,7 @@ export class Room {
       this.spawnStragglers();
       this.sendMeta();
       this.toast('A new RV. A new loan. The same idiots.', '#ffd166', 6);
+      if (this.rolesText()) this.toast(this.rolesText(), '#ffd166', 6);
     }
 
     // casino

@@ -461,9 +461,7 @@ function computeTarget() {
     if (!p) return null;
     const L = LOOT[p.type];
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
-    if (p.type === 'map') return mapFree()
-      ? { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }
-      : { kind: 'mapwait', label: (S.meta?.players.length ?? 1) < 2 ? 'The road map. It takes two: one drives, one reads it out.' : 'The road map. Someone has to be driving before you can take it.' };
+    if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }; }
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
     return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
@@ -487,7 +485,7 @@ function computeTarget() {
     // the whole lower front of the RV is "the winch" if you're standing outside in front of it
     const lh = toLocal(S.rv.p, S.rv.q, hit.point);
     if (!u && !me.par && lh.z > 3.8 && lh.y < 1.1) u = 'winch';
-    if (u === 'seat0') return { kind: 'rvuse', use: 'seat0', label: '[E] DRIVE' };
+    if (u === 'seat0') return { kind: 'rvuse', use: 'seat0', label: roleOf('drv') && roleOf('drv') !== S.selfId ? `${roleName('drv')} drives today. You ride along.` : '[E] DRIVE' };
     if (u === 'seat1') return { kind: 'rvuse', use: 'seat1', label: '[E] ride shotgun' };
     if (u === 'door') return { kind: 'rvuse', use: 'door', label: '[E] open the door' };
     if (u === 'bunk') return { kind: 'rvuse', use: 'bunk', label: S.g?.ph === 'night' ? '[E] sleep (everyone in a bunk = next day)' : 'bunks (bedtime is after the Repo Man gets paid)' };
@@ -502,20 +500,29 @@ function computeTarget() {
   return null;
 }
 
-// who is at the wheel, if it's somebody else
+// who is at the wheel right now, if it's somebody else
 function driverName() {
   const id = S.g?.drv;
   if (!id || id === S.selfId) return null;
   return S.meta?.players.find(q => q.id === id)?.name || 'the driver';
 }
-// May I take the road map? The server's rule (server/room.js mayTakeMap): someone else is at the wheel. This
-// only words the prompt and saves sending a grab it would refuse
-const mapFree = () => !!driverName();
-// should a passenger take the map now: someone else drives, the road ahead matters (camp, or the road before
-// town), and the map lies in the RV with nobody reading it
+// the day's roles (server/room.js drawRoles): who drives and who reads the map today
+const roleOf = job => S.meta?.roles?.[job] || 0;
+const roleName = job => S.meta?.players.find(q => q.id === roleOf(job))?.name || (job === 'drv' ? 'Somebody else' : 'the navigator');
+// Why I can't take the road map now (null: I can). The server's rule (server/room.js mapRefusal): only today's
+// navigator takes it, only while the driver is at the wheel. This only words the prompt: the server decides
+function mapNo() {
+  if (!roleOf('nav')) return 'The road map. It takes two: one drives, one reads it out.';
+  if (roleOf('drv') === S.selfId) return 'The road map. You drive today: no peeking.';
+  if (roleOf('nav') !== S.selfId) return `The road map. Only ${roleName('nav')} reads it today.`;
+  if (!driverName()) return `The road map. ${roleName('drv')} has to be at the wheel first.`;
+  return null;
+}
+// should I (today's navigator) take the map now: the driver is at the wheel, the road ahead matters (camp, or
+// the road before town), and the map lies in the RV with nobody reading it
 function mapWanted() {
   const g = S.g;
-  if (!g || !driverName() || !(g.ph === 'camp' || (g.ph === 'road' && !g.town)) || mapOut()) return false;
+  if (!g || roleOf('nav') !== S.selfId || !driverName() || !(g.ph === 'camp' || (g.ph === 'road' && !g.town)) || mapOut()) return false;
   const mp = [...S.props.values()].find(p => p.type === 'map');
   if (!mp?.pose || !S.rv) return false;
   const l = toLocal(S.rv.p, S.rv.q, mp.pose.p);
@@ -606,7 +613,7 @@ const TIPS = [
   'The Repo Man collects at midnight. Every night.',
   'Loot loses value every time it gets knocked about. Carry it gently.',
   'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
-  'The driver can\'t see the map. Once someone\'s driving, grab it off the dash and call out what\'s coming.',
+  'Each morning picks a driver and a navigator. The driver can\'t see the map: the navigator reads it out.',
   'Walk into the RV to push it out of the mud.',
   'Hold E on a knocked-out friend to pick them up. Waiting it out costs a doctor\'s bill.',
   'Walkie-talkies reach anyone else holding one, at any range. $150 at the store.',
@@ -967,7 +974,7 @@ function onMeta(m) {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn">${escapeHtml(p.name)}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
+  $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn"><span class="nm">${escapeHtml(p.name)}</span>${m.roles?.drv === p.id ? '<em class="role">driver</em>' : m.roles?.nav === p.id ? '<em class="role">navigator</em>' : ''}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
 }
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
@@ -1732,8 +1739,8 @@ function mapOut() {
 function tutTip(g, town) {
   if (!settings.tutorial) return null;
   // someone else took the wheel and nobody has the map out: a passenger navigates
-  if (!tut.has('map') && mapWanted()) return `Hint: ${driverName()} can't see the map. Grab it off the dash and call out what's coming`;
-  if (g.ph === 'camp') return tut.has('drive') ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
+  if (!tut.has('map') && mapWanted()) return `Hint: you navigate today. ${driverName()} can't see the map: grab it off the dash and call out what's coming`;
+  if (g.ph === 'camp') return tut.has('drive') || (roleOf('drv') && roleOf('drv') !== S.selfId) ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
   if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
@@ -1744,7 +1751,11 @@ function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
   const town = townName(S.W), L = [];
   const tip = tutTip(g, town);
-  if (tip) L.push([tip, 'qt-tip']);   // (not 'tip': that's the silver tooltip frame, absolutely positioned)
+  if (tip) L.push([tip, 'qt-tip']);
+  if (roleOf('drv') && (g.ph === 'camp' || g.ph === 'road')) {
+    const d = roleOf('drv') === S.selfId, n = roleOf('nav') === S.selfId, nav = roleOf('nav') ? roleName('nav') : null;
+    L.push([d ? `You drive today${nav ? `. ${nav} reads the map` : ''}` : n ? `You read the map today. ${roleName('drv')} drives` : `${roleName('drv')} drives today${nav ? `, ${nav} reads the map` : ''}`, '']);
+  }   // (not 'tip': that's the silver tooltip frame, absolutely positioned)
   if (g.ph === 'camp') L.push(['Drive out of camp to start the clock', '']);
   else if (g.ph === 'road') {
     if (!g.town) {

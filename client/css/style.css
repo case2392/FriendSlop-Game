@@ -280,6 +280,10 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .roster .pf .ico-speaker { right: -6px; bottom: -3px; }
 .roster .pf .ico-walkie { left: -5px; bottom: -3px; }
 .roster .pn { color: color-mix(in srgb, var(--c, #fff) 72%, #fff2d0); text-shadow: var(--outline); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 15px; line-height: 1.2; }
+/* the day's role after the name (the name gives way first) */
+.roster .pn:has(.role) { display: flex; align-items: baseline; gap: 5px; }
+.roster .pn .nm { overflow: hidden; text-overflow: ellipsis; }
+.roster .pn .role { flex: none; font-style: normal; font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase; color: var(--gold); text-shadow: var(--outline-thin); }
 /* the bar under each name is real: your own shows your stamina (WoW's yellow energy), the
    others' show green while they're up; a knocked-out player's bar runs red and drains with the
    seconds left before they wake up alone (and the bank pays the doctor), pulsing, with the

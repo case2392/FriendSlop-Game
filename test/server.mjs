@@ -329,15 +329,15 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   check(room.day === 2, `rooms: after 45 s the RV leaves at dawn anyway (day ${room.day})`);
 }
 
-// ---- in process: the road map ---------------------------------------------------------------------------
+// ---- in process: the road map and the day's roles ------------------------------------------------------
 {
-  // a passenger reads it to the driver: nobody takes it until someone else is at the wheel; the driver can't
-  // take it; a reader keeps it when the driver gets up (or is knocked out); a reader who takes the wheel
-  // lets go of it
+  // today Ann drives and Bob navigates: Bob takes the map only while Ann is at the wheel; Ann never can, seated
+  // or not; Bob keeps it when Ann gets up or is knocked out; neither takes the other's job
   const room = new Room('MAP', 4242);
   const ca = new FakeConn(), cb = new FakeConn();
   const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player;
   room.welcome(A); room.welcome(B);
+  room.setRoles(A.id, B.id);
   tick(room, 0.5);
   const sim = room.sim, map = [...sim.props.values()].find(p => p.type === 'map');
   // standing in the cab (RV-local): Ann behind the driver's seat, Bob on the passenger side, both looking ahead and down
@@ -347,11 +347,11 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const said = (c, re) => c.has(m => m.t === 'toast' && re.test(m.text));
   stand(A, 0.6, 2.4); stand(B, -0.4, 2.3);
   grab(B);
-  check(!!map && cb.last('grabbed')?.ok === false && !holds(B) && said(cb, /has to be driving/), 'map: with nobody at the wheel nobody takes the road map, and is told why');
+  check(!!map && cb.last('grabbed')?.ok === false && !holds(B) && said(cb, /Ann has to be at the wheel/), 'map: with nobody at the wheel the navigator can\'t take it yet, and is told why');
   room.handle(A, { t: 'use', kind: 'seat0' });
   grab(B);
   tick(room, 0.5);
-  check(A.seat === 0 && cb.last('grabbed')?.ok === true && holds(B) && said(cb, /Somebody grab the map/), 'map: once someone drives (and the crew is told to grab the map), a passenger takes it');
+  check(A.seat === 0 && cb.last('grabbed')?.ok === true && holds(B) && said(cb, /Bob, grab the map/), 'map: once the driver is at the wheel (and the navigator is called by name), the navigator takes it');
   const n0 = ca.sent.filter(m => m.t === 'grabbed').length;
   grab(A);
   check(!holds(A) && ca.sent.filter(m => m.t === 'grabbed').length === n0 && map.holders.size === 1, 'map: the driver can\'t take it from the seat');
@@ -359,26 +359,25 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   stand(A, 0.6, 2.4);
   tick(room, 0.3);
   grab(A);
-  check(A.seat === null && holds(B) && ca.last('grabbed')?.ok === false && !holds(A), 'map: the driver gets up: the reader keeps it, and nobody else takes it until someone drives again');
+  check(A.seat === null && holds(B) && ca.last('grabbed')?.ok === false && !holds(A) && said(ca, /Only Bob reads the map/), 'map: the driver gets up: the navigator keeps it, and the driver still can\'t take it');
   room.handle(B, { t: 'use', kind: 'seat0' });
+  check(B.seat === null && holds(B) && said(cb, /Ann drives today/), 'roles: the navigator can\'t take the wheel (and is told who drives), and keeps the map');
+  room.handle(A, { t: 'use', kind: 'seat0' });
+  room.handle(A, { t: 'ko', why: 'fall' });
   tick(room, 0.3);
-  check(B.seat === 0 && !holds(B) && map.holders.size === 0, 'map: a reader who takes the wheel lets go of it');
-  grab(A);
-  room.handle(B, { t: 'ko', why: 'fall' });
-  tick(room, 0.3);
-  check(ca.last('grabbed')?.ok === true && holds(A) && B.seat === null, 'map: the new passenger takes it; a knocked-out driver leaves the seat and the reader keeps the map');
-  // the driver toast asks for a reader only while nobody has the map out
+  check(holds(B) && A.seat === null, 'map: a knocked-out driver leaves the seat; the navigator keeps the map');
+  // the driver toast calls the navigator only while nobody has the map out
   const n1 = ca.sent.length;
-  room.handle(B, { t: 'wake' });
-  stand(B, 0.6, 2.4);
-  room.handle(B, { t: 'use', kind: 'seat0' });
+  room.handle(A, { t: 'wake' });
+  stand(A, 0.6, 2.4);
+  room.handle(A, { t: 'use', kind: 'seat0' });
   const t1 = ca.sent.slice(n1).find(m => m.t === 'toast' && /is driving/.test(m.text));
-  check(B.seat === 0 && holds(A) && t1 && !/grab the map/.test(t1.text), `map: a new driver with the map already out isn't asked for a reader ("${t1?.text}")`);
+  check(A.seat === 0 && holds(B) && t1 && !/grab the map/.test(t1.text), `map: back at the wheel with the map already out, nobody is called to grab it ("${t1?.text}")`);
   room.sim.free?.();
 }
 {
-  // alone (a host waiting for friends at camp, the clock stopped, is alone too): no driver, no map; and taking
-  // the wheel doesn't ask for a reader who isn't there
+  // alone (a host waiting for friends at camp, the clock stopped, is alone too): you drive, nobody navigates,
+  // so nobody takes the map; and taking the wheel calls nobody to grab it
   const room = new Room('MAP1', 4242);
   const c = new FakeConn(), P = room.addPlayer(c, 'Solo').player;
   room.welcome(P);
@@ -386,9 +385,51 @@ const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); 
   const map = [...room.sim.props.values()].find(p => p.type === 'map'), t = map.body.translation();
   room.onPose(P, { par: 1, x: -0.4, y: 0.05, z: 2.3, yaw: 0, pitch: 0.5, m: 0, f: 0, v: [0, 0, 0] });
   room.handle(P, { t: 'grab', kind: 'prop', id: map.id, pt: [t.x, t.y, t.z], d: 1.2 });
-  check(c.last('grabbed')?.ok === false && !room.sim.holds.has(P.id), 'map: alone on a trip, nobody takes the map: there is nobody driving');
+  check(room.roles.drv === P.id && !room.roles.nav && c.last('grabbed')?.ok === false && !room.sim.holds.has(P.id), 'map: alone on a trip you drive and nobody navigates: nobody takes the map');
   room.handle(P, { t: 'use', kind: 'seat0' });
-  check(P.seat === 0 && !c.has(m => m.t === 'toast' && /grab the map/.test(m.text)), 'map: ... and taking the wheel alone doesn\'t ask for a reader');
+  check(P.seat === 0 && !c.has(m => m.t === 'toast' && /grab the map/.test(m.text)), 'map: ... and taking the wheel alone calls nobody to grab it');
+  room.sim.free?.();
+}
+{
+  // the day's roles: drawn in camp among who's here (again when the crew changes), locked once the RV leaves
+  // camp, handed on when a player leaves for good, drawn again each morning (whoever has done a job least first)
+  const room = new Room('ROLES', 4242);
+  const cs = [new FakeConn(), new FakeConn(), new FakeConn()];
+  const said = (c, re) => c.has(m => m.t === 'toast' && re.test(m.text));
+  const A = room.addPlayer(cs[0], 'Ann').player;
+  room.welcome(A);
+  check(room.roles.drv === A.id && !room.roles.nav, 'roles: alone in camp, you drive and nobody navigates');
+  const B = room.addPlayer(cs[1], 'Bob').player;
+  room.welcome(B);
+  const two = new Set([room.roles.drv, room.roles.nav]);
+  check(two.size === 2 && two.has(A.id) && two.has(B.id) && said(cs[0], /drives today, and .* reads the map/), 'roles: a friend climbs aboard in camp: drawn again, one drives and one navigates, and everyone is told');
+  check(cs[1].last('meta')?.roles?.drv === room.roles.drv && cs[1].last('meta')?.roles?.nav === room.roles.nav, 'roles: the party gets them with the player list (meta)');
+  // drawn at random: over many draws in camp both of them get to drive
+  const drivers = new Set();
+  for (let i = 0; i < 40; i++) { room.rolesCrew = ''; room.checkRoles(); drivers.add(room.roles.drv); }
+  check(drivers.size === 2, 'roles: the draw is random (either of two can drive)');
+  // out of camp: the roles are locked
+  const W = room.W, sim = room.sim, z = W.camp.exitZ + 4;
+  sim.placeRV(W.roadX(z), z, 0);
+  tick(room, 0.2);
+  const locked = { ...room.roles };
+  const Cat = room.addPlayer(cs[2], 'Cat').player;
+  room.welcome(Cat);
+  check(room.phase === 'road' && room.roles.drv === locked.drv && room.roles.nav === locked.nav, 'roles: on the road they are locked: a newcomer is crew');
+  // crew can't drive or read the map
+  room.onPose(Cat, { par: 1, x: 0.6, y: 0.05, z: 2.4, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+  room.handle(Cat, { t: 'use', kind: 'seat0' });
+  const map = [...sim.props.values()].find(p => p.type === 'map'), mt = map.body.translation();
+  room.handle(Cat, { t: 'grab', kind: 'prop', id: map.id, pt: [mt.x, mt.y, mt.z], d: 1.2 });
+  check(Cat.seat === null && said(cs[2], /drives today\. Ride along/) && cs[2].last('grabbed')?.ok === false && said(cs[2], /Only .* reads the map today/), 'roles: crew can\'t take the wheel or the map, and is told whose job it is');
+  // the navigator leaves the trip: the crew member takes the map over
+  const navWas = locked.nav, drvWas = locked.drv;
+  room.removePlayer(navWas, 'left');
+  check(room.roles.nav === Cat.id && room.roles.drv === drvWas, 'roles: the navigator leaves the trip: Cat (crew) reads the map now');
+  // the next morning: drawn again, whoever has done a job least first: Cat (who hasn't driven) drives, the
+  // old driver navigates
+  room.nextDay();
+  check(room.phase === 'camp' && room.roles.drv === Cat.id && room.roles.nav === drvWas, `roles: drawn again in the morning, the one who hasn't driven yet drives (driver ${room.roles.drv}, navigator ${room.roles.nav})`);
   room.sim.free?.();
 }
 

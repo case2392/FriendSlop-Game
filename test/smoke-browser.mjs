@@ -113,6 +113,11 @@ try {
   await shot(joiner, 'camp');
 
   // ---- Dave rides inside, Steve drives ----
+  // (the day's roles are drawn at random; the test sets them through a test-only lever)
+  const ids = { steve: await host.evaluate(() => window.__nmd.selfId), dave: await joiner.evaluate(() => window.__nmd.selfId) };
+  const rolesNow = (drv, nav) => host.evaluate(([drv, nav]) => window.__nmd.send({ t: 'dbg', op: 'roles', drv, nav }), [drv, nav]);
+  await rolesNow(ids.steve, ids.dave);
+  await host.waitForFunction(id => window.__nmd.meta?.roles?.drv === id, ids.steve, { timeout: 24000 });
   await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); S.me.pitch = 0.05; });
   await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x + 0.25, r.y + 0.1, r.z + 2.0, 0); S.aimAt(r.x + 0.62, r.y + 0.4, r.z + 2.85); });
   await wait(host, 900);
@@ -187,8 +192,11 @@ try {
   await shot(host, 'climbing-fp');
   await host.mouse.up();
 
-  // ---- the map: a passenger reads it to the driver ----
-  // nobody at the wheel: Steve can't take it off the dash (the prompt says why), and a grab sent anyway is refused
+  // ---- the map: the navigator reads it to the driver ----
+  // now Dave drives and Steve navigates (set through the test lever). Nobody at the wheel yet: Steve can't take
+  // it off the dash (the prompt says why), and a grab sent anyway is refused
+  await rolesNow(ids.dave, ids.steve);
+  await host.waitForFunction(id => window.__nmd.meta?.roles?.nav === id, ids.steve, { timeout: 24000 });
   await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
   await wait(host, 900);
   const aimAtMap = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
@@ -199,7 +207,7 @@ try {
   const waitLabel = await host.evaluate(() => window.__nmd.target()?.label || '');
   await host.evaluate(() => window.__nmd.press('grab'));
   const m0 = await mapAt();
-  const refusedToast = toastSays(host, /has to be driving/);
+  const refusedToast = toastSays(host, /Dave has to be at the wheel/);
   await host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.send({ t: 'grab', kind: 'prop', id: m.id, pt: [m.pose.p.x, m.pose.p.y, m.pose.p.z], d: 1.2 }); });
   const refused = await refusedToast;
   await wait(host, 900);
@@ -207,7 +215,7 @@ try {
   const m1 = await mapAt(), l0 = toLocal(m0.rv.p, m0.rv.q, m0.p), l1 = toLocal(m1.rv.p, m1.rv.q, m1.p);
   const slid = Math.hypot(l1.x - l0.x, l1.y - l0.y, l1.z - l0.z);
   const early = await host.evaluate(() => ({ holding: window.__nmd.me.holding, up: window.__nmd.mapUp() }));
-  check(/has to be driving/.test(waitLabel) && !early.holding && !early.up && refused && slid < 0.05, `nobody at the wheel: the map stays on the dash ("${waitLabel}"; a grab sent anyway is refused: ${refused}; the map moved ${slid.toFixed(2)} m)`);
+  check(/Dave has to be at the wheel/.test(waitLabel) && !early.holding && !early.up && refused && slid < 0.05, `nobody at the wheel: the map stays on the dash ("${waitLabel}"; a grab sent anyway is refused: ${refused}; the map moved ${slid.toFixed(2)} m)`);
   const route = await host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); let on = false; m.mesh.traverse(o => { if (o.material?.map?.image === S.mapCv) on = true; }); return on; });
   check(!route, 'the map lying on the dash shows no route (only its reader\'s raised sheet does)');
   // a grab the server refuses never puts the map up, not even while its answer is on the way (the hands
@@ -224,7 +232,7 @@ try {
   // Dave takes the wheel and stands on the brake: now Steve takes the map, and only Steve's screen shows it
   await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); });
   await wait(joiner, 900);
-  const cue = toastSays(host, /Somebody grab the map/);
+  const cue = toastSays(host, /Steve, grab the map/);
   await joiner.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
   await joiner.waitForFunction(() => window.__nmd.me.mode === 'seat' && window.__nmd.me.seat === 0, null, { timeout: 24000 });
   await joiner.keyboard.down(' ');
@@ -238,7 +246,10 @@ try {
   await wait(host, 900);
   const reading = await host.evaluate(() => ({ type: window.__nmd.me.holding?.type, ok: !!window.__nmd.me.holding?.ok, up: window.__nmd.mapUp() }));
   const daveSees = await joiner.evaluate(() => window.__nmd.mapUp());
-  check(reading.type === 'map' && reading.ok && reading.up && !daveSees && (await cue) && /call out the road to Dave/.test(freeLabel), `with Dave at the wheel (the crew told to grab the map), Steve took the road map ("${freeLabel}") and reads it; Dave's screen shows none of it`);
+  check(reading.type === 'map' && reading.ok && reading.up && !daveSees && (await cue) && /call out the road to Dave/.test(freeLabel), `with Dave at the wheel (and Steve called to grab the map), Steve took the road map ("${freeLabel}") and reads it; Dave's screen shows none of it`);
+  // the roles hold: Steve (today's navigator) can't take the wheel, and Dave can't take the map
+  const roster = await host.evaluate(() => [...document.querySelectorAll('#roster .pm')].map(e => e.querySelector('.pn')?.textContent));
+  check(roster.some(t => /^Dave\s*driver$/i.test(t)) && roster.some(t => /^Steve\s*navigator$/i.test(t)), `the party frames say who drives and who reads the map today (${roster.join(' | ')})`);
   await host.evaluate(() => { window.__nmd.me.pitch = 0.1; });
   await shot(host, 'map');
   await host.evaluate(() => window.__nmd.press('release'));
