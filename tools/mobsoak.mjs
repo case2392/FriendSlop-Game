@@ -106,7 +106,9 @@ export function soakBeds(seed, day, { secs = 60 } = {}) {
     mobs.ghCost(m, p, m.patience + 1);
     for (let i = 0; i < 45 * 60 && m.st !== GST.LEFT; i++) sim.step(1 / 60, players);
     const t = sim.props.get(m.id).body.translation();
-    out.push({ ob: b.ob, off, kos, st: m.st, fromExit: Math.hypot(t.x - b.exit.x, t.z - b.exit.z), fromRoad: Math.abs(t.x - W.roadX(t.z)) });
+    // (by the way off it walked to: its bed's, or the nearest from where it got stuck)
+    const ex = m.exit || b.exit;
+    out.push({ ob: b.ob, off, kos, st: m.st, fromExit: Math.hypot(t.x - ex.x, t.z - ex.z), fromRoad: Math.abs(t.x - W.roadX(t.z)), replan: !!m.exit });
   }
   sim.free();
   return out;
@@ -145,6 +147,6 @@ if (isMain) {
   gate(T.nonFinite === 0, `${T.nonFinite} non-finite bodies`);
   gate(mean(T.stepMs) <= 0.3, `the wildlife's share of a step ${mean(T.stepMs).toFixed(3)} ms (<= 0.3)`);
   gate(beds.every(b => b.off <= 20), `grumphorn charges stay within 20 m of the road (worst ${Math.max(0, ...beds.map(b => b.off)).toFixed(1)} m)`);
-  gate(beds.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= 6.5), `every grumphorn that ran out of patience lay down by its exit, clear of the road (worst ${Math.max(0, ...beds.map(b => b.fromExit)).toFixed(2)} m from its spot, nearest ${Math.min(99, ...beds.map(b => b.fromRoad)).toFixed(1)} m from the road's middle; ${beds.filter(b => b.st !== GST.LEFT).length} never did)`);
+  gate(beds.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= 6.5), `every grumphorn that ran out of patience lay down by its exit, clear of the road (worst ${Math.max(0, ...beds.map(b => b.fromExit)).toFixed(2)} m from its spot, nearest ${Math.min(99, ...beds.map(b => b.fromRoad)).toFixed(1)} m from the road's middle; ${beds.filter(b => b.replan).length} couldn't get back to its own and took the nearest; ${beds.filter(b => b.st !== GST.LEFT).length} never did)`);
   process.exit(failed ? 1 : 0);
 }

@@ -942,10 +942,10 @@ export class Room {
     } else if (e.s === 'leave') {
       this.stats.beasts++;
       this.toast(`The Grumphorn has had enough of you. It wanders off, clanking. (It dropped its cowbell: ${fmt$(e.value)}.)`, '#7CFC00', 6);
-    } else if (e.s === 'steal') {
-      this.stats.stolen += e.value; this.dayStats.stolen += e.value;
-      const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };
-      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot';
+    } else if (e.s === 'steal' && !e.again) {
+      if (e.ours) { this.stats.stolen += e.value; this.dayStats.stolen += e.value; }
+      const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, ours: false, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };
+      q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours;
       this.theftQ.set(e.den, q);
     } else if (e.s === 'recovered') {
       this.stats.recovered += e.value; this.dayStats.recovered += e.value;
@@ -961,7 +961,10 @@ export class Room {
       this.theftQ.delete(den);
       this.theftToastAt.set(den, this.t);
       const where = q.poi ? ` at ${STOP_NAMES[q.poi] || 'the stop'}` : '';
-      this.toast(q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${where}! Its den is close by.`
+      // (the stop's own loot nobody had touched yet: they beat you to it)
+      if (!q.ours) this.toast(q.n === 1 ? `A ringtail beat you to the ${q.what} (${fmt$(q.value)})${where}. Its den is close by.`
+        : `Ringtails beat you to ${q.n} things (${fmt$(q.value)})${where}. Their den is close by.`, '#ffd166', 4);
+      else this.toast(q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${where}! Its den is close by.`
         : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${where}! Their den is close by.`, '#ffb74d', 4);
     }
   }

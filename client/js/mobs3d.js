@@ -96,7 +96,8 @@ function ringtailGeo(biome) {
   const furUV = (st, z0, z1) => (x, y, z) => [Math.min(1, Math.max(0, (z - z0) / (z1 - z0))), 1 - Math.atan2(Math.abs(x), y - midAt(st, z)) / Math.PI];
   P.add(loft(RT_BODY, 12, 2.2), R.fur, { uv: 'fn', fn: furUV(RT_BODY, -0.3, 0.22), tint: coat, bone: B.body, crease: 70 });
   // the head: the mask painted across the eyes, a pointed snout
-  P.add(loft(RT_HEAD, 12, 2.2), R.mask, { uv: 'fn', fn: (x, y, z) => [0.5 + Math.atan2(x, 0.12) / Math.PI * 0.9, Math.min(1, Math.max(0, (z - 0.15) / 0.28))], tint: coat, bone: B.head, crease: 70 });
+  // (the painting runs crown to nose down the canvas: v is 1 at the back of the head, 0 at the nose)
+  P.add(loft(RT_HEAD, 12, 2.2), R.mask, { uv: 'fn', fn: (x, y, z) => [0.5 + Math.atan2(x, 0.12) / Math.PI * 0.9, 1 - Math.min(1, Math.max(0, (z - 0.15) / 0.28))], tint: coat, bone: B.head, crease: 70 });
   // ears, eyes (they catch the light at dusk: the mask's glow) and the nose
   for (const sx of [-1, 1]) {
     P.add(sphere(1, 6, 4), R.fur, { at: mat4(sx * 0.075, 0.15, 0.22, 0, 0, sx * 0.3, [0.04, 0.05, 0.02]), uv: 'keep', tint: coat.map(c => c * 0.7), bone: B.head });
@@ -241,6 +242,8 @@ export class MobView {
       tgt.tail = fast ? 0.2 : 0; tgt.tailY = fast ? Math.sin(t * 13) * 0.45 : Math.sin(t * 2) * 0.15;
     }
     const legK = this.snap ? 1 : Math.min(1, dt * 22);
+    // (out of a spin, the roll comes the short way round to where it's going, not back through every turn)
+    if (s !== S.FLUNG) { const r = J.roll - tgt.roll; J.roll = tgt.roll + r - Math.round(r / (Math.PI * 2)) * Math.PI * 2; }
     for (const key in J) J[key] = ease(J[key], tgt[key], key === 'roll' && s === S.FLUNG ? 1 : key === 'fl' || key === 'fr' || key === 'bl' || key === 'br' ? legK : k);
     const b = this.b;
     b.root.position.y = J.lift;

@@ -1278,13 +1278,8 @@ export function generateLeg(seed, day, opts = {}) {
       // asleep across the road, slantwise
       const head = Math.atan2(roadX(z + 2) - roadX(z - 2), 4);
       const ry = head + (rngM() < 0.5 ? -1 : 1) * (0.7 + 0.5 * rngM());
-      // where it walks off to when it has had enough: the first flat ground off the road
-      let exit = null;
-      find: for (const off of [8, 9, 7.5, 10, 12, 16, 22]) for (const sd of [1, -1]) {
-        const ez = z + 6, ex = roadX(ez) + sd * off;
-        if (flatAt(ex, ez, roadY(ez), 1.5)) { exit = { x: ex, y: heightAt(ex, ez), z: ez }; break find; }
-      }
-      if (!exit) { const ez = z + 6, ex = roadX(ez) + 8; exit = { x: ex, y: heightAt(ex, ez), z: ez }; }
+      // where it walks off to when it has had enough (bedExit)
+      const exit = bedExit({ heightAt, roadX, roadY, LEN, statics, cyls, hulls }, z);
       beds.push({ id: beds.length, ob: o.type, obz: o.z, type: 'grumphorn', x, y: heightAt(x, z), z, ry, exit });
       // the warning, short of the obstacle and across the road from that obstacle's own sign (the boulder's
       // stands on the right, the mud's and the gate's on the left: a driver heading +z has +x on the left)
@@ -1480,6 +1475,48 @@ function qRot(q, x, y, z) {
 }
 
 // Is a world point inside a mud patch?
+// Where a grumphorn walks off the road for good, from its bed at z (server/mobs.js LEAVE): the first flat
+// ground off the road abreast of it or further on (in a canyon there's none beside it: past the narrows the
+// walls open out), with a way to it straight out from the road that it can walk (no bank steeper than ~30
+// degrees, nothing solid in the way). None within 45 m: the wall's foot, as far off the road as it goes.
+// near: the nearest such ground to z either way along the road (a beast that can't get back to its own way
+// off, say past the boulder). W needs heightAt, roadX, roadY, LEN, statics, cyls, hulls.
+export function bedExit(W, z, near = false) {
+  const solid = (x, zz) => W.statics.some(b => b.mat !== 'invisible' && Math.abs(b.x - x) < Math.max(b.hx, b.hz) + 1.1 && Math.abs(b.z - zz) < Math.max(b.hx, b.hz) + 1.1)
+    || W.cyls.some(c => Math.hypot(c.x - x, c.z - zz) < c.r + 1.1) || W.hulls.some(c => Math.hypot(c.x - x, c.z - zz) < (c.r || 2) + 1.1);
+  const flat = (x, zz, ref) => {
+    const h = W.heightAt(x, zz);
+    if (Math.abs(h - ref) > 1.5) return false;
+    let sl = 0;
+    for (const [dx, dz] of [[1.2, 0], [-1.2, 0], [0, 1.2], [0, -1.2]]) sl = Math.max(sl, Math.abs(W.heightAt(x + dx, zz + dz) - h) / 1.2);
+    return sl <= 0.36;
+  };
+  // out from the road's edge to off m on side sd: every half metre no steeper than ~30 degrees, and clear
+  const walk = (zz, sd, off) => {
+    let h0 = W.heightAt(W.roadX(zz) + sd * 3, zz);
+    for (let k = 3.5; k <= off + 0.01; k += 0.5) {
+      const x = W.roadX(zz) + sd * k, h = W.heightAt(x, zz);
+      if (Math.abs(h - h0) > 0.3 || solid(x, zz)) return false;
+      h0 = h;
+    }
+    return true;
+  };
+  for (const dz of near ? [0, 4, -4, 8, -8, 13, -13, 19, -19, 26, -26] : [6, 10, 15, 21, 28, 36, 45]) {
+    const ez = z + dz;
+    if (ez > W.LEN - 40) { if (near) continue; break; }   // (never into town)
+    for (const off of [8, 9, 7.5, 10, 12, 16, 22]) for (const sd of [1, -1]) {
+      const ex = W.roadX(ez) + sd * off;
+      if (flat(ex, ez, W.roadY(ez)) && walk(ez, sd, off)) return { x: ex, y: W.heightAt(ex, ez), z: ez };
+    }
+  }
+  // the wall's foot: as far off the road as it can walk, beside its bed
+  const ez = z + (near ? 0 : 6);
+  let best = { off: 5, sd: 1 };
+  for (const sd of [1, -1]) for (let off = 5; off <= 22; off += 0.5) { if (!walk(ez, sd, off)) break; if (off > best.off) best = { off, sd }; }
+  const ex = W.roadX(ez) + best.sd * best.off;
+  return { x: ex, y: W.heightAt(ex, ez), z: ez };
+}
+
 export function inMud(W, x, z) {
   for (const m of W.mud) {
     if (z >= m.z0 && z <= m.z1 && Math.abs(x - W.roadX(z)) < m.hw) return true;

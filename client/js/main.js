@@ -608,7 +608,8 @@ function onShove() {
   net.send({ t: 'shove' });
   hands.shove();
   sfx.whoosh();
-  tutDone('shove'); tutDone('ringtail');
+  tutDone('shove');
+  if (target?.kind === 'prop' && S.props.get(target.id)?.type === 'ringtail') tutDone('ringtail');
 }
 function onDrop() {
   if (me.holding) { net.send({ t: 'rel' }); me.holding = null; }
@@ -1128,14 +1129,15 @@ function onMobEvent(e) {
     case 'steal': {
       positional(at, () => sfx.yoink(), 45);
       const it = S.props.get(e.item);
-      if (it) { floatText(it.mesh.position, `STOLEN ${fmt$(e.value)}`, '#ff6b5a'); markStolen(e.item); }
+      // (the stop's own loot that nobody had touched yet: not yours to lose, but there it goes)
+      if (it) { floatText(it.mesh.position, e.ours === false ? 'YOINK!' : `STOLEN ${fmt$(e.value)}`, '#ff6b5a'); markStolen(e.item); }
       break;
     }
     case 'stash': case 'trapped': positional(at, () => sfx.chitter(), 25); break;
     case 'drop': positional(at, () => sfx.snap(), 25); unmark(e.item); break;
     case 'bite':
       positional(at, () => { sfx.snap(); sfx.squeal(); }, 30);
-      if (e.by === S.selfId) { me.stamina = Math.max(0, me.stamina - RT.BITE_STAMINA); shake(0.25); }
+      if (e.by === S.selfId) { me.spend(RT.BITE_STAMINA); shake(0.25); }
       break;
     case 'wriggle': positional(at, () => sfx.squeal(), 30); break;
     case 'stun': positional(at, () => sfx.bonk(), 30); break;
