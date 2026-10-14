@@ -334,7 +334,7 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
   function gallop(t0, beats, v = 1) {
     for (let i = 0; i < beats; i++) {
       const t = t0 + i * BEAT;
-      kick(t, 0.8 * v); tom(t + E8, 96, 0.42 * v); tom(t + E8 + S16, 120, 0.5 * v);
+      kick(t, 0.65 * v); tom(t + E8, 150, 0.3 * v); tom(t + E8 + S16, 185, 0.36 * v);   // (high toms: a clip-clop, not a rumble)
       if (i % 2) snare(t, 0.7 * v);
       for (let q = 0; q < 4; q++) brush(t + q * S16, (q === 0 ? 0.3 : 0.16) * v, 0.08);
     }
