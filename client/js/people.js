@@ -1656,9 +1656,10 @@ function playerPose(st, m) {
   }
   if ((st.flags & F.HOLDING) && st.mode !== M.KO && st.mode !== M.CLIMB) {
     const map = st.flags & F.MAP;
-    // carrying: forearms forward under the load; the map: held up in front, head down
-    T.aL = T.aR = map ? 0.55 : 0.7; T.eL = T.eR = map ? 1.15 : 0.95; T.abL = T.abR = map ? 0.12 : 0.24; T.inL = T.inR = map ? 0.35 : 0.42;
-    T.wristL = T.wristR = map ? 0.3 : 0.2; T.wtL = T.wtR = 0;
+    // carrying: both arms out in front, nearly straight, hands either side of the load at chest height (it's
+    // held half a metre out: shared/loot.js CARRY); the map: held up close in front, head down
+    T.aL = T.aR = map ? 0.55 : 1.15; T.eL = T.eR = map ? 1.15 : 0.45; T.abL = T.abR = map ? 0.12 : 0.12; T.inL = T.inR = map ? 0.35 : 0.3;
+    T.wristL = T.wristR = map ? 0.3 : 0; T.wtL = T.wtR = 0;
     if (map) { T.head = Math.max(T.head, 0.35); T.mapK = 1; }
     else T.bend -= 0.05;
   }

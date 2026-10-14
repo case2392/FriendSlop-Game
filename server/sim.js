@@ -108,6 +108,7 @@ export class Sim {
     this.gatesOpen = new Set();
     this.knockCd = new Map();
     this.tied = new Map();           // prop id -> joint (bungee'd to the RV)
+    this.mapJoint = null;            // { id, j }: the road map fixed to its spot on the dash (dockMap)
     this.mobs = null;                // the wildlife (server/mobs.js), from when the RV leaves camp till nightfall
     this.mobsDone = false;           // gone for the night: they don't come back the same day
     this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
@@ -273,6 +274,7 @@ export class Sim {
     this.mobs?.onRemoved(id);
     for (const [pid, h] of this.holds) if (h.kind === 'prop' && h.id === id) this.holds.delete(pid);
     if (this.tied.has(id)) this.tied.delete(id);
+    if (this.mapJoint?.id === id) this.mapJoint = null;   // (the joint goes with the body)
     this.riding.delete(id); this.calm.delete(id);
     if (this.hook.attach && this.hook.attach.id === id) this.unhook();
     this.byCollider.delete(p.col.handle);
@@ -310,7 +312,7 @@ export class Sim {
   // Put down anywhere, or thrown, it goes back there
   dockMap(p) {
     if (!p || p.type !== 'map' || p.holders.size) return;
-    if (this.tied.has(p.id)) { this.world.removeImpulseJoint(this.tied.get(p.id), true); this.tied.delete(p.id); }
+    this.undock(p);
     this.unride(p);
     const rq = this.rv.rotation();
     p.body.setTranslation(toWorld(this.rv.translation(), rq, RV_MAP_SPOT), true);
@@ -318,7 +320,12 @@ export class Sim {
     p.body.setLinvel(this.rv.linvel(), true);
     p.body.setAngvel(this.rv.angvel(), true);
     const j = this.world.createImpulseJoint(RAPIER.JointData.fixed(RV_MAP_SPOT, { x: 0, y: 0, z: 0, w: 1 }, v3(), { x: 0, y: 0, z: 0, w: 1 }), this.rv, p.body, true);
-    this.tied.set(p.id, j);
+    this.mapJoint = { id: p.id, j };
+  }
+  undock(p) {
+    if (this.mapJoint?.id !== p.id) return;
+    this.world.removeImpulseJoint(this.mapJoint.j, true);
+    this.mapJoint = null;
   }
   // (the test lever) the map back on the dash
   mapHome() { this.dockMap([...this.props.values()].find(p => p.type === 'map')); }
@@ -597,6 +604,7 @@ export class Sim {
       const carry = carried(p.type);
       if (carry) dist = Math.max(CARRY.MIN, Math.min(CARRY.MAX, num(m.d, 100) || carryDist(p.type)));
       if (this.tied.has(p.id)) { this.world.removeImpulseJoint(this.tied.get(p.id), true); this.tied.delete(p.id); }
+      this.undock(p);
       this.unride(p);
       const local = toLocal(p.body.translation(), p.body.rotation(), pt);
       // clamp the grab point onto the object (hands, not telekinesis)

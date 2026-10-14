@@ -8,9 +8,9 @@ process.env.FRIENDSLOP_NOMOBS = '1';
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
-const { RV_HATCH, RV_WHEELS, RV_DIM, qRotate, toWorld, toLocal, insideRV } = await import('../shared/rv.js');
+const { RV_HATCH, RV_WHEELS, RV_DIM, RV_MAP_SPOT, qRotate, qYaw, toWorld, toLocal, insideRV } = await import('../shared/rv.js');
 const { generateLeg } = await import('../shared/world.js');
-const { LOOT } = await import('../shared/loot.js');
+const { LOOT, CARRY, carryDist } = await import('../shared/loot.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -886,6 +886,54 @@ const crashCost = (room, dv, zone) => {
   const off = run(null), on = run({ perks: { steady: 2 }, part: null });
   check(on.peak <= 0.82 && on.upright > 0.7 && off.peak > on.peak,
     `garage: full lock at 13 m/s for 5 s: with Steady Hands II the RV peaks at ${on.peak.toFixed(2)} g sideways and stays up (its roof at ${on.upright.toFixed(2)}); without, ${off.peak.toFixed(2)} g (roof ${off.upright.toFixed(2)}) (ground within ${on.dev.toFixed(1)} m)`);
+}
+
+// ---- the road map stays put on the dash while the RV drives; put down anywhere, it goes back there ----
+{
+  const { room, ps: [A, B] } = crew(['Ann', 'Bo']);
+  const sim = room.sim, map = [...sim.props.values()].find(p => p.type === 'map');
+  const off = () => { const l = toLocal(sim.rv.translation(), sim.rv.rotation(), map.body.translation()); return Math.hypot(l.x - RV_MAP_SPOT.x, l.y - RV_MAP_SPOT.y, l.z - RV_MAP_SPOT.z); };
+  const d0 = off();
+  let worst = 0;
+  const z0 = sim.rv.translation().z;
+  drive(room, A, 9, 10, { onTick: () => { worst = Math.max(worst, off()); } });
+  pedal(room, A, 0, 2, 0, 1);
+  const went = sim.rv.translation().z - z0;
+  // Bo takes it up (the physics' grab: who may is the room's rule) and lets go of it over the floor
+  ride(room, B, -0.2, 2.2);
+  tick(room, 0.2);
+  const c = map.body.translation();
+  const took = sim.grab(B.id, B, { kind: 'prop', id: map.id, pt: [c.x, c.y, c.z], d: 1.0 }) !== false && map.holders.has(B.id);
+  tick(room, 0.8);
+  const away = off();
+  sim.release(B.id);
+  tick(room, 0.5);
+  const back = off();
+  check(d0 < 0.02 && went > 30 && worst < 0.03 && took && away > 0.1 && back < 0.02,
+    `rv: the road map sits on the passenger-side dash and stays there over ${went.toFixed(0)} m of road (moved at most ${(worst * 100).toFixed(1)} cm); taken up (${(away * 100).toFixed(0)} cm off its spot) and let go, it's back on it (${(back * 100).toFixed(1)} cm)`);
+}
+
+// ---- what one person carries is in both hands: by its middle, at chest height, turning as they turn ----
+{
+  const { room, ps: [A] } = crew(['Ann']);
+  const sim = room.sim, W = room.W;
+  const z = 120, x = W.roadX(z) + 3, y = W.heightAt(x, z);
+  stand(room, A, x, z, Math.PI / 2);
+  const tv = sim.addProp('tv', { x: x + 1.1, y: W.heightAt(x + 1.1, z) + 0.4, z }, { x: 0, y: 0, z: 0, w: 1 }, 300, 300);
+  tick(room, 1);
+  const c = tv.body.translation();
+  room.handle(A, { t: 'grab', kind: 'prop', id: tv.id, pt: [c.x, c.y, c.z], d: carryDist('tv') });   // (as the page asks)
+  tick(room, 1.5);
+  const d = carryDist('tv'), e1 = A.eye, at1 = tv.body.translation();
+  const off1 = Math.hypot(at1.x - (e1.x + d), at1.y - (e1.y - CARRY.DROP), at1.z - e1.z), yaw1 = qYaw(tv.body.rotation());
+  stand(room, A, x, z, 0);   // a quarter turn, to face up the road
+  tick(room, 1.5);
+  const e2 = A.eye, at2 = tv.body.translation();
+  const off2 = Math.hypot(at2.x - e2.x, at2.y - (e2.y - CARRY.DROP), at2.z - (e2.z + d));
+  let turn = qYaw(tv.body.rotation()) - yaw1;
+  turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+  check(tv.holders.has(A.id) && off1 < 0.12 && off2 < 0.12 && Math.abs(turn + Math.PI / 2) < 0.3,
+    `rv: a TV carried is held ${d.toFixed(2)} m out at chest height (${(off1 * 100).toFixed(0)} cm off), and a quarter turn takes it round with her (${(off2 * 100).toFixed(0)} cm off; it turned ${(turn * 180 / Math.PI).toFixed(0)} deg)`);
 }
 
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }
