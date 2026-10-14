@@ -29,7 +29,7 @@ async function open(name) {
   page.on('pageerror', e => errors.push(`[${name}] ${e.message}`));
   page.on('console', m => { if (m.type() === 'error') errors.push(`[${name}] ${m.text()}`); });
   await page.goto(`http://localhost:${PORT}`, { timeout: 240000 });
-  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAsked', '1')));
+  await page.evaluate(() => (localStorage.setItem('nmdHelpSeen', '1'), localStorage.setItem('nmdVoiceAuto', '1')));   // (voice joins by itself; a test's automation has to ask)
   await page.fill('#nameInput', name);
   return page;
 }
@@ -392,9 +392,10 @@ try {
   await wait(host, 800);
   await shot(host, 'repo-man');
 
-  // ---- voice: both join; Dave talks (push-to-talk held) next to Steve, who hears it through the game's own connection ----
-  await host.evaluate(() => document.getElementById('voiceJoinBtn').click());
-  await joiner.evaluate(() => document.getElementById('voiceJoinBtn').click());
+  // ---- voice: both are in it from the start, mics on; Dave talks (push-to-talk held) next to Steve, who hears it
+  // through the game's own connection ----
+  const inVoice = await Promise.all([host, joiner].map(p => p.waitForFunction(() => window.__nmdVoice?.on && window.__nmdVoice.mic, null, { timeout: 30000 }).then(() => true, () => false)));
+  check(inVoice.every(Boolean), `voice: both pages are in it with their mics on without a click (${inVoice.join(', ')})`);
   const hp = await host.evaluate(() => window.__nmd.me.pos);
   await joiner.evaluate(p => window.__nmd.me.teleport(p.x + 2, p.y, p.z, 0), hp);
   await joiner.waitForFunction(() => window.__nmdVoice?.on, null, { timeout: 30000 }).catch(() => {});
@@ -404,6 +405,22 @@ try {
   const vs = await host.evaluate(() => { const V = window.__nmdVoice; return { on: V.on, err: V.err, decoded: V.stats.decoded, peers: [...V.peers.values()].map(p => !!p.panner) }; });
   const sent = await joiner.evaluate(() => ({ sent: window.__nmdVoice.stats.sent, err: window.__nmdVoice.err }));
   check(vs.on && vs.decoded > 20 && vs.peers.length === 1 && vs.peers[0], `proximity voice: Dave sent ${sent.sent} Opus frames, Steve decoded ${vs.decoded} into a 3D panner${vs.err || sent.err ? ` (${vs.err || sent.err})` : ''}`);
+  // Steve's knobs on Dave's frame: mute him (his voice to 0), unmute, then 60%; kept by his name
+  {
+    const k = await host.evaluate(() => {
+      const S = window.__nmd, V = window.__nmdVoice;
+      const row = [...document.querySelectorAll('#roster .pm')].find(el => Number(el.dataset.id) !== S.selfId);
+      const id = Number(row.dataset.id), peer = V.peers.get(id), btn = row.querySelector('.pv-mute'), vol = row.querySelector('.pv-vol');
+      btn.click();
+      const muted = peer.gain.gain.value === 0 && btn.classList.contains('off') && /speakeroff/.test(row.querySelector('.ico-vc').className);
+      btn.click();
+      vol.value = '0.6'; vol.dispatchEvent(new Event('input', { bubbles: true }));
+      const r = { muted, gain: peer.gain.gain.value, pct: row.querySelector('.pct').textContent, kept: localStorage.getItem('slopVoice.vol.' + S.meta.players.find(p => p.id === id).name) };
+      vol.value = '1'; vol.dispatchEvent(new Event('input', { bubbles: true }));
+      return r;
+    });
+    check(k.muted && Math.abs(k.gain - 0.6) < 0.01 && k.pct === '60%' && k.kept === '0.6', `voice: Dave's frame on Steve's screen mutes him (${k.muted}) and turns him to ${k.pct} (gain ${k.gain.toFixed(2)}, kept by name: ${k.kept})`);
+  }
 
   // ---- wildlife: a grumphorn drawn and labelled; the shove; bracing in the RV; knocks on riders ----
   {

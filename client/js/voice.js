@@ -10,6 +10,9 @@
 //
 // Browser rules worth knowing: getUserMedia only exists in a secure context (https, localhost, or the
 // desktop build's app://), and WebCodecs' Opus is in Chromium (so Steam's build) and recent Firefox.
+//
+// Everyone is in voice from the moment they're in the game (main.js joins it): hearing whoever is in earshot
+// needs no mic. The mic comes on too when the browser gives it; blocked or missing, you still hear the rest.
 
 import * as net from './net.js';
 import { voiceGain } from '/shared/constants.js';
@@ -28,9 +31,11 @@ const load = (k, d) => {
 };
 
 export const V = {
-  supported: !!(navigator.mediaDevices?.getUserMedia && window.AudioEncoder && window.AudioDecoder && window.AudioWorkletNode),
+  supported: !!(window.AudioDecoder && window.AudioWorkletNode),    // hearing the others
+  canTalk: !!(navigator.mediaDevices?.getUserMedia && window.AudioEncoder && window.AudioWorkletNode),
   secure: window.isSecureContext,
-  on: false,                       // am I in voice?
+  on: false,                       // am I in voice (hearing whoever is in earshot)?
+  mic: false,                      // and is my mic on it?
   connecting: false,
   mode: load('mode', 'open'),      // 'open' | 'ptt'
   ptt: false,                      // push-to-talk key held right now
@@ -68,7 +73,7 @@ function ensureCtx() {
 // ---- transmit gating ------------------------------------------------------------------
 
 function txAllowed() {
-  return V.on && !V.muted && (V.mode === 'open' || V.ptt || V.walkieKey);
+  return V.on && V.mic && !V.muted && (V.mode === 'open' || V.ptt || V.walkieKey);
 }
 
 // holding T to talk on the walkie always transmits, even in push-to-talk mode
@@ -154,6 +159,7 @@ export async function setMic(deviceId) {
   V.micId = deviceId;
   store('micId', deviceId);
   if (!V.on) return;
+  if (!V.mic) return retryMic();
   try {
     const next = await openMic();
     closeMic(mic);
@@ -166,6 +172,7 @@ export async function setMic(deviceId) {
 
 // ---- join / leave -------------------------------------------------------------------------
 
+// in voice: hearing whoever is in earshot at once, then the mic if the browser gives it
 let workletLoaded = null;
 export async function joinVoice() {
   if (V.on || V.connecting) return;
@@ -183,21 +190,46 @@ export async function joinVoice() {
     ensureCtx();
     workletLoaded ??= actx.audioWorklet.addModule(new URL('./voice_worklet.js', import.meta.url));
     await workletLoaded;
-    enc = await makeEncoder();
+  } catch (e) {
+    V.connecting = false;
+    V.err = 'Voice chat could not start: ' + e.message;
+    emitChange();
+    return;
+  }
+  V.on = true;
+  net.send({ t: 'voice', on: true, mic: false });
+  startMeter();
+  syncPeers();
+  await openMyMic();
+  V.connecting = false;
+  emitChange();
+}
+async function openMyMic() {
+  if (!V.canTalk) { V.err = 'This browser can hear the others but not send your voice: Chrome or Edge can.'; return; }
+  try {
+    enc ||= await makeEncoder();
     mic = await openMic();
-    V.on = true;
-    net.send({ t: 'voice', on: true });
+    V.mic = true;
+    V.err = null;
+    if (V.on) net.send({ t: 'voice', on: true, mic: true });
     refreshMics();
-    startMeter();
-    syncPeers();
   } catch (e) {
     closeMic(mic); mic = null;
     try { enc?.close(); } catch {}
     enc = null;
+    V.mic = false;
     V.err = e.name === 'NotAllowedError'
-      ? 'Mic permission denied. Allow it and try again.'
-      : e.name === 'NotFoundError' ? 'No microphone found.' : 'Mic error: ' + e.message;
+      ? 'Your mic is blocked, so nobody hears you. Allow it (the icon left of the address bar), then click the mic.'
+      : e.name === 'NotFoundError' ? 'No microphone found: you hear the others, they can\'t hear you.' : 'Mic error: ' + e.message;
   }
+}
+// the mic again (blocked, then allowed; or plugged in)
+export async function retryMic() {
+  if (!V.on) return joinVoice();
+  if (V.mic || V.connecting) return;
+  V.connecting = true;
+  emitChange();
+  await openMyMic();
   V.connecting = false;
   emitChange();
 }
@@ -205,6 +237,7 @@ export async function joinVoice() {
 export function leaveVoice() {
   if (!V.on) return;
   V.on = false;
+  V.mic = false;
   net.send({ t: 'voice', on: false });
   for (const id of [...V.peers.keys()]) closePeer(id);
   closeMic(mic); mic = null;
@@ -221,7 +254,7 @@ function makePeer(id) {
   ensureCtx();
   const peer = {
     id, dec: null, playAt: 0, lastSeq: -1, lastAt: 0,
-    vol: load('vol.' + nameOf(id), 1), muted: false,
+    ...peerPrefs(id),
   };
   peer.input = actx.createGain();
   peer.gain = actx.createGain();
@@ -423,21 +456,25 @@ export function toggleMute() {
 
 export function setMasterVol(v) { setSetting('voice', v); }
 
-export function setPeerVol(id, v) {
-  const peer = V.peers.get(id);
-  if (!peer) return;
-  peer.vol = Math.max(0, Math.min(1.5, v));
-  store('vol.' + nameOf(id), peer.vol);
-  applyPeerVol(peer);
+// how loud each friend is to me, and whether I've muted them: kept by their name (so it lasts from trip to
+// trip), set whether or not they're in voice yet
+export function peerPrefs(id) {
+  const n = nameOf(id);
+  return { vol: load('vol.' + n, 1), muted: load('mute.' + n, false) };
 }
-
-export function togglePeerMute(id) {
+export function setPeerVol(id, v) {
+  v = Math.max(0, Math.min(1.5, v));
+  store('vol.' + nameOf(id), v);
   const peer = V.peers.get(id);
-  if (!peer) return;
-  peer.muted = !peer.muted;
-  applyPeerVol(peer);
+  if (peer) { peer.vol = v; applyPeerVol(peer); }
+}
+export function setPeerMute(id, muted) {
+  store('mute.' + nameOf(id), !!muted);
+  const peer = V.peers.get(id);
+  if (peer) { peer.muted = !!muted; applyPeerVol(peer); }
   emitChange();
 }
+export function togglePeerMute(id) { setPeerMute(id, !peerPrefs(id).muted); }
 
 // ---- boot ------------------------------------------------------------------------------------
 

@@ -151,7 +151,7 @@ function showTripCode(code) {
   $('hCode').title = 'Your trip code: friends click Join Game and type it in. Click to copy.';
   $('hCode').classList.remove('hidden');
   $('ctpCodeNum').textContent = code;
-  $('ctpCode').classList.remove('hidden');
+  $('ctpCode').classList.toggle('hidden', playedYet);   // (on the card till you first click in; the HUD's chip keeps it)
 }
 // the host hears their code once the first day is up and its zone text has faded (a toast during the
 // load or under the zone text would go unseen); it stays on the HUD and the Esc card
@@ -289,22 +289,7 @@ $('joinBtn').onclick = async () => {
 };
 // trip codes are digits: keep only those, four at most (a pasted "12 34" or "code: 4821, 8pm" works too)
 $('codeInput').addEventListener('input', () => { const el = $('codeInput'), v = tripCodeIn(el.value).slice(0, 4); if (el.value !== v) el.value = v; });
-$('helpOk').onclick = () => { $('help').classList.add('hidden'); askVoice(); };
-// Proximity voice is half the game: the first trip asks once (a card by the voice button, not a modal:
-// nobody is held up), and remembers the answer
-function askVoice() {
-  let asked = null;
-  try { asked = localStorage.getItem('nmdVoiceAsked'); } catch {}
-  if (asked || voice.V.on || !voice.V.supported || $('voiceAsk')) return;
-  const el = document.createElement('div');
-  el.id = 'voiceAsk'; el.className = 'voice-ask panel parchment';
-  el.innerHTML = '<b>Proximity voice chat</b><p>Hear whoever is within about 25 m of you in the game, from where they stand. Farther than that takes walkie-talkies. Press Esc to use the mouse.</p><div class="row"><button class="btn small green" id="voiceAskYes">Use my mic</button><button class="btn small gray" id="voiceAskNo">Not now</button></div>';
-  $('game').appendChild(el);
-  const done = () => { try { localStorage.setItem('nmdVoiceAsked', '1'); } catch {} el.remove(); };
-  $('voiceAskYes').onclick = () => { done(); initAudio(); voice.joinVoice(); };
-  $('voiceAskNo').onclick = done;
-  setTimeout(() => { if (el.isConnected) el.remove(); }, 45000);
-}
+$('helpOk').onclick = () => $('help').classList.add('hidden');
 $('codeInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('joinBtn').click(); });
 $('nameInput').addEventListener('keydown', e => { if (e.key === 'Enter') $('hostBtn').click(); });
 $('hCode').onclick = async () => {
@@ -354,9 +339,19 @@ function waitingSummaries() {
   const names = who.slice(0, 3).join(', ') + (who.length > 3 ? ` and ${who.length - 3} more` : '');
   return ` ${names} ${who.length > 1 ? 'haven\'t' : 'hasn\'t'} got ${who.length > 1 ? 'their' : 'the'} trip summary yet: it waits on your PC till they reconnect, and leaving loses it.`;
 }
+// a page can't keep the browser's own keys (Ctrl+W, Ctrl+T, Ctrl+N) from it, only ask before leaving: mid-trip
+// in a browser, closing the tab asks first (not under a test's automation)
+window.addEventListener('beforeunload', e => { if (!DESK && S.phase === 'game' && !navigator.webdriver) { e.preventDefault(); e.returnValue = ''; } });
 document.addEventListener('pointerlockerror', () => { if (S.phase === 'game') toast('Click again to look around.', '#fff', 2); });
+// The card: the first time in, it has the trip code to read out (after that the HUD's chip has it). Esc brings
+// all of it (the Garage, Settings, Leave); back from another window (the browser lets go of the mouse when you
+// tab out) it only says click to resume
+let playedYet = false, blurAt = -1e9;
+window.addEventListener('blur', () => { blurAt = performance.now(); });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
+  if (locked && !playedYet) { playedYet = true; $('ctpCode').classList.add('hidden'); }
+  if (!locked) $('clickToPlay').classList.toggle('slim', document.hidden || !document.hasFocus() || performance.now() - blurAt < 500);
   $('clickToPlay').classList.toggle('hidden', locked || S.phase === 'menu' || uiOpen());
   if (!locked) { inp.grab = false; for (const k in keys) keys[k] = false; letGoOfTheWheel(); }
 });
@@ -423,7 +418,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'h' && me.mode === 'seat' && me.seat === 0) { if (!e.repeat) { hornHeld = true; net.send({ t: 'horn', on: 1 }); } }
   else if (k === 'v') voice.setPtt(true);
   else if (k === 'm') {
-    if (!voice.V.on) toast('Voice chat is off. JOIN VOICE is at the bottom left (press Esc for the mouse).', '#fff', 4);
+    if (!voice.V.mic) toast(voice.V.err || 'Your mic isn\'t on yet.', '#ffb4a2', 5);
     else { voice.toggleMute(); toast(voice.V.muted ? `Mic muted (${keyLabel('M')})` : 'Mic on', voice.V.muted ? '#ffb4a2' : '#7CFC00', 2); }
   }
   else if (k === 't') voice.setWalkieKey(true);
@@ -431,7 +426,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'g' && !e.repeat) { if (garageOpen()) closePanel('garage'); else openPanel('garage'); }   // (held down: not open-then-shut)
   else if (/^[1-8]$/.test(k) && casinoKey(Number(k))) { /* (at a casino station the number keys play it) */ }
   else if (/^[1-6]$/.test(k)) net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
-  else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); }
+  else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); if (!locked) $('clickToPlay').classList.remove('slim'); }
 });
 window.addEventListener('keyup', e => {
   const k = keyName(e);
@@ -1025,15 +1020,19 @@ net.on('welcome', m => {
   welcomeWait?.resolve(m);
   // say whether this page is in voice: a reloaded page rejoins its seat out of voice (the host forgets it:
   // room.js resume), a reconnected one that's still in voice says so again
-  net.send({ t: 'voice', on: !!voice.V.on });
+  net.send({ t: 'voice', on: !!voice.V.on, mic: !!voice.V.mic });
   if (back) return;
   hostLeft = null;
   $('menuError').textContent = '';
   $('menu').classList.add('hidden');
   $('game').classList.remove('hidden');
   S.phase = 'game';
-  $('clickToPlay').classList.remove('hidden');
+  playedYet = false;
+  $('clickToPlay').classList.remove('hidden', 'slim');
   voice.initVoice(m.id, renderVoiceUI);
+  // everyone's in voice from the start: hearing whoever is near needs no mic, and the mic comes on when the
+  // browser gives it (not under a test's automation unless it asks: those pages have no mic)
+  if (!navigator.webdriver || localStorage.getItem('nmdVoiceAuto')) { initAudio(); voice.joinVoice(); }
   renderVoiceUI();
   // the trip code (the gate's keypad wants a different one): in the browser build at once; a desktop
   // host's once its Steam lobby is up (a code nobody can find yet would only mislead); a guest who came
@@ -1129,8 +1128,46 @@ function onMeta(m) {
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
     else v.setName(p.name, p.color);
   }
-  $('roster').innerHTML = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.voice ? '<i class="ico ico-speaker" title="in voice"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn"><span class="nm">${escapeHtml(p.name)}</span>${m.roles?.drv === p.id ? '<em class="role">driver</em>' : m.roles?.nav === p.id ? '<em class="role">map</em>' : ''}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span></div>`).join('');   // hud() drives the bars
+  const html = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.id !== S.selfId ? '<i class="ico ico-vc"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn"><span class="nm">${escapeHtml(p.name)}</span>${m.roles?.drv === p.id ? '<em class="role">driver</em>' : m.roles?.nav === p.id ? '<em class="role">map</em>' : ''}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span>${p.id !== S.selfId ? '<span class="pv"><button class="voice-btn pv-mute"></button><input class="pv-vol" type="range" min="0" max="1.5" step="0.05"><span class="pct"></span></span>' : ''}</div>`).join('');   // hud() drives the bars
+  if (rosterDrag) rosterLater = html;   // (not under a finger dragging a volume: once it's let go)
+  else $('roster').innerHTML = html;
+  rosterVoice();
 }
+// each friend's voice on their frame: an icon (you muted them, they've no mic on, in voice) and, while the
+// mouse is free (Esc), a mute button and how loud they are to you, kept by their name from trip to trip
+let rosterDrag = false, rosterLater = null;
+function rosterVoice() {
+  for (const el of $('roster').children) {
+    const id = Number(el.dataset.id), p = S.meta?.players.find(q => q.id === id);
+    if (id === S.selfId || !p) continue;
+    const pref = voice.peerPrefs(id), st = pref.muted ? 'speakeroff' : !p.voice ? null : p.mic === 0 ? 'micoff' : 'speaker';
+    const ic = el.querySelector('.ico-vc');
+    if (ic) { ic.className = 'ico ico-vc' + (st ? ' ico-' + st : ''); ic.style.display = st ? '' : 'none'; ic.title = st === 'speakeroff' ? `you muted ${p.name}` : st === 'micoff' ? `${p.name} has no mic on` : st ? 'in voice' : ''; }
+    const btn = el.querySelector('.pv-mute'), vol = el.querySelector('.pv-vol'), pct = el.querySelector('.pct');
+    if (btn) { btn.classList.toggle('off', pref.muted); btn.title = `${pref.muted ? 'unmute' : 'mute'} ${p.name}`; }
+    if (vol) { vol.title = `${p.name}'s voice`; if (!rosterDrag) vol.value = pref.vol; }
+    if (pct) pct.textContent = pref.muted ? 'muted' : `${Math.round(pref.vol * 100)}%`;
+  }
+}
+$('roster').addEventListener('pointerdown', e => { if (e.target.closest('.pv-vol')) rosterDrag = true; });
+document.addEventListener('pointerup', () => {
+  if (!rosterDrag) return;
+  rosterDrag = false;
+  if (rosterLater != null) { $('roster').innerHTML = rosterLater; rosterLater = null; }
+  rosterVoice();
+});
+$('roster').addEventListener('click', e => {
+  const b = e.target.closest('.pv-mute');
+  if (b) { voice.togglePeerMute(Number(b.closest('.pm').dataset.id)); rosterVoice(); }
+});
+$('roster').addEventListener('input', e => {
+  const v = e.target.closest('.pv-vol');
+  if (!v) return;
+  const id = Number(v.closest('.pm').dataset.id);
+  voice.setPeerVol(id, Number(v.value));
+  if (voice.peerPrefs(id).muted && Number(v.value) > 0) voice.setPeerMute(id, false);   // (turned up: unmuted)
+  rosterVoice();
+});
 net.on('s', m => {
   if (!S.W || worldBuilding) return;
   S.interp.push(m, performance.now());
@@ -1667,7 +1704,7 @@ function openPanel(id) {
 }
 function closePanel(id) {
   $(id).classList.add('hidden');
-  if (S.phase === 'game' && !locked) $('clickToPlay').classList.remove('hidden');
+  if (S.phase === 'game' && !locked) $('clickToPlay').classList.remove('hidden', 'slim');
 }
 $('settingsBtn').onclick = () => { sfx.click(); openPanel('settings'); };
 $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
@@ -1732,17 +1769,16 @@ onSettings(k => {
 const VV = voice.V;
 window.__nmdVoice = VV;
 function renderVoiceUI() {
-  $('voiceJoinBtn').classList.toggle('hidden', VV.on);
-  $('voiceJoinBtn').disabled = VV.connecting;
-  $('voiceJoinBtn').textContent = VV.connecting ? 'JOINING…' : 'JOIN VOICE';   // the mic icon is painted by CSS
   $('voiceLive').classList.toggle('hidden', !VV.on);
   $('voiceErr').classList.toggle('hidden', !VV.err);
   $('voiceErr').textContent = VV.err || '';
   if (VV.on) {
     $('voiceMuteBtn').textContent = '';   // CSS paints the mic / muted-mic icon from the .off class
-    $('voiceMuteBtn').classList.toggle('off', VV.muted);
-    $('voiceTxHint').textContent = VV.muted ? `muted (${keyLabel('M')})` : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : `hold ${keyLabel('V')} to talk`) : 'proximity mic';
+    $('voiceMuteBtn').classList.toggle('off', VV.muted || !VV.mic);
+    $('voiceMuteBtn').title = VV.mic ? 'mute / unmute (M)' : 'turn your mic on';
+    $('voiceTxHint').textContent = VV.connecting ? 'mic…' : !VV.mic ? 'no mic: click it' : VV.muted ? `muted (${keyLabel('M')})` : VV.mode === 'ptt' ? (VV.ptt ? 'talking…' : `hold ${keyLabel('V')} to talk`) : 'proximity mic';
   }
+  rosterVoice();
   const rows = $('voicePeerRows');
   rows.innerHTML = '';
   for (const [id, peer] of VV.peers) {
@@ -1761,9 +1797,7 @@ function renderVoiceUI() {
   document.querySelectorAll('input[name=voiceMode]').forEach(r => { r.checked = r.value === VV.mode; });
   $('voiceMasterVol').value = VV.masterVol;
 }
-$('voiceJoinBtn').onclick = () => { initAudio(); voice.joinVoice(); };
-$('voiceLeaveBtn').onclick = () => { voice.leaveVoice(); $('voicePanel').classList.add('hidden'); };
-$('voiceMuteBtn').onclick = () => voice.toggleMute();
+$('voiceMuteBtn').onclick = () => { if (VV.mic) voice.toggleMute(); else { initAudio(); voice.retryMic(); } };
 $('voiceCfgBtn').onclick = () => { $('voicePanel').classList.toggle('hidden'); voice.refreshMics(); if (!$('voicePanel').classList.contains('hidden')) document.exitPointerLock?.(); };
 $('voicePanelClose').onclick = () => $('voicePanel').classList.add('hidden');
 $('voiceMicSel').onchange = e => voice.setMic(e.target.value);
@@ -1882,7 +1916,8 @@ requestAnimationFrame(frame);
   inp.jump = !typing && !!keys[' '] && !S.jumpLatch;
   S.jumpLatch = !!keys[' '];
   inp.sprint = !!keys.shift;
-  inp.crouch = !!keys.control || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
+  // (Ctrl crouches in the desktop build only: in a browser, crouch-walking on Ctrl+W closed the tab)
+  inp.crouch = (!!DESK && !!keys.control) || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
   me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
   for (const e of me.events) meEvent(e);
@@ -1934,6 +1969,7 @@ requestAnimationFrame(frame);
   const odo = rv ? rv.p.z : 0;   // the metres the map's ticks count, from the end of camp (it reads 0 in camp)
   // (the RV's condition as it shows: dents a side from the hits this page has seen, smoke, the dial, hazards)
   const cond = S.g ? { hp: S.g.rvh ?? 100, brk: !!S.g.brk, zones: S.rvZones } : null;
+  rvView.groundAt = S.W.heightAt;
   rvView.update(dt, rv, S.door, night, S.hook, odo, S.g ? fmtClock(S.g.clk) : '', cond);
   rvSounds(dt, rvDistNow(rv));
   if (S.g) setTimeOfDay(S.g.clk, S.g.ph === 'night');
@@ -2411,6 +2447,7 @@ function updateTownLabels() {
 // ---- hud ------------------------------------------------------------------------------------------
 
 function hud(rv) {
+  $('game').classList.toggle('free', !locked && !S.forceLock);   // (the mouse is free: the frames' voice knobs show)
   const g = S.g;
   if (g) {
     $('hDay').textContent = `DAY ${Math.min(g.day, C.DAYS)}/${C.DAYS}`;
@@ -2451,7 +2488,7 @@ function hud(rv) {
   }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 3.6)} km/h${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);

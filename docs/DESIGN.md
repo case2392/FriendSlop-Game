@@ -537,7 +537,7 @@ proximity chat for the same ears (the reason Lethal Company and Peak lean on amb
 Things the systems will produce without being scripted:
 
 - The TV breaking in the back on a hard turn ("WHO LEFT IT ON THE TABLE").
-- Falling off the roof at 50 km/h.
+- Falling off the roof at 30 mph.
 - Running over your friend: a $500 bill, and the toast names the driver.
 - "CRUNCH. Sam put the RV into the ranger gate: -18%." The receipt that
   night: "RV 58% (-34% today: Sam -18%, the Grumphorn -8%, rocks -9%)".

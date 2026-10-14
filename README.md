@@ -216,7 +216,9 @@ while you play turns it off (the radio and the casino's band stay).
 
 ## Voice
 
-Hit **JOIN VOICE**. It's **proximity chat**: each voice is Opus audio sent
+Everyone is in voice from the moment they're in the game: the browser asks for the mic once, and
+without one you still hear everyone near you (your frame says you've no mic on; click the mic at the
+bottom left to try again). It's **proximity chat**: each voice is Opus audio sent
 over the game's own connection, and the host passes it only to the players who
 can hear it, who hear it through a 3D HRTF panner at the speaker's head. It's at full volume within
 4 m and gone by 25 m (everyone in the RV hears each other; across a stop or a town, nobody does), gets
@@ -224,6 +226,8 @@ muffled when terrain or the RV is between you, and sounds face-down when
 someone's knocked out. **Walkie-talkies** ($150 each at the general store) reach
 anyone else who owns one, at any range, through a crunchy radio filter. Hold
 `T`. Play on the game's voice, not a call: who hears you is half the game.
+How loud each friend is to you is on their frame at the top left: press Esc for the mouse, then their
+slider and mute button are under their name (kept by name, trip to trip). `M` mutes your own mic.
 
 Nothing is peer-to-peer, so nobody's router gets in the way and nobody sees
 anyone's IP address. In a browser, mics need a secure context (https or

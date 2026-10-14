@@ -384,7 +384,7 @@ export class Room {
       if (p.key !== key) continue;
       if (p.connected) { const old = p.conn; this.hold(p, p.holdSecs || HOLD_SECS, true); try { old?.close?.(4002, 'replaced by a new connection'); } catch {} }
       p.conn = conn; p.connected = true; p.heldAt = null; p.rdy = !!opts.ready; p.activeAt = this.t;
-      p.voice = false;   // (a reloaded page isn't in voice yet; a page that is says so on its welcome: main.js)
+      p.voice = false; p.mic = false;   // (a reloaded page isn't in voice yet; a page that is says so on its welcome: main.js)
       this.awaitReady(p);
       if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
       return p;
@@ -571,7 +571,7 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, mic: p.mic ? 1 : 0, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
       // the trip: practice or not (what it records), and whose summary is still waiting for them
       trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
@@ -629,7 +629,7 @@ export class Room {
         if (pt && pt.every(Number.isFinite)) this.broadcast({ t: 'ping', id: p.id, pt });
         return;
       }
-      case 'voice': p.voice = !!m.on; this.sendMeta(); return;
+      case 'voice': p.voice = !!m.on; p.mic = p.voice && m.mic !== false; this.sendMeta(); return;   // (in voice: hearing; mic: heard too)
       // the page has this trip's summary in its save: stop sending it
       case 'tripAck': {
         const held = this.pending.get(p.pid);
