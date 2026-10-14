@@ -37,14 +37,24 @@ function noiseLoop(lp, dest) {
   return { f, g };
 }
 
-// continuous sounds, every frame. rv: the RV's position (the engine, the winch and the gravel come from there)
-export function setLoops({ engineOn = false, rpm = 0, near = 1, winchOn = false, windAmt = 0.2, rv = null, speed = 0 }) {
+// continuous sounds, every frame. rv: the RV's position (the engine, the winch and the gravel come from there).
+// cond: the RV's condition ({ hp, brk, stl }): a worn engine misfires (60% or less), drops out now and then
+// (30% or less), and is silent broken down or stalled
+let missUntil = 0, roughPh = 0, loopT = 0;
+export function setLoops({ engineOn = false, rpm = 0, near = 1, winchOn = false, windAmt = 0.2, rv = null, speed = 0, cond = null }) {
   if (!engine) return;
-  const t = ctx.currentTime;
+  const t = ctx.currentTime, dt = Math.min(0.1, Math.max(0, t - loopT));
+  loopT = t;
   if (rv) { if (rvPan.positionX) { rvPan.positionX.value = rv.x; rvPan.positionY.value = rv.y + 0.6; rvPan.positionZ.value = rv.z; } else rvPan.setPosition(rv.x, rv.y + 0.6, rv.z); }
-  engine.g.gain.setTargetAtTime(engineOn ? 0.09 * Math.max(near, 0.35) : 0, t, 0.15);
-  engine.o.frequency.setTargetAtTime(42 + rpm * 70, t, 0.1);
-  engine.o2.frequency.setTargetAtTime((42 + rpm * 70) * 1.51, t, 0.1);
+  // (misfires by the second, not by the frame, so a fast screen doesn't make a worse engine)
+  const hp = cond?.hp ?? 100, dead = !!(cond?.brk || cond?.stl);
+  if (engineOn && !dead && hp <= 60 && t > missUntil && Math.random() < (hp <= 30 ? 1.8 : 0.6) * dt) missUntil = t + (hp <= 30 && Math.random() < 0.4 ? 0.45 : 0.09);
+  const on = engineOn && !dead && t > missUntil;
+  roughPh += hp <= 60 ? 21 * dt : 0;
+  const rough = hp <= 60 ? 1 + Math.sin(roughPh) * (hp <= 30 ? 0.08 : 0.04) : 1;
+  engine.g.gain.setTargetAtTime(on ? 0.09 * Math.max(near, 0.35) : 0, t, on ? 0.15 : 0.03);
+  engine.o.frequency.setTargetAtTime((42 + rpm * 70) * rough, t, 0.1);
+  engine.o2.frequency.setTargetAtTime((42 + rpm * 70) * 1.51 * rough, t, 0.1);
   engine.f.frequency.setTargetAtTime(260 + rpm * 500, t, 0.1);
   winch.g.gain.setTargetAtTime(winchOn ? 0.035 : 0, t, 0.1);
   gravel.g.gain.setTargetAtTime(Math.min(1, speed / 14) * 0.16, t, 0.2);
@@ -122,6 +132,18 @@ export const sfx = {
   squeal: () => { tone(1700, 0.26, 'sawtooth', 0.06, 2600); tone(2300, 0.2, 'square', 0.025, 1500, 0.06); },
   snap: () => { noise(0.05, 2600, 0.24, 1200, 'bandpass'); tone(900, 0.05, 'square', 0.07, 480); },
   thunk: (k = 1) => { tone(140, 0.12, 'sine', 0.35 * k, 60); noise(0.08, 700, 0.2 * k); },
+  // the RV: a crash by what it cost (metal folding, then the loose bits rattling), a misfire, the engine
+  // dying, the starter grinding till it catches, a socket wrench at the engine hatch
+  crunch: (pct = 10) => {
+    const a = Math.min(1, 0.35 + pct / 25);
+    noise(0.3 + a * 0.35, 1100, 0.55 * a, 110, 'lowpass'); tone(85, 0.35, 'sine', 0.4 * a, 40);
+    noise(0.22, 2600, 0.22 * a, 700, 'bandpass', 0.03);
+    for (let i = 0; i < 3; i++) tone(240 + Math.random() * 380, 0.07, 'square', 0.05 * a, 90, 0.08 + i * 0.06);
+  },
+  sputter: () => { noise(0.06, 500, 0.28, 180); noise(0.05, 420, 0.22, 150, 'lowpass', 0.12); },
+  stall: () => { tone(72, 0.7, 'sawtooth', 0.12, 28); noise(0.5, 320, 0.14, 80, 'lowpass'); },
+  crank: () => { for (let i = 0; i < 5; i++) tone(118, 0.09, 'square', 0.08, 92, i * 0.13); noise(0.5, 300, 0.25, 900, 'lowpass', 0.7); tone(55, 0.6, 'sawtooth', 0.12, 82, 0.75); },
+  ratchet: () => { for (let i = 0; i < 3; i++) noise(0.022, 3600, 0.22, null, 'highpass', i * 0.045); },
   shatter: () => { noise(0.5, 6000, 0.6, 1500, 'highpass'); for (let i = 0; i < 6; i++) tone(2000 + Math.random() * 3000, 0.08, 'sine', 0.12, null, Math.random() * 0.25); },
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },
   bell: () => { tone(1568, 0.6, 'sine', 0.22); tone(2350, 0.4, 'sine', 0.08, null, 0.01); },

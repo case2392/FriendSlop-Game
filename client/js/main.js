@@ -1153,7 +1153,9 @@ function onEvent(e) {
     case 'rvhit': {
       const at = e.at ? { x: e.at[0], y: e.at[1], z: e.at[2] } : S.rv?.p;
       if (at) floatText(at, `-${e.amt}% RV`, '#ff8a65');
-      positional(at, () => sfx.thunk(Math.min(1.4, 0.5 + e.amt / 20)), 70);
+      positional(at, () => sfx.crunch(e.amt), 70);
+      // (where it landed, for the dents: the sides by the hit's zone; rocks on the roof dent no side)
+      if (['front', 'rear', 'left', 'right'].includes(e.zone)) { S.rvZones ||= {}; S.rvZones[e.zone] = (S.rvZones[e.zone] || 0) + e.amt; }
       if (me.par || me.mode === 'seat') shake(Math.min(0.6, 0.12 + e.amt / 40));
       rvFlash();
       break;
@@ -1161,7 +1163,7 @@ function onEvent(e) {
     case 'rvfix': {
       const at = S.rv ? toWorld(S.rv.p, S.rv.q, RV_HATCH) : null;
       if (at) { floatText(at, `RUNNING · RV ${e.hp}%`, '#7CFC00'); burst(at, '#cfcfcf', 10, 1.5, 0.2, 1.2); }
-      positional(at, () => { sfx.clang(); sfx.gate(); }, 50);
+      positional(at, () => sfx.crank(), 50);
       break;
     }
     case 'hook':
@@ -1644,6 +1646,7 @@ S.target = () => target;
 S.send = m => net.send(m);
 S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?
 S.renderer = () => renderer;   // tools read draw-call counts
+S.rvView = () => rvView;       // tests read the RV's condition as it shows (smoke, the dial, the hazard lamps)
 requestAnimationFrame(frame);
   const dt = Math.min(0.05, (now - lastT) / 1000);
   lastT = now;
@@ -1753,7 +1756,10 @@ requestAnimationFrame(frame);
   // the RV, its hook, its dashboard
   const night = S.g ? (S.g.ph === 'night' || S.g.clk >= 20.2) : false;
   const odo = rv ? rv.p.z : 0;   // the metres the map's ticks count, from the end of camp (it reads 0 in camp)
-  rvView.update(dt, rv, S.door, night, S.hook, odo, S.g ? fmtClock(S.g.clk) : '');
+  // (the RV's condition as it shows: dents a side from the hits this page has seen, smoke, the dial, hazards)
+  const cond = S.g ? { hp: S.g.rvh ?? 100, brk: !!S.g.brk, zones: S.rvZones } : null;
+  rvView.update(dt, rv, S.door, night, S.hook, odo, S.g ? fmtClock(S.g.clk) : '', cond);
+  rvSounds(dt, rvDistNow(rv));
   if (S.g) setTimeOfDay(S.g.clk, S.g.ph === 'night');
   updateSun(me.pos);
   updateWorld(S.wv, dt, time, camera.position);
@@ -1811,6 +1817,7 @@ requestAnimationFrame(frame);
   const inMyRV = !!me.par && insideRV(...Object.values(me.lp || { x: 9, y: 9, z: 9 }));
   setListener(camera.position, look);
   setLoops({
+    cond: S.g ? { hp: S.g.rvh ?? 100, brk: !!S.g.brk, stl: !!S.g.stl } : null,
     engineOn: !!drv, rpm: Math.min(1.4, rvSpeed / 12), near: Math.max(0, 1 - rvDist / 60),
     winchOn: !!S.hook?.reeling && rvDist < 50,
     windAmt: me.par ? Math.min(1, rvSpeed / 14) * (inMyRV ? 0.2 : 1) : 0.15 + Math.max(0, me.pos.y - S.W.roadY(me.pos.z)) / 40,
@@ -1989,6 +1996,22 @@ function hud(rv) {
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
   rosterBars();
+}
+
+// the RV's own noises: the engine dying in a stall, a sputter now and then when it's limping, the ratchet of
+// whoever is fixing it (everyone near hears it)
+let rvStalled = false, sputterT = 0, ratchetT = 0;
+const rvDistNow = rv => rv ? Math.hypot(rv.p.x - camera.position.x, rv.p.y - camera.position.y, rv.p.z - camera.position.z) : 999;
+function rvSounds(dt, dist) {
+  const g = S.g;
+  if (!g || !S.rv) return;
+  const hp = g.rvh ?? 100, drv = !!g.drv;   // (somebody at the wheel: the engine is running; 0 is nobody)
+  if (!!g.stl !== rvStalled) { rvStalled = !!g.stl; if (rvStalled && dist < 60) positional(S.rv.p, () => sfx.stall(), 60); }
+  sputterT -= dt;
+  if (drv && hp > 0 && hp <= 30 && !g.stl && sputterT <= 0) { sputterT = 1.5 + Math.random() * 3; if (dist < 50) positional(S.rv.p, () => sfx.sputter(), 50); }
+  ratchetT -= dt;
+  if (g.fix > 0 && ratchetT <= 0) { ratchetT = 0.4; const h = toWorld(S.rv.p, S.rv.q, RV_HATCH); positional(h, () => sfx.ratchet(), 25); }
+  if ((g.rvh ?? 100) >= 100) S.rvZones = {};   // (good as new: Gus took the dents out)
 }
 
 // the condition pill flashes when the RV takes a knock

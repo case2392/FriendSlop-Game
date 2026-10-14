@@ -415,8 +415,15 @@ try {
     const pill = p => p.waitForFunction(() => document.getElementById('hRV').textContent === 'RV 70%', null, { timeout: 24000 }).then(() => true, () => false);
     const pills = await Promise.all([pill(host), pill(joiner)]);
     check(pills.every(Boolean), `the RV at 70%: the top bar says "RV 70%" on both pages (${pills.join(', ')})`);
+    // ...and the RV shows it: the dial on the dash reads 70, the first dents on every side, no smoke yet
+    const look70 = await host.waitForFunction(() => { const V = window.__nmd.rvView(); return V.condLast.startsWith('70|') && Object.values(V.dents).every(d => d.lv >= 1) && V.smoke.live() === 0 && { dial: V.condLast }; }, null, { timeout: 20000 }).then(h => h.jsonValue(), () => null);
+    check(!!look70, `at 70% the dash dial reads ${look70?.dial ?? '(nothing)'}, there are dents on every side, and no smoke`);
     await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'rvhp', hp: 0 }));
     await host.waitForFunction(() => window.__nmd.g?.brk === 1, null, { timeout: 24000 });
+    // broken down: black smoke out of the back, the dial's CHECK ENGINE lamp, a wreck all round, the hazard lamps blinking
+    const look0 = await host.waitForFunction(() => { const V = window.__nmd.rvView(); return V.smoke.live() > 0 && V.condLast.startsWith('0|') && Object.values(V.dents).every(d => d.lv === 3) && { puffs: V.smoke.live(), dial: V.condLast }; }, null, { timeout: 20000 }).then(h => h.jsonValue(), () => null);
+    const blink = await host.evaluate(() => { const V = window.__nmd.rvView(), c = { hp: 0, brk: true }, seen = []; for (let i = 0; i < 4; i++) { V.t += 0.5; V.setCond(0, null, false, c); seen.push(V.mat.haz.emissive.getHex()); } return seen; });
+    check(!!look0 && blink.includes(0xffffff) && blink.includes(0), `broken down: smoke in the air (${look0?.puffs ?? 0} so far), the dial ${look0?.dial ?? '(nothing)'}, dents all round, the hazard lamps blinking (${blink.map(h => (h ? 'on' : 'off')).join(' ')})`);
     // E already held before he gets there: the fix starts when he does, without a fresh press
     await host.evaluate(() => window.__nmd.key('e', true));
     // Steve 1.5 m behind the engine hatch on the RV's back wall, facing it
