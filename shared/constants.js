@@ -14,6 +14,10 @@ export const MAX_PLAYERS = 6;
 // ---- the run ----------------------------------------------------------------
 export const DAYS = 5;
 export const QUOTAS = [1000, 2500, 4500, 7500, 15000];   // due at midnight, per day: miss one and the RV is gone
+// BAD CREDIT, the loan terms for a crew made only of veterans (everyone aboard as the RV leaves camp on day 1
+// with WINS or more kept wins): every payment x PAY, to the $50 ($1,150 / $2,900 / $5,200 / $8,650 / $17,250)
+export const BAD = { WINS: 2, PAY: 1.15 };
+export const dueOn = (day, tier = 'std') => (tier === 'bad' ? Math.round(QUOTAS[day - 1] * BAD.PAY / 50) * 50 : QUOTAS[day - 1]);
 export const DOCK_RATE = 0.8;                            // what Ed pays for the RV's load at his loading zone
 export const HOUR_SEC = FAST ? 5 : 45;                   // real seconds per game hour
 export const DAY_START = 6;                              // 06:00

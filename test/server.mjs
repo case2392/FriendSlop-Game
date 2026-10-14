@@ -960,6 +960,53 @@ const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2
   room.sim.free?.();
 }
 
+// ---- in process: the loan terms (Bad Credit) ------------------------------------------------------------------
+{
+  // T1: a crew made only of veterans (2+ kept wins each) gets Bad Credit; anyone below 2 makes it Standard; the
+  // leader asking for Standard gets Standard; and once the RV has left camp a newcomer joining changes nothing.
+  // T2: Bad Credit's payments are 1,150 / 2,900 / 5,200 / 8,650 / 17,250 (plus any loan)
+  const crewOf = wins => {
+    const room = new Room('BAD', 4242);
+    const ps = wins.map((w, i) => { const c = new FakeConn(), p = room.addPlayer(c, 'P' + i).player; p.key = 'tok:' + i; room.setProfile(p, { pid: String(i + 1).repeat(16), wins: w }); room.welcome(p); p.conn = c; return p; });
+    return { room, ps };
+  };
+  const vets = crewOf([2, 5, 3]), mixed = crewOf([2, 1]), asked = crewOf([4, 4]);
+  const due1 = vets.room.due, mixedDue = mixed.room.due;
+  asked.room.handle(asked.ps[1], { t: 'terms', std: true });   // (not the leader: ignored)
+  const notLeader = asked.room.tier();
+  asked.room.handle(asked.ps[0], { t: 'terms', std: true });
+  const leaderAsked = asked.room.tier(), askedDue = asked.room.due, meta = asked.ps[1].conn.last('meta')?.trip;
+  vets.room.sim.placeRV(vets.room.W.roadX(vets.room.W.camp.exitZ + 8), vets.room.W.camp.exitZ + 8, 0);
+  tick(vets.room, 0.2);
+  const late = (() => { const c = new FakeConn(), p = vets.room.addPlayer(c, 'New').player; p.key = 'tok:new'; vets.room.setProfile(p, { pid: 'ffffffffffffffff', wins: 0 }); vets.room.welcome(p); return p; })();
+  tick(vets.room, 0.2);
+  const afterLate = vets.room.tier(), told = vets.ps[0].conn.has(m => m.t === 'toast' && /BAD CREDIT/.test(m.text));
+  check(vets.room.tier() === 'bad' && due1 === 1150 && told && mixed.room.tier() === 'std' && mixedDue === 1000 && notLeader === 'bad' && leaderAsked === 'std' && askedDue === 1000 && meta?.askStd === true && meta?.tier === 'std' && afterLate === 'bad' && late,
+    `loan terms: three veterans get Bad Credit ($${due1} on day 1, and the crew is told); a 1-win player keeps it Standard ($${mixedDue}); the leader asking for Standard gets it ($${askedDue}; anyone else asking changes nothing); a newcomer joining after the RV left keeps it ${afterLate}`);
+  const dues = [];
+  for (let d = 1; d <= 5; d++) { dues.push(vets.room.due); if (d < 5) { vets.room.bank = 1e6; vets.room.pay(vets.ps[0]); vets.room.nextDay(); } }
+  vets.room.loanAdd = 415; vets.room.day = 4; vets.room.nextDay();
+  const withLoan = vets.room.due;
+  check(dues.join() === '1150,2900,5200,8650,17250' && C.dueOn(5, 'std') === 15000 && withLoan === 17250 + 415,
+    `loan terms: Bad Credit's payments ${dues.map(d => '$' + d.toLocaleString('en-US')).join(' / ')} ($${dues.reduce((a, b) => a + b, 0).toLocaleString('en-US')} a trip), plus Gus's loan ($${withLoan.toLocaleString('en-US')} on day 5 with $415 on it)`);
+  for (const r of [vets, mixed, asked]) r.room.sim.free?.();
+}
+{
+  // T3: a rare card drops only on Bad Credit: the same draw (a rand that picks the set's last card) gives the
+  // rare on 'bad' and never on 'std', for a tin and for one of Ed's containers
+  const K = await import('../shared/cards.js');
+  const hi = () => 0.9999;
+  const bad = K.rollCard(1, 'bad', hi), std = K.rollCard(1, 'std', hi);
+  const room = new Room('RARE', 4242, { rand: hi });
+  const c = new FakeConn(), p = room.addPlayer(c, 'Ann').player; p.key = 'tok:r'; room.setProfile(p, { pid: 'abababababababab', wins: 9 }); room.welcome(p);
+  const tinBad = K.rollTin('tin', 1, room.tier(), room.rand);
+  room.handle(p, { t: 'terms', std: true });
+  const tinStd = K.rollTin('tin', 1, room.tier(), room.rand);
+  check(K.CARD[bad].rarity === 'rare' && K.CARD[std].rarity !== 'rare' && tinBad.every(id => K.CARD[id].rarity === 'rare') && tinStd.every(id => K.CARD[id].rarity !== 'rare'),
+    `loan terms: the same draw is ${K.CARD[bad].name} (rare) on Bad Credit and ${K.CARD[std].name} on Standard; a tin's on a Bad Credit trip: ${tinBad.map(id => K.CARD[id].name).join(', ')}; on Standard: ${tinStd.map(id => K.CARD[id].name).join(', ')}`);
+  room.sim.free?.();
+}
+
 // ---- in process: trip codes (GameHost) -----------------------------------------------------------------
 {
   const { GameHost } = await import('../server/host.js');
