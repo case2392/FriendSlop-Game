@@ -28,15 +28,24 @@ class FakeConn {
   has(pred) { return this.sent.some(pred); }
 }
 const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); i++) room.tick(1 / C.SIM_HZ); };
-// a blackjack hand dealt for `stake` and still being voted on (a natural settles at once: deal again); the
-// stake comes out of the bank as at the table. What the hand pays back once it's played out as a stand:
-const dealHand = (room, stake) => {
-  const bj = room.bj;
-  do { bj.state = 'bet'; bj.hand = null; bj.bet = stake; bj.deal(room.t, 1e9); } while (bj.state !== 'vote');
+// p's blackjack hand at seat 1, dealt for `stake` and still in play (a natural settles at once: deal again);
+// the stake comes out of the bank as at the table. What the hand pays back once it's played out as a stand:
+const dealHand = (room, p, stake) => {
+  const s = room.casino.st.get('bj1');
+  room.casino.sit(p, 'bj1');
+  do { s.state = 'bet'; s.hand = null; s.bet = stake; room.casino.act(p, 'bj1', 'go', 0, room.t, 1e9); } while (s.state !== 'play');
   room.bank -= stake;
-  return bj;
+  return s;
 };
-const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2, push: bj.stake, lose: 0 })[bj.outcome];
+const paidBack = s => ({ natural: Math.floor(s.stake * 2.5), win: s.stake * 2, push: s.stake, lose: 0 })[s.out];
+// p's coin in the air at Double or Nothing machine 1 for `stake`, a winner; out of the bank as at the machine
+const coinUp = (room, p, stake) => {
+  const f = room.casino.st.get('flip1');
+  room.casino.sit(p, 'flip1');
+  Object.assign(f, { stake, state: 'spin', pend: { at: room.t + 5, win: true, p } });
+  room.bank -= stake;
+  return f;
+};
 {
   const room = new Room('TEST', 4242);
   const ca = new FakeConn(), cb = new FakeConn();
@@ -160,11 +169,11 @@ const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2
   check(Math.hypot(rv.x - T.lot.x, rv.z - T.lot.z) < 1 && Math.hypot(T.lot.x - T.fire.x, T.lot.z - T.fire.z) < 25, `rooms: at night the RV is at the lot, ${Math.hypot(T.lot.x - T.fire.x, T.lot.z - T.fire.z).toFixed(0)} m from the crew's fire`);
   check(!B.ko && cb.has(m => m.t === 'revived') && room.bank === bank0 + sold - 1500, 'rooms: knocked out at nightfall, you come round at the fire with no bill');
   A.seat = 0;
-  const table = dealHand(room, 400);
+  const table = dealHand(room, B, 400);
   const b1 = room.bank;
   room.nextDay();
   check(table.state === 'result' && room.bank === b1 + paidBack(table) && A.seat === null && ca.has(m => m.t === 'seat' && m.seat === null),
-    `rooms: at dawn a hand mid-vote is played out as a stand (${table.outcome}: +$${room.bank - b1}) and the driver is told the seat is free`);
+    `rooms: at dawn a hand still in play is played out as a stand (${table.out}: +$${room.bank - b1}) and the driver is told the seat is free`);
   // bungee cords stay on overnight
   const { toWorld } = await import('../shared/rv.js');
   const r = room.sim.rvPose();
@@ -776,19 +785,18 @@ const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2
 }
 {
   // money still on the casino tables at midnight is settled before the Repo Man counts it: a blackjack hand
-  // being voted on is played out as a stand (no taking it back after seeing the cards), a coin flip in the
-  // air lands now
+  // in play is played out as a stand (no taking it back after seeing the cards), a coin flip in the air lands now
   const room = new Room('TABLE', 4242);
   const ca = new FakeConn(), A = room.addPlayer(ca, 'Ann').player;
   room.welcome(A);
   room.nextDay();   // day 2: $2,500 due
   room.phase = 'road';
   room.bank = 2600;
-  const table = dealHand(room, 300);                 // $300 on the blackjack table
-  room.pendingFlip = { win: true, stake: 200, by: A, at: room.t + 5 }; room.bank -= 200;   // $200 in the air, a winner
+  const table = dealHand(room, A, 300);              // $300 on the blackjack table
+  const coin = coinUp(room, A, 200);                 // $200 in the air, a winner
   room.midnight();
   const back = paidBack(table);
-  check(table.state === 'result' && room.paid && room.phase === 'night' && room.bank === 2600 - 300 + back + 200 - C.QUOTAS[1] && !room.pendingFlip && ca.has(m => m.t === 'toast' && /Last call/.test(m.text)),
+  check(table.state === 'result' && coin.state === 'result' && room.paid && room.phase === 'night' && room.bank === 2600 - 300 + back + 200 - C.QUOTAS[1] && room.casino.inPlay() === 0 && ca.has(m => m.t === 'toast' && /Last call/.test(m.text)),
     `payments: a hand on the table (played out: ${table.outcome}) and a coin in the air at midnight count toward the payment (bank after: $${room.bank})`);
   room.sim.free?.();
 }
@@ -800,10 +808,11 @@ const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2
   room.welcome(A);
   room.bank = 5000;
   room.finish(true);
-  dealHand(room, 3000);
-  room.pendingFlip = { win: true, stake: 1000, by: A, at: room.t + 5 }; room.bank -= 1000;
+  dealHand(room, A, 3000);
+  coinUp(room, A, 1000);
   room.newRun();
-  check(room.bank === 200 && !room.stats.bestWin && !room.stats.worstLoss && !room.pendingFlip && room.bj.state === 'bet', `payments: a new run starts with $200 and clean stats, whatever was bet during the game-over (bank $${room.bank})`);
+  tick(room, 6);
+  check(room.bank === 200 && !room.stats.bestWin && !room.stats.worstLoss && room.casino.inPlay() === 0 && room.casino.st.get('bj1').state === 'bet', `payments: a new run starts with $200 and clean stats, whatever was bet during the game-over (bank $${room.bank})`);
   room.sim.free?.();
 }
 

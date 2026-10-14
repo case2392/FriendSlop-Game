@@ -273,9 +273,10 @@ for (const v of views) {
       await camAt(T.pawn.x + 3.6, T.pawn.z + 0.4, T.pawn.x - 1.2, T.pawn.y + 0.5, T.pawn.z - 0.2);
       await shot(dave, v);
     } else if (v === 'casinoin') {
-      const s = T.bj.stand, h = T.bj.hit, t = T.bj.table;
-      await steveAt(h.x, h.z, 0);
-      await camAt(s.x + 2.4, s.z + 2.2, (h.x + t.x) / 2, t.y + 0.1, (h.z + t.z) / 2);
+      // Steve at blackjack seat 2, seen from the craps side of the room
+      const s = T.bj.seats[1], t = T.bj.table, r = T.craps.rails[0];
+      await steveAt(s.x, s.z, Math.atan2(t.x - s.x, t.z - s.z));
+      await camAt((s.x + r.x) / 2, (s.z + r.z) / 2, t.x, t.y + 0.1, t.z);
       await shot(dave, v);
     } else if (v === 'repo') {
       await camAt(T.repo.x - 7.5, T.repo.z - 3.5, T.repo.x - 0.8, T.y + 1.5, T.repo.z + 0.3);

@@ -209,11 +209,13 @@ await shot(dave, '_town');
 await ev(steve, T => { const S = window.__nmd; S.me.teleport(T.repo.x - 7.5, T.y + 0.05, T.repo.z - 3.5, 0); S.aimAt(T.repo.x - 0.8, T.y + 1.5, T.repo.z + 0.3); }, T);
 await shot(steve, 'repo-man');
 {
-  await ev(steve, T => { const S = window.__nmd; const u = S.W.uses.find(u => u.kind === 'bj' && u.arg === '+500'); S.me.teleport(u.x - 1.3, T.y + 0.05, u.z, Math.PI / 2); }, T);
+  // the casino: Steve's own hand at blackjack seat 2 ($1,500 of the crew's bank), seen from across the room
+  await ev(steve, T => { const S = window.__nmd, st = T.casino_stations.find(s => s.id === 'bj2'), u = S.W.uses.find(q => q.kind === 'cas' && q.arg === 'bj2'); S.me.teleport(st.x, T.casino.y + 0.05, st.z, 0); S.aimAt(u.x, u.y, u.z); }, T);
   await wait(steve, 900);
-  for (const arg of ['+500', '+500', '+500', 'deal']) { await ev(steve, arg => { const S = window.__nmd; const u = S.W.uses.find(u => u.kind === 'bj' && u.arg === arg); S.send({ t: 'use', id: u.id }); }, arg); await wait(steve, 250); }
-  await ev(steve, T => { const S = window.__nmd; const h = T.bj.hit; S.me.teleport(h.x, T.y + 0.05, h.z, 0); S.aimAt(T.bj.table.x, T.bj.table.y, T.bj.table.z); }, T);
-  await ev(dave, T => { const S = window.__nmd; const s = T.bj.stand; S.me.teleport(s.x + 2.4, T.y + 0.05, s.z + 2.2, 0); S.aimAt((T.bj.hit.x + T.bj.table.x) / 2, T.bj.table.y + 0.1, (T.bj.hit.z + T.bj.table.z) / 2); }, T);
+  await ev(steve, () => window.__nmd.press('use'));
+  await steve.waitForFunction(() => window.__nmd.g?.cas?.bj2?.o === window.__nmd.selfId, null, { timeout: 120000 });
+  for (const a of ['b500', 'b500', 'b500', 'go']) { await ev(steve, a => window.__nmd.send({ t: 'cas', s: 'bj2', a }), a); await wait(steve, 250); }
+  await ev(dave, T => { const S = window.__nmd, B = T.bj, c = Math.cos(B.ry), s = Math.sin(B.ry), at = (lx, lz) => ({ x: B.table.x + lx * c + lz * s, z: B.table.z - lx * s + lz * c }); const p = at(-2.6, 3.4), t = at(0.2, 0.1); S.me.teleport(p.x, T.casino.y + 0.05, p.z, 0); S.aimAt(t.x, B.table.y - 0.1, t.z); }, T);
   await shot(dave, 'casino');
 }
 await send({ t: 'dbg', op: 'spawn', type: 'vase', x: T.pawn.x, y: T.pawn.y + 0.4, z: T.pawn.z - 1.4, value: 520 });

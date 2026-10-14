@@ -318,24 +318,59 @@ try {
   await host.evaluate(T => { const S = window.__nmd; S.me.teleport(4, T.y + 0.05, T.z + 30, 0); }, T);
   await wait(joiner, 900);
   await shot(joiner, 'town');
-  // blackjack: Steve bets and deals, both vote on the pads
-  await host.evaluate(T => { const S = window.__nmd; const u = S.W.uses.find(u => u.kind === 'bj' && u.arg === '+500'); S.me.teleport(u.x - 1.3, T.y + 0.05, u.z, Math.PI / 2); }, T);
-  await wait(host, 900);
-  await host.evaluate(() => { window.__nmd.bets = 0; });
-  for (const arg of ['+500', '+500', 'deal']) {
-    await host.evaluate(arg => { const S = window.__nmd; const u = S.W.uses.find(u => u.kind === 'bj' && u.arg === arg); S.send({ t: 'use', id: u.id }); }, arg);
-    await wait(host, 250);
+  // the casino: one bank, a game each. Steve sits down at blackjack seat 2 and Dave at a Double or Nothing
+  // machine, each at his own button, at the same time; the number keys set their stakes and play them, and
+  // both settle into the one bank. Then a Derby ticket each, and the race
+  {
+    // (stand at a station, dx along the room, and aim at its button)
+    const sitAt = (p, id, dx = 0) => p.evaluate(([id, dx]) => { const S = window.__nmd, st = S.W.town.casino_stations.find(s => s.id === id), u = S.W.uses.find(q => q.kind === 'cas' && q.arg === id), r = S.W.town.bj.ry; S.me.teleport(st.x + Math.cos(r) * dx, S.W.town.casino.y + 0.05, st.z - Math.sin(r) * dx, 0); S.aimAt(u.x, u.y, u.z); }, [id, dx]);
+    const digit = (p, k) => p.evaluate(k => { for (const t of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(t, { key: k, code: 'Digit' + k, bubbles: true })); }, String(k));
+    const panel = p => p.evaluate(() => { const el = document.getElementById('casPanel'); return el.classList.contains('hidden') ? '' : el.textContent.replace(/\s+/g, ' '); });
+    await host.evaluate(() => { window.__nmd.betLog = []; });
+    await sitAt(host, 'bj2'); await sitAt(joiner, 'flip1');
+    await wait(host, 700); await wait(joiner, 700);
+    const aimed = [await host.evaluate(() => window.__nmd.target()?.label || ''), await joiner.evaluate(() => window.__nmd.target()?.label || '')];
+    await host.evaluate(() => window.__nmd.press('use')); await joiner.evaluate(() => window.__nmd.press('use'));
+    const seated = p => p.waitForFunction(id => window.__nmd.g?.cas?.[id]?.o === window.__nmd.selfId && !document.getElementById('casPanel').classList.contains('hidden'), p === host ? 'bj2' : 'flip1', { timeout: 24000 }).then(() => true, () => false);
+    const sat = [await seated(host), await seated(joiner)];
+    await digit(host, 2); await digit(host, 2); await digit(joiner, 1);
+    await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.bet === 1000 && window.__nmd.g.cas.flip1?.bet === 100, null, { timeout: 24000 });
+    const panels = [await panel(host), await panel(joiner)];
+    check(sat.every(Boolean) && /Sit down at seat 2/.test(aimed[0]) && /Double or Nothing/.test(aimed[1]) && /Blackjack · seat 2/.test(panels[0]) && /Bet \$1,000/.test(panels[0]) && /Double or Nothing/.test(panels[1]) && /Bet \$100/.test(panels[1]),
+      `the casino: Steve sits down at blackjack seat 2 and Dave at a Double or Nothing machine ("${aimed.join('", "')}"); each one's keys set his own stake ("${panels[0].slice(0, 70)}" / "${panels[1].slice(0, 60)}")`);
+    await digit(host, 5); await digit(joiner, 5);
+    await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.st !== 'bet', null, { timeout: 24000 });
+    await host.evaluate(() => { const S = window.__nmd; if (S.g.cas.bj2.st === 'play') for (const t of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(t, { key: '6', code: 'Digit6', bubbles: true })); });
+    await host.waitForFunction(() => (window.__nmd.betLog || []).length >= 2, null, { timeout: 135000 })
+      .catch(async () => { throw new Error(`the games never settled: ${JSON.stringify(await host.evaluate(() => ({ cas: window.__nmd.g?.cas, log: window.__nmd.betLog })))}`); });
+    await wait(host, 400);
+    const res = await host.evaluate(() => { const S = window.__nmd; return { log: S.betLog.map(e => ({ won: e.won, game: e.game, by: e.by })), bank: S.g.bank, me: S.selfId, label: S.wv.cas.labels.get('bj2').userData.t }; });
+    const dave = await joiner.evaluate(() => window.__nmd.selfId);
+    const bj = res.log.find(e => e.by === res.me && e.game === 'Blackjack'), fl = res.log.find(e => e.by === dave && e.game === 'Double or Nothing');
+    check(bj && fl && res.bank === 2600 + bj.won + fl.won && /STEVE/.test(res.label),
+      `the casino: Steve's blackjack (${bj?.won}) and Dave's coin (${fl?.won}) played at once out of one bank ($2,600 -> $${res.bank}); Steve's seat reads "${res.label}"`);
+    await joiner.evaluate(T => { const S = window.__nmd, B = T.bj, c = Math.cos(B.ry), s = Math.sin(B.ry), at = (lx, lz) => ({ x: B.table.x + lx * c + lz * s, z: B.table.z - lx * s + lz * c }); const p = at(-2.6, 3.4), t = at(0.2, 0.1); S.me.teleport(p.x, T.casino.y + 0.05, p.z, 0); S.aimAt(t.x, B.table.y - 0.1, t.z); }, T);
+    await wait(joiner, 700);
+    await shot(joiner, 'casino');
+    // the Derby: a $100 ticket each, Steve on No. 3 and Dave on No. 1; the race runs and pays out
+    await sitAt(host, 'derby', -0.7); await sitAt(joiner, 'derby', 0.7);
+    await wait(host, 500); await wait(joiner, 500);
+    await host.evaluate(() => window.__nmd.press('use')); await joiner.evaluate(() => window.__nmd.press('use'));
+    await host.waitForFunction(() => /Derby/.test(document.getElementById('casPanel').textContent) && !document.getElementById('casPanel').classList.contains('hidden'), null, { timeout: 24000 });
+    await joiner.waitForFunction(() => /Derby/.test(document.getElementById('casPanel').textContent) && !document.getElementById('casPanel').classList.contains('hidden'), null, { timeout: 24000 });
+    await host.evaluate(() => { window.__nmd.betLog = []; });
+    await digit(host, 1); await digit(joiner, 1);
+    await host.waitForFunction(id => window.__nmd.g?.cas?.derby?.bets?.[window.__nmd.selfId] === 100 && window.__nmd.g.cas.derby.bets[id] === 100, dave, { timeout: 24000 });
+    await digit(host, 7); await digit(joiner, 5);
+    await host.waitForFunction(() => (window.__nmd.g?.cas?.derby?.tix || []).length === 2, null, { timeout: 24000 });
+    await host.waitForFunction(() => window.__nmd.g?.cas?.derby?.st === 'race' && window.__nmd.g.cas.derby.el > 2.5, null, { timeout: 60000 });
+    await shot(host, 'derby', 200);
+    await host.waitForFunction(() => (window.__nmd.betLog || []).filter(e => e.game === 'the Ringtail Derby').length >= 2, null, { timeout: 60000 });
+    const derby = await host.evaluate(() => { const S = window.__nmd; return { order: S.g.cas.derby.order, log: S.betLog.filter(e => e.game === 'the Ringtail Derby').map(e => ({ won: e.won, by: e.by })), me: S.selfId }; });
+    const paid = derby.log.find(e => e.by === derby.me)?.won, paidD = derby.log.find(e => e.by === dave)?.won;
+    check(derby.order && paid === (derby.order[0] === 3 ? 280 : -100) && paidD === (derby.order[0] === 1 ? 280 : -100),
+      `the Ringtail Derby: No. ${derby.order?.[0]} won; Steve's ticket on 3 ${paid >= 0 ? '+' : ''}${paid}, Dave's on 1 ${paidD >= 0 ? '+' : ''}${paidD}`);
   }
-  await host.waitForFunction(() => window.__nmd.g?.bj?.st === 'vote' || window.__nmd.g?.bj?.st === 'result', null, { timeout: 24000 });
-  ok('blackjack hand dealt for $1,000 of the shared bank');
-  await host.evaluate(T => { const S = window.__nmd; const h = T.bj.hit; S.me.teleport(h.x, T.y + 0.05, h.z, 0); S.aimAt(T.bj.table.x, T.bj.table.y, T.bj.table.z); }, T);
-  await joiner.evaluate(T => { const S = window.__nmd; const s = T.bj.stand; S.me.teleport(s.x + 0.4, T.y + 0.05, s.z + 0.5, 0); S.aimAt(T.bj.hit.x, T.bj.table.y, T.bj.hit.z); }, T);
-  await wait(joiner, 700);
-  await shot(joiner, 'casino');
-  await host.waitForFunction(() => (window.__nmd.bets || 0) > 0, null, { timeout: 135000 })
-    .catch(async e => { throw new Error(`hand never resolved: ${JSON.stringify(await host.evaluate(() => window.__nmd.g?.bj))}`); });
-  const out = await host.evaluate(() => window.__nmd.lastBet);
-  ok(`the hand resolved by body-vote: ${out.won > 0 ? 'won' : out.won < 0 ? 'lost' : 'push'} ${out.won}`);
   // pawn shop
   await host.evaluate(T => { const S = window.__nmd; S.send({ t: 'dbg', op: 'spawn', type: 'vase', x: T.pawn.x, y: T.pawn.y + 0.6, z: T.pawn.z - 1.2, value: 520 }); S.send({ t: 'dbg', op: 'spawn', type: 'neon', x: T.pawn.x, y: T.pawn.y + 0.6, z: T.pawn.z + 0.8, value: 380 }); S.me.teleport(T.pawn.x + 3.4, T.y + 0.05, T.pawn.z + 0.5, -Math.PI / 2); S.aimAt(T.pawn.x - 1.5, T.pawn.y + 0.3, T.pawn.z - 0.2); }, T);
   await host.waitForFunction(() => (window.__nmd.g?.pawn || 0) > 0, null, { timeout: 24000 });

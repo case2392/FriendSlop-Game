@@ -160,6 +160,7 @@ export const sfx = {
   buzz: () => tone(110, 0.35, 'square', 0.25),
   win: () => [523, 659, 784, 1046].forEach((f, i) => tone(f, 0.22, 'square', 0.22, null, i * 0.1)),
   lose: () => [400, 340, 280, 200].forEach((f, i) => tone(f, 0.25, 'sawtooth', 0.18, null, i * 0.13)),
+  dice: () => { for (let i = 0; i < 7; i++) noise(0.03, 2800 + Math.random() * 900, 0.16, null, 'bandpass', i * 0.08 + Math.random() * 0.03); },
   coin: () => { for (let i = 0; i < 8; i++) tone(1800 + (i % 2) * 400, 0.04, 'square', 0.1, null, i * 0.12); },
   knock: () => { noise(0.3, 400, 0.8, 80); tone(80, 0.3, 'sine', 0.6, 40); },
   ko: () => { tone(880, 0.12, 'sine', 0.2, 440); tone(660, 0.4, 'sine', 0.2, 220, 0.12); },

@@ -1143,21 +1143,44 @@ export function generateLeg(seed, day, opts = {}) {
     const ry = -Math.PI / 2;
     const { F, y0 } = building(21, T + 58, ry, 22, 18, 5.2, 'casino', '#6a2c70', townY, 'casino');
     tagNow = { town: 'casino' };
-    // blackjack table
+    // the games (server/casino.js): one bank, the crew's, and a game each. A station is where one player plays
+    // (its use point sits them down there); the Derby takes everybody's tickets
+    const stations = [];
+    const station = (id, kind, at, label, u) => { stations.push({ id, kind, x: at.x, z: at.z }); const p = F(u[0], u[1], u[2]); use('cas', p.x, y0 + u[1], p.z, label, id, 0.3); };
+    // blackjack: three seats along the player side of the table, each its own hand; the dealer behind it
     const tbl = F(-5, 0.45, -3);
     box(tbl.x, y0 + 0.45, tbl.z, 1.8, 0.45, 1.0, ry, 'felt', '#1f7a4d', 'bj_table');
     const dealer = F(-5, 0, -4.6); dealer.y = y0;
-    const hit = F(-7.2, 0.02, 0.6), stand = F(-2.8, 0.02, 0.6);
-    town.bj = { table: { ...tbl, y: y0 + 0.92 }, dealer, ry, hit: { x: hit.x, z: hit.z, r: 1.35 }, stand: { x: stand.x, z: stand.z, r: 1.35 } };
-    const btn = (lx, label, arg) => { const b = F(lx, 1.0, -2.0); use('bj', b.x, y0 + 1.0, b.z, label, arg, 0.26); };
-    btn(-6.6, 'Bet +$100', '+100'); btn(-5.9, 'Bet +$500', '+500'); btn(-5.2, 'ALL IN', 'all'); btn(-4.5, 'Clear bet', 'clear'); btn(-3.5, 'DEAL', 'deal');
-    // double-or-nothing machine
-    const m = F(5.5, 1.1, -6.5);
-    box(m.x, y0 + 1.1, m.z, 1.0, 1.1, 0.6, ry, 'machine', '#d4af37', 'flip_machine');
-    town.flip = { x: m.x, y: y0, z: m.z, ry };
-    const fb = (lx, label, arg) => { const b = F(lx, 1.15, -5.8); use('flip', b.x, y0 + 1.15, b.z, label, arg, 0.24); };
-    fb(4.9, 'Stake +$100', '+100'); fb(5.5, 'Stake +$500', '+500'); fb(6.1, 'ALL IN', 'all');
-    const lever = F(6.9, 1.4, -6.3); use('flip', lever.x, y0 + 1.4, lever.z, 'PULL — double or nothing', 'pull', 0.3);
+    const seats = [-1.2, 0, 1.2].map((dx, i) => {
+      const at = F(-5 + dx, 0, -1.3);
+      station(`bj${i + 1}`, 'bj', at, `Sit down at seat ${i + 1}: blackjack`, [-5 + dx, 1.0, -2.05]);
+      return { id: `bj${i + 1}`, x: at.x, z: at.z, dx };
+    });
+    town.bj = { table: { ...tbl, y: y0 + 0.92 }, dealer, ry, seats };
+    // craps: a table, two rails (a shooter each). It faces the room the other way from the blackjack table
+    // (its players stand on the door side of it), so its own frame is turned round: rails' dx are in that frame
+    const ct = F(-5, 0.45, 4.0);
+    box(ct.x, y0 + 0.45, ct.z, 1.7, 0.45, 0.85, ry + Math.PI, 'felt', '#7a1f2b', 'craps_table');
+    const rails = [0.8, -0.8].map((dx, i) => {
+      const at = F(-5 - dx, 0, 2.45);
+      station(`craps${i + 1}`, 'craps', at, `Step up to rail ${i + 1}: craps`, [-5 - dx, 1.0, 3.12]);
+      return { id: `craps${i + 1}`, x: at.x, z: at.z, dx };
+    });
+    town.craps = { table: { ...ct, y: y0 + 0.92 }, ry: ry + Math.PI, rails };
+    // two Double or Nothing machines
+    town.flips = [5.5, 2.3].map((lx, i) => {
+      const m = F(lx, 1.1, -6.5);
+      box(m.x, y0 + 1.1, m.z, 1.0, 1.1, 0.6, ry, 'machine', '#d4af37', 'flip_machine');
+      station(`flip${i + 1}`, 'flip', F(lx, 0, -5.2), 'Play Double or Nothing', [lx, 1.15, -5.8]);
+      return { id: `flip${i + 1}`, x: m.x, y: y0, z: m.z, ry };
+    });
+    // the Ringtail Derby: four lanes on a waist-high track (lz: the lanes' middle, across it), and a counter
+    // along the front with the ticket button on it
+    const dt = F(5.5, 0.5, -2.35);
+    box(dt.x, y0 + 0.5, dt.z, 3.3, 0.5, 0.95, ry, 'wood', '#6b4426', 'derby_track');
+    station('derby', 'derby', F(5.5, 0, -0.75), 'Bet on the Ringtail Derby', [5.5, 1.06, -1.53]);
+    town.derby = { x: dt.x, y: y0 + 1.0, z: dt.z, ry, len: 6.0, w: 1.6, lanes: 4, lz: -0.15 };
+    town.casino_stations = stations;
     // decor slot banks
     for (let i = 0; i < 5; i++) {
       const s = F(-9 + i * 1.3, 1.0, -8.3);
