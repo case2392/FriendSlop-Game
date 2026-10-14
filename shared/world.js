@@ -676,11 +676,16 @@ export function generateLeg(seed, day, opts = {}) {
       lbox(F, ry, 0, 3.6, -5.6, 0.5, 0.5, 2.2, 'dino', '#5aa469', 'dino_tail');
       for (const lx of [-1.1, 1.1]) for (const lz of [-3.4, 0.4]) lbox(F, ry, lx, 0.9, lz, 0.4, 0.9, 0.4, 'dino', '#4b8a58', 'dino_leg');
       lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469', 'dino_neck');
-      // the head is loot, and it's back on its neck (stolen in 1987 and every few years since): 6.5 m up, out of
-      // a ringtail's reach and the bot's; climb the statue, or get the RV alongside and pull it from the roof.
-      // It's 120 kg: one pair of hands can't hold it, and a fall from up there costs it a few hundred dollars
-      const h = F(0, 6.5, 1.4);
-      placeLoot('dino', h.x, h.y, h.z, ry);
+      // the top of the neck's arch, out over the plinth (client/js/roadside3d.js DINO_NECK: it ends at 6.9 m up,
+      // 3 m forward)
+      lbox(F, ry, 0, 7.0, 2.55, 0.38, 0.4, 0.65, 'dino', '#5aa469', 'dino_arch');
+      // the head is loot, and it's back where it belongs, on the end of the neck (stolen in 1987 and every few
+      // years since, glued back on every time): 7.4 m up, out of a ringtail's reach and the bot's. Climb the
+      // statue, or get the RV alongside and reach it from the roof; it's 120 kg, so one pair of hands can't hold
+      // it, and a fall from up there costs it a few hundred dollars. (The head model's snout is its -z, its neck
+      // stub dropping down and back into the statue's neck: turned round)
+      const h = F(0, 7.4, 2.75);
+      placeLoot('dino', h.x, h.y, h.z, ry + Math.PI);
       for (let i = 0; i < 2; i++) {
         const w = F(-3 + rng() * 6, 0, 3 + rng() * 2);
         placeLoot(POI_LOOT.dino[1 + Math.floor(rng() * 2)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);

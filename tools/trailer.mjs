@@ -846,16 +846,16 @@ shot({
     // (a point in the statue's frame: lx across, ly up from its ground, lz along it, its head end +lz)
     this.at = (lx, ly, lz) => onTable(D, D.ry, lx, ly, lz);
     this.D = D;
-    this.head = [...room.sim.props.values()].filter(p => p.type === 'dino').sort((a, b) => hyp(a.body.translation(), this.at(0, 6.9, 1.4)) - hyp(b.body.translation(), this.at(0, 6.9, 1.4)))[0];
+    this.head = [...room.sim.props.values()].filter(p => p.type === 'dino').sort((a, b) => hyp(a.body.translation(), this.at(0, 7.9, 2.75)) - hyp(b.body.translation(), this.at(0, 7.9, 2.75)))[0];
     log(`  the head: #${this.head?.id} at ${JSON.stringify(this.head?.body.translation())}`);
     this.pushed = false;
   },
   tick(t) {
-    const { Steve, Kyle } = bots, D = this.D, k = this.at(0, 4.22, 0.25), h = this.at(0, 6.9, 1.4);
+    const { Steve, Kyle } = bots, D = this.D, k = this.at(0, 4.22, 0.25), h = this.at(0, 7.9, 2.75);
     // Kyle stands on the dino's back behind its neck, reaching up for the head
     Kyle.at(k.x, k.z, D.ry, { y: k.y, pitch: -0.75 });
     // Steve in the snow in front, looking up; once it goes, he backs off out from under it
-    const s0 = this.at(-2.4, 0, 3.6), s1 = this.at(-3.6, 0, 5.4), s = t < 1.1 ? s0 : s1;
+    const s0 = this.at(-2.9, 0, 3.2), s1 = this.at(-4.4, 0, 4.4), s = t < 1.1 ? s0 : s1;
     if (!Steve.fly && !Steve.downed) Steve.at(s.x, s.z, yawTo(s, h), { pitch: -0.6 });
     if (!this.pushed && t > 0.8 && this.head) {
       this.pushed = true;
@@ -866,8 +866,9 @@ shot({
       b.setAngvel({ x: f.z * 2.2, y: 0.4, z: -f.x * 2.2 }, true);   // (tumbling forward)
     }
   },
-  cam() { const c = this.at(8.5, 0, 9.5), t = this.at(0, 3.8, 1.8); return { p: { x: c.x, y: H(c.x, c.z) + 2.0, z: c.z }, t }; },
-  body() { const b = this.at(16, 0, 14); return { x: b.x, z: b.z }; },
+  // (from the statue's far side from its sign, three-quarters on: the sign stays out of the picture)
+  cam() { const c = this.at(-6.8, 0, 7.6), t = this.at(0, 4.2, 2.2); return { p: { x: c.x, y: H(c.x, c.z) + 2.2, z: c.z }, t }; },
+  body() { const b = this.at(-14, 0, 14); return { x: b.x, z: b.z }; },
 });
 
 // ---- day 4 -----------------------------------------------------------------------------------------
@@ -1236,7 +1237,7 @@ const EDL = [
   { shot: 'campfire', secs: 1.25, from: 12, cards: [['c_jobs', 0.05, 1.25]] },
   // the verbs
   { shot: 'mapfp', secs: 1.25, from: 10, cards: [['c_map', 0.05, 1.25]], sfx: [[0.05, 'grab', 0.8]] },
-  { shot: 'dino', secs: 1.25, align: [evIs('dmg'), 1.0], cards: [['c_haul', 0.05, 1.25]], cues: [[evIs('dmg'), 'thunk:1.4', 1.0, -0.02]] },
+  { shot: 'dino', secs: 1.25, align: [evIs('dmg'), 1.15], cards: [['c_haul', 0.05, 1.25]], cues: [[evIs('dmg'), 'thunk:1.4', 1.0, -0.02]] },
   { shot: 'climb', secs: 1.25, from: 10, cards: [['c_climb', 0.05, 1.25]] },
   { shot: 'winch', secs: 1.25, from: 12, cards: [['c_winch', 0.05, 1.25]], sfx: [[0.05, 'hook', 0.9]] },
   { shot: 'pawn', secs: 2.5, align: [evIs('sold'), 1.1], cards: [['c_pawn', 0.05, 2.5]], cues: [[evIs('sold'), 'bell', 0.9, -0.12], [evIs('sold'), 'kaching', 1.0, 0.08]] },

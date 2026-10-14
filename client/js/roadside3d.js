@@ -2052,9 +2052,8 @@ function buildGas(B, p, parts, ctx, decor) {
 // elephant legs with bulging thighs and cream toenails, a row of terracotta back plates running from the tail
 // tip up the back and the neck, a heavy tail in a gentle S that droops at the tip, and a long swan neck that
 // climbs out of the shoulders through its column and arches forward over the plinth toward the road, where it
-// ends in a jagged break: a pale ring of snapped plaster round the dark hollow, rebar bent out of it (the head
-// is loot, lying on the ground under the break). Snow day: a blanket of snow along the back, ridges on the
-// neck's arch and the tail, icicles under the arch.
+// ends in a rounded cap where its head is glued on (the head is loot, sitting there: shared/world.js). Snow day:
+// a blanket of snow along the back, ridges on the neck's arch and the tail, icicles under the arch.
 const DINO_NECK = [[3.2, -0.15, 0.8], [3.9, 0.75, 0.72], [4.7, 1.25, 0.6], [5.5, 1.42, 0.52], [6.2, 1.56, 0.47], [6.78, 1.92, 0.44], [7.02, 2.48, 0.41], [6.9, 3.02, 0.39]];
 function buildDino(B, p, parts, ctx) {
   const d = p.dino || { x: p.x, y: p.y, z: p.z, ry: p.ry || 0 };
@@ -2179,29 +2178,14 @@ function buildDino(B, p, parts, ctx) {
       const q = F.at(0.95 + k * (NL - 1.95) / 6.4), r = lerp(radii[q.i], radii[q.i + 1], q.f), h = 0.3 - k * 0.022;
       plate(q.p.clone().addScaledVector(q.d, r - 0.06), q.d, q.t, h, 0.42 + h * 0.3, k + 7);
     }
-    // the break, square across the end of the neck: the painted skin running on into jagged teeth, a pale lip of
-    // snapped plaster, the dark hollow inside (closed well down), three bent rebar stubs
-    const E = pts[n], Tn = F.tg[n], Yn = F.dors[n], Xn = Yn.clone().cross(Tn).normalize(), rE = radii[n], NJ = 22, ph = rnd() * TAU;
-    const jag = []; for (let i = 0; i < NJ; i++) jag.push(0.03 + 0.05 * (0.5 + 0.5 * Math.sin(i / NJ * TAU * 2 + ph)) + (i % 3 === 1 ? range(rnd, 0.04, 0.1) : range(rnd, 0, 0.025)));
-    const ring = (u, rr, h) => { const a = u * TAU, ii = Math.round(u * NJ) % NJ, hh = h === null ? 0 : h(jag[ii]); return E.clone().addScaledVector(Xn, Math.cos(a) * rr).addScaledVector(Yn, Math.sin(a) * rr).addScaledVector(Tn, hh); };
+    // the end of the neck: a rounded cap of painted skin (the head sits on it, glued back on; taken, the cap
+    // is what's left)
+    const E = pts[n], Tn = F.tg[n], Yn = F.dors[n], Xn = Yn.clone().cross(Tn).normalize(), rE = radii[n], NJ = 22;
     const arr = q => [q.x, q.y, q.z];
-    B.grid('rs_dino', NJ, 1, (u, v) => arr(ring(u, rE * (1 - 0.04 * v), j => v * j)), { wrapU: true, tint, uvFn: (pl, nl) => [U0 - NL / S, lerp(0.12, 0.84, vOf(nl, [Yn.x, Yn.y, Yn.z], 0.3))] });
-    const lipR = [rE * 0.96, rE * 0.88, rE * 0.8], lipH = [0, 0.012, -0.025];
-    B.grid('rs_stone', NJ, 2, (u, v) => { const k = Math.round(v * 2); return arr(ring(u, lipR[k], j => j + lipH[k])); }, { wrapU: true, tint: [1.3, 1.24, 1.1], noAO: true });
-    const inR = [rE * 0.8, rE * 0.78, rE * 0.55, 0.02], inH = [-0.025, -0.32, -0.6, -0.68];
-    B.grid('rs_iron', NJ, 3, (u, v) => { const k = Math.round(v * 3); return arr(ring(u, inR[k], k === 0 ? (j => j + inH[0]) : (() => inH[k]))); }, { wrapU: true, tint: [0.4, 0.34, 0.32], noAO: true, shelter: true });
-    for (const [a, bend] of [[0.6, 0.35], [2.5, -0.3], [4.3, 0.2]]) {
-      const o = E.clone().addScaledVector(Xn, Math.cos(a) * rE * 0.5).addScaledVector(Yn, Math.sin(a) * rE * 0.5);
-      const radial = Xn.clone().multiplyScalar(Math.cos(a)).addScaledVector(Yn, Math.sin(a));
-      B.tube('rs_iron', [o.clone().addScaledVector(Tn, -0.15), o.clone().addScaledVector(Tn, 0.14), o.clone().addScaledVector(Tn, 0.26).addScaledVector(radial, 0.08 + bend * 0.1), o.clone().addScaledVector(Tn, 0.32).addScaledVector(radial, 0.2 + bend * 0.2)],
-        0.024, { seg: 5, lod0: false, tint: [0.9, 0.62, 0.48], shelter: true });
-    }
-    // two chunks of the neck lying on the plinth's front ledge under the break (painted skin on top, the pale
-    // plaster showing at the broken sides)
-    for (const [cx, cz, w, ry2] of [[-0.38, 1.2, 0.36, 0.5], [0.42, 1.28, 0.26, -0.4]]) {
-      B.box('rs_dino', w, 0.13, w * 0.75, cx, ptop + 0.06, cz, { r: 0.04, jit: 0.07, ry: ry2, rz: 0.12, rx: -0.08, tint, uvFn: (pl, nl) => [pl.x / S, lerp(0.3, 0.8, 0.5 + 0.5 * nl.y)],
-        faces: { px: { m: 'rs_stone', tint: [1.25, 1.2, 1.08] }, nx: { m: 'rs_stone', tint: [1.25, 1.2, 1.08] }, ny: { m: 'rs_stone', tint: [1.1, 1.05, 0.95] } } });
-    }
+    B.grid('rs_dino', NJ, 5, (u, v) => {
+      const a = u * TAU, b = v * Math.PI / 2, rr = rE * Math.cos(b) + 0.002;
+      return arr(E.clone().addScaledVector(Xn, Math.cos(a) * rr).addScaledVector(Yn, Math.sin(a) * rr).addScaledVector(Tn, rE * 0.75 * Math.sin(b)));
+    }, { wrapU: true, tint, uvFn: (pl, nl) => [U0 - NL / S, lerp(0.12, 0.84, vOf(nl, [Yn.x, Yn.y, Yn.z], 0.3))] });
     if (ctx.snow) {
       // snow along the top of the arch (none on the climb), icicles hanging under it
       snowRidge(pts, radii, F, Math.round(n * 0.55), n - 3, 0.09);
