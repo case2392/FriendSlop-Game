@@ -454,6 +454,10 @@ shot({
     dbg({ op: 'phase', ph: 'camp' }); dbg({ op: 'clock', h: 7.6 }); dbg({ op: 'tpRV', x: 0, z: -42, yaw: 0 });
     offstage(bots.Steve, bots.Kyle);
     seatDriver(bots.Dave, await me());
+    // the map back on the dash, where the morning puts it (an earlier shot may have left it anywhere)
+    const { RV_MAP_SPOT, toWorld: tw } = await import(path.join(ROOT, 'shared/rv.js'));
+    const map = [...room.sim.props.values()].find(q => q.type === 'map');
+    if (map) { const r = room.sim.rv; map.body.setTranslation(tw(r.translation(), r.rotation(), RV_MAP_SPOT), true); map.body.setRotation(r.rotation(), true); map.body.setLinvel({ x: 0, y: 0, z: 0 }, true); map.body.setAngvel({ x: 0, y: 0, z: 0 }, true); }
   },
   // (the camera's own player, in lockstep with the RV held still: in beside the driver, the map picked up)
   async preAct(i) {
@@ -629,7 +633,7 @@ shot({
 
 // the Repo Man by his tow truck, at night (a slow push in)
 shot({
-  id: 'repoman', day: 1, secs: 2.6, pre: 0.4, fov: 52,
+  id: 'repoman', day: 1, secs: 4.0, pre: 0.4, fov: 52,
   setup() {
     room.flip.rng = Math.random;
     offstage(bots.Dave, bots.Steve, bots.Kyle);
@@ -760,7 +764,7 @@ shot({
 
 // a ringtail sneaks up on the vase Steve set down, snatches it, and runs (STOLEN $520)
 shot({
-  id: 'ringtail', day: 2, secs: 2.8, pre: 0.5, fov: 58, preMax: 16,
+  id: 'ringtail', day: 2, secs: 2.8, pre: 0.5, fov: 58, preMax: 24,
   startWhen() { const m = this.coon, p = m && room.sim.props.get(m.id), v = this.vase && room.sim.props.get(this.vase.id); if (!p || !v) return false; const a = p.body.translation(), b = v.body.translation(); return (m.st & 31) >= 1 && Math.hypot(a.x - b.x, a.z - b.z) < 4.2; },
   setup() {
     dbg({ op: 'mobs', on: false });
@@ -776,12 +780,12 @@ shot({
     this.v = v;
     this.coon = spawnMob('ringtail', 2, 214, { yaw: 0.8 });
   },
-  tick(t) { const { Steve } = bots; Steve.at(this.v.x - 5.5, this.v.z + 0.5, -Math.PI / 2); },
+  tick(t) { const { Steve } = bots; Steve.at(this.v.x - 2.6, this.v.z + 2.6, -Math.PI / 4); },
   cam(t) {
     const p = this.coon && room.sim.props.get(this.coon.id), c = p ? p.body.translation() : { x: this.v.x, z: this.v.z };
-    return { p: at(this.v.x + 2.6, this.v.z + 3.4, 0.55), t: { x: lerp(this.v.x, c.x, 0.55), y: H(c.x, c.z) + 0.3, z: lerp(this.v.z, c.z, 0.55) } };
+    return { p: at(this.v.x + 3.2, this.v.z - 3.0, 0.55), t: { x: lerp(this.v.x, c.x, 0.5), y: H(c.x, c.z) + 0.3, z: lerp(this.v.z, c.z, 0.5) } };
   },
-  body() { return { x: this.v.x + 10, z: this.v.z + 12 }; },
+  body() { return { x: this.v.x + 11, z: this.v.z - 10 }; },
 });
 
 // ---- day 3 -----------------------------------------------------------------------------------------
@@ -840,20 +844,20 @@ shot({
 // ---- day 5 -----------------------------------------------------------------------------------------
 // paid off: the crew in Lost Wages at sunset, arms up, the battered RV behind them
 shot({
-  id: 'payoff', day: 5, secs: 2.6, pre: 0.5, fov: 56,
+  id: 'payoff', day: 5, secs: 4.0, pre: 0.5, fov: 56,
   setup() {
     dbg({ op: 'mobs', on: false });
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 18.6 }); dbg({ op: 'rvhp', hp: 38 });
     for (const b of Object.values(bots)) unseat(b);
-    dbg({ op: 'tpRV', x: 0, z: W.town.z + 20, yaw: 0 });
+    dbg({ op: 'tpRV', x: -1.5, z: W.town.z + 32, yaw: 0.5 });
   },
   tick(t) {
-    const { Dave, Steve, Kyle } = bots, z = W.town.z + 27, face = Math.atan2(-9.5, -11);
-    Dave.at(3.5, z, face); Steve.at(5.0, z + 1.5, face); Kyle.at(6.5, z, face);
+    const { Dave, Steve, Kyle } = bots, z = W.town.z + 27, C0 = { x: 10.5, z: W.town.z + 19 };
+    Dave.at(3.6, z, yawTo({ x: 3.6, z }, C0)); Steve.at(5.2, z + 1.2, yawTo({ x: 5.2, z: z + 1.2 }, C0)); Kyle.at(6.6, z - 0.4, yawTo({ x: 6.6, z: z - 0.4 }, C0));
     if (every(t, 2.8, 0.05)) for (const b of [Dave, Steve, Kyle]) b.say({ t: 'emote', e: '👑' });
   },
-  cam: t => ({ p: { x: -5 + t * 0.15, y: W.town.y + 1.6, z: W.town.z + 18 }, t: { x: 4.5, y: W.town.y + 1.3, z: W.town.z + 29 } }),
-  body: () => ({ x: -9, z: W.town.z + 12 }),
+  cam: t => ({ p: { x: 10.5 - t * 0.2, y: W.town.y + 1.55, z: W.town.z + 19 + t * 0.15 }, t: { x: 4.2, y: W.town.y + 1.5, z: W.town.z + 28.5 } }),
+  body: () => ({ x: 15, z: W.town.z + 14 }),
 });
 
 const DAYS = [1, 2, 3, 4, 5];
@@ -889,7 +893,7 @@ async function stills() {
   await page.evaluate(() => { const S = window.__nmd; window.__cam = null; S.noRender = false; });
   if (room.day !== 5) await toDay(5);
   dbg({ op: 'clock', h: 18.6 }); dbg({ op: 'phase', ph: 'road' });
-  await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(-5, T.y + 0.05, T.z + 18, 0); S.aimAt(4.5, T.y + 1.3, T.z + 29); });
+  await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(10.5, T.y + 0.05, T.z + 19, 0); S.aimAt(4.2, T.y + 1.5, T.z + 28.5); });
   dbg({ op: 'win' });
   await page.waitForFunction(() => !document.getElementById('overScreen').classList.contains('hidden'), null, { timeout: 120000 });
   await show('#overScreen');
@@ -904,11 +908,12 @@ async function stills() {
   dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'bank', v: 300 });
   dbg({ op: 'tpRV', x: 0, z: W.town.z + 12, yaw: 0 });
   await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(2, T.y + 0.05, T.z + 4, 0); S.aimAt(7.5, T.y + 2.2, T.z + 24); S.setSetting('uiScale', 1.6); });
-  dbg({ op: 'clock', h: 23.984 });
   await show('#hud');
-  await page.waitForTimeout(1200);
-  host.stop();   // (the clock stays at 11:59 PM while the page is photographed)
-  await page.waitForTimeout(300);
+  await page.waitForTimeout(1000);
+  dbg({ op: 'clock', h: 23.984 });
+  await page.waitForTimeout(160);   // (a few snapshots with the new time, then the server held still at 11:59 PM)
+  host.stop();
+  await page.waitForTimeout(600);
   await page.screenshot({ path: path.join(dir, 'hud.png') });
   host.start();
   log('still: hud');
@@ -1082,6 +1087,8 @@ card('t_fixed', 'toast', 'Dave, Steve and Kyle got it running with a coat hanger
 card('t_again', 'toast', 'A new RV. A new loan. The same idiots.', { color: '#ffd166' });
 card('t_beaned', 'toast', 'Kyle beaned Steve with the Garden Gnome.', { color: '#ffb4a2' });
 card('t_ko', 'ko', 'You have been knocked out.', { sub: 'Waking up alone costs $350.' });
+card('c_repod', 'verdict', "REPO'D.", { sub: 'The Repo Man hooks the Slopmaster and drives off into the sunset without you.', color: 'red' });
+card('c_owned', 'verdict', 'YOU OWN THE RV.', { sub: 'The Slopmaster 9000 is finally, legally, yours.' });
 // the five days (the game's zone names, and what each one owes)
 [['The Westmeadow Road', 1, '$1,000'], ['Goldenfield Pike', 2, '$2,500'], ['Frostpeak Pass', 3, '$4,500'], ['The Redrock Badlands', 4, '$7,500'], ['The Lost Wages Flats', 5, '$15,000']]
   .forEach(([name, d, due]) => card(`z${d}`, 'zone', name, { sub: `DAY ${d} · ${due} DUE AT MIDNIGHT`, size: 72, y: 110 }));
@@ -1106,6 +1113,9 @@ function cardHtml(c, port) {
       <div style="display:inline-block; padding: 34px 70px 30px; background: rgba(12,8,6,0.72); border: 3px solid #b8892e; border-radius: 6px; box-shadow: 0 0 0 2px #3b1f06, 0 12px 40px rgba(0,0,0,0.6);">
       <div style="font: 64px/1.2 'NMD UI'; color:#ff5a3a; text-shadow:${OUTLINE};">${c.text}</div>
       <div style="font: 38px/1.5 'NMD UI'; color:#f3e6c8; text-shadow:${OUTLINE}; margin-top: 8px;">${c.sub}</div></div></div>`;
+  else if (c.kind === 'verdict') body = `<div style="position:absolute; left:0; right:0; top:330px; text-align:center;">
+      <div style="font: 900 150px/1.05 Cinzel; letter-spacing: 4px; ${c.color === 'red' ? `color:#e8402a; text-shadow:${OUTLINE}, 0 0 40px rgba(160,20,0,0.7);` : gold}">${c.text}</div>
+      <div style="display:inline-block; margin-top: 18px; padding: 6px 30px; font: 44px/1.35 'NMD UI'; color:#f3e6c8; text-shadow:${OUTLINE}; background: radial-gradient(ellipse at center, rgba(8,5,3,0.55) 40%, rgba(8,5,3,0) 100%);">${c.sub}</div></div>`;
   else if (c.kind === 'feat') body = `<div style="position:absolute; left:0; right:0; bottom:${c.y ?? 96}px; text-align:center; font: 44px/1.4 'NMD UI'; letter-spacing: 3px; color:#f3e6c8; text-shadow:${OUTLINE};">${c.text}</div>`;
   else if (c.kind === 'end') body = `<div style="position:absolute; left:0; right:0; bottom:${c.y ?? 120}px; text-align:center;">
       <div style="font: 900 ${c.size ?? 76}px/1.1 Cinzel; letter-spacing: 6px; ${gold}">${c.text}</div>
@@ -1195,7 +1205,7 @@ const EDL = [
   { shot: 'coinflip', secs: 2.5, from: 6, sfx: [[0.15, 'coin', 0.9]], cues: [[toastIs(/Double or Nothing/), 'lose', 1.0, 0.0]] },
   { still: 'hud.png', secs: 1.25, zoom: 1.06, crop: [0.18, 0, 0.64, 0.36], cards: [['c_miss', 0.05, 1.25]] },
   { shot: 'repoman', secs: 2.5, cards: [['c_takes', 0.1, 2.5]], sfx: [[0.1, 'repo', 1.0]] },
-  { still: 'repod.png', secs: 1.25, zoom: 1.05, crop: [0.2, 0.08, 0.6, 0.6], sfx: [[0.0, 'repoArrives', 1.0]] },
+  { shot: 'repoman', secs: 1.25, from: 'end', dim: 0.35, cards: [['c_repod', 0.0, 1.25]], sfx: [[0.0, 'repoArrives', 1.0]] },
   // again
   { shot: 'campfire', secs: 1.25, from: 40, cards: [['t_again', 0.05, 1.25]], sfx: [[0.05, 'day', 0.9]] },
   { shot: 'chase1', secs: 1.25, cards: [['z1', 0.0, 1.25], ['c_five', 0.0, 2.5]] },
@@ -1204,7 +1214,7 @@ const EDL = [
   { shot: 'chase4', secs: 1.25, cards: [['z4', 0.0, 1.25]] },
   { shot: 'chase5', secs: 1.25, cards: [['z5', 0.0, 1.25]], sfx: [[0.3, 'horn', 0.6]] },
   { shot: 'payoff', secs: 2.5, cards: [['c_balloon', 0.1, 2.5]] },
-  { still: 'owned.png', secs: 1.25, zoom: 1.05, crop: [0.2, 0.08, 0.6, 0.6], sfx: [[0.0, 'owned', 0.9]] },
+  { shot: 'payoff', secs: 1.25, from: 'end', dim: 0.25, cards: [['c_owned', 0.0, 1.25]], sfx: [[0.0, 'owned', 0.9]] },
   // the title, the stinger, the end card
   { still: 'title.png', secs: 3.75, zoom: 1.06, cards: [['c_features', 1.2, 3.75]] },
   { shot: 'gnome', secs: 2.5, from: 8, cards: [['t_beaned', 1.2, 2.5]], cues: [[toastIs(/beaned/), 'bonk', 1.0, -0.05]], sfx: [[0.75, 'throw', 0.9]] },
@@ -1259,6 +1269,7 @@ async function edit() {
         : `[0:v]${cr}scale=3840:2160,zoompan=z='1+(${z}-1)*on/${n}':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':d=1:s=1920x1080:fps=${FPS},setsar=1,trim=end_frame=${n}[v0]`);
     }
     let v = 'v0';
+    if (e.dim) { filt.push(`[${v}]eq=brightness=-${e.dim * 0.5}:saturation=${1 - e.dim * 0.6}[vd]`); v = 'vd'; }
     if (e.gray) { filt.push(`[${v}]hue=s=0,eq=contrast=1.15:brightness=-0.04,rotate=0.06*sin(2*PI*t/2.4):c=black:ow=iw:oh=ih,vignette=PI/3.2[vg]`); v = 'vg'; }
     for (const [k, c] of (e.cards || (e.card ? [[e.card, e.cardIn ?? 0.15, e.cardOut ?? e.secs]] : [])).entries()) {
       const [id, cin, cout] = c;
