@@ -21,6 +21,7 @@ const path = require('node:path');
 const fs = require('node:fs');
 
 const ROOT = path.join(__dirname, '..');
+const { readSave, writeSave, quarantineSave, serverEnv } = require('./save.cjs');
 const PRODUCT = 'NO MONEY DOWN';
 const ORIGIN = 'app://nmd';
 const PKG = require('../package.json');
@@ -52,6 +53,9 @@ if (!app.requestSingleInstanceLock({ argv })) {
     if (app.requestSingleInstanceLock({ argv })) break;
   }
 }
+
+// the player's save: <userData>/save (a --multi-instance copy has its own userData, so its own save)
+const saveDir = () => path.join(app.getPath('userData'), 'save');
 
 // ---- the log: <userData>/logs/main.log (this run; the one before is main.old.log) ------------------
 app.setAppLogsPath(path.join(app.getPath('userData'), 'logs'));
@@ -102,7 +106,8 @@ if (steam.restarting) { app.exit(0); return; }
 let server = null, quitting = false, win = null;
 function startServer() {
   return new Promise((resolve, reject) => {
-    const proc = utilityProcess.fork(path.join(__dirname, 'server-process.mjs'), [], { serviceName: `${PRODUCT} game server`, stdio: 'pipe' });
+    // (a player's copy never takes test switches from its environment: save.cjs serverEnv)
+    const proc = utilityProcess.fork(path.join(__dirname, 'server-process.mjs'), [], { serviceName: `${PRODUCT} game server`, stdio: 'pipe', env: serverEnv(process.env, app.isPackaged) });
     const { port1, port2 } = new MessageChannelMain();
     let done = false;
     const finish = (err, v) => { if (done) return; done = true; clearTimeout(timer); if (err) reject(err); else resolve(v); };
@@ -377,6 +382,7 @@ ipcMain.on('desktop:boot', e => {
   e.returnValue = fromGame(e.senderFrame?.url) ? {
     version: app.getVersion(), build: server?.build ?? null, wsUrl: server ? `ws://127.0.0.1:${server.wsPort}` : null,
     platform: process.platform, steam: steam.info(), devtools: FLAGS.devtools,
+    profile: readSave(saveDir()),   // the player's save as it is on disk (client/js/profile.js)
   } : null;
 });
 on('desktop:log', (_e, ...a) => log('[page]', ...a.map(x => String(x).slice(0, 2000))));
@@ -390,6 +396,9 @@ on('desktop:presence', (_e, p) => {
   else steamNet().setPresence(steam.client, presence || { ph: 'menu' });
 });
 handle('desktop:pick-code', () => pickCode());
+// the save (save.cjs): written atomically when a trip is credited; an unreadable one is moved aside
+handle('desktop:profile-save', text => writeSave(saveDir(), String(text ?? '')));
+handle('desktop:profile-quarantine', () => quarantineSave(saveDir()));
 handle('desktop:host', code => hostLobby(String(code ?? '')));
 handle('desktop:invite', () => {
   if (!steam.ok) return { ok: false, msg: steam.reason };

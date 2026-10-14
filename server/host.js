@@ -154,7 +154,7 @@ export class GameHost {
             const want = this.singleRoom && info.kind === 'local' ? normalizeTripCode(m.code) : '';
             const code = isTripCode(want) && !this.rooms.has(want) && !this.cooling(want) ? want : this.newCode();
             if (!code) return fail('Too many trips are running on this server. Try again in a minute.', 'full');
-            r = new Room(code, seed);
+            r = new Room(code, seed, { typed: seed != null });   // (a typed seed: that trip is practice)
             this.rooms.set(r.code, r);
           }
           const key = info.key ?? (typeof m.resume === 'string' && /^[0-9a-f]{24}$/.test(m.resume) ? 'tok:' + m.resume : null);
@@ -186,6 +186,8 @@ export class GameHost {
             player.key = key || 'tok:' + crypto.randomBytes(12).toString('hex');
           }
           room = r;
+          // the page's save: its profile id (the trip's record comes back to it) and its wins
+          r.setProfile(player, m.prof && typeof m.prof === 'object' ? m.prof : null, { resumed: !!back });
           r.welcome(player);
           if (!info.key) conn.send(JSON.stringify({ t: 'session', resume: player.key.slice(4), build: this.build }));   // a ws client keeps this to come back
           if (m.t === 'join') r.toast(back ? `${player.name} is back.` : `${player.name} climbed aboard.`, player.color, 3);

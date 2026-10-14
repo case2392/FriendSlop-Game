@@ -190,6 +190,101 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(['Georgia', 'Liberation Serif', 'DejaVu Sans', 'Arial Black', 'serif', 'sans-serif'].every(n => faces.includes(n)) && !faces.some(n => /px|\$|\{/.test(n)), `textures: the system font faces the families name are found for the cache key (${faces.length}: ${faces.join(', ')})`);
 }
 
+// --- the save (shared/profile.js): checked on the way in, never thrown by junk, a trip counted once, and the
+// record rules (pure logic) ---
+{
+  const P = await import('../shared/profile.js');
+  const rnd = mulberry32(99);
+  // P1: whatever a save holds (junk, wrong types, huge lists, nesting), validate() returns something in bounds
+  const junk = d => {
+    const r = rnd();
+    if (d > 3 || r < 0.15) return [null, undefined, NaN, Infinity, -1e300, 1e300, '', 'x'.repeat(40), '0123456789abcdef', 7.5, -3, true, '<b>'][Math.floor(rnd() * 13)];
+    if (r < 0.45) return Array.from({ length: Math.floor(rnd() * 60) }, () => junk(d + 1));
+    const o = {};
+    for (const k of ['v', 'pid', 'made', 'saved', 'rev', 'best', 'std', 'bad', 'fast', 'h', 'at', 'crew', 'splits', 'haul', 'sold', 'surplus', 'casino', 'won', 'clean', 'hp', 'crews', 'key', 'names', 'trips', 'wins', 'seeds', 'seed', 'life', 'runs', 'days', 'pawned', 'kos', 'sum', '__proto__', 'constructor'])
+      if (rnd() < 0.35) o[k] = junk(d + 1);
+    return o;
+  };
+  let threw = 0, out = 0;
+  const inRange = (v, lo, hi) => Number.isFinite(v) && v >= lo && v <= hi;
+  for (let i = 0; i < 2000; i++) {
+    let p;
+    try { p = P.validate(junk(0)); } catch { threw++; continue; }
+    const boards = ['std', 'bad'].map(k => p.best[k]);
+    const okBoard = b => b.splits.length === 5 && b.splits.every(x => x === null || inRange(x.h, 6, 24))
+      && (b.fast === null || (inRange(b.fast.h, 0, 90) && b.fast.crew.length <= 6)) && (b.haul === null || inRange(b.haul.sold, 0, 1e9)) && (b.clean === null || inRange(b.clean.hp, 0, 100));
+    const good = (p.pid === null || P.isPid(p.pid)) && boards.every(okBoard) && p.crews.length <= 12 && p.seeds.length <= 20 && p.runs.length <= 32
+      && p.runs.every(P.isRun) && Object.values(p.life).every(v => inRange(v, 0, 1e12)) && Object.keys(p.life).length === P.LIFE.length
+      && p.crews.every(c => c.names.length <= 6 && c.names.every(n => typeof n === 'string' && n.length <= 16 && !/[<>]/.test(n)));
+    if (!good) out++;
+    try { P.serialize(p); } catch { threw++; }
+  }
+  check(!threw && !out, `save: validate() takes 2,000 junk saves without throwing, and everything it returns is in bounds (${threw} threw, ${out} out of bounds)`);
+  // P2: a torn write, a newer version, nothing at all
+  const pid = '0123456789abcdef', base = P.fresh(pid, 1000), text = P.serialize(base);
+  const torn = text.slice(0, text.length - 9), edited = text.replace('"rev":0', '"rev":5');
+  const newer = JSON.stringify({ ...JSON.parse(text), v: 2 });
+  check(P.parse(text).status === 'ok' && P.parse(text).prof.pid === pid && P.parse(torn).status === 'corrupt' && P.parse(edited).status === 'corrupt'
+    && P.parse(newer).status === 'newer' && P.parse('').status === 'empty' && P.parse(null).status === 'empty' && P.parse('[1,2]').status === 'corrupt',
+    'save: a good save reads back; a torn write or an edit without its sum is corrupt; v 2 is newer (read-only); nothing there is empty');
+  // P3, P4: the record rules
+  const trip = ({ run = 'a', you = {}, ...o } = {}) => ({ run: run.padEnd(10, '0'), won: true, practice: null, tier: 'std', splits: [14, 14, 14, 14, 14], sold: 20000, surplus: 1500, casino: -200, rvEnd: 80, repairs: 245,
+    crew: [{ h: '0a0b0c0d', name: 'Ann' }, { h: '01020304', name: 'Bob' }], ...o, you: { fromStart: true, atEnd: true, kos: 1, revives: 2, rvDmg: 9, ...you } });
+  const p = P.fresh(pid, 0);
+  const r1 = P.creditTrip(p, trip({ run: 'a1' })), snap = JSON.stringify(p), r2 = P.creditTrip(p, trip({ run: 'a1' }));
+  check(r1.counted && !r2.counted && r2.dup && JSON.stringify(p) === snap && p.life.trips === 1 && p.life.wins === 1 && p.best.std.fast.h === 40 && p.best.std.haul.sold === 20000,
+    `save: the same trip credited twice counts once (road time ${P.fmtRoad(p.best.std.fast.h)}, ${r1.newRecords.length} records the first time, none the second)`);
+  const q = P.fresh(pid, 0);
+  const test = P.creditTrip(q, trip({ run: 'b1', practice: 'test' })), testOk = P.creditTrip(P.fresh(pid, 0), trip({ run: 'b2', practice: 'test' }), { acceptTest: true });
+  const seeded = P.creditTrip(q, trip({ run: 'b3', practice: 'seed', seed: 777 }));
+  const late = P.creditTrip(q, trip({ run: 'b4', you: { fromStart: false } })), left = P.creditTrip(q, trip({ run: 'b5', you: { atEnd: false } }));
+  check(!test.counted && testOk.counted && seeded.counted && q.seeds.length === 1 && q.seeds[0].seed === 777 && q.seeds[0].fast === 40 && q.life.trips === 2
+    && late.counted && left.counted && !q.best.std.fast && !q.best.std.haul && q.crews.length === 0,
+    `save: a test trip records nothing (unless the browser test asks); a typed seed's goes on its seed board only; joining late or leaving early counts the trip but sets no record (life ${q.life.trips} trips, ${q.seeds.length} seed board)`);
+  const w = P.fresh(pid, 0);
+  P.creditTrip(w, trip({ run: 'c1', won: false, splits: [13, 13, 13, 13, null], sold: 30000 }));
+  const lostOk = !w.best.std.fast && w.best.std.haul?.sold === 30000 && w.best.std.splits[3].h === 13 && w.best.std.splits[4] === null && !w.best.std.clean;
+  P.creditTrip(w, trip({ run: 'c2', won: false, splits: [12, 12, 12, null, null], sold: 90000 }));
+  const short = w.best.std.haul.sold === 30000 && w.best.std.splits[0].h === 12;
+  const fast2 = P.creditTrip(w, trip({ run: 'c3', splits: [15, 15, 15, 15, 15], rvEnd: 95 }));
+  check(lostOk && short && fast2.newRecords.includes('fast') && fast2.newRecords.includes('clean') && !fast2.newRecords.includes('haul') && w.best.std.fast.h === 45 && w.life.wins === 1 && w.crews[0].trips === 3,
+    'save: a loss sets no time record but its splits and haul count; a haul needs days 1 to 4 paid; a slower win still sets the first fastest payoff and the cleanest RV');
+  // P5: every table full stays well under 16 KB
+  const full = P.fresh(pid, Date.now());
+  for (let i = 0; i < 40; i++) {
+    const hs = Array.from({ length: 6 }, (_, k) => ((i * 7 + k) * 2654435761 >>> 0).toString(16).padStart(8, '0'));
+    P.creditTrip(full, { ...trip({ run: i.toString(16).padStart(10, '0') }), crew: hs.map((h, k) => ({ h, name: 'Abcdefghijklmnop'.slice(0, 16 - k) })), tier: i % 2 ? 'bad' : 'std' }, { now: Date.now() });
+    P.creditTrip(full, { ...trip({ run: (1000 + i).toString(16).padStart(10, 'f') }), practice: 'seed', seed: 4000000000 - i }, { now: Date.now() });
+  }
+  const bytes = P.serialize(full).length;
+  check(full.crews.length === 12 && full.seeds.length === 20 && full.runs.length === 32 && bytes <= 16 * 1024, `save: with every table full (12 crews of six, 20 seeds, 32 trips, both boards) it is ${(bytes / 1024).toFixed(1)} KB (at most 16)`);
+}
+
+// --- the desktop build's save files (desktop/save.cjs): an atomic write leaves the last save as the backup,
+// an unreadable one goes aside (the last 3 kept), and a player's copy never takes test switches ---
+{
+  const { createRequire } = await import('node:module');
+  const fs = await import('node:fs'), os = await import('node:os'), path = await import('node:path');
+  const SV = createRequire(import.meta.url)('../desktop/save.cjs');
+  const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nmd-save-')), 'save');
+  const none = SV.readSave(dir);
+  const ONE = '{"n":1}', TWO = '{"n":2}', THREE = '{"n":3}';
+  SV.writeSave(dir, ONE); SV.writeSave(dir, TWO);
+  const two = SV.readSave(dir), listed = fs.readdirSync(dir).sort().join(',');
+  for (let i = 0; i < 5; i++) { fs.writeFileSync(path.join(dir, 'profile.json'), `bad${i}`); SV.quarantineSave(dir, 1000 + i); }
+  const kept = fs.readdirSync(path.join(dir, 'corrupt')).sort().join(','), after = SV.readSave(dir);
+  const big = SV.writeSave(dir, 'x'.repeat(SV.SAVE_MAX + 1));
+  fs.writeFileSync(path.join(dir, 'profile.json'), 'garbage');   // (one that doesn't read doesn't push out the backup)
+  SV.writeSave(dir, THREE);
+  const three = SV.readSave(dir);
+  check(none.text === null && two.text === TWO && two.bak === ONE && listed === 'profile.bak.json,profile.json' && kept === 'profile-1002.json,profile-1003.json,profile-1004.json' && after.text === null && after.bak === ONE && !big.ok
+    && three.text === THREE && three.bak === ONE,
+    `desktop save: written atomically with the last one as the backup (no .tmp left: ${listed}), an unreadable one kept aside (the last 3: ${kept}) and never made the backup, a save too big refused`);
+  const env = { FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1', friendslop_nomobs: '1', PATH: '/bin' };
+  check(Object.keys(SV.serverEnv(env, true)).join() === 'PATH' && Object.keys(SV.serverEnv(env, false)).length === 4,
+    'desktop save: a packaged game\'s server never takes FRIENDSLOP_* test switches from its environment (an unpackaged one does, for the tests)');
+}
+
 const server = spawn(process.execPath, ['server/index.js'], { env: { ...process.env, PORT: String(PORT), FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1', FRIENDSLOP_NOMOBS: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
 process.on('exit', () => { try { server.kill('SIGKILL'); } catch {} });
 await new Promise((res, rej) => { server.stdout.on('data', d => { if (String(d).includes('rolling')) res(); }); setTimeout(() => rej(new Error('server did not start')), 8000); });

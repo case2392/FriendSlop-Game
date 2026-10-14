@@ -807,6 +807,125 @@ const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2
   room.sim.free?.();
 }
 
+// ---- in process: the trip's record (each player's save) -------------------------------------------------
+{
+  // five days played (the RV leaves camp, each day paid at a set time): everyone on the trip gets a 'trip'
+  // with the road time (each payment less 6:00, added up), the payment times, the haul, what was left and
+  // the casino's net; the game-over carries the same run
+  const room = new Room('TRIP', 4242);
+  const ca = new FakeConn(), cb = new FakeConn(), cc = new FakeConn();
+  const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player;
+  A.key = 'tok:a'; B.key = 'tok:b';
+  room.setProfile(A, { pid: 'aaaaaaaaaaaaaaaa', wins: 2 }); room.setProfile(B, { pid: 'bbbbbbbbbbbbbbbb' });
+  room.welcome(A); room.welcome(B);
+  room.sim.placeRV(0, room.W.camp.exitZ + 6, 0);
+  tick(room, 1 / C.SIM_HZ);
+  const departed = room.phase === 'road' && room.departed && [...room.roster.values()].every(e => e.fromStart);
+  let Cc = null;
+  for (let d = 1; d <= 5; d++) {
+    if (d === 3) {   // Cid joins on day 3, Bob drops on day 5 and his seat is kept
+      Cc = room.addPlayer(cc, 'Cid').player; Cc.key = 'tok:c';
+      room.setProfile(Cc, { pid: 'cccccccccccccccc' }); room.welcome(Cc);
+    }
+    room.phase = 'road'; room.ride(); room.clock = 13 + d * 0.25; room.bank = 100000;   // (the day's road begins)
+    room.stats.sold += 1000;
+    if (d === 2) room.betResult(300, 'Blackjack', A);
+    if (d === 5) room.hold(B, 60);
+    room.pay(A);
+    if (d < 5) room.nextDay();
+  }
+  const ta = ca.last('trip'), over = ca.last('over'), tc = cc.last('trip');
+  const splits = [13.25, 13.5, 13.75, 14, 14.25];
+  check(departed && ta && ta.run === over?.run?.id && ta.won && Math.abs(ta.time - 38.75) < 1e-6 && JSON.stringify(ta.splits) === JSON.stringify(splits) && ta.sold === 5000 && ta.casino === 300 && ta.surplus === Math.round(room.bank)
+    && ta.you.fromStart && ta.you.atEnd && ta.crew.length === 2 && ta.crew.every(c => /^[0-9a-f]{8}$/.test(c.h)),
+    `the trip's record: everyone aboard at the end gets a 'trip': road time ${ta?.time} h (each payment less 6:00), the payment times, $${ta?.sold} pawned, $${ta?.casino} at the casino, $${ta?.surplus} left; the crew is whoever went all the way (${ta?.crew?.map(c => c.name).join(', ')})`);
+  check(tc && !tc.you.fromStart && tc.you.atEnd && !cb.has(m => m.t === 'trip'),
+    'the trip\'s record: who joined on day 3 gets theirs, marked not from the start; a dropped player\'s waits for them');
+  // the host page is told whose summary waits (and asks before ending the trip)
+  check(JSON.stringify(ca.last('meta').trip.pending) === '["Bob"]', `the trip's record: the meta names whose summary is waiting (${JSON.stringify(ca.last('meta').trip.pending)})`);
+  // Bob comes back: his summary, with the same run id; again without saying he has it: the same one again;
+  // once he says so, no more
+  const cb2 = new FakeConn();
+  room.welcome(room.resume('tok:b', cb2));
+  const tb = cb2.last('trip');
+  const cb3 = new FakeConn();
+  room.welcome(room.resume('tok:b', cb3));
+  const again = cb3.last('trip');
+  room.handle(B, { t: 'tripAck', run: tb?.run });
+  const cb4 = new FakeConn();
+  room.welcome(room.resume('tok:b', cb4));
+  check(tb?.run === ta.run && tb.you.atEnd && again?.run === ta.run && !cb4.has(m => m.t === 'trip') && JSON.stringify(cb4.last('meta').trip.pending) === '[]',
+    'the trip\'s record: a kept seat gets its summary when it\'s back, the same run again until the page says it has it ("tripAck"), then no more');
+  // somebody who joins during the game-over sees it, but it isn't their trip
+  const cl = new FakeConn(), L = room.addPlayer(cl, 'Lou').player;
+  room.setProfile(L, { pid: 'dddddddddddddddd' }); room.welcome(L);
+  check(cl.last('over') && !cl.has(m => m.t === 'trip'), 'the trip\'s record: joining during the game-over shows it, but sends no summary');
+  // Cid leaves, and comes back to the room on a later trip with the same profile: his is still there
+  room.handle(Cc, { t: 'leave' });
+  room.newRun();
+  const cc2 = new FakeConn(), C2 = room.addPlayer(cc2, 'Cid').player;
+  room.setProfile(C2, { pid: 'cccccccccccccccc' }); room.welcome(C2);
+  check(cc2.last('trip')?.run === ta.run && room.runId !== ta.run, 'the trip\'s record: who left and rejoins the room later with the same profile still gets the summary they missed');
+  room.sim.free?.();
+}
+{
+  // practice: a typed seed's trip, a test lever, a server with test switches; the next trip in the room isn't
+  const room = new Room('PRAC', 777, { typed: true });
+  const ca = new FakeConn(), A = room.addPlayer(ca, 'Ann').player;
+  room.welcome(A);
+  const testServer = room.practice();
+  room.serverTest = false; room.mobsOn = true;   // (as on a player's server)
+  const typed = room.practice();
+  room.newRun();
+  const next = room.practice();
+  room.handle(A, { t: 'dbg', op: 'clock', h: 9 });
+  const lever = room.practice();
+  room.newRun();
+  room.mobsOn = false;
+  const noMobs = room.practice();
+  room.mobsOn = true;
+  const fresh = new Room('PRAC2', null);
+  fresh.serverTest = false; fresh.mobsOn = true;
+  check(testServer === 'test' && typed === 'seed' && next === null && lever === 'test' && noMobs === 'test' && room.practice() === null && fresh.practice() === null,
+    `the trip's record: a typed seed is practice ('${typed}'), the room's next trip isn't (${next}); a test lever (${lever}), test switches (${testServer}) or no wildlife (${noMobs}) make a test trip; a fresh trip after it counts again`);
+  room.sim.free?.(); fresh.sim.free?.();
+}
+{
+  // who the trip's record is for: the day starts when someone walks off down the road (camp's clock doesn't
+  // wait while someone walks to town); a summary only for who rode; a new tab while their old seat is kept is
+  // the same player; leaving and coming back later isn't the whole trip
+  const room = new Room('WHO', 4242);
+  const ca = new FakeConn(), cb = new FakeConn(), cc = new FakeConn();
+  const A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(cb, 'Bob').player, Cc = room.addPlayer(cc, 'Cid').player;
+  A.key = 'tok:a'; B.key = 'tok:b'; Cc.key = 'tok:c';
+  room.setProfile(A, { pid: 'aaaaaaaaaaaaaaaa' }); room.setProfile(B, { pid: 'bbbbbbbbbbbbbbbb' }); room.setProfile(Cc, { pid: 'cccccccccccccccc' });
+  room.welcome(A); room.welcome(B); room.welcome(Cc);
+  room.handle(Cc, { t: 'leave' });   // Cid looks in at camp and goes before the RV does
+  const z = room.W.camp.exitZ + 40;
+  room.onPose(A, { par: 0, x: 0, y: room.W.heightAt(0, z) + 0.05, z, yaw: 0, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+  tick(room, 1);
+  const waited = room.phase === 'camp' && room.clock === C.DAY_START;
+  tick(room, 1.5);
+  check(waited && room.phase === 'road' && room.departed && room.clock > C.DAY_START && ca.has(m => m.t === 'toast' && /Ann set off on foot, so the day has started/.test(m.text))
+    && room.roster.get('aaaaaaaaaaaaaaaa').fromStart && room.roster.get('bbbbbbbbbbbbbbbb').fromStart,
+    `the trip's record: someone 40 m down the road on foot for 2 s starts the day, the RV still in camp (clock ${room.clock.toFixed(3)})`);
+  // Bob's tab dies and he opens a new one, his old seat still kept: the same profile id, the same trip
+  room.hold(B, 90);
+  const cb2 = new FakeConn(), B2 = room.addPlayer(cb2, 'Bob').player;
+  B2.key = 'tok:b2'; room.setProfile(B2, { pid: 'bbbbbbbbbbbbbbbb' }); room.welcome(B2);
+  room.removePlayer(B.id, 'expired');
+  // Ann leaves the trip on day 1, and joins again later on
+  room.handle(A, { t: 'leave' });
+  const ca2 = new FakeConn(), A2 = room.addPlayer(ca2, 'Ann').player;
+  A2.key = 'tok:a2'; room.setProfile(A2, { pid: 'aaaaaaaaaaaaaaaa' }); room.welcome(A2);
+  room.finish(true);
+  const ta = ca2.last('trip'), tb = cb2.last('trip');
+  check(B2.pid === 'bbbbbbbbbbbbbbbb' && tb?.you.fromStart && tb.you.atEnd && ta && !ta.you.fromStart && ta.you.atEnd
+    && JSON.stringify(ta.crew.map(c => c.name)) === '["Bob"]' && !room.pending.has('cccccccccccccccc') && JSON.stringify(cb2.last('meta').trip.pending) === '[]',
+    `the trip's record: a new tab while the old seat is kept keeps its profile id (${B2.pid}); who left and came back isn't from the start (crew ${ta?.crew?.map(c => c.name).join(', ')}); who never rode gets no summary`);
+  room.sim.free?.();
+}
+
 // ---- in process: trip codes (GameHost) -----------------------------------------------------------------
 {
   const { GameHost } = await import('../server/host.js');

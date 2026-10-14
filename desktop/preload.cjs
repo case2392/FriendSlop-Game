@@ -28,4 +28,10 @@ contextBridge.exposeInMainWorld('desktop', {
   joinLobby: id => ipcRenderer.invoke('desktop:join-lobby', String(id)),   // -> { ok, wsUrl, code, hostName, lobby } or { ok: false, msg }
   joinCode: code => ipcRenderer.invoke('desktop:join-code', String(code)), // the same, found by trip code on Steam
   onEvent: fn => { if (typeof fn === 'function') listeners.add(fn); },     // { t: 'lobby', id }: an invite accepted mid-game
+  // the player's save (client/js/profile.js): as it was on disk when the page loaded, and how to write it
+  profile: Object.freeze({
+    boot: boot.profile ? Object.freeze({ text: boot.profile.text ?? null, bak: boot.profile.bak ?? null }) : null,
+    save: text => ipcRenderer.invoke('desktop:profile-save', String(text)),   // -> { ok } or { ok: false, msg }
+    quarantine: () => ipcRenderer.invoke('desktop:profile-quarantine'),       // the unreadable save, moved aside
+  }),
 });

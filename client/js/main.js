@@ -25,6 +25,9 @@ import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
 import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
+import { profile, profileStatus, forServer, credit } from './profile.js';
+import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
+import { fmtRoad, fmtClockH, crewBest } from '/shared/profile.js';
 
 const $ = id => document.getElementById(id);
 const S = window.__nmd = {
@@ -184,7 +187,7 @@ async function joinViaSteam(find, status) {
   catch (e) { if (!stale()) { menuBusy(null); menuStatus(''); $('menuError').textContent = e.message; DESK.leave(); } return false; }
   if (stale()) { net.close(); return false; }
   S.hosting = false; S.viaSteam = true; S.lobbyId = r.lobby || null;
-  net.send({ t: 'join', name: myName(), room: r.code, build: BUILD(), rdy: 1 });
+  net.send({ t: 'join', name: myName(), room: r.code, build: BUILD(), rdy: 1, prof: forServer() });
   return true;
 }
 // an invite accepted while the game runs: straight in from the menu; mid-trip, ask first (unless it's
@@ -253,7 +256,7 @@ $('hostBtn').onclick = async () => {
   const pick = STEAM ? await DESK.pickCode?.().catch(() => null) : null;
   if (my !== attempt) return;
   S.hosting = true;
-  if (await ensureConnected()) { if (my === attempt) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null, code: pick?.ok ? pick.code : undefined, build: BUILD(), rdy: 1 }); }
+  if (await ensureConnected()) { if (my === attempt) net.send({ t: 'create', name: myName(), seed: $('seedInput').value.trim() || null, code: pick?.ok ? pick.code : undefined, build: BUILD(), rdy: 1, prof: forServer() }); }
   else menuBusy(null);
 };
 // Join Game: the trip code a friend read out. The browser build asks its server; the desktop build has
@@ -277,7 +280,7 @@ $('joinBtn').onclick = async () => {
   $('menuError').textContent = ''; menuStatus('');
   S.hosting = false; hostLeft = null;
   await physReady;
-  if (await ensureConnected()) { if (my === attempt) net.send({ t: 'join', name: myName(), room: code, resume: savedSession(code), build: BUILD(), rdy: 1 }); }
+  if (await ensureConnected()) { if (my === attempt) net.send({ t: 'join', name: myName(), room: code, resume: savedSession(code), build: BUILD(), rdy: 1, prof: forServer() }); }
   else menuBusy(null);
 };
 // trip codes are digits: keep only those, four at most (a pasted "12 34" or "code: 4821, 8pm" works too)
@@ -328,17 +331,25 @@ function fmtClock(h) {
 
 const canvas = $('canvas');
 const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden') || !!$('netModal')
-  || !$('settings').classList.contains('hidden') || !$('credits').classList.contains('hidden');
+  || !$('settings').classList.contains('hidden') || !$('credits').classList.contains('hidden') || garageOpen();
 canvas.addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
 $('clickToPlay').addEventListener('click', e => { if (!e.target.closest('.ctp-row, .ctp-code') && !uiOpen()) canvas.requestPointerLock?.(); });
 // Esc: the pointer comes free and this card offers the rest (the world keeps going: it's co-op)
 $('ctpInvite').onclick = () => inviteFriends();
-$('ctpLeave').onclick = () => netModal('Leave the trip?', DESK && S.hosting ? 'The trip runs on your PC: if you leave, it ends for everyone.' : 'Your seat goes to whoever joins next.', [
+$('ctpLeave').onclick = () => netModal('Leave the trip?', (DESK && S.hosting ? 'The trip runs on your PC: if you leave, it ends for everyone.' : 'Your seat goes to whoever joins next.') + waitingSummaries(), [
   ['Leave', () => backToMenu(null)], ['Stay', () => $('netModal')?.remove()],
 ]);
-$('ctpQuit').onclick = () => netModal('Quit the game?', S.hosting ? 'The trip runs on your PC: quitting ends it for everyone.' : 'Your friends keep driving without you.', [
+$('ctpQuit').onclick = () => netModal('Quit the game?', (S.hosting ? 'The trip runs on your PC: quitting ends it for everyone.' : 'Your friends keep driving without you.') + waitingSummaries(), [
   ['Quit', () => DESK?.quit()], ['Stay', () => $('netModal')?.remove()],
 ]);
+// the desktop host's game holds a friend's trip summary (their records) till they come back for it:
+// leaving ends that ('Ann hasn't got her trip summary yet.')
+function waitingSummaries() {
+  const who = DESK && S.hosting ? S.meta?.trip?.pending || [] : [];
+  if (!who.length) return '';
+  const names = who.slice(0, 3).join(', ') + (who.length > 3 ? ` and ${who.length - 3} more` : '');
+  return ` ${names} ${who.length > 1 ? 'haven\'t' : 'hasn\'t'} got ${who.length > 1 ? 'their' : 'the'} trip summary yet: it waits on your PC till they reconnect, and leaving loses it.`;
+}
 document.addEventListener('pointerlockerror', () => { if (S.phase === 'game') toast('Click again to look around.', '#fff', 2); });
 document.addEventListener('pointerlockchange', () => {
   locked = document.pointerLockElement === canvas;
@@ -393,6 +404,8 @@ window.addEventListener('keydown', e => {
   if (keys[k]) return;
   keys[k] = true;
   if (S.phase === 'menu') return;
+  // the Garage holds the game's keys while it's open (it closes on G or Esc; the voice keys still work)
+  if (garageOpen() && !['g', 'escape', 'v', 't', 'm'].includes(k)) return;
   // the night's receipt (shown while the mouse is captured): any of these keys puts it away
   if (!$('receipt').classList.contains('hidden') && (k === 'e' || k === 'enter' || k === ' ' || k === 'escape')) { $('receipt').classList.add('hidden'); return; }
   if (k === 'e') onUse();
@@ -407,8 +420,9 @@ window.addEventListener('keydown', e => {
   }
   else if (k === 't') voice.setWalkieKey(true);
   else if (k === 'f1' || k === '?') { e.preventDefault(); $('help').classList.toggle('hidden'); }
+  else if (k === 'g' && !e.repeat) { if (garageOpen()) closePanel('garage'); else openPanel('garage'); }   // (held down: not open-then-shut)
   else if (/^[1-6]$/.test(k)) net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
-  else if (k === 'escape') closeKeypad();
+  else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); }
 });
 window.addEventListener('keyup', e => {
   const k = keyName(e);
@@ -722,6 +736,8 @@ const TIPS = [
   'Crashes and the wildlife dent the RV. Worn down it\'s slower, and at 0% it breaks down: everyone out, and hold E at the engine hatch at the back.',
   'Gus fixes the RV by the lot at night, once the Repo Man is paid: cash, or on tomorrow\'s payment.',
   'The casino pays out to the whole crew. So do its losses.',
+  'Every trip is timed and counted. G opens the Garage: your fastest payoff, your biggest haul, your crews.',
+  'A trip from a typed seed is practice: it counts only on that seed\'s board in your Logbook.',
 ];
 let tipN = Math.floor(Math.random() * TIPS.length);
 function loadingBar(on, frac = 0, text = 'Loading the road') {
@@ -946,7 +962,7 @@ async function reconnect() {
     try {
       await net.connect();
       const got = new Promise((resolve, reject) => { welcomeWait = { resolve, reject }; setTimeout(() => reject({ code: 'timeout' }), 8000); });
-      net.send({ t: 'join', name: myName(), room: S.code, resume: savedSession(S.code), build: BUILD(), rdy: 1 });
+      net.send({ t: 'join', name: myName(), room: S.code, resume: savedSession(S.code), build: BUILD(), rdy: 1, prof: forServer() });
       await got;
       welcomeWait = null;
       reconnecting = false;
@@ -1128,6 +1144,17 @@ net.on('emote', inOrder(m => { const v = S.views.get(m.id); if (v) v.emote = { e
 net.on('ping', inOrder(addPing));
 net.on('receipt', inOrder(showReceipt));
 net.on('over', inOrder(showOver));
+// a trip's summary for my save (sent after the game-over; held by the server till this page says it has it,
+// so one that arrives on a reconnect is a trip that ended while I was away)
+net.on('trip', inOrder(m => {
+  const res = credit(m, { acceptTest: !!S.acceptTestRuns });
+  // the server holds it till the page says it's saved (a failed write: it comes again on the next welcome)
+  res.saved.then(ok => { if (ok) net.send({ t: 'tripAck', run: m.run }); });
+  if (res.dup) return;   // (already shown: the game-over keeps its lines, see showOver)
+  S.lastTrip = { m, res };
+  if (m.run === S.overRun && !$('overScreen').classList.contains('hidden')) { const el = $('overRecords'); if (el) el.innerHTML = recordLines(m, res); }
+  else if (res.counted) toast(`Your last trip (${m.won ? 'paid off' : 'repo\'d'}) is in your Logbook${res.newRecords.length ? ': a new record!' : '.'} (G)`, '#ffd166', 6);
+}));
 net.on('ev', m => afterWorld(() => { for (const e of m.list) onEvent(e); }));
 
 function onEvent(e) {
@@ -1261,7 +1288,7 @@ function showReceipt(m) {
     ${row('Loot broken', fmt$(m.broken) + ' of stuff', m.broken ? 'bad' : '')}
     ${m.stolen ? row('Stolen by ringtails', `${fmt$(m.stolen)}${m.recovered ? ` (got ${fmt$(m.recovered)} back)` : ''}`, m.recovered >= m.stolen ? '' : 'bad') : ''}
     ${m.rv ? row('The RV', `${m.rv.hp}%${m.rv.today ? ` (-${m.rv.today}% today: ${rvBlame(m.rv.src)})` : ''}`, m.rv.today ? 'bad' : '') : ''}
-    ${row('Payment', `PAID ${fmt$(m.due)}`, 'good')}
+    ${row('Payment', `PAID ${fmt$(m.due)}${m.paidAt != null ? ` at ${fmtClockH(m.paidAt)}${paidBest(m) ? ` <small>(your best day ${m.day}: ${fmtClockH(paidBest(m))})</small>` : ''}` : ''}`, 'good')}
     ${row('Bank', fmt$(m.bank))}
     ${m.rv && m.rv.hp < 100 ? `<p class="hint">Gus fixes it by the lot tonight: ${m.rv.quote.pts}% for ${fmt$(m.rv.quote.cash)}, or ${fmt$(m.rv.quote.loan)} on ${m.day === C.DAYS - 1 ? 'the balloon payment' : 'tomorrow\'s payment'}.</p>` : ''}
     <p class="hint">Campfire's lit. The store is open. When everyone's in a bunk (E on the bed in the RV), day ${m.day + 1} starts.</p>
@@ -1270,6 +1297,8 @@ function showReceipt(m) {
   $('receiptClose').onclick = () => $('receipt').classList.add('hidden');
   sfx.sleep();
 }
+// my best time of day for paying this day (any whole trip on Standard terms), from my save
+const paidBest = m => profile()?.best.std.splits[m.day - 1]?.h ?? null;
 // who and what dented the RV today, worst first ('Sam -18%, the Grumphorn -8%, rocks -9%')
 function rvBlame(src) {
   return Object.entries(src || {}).sort((a, b) => b[1] - a[1]).map(([k, v]) => `${escapeHtml(k === 'nobody' ? 'nobody at the wheel' : k)} -${v}%`).join(', ');
@@ -1277,6 +1306,9 @@ function rvBlame(src) {
 let overTimer = 0;
 function showOver(m) {
   const s = m.stats || {};
+  S.overRun = m.run?.id ?? null;
+  const practice = m.run?.practice === 'seed' ? '<p class="hint">Practice trip (typed seed): it counts only on that seed\'s board in your Logbook.</p>'
+    : m.run?.practice === 'test' ? '<p class="hint">Test trip: nothing is recorded.</p>' : '';
   $('overScreen').innerHTML = m.won
     ? `<h1 class="won">You Own the RV</h1><div class="filigree"></div><p>Five days, ${fmt$(s.sold || 0)} of pawned junk, and the Slopmaster 9000 is finally, legally, yours.</p>`
     : `<h1 class="lost">Repo'd</h1><div class="filigree"></div><p>Day ${m.day} of ${C.DAYS}. ${m.short > 0 ? `${fmt$(m.short)} short of the ${fmt$(m.due)} ${m.day >= C.DAYS ? 'balloon payment' : 'payment'} at midnight. ` : ''}The Repo Man hooks the Slopmaster and drives off into the sunset without you.</p>`;
@@ -1294,10 +1326,16 @@ function showOver(m) {
     ${s.beanings ? `<div class="rrow"><span>Friends beaned</span><b>${s.beanings}</b></div>` : ''}
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
+    <div id="overRecords">${S.lastTrip?.m.run === S.overRun && S.overRun ? recordLines(S.lastTrip.m, S.lastTrip.res) : ''}</div>
+    ${practice}
     <p class="hint" id="overNext"></p>
     <div class="row"><button class="btn small pink" id="overLeave">Leave Trip</button></div>`;
   $('overScreen').classList.remove('hidden');
-  $('overLeave').onclick = () => backToMenu(null);
+  $('overLeave').onclick = () => {
+    const wait = waitingSummaries();
+    if (!wait) { backToMenu(null); return; }
+    netModal('Leave the trip?', 'The trip runs on your PC: if you leave, it ends for everyone.' + wait, [['Leave', () => backToMenu(null)], ['Stay', () => $('netModal')?.remove()]]);
+  };
   const until = performance.now() + (m.next ?? 25) * 1000;
   clearInterval(overTimer);
   overTimer = setInterval(() => {
@@ -1520,6 +1558,7 @@ function renderSettings() {
 function openPanel(id) {
   document.exitPointerLock?.();
   if (id === 'settings') renderSettings();
+  if (id === 'garage') renderGarage();
   $(id).classList.remove('hidden');
   $('clickToPlay').classList.add('hidden');
 }
@@ -1528,6 +1567,10 @@ function closePanel(id) {
   if (S.phase === 'game' && !locked) $('clickToPlay').classList.remove('hidden');
 }
 $('settingsBtn').onclick = () => { sfx.click(); openPanel('settings'); };
+$('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
+$('ctpGarage').onclick = () => openPanel('garage');
+$('garageClose').onclick = () => closePanel('garage');
+initGarage({ canImport: () => S.phase === 'menu' });
 $('ctpSettings').onclick = () => openPanel('settings');
 $('settingsClose').onclick = () => closePanel('settings');
 $('settingsReset').onclick = () => { resetSettings(); renderSettings(); };
@@ -1642,6 +1685,8 @@ function frameInner(now) {
 S.aimAt = (x, y, z) => { const e = me.eye(S.rv); const dx = x - e.x, dy = y - e.y, dz = z - e.z; me.yaw = Math.atan2(dx, dz); me.pitch = -Math.atan2(dy, Math.hypot(dx, dz)); };
 S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, throw: onThrow, drop: onDrop })[fn]?.();
 S.key = (k, down) => { keys[k] = !!down; };   // (a key held or let go, for the tests: the E of a held fix)
+S.uiOpen = () => uiOpen();   // (tests: a panel is up, and the game's keys are off)
+S.profile = profile; S.profileStatus = profileStatus;   // (tests: this player's save)
 S.target = () => target;
 S.send = m => net.send(m);
 S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?
@@ -2109,6 +2154,13 @@ function questTracker(g) {
   if ((g.ph === 'camp' || g.ph === 'road') && g.brk) L.push([keysIn('BROKEN DOWN: hold [E] at the engine hatch on the back of the RV'), 'warn']);
   else if ((g.ph === 'camp' || g.ph === 'road') && hp <= 60) L.push([`RV ${hp}%: ${hp > 30 ? 'smoking, down on power' : 'limping, a knock stalls it'}`, 'warn']);
   if (g.ph === 'camp') L.push([roleOf('drv') && roleOf('drv') !== S.selfId && !roleAway('drv') ? `${roleName('drv')} drives out of camp to start the clock` : 'Drive out of camp to start the clock', '']);
+  if (g.ph === 'camp' && g.day === 1) {
+    const pr = S.meta?.trip?.practice;
+    if (pr === 'seed') L.push(['Practice trip (typed seed): it counts only on that seed\'s board', 'warn']);
+    else if (pr === 'test') L.push(['Test trip: nothing is recorded', 'warn']);
+    const crew = crewBest(profile(), (S.meta?.players || []).map(p => p.h).filter(Boolean));
+    if (crew && !pr) L.push([`Best with this crew: ${crew.fast != null ? fmtRoad(crew.fast) : `${crew.wins}/${crew.trips} paid off`}${crew.haul != null ? `, ${fmt$(crew.haul)} pawned` : ''}`, '']);
+  }
   else if (g.ph === 'road') {
     if (!g.town) {
       const left = S.rv ? Math.max(0, S.W.LEN - 8 - S.rv.p.z) : 0;

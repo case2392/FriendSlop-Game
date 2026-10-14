@@ -232,6 +232,31 @@ Answer these in Steamworks before the store page goes to review:
 - [ ] Store pictures (`tools/storeart.mjs`), 5+ screenshots, the content survey and the AI disclosure
       done; the store page passed review and was "Coming Soon" for 2+ weeks; the build passed review
 
+## Steam Cloud for the save (optional, once the real App ID exists)
+
+Nothing is needed for saves to work: each player's save lives on their own PC, in the game's folder
+(`%APPDATA%\NO MONEY DOWN\save` on Windows, `~/.config/NO MONEY DOWN/save` on Linux and the Steam
+Deck): `profile.json`, and `profile.bak.json` (the one before it). Steam Cloud only carries it between
+a player's machines. Turn it on after the real App ID is in `package.json`, never under 480 (Valve's
+shared test app: everyone's files would mix).
+
+1. On partner.steamgames.com, open the app, then **Application > Steam Cloud**. Set the byte quota per
+   user to 1048576 (1 MB) and the number of files per user to 8. Save.
+2. On the same page, under **Auto-Cloud**, add a root path: root `WinAppDataRoaming`, subdirectory
+   `NO MONEY DOWN/save`, pattern `profile*.json`, OS Windows, not recursive. That syncs the save and its
+   backup and nothing else (not `save/corrupt`, not the logs).
+3. Add a root override for Linux (the Steam Deck too): original root `WinAppDataRoaming`, OS Linux, new
+   root `LinuxHome`, path `.config/` (the folder becomes `~/.config/NO MONEY DOWN/save`). Check the exact
+   field names, and whether Valve offers an XDG config root by now, against Valve's Steam Cloud
+   documentation while doing it.
+4. Tick **Enable cloud support for developers only** and publish. Test: finish a trip on PC A and quit
+   (Steam syncs on exit), start on PC B: the Garage's Logbook has it. Then play offline on both and
+   reconnect: Steam's own conflict dialog should come up.
+5. Untick "developers only" and publish.
+
+The browser build keeps its save in the browser (per browser and per address); the Garage's Save tab
+has Export and Import to move it.
+
 ## Later: a native Linux depot
 
 `npm run dist:linux` makes `dist/linux-unpacked/`. Before shipping it as its own depot:
@@ -248,6 +273,7 @@ without Steam features. Until that's solved, Proton running the Windows build is
 | `desktop/steam/` | lobbies, P2P, the host side (`host.cjs`) and the guest's bridge (`guest.cjs`) |
 | `desktop/electron-builder.cjs` | how `npm run dist` packages it |
 | `server/host.js` | the game server (every connection: the host's own page, friends over Steam, browsers) |
+| `desktop/save.cjs` | the player's save files (`<userData>/save`): atomic writes, the backup, bad files kept aside |
 | `steam/` | SteamPipe upload scripts and the rich presence file |
 | `test/steamnet.mjs` | the Steam networking against a stand-in Steam (`test/fakesteam/`) |
 | `test/desktop-smoke.mjs` | the real desktop app, two copies over the stand-in Steam |

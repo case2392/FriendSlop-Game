@@ -15,7 +15,7 @@ payment and he takes the RV.
 | | |
 |---|---|
 | ![the crew at camp](docs/screenshots/camp.jpg) | ![winching the RV up a washed-out grade](docs/screenshots/winch.jpg) |
-| **Morning camp.** The clock doesn't start until the RV rolls out. | **The Grade.** Too steep to drive. Somebody climbs up with the winch hook. |
+| **Morning camp.** The clock doesn't start until the RV rolls out (or somebody wanders off down the road). | **The Grade.** Too steep to drive. Somebody climbs up with the winch hook. |
 | ![climbing a canyon wall](docs/screenshots/climbing.jpg) | ![the code painted on the canyon rim](docs/screenshots/rim-code.jpg) |
 | **Climb anything steep**, on a stamina bar (PEAK rules). | **The ranger gate code** is painted up on the rim. Shout it down. |
 | ![carrying a CRT TV](docs/screenshots/carrying.jpg) | ![the paper road map](docs/screenshots/map.jpg) |
@@ -35,6 +35,16 @@ engine), a big hit throws the door open, and at 0% it **breaks down**: everybody
 engine hatch on its back until it coughs back to life (one of you takes 8 seconds, three take under 3).
 **Gus** fixes it by the RV lot in town at night, once the Repo Man is paid: 25% a press, for cash or on
 tomorrow's payment. It never ends a trip by itself: only a missed payment does.
+
+## Beat your time, beat your haul
+
+Every trip is timed and counted. **Road time** is the clock at each day's payment less 6:00, added up over
+the five days (pay at 2 PM every day and it's 30:00 of real time); the **biggest haul** is everything you
+pawned. The **Garage** (the menu, the Esc card, or `G`) keeps your fastest payoff, your best payment time
+for each day, your biggest haul, your cleanest delivery, a tally for every crew you've finished a trip
+with, and lifetime counters. Records need you aboard from the first morning to the end; a trip from a
+typed seed is practice and counts only on that seed's board. The save is yours, on your own PC (or in
+your browser), with Export and Import in the Garage to move it.
 
 ## Wildlife
 
@@ -269,7 +279,7 @@ npm test
   get into the text players can see (the store and the Steam agreement need
   everything shipped to be ours).
 - `test/logic.mjs` plays a whole run over real WebSockets with two fake
-  players and real physics (60 checks). It drives, carries and throws a vase
+  players and real physics (71 checks). It drives, carries and throws a vase
   (it chips), cracks the ranger gate, winches the RV up the grade, pawns a
   TV, wins or loses blackjack by standing on a pad, flips double-or-nothing,
   buys a walkie, pays the Repo Man, sleeps into day 2, gets billed for a KO,
@@ -277,7 +287,9 @@ npm test
   spot, starts over, and wins on day 5.
 - `test/server.mjs` checks what keeps an evening going when connections
   misbehave: kept seats, malformed frames, floods, a different build, silent
-  connections, the goodbye when the server shuts down.
+  connections, the goodbye when the server shuts down; and every trip's
+  summary reaching whoever was on it (held for a dropped player till they're
+  back, and only for who rode), and what counts as practice.
 - `test/rv.mjs` checks the RV's condition in process: what a crash costs and
   what must never count as one (keyboard driving, a handbrake stop with safes
   aboard, teleports, the tow off a steep bank, the winch), the winch hauling
