@@ -12,9 +12,6 @@
 // step <= 0.3 ms (mean), grumphorn charges within 20 m of the road, LEAVE ends by its exit (1.2 m) and at least
 // LEFT_OFF_ROAD (6.3 m) off the road's middle.
 import path from 'node:path';
-// a grumphorn out of patience lies down at least this far off the road's middle (its exit is 7.5 m or more out,
-// and it lies within 1.2 m of it; test/mobs.mjs G-exit uses the same)
-export const LEFT_OFF_ROAD = 6.3;
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +22,10 @@ const { RST, GST, FLAG } = { ...(await imp('shared/mobs.js')), ...(await imp('sh
 const { LOOT } = await imp('shared/loot.js');
 const { toWorld, RV_DIM } = await imp('shared/rv.js');
 await initPhysics();
+
+// a grumphorn out of patience lies down at least this far off the road's middle (its exit is 7.5 m or more out,
+// and it lies within 1.2 m of it; test/mobs.mjs G-exit uses the same)
+export const LEFT_OFF_ROAD = 6.3;
 
 const fake = (id, x, y, z, look) => ({ id, pos: { x, y: y + 0.9, z }, eye: { x, y: y + 1.6, z }, look, ko: false, par: 0, seat: null, flags: 0, mode: 0, name: `P${id}` });
 const finite = t => t && Number.isFinite(t.x + t.y + t.z);

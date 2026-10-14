@@ -601,6 +601,25 @@ const billed = (room, fn) => { const M = room.sim.mobs, f = M.ghCost.bind(M), lo
   check(g && at && Math.abs(at.z - g.z) < 3, `grumphorn: its charge into the closed ranger gate stops at the bars, winded (${at ? `${(at.z - g.z).toFixed(1)} m from them` : 'it never was'})`);
 }
 {
+  // the RV at 8 m/s into the closed ranger gate with a grumphorn asleep in front of its bars: each step of the
+  // crash goes to what the RV touched most in it, so the beast is priced as a beast and the bars as a crash
+  // (a crash that started on the beast used to be dropped whole, bars and all)
+  const { room, ps: [A] } = crew(['Ann']);
+  room.debug(A, { op: 'day', d: 3 });
+  tick(room, 0.2);
+  room.mobsOn = false;
+  const sim = room.sim, W = room.W, g = W.gates[0], r = roadAt(room, g.z - 40);
+  sim.placeRV(r.x, r.z, r.yaw);
+  tick(room, 0.8);
+  mobAt(room, A, 'grumphorn', g.x, g.z - 1.8, { yaw: Math.PI, st: GST.SLEEP });
+  const seen = rvHits(room);
+  driveAt(room, A, 8, 14, () => {});
+  A.seat = null;
+  tick(room, 3);
+  const pr = seen.filter(h => h.priced), beast = pr.filter(h => h.why === 'beast'), bars = pr.filter(h => h.why === 'crash' && h.what === 'the ranger gate');
+  check(beast.length === 1 && bars.length >= 1, `grumphorn: the RV rammed into the gate with a beast asleep before its bars pays for both: the beast -${beast[0]?.amt ?? 0}%, the bars -${bars.reduce((n, h) => n + h.amt, 0)}% (RV ${room.rvc.hp}%)`);
+}
+{
   // MRV3: a charge into the back of an RV driving off at 5 m/s closes at 2 m/s: no damage
   const { room, ps: [A] } = crew(['Ann']);
   room.mobsOn = false;
