@@ -236,10 +236,10 @@ export class Me {
     if (inp.grab && !this.holding && !this.hasHook && this.regrabT <= 0 && this.stamina > 4 && !limp) {
       const eye = this.eye(rv);
       const lk = this.look();
-      let hit = lw.ray(eye, lk, C.CLIMB.REACH + 0.55, G.WORLD | G.RV, exclude, false);
+      let hit = lw.ray(eye, lk, C.CLIMB.REACH + 0.55, G.WORLD | G.RV | G.FENCE, exclude, false);
       if (!hit || !CLIMBABLE.has(hit.kind)) {
         const chest = v3(this.pos.x, this.pos.y + 1.1, this.pos.z);
-        hit = lw.ray(chest, fwd, C.CLIMB.REACH, G.WORLD | G.RV, exclude, false);
+        hit = lw.ray(chest, fwd, C.CLIMB.REACH, G.WORLD | G.RV | G.FENCE, exclude, false);
       }
       if (hit && CLIMBABLE.has(hit.kind) && hit.normal.y < STEEP && hit.normal.y > -0.6) {
         this.mode = 'climb';
@@ -252,7 +252,7 @@ export class Me {
 
     const center = v3(this.pos.x, this.pos.y + CH, this.pos.z);
     const vy0 = this.vel.y;
-    const res = lw.moveSelf(center, mul(this.vel, dt), exclude);
+    const res = lw.moveSelf(center, mul(this.vel, dt), exclude, false, !!this.par);
     this.pos = v3(center.x + res.move.x, center.y + res.move.y - CH, center.z + res.move.z);
     // blocked sideways? lose that velocity (no wall-sliding at full speed)
     if (dt > 0) {
@@ -306,7 +306,7 @@ export class Me {
       return;
     }
     const center = v3(this.pos.x, this.pos.y + CH, this.pos.z);
-    const probe = lw.ray(add(center, mul(c.n, 0.35)), mul(c.n, -1), 1.7, G.WORLD | G.RV, exclude, false);
+    const probe = lw.ray(add(center, mul(c.n, 0.35)), mul(c.n, -1), 1.7, G.WORLD | G.RV | G.FENCE, exclude, false);
     if (!probe || !CLIMBABLE.has(probe.kind)) {
       if (inp.f > 0 && this.mantle(lw, center, c.n, exclude)) return;
       this.mode = 'walk'; this.climb = null; this.vel = v3(); this.regrabT = 0.2;
@@ -346,7 +346,7 @@ export class Me {
     // reached the top edge?
     if (inp.f > 0) {
       const head = add(add(nc, mul(tUp, 0.95)), mul(c.n, 0.4));
-      const above = lw.ray(head, mul(c.n, -1), 1.1, G.WORLD | G.RV, exclude, false);
+      const above = lw.ray(head, mul(c.n, -1), 1.1, G.WORLD | G.RV | G.FENCE, exclude, false);
       if (!above && this.mantle(lw, nc, c.n, exclude, probe.mat === 'mesa')) return;
     }
     this.pos = v3(nc.x, nc.y - CH, nc.z);
@@ -365,7 +365,7 @@ export class Me {
       const cand = add(add(center, v3(0, upBy, 0)), mul(nh, fwdBy));
       if (!lw.fits(cand)) continue;
       // there has to be something to stand on
-      const g = lw.ray(cand, v3(0, -1, 0), CH + 0.8, G.WORLD | G.RV | G.PROP, exclude, false);
+      const g = lw.ray(cand, v3(0, -1, 0), CH + 0.8, G.WORLD | G.RV | G.PROP | G.FENCE, exclude, false);
       if (!g || (strict && g.normal.y < WALKABLE)) continue;
       this.pos = v3(cand.x, g.point.y + 0.02, cand.z);
       this.mode = 'walk'; this.climb = null; this.vel = v3();
@@ -381,7 +381,7 @@ export class Me {
     let onRV = false;
     if (this.mode === 'climb') onRV = !!this.climb?.rv;
     else {
-      const g = lw.ray(v3(this.pos.x, this.pos.y + 0.2, this.pos.z), v3(0, -1, 0), 0.7, G.WORLD | G.RV | G.PROP, exclude, false);
+      const g = lw.ray(v3(this.pos.x, this.pos.y + 0.2, this.pos.z), v3(0, -1, 0), 0.7, G.WORLD | G.RV | G.PROP | G.FENCE, exclude, false);
       onRV = (g && g.kind === 'rv') || (insideRV(l.x, l.y, l.z, -0.05) && l.y < RV_DIM.ROOF_Y - 0.25);
     }
     if (onRV && !this.par) { this.par = 1; this.vel = sub(this.vel, rv.v); }

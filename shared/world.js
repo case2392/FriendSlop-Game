@@ -1206,7 +1206,7 @@ export function generateLeg(seed, day, opts = {}) {
   }
   // trees flanking the town sign, clear of the road and the Repo Man
   for (const [x, z] of [[13.5, T + 2], [-10.5, T + 5], [16, T + 10]]) townTree(x + (rngD() - 0.5), z + (rngD() - 0.5));
-  // rail fences along both sides of the main street, between the buildings (visual only)
+  // rail fences along both sides of the main street, between the buildings (solid to people: see the end)
   const fenceRun = (x, z0, z1) => {
     for (let z = z0; z < z1 - 3; ) {
       const n = Math.min(7, Math.max(2, Math.round((z1 - z) / 1.9) + 1)), L = (n - 1) * 1.9, zc = z + L / 2;
@@ -1437,6 +1437,23 @@ export function generateLeg(seed, day, opts = {}) {
     return { dens, beds, rockfalls };
   }
   const wild = opts.mobs === false ? { dens: [], beds: [], rockfalls: [] } : placeWildlife();
+
+  // the fences are solid: one thin box per rail span, the very spans client/js/nature3d.js draws (posts 1.9 m
+  // apart along the run's own z; a span steeper than 0.4 gets no rails, so no box), as wide as the rails either
+  // side of the posts and 0.95 m tall: a jump (1.09 m) clears it, and it can be climbed. Invisible (the fence
+  // itself is drawn) and part 'fence': they stop people and loot, not the RV, the critters or the ground checks
+  // (server/groups.js, client/js/phys.js). Made last, so nothing placed before them moves
+  for (const d of decor) {
+    if (d.k !== 'fence') continue;
+    const n = Math.max(2, d.len || 4), ry = d.ry || 0, sn = Math.sin(ry), cs = Math.cos(ry), tall = 0.95;
+    const post = i => { const lz = (i - (n - 1) / 2) * 1.9, x = d.x + lz * sn, z = d.z + lz * cs; return { x, z, g: heightAt(x, z) }; };
+    for (let i = 0; i < n - 1; i++) {
+      const A = post(i), B = post(i + 1);
+      if (Math.abs(B.g - A.g) / 1.9 > 0.4) continue;
+      const lo = Math.min(A.g, B.g), hi = Math.max(A.g, B.g) + tall;
+      box((A.x + B.x) / 2, (lo + hi) / 2, (A.z + B.z) / 2, 0.2, (hi - lo) / 2, 1.05, ry, 'invisible', null, 'fence');
+    }
+  }
 
   return {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
