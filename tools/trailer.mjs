@@ -339,7 +339,8 @@ const H = (x, z) => W.heightAt(x, z);
 const lerp = (a, b, u) => a + (b - a) * u;
 const ease = u => u < 0 ? 0 : u > 1 ? 1 : u * u * (3 - 2 * u);
 // true once every `period` s (from `phase`), for a tick at t (ticks are 1/60 s apart)
-const every = (t, period, phase = 0) => t >= phase && ((t - phase) % period) < 1 / 60 - 1e-9;
+// (t sums 1/60 steps, so it lands a hair either side of a beat: the 1e-6 nudge makes every beat fire once)
+const every = (t, period, phase = 0) => { const u = t - phase + 1e-6; return u >= 0 && u - Math.floor(u / period) * period < 1 / 60; };
 const lerp3 = (a, b, u) => ({ x: lerp(a.x, b.x, u), y: lerp(a.y, b.y, u), z: lerp(a.z, b.z, u) });
 const at = (x, z, dy) => ({ x, y: H(x, z) + dy, z });
 const yawTo = (from, to) => Math.atan2(to.x - from.x, to.z - from.z);
@@ -909,7 +910,7 @@ async function stills() {
   dbg({ op: 'tpRV', x: 0, z: W.town.z + 12, yaw: 0 });
   await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(2, T.y + 0.05, T.z + 4, 0); S.aimAt(7.5, T.y + 2.2, T.z + 24); S.setSetting('uiScale', 1.6); });
   await show('#hud');
-  await page.addStyleTag({ content: '#hCode, #tracker, #tracker * { visibility: hidden !important; }' });
+  await page.addStyleTag({ content: '#hCode, #hCode *, #tracker, #tracker * { visibility: hidden !important; } #connBox { display: none !important; }' });
   await page.waitForTimeout(1000);
   dbg({ op: 'clock', h: 23.984 });
   await page.waitForTimeout(160);   // (a few snapshots with the new time, then the server held still at 11:59 PM)
