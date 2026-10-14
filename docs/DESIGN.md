@@ -339,20 +339,38 @@ roof, then the RV; it made the first four days too forgiving.)
   unseen, at 80%: carrying the good stuff in is worth it, carrying the junk in
   isn't. (Unloading 20 things one at a time ate three game hours.)
 - **Casino:** every game bets *the shared bank*, and *anyone* can bet it.
-  That's GWYF's comedy and it's ours too. But nobody waits for anybody: each
-  player plays their own game at the same time (one at blackjack, one at craps,
-  one on the coin machine), all of it out of the one bank. A station (a
-  blackjack seat, a craps rail, a machine) is yours once you press E at its
-  button and stays yours till you walk off. A game you leave half-played is
-  played out the house's way: a hand stands, the dice roll on. The number keys
-  play it: 1-4 set the stake (+$100, +$500, ALL IN, clear), 5 deals, rolls or
-  pulls, 6 stands. The stake leaves the bank when it's played; winnings come
-  back when the game settles; the crew sees every result with the player's name.
-  - **Blackjack.** Three seats, each your own hand against the dealer. A
-    natural pays 3 to 2, and the dealer stands on 17.
-  - **Craps.** Two rails, the pass line: 7 or 11 on the come-out wins, 2, 3 or
-    12 loses, anything else is the point; roll it again before a 7. Even
-    money, a 1.4% house edge.
+  That's GWYF's comedy and it's ours too. Each player can be at a different
+  game at the same time (one at blackjack, one at craps, one on the coin
+  machine), all of it out of the one bank; the blackjack table plays its seats
+  together, one round. A station (a blackjack seat, a craps rail, a machine) is
+  yours once you press E at its button and stays yours till you walk off. A
+  game you leave half-played is played out the house's way: a hand stands, the
+  dice roll on. The number keys play it: 1-4 set the stake (+$100, +$500, ALL
+  IN, clear), 5 deals, hits, rolls or pulls; at blackjack 6 stands, 7 doubles,
+  8 splits; at craps 7 lays odds. The stake leaves the bank when it's played;
+  winnings come back when the game settles; the crew sees every result with the
+  player's name.
+  - **Blackjack.** One table, three seats, one round played together, the way
+    a casino deals it (server/blackjack.js, a six-deck shoe). The first DEAL
+    with a bet down starts a 5 s count for the others to get in (everyone
+    seated and bet saying DEAL deals at once). The dealer deals round the seats
+    in order and a card up to himself, then a second round and his hole card
+    down. With an ace or a ten up he checks for blackjack (his natural ends the
+    round: a player's natural pushes, the rest lose). Then each seat in turn,
+    25 s each: hit, stand, double on the first two cards (one card, the stake
+    doubled) or split a pair once (a stake on each hand; split aces get a card
+    each). Last he turns his card and draws to 17 (stands on every 17). A
+    natural pays 3 to 2. A stake the bank can't cover on top of the others'
+    sits that hand out.
+  - **Craps.** Two rails, the pass line: 7 or 11 on the come-out wins even
+    money, 2, 3 or 12 loses, anything else is the point; roll it again before a
+    7. The line pays even money (a 1.4% house edge). With a point up you can
+    lay odds behind the line, a bet at a time up to 3x the line, paid at true
+    odds: the harder the point, the more it pays (4 or 10 pays 2 to 1, 5 or 9
+    3 to 2, 6 or 8 6 to 5), with no house edge on the odds. (The line itself
+    can't pay by the point: the come-out's 7s and 11s already lean the
+    player's way, and paying points at their odds as well would hand the crew
+    an edge over the house.)
   - **Double or Nothing.** Two coin-flip machines with levers. It's 48.5%,
     because the house always wins. The stake stays set: pull again.
   - **The Ringtail Derby.** Everybody's game: four ringtails race down a

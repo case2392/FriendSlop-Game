@@ -28,16 +28,21 @@ class FakeConn {
   has(pred) { return this.sent.some(pred); }
 }
 const tick = (room, secs) => { for (let i = 0; i < Math.round(secs * C.SIM_HZ); i++) room.tick(1 / C.SIM_HZ); };
-// p's blackjack hand at seat 1, dealt for `stake` and still in play (a natural settles at once: deal again);
-// the stake comes out of the bank as at the table. What the hand pays back once it's played out as a stand:
+// p's blackjack hand at seat 1, dealt for `stake` and its turn to play (a natural, the dealer's or p's, settles
+// without a turn: deal again); the stake comes out of the bank as at the table. What the hand pays back once
+// it's played out as a stand:
 const dealHand = (room, p, stake) => {
-  const s = room.casino.st.get('bj1');
-  room.casino.sit(p, 'bj1');
-  do { s.state = 'bet'; s.hand = null; s.bet = stake; room.casino.act(p, 'bj1', 'go', 0, room.t, 1e9); } while (s.state !== 'play');
+  const cas = room.casino, T = cas.bj, s = cas.st.get('bj1');
+  cas.sit(p, 'bj1');
+  for (let k = 0; k < 50 && T.state !== 'turn'; k++) {
+    T.reset(); s.bet = stake; s.dealt = p;
+    T.begin(new Map([['bj1', stake]]), room.t);
+    for (let i = 0; i < 20 && T.state === 'deal'; i++) { T.until = 0; T.step(room.t); }
+  }
   room.bank -= stake;
-  return s;
+  return { s, h: T.hands.get('bj1').hands[0], stake };
 };
-const paidBack = s => ({ natural: Math.floor(s.stake * 2.5), win: s.stake * 2, push: s.stake, lose: 0 })[s.out];
+const paidBack = d => ({ natural: Math.floor(d.stake * 2.5), win: d.stake * 2, push: d.stake, lose: 0, bust: 0 })[d.h.out];
 // p's coin in the air at Double or Nothing machine 1 for `stake`, a winner; out of the bank as at the machine
 const coinUp = (room, p, stake) => {
   const f = room.casino.st.get('flip1');
@@ -172,8 +177,8 @@ const coinUp = (room, p, stake) => {
   const table = dealHand(room, B, 400);
   const b1 = room.bank;
   room.nextDay();
-  check(table.state === 'result' && room.bank === b1 + paidBack(table) && A.seat === null && ca.has(m => m.t === 'seat' && m.seat === null),
-    `rooms: at dawn a hand still in play is played out as a stand (${table.out}: +$${room.bank - b1}) and the driver is told the seat is free`);
+  check(table.h.out && table.h.cards.length === 2 && room.bank === b1 + paidBack(table) && A.seat === null && ca.has(m => m.t === 'seat' && m.seat === null),
+    `rooms: at dawn a hand still in play is played out as a stand (${table.h.out}: +$${room.bank - b1}) and the driver is told the seat is free`);
   // bungee cords stay on overnight
   const { toWorld } = await import('../shared/rv.js');
   const r = room.sim.rvPose();
@@ -796,8 +801,8 @@ const coinUp = (room, p, stake) => {
   const coin = coinUp(room, A, 200);                 // $200 in the air, a winner
   room.midnight();
   const back = paidBack(table);
-  check(table.state === 'result' && coin.state === 'result' && room.paid && room.phase === 'night' && room.bank === 2600 - 300 + back + 200 - C.QUOTAS[1] && room.casino.inPlay() === 0 && ca.has(m => m.t === 'toast' && /Last call/.test(m.text)),
-    `payments: a hand on the table (played out: ${table.outcome}) and a coin in the air at midnight count toward the payment (bank after: $${room.bank})`);
+  check(table.h.out && coin.state === 'result' && room.paid && room.phase === 'night' && room.bank === 2600 - 300 + back + 200 - C.QUOTAS[1] && room.casino.inPlay() === 0 && ca.has(m => m.t === 'toast' && /Last call/.test(m.text)),
+    `payments: a hand on the table (played out: ${table.h.out}) and a coin in the air at midnight count toward the payment (bank after: $${room.bank})`);
   room.sim.free?.();
 }
 {
@@ -812,7 +817,7 @@ const coinUp = (room, p, stake) => {
   coinUp(room, A, 1000);
   room.newRun();
   tick(room, 6);
-  check(room.bank === 200 && !room.stats.bestWin && !room.stats.worstLoss && room.casino.inPlay() === 0 && room.casino.st.get('bj1').state === 'bet', `payments: a new run starts with $200 and clean stats, whatever was bet during the game-over (bank $${room.bank})`);
+  check(room.bank === 200 && !room.stats.bestWin && !room.stats.worstLoss && room.casino.inPlay() === 0 && room.casino.bj.state === 'bet', `payments: a new run starts with $200 and clean stats, whatever was bet during the game-over (bank $${room.bank})`);
   room.sim.free?.();
 }
 

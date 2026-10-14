@@ -1,7 +1,7 @@
 // NO MONEY DOWN — client entry.
 import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
-import { LOOT, fmt$ } from '/shared/loot.js';
+import { LOOT, fmt$, CARRY, carried, carryDist } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, RV_HATCH, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
 import * as net from './net.js';
@@ -383,17 +383,18 @@ document.addEventListener('mousemove', e => {
 document.addEventListener('mousedown', e => {
   if (!isLocked()) return;
   initAudio();
-  if (e.button === 0) { inp.grab = true; onGrabPress(); }
+  if (e.button === 0) inp.grab = true;   // (held: climbing. Things are picked up and set down with E)
   if (e.button === 2) onThrow();
   if (e.button === 1) onPing();
 });
 document.addEventListener('mouseup', e => {
-  if (e.button === 0) { inp.grab = false; onGrabRelease(); }
+  if (e.button === 0) inp.grab = false;
 });
 document.addEventListener('contextmenu', e => { if (locked) e.preventDefault(); });
 document.addEventListener('wheel', e => {
   if (!locked || !me.holding) return;
-  S.holdDist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, (S.holdDist || C.GRAB.HOLD_DEFAULT) - Math.sign(e.deltaY) * 0.2));
+  const lo = me.holding.carry ? CARRY.MIN : C.GRAB.HOLD_MIN, hi = me.holding.carry ? CARRY.MAX : C.GRAB.HOLD_MAX;
+  S.holdDist = Math.max(lo, Math.min(hi, (S.holdDist || C.GRAB.HOLD_DEFAULT) - Math.sign(e.deltaY) * 0.2));
   net.send({ t: 'hd', d: S.holdDist });
 }, { passive: true });
 
@@ -511,11 +512,11 @@ function computeTarget() {
     const L = LOOT[p.type];
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
     if (L.mob) return { kind: 'prop', id: p.id, hit, label: mobLabel(p) };
-    if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }; }
-    if (L.find) return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name}: set it down in the RV to keep it (${TINS[L.find]} cards)` };
+    if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[E] take the road map and call out the road to ${driverName()}` }; }
+    if (L.find) return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name}: set it down in the RV to keep it (${TINS[L.find]} cards)` };
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
-    return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
+    return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
   }
   if (hit.kind === 'use') {
     const u = S.W.uses[hit.id];
@@ -586,16 +587,16 @@ function gusPrompt(arg) {
 function mobLabel(p) {
   const st = (p.st ?? 0) & ST_MASK;
   if (p.type === 'ringtail') {
-    if ((p.st ?? 0) & ST_CARRY) return '[Hold LMB] grab the ringtail: it drops what it stole · [RMB] shove it';
-    if (st === RST.NIP) return 'An angry ringtail, seeing you off its den. [RMB] shove it · [Hold LMB] grab it';
-    if (st === RST.RAID || st === RST.INRV) return 'A ringtail after what\'s in the RV! [Hold LMB] grab it · [RMB] shove it';
-    if (st === RST.STUN || st === RST.FLUNG) return 'A dizzy ringtail. [Hold LMB] grab it · [RMB] shove it';
-    return '[Hold LMB] grab the ringtail · [RMB] shove it';
+    if ((p.st ?? 0) & ST_CARRY) return '[E] grab the ringtail: it drops what it stole · [RMB] shove it';
+    if (st === RST.NIP) return 'An angry ringtail, seeing you off its den. [RMB] shove it · [E] grab it';
+    if (st === RST.RAID || st === RST.INRV) return 'A ringtail after what\'s in the RV! [E] grab it · [RMB] shove it';
+    if (st === RST.STUN || st === RST.FLUNG) return 'A dizzy ringtail. [E] grab it · [RMB] shove it';
+    return '[E] grab the ringtail · [RMB] shove it';
   }
   if (st === GST.SLEEP || st === GST.DOZE) return 'A sleeping Grumphorn. Let it sleep: crouch past it (C), or creep the RV by. (Two of you [RMB] shoving its side together tip it over.)';
   if (st === GST.TIPPED) return 'A tipped-over Grumphorn! It\'s up in a moment: get by it now.';
   if (st === GST.LEFT || st === GST.LEAVE) return 'A Grumphorn that has had enough of you.';
-  if (st === GST.WINDED) return 'The Grumphorn is winded: pelt it, shove it, ram it. [Hold LMB] its horns';
+  if (st === GST.WINDED) return 'The Grumphorn is winded: pelt it, shove it, ram it. [E] grab its horns';
   return 'GRUMPHORN. Get out of its way!';
 }
 
@@ -640,8 +641,12 @@ function onGrabPress() {
     const p = S.props.get(t.id);
     if (!p) return;
     const eye = me.eye(S.rv);
-    S.holdDist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, t.hit.toi + 0.1));
-    me.holding = { id: p.id, type: p.type };
+    // what one person carries comes into both hands (shared/loot.js CARRY); the heavy things are held where
+    // they were grabbed, at arm's length
+    const carry = carried(p.type);
+    S.holdDist = carry ? carryDist(p.type) : Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, t.hit.toi + 0.1));
+    const q0 = p.pose?.q || { x: 0, y: 0, z: 0, w: 1 };
+    me.holding = { id: p.id, type: p.type, carry, rel: carry ? qMul(yawQ(-me.yaw), q0) : null };
     if (p.type === 'ringtail') tutDone('ringtail');
     net.send({ t: 'grab', kind: 'prop', id: p.id, pt: [t.hit.point.x, t.hit.point.y, t.hit.point.z], d: S.holdDist });
     sfx.grab();
@@ -687,8 +692,10 @@ function onUse() {
   initAudio();
   if (worldBuilding) return;
   if (me.mode === 'seat') { net.send({ t: 'use', kind: 'unseat' }); return; }
+  if (me.holding) { onDrop(); return; }   // E picks a thing up and E sets it down
   const t = target;
   if (!t) return;
+  if (t.kind === 'prop') { onGrabPress(); return; }
   if (t.kind === 'hookhold') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'hook') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'door') { net.send({ t: 'use', kind: 'door' }); return; }
@@ -1649,6 +1656,7 @@ const SETTINGS_UI = [
   ['sfx', 'Sound effects', 'range', 0, 1, 0.05, pct],
   ['amb', 'Ambience', 'range', 0, 1, 0.05, pct],
   ['voice', 'Voice chat', 'range', 0, 1, 0.05, pct],
+  ['voiceMode', 'Your mic', 'select', [['open', 'Open mic (sends while you talk)'], ['ptt', 'Push-to-talk (hold V)']]],
   ['score', 'Music while you play (each place has its tune; it follows the wildlife and the clock)', 'check'],
   ['radio', 'The RV radio plays while someone drives', 'check'],
   ['muteInBackground', 'Mute when the game is in the background', 'check'],
@@ -1761,6 +1769,7 @@ onSettings(k => {
   if (k === 'quality') { applyQuality(); if (S.W) toast('The grass follows on the next day.', '#fff', 3); }
   if (k === 'uiScale') applyUiScale();
   if (k === 'sens') $('sensInput').value = settings.sens;
+  if (k === 'voiceMode') renderVoiceUI();
 });
 
 // ---- voice ui (dock + settings panel) ---------------------------------------------------------
@@ -1812,6 +1821,50 @@ let lastT = performance.now(), time = 0;
 // jump, a fall, a teleport or a seat snaps), bobs a little with each stride (Settings: head bob), and dips on a
 // hard landing (a spring); the sprint's wider view eases in
 const feel = { y: null, ph: 0, side: 0, dip: 0, dipV: 0, fov: 74 };
+// The map in the reader's hands shows where the RV is: the day's sheet with the RV drawn on it, pointing the
+// way it's heading, redrawn five times a second
+let liveCv = null, liveAt = -1, liveFor = null;
+function liveMap(rv) {
+  const base = S.mapCv;
+  if (!base?.proj || !rv) return base;
+  const now = performance.now();
+  if (liveCv && liveFor === base && now - liveAt < 200) return liveCv;
+  liveAt = now; liveFor = base;
+  liveCv ||= document.createElement('canvas');
+  if (liveCv.width !== base.width || liveCv.height !== base.height) { liveCv.width = base.width; liveCv.height = base.height; }
+  const g = liveCv.getContext('2d');
+  g.drawImage(base, 0, 0);
+  const [x, y] = base.proj(rv.p.x, rv.p.z), f = toWorld(rv.p, rv.q, { x: 0, y: 0, z: 6 }), [x2, y2] = base.proj(f.x, f.z), a = Math.atan2(y2 - y, x2 - x);
+  const pulse = 0.5 + 0.5 * Math.sin(now / 260);
+  g.save(); g.translate(x, y);
+  g.strokeStyle = `rgba(180,40,24,${0.35 + 0.4 * pulse})`; g.lineWidth = 1.5; g.beginPath(); g.arc(0, 0, 9 + 3 * pulse, 0, Math.PI * 2); g.stroke();
+  g.rotate(a);
+  g.fillStyle = '#b4281a'; g.strokeStyle = '#2a1a10'; g.lineWidth = 1.2;
+  g.beginPath(); g.moveTo(8, 0); g.lineTo(-5, -5); g.lineTo(-2.5, 0); g.lineTo(-5, 5); g.closePath(); g.fill(); g.stroke();
+  g.restore();
+  g.font = 'italic bold 10px Georgia, serif'; g.fillStyle = '#7a1a10'; g.textAlign = 'center';
+  g.fillText('the RV', x, y + (y > 30 ? -14 : 22));
+  liveCv.__drawn = now;
+  return liveCv;
+}
+// What I carry is drawn in my hands, where the server holds it (sim.js: its middle, chest height, my distance,
+// its turn against mine), from this frame's eye: the server's copy comes a round trip and the interpolation
+// late, so drawn as it says it trailed every turn, floating out ahead. Where the two part (it's caught on a
+// wall, or another pair of hands has it) the server's is drawn
+const _hq = new THREE.Quaternion(), _hq2 = new THREE.Quaternion();
+const qMul = (a, b) => ({ w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z, x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x, z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w });
+const yawQ = yaw => ({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) });
+function holdInHands(ex, ey, ez, look) {
+  const h = me.holding, p = h?.carry && h.ok !== false ? S.props.get(h.id) : null;
+  if (!p?.pose || me.mode !== 'walk') return;
+  const L = look, up = { x: -L.x * L.y, y: 1 - L.y * L.y, z: -L.z * L.y }, ul = Math.hypot(up.x, up.y, up.z) || 1, d = S.holdDist || carryDist(p.type);
+  const px = ex + L.x * d - up.x / ul * CARRY.DROP, py = ey + L.y * d - up.y / ul * CARRY.DROP, pz = ez + L.z * d - up.z / ul * CARRY.DROP;
+  const s = p.pose.p, off = Math.hypot(s.x - px, s.y - py, s.z - pz), w = Math.max(0, Math.min(1, (off - 0.3) / 0.5));
+  const q = qMul(yawQ(me.yaw), h.rel);
+  p.mesh.position.set(px + (s.x - px) * w, py + (s.y - py) * w, pz + (s.z - pz) * w);
+  _hq.set(q.x, q.y, q.z, q.w); _hq2.set(p.pose.q.x, p.pose.q.y, p.pose.q.z, p.pose.q.w);
+  p.mesh.quaternion.copy(_hq.slerp(_hq2, w));
+}
 function cameraFeel(dt, eye) {
   const ease = me.mode === 'walk' && me.grounded && feel.y != null && Math.abs(eye.y - feel.y) < 0.7;
   feel.y = ease ? feel.y + (eye.y - feel.y) * Math.min(1, dt * 16) : eye.y;
@@ -1950,6 +2003,7 @@ requestAnimationFrame(frame);
   feel.fov += (settings.fov + (me.sprinting ? 6 : 0) - feel.fov) * Math.min(1, dt * 7);   // (the sprint's wider view eases in and out)
   camera.fov = feel.fov;
   camera.updateProjectionMatrix();
+  holdInHands(ex, ey, ez, look);
 
   // views of other players
   for (const [id, st] of others) {
@@ -1982,7 +2036,7 @@ requestAnimationFrame(frame);
   // the real map shows only on its reader's own screen, once the server has said the grab took (a refused
   // grab never flashes it), and never in a seat (nobody seated holds anything anyway)
   const reading = me.holding?.type === 'map' && !!me.holding.ok && mapRaised && me.mode !== 'seat';
-  if (reading) hands.showMap(S.mapCv); else hands.hideMap();
+  if (reading) hands.showMap(liveMap(rv), true); else hands.hideMap();
 
   // what am I looking at
   target = computeTarget();
@@ -2222,7 +2276,18 @@ function chipStack(group, amount, p) {
 }
 const nameOfId = id => S.meta?.players.find(q => q.id === id)?.name || 'Somebody';
 const GAME_NAME = { bj: 'Blackjack', craps: 'Craps', flip: 'Double or Nothing', derby: 'The Ringtail Derby' };
-const OUT_WORD = { win: 'WIN', natural: 'BLACKJACK!', push: 'PUSH', lose: 'LOSE' };
+const OUT_WORD = { win: 'WIN', natural: 'BLACKJACK!', push: 'PUSH', lose: 'LOSE', bust: 'BUST' };
+// blackjack on the page: a card's count (the server keeps the rules: server/blackjack.js), the table's round
+const cardVal = c => { const r = c.slice(0, -1); return r === 'A' ? 11 : r === '10' || r === 'J' || r === 'Q' || r === 'K' ? 10 : +r; };
+const bjTable = () => S.g?.cas?.bjt || { st: 'bet', dl: [] };
+const seatNo = id => String(id || '').replace(/\D/g, '');
+const seatName = id => { const o = S.g?.cas?.[id]?.o; return o ? nameOfId(o) : `Seat ${seatNo(id)}`; };
+// the moves the hand in turn has: double on its first two cards, split a pair (once)
+function bjMoves(v, tb) {
+  const hands = v.hands || [], h = hands[tb.hand || 0] || [];
+  const two = h.length === 2;
+  return { double: two, split: two && hands.length === 1 && cardVal(h[0]) === cardVal(h[1]) };
+}
 const moneyCol = won => (won > 0 ? '#7CFC00' : won < 0 ? '#ff5252' : '#fff');
 const casStation = id => S.W?.town?.casino_stations?.find(s => s.id === id);
 const myStation = () => {
@@ -2233,16 +2298,19 @@ const myStation = () => {
   return { id, st, v };
 };
 net.on('cas', m => { S.casAt = m.at; sfx.click(); });
-// the number keys at a station: 1-4 set the stake (+$100, +$500, all in, clear); 5 deals (hits, in a hand),
-// rolls or pulls, 6 stands; at the Derby 5-8 buy a ticket on ringtail 1-4
+// the number keys at a station: 1-4 set the stake (+$100, +$500, all in, clear); 5 deals (in your turn at
+// blackjack, hits), rolls or pulls; at blackjack 6 stands, 7 doubles, 8 splits; at craps 7 lays odds behind
+// the line; at the Derby 5-8 buy a ticket on ringtail 1-4
 function casinoKey(n) {
   const at = myStation();
   if (!at) return false;
-  const send = (a, x) => net.send({ t: 'cas', s: at.id, a, n: x });
+  const send = (a, x) => net.send({ t: 'cas', s: at.id, a, n: x }), k = at.st.kind;
   if (n <= 4) { send(['b100', 'b500', 'ball', 'bclr'][n - 1]); sfx.click(); return true; }
-  if (at.st.kind === 'derby') { send('go', n - 4); return true; }
-  if (n === 5) send(at.st.kind === 'bj' && at.v.st === 'play' ? 'hit' : 'go');
-  else if (n === 6 && at.st.kind === 'bj') send('stand');
+  if (k === 'derby') { send('go', n - 4); return true; }
+  const tb = bjTable(), mine = k === 'bj' && tb.st === 'turn' && tb.turn === at.id;
+  if (n === 5) send(mine ? 'hit' : 'go');
+  else if (k === 'bj' && n >= 6) send(['stand', 'double', 'split'][n - 6]);
+  else if (k === 'craps' && n === 7) send('odds');
   else return n <= 6;
   return true;
 }
@@ -2256,12 +2324,37 @@ function casinoPanel(at, g) {
   const K = (n, t) => `<kbd>${n}</kbd> ${t}`;
   const stakeKeys = [K(1, '+$100'), K(2, '+$500'), K(3, 'ALL IN'), K(4, 'clear')].join(' ');
   if (k === 'bj') {
-    if (v.st === 'play') { line = `You ${v.tot} · the dealer shows ${v.up}`; keysTxt = `${K(5, 'HIT')} ${K(6, 'STAND')}`; }
-    else { line = v.st === 'result' ? `${OUT_WORD[v.out] || ''} ${v.won ? (v.won > 0 ? '+' : '') + fmt$(v.won) : ''} · you ${v.tot}, the dealer ${v.dt ?? '-'}` : 'Blackjack pays 3 to 2. The dealer stands on 17.'; keysTxt = `${stakeKeys} ${K(5, 'DEAL')}`; }
+    // the table plays one round together: the count after the first DEAL, the cards round the seats, each
+    // seat's turn in order, the dealer last (server/blackjack.js)
+    const tb = bjTable(), hands = v.hands || [], tots = v.tots || [], inIt = hands.length > 0, mine = tb.st === 'turn' && tb.turn === at.id;
+    const you = hands.length > 1 ? tots.map((t, i) => `hand ${i + 1}: ${t}`).join(', ') : `you ${tots[0] ?? '-'}`;
+    const dl = tb.st === 'result' || tb.st === 'dealer' ? `the dealer ${tb.dt}` : `the dealer shows ${tb.dt || '-'}`;
+    if (mine) {
+      const o = bjMoves(v, tb);
+      line = `YOUR TURN${hands.length > 1 ? ` (hand ${tb.hand + 1})` : ''} · ${you} · ${dl}${tb.left != null ? ` · ${tb.left} s` : ''}`;
+      keysTxt = [K(5, 'HIT'), K(6, 'STAND'), o.double && K(7, 'DOUBLE'), o.split && K(8, 'SPLIT')].filter(Boolean).join(' ');
+    } else if (inIt && tb.st === 'result') {
+      line = `${(v.outs || []).map(x => OUT_WORD[x] || '').join(' / ')} ${v.won ? (v.won > 0 ? '+' : '') + fmt$(v.won) : ''} · ${you}, ${dl}`;
+      keysTxt = 'The next hand\'s coming';
+    } else if (inIt) {
+      line = `${tb.st === 'deal' ? 'Dealing…' : tb.st === 'turn' ? `${seatName(tb.turn)} to play` : 'The dealer plays'} · ${you} · ${dl}`;
+      keysTxt = tb.st === 'turn' ? 'Your turn comes in seat order' : '';
+    } else if (tb.st === 'count') {
+      const ready = (tb.ready || []).includes(at.id);
+      line = ready ? `You're in. Dealing in ${tb.left ?? 0} s` : `Bets going down: DEAL to be in this hand (${tb.left ?? 0} s)`;
+      keysTxt = ready ? stakeKeys : `${stakeKeys} ${K(5, 'DEAL')}`;
+    } else if (tb.st !== 'bet') {
+      line = 'A hand\'s being played. You\'re in the next one.';
+      keysTxt = stakeKeys;
+    } else {
+      line = 'One table, one round: it deals round the seats, then each plays in turn. Blackjack pays 3 to 2; the dealer stands on 17.';
+      keysTxt = `${stakeKeys} ${K(5, 'DEAL')}`;
+    }
   } else if (k === 'craps') {
     const rolling = v.dice && !v.land;
-    line = rolling ? 'Rolling…' : v.st === 'point' ? `The point is ${v.pt}: roll a ${v.pt} before a 7` : v.st === 'result' ? `${v.won > 0 ? 'Winner' : 'Loser'}: ${v.dice ? v.dice[0] + v.dice[1] : ''} · ${v.won > 0 ? '+' : ''}${fmt$(v.won)}` : 'The pass line: a 7 or 11 wins, 2, 3 or 12 loses, anything else is the point. Even money.';
-    keysTxt = v.st === 'point' ? K(5, 'ROLL') : `${stakeKeys} ${K(5, 'ROLL')}`;
+    const pays = { 4: '2 to 1', 10: '2 to 1', 5: '3 to 2', 9: '3 to 2', 6: '6 to 5', 8: '6 to 5' }[v.pt];
+    line = rolling ? 'Rolling…' : v.st === 'point' ? `The point is ${v.pt}: roll a ${v.pt} before a 7.${v.odds ? ` Odds ${fmt$(v.odds)} behind the line pay ${pays}.` : ` Odds behind the line pay ${pays}.`}` : v.st === 'result' ? `${v.won > 0 ? 'Winner' : 'Loser'}: ${v.dice ? v.dice[0] + v.dice[1] : ''} · ${v.won > 0 ? '+' : ''}${fmt$(v.won)}` : 'The pass line: a 7 or 11 wins even money, 2, 3 or 12 loses, anything else is the point.';
+    keysTxt = v.st === 'point' ? `${K(5, 'ROLL')} ${K(7, 'ODDS +bet')}` : `${stakeKeys} ${K(5, 'ROLL')}`;
   } else if (k === 'flip') {
     line = v.spin ? 'Flipping…' : v.st === 'result' ? (v.won > 0 ? `DOUBLED! +${fmt$(v.won)}` : `NOTHING. ${fmt$(v.won)}`) : 'Your stake doubles or it\'s gone. It stays set: pull again.';
     keysTxt = `${stakeKeys} ${K(5, 'PULL')}`;
@@ -2270,7 +2363,7 @@ function casinoPanel(at, g) {
     line = v.st === 'race' ? 'They\'re off!' : v.st === 'result' ? `No. ${v.order?.[0]} wins: tickets on it pay x3.8` : v.left != null ? `Off in ${v.left} s${mine.length ? ` · yours: ${mine.join(', ')}` : ''}` : 'Four ringtails, one winner, x3.8. The race runs 12 s after the first ticket.';
     keysTxt = `${stakeKeys} · a ticket on ${[1, 2, 3, 4].map(n => K(n + 4, `No. ${n}`)).join(' ')}`;
   }
-  const html = `<div class="cas-h">${title}<span>the bank ${fmt$(g.bank)}</span></div><div class="cas-l">${line}</div><div class="cas-b">${k === 'derby' ? 'Your ticket' : 'Bet'} <b>${fmt$(bet)}</b>${v.stake && (v.st === 'play' || v.st === 'point' || v.spin) ? ` · in play ${fmt$(v.stake)}` : ''}</div><div class="cas-k">${keysTxt}</div><div class="cas-x">Walk away to leave it</div>`;
+  const html = `<div class="cas-h">${title}<span>the bank ${fmt$(g.bank)}</span></div><div class="cas-l">${line}</div><div class="cas-b">${k === 'derby' ? 'Your ticket' : 'Bet'} <b>${fmt$(bet)}</b>${v.stake && ((k === 'bj' && v.hands && v.st !== 'result') || v.st === 'point' || v.spin) ? ` · in play ${fmt$(v.stake + (v.odds || 0))}` : ''}</div><div class="cas-k">${keysTxt}</div><div class="cas-x">Walk away to leave it</div>`;
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
   el.classList.remove('hidden');
 }
@@ -2371,26 +2464,33 @@ function updateCasino(dt) {
   const cas = g.cas ? Object.fromEntries(Object.entries(g.cas).map(([id, v]) => [id, { ...CAS_BLANK, ...v }])) : null, c = w.cas;
   S.cas = cas;
   // the cards and chips are re-laid whenever any seat's hand or bet changes
-  const key = cas ? JSON.stringify(T.bj.seats.map(s => { const v = cas[s.id]; return v ? [v.cards, v.up, v.dl, v.bet, v.stake, v.st] : 0; }).concat(T.craps.rails.map(r => [cas[r.id]?.bet, cas[r.id]?.stake, cas[r.id]?.st]))) : '';
+  const tb = cas?.bjt;
+  const key = cas ? JSON.stringify([tb?.dl, T.bj.seats.map(s => { const v = cas[s.id]; return v ? [v.hands, v.bet, v.stake, v.st] : 0; }), T.craps.rails.map(r => [cas[r.id]?.bet, cas[r.id]?.stake, cas[r.id]?.odds, cas[r.id]?.st])]) : '';
   if (key !== lastCards) {
     lastCards = key;
     while (c.cards.children.length) c.cards.remove(c.cards.children[0]);
-    const lay = (seat, codes, row) => codes.forEach((code, i) => {
+    const lay = (dx, codes, row) => codes.forEach((code, i) => {
       const m = new THREE.Mesh(cardGeo, cardMaterial(code));
       m.rotation.x = -Math.PI / 2;
       m.rotation.z = T.bj.ry;
-      m.position.copy(onTable(T.bj.table, T.bj.ry, seat.dx + (i - (codes.length - 1) / 2) * 0.17, 0.01 + i * 0.002, row));
+      m.position.copy(onTable(T.bj.table, T.bj.ry, dx + (i - (codes.length - 1) / 2) * 0.17, 0.01 + i * 0.002, row));
       c.cards.add(m);
     });
+    // the dealer's one hand in his box, each seat's in its own (a split's second hand nearer the dealer)
+    if (tb?.dl?.length) lay(0, tb.dl, -0.62);
     if (cas) for (const seat of T.bj.seats) {
       const v = cas[seat.id];
       if (!v) continue;
-      if (v.cards) lay(seat, v.cards, 0.42);
-      if (v.dl) lay(seat, v.dl, -0.62);
-      else if (v.up) lay(seat, [v.up, '??'], -0.62);
-      chipStack(c.cards, v.st === 'play' || v.st === 'result' ? v.stake : v.bet, onTable(T.bj.table, T.bj.ry, seat.dx, 0, 0.8));
+      (v.hands || []).forEach((h, i) => lay(seat.dx, h, 0.42 - i * 0.38));
+      chipStack(c.cards, v.hands ? v.stake : v.bet, onTable(T.bj.table, T.bj.ry, seat.dx, 0, 0.8));
     }
-    if (cas) for (const rail of T.craps.rails) { const v = cas[rail.id]; if (v) chipStack(c.cards, v.st === 'point' || v.st === 'roll' ? v.stake : v.bet, onTable(T.craps.table, T.craps.ry, rail.dx, 0, 0.62)); }
+    if (cas) for (const rail of T.craps.rails) {
+      const v = cas[rail.id];
+      if (!v) continue;
+      const on = v.st === 'point' || v.st === 'roll';
+      chipStack(c.cards, on ? v.stake : v.bet, onTable(T.craps.table, T.craps.ry, rail.dx, 0, 0.62));
+      if (on && v.odds) chipStack(c.cards, v.odds, onTable(T.craps.table, T.craps.ry, rail.dx, 0, 0.5));   // (behind the line)
+    }
   }
   if (!cas) { casinoPanel(null); return; }
   // the placards over each station
@@ -2400,9 +2500,12 @@ function updateCasino(dt) {
     const who = v.o ? nameOfId(v.o).toUpperCase() : null, n = id.replace(/\D/g, '');
     let t = '', col = '#fff';
     if (v.k === 'bj') {
-      if (!who) { t = `SEAT ${n} · OPEN`; col = '#c8b890'; }
-      else if (v.st === 'play') t = `${who} · ${v.tot} vs ${v.up}`;
-      else if (v.st === 'result') { t = `${who} · ${OUT_WORD[v.out] || ''} ${v.won ? (v.won > 0 ? '+' : '') + fmt$(v.won) : ''}`; col = moneyCol(v.won); }
+      const tb = cas.bjt || {}, nm = who || `SEAT ${n}`;
+      if (v.hands && tb.st === 'result') { t = `${nm} · ${(v.outs || []).map(x => OUT_WORD[x] || '').join(' / ')} ${v.won ? (v.won > 0 ? '+' : '') + fmt$(v.won) : ''}`; col = moneyCol(v.won); }
+      else if (v.hands && tb.st === 'turn' && tb.turn === id) { t = `${nm} · ${(v.tots || []).join(' / ')} · TO PLAY${tb.left != null ? ` ${tb.left} s` : ''}`; col = '#ffd166'; }
+      else if (v.hands) t = `${nm} · ${(v.tots || []).join(' / ')} vs ${tb.dt || '-'}`;
+      else if (!who) { t = `SEAT ${n} · OPEN`; col = '#c8b890'; }
+      else if (tb.st === 'count') { const ready = (tb.ready || []).includes(id); t = `${who} · BET ${fmt$(v.bet)} · ${ready ? 'IN' : `DEAL? ${tb.left ?? 0} s`}`; col = ready ? '#fff' : '#ffd166'; }
       else t = `${who} · BET ${fmt$(v.bet)}`;
     } else if (v.k === 'craps') {
       if (!who) { t = `RAIL ${n} · OPEN`; col = '#c8b890'; }
@@ -2471,11 +2574,11 @@ function hud(rv) {
   let held = '';
   if (me.holding) {
     const p = S.props.get(me.holding.id);
-    held = !p ? '' : p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop'
-      : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [Q] let go`
-      : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off'
-      : LOOT[p.type].find ? `${LOOT[p.type].name} · set it down in the RV to keep its cards · [RMB] throw · [Q] drop`
-      : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`;
+    held = !p ? '' : p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [E] put it down'
+      : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [E] let go`
+      : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off · [E] let go'
+      : LOOT[p.type].find ? `${LOOT[p.type].name} · set it down in the RV to keep its cards · [E] set down · [RMB] throw`
+      : `${LOOT[p.type].name} · ${fmt$(p.value)} · [E] set down · [RMB] throw · wheel: reach`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
   $('heldLabel').classList.toggle('hidden', !held);
@@ -2555,7 +2658,7 @@ function tutTip(g, town) {
   if (!tut.has('ringtail') && critterNear('ringtail', 15)) return keysIn('Hint: ringtails steal loot nobody is watching. Stand facing your pile, grab the thief (it drops it), or [RMB] shove it');
   if (!tut.has('rock') && rockAhead(90)) return keysIn('Hint: loose rock above the narrows ahead. The driver honks [H] at the LOOSE ROCK sign, and it comes down before you get there');
   if (!tut.has('den') && S.W.day >= 2 && denNear(14)) return keysIn('Hint: ringtails nip anyone who comes close to their den, and you drop what you carry. [RMB] shove them off, or be quick');
-  if (!tut.has('grab')) return 'Hint: hold the left mouse button on glittering junk to carry it';
+  if (!tut.has('grab')) return 'Hint: press E on glittering junk to pick it up (E again sets it down)';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
   if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
   return null;

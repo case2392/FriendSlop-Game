@@ -9,7 +9,7 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as C from '../shared/constants.js';
-import { LOOT } from '../shared/loot.js';
+import { LOOT, CARRY, carried, carryDist } from '../shared/loot.js';
 import {
   RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_HULL,
   toWorld, toLocal, insideRV, qRotate, qConj, hitZone,
@@ -38,6 +38,7 @@ const sub = (a, b) => v3(a.x - b.x, a.y - b.y, a.z - b.z);
 const add = (a, b) => v3(a.x + b.x, a.y + b.y, a.z + b.z);
 const mul = (a, s) => v3(a.x * s, a.y * s, a.z * s);
 const len = a => Math.hypot(a.x, a.y, a.z);
+const qMulS = (a, b) => ({ w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z, x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x, z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w });
 const r3 = n => Math.round(n * 1000) / 1000;
 // what a crash into the world's parts is called (the toast: "Sam put the RV into the ranger gate")
 const CYL_NAMES = { tree: 'a tree', deadtree: 'a dead tree', deadtree_decor: 'a dead tree', rock: 'a rock', post: 'a post', cactus: 'a cactus', haybale: 'a hay bale', cairn: 'a cairn', windmill: 'the windmill' };
@@ -107,6 +108,7 @@ export class Sim {
     this.gatesOpen = new Set();
     this.knockCd = new Map();
     this.tied = new Map();           // prop id -> joint (bungee'd to the RV)
+    this.mapJoint = null;            // { id, j }: the road map fixed to its spot on the dash (dockMap)
     this.mobs = null;                // the wildlife (server/mobs.js), from when the RV leaves camp till nightfall
     this.mobsDone = false;           // gone for the night: they don't come back the same day
     this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
@@ -272,6 +274,7 @@ export class Sim {
     this.mobs?.onRemoved(id);
     for (const [pid, h] of this.holds) if (h.kind === 'prop' && h.id === id) this.holds.delete(pid);
     if (this.tied.has(id)) this.tied.delete(id);
+    if (this.mapJoint?.id === id) this.mapJoint = null;   // (the joint goes with the body)
     this.riding.delete(id); this.calm.delete(id);
     if (this.hook.attach && this.hook.attach.id === id) this.unhook();
     this.byCollider.delete(p.col.handle);
@@ -301,18 +304,31 @@ export class Sim {
     for (const p of this.props.values()) if (p.type === 'map') return;
     const w = toWorld(this.rv.translation(), this.rv.rotation(), RV_MAP_SPOT);
     const prop = this.addProp('map', w, this.rv.rotation(), 0, 0);
+    this.dockMap(prop);
     this.out.push({ k: 'spawn', p: this.describe(prop) });
   }
 
-  // (the test lever) the map back on the dash, wherever it slid to on the drive
-  mapHome() {
-    const map = [...this.props.values()].find(p => p.type === 'map');
-    if (!map || map.holders.size) return;
-    map.body.setTranslation(toWorld(this.rv.translation(), this.rv.rotation(), RV_MAP_SPOT), true);
-    map.body.setRotation(this.rv.rotation(), true);
-    map.body.setLinvel(this.rv.linvel(), true);
-    map.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  // The road map lives on the dash, passenger side, fixed there (it used to slide about as the RV drove).
+  // Put down anywhere, or thrown, it goes back there
+  dockMap(p) {
+    if (!p || p.type !== 'map' || p.holders.size) return;
+    this.undock(p);
+    this.unride(p);
+    const rq = this.rv.rotation();
+    p.body.setTranslation(toWorld(this.rv.translation(), rq, RV_MAP_SPOT), true);
+    p.body.setRotation(rq, true);
+    p.body.setLinvel(this.rv.linvel(), true);
+    p.body.setAngvel(this.rv.angvel(), true);
+    const j = this.world.createImpulseJoint(RAPIER.JointData.fixed(RV_MAP_SPOT, { x: 0, y: 0, z: 0, w: 1 }, v3(), { x: 0, y: 0, z: 0, w: 1 }), this.rv, p.body, true);
+    this.mapJoint = { id: p.id, j };
   }
+  undock(p) {
+    if (this.mapJoint?.id !== p.id) return;
+    this.world.removeImpulseJoint(this.mapJoint.j, true);
+    this.mapJoint = null;
+  }
+  // (the test lever) the map back on the dash
+  mapHome() { this.dockMap([...this.props.values()].find(p => p.type === 'map')); }
 
   describe(p) {
     const t = p.body.translation(), q = p.body.rotation();
@@ -580,11 +596,15 @@ export class Sim {
     this.release(pid);
     const pt = v3(num(m.pt?.[0], 1e5), num(m.pt?.[1], 1e5), num(m.pt?.[2], 1e5));
     if (len(sub(pt, pl.eye)) > C.PLAYER.REACH + 0.8) return false;
-    const dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, num(m.d, 100) || C.GRAB.HOLD_DEFAULT));
+    let dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, num(m.d, 100) || C.GRAB.HOLD_DEFAULT));
     if (m.kind === 'prop') {
       const p = this.props.get(Number(m.id));
       if (!p) return false;
+      // what one person carries is held in both hands by its middle (shared/loot.js CARRY), turning as you turn
+      const carry = carried(p.type);
+      if (carry) dist = Math.max(CARRY.MIN, Math.min(CARRY.MAX, num(m.d, 100) || carryDist(p.type)));
       if (this.tied.has(p.id)) { this.world.removeImpulseJoint(this.tied.get(p.id), true); this.tied.delete(p.id); }
+      this.undock(p);
       this.unride(p);
       const local = toLocal(p.body.translation(), p.body.rotation(), pt);
       // clamp the grab point onto the object (hands, not telekinesis)
@@ -596,7 +616,8 @@ export class Sim {
       if (!p.mob) p.ours = true;   // (in the crew's hands once: theirs, so a ringtail taking it is a theft)
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();
-      this.holds.set(pid, { kind: 'prop', id: p.id, local, dist, last: null });
+      const rel = carry ? qMulS(qConj(yawQ(Math.atan2(pl.look.x, pl.look.z))), p.body.rotation()) : null;   // (its turn against yours)
+      this.holds.set(pid, { kind: 'prop', id: p.id, local: carry ? v3() : local, dist, last: null, carry, rel });
       this.mobs?.onGrabbed(p, pid);
       return true;
     }
@@ -661,7 +682,7 @@ export class Sim {
 
   holdDist(pid, d) {
     const h = this.holds.get(pid);
-    if (h) h.dist = Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, num(d, 100) || h.dist));
+    if (h) h.dist = h.carry ? Math.max(CARRY.MIN, Math.min(CARRY.MAX, num(d, 100) || h.dist)) : Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, num(d, 100) || h.dist));
   }
 
   release(pid, throwDir = null, pl = null) {
@@ -673,6 +694,7 @@ export class Sim {
     if (!p) return;
     p.holders.delete(pid);
     if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].adamp ?? (LOOT[p.type].mob ? 2 : 0.3));
+    if (p.type === 'map') { this.dockMap(p); return; }   // (back on the dash: dockMap)
     if (throwDir) {
       const m = p.body.mass();
       const imp = Math.min(m * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP);
@@ -1022,7 +1044,11 @@ export class Sim {
     for (const [pid, h] of this.holds) {
       const pl = players.get(pid);
       if (!pl || !pl.eye || pl.ko) { this.release(pid); continue; }
-      const target = add(pl.eye, mul(pl.look, h.dist));
+      let target = add(pl.eye, mul(pl.look, h.dist));
+      if (h.carry) {   // at chest height: down along the view's own down
+        const L = pl.look, up = v3(-L.x * L.y, 1 - L.y * L.y, -L.z * L.y), ul = len(up) || 1;
+        target = sub(target, mul(up, CARRY.DROP / ul));
+      }
       const tv = h.last ? mul(sub(target, h.last), 1 / dt) : v3();
       const tvl = len(tv);
       if (tvl > 25) { tv.x *= 25 / tvl; tv.y *= 25 / tvl; tv.z *= 25 / tvl; }
@@ -1057,6 +1083,14 @@ export class Sim {
         // at the door the hands guide it without wrenching it round (turnToDoor does the turning)
         if (door) body.applyImpulse(mul(F, dt), true);
         else body.applyImpulseAtPoint(mul(F, dt), gp, true);
+        // carried alone, it keeps its turn against yours (you turn, it turns with you)
+        if (h.carry && n === 1 && !door) {
+          const want = qMulS(yawQ(Math.atan2(pl.look.x, pl.look.z)), h.rel), q = body.rotation();
+          let e = qMulS(want, qConj(q));
+          if (e.w < 0) e = { x: -e.x, y: -e.y, z: -e.z, w: -e.w };
+          const sn = Math.hypot(e.x, e.y, e.z), k = sn > 1e-6 ? Math.min(2 * Math.atan2(sn, e.w) * 10, 14) / sn : 0, w = body.angvel();
+          body.setAngvel(v3(w.x + (e.x * k - w.x) * 0.5, w.y + (e.y * k - w.y) * 0.5, w.z + (e.z * k - w.z) * 0.5), true);
+        }
       } else if (h.kind === 'rv') {
         const gp = this.rvToWorld(h.local);
         if (len(sub(gp, pl.eye)) > C.PLAYER.REACH + 1.4) { this.holds.delete(pid); continue; }

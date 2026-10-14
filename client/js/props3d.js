@@ -1364,6 +1364,20 @@ export function mapCanvas(W) {
     calls.forEach((c, i) => inkText(g, c, cx, ly + 11 * (i + 1), { size: 8, color: '#4a3a30', italic: true, weight: 'normal', clear: 0.6 }));
     g.save(); g.strokeStyle = '#a8241a'; g.lineWidth = 2; g.beginPath(); g.moveTo(px - 4, py - 4); g.lineTo(px + 4, py + 4); g.moveTo(px + 4, py - 4); g.lineTo(px - 4, py + 4); g.stroke(); g.restore();
   }
+  // the ranger gate's code is brushed on the rim rock above the gate: a red X where, so whoever climbs
+  // knows which side of the canyon to go up (the code itself is only up there)
+  for (const o of Wd.obstacles) {
+    if (!o.codeAt) continue;
+    const px = X(o.codeAt.z), py = Y(o.codeAt.z, o.codeAt.x);
+    g.save(); g.strokeStyle = '#c0281c'; g.lineWidth = 2.6; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(px - 5, py - 5); g.lineTo(px + 5, py + 5); g.moveTo(px + 5, py - 5); g.lineTo(px - 5, py + 5); g.stroke();
+    g.lineWidth = 1; g.setLineDash([2, 2]); g.beginPath(); g.arc(px, py, 9, 0, TAU); g.stroke(); g.restore();
+    claim([px - 10, py - 10, px + 10, py + 10]);
+    const txt = 'gate code: up on the rim', w = textW(txt, 8.5, true) + 6;
+    const [lx, ly] = place(px, py, w, 10, [[0, -17], [0, 17], [w / 2 + 13, 0], [-w / 2 - 13, 0], [0, -30], [0, 30]]);
+    leader(px, py, lx, ly, 'rgba(138,30,20,0.6)');
+    inkText(g, txt, lx, ly, { size: 8.5, italic: true, weight: 'normal', color: '#8a1e14', clear: 0.6 });
+  }
   // landmarks
   for (const l of Wd.landmarks) {
     const px = X(l.z), py = Y(l.z, l.x);
@@ -1445,6 +1459,8 @@ export function mapCanvas(W) {
     at(1); g.fillStyle = '#2a160c'; g.fill();
     g.save(); g.strokeStyle = 'rgba(214,120,44,0.4)'; g.lineWidth = 1.2; at(1.02); g.stroke(); g.restore();
   }
+  // where a point of the world is on the sheet (main.js draws the RV there while the map is read)
+  cv.proj = (x, z) => { const zz = Math.max(z0, Math.min(z1, z)); return [X(zz), Y(zz, x)]; };
   if (W) mapCache.set(W, cv);
   return cv;
 }

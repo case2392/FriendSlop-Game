@@ -57,6 +57,7 @@
 // is built 0.95× (WoW women carry a smaller, rounder head), her hair and hat with it.
 import { THREE, painted, tex, labelSprite, canvasTex } from './gfx.js';
 import * as C from '/shared/constants.js';
+import { CARRY, carried, carrySize } from '/shared/loot.js';
 import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
 import { AW, AH, REG, HEAD_RINGS, HEAD_SCALE, headTh, headU, headV, hairWave, BEARD_TOP, GOATEE_TOP, MUSTACHES, mustacheAt, TORSO, TORSO_UP, hairlineDy, lerpTable, armV, ARM_LM, skirtV, dressV, DRESS_Y0, DRESS_Y1, APRON_Y0, APRON_Y1, resolveSpec, charAtlas, charGlow, handsAtlas, FP, labelColor } from './paint/characters.js';
 
@@ -1655,9 +1656,10 @@ function playerPose(st, m) {
   }
   if ((st.flags & F.HOLDING) && st.mode !== M.KO && st.mode !== M.CLIMB) {
     const map = st.flags & F.MAP;
-    // carrying: forearms forward under the load; the map: held up in front, head down
-    T.aL = T.aR = map ? 0.55 : 0.7; T.eL = T.eR = map ? 1.15 : 0.95; T.abL = T.abR = map ? 0.12 : 0.24; T.inL = T.inR = map ? 0.35 : 0.42;
-    T.wristL = T.wristR = map ? 0.3 : 0.2; T.wtL = T.wtR = 0;
+    // carrying: both arms out in front, nearly straight, hands either side of the load at chest height (it's
+    // held half a metre out: shared/loot.js CARRY); the map: held up close in front, head down
+    T.aL = T.aR = map ? 0.55 : 1.15; T.eL = T.eR = map ? 1.15 : 0.45; T.abL = T.abR = map ? 0.12 : 0.12; T.inL = T.inR = map ? 0.35 : 0.3;
+    T.wristL = T.wristR = map ? 0.3 : 0; T.wtL = T.wtR = 0;
     if (map) { T.head = Math.max(T.head, 0.35); T.mapK = 1; }
     else T.bend -= 0.05;
   }
@@ -1892,7 +1894,8 @@ export class Hands {
     this.L.material = m; this.R.material = m;
     if (this.board) for (const c of this.board.children) c.material = m;
   }
-  showMap(canvas) {
+  // dirty: the canvas is redrawn now and then (the RV moving on it: main.js liveMap stamps canvas.__drawn)
+  showMap(canvas, dirty = false) {
     if (!this.map) {
       // a parchment sheet, gently curled, wound on a wooden roller at the top and the bottom
       this.mapTex = canvasTex(canvas);
@@ -1914,9 +1917,10 @@ export class Hands {
       this.map.add(this.board);
       this.g.add(this.map);
     }
-    if (this.mapTex.image !== canvas) {   // the map is painted once per day: upload it only when it changes
+    if (this.mapTex.image !== canvas || (dirty && canvas.__drawn !== this.mapTex.__drawn)) {   // (upload it only when it changes)
       this.mapTex.image = canvas;
       this.mapTex.needsUpdate = true;
+      this.mapTex.__drawn = canvas.__drawn;
     }
     this.map.visible = true;
   }
@@ -1982,9 +1986,12 @@ export class Hands {
         pose(h, p.x, p.y, p.z, q, 0);
       }
     } else if (me.holding) {
-      // open hands reaching out round the load, palms in
-      pose(this.L, -0.25, -0.26 + bobL * 0.6, -0.46, eul(0.35, -0.35, 1.25), 1);
-      pose(this.R, 0.25, -0.255 + bobR * 0.6, -0.46, eul(0.35, 0.35, -1.25), 1);
+      // both hands on what you carry, either side of it, palms in, at the chest height and distance main.js
+      // draws it at (shared/loot.js CARRY); a heavy thing (held where it was grabbed): reaching out to it
+      const cs = carried(me.holding.type) ? carrySize(me.holding.type) : null;
+      const x = cs ? Math.min(0.3, Math.max(0.13, cs.half + 0.04)) : 0.25, y = cs ? 0.03 - CARRY.DROP : -0.26, z = cs ? -Math.min(0.56, CARRY.HANDS + cs.r * 0.5) : -0.46;
+      pose(this.L, -x, y + bobL * 0.6, z, eul(0.35, -0.35, 1.25), 1);
+      pose(this.R, x, y + 0.005 + bobR * 0.6, z, eul(0.35, 0.35, -1.25), 1);
     } else {
       // loose fists low in the frame, the backs of the hands toward you (the knuckle plate, the studs,
       // your strap); not mirror twins: the left rides a little lower and idles on its own beat

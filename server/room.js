@@ -1033,13 +1033,18 @@ export class Room {
     if (r.err) return this.toast(r.err, '#fff', 3, p);
     if (r.spend) {
       this.bank -= r.spend;
-      if (st.kind === 'flip' || st.kind === 'craps') this.broadcast({ t: 'ev', list: [{ k: st.kind === 'flip' ? 'flip' : 'dice', by: p.id, s: id, stake: r.spend }] });
+      if ((st.kind === 'flip' || st.kind === 'craps') && m.a === 'go') this.broadcast({ t: 'ev', list: [{ k: st.kind === 'flip' ? 'flip' : 'dice', by: p.id, s: id, stake: r.spend }] });
     }
     if (r.msg) this.toast(r.msg, '#ffd166', 3);
     this.casinoResults(r.results);
   }
   casinoResults(list) {
-    for (const r of list || []) { this.bank += r.back; this.betResult(r.won, r.game, r.p); }
+    for (const r of list || []) {
+      if (r.msg) this.toast(r.msg, '#ffd166', 4);
+      if (r.spend != null) { this.bank -= r.spend; continue; }   // (a stake going down on the table's own clock: the deal)
+      if (r.back == null) continue;
+      this.bank += r.back; this.betResult(r.won, r.game, r.p);
+    }
   }
 
   betResult(won, game, p) {
@@ -1314,7 +1319,7 @@ export class Room {
     // casino
     // (a game each: one walked away from is played out for them, the house's way)
     this.casinoResults(this.casino.release(this.players, this.t));
-    this.casinoResults(this.casino.tick(this.t));
+    this.casinoResults(this.casino.tick(this.t, this.bank));
 
     // an RV on its back or side gets towed (for a price) after 7 s; rocking back over the line for a moment
     // doesn't start the count again (it counts down at twice the speed)

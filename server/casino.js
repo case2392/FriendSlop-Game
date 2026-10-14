@@ -1,12 +1,13 @@
-// The Lucky Slop. One bank, the crew's: every game bets it and anybody can bet it. But each player plays their
-// own game, and nobody waits for anybody: a seat at the blackjack table, a rail at the craps table, a Double or
-// Nothing machine, a ticket on the Ringtail Derby. A stake leaves the bank when it's played (the deal, the
-// roll, the pull, the ticket) and its winnings come back when the game settles.
+// The Lucky Slop. One bank, the crew's: every game bets it and anybody can bet it. A seat at the blackjack
+// table (the table plays its rounds together, dealt round the seats the way a casino deals: server/blackjack.js),
+// a rail at the craps table, a Double or Nothing machine, a ticket on the Ringtail Derby. A stake leaves the
+// bank when it's played (the deal, a double or a split, the roll, the odds, the pull, the ticket) and its
+// winnings come back when the game settles.
 //
 // Stations (world gen: shared/world.js town.casino.stations): one player each, the one who sat down there;
 // whoever walks off (or drops) gives it up, and a game left half-played is finished for them the way the
 // house would (a hand stands, the dice roll on). The Derby is everybody's: a ticket each, one race.
-import { Blackjack } from './blackjack.js';
+import { BJTable } from './blackjack.js';
 import { FAST, CASINO } from '../shared/constants.js';
 
 export const FLIP_ODDS = 0.485;              // Double or Nothing: the house always wins (eventually)
@@ -15,6 +16,8 @@ const RESULT_T = FAST ? 1 : 4;               // a settled game's result stays up
 const ROLL_T = FAST ? 0.4 : 1.6;             // the dice tumble, the coin spins, before they say
 export const SEAT_R = CASINO.SEAT_R;         // m from a station's spot: walk further and it's free again
 export const GAMES = { bj: 'Blackjack', craps: 'Craps', flip: 'Double or Nothing', derby: 'the Ringtail Derby' };
+// craps: odds behind the pass line pay true odds (what makes a point harder to make pays more), up to 3x the line
+export const ODDS = { 4: 2, 10: 2, 5: 1.5, 9: 1.5, 6: 1.2, 8: 1.2, MAX: 3 };
 
 // a stake set with the buttons: never more than the bank has right now
 export function stepBet(cur, a, bank) {
@@ -33,12 +36,15 @@ export class Casino {
     this.st = new Map();
     for (const s of spots) {
       const base = { id: s.id, kind: s.kind, x: s.x, z: s.z, owner: null, bet: 0, stake: 0, state: 'bet', until: 0, out: null, won: 0 };
-      if (s.kind === 'craps') Object.assign(base, { point: 0, dice: null, rollAt: 0, pend: null });
+      if (s.kind === 'craps') Object.assign(base, { point: 0, dice: null, rollAt: 0, pend: null, odds: 0 });
       if (s.kind === 'flip') Object.assign(base, { pend: null, last: null });
       if (s.kind === 'derby') Object.assign(base, { state: 'open', tickets: [], bets: new Map(), order: null, seed: 0, race: 0 });
       this.st.set(s.id, base);
     }
+    // the blackjack table: its seats in the order the dealer deals them
+    this.bj = new BJTable([...this.st.values()].filter(s => s.kind === 'bj').map(s => s.id).sort(), rng);
   }
+  bjSeats() { return [...this.st.values()].filter(s => s.kind === 'bj'); }
 
   // ---- taking a seat --------------------------------------------------------------------------------
   // p sat down at a station (its use point): it's theirs if it's free. One game at a time: a seat they had is
@@ -49,7 +55,7 @@ export class Casino {
     if (s.owner != null && s.owner !== p.id) return { err: 'Somebody\'s playing that one. There are others.' };
     const results = [];
     for (const o of this.st.values()) if (o !== s && o.owner === p.id) { results.push(...this.finish(o, t, p)); o.owner = null; o.bet = 0; }
-    s.owner = p.id;
+    s.owner = p.id; s.pl = p;
     return { ok: true, results };
   }
   // the stations each player holds, given up when they walk off or drop (an unfinished game is played out)
@@ -75,7 +81,7 @@ export class Casino {
     if (s.kind !== 'derby' && s.owner !== p.id) return { err: s.owner == null ? 'Take a seat first.' : 'Somebody\'s playing that one.' };
     if (a === 'b100' || a === 'b500' || a === 'ball' || a === 'bclr') {
       if (s.kind === 'derby') { s.bets.set(p.id, stepBet(s.bets.get(p.id) || 0, a, bank)); return {}; }
-      if (s.state === 'play' || s.state === 'point' || s.pend) return { err: 'Not in the middle of a game.' };
+      if (s.kind === 'bj' ? this.bj.hands.has(s.id) : s.state === 'play' || s.state === 'point' || s.pend) return { err: 'Not in the middle of a game.' };
       s.bet = stepBet(s.bet, a, bank);
       return {};
     }
@@ -89,34 +95,74 @@ export class Casino {
     return null;
   }
 
-  // Blackjack: your own hand against the dealer. A natural pays 3 to 2.
+  // Blackjack, at the table: DEAL with a bet down says you're in (the first starts the count); in your turn
+  // DEAL hits, then stand, double or split
   bjAct(s, p, a, n, t, bank) {
-    if (a === 'go' && s.state !== 'play') {
+    const T = this.bj, mine = T.state === 'turn' && T.current()?.id === s.id;
+    if (a === 'go' && !mine) {
+      if (T.state !== 'bet' && T.state !== 'count') return { err: T.state === 'result' ? 'The next hand\'s coming.' : 'A hand\'s being played: you\'re in the next one.' };
       const no = this.stakeOf(s.bet, bank);
       if (no) return no;
-      s.stake = s.bet; s.hand = new Blackjack(this.rng); s.out = null; s.state = 'play';
-      if (s.hand.state === 'done') return { spend: s.stake, results: [this.bjSettle(s, t, p)] };
-      return { spend: s.stake };
+      const first = T.state === 'bet';
+      T.callDeal(s.id, this.bjSeats().filter(x => x.owner != null && x.bet > 0).map(x => x.id), t);
+      return first ? { msg: `${p.name} is in at Blackjack. Bets down: dealing in ${Math.ceil(T.until - t)} s.` } : {};
     }
-    if (s.state !== 'play' || (a !== 'hit' && a !== 'stand' && a !== 'go')) return {};
-    const done = s.hand.act(a === 'stand' ? 'stand' : 'hit');
-    return done ? { results: [this.bjSettle(s, t, p)] } : {};
+    const move = a === 'go' ? 'hit' : a;
+    if (!mine || !['hit', 'stand', 'double', 'split'].includes(move)) return {};
+    if ((move === 'double' || move === 'split') && T.options()[move]) {
+      const more = T.current().h.stake;
+      if (more > bank) return { err: `That takes another ${more.toLocaleString('en-US')}: the bank has ${Math.max(0, Math.floor(bank)).toLocaleString('en-US')}.` };
+    }
+    const r = T.act(s.id, move, t);
+    return r.ok ? { spend: r.spend || 0 } : {};
   }
-  bjSettle(s, t, p) {
-    const o = s.hand.outcome, back = o === 'natural' ? Math.floor(s.stake * 2.5) : o === 'win' ? s.stake * 2 : o === 'push' ? s.stake : 0;
-    s.state = 'result'; s.out = o; s.won = back - s.stake; s.until = t + RESULT_T;
-    return { back, won: s.won, game: GAMES.bj, p, id: s.id };
+  // the table on its own clock: the count runs out (the stakes go down), the cards come, the dealer plays,
+  // the round settles -> [{ spend } | settled result]
+  bjTick(t, bank) {
+    const T = this.bj, out = [];
+    if (T.state === 'count' && t >= T.until) {
+      const stakes = new Map();
+      let left = bank;
+      for (const s of this.bjSeats()) {
+        if (s.owner == null || !(s.bet > 0)) continue;
+        // (the seats' stakes go down in seat order: one the bank can't cover now sits this hand out)
+        if (s.bet > left) { out.push({ msg: `${s.pl?.name || 'Somebody'}: the bank can't cover ${s.bet.toLocaleString('en-US')} on top of the others' bets. Sitting this hand out.` }); continue; }
+        stakes.set(s.id, s.bet); left -= s.bet; s.dealt = s.pl;
+      }
+      if (T.begin(stakes, t)) out.push({ spend: bank - left, game: GAMES.bj });
+      return out;
+    }
+    const r = T.step(t);
+    if (r) for (const x of r) {
+      const s = this.st.get(x.id);
+      s.out = x.out; s.won = x.won;
+      out.push({ back: x.back, won: x.won, game: GAMES.bj, p: s.dealt || null, id: x.id });
+    }
+    return out;
   }
 
   // Craps, the pass line: a 7 or 11 on the come-out wins, 2, 3 or 12 loses; anything else is the point, and
-  // you roll till you make it again (win) or throw a 7 (lose). Even money; the house's edge is 1.4%.
+  // you roll till you make it again (win) or throw a 7 (lose). The line pays even money (the house's edge is
+  // 1.4%). With a point up you can lay odds behind the line (ODDS: your bet again, up to 3x the line): those pay
+  // true odds, so the harder point pays more (a 4 or 10 2 to 1, a 5 or 9 3 to 2, a 6 or 8 6 to 5), and the
+  // house has no edge on them. (Paying the line itself by the point would hand the players the edge: the
+  // come-out's 7s and 11s already favour them)
   crapsAct(s, p, a, n, t, bank) {
+    if (a === 'odds') {
+      if (s.state !== 'point' || s.pend) return { err: 'Odds go behind the line once there\'s a point.' };
+      const add = Math.min(s.bet || s.stake, s.stake * ODDS.MAX - s.odds);
+      if (add <= 0) return { err: `The odds are full: up to ${ODDS.MAX}x the line.` };
+      const no = this.stakeOf(add, bank);
+      if (no) return no;
+      s.odds += add;
+      return { spend: add };
+    }
     if (a !== 'go' || s.pend) return {};
     let spend = 0;
     if (s.state !== 'point') {
       const no = this.stakeOf(s.bet, bank);
       if (no) return no;
-      s.stake = s.bet; spend = s.stake; s.point = 0; s.out = null;
+      s.stake = s.bet; spend = s.stake; s.point = 0; s.out = null; s.odds = 0;
     }
     const dice = [d6(this.rng), d6(this.rng)], sum = dice[0] + dice[1];
     s.dice = dice; s.rollAt = t; s.state = s.point ? 'point' : 'roll';
@@ -131,8 +177,8 @@ export class Casino {
     s.pend = null;
     if (out === 'point') { s.point = sum; s.state = 'point'; return []; }
     if (out === 'again') return [];
-    const back = out === 'win' ? s.stake * 2 : 0;
-    s.state = 'result'; s.out = out; s.won = back - s.stake; s.until = t + RESULT_T; s.point = 0;
+    const odds = s.point ? s.odds : 0, back = out === 'win' ? s.stake * 2 + (odds ? odds + Math.floor(odds * ODDS[s.point]) : 0) : 0;
+    s.state = 'result'; s.out = out; s.won = back - s.stake - odds; s.until = t + RESULT_T; s.point = 0; s.odds = 0;
     return [{ back, won: s.won, game: GAMES.craps, p, id: s.id }];
   }
 
@@ -187,9 +233,10 @@ export class Casino {
 
   // ---- time --------------------------------------------------------------------------------------------
   // -> settled results
-  tick(t) {
-    const out = [];
+  tick(t, bank = Infinity) {
+    const out = this.bjTick(t, bank);
     for (const s of this.st.values()) {
+      if (s.kind === 'bj') continue;
       if (s.pend && t >= s.pend.at) out.push(...(s.kind === 'craps' ? this.crapsLand(s, t) : this.flipLand(s, t)));
       if (s.kind === 'derby') {
         if (s.state === 'open' && s.until && t >= s.until) this.derbyRun(s, t);
@@ -204,7 +251,7 @@ export class Casino {
   // a station's game played out the house's way: a hand stands, the dice roll on to a decision, a coin lands
   finish(s, t, p) {
     const out = [];
-    if (s.kind === 'bj' && s.state === 'play') { s.hand.act('stand'); out.push(this.bjSettle(s, t, p)); }
+    if (s.kind === 'bj') this.bj.vacated(s.id, t);   // (its hand stands when its turn comes: the round plays on)
     if (s.kind === 'craps') {
       if (s.pend) out.push(...this.crapsLand(s, t));
       for (let i = 0; i < 200 && s.state === 'point'; i++) {
@@ -218,7 +265,13 @@ export class Casino {
   // last call (the day's over): every game on the floor played out, the Derby run now if it has tickets
   closeAll(t) {
     const out = [];
+    for (const x of this.bj.close(t)) {
+      const s = this.st.get(x.id);
+      s.out = x.out; s.won = x.won;
+      out.push({ back: x.back, won: x.won, game: GAMES.bj, p: s.dealt || null, id: x.id });
+    }
     for (const s of this.st.values()) {
+      if (s.kind === 'bj') continue;
       if (s.kind === 'derby') {
         if (s.state === 'open' && s.tickets.length) this.derbyRun(s, t);
         if (s.state === 'race') out.push(...this.derbyPay(s, t));
@@ -233,7 +286,8 @@ export class Casino {
     let n = 0;
     for (const s of this.st.values()) {
       if (s.kind === 'derby') n += s.tickets.reduce((a, k) => a + k.stake, 0);
-      else if (s.state === 'play' || s.state === 'point' || s.state === 'roll' || s.pend) n += s.stake;
+      else if (s.kind === 'bj') { if (this.bj.state !== 'result') n += this.bj.hands.get(s.id)?.stake || 0; }
+      else if (s.state === 'play' || s.state === 'point' || s.state === 'roll' || s.pend) n += s.stake + (s.odds || 0);
     }
     return n;
   }
@@ -243,11 +297,13 @@ export class Casino {
     const out = {};
     for (const s of this.st.values()) {
       const v = { k: s.kind, o: s.owner, st: s.state, bet: s.bet, stake: s.stake, out: s.out, won: s.won };
-      if (s.kind === 'bj' && s.hand) {
-        const h = s.hand.publicState();
-        Object.assign(v, { cards: h.squad, tot: h.squadTotal, up: h.dealerUp, dl: h.dealer, dt: h.dealerTotal });
+      if (s.kind === 'bj') {
+        const h = this.bj.seatView(s.id);
+        v.st = h ? this.bj.state : 'bet';
+        if (h) Object.assign(v, { hands: h.hands, tots: h.tots, outs: h.outs, stake: h.stake });
+        if (v.st !== 'result') { v.out = null; v.won = 0; }
       }
-      if (s.kind === 'craps') Object.assign(v, { pt: s.point, dice: s.dice, roll: s.dice ? Math.round((t - s.rollAt) * 10) / 10 : null, land: s.pend ? 0 : 1 });
+      if (s.kind === 'craps') Object.assign(v, { pt: s.point, dice: s.dice, roll: s.dice ? Math.round((t - s.rollAt) * 10) / 10 : null, land: s.pend ? 0 : 1, odds: s.odds });
       if (s.kind === 'flip') Object.assign(v, { spin: s.pend ? 1 : 0 });
       if (s.kind === 'derby') {
         Object.assign(v, { left: s.until ? Math.max(0, Math.ceil(s.until - t)) : null, order: s.order, seed: s.seed, race: s.race, rt: DERBY.RACE_T,
@@ -258,6 +314,7 @@ export class Casino {
       for (const k of Object.keys(v)) if (v[k] == null || v[k] === 0 || v[k] === false) delete v[k];
       out[s.id] = v;
     }
+    out.bjt = this.bj.view(t);   // the table itself: the dealer's cards, whose turn
     return out;
   }
 }
