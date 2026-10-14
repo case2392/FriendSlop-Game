@@ -86,9 +86,11 @@ function clearance(sim, W, dir = 1) {
   const ahead = (x, z) => (x - rp.x) * f.x + (z - rp.z) * f.z > 4;
   for (const p of sim.props.values()) {
     const t = p.body.translation();
-    if (Math.hypot(t.x - rp.x, t.z - rp.z) > 26 || !ahead(t.x, t.z)) continue;
+    if (Math.hypot(t.x - rp.x, t.z - rp.z) > 26) continue;
     const l = sim.rvToLocal(t);
     if (Math.abs(l.x) < 1.3 && Math.abs(l.z) < 4.5) continue;   // (aboard)
+    // (ahead of the nose itself, however close: loot at the bumper's corner is in the way too)
+    if (l.z * dir < 3.6 || Math.abs(l.x) > 2.6 + Math.max(0, l.z * dir - 4.4)) continue;
     for (const n of nose) best = Math.min(best, Math.hypot(n.x - t.x, n.z - t.z) - 0.4);
   }
   for (const s of W.statics) {
@@ -313,6 +315,11 @@ if (ONLY.has('soak')) for (const seed of SEEDS) for (let day = D0; day <= Math.m
   const broke = loose.filter(id => !sim.props.has(id)).map(id => LOOSE[loose.indexOf(id)]), out = loose.filter(id => sim.props.has(id) && !inRV.has(id)).map(id => LOOSE[loose.indexOf(id)]);
   if (made) { room.clock = 9; ctx.doing = 'dock'; ctx.docked = dock(ctx); }
   teleports(ctx);
+  // (the loose things that came out on the road stay out of the aprons: the crew would have picked them up,
+  // and they aren't the stops' own loot)
+  // (after the tow's tumble too: what's still aboard now)
+  const still = new Set(sim.cargo());
+  for (const id of loose) if (sim.props.has(id) && !still.has(id)) sim.removeProp(id);
   let aprons = 0;
   if (!QUICK) for (const poi of W.pois) {
     if (POI && poi.type !== POI) continue;
