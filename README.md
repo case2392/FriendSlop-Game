@@ -36,6 +36,16 @@ engine hatch on its back until it coughs back to life (one of you takes 8 second
 **Gus** fixes it by the RV lot in town at night, once the Repo Man is paid: 25% a press, for cash or on
 tomorrow's payment. It never ends a trip by itself: only a missed payment does.
 
+## Beat your time, beat your haul
+
+Every trip is timed and counted. **Road time** is the clock at each day's payment less 6:00, added up over
+the five days (pay at 2 PM every day and it's 30:00 of real time); the **biggest haul** is everything you
+pawned. The **Garage** (the menu, the Esc card, or `G`) keeps your fastest payoff, your best payment time
+for each day, your biggest haul, your cleanest delivery, a tally for every crew you've finished a trip
+with, and lifetime counters. Records need you aboard from the first morning to the end; a trip from a
+typed seed is practice and counts only on that seed's board. The save is yours, on your own PC (or in
+your browser), with Export and Import in the Garage to move it.
+
 ## Wildlife
 
 From day 2 a **Grumphorn**, a one-ton shaggy beast with curled horns and a brass cowbell, sleeps on the
@@ -277,7 +287,9 @@ npm test
   spot, starts over, and wins on day 5.
 - `test/server.mjs` checks what keeps an evening going when connections
   misbehave: kept seats, malformed frames, floods, a different build, silent
-  connections, the goodbye when the server shuts down.
+  connections, the goodbye when the server shuts down; and every trip's
+  summary reaching whoever was on it (held for a dropped player till they're
+  back), and what counts as practice.
 - `test/rv.mjs` checks the RV's condition in process: what a crash costs and
   what must never count as one (keyboard driving, a handbrake stop with safes
   aboard, teleports, the tow off a steep bank, the winch), the winch hauling

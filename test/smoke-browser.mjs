@@ -545,6 +545,58 @@ try {
     const dawn = await host.evaluate(() => ({ holding: window.__nmd.me.holding, up: window.__nmd.mapUp() }));
     check(held && !dawn.holding && !dawn.up, `a map held overnight stays behind: day 2 starts with empty hands and no map up (held ${held}, then ${JSON.stringify(dawn.holding)}, map up ${dawn.up})`);
   }
+  // ---- the save: a trip paid off goes into the host's own save; the Garage (from the Esc card, or G) shows it
+  // and holds the game's keys; it survives a reload; Export and Import carry it ----
+  {
+    const fromEsc = await host.evaluate(() => {
+      document.getElementById('clickToPlay').classList.remove('hidden');
+      document.getElementById('ctpGarage').click();
+      const up = !document.getElementById('garage').classList.contains('hidden') && window.__nmd.uiOpen();
+      document.getElementById('garageClose').click();
+      return up && !window.__nmd.uiOpen();
+    });
+    await host.evaluate(() => { window.__nmd.acceptTestRuns = true; window.__nmd.send({ t: 'dbg', op: 'win' }); });
+    const run = await host.waitForFunction(() => {
+      const S = window.__nmd, P = JSON.parse(localStorage.getItem('nmdProfile') || '{}');
+      return S.overRun && P.runs?.includes(S.overRun) && document.getElementById('overRecords')?.textContent.includes('Road time') && S.overRun;
+    }, null, { timeout: 120000 }).then(h => h.jsonValue(), () => null);
+    const overLine = await host.evaluate(() => document.getElementById('overRecords')?.textContent.replace(/\s+/g, ' ').trim() || '');
+    // G on the trip: the Logbook
+    const logbook = await host.evaluate(() => {
+      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', bubbles: true }));
+      window.dispatchEvent(new KeyboardEvent('keyup', { key: 'g', code: 'KeyG', bubbles: true }));
+      const txt = document.getElementById('garageBody').textContent.replace(/\s+/g, ' ');
+      const up = !document.getElementById('garage').classList.contains('hidden');
+      document.getElementById('garageClose').click();
+      return { up, txt };
+    });
+    const fast = /Fastest payoff\s*(\d+:\d\d)/.exec(logbook.txt)?.[1];
+    check(fromEsc && run && /NEW RECORD/.test(overLine) && logbook.up && fast,
+      `the save: the Garage opens from the Esc card and holds the game's keys (${fromEsc}); a trip paid off is in the host's save (run ${run}), the game-over says "${overLine.slice(0, 60)}", and G opens the Logbook with the fastest payoff ${fast}`);
+    // a reload (the menu): still there; Export, then Import that code: the same save; a garbled code is refused
+    await host.reload();
+    await host.waitForFunction(() => window.__nmd && document.getElementById('garageBtn'), null, { timeout: 120000 });
+    const io = await host.evaluate(() => {
+      document.getElementById('garageBtn').click();
+      const kept = /Fastest payoff\s*(\d+:\d\d)/.exec(document.getElementById('garageBody').textContent)?.[1];
+      document.querySelector('#garage .gtab[data-tab="save"]').click();
+      document.getElementById('gxExport').click();
+      const code = document.getElementById('gxOut').value;
+      document.getElementById('gxIn').value = code.slice(0, 40);
+      document.getElementById('gxImport').click();
+      const refused = document.getElementById('gxMsg')?.textContent || '';
+      const before = localStorage.getItem('nmdProfile');
+      document.getElementById('gxIn').value = code;
+      document.getElementById('gxImport').click();
+      const after = JSON.parse(localStorage.getItem('nmdProfile')), was = JSON.parse(before);
+      const same = after.pid === was.pid && JSON.stringify(after.best) === JSON.stringify(was.best) && JSON.stringify(after.runs) === JSON.stringify(was.runs);
+      const back = /Fastest payoff/.test(document.getElementById('garageBody').textContent);
+      document.getElementById('garageClose').click();
+      return { kept, code: code.slice(0, 5), refused, same, back };
+    });
+    check(io.kept === fast && io.code === 'NMD1.' && /garbled|cut short/.test(io.refused) && io.same && io.back,
+      `the save: after a reload the Logbook still has ${io.kept}; Export gives a code (${io.code}...), half of it is refused ("${io.refused}"), and Import of the whole code gives back the same save (${io.same})`);
+  }
   server.kill('SIGTERM');
   await joiner.waitForFunction(() => /The trip is over/.test(document.getElementById('netModal')?.textContent || ''), null, { timeout: 20000 });
   const said = (await joiner.evaluate(() => document.getElementById('netModal').textContent)).replace(/\s+/g, ' ').trim();

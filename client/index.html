@@ -37,6 +37,7 @@
     <p id="menuStatus" class="status-text"></p>
     <p id="menuError" class="error-text"></p>
     <div class="menu-row">
+      <button id="garageBtn" class="btn small gray">Garage</button>
       <button id="settingsBtn" class="btn small gray">Settings</button>
       <button id="creditsBtn" class="btn small gray">Credits</button>
       <button id="quitBtn" class="btn small gray hidden">Quit Game</button>
@@ -82,6 +83,7 @@
     <div id="ctpCode" class="ctp-code hidden"><span class="k">Trip code</span><b id="ctpCodeNum"></b><small>Friends click Join Game and type it in</small></div>
     <div class="ctp-row">
       <button id="ctpInvite" class="btn small green hidden">Invite Friends</button>
+      <button id="ctpGarage" class="btn small gray">Garage</button>
       <button id="ctpSettings" class="btn small gray">Settings</button>
       <button id="ctpLeave" class="btn small pink">Leave Trip</button>
       <button id="ctpQuit" class="btn small gray hidden">Quit Game</button>
@@ -122,7 +124,7 @@
         <p>One shared bank. Pawn loot in town, gamble at the casino, and pay the Repo Man by midnight, every night. Miss one payment and he takes the RV: the trip is over.</p>
       </div>
     </div>
-    <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (any range; buy one at the store) · <kbd>F1</kbd> this page</p>
+    <p class="hint"><kbd>V</kbd> push-to-talk · <kbd>M</kbd> mute · <kbd>T</kbd> walkie-talkie (any range; buy one at the store) · <kbd>G</kbd> the Garage (your records) · <kbd>F1</kbd> this page</p>
     <label class="sens">Mouse sensitivity <input id="sensInput" type="range" min="0.3" max="2.5" step="0.05"></label>
     <button id="helpOk" class="btn small green">Got It</button>
   </div>
@@ -157,6 +159,14 @@
   <div class="filigree"></div>
   <div id="settingsBody" class="settings-body"></div>
   <div class="row"><button id="settingsReset" class="btn small gray">Defaults</button><button id="settingsClose" class="btn small green">Done</button></div>
+</div>
+<!-- ============ THE GARAGE (your save: the menu, the Esc card, or G) ============ -->
+<div id="garage" class="panel parchment settings garage hidden">
+  <h2>The Garage</h2>
+  <div class="filigree"></div>
+  <div class="gtabs"><button class="gtab on" data-tab="log">Logbook</button><button class="gtab" data-tab="save">Save</button></div>
+  <div id="garageBody" class="settings-body garage-body"></div>
+  <div class="row"><button id="garageClose" class="btn small green">Done</button></div>
 </div>
 <div id="credits" class="panel parchment settings hidden">
   <h2>Credits</h2>

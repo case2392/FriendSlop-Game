@@ -5,7 +5,13 @@
 //   road  — the clock runs, the roles are locked. scavenge, climb, winch, get to town, pawn, gamble.
 //   night — paid. campfire, store, everyone into a bunk = next day.
 //   over  — you own the RV, or the Repo Man owns you (one missed payment does it). then a fresh run.
+//
+// Every trip ends with a 'trip' message to each player who was on it (tripMsg): its times and money and
+// their part in it, for their own save (shared/profile.js; client/js/profile.js keeps it). Each one is held
+// for that player's profile id until their page says it has it ('tripAck'), so somebody who dropped gets
+// theirs when they come back, from this trip or a later one in the same room.
 
+import crypto from 'node:crypto';
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
 import { LOOT, fmt$ } from '../shared/loot.js';
@@ -13,6 +19,7 @@ import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, RV_HATCH, toWorld, qRotate, insideRV } 
 import { Sim } from './sim.js';
 import { STOP_NAMES } from '../shared/mobs.js';
 import { BJTable, FlipMachine } from './casino.js';
+import { fnv1a, isPid } from '../shared/profile.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -27,11 +34,13 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
 const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
+const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 // a number from a client: finite and within +-lim, or 0
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
 export class Room {
-  constructor(code, seed = null) {
+  // opts.typed: the seed was typed on the menu (that first trip is practice: shared/profile.js)
+  constructor(code, seed = null, opts = {}) {
     this.code = code;
     this.players = new Map();
     this.hostId = null;
@@ -42,6 +51,11 @@ export class Room {
     this.rolesCrew = '';               // the crew the roles were last settled for (a newcomer in camp draws again)
     // the wildlife comes out once the RV leaves camp (FRIENDSLOP_NOMOBS=1, or the test lever, keeps it away)
     this.mobsOn = typeof process === 'undefined' || process.env.FRIENDSLOP_NOMOBS !== '1';
+    // a server with a fast clock or the test levers on: its trips set no records (the tests turn it off to
+    // check the rules)
+    this.serverTest = C.TEST || C.FAST;
+    this.typedSeed = !!opts.typed;
+    this.pending = new Map();          // profile id -> { name, list }: the 'trip' messages that player hasn't taken yet
     this.newRun(seed);
   }
 
@@ -49,10 +63,18 @@ export class Room {
 
   newRun(seed = null) {
     this.seed = seed ?? (Math.floor(Math.random() * 1e9) >>> 0);
+    this.typed = seed != null && this.typedSeed;   // (the next trip in this room has a seed of its own)
+    // what makes the trip's record: its id, who was on it (by profile id), when each day was paid
+    this.runId = crypto.randomBytes(5).toString('hex');
+    this.roster = new Map();
+    this.payAt = [];
+    this.tainted = false;            // a test lever was pulled: the trip records nothing
+    this.departed = false;           // the RV has left camp on day 1 (who was aboard then went from the start)
+    this.run = null;
     this.day = 1;
     this.bank = 200;                 // gas money. that's it. that's all you have.
     for (const p of this.players.values()) p.walkie = p.hat = false;   // a new trip buys its own walkies (and hard hats)
-    this.stats = { bills: 0, broken: 0, sold: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0,
+    this.stats = { bills: 0, broken: 0, sold: 0, gamble: 0, bestWin: null, worstLoss: null, kos: 0, stolen: 0, recovered: 0, beasts: 0, beanings: 0,
       rv: { dmg: 0, crashes: 0, worst: null, cash: 0, loan: 0, breakdowns: 0, end: 100 } };
     // the RV's condition (a new trip, a new RV): the hit being added up, the day's breakdowns, the roadside
     // fix's progress, Gus's pending loan question; repairs put on the loan land on tomorrow's payment
@@ -60,6 +82,7 @@ export class Room {
     this.loanAdd = 0;
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
+    for (const p of this.players.values()) this.enroll(p);   // (aboard as this trip begins)
     this.startDay([]);
   }
 
@@ -117,13 +140,81 @@ export class Room {
     this.phase = 'over';
     this.stats.rv.end = Math.round(this.rvc.hp);
     this.over = { won, at: this.t, day: Math.min(this.day, C.DAYS), due: this.due, short };
+    this.run = this.buildRun(won);
     this.broadcast(this.overMsg());
+    for (const e of this.roster.values()) this.queueTrip(e, this.tripMsg(e));
     this.sendMeta();
   }
 
   overMsg() {
     const o = this.over;
-    return { t: 'over', won: o.won, day: o.day, due: o.due, short: o.short, stats: this.stats, next: Math.max(0, Math.round((C.FAST ? 3 : 25) - (this.t - o.at))) };
+    return { t: 'over', won: o.won, day: o.day, due: o.due, short: o.short, stats: this.stats, run: this.run, next: Math.max(0, Math.round((C.FAST ? 3 : 25) - (this.t - o.at))) };
+  }
+
+  // ---- the trip's record -----------------------------------------------------------------------------
+  // 'seed': the trip's seed was typed on the menu (it records only to that seed's board); 'test': a test
+  // lever was pulled, or the server runs a fast clock, test levers or no wildlife (it records nothing)
+  practice() { return this.serverTest || this.tainted || !this.mobsOn ? 'test' : this.typed ? 'seed' : null; }
+
+  // the trip as everyone on it saw it: its id, the clock at each day's payment (midnight's auto-pay is
+  // 24:00), the road time (wins only: the payments less 6:00, summed), the money, and who went all the way
+  buildRun(won) {
+    const splits = [1, 2, 3, 4, 5].map(d => (this.payAt[d] != null ? Math.round(this.payAt[d] * 1000) / 1000 : null));
+    const time = won && splits.every(h => h != null) ? Math.round(splits.reduce((a, h) => a + h - C.DAY_START, 0) * 1000) / 1000 : null;
+    const practice = this.practice();
+    return {
+      id: this.runId, won, practice, ...(practice === 'seed' ? { seed: this.seed } : {}), tier: 'std',
+      time, splits, sold: this.stats.sold, surplus: won ? Math.round(this.bank) : null, casino: this.stats.gamble,
+      rvEnd: this.stats.rv.end, repairs: this.stats.rv.cash + this.stats.rv.loan,
+      crew: [...this.roster.values()].filter(e => e.fromStart && e.here).map(e => ({ h: e.h, name: e.name })),
+    };
+  }
+  // one player's 'trip' message: the run, and their part in it
+  tripMsg(e) {
+    const { id, ...run } = this.run;
+    return { t: 'trip', run: id, ...run, you: { fromStart: e.fromStart, atEnd: e.here, kos: e.kos, revives: e.revives, rvDmg: e.rvDmg } };
+  }
+  // held for that profile id until their page takes it (a page that's here gets it now)
+  queueTrip(e, msg) {
+    const list = (this.pending.get(e.pid)?.list || []).filter(m => m.run !== msg.run);
+    list.push(msg);
+    this.pending.delete(e.pid);   // (the most recent last: the oldest goes first when too many are held)
+    this.pending.set(e.pid, { name: e.name, list: list.slice(-PENDING_TRIPS) });
+    while (this.pending.size > PENDING_PIDS) this.pending.delete(this.pending.keys().next().value);
+    for (const p of this.players.values()) if (p.pid === e.pid) this.send(p, msg);
+  }
+  deliver(p) { for (const m of this.pending.get(p.pid)?.list || []) this.send(p, m); }
+  // whose trip is still waiting for them (not here to take it): the desktop host asks before ending the trip
+  undelivered() {
+    const here = new Set([...this.players.values()].filter(p => p.connected).map(p => p.pid));
+    return [...this.pending].filter(([pid]) => !here.has(pid)).map(([, v]) => v.name);
+  }
+
+  // ---- profiles ------------------------------------------------------------------------------------
+  // prof: what the page says of its save (create / join): { pid, wins }. A page with none (or a bad one)
+  // is known by its connection's key instead. A seat coming back keeps the profile it had.
+  setProfile(p, prof, { resumed = false } = {}) {
+    if (resumed && p.pid) return;
+    let pid = prof && isPid(prof.pid) ? prof.pid : 'k:' + fnv1a(String(p.key || p.id));
+    // (two pages on one browser share a save: the second is known by its key)
+    if ([...this.players.values()].some(q => q !== p && q.pid === pid)) pid = 'k:' + fnv1a(String(p.key || p.id));
+    p.pid = pid;
+    const w = Math.round(Number(prof?.wins));
+    p.wins = Number.isFinite(w) ? Math.max(0, Math.min(100000, w)) : 0;
+  }
+  // on the trip's roster (by profile id): aboard now, and what they did on it
+  enroll(p) {
+    if (!p.pid) this.setProfile(p, null);
+    let e = this.roster.get(p.pid);
+    if (!e) this.roster.set(p.pid, e = { pid: p.pid, h: fnv1a(p.pid), name: p.name, fromStart: false, here: true, kos: 0, revives: 0, rvDmg: 0 });
+    e.name = p.name; e.here = true;
+    return e;
+  }
+  entry(p) { return p ? this.roster.get(p.pid) : null; }
+  // the RV leaves camp on day 1: everyone aboard (here, or their seat kept) went from the start
+  depart() {
+    this.departed = true;
+    for (const p of this.players.values()) { const e = this.entry(p) || this.enroll(p); e.fromStart = true; }
   }
 
   worldMsg() {
@@ -165,6 +256,8 @@ export class Room {
     this.sim.release(id);
     this.sim.dropHook(id);
     this.players.delete(id);
+    const e = this.entry(p);
+    if (e && ![...this.players.values()].some(q => q.pid === p.pid)) e.here = false;   // (off the trip: not aboard at the end)
     if (this.hostId === id) this.hostId = [...this.players.values()].find(q => q.connected)?.id ?? null;
     if (this.players.size === 0) { this.closed = true; return; }
     if (why === 'left') this.toast(`${p.name} left the trip.`, '#ffb4a2', 4);
@@ -245,6 +338,9 @@ export class Room {
     // joining at night or after the run ended: what everyone else is looking at
     if (this.phase === 'night' && this.receipt) this.send(p, { ...this.receipt, rv: this.rvReceipt() });
     if (this.phase === 'over' && this.over) this.send(p, this.overMsg());
+    // (during the game-over they weren't on the trip that ended: the next one is theirs)
+    if (this.phase !== 'over') this.enroll(p);
+    this.deliver(p);
     this.checkRoles();
     this.sendMeta();
   }
@@ -383,8 +479,10 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0 })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '' })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
+      // the trip: practice or not (what it records), and whose summary is still waiting for them
+      trip: { practice: this.practice(), pending: this.undelivered() },
     });
   }
 
@@ -434,7 +532,15 @@ export class Room {
         return;
       }
       case 'voice': p.voice = !!m.on; this.sendMeta(); return;
-      case 'dbg': if (C.TEST) this.debug(p, m); return;
+      // the page has this trip's summary in its save: stop sending it
+      case 'tripAck': {
+        const held = this.pending.get(p.pid);
+        if (!held) return;
+        held.list = held.list.filter(x => x.run !== m.run);
+        if (!held.list.length) this.pending.delete(p.pid);
+        return;
+      }
+      case 'dbg': if (C.TEST) { this.tainted = true; this.debug(p, m); } return;
     }
   }
 
@@ -469,6 +575,8 @@ export class Room {
     else if (m.op === 'rvhp') { this.rvc.hp = Math.max(0, Math.min(100, +m.hp || 0)); this.rvc.fix = 0; if (this.rvc.hp <= 0) this.rvc.brokeN = Math.max(1, this.rvc.brokeN); sim.setRvCond(this.rvc.hp); }
     else if (m.op === 'rvhit') sim.out.push({ k: 'rvhit', why: String(m.why || 'crash'), amt: +m.amt || 0, dv: +m.dv || 0, what: m.what || 'the test lever', at: [0, 0, 0] });
     else if (m.op === 'hat') { p.hat = !!m.on; this.sendMeta(); }
+    // the trip paid off now (days not paid yet count as paid this minute): the game-over and everyone's summary
+    else if (m.op === 'win' && this.phase !== 'over') { for (let d = 1; d <= C.DAYS; d++) this.payAt[d] ??= this.clock; this.finish(true); }
   }
 
   // who's here and playing right now (the wildlife is sized for them)
@@ -612,6 +720,8 @@ export class Room {
       const q = this.players.get(Number(m.id));
       if (!q || !q.ko || !q.pos || dist3(q.pos, p.pos) > 3.5) return;
       q.ko = false;
+      const e = this.entry(p);
+      if (e) e.revives++;
       this.send(q, { t: 'revived', by: p.id });
       this.toast(`${p.name} picked ${q.name} up off the ground. No ambulance bill.`, '#7CFC00', 3);
       return;
@@ -725,6 +835,7 @@ export class Room {
     const src = e.why === 'crash' ? (I.first.crash.by || 'nobody') : e.why === 'beast' ? 'the Grumphorn' : e.why === 'rock' ? 'rocks' : 'a ringtail';
     D.src[src] = (D.src[src] || 0) + amt;
     if (e.why === 'crash' && (!S.worst || I.parts.crash > S.worst.amt)) S.worst = { amt: I.parts.crash, by: I.first.crash.by, what: I.first.crash.what, day: this.day };
+    if (e.why === 'crash' && drv) { const en = this.entry(drv); if (en) en.rvDmg += amt; }
     if (!C.TEST) console.log('[rv]', this.code, this.day, e.why, e.dv ?? '', e.what || '', amt, R.hp);
     Object.assign(e, { amt, hp: R.hp, by: e.why === 'crash' ? drv?.id ?? 0 : 0 });
     // a big incident throws the door open (E shuts it): loot slides out on a turn, ringtails come calling
@@ -820,6 +931,7 @@ export class Room {
 
   betResult(won, game, p) {
     this.dayStats.gamble += won;
+    this.stats.gamble += won;
     if (won > 0 && (!this.stats.bestWin || won > this.stats.bestWin.amt)) this.stats.bestWin = { amt: won, name: p?.name, game };
     if (won < 0 && (!this.stats.worstLoss || won < this.stats.worstLoss.amt)) this.stats.worstLoss = { amt: won, name: p?.name, game };
     this.broadcast({ t: 'ev', list: [{ k: 'bet', won, game }] });
@@ -829,6 +941,7 @@ export class Room {
   pay(p = null) {
     this.bank -= this.due;
     this.paid = true;
+    this.payAt[this.day] = this.clock;   // (the day's split: midnight's auto-pay is 24:00)
     this.toast(`Paid the Repo Man ${fmt$(this.due)}${p ? ` (${p.name} handed it over)` : ''}. The RV is yours for one more night.`, '#7CFC00', 6);
     if (this.day >= C.DAYS) return this.finish(true);
     this.beginNight();
@@ -845,6 +958,8 @@ export class Room {
     if (h?.kind === 'prop') this.sim.mobs?.onDowned([h.id]);   // (what they dropped: the ringtails' favourite pickings)
     this.sim.dropHook(p.id);
     this.stats.kos++;
+    const e = this.entry(p);
+    if (e) e.kos++;
     // what knocked them about in the last 3 s says how they went down (the page only knows it fell)
     const k = p.lastKnock && this.t - p.lastKnock.t < 3 ? p.lastKnock : null;
     const by = k?.by != null ? this.players.get(k.by)?.name : null;
@@ -892,7 +1007,7 @@ export class Room {
       const s = { x: f.x + Math.cos(a) * 3, z: f.z + Math.sin(a) * 3 };
       this.send(p, { t: 'tp', x: s.x, y: this.W.townY + 0.1, z: s.z, yaw: Math.atan2(f.x - s.x, f.z - s.z) });
     }
-    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, ...this.dayStats, rv: this.rvReceipt() };
+    this.receipt = { t: 'receipt', day: this.day, due: this.due, bank: this.bank, paidAt: this.payAt[this.day] ?? null, ...this.dayStats, rv: this.rvReceipt() };
     this.broadcast(this.receipt);
   }
 
@@ -998,6 +1113,7 @@ export class Room {
     if (this.phase === 'camp' && rvp.z > this.W.camp.exitZ) {
       this.phase = 'road';
       this.countJob('drv', this.roles.drv); this.countJob('nav', this.roles.nav);   // locked now: counted
+      if (this.day === 1 && !this.departed) this.depart();
       this.toast(`ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
     }
     if (this.phase === 'road') {

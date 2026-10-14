@@ -400,6 +400,35 @@ playtests with real friends before anyone trusts them (confidence: moderate).
   balloon, so the first press only says what it'll cost). Nothing heals
   overnight but Gus.
 
+### 8.1 Records and the save
+
+Every trip is timed and counted, so there's something to beat next time besides the Repo Man:
+
+- **Road time**: the clock at each day's payment less 6:00, added up over the five days (a payment
+  made by midnight's auto-pay counts 18 hours), shown as real time at 45 s a game hour. Paying at 2 PM
+  every day is 40 game hours, 30:00. **Fastest payoff** counts wins only; **best payment times** keep
+  each day's earliest payment on any trip.
+- **Biggest haul**: everything pawned on a trip that paid days 1 to 4 (the skill number), with what was
+  left after the balloon and the casino's net beside it. **Cleanest delivery**: the RV's condition when
+  the balloon was paid.
+- **Whose**: each player's own save. A crew (everyone aboard from day 1's departure to the end, known
+  by hashes of their profile ids) has its own tally, the 12 most recent kept. A trip counts toward
+  your records only if you were aboard when the RV left camp on day 1 and still aboard at the end;
+  lifetime counters (trips, wins, days paid, money pawned, knockouts, friends picked up, RV damage as
+  the driver, Gus's bills) take every trip.
+- **Practice**: a trip from a typed menu seed counts only on that seed's board (the 20 most recent).
+  A trip on a server with test switches (a fast clock, test levers, the wildlife off) or with a test
+  lever pulled records nothing. The automatic next trip always has a seed of its own.
+
+The save (`shared/profile.js`) is a few KB of JSON on the player's own machine: the desktop build's
+`save/profile.json` (written atomically, the last one kept as `profile.bak.json`, an unreadable one
+moved into `save/corrupt`), or the browser's localStorage. It carries a random profile id (never a
+Steam id) and an FNV-1a sum that catches a torn write. It's the player's: they can edit it, and the
+host's server only ever takes the profile id and the win count from it. The server sends each player
+a summary of every trip they were on and holds it, by profile id, until their page says it has it, so
+a player who dropped gets theirs when they come back. The desktop host is asked before leaving while
+a friend's summary is still waiting.
+
 ## 9. Voice and communication
 
 - **Proximity voice:** an HRTF panner placed at the speaker's head. Full

@@ -91,6 +91,25 @@ try {
   const mic = await page.evaluate(() => navigator.permissions.query({ name: 'microphone' }).then(s => s.state, e => String(e)));
   check(mic === 'granted', `the microphone is allowed for voice chat (${mic})`);
 
+  // the save: the first launch made one in the game's folder; a change (an Import in the Garage) keeps the
+  // last one as the backup and leaves no temp file
+  const saveDir = path.join(udHost, 'save'), saved = f => path.join(saveDir, f);
+  const made = await until(() => fs.existsSync(saved('profile.json')), 10000);
+  const pid1 = made ? JSON.parse(fs.readFileSync(saved('profile.json'), 'utf8')).pid : null;
+  const imp = await page.evaluate(() => {
+    document.getElementById('garageBtn').click();
+    document.querySelector('#garage .gtab[data-tab="save"]').click();
+    const where = document.getElementById('garageBody').textContent;
+    document.getElementById('gxExport').click();
+    document.getElementById('gxIn').value = document.getElementById('gxOut').value;
+    document.getElementById('gxImport').click();
+    document.getElementById('garageClose').click();
+    return { pid: window.__nmd.profile().pid, st: window.__nmd.profileStatus().status, where: /On this PC/.test(where) };
+  });
+  const bak = await until(() => fs.existsSync(saved('profile.bak.json')), 10000);
+  check(made && /^[0-9a-f]{16}$/.test(pid1 || '') && imp.pid === pid1 && imp.st === 'ok' && imp.where && bak && !fs.existsSync(saved('profile.json.tmp')),
+    `the save: the first launch wrote save/profile.json (profile ${pid1}); an Import in the Garage rewrote it, the last one kept as profile.bak.json, no temp file left`);
+
   await startTrip(page, 'Solo');
   check(await page.evaluate(() => window.__nmd.phase === 'game' && !!window.__nmd.code), 'a trip starts and the world builds in the desktop app');
   check(await page.evaluate(() => document.getElementById('hCode').classList.contains('hidden')), 'no room code or invite pill without Steam');
@@ -149,9 +168,24 @@ try {
   const be = await startBackend({});
   // the friend lives two Steam regions from the host: only a worldwide search finds the trip
   const fakeEnv = (id, name, region = 0) => ({ NMD_FAKE_STEAM: String(be.port), NMD_FAKE_ID: String(76561190000000000n + BigInt(id)), NMD_FAKE_NAME: name, NMD_FAKE_REGION: String(region) });
+  // (the host's save garbled while the game was closed: it comes back from the backup, the bad one kept aside)
+  const goodPid = JSON.parse(fs.readFileSync(saved('profile.json'), 'utf8')).pid;
+  fs.writeFileSync(saved('profile.json'), '{"v":1,"pid":"garbl');
   const host = await launch('host', { userData: udHost, env: fakeEnv(1, 'Hosty', 2) });
   const guest = await launch('guest', { userData: path.join(tmp, 'guest'), env: fakeEnv(2, 'Dave', 0) });
   try {
+    const back = await host.page.evaluate(() => ({ pid: window.__nmd.profile().pid, st: window.__nmd.profileStatus().status }));
+    const fixed = await until(() => { try { return JSON.parse(fs.readFileSync(saved('profile.json'), 'utf8')).pid === goodPid; } catch { return false; } }, 10000);
+    const aside = fs.existsSync(saved('corrupt')) ? fs.readdirSync(saved('corrupt')) : [];
+    check(back.pid === goodPid && back.st === 'bak' && fixed && aside.length === 1,
+      `the save after a restart: the same profile (${back.pid}); garbled, it came back from the backup (${back.st}), was written again, and the bad file was kept aside (${aside.join(', ')})`);
+    // a second copy on this PC for testing (--multi-instance) keeps a save of its own
+    const multi = await launch('multi', { userData: udHost, args: ['--multi-instance'] });
+    const mPid = await multi.page.evaluate(() => window.__nmd.profile().pid);
+    const mFile = path.join(`${udHost} (2)`, 'save', 'profile.json');
+    const mSaved = await until(() => fs.existsSync(mFile), 10000);
+    await multi.app.close().catch(() => {});
+    check(mSaved && mPid !== goodPid && JSON.parse(fs.readFileSync(mFile, 'utf8')).pid === mPid, `a --multi-instance copy has its own save (${mPid}, in "${path.basename(path.dirname(path.dirname(mFile)))}")`);
     const hs = await host.page.evaluate(() => ({ steam: window.desktop.steam, note: document.getElementById('menuSteam').textContent, name: document.getElementById('nameInput').value }));
     check(hs.steam.ok && hs.steam.name === 'Hosty' && /On Steam as Hosty/.test(hs.note) && hs.name, `with Steam: "${hs.note}"`);
     await host.page.fill('#seedInput', '777');
