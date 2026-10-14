@@ -2111,7 +2111,7 @@ const OUT_WORD = { win: 'WIN', natural: 'BLACKJACK!', push: 'PUSH', lose: 'LOSE'
 const moneyCol = won => (won > 0 ? '#7CFC00' : won < 0 ? '#ff5252' : '#fff');
 const casStation = id => S.W?.town?.casino_stations?.find(s => s.id === id);
 const myStation = () => {
-  const id = S.casAt, st = id && casStation(id), v = id && S.cas?.[id];
+  const id = S.casAt, st = id && casStation(id), v = id && S.g?.cas?.[id] && { ...CAS_BLANK, ...S.g.cas[id] };   // (the latest snapshot's, not the last frame's)
   if (!st || !v || !me.pos || me.mode === 'seat') return null;
   if (Math.hypot(me.pos.x - st.x, me.pos.z - st.z) > C.CASINO.SEAT_R) return null;
   if (st.kind !== 'derby' && v.o !== S.selfId) return null;
