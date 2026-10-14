@@ -40,7 +40,7 @@ const SEEDS = (opt('--seed', null) != null ? [Number(opt('--seed'))] : Array.fro
   .filter((_, i) => i % PART[1] === PART[0]);
 const MERGE = args.includes('--merge') ? args.slice(args.indexOf('--merge') + 1).filter(a => !a.startsWith('--')) : null;
 const CREW = Math.max(1, Math.min(C.MAX_PLAYERS, Number(opt('--crew', 3))));
-const [D0, D1] = String(opt('--days', '1-5')).split('-').map(Number).concat([5]).slice(0, 2);
+const [D0, D1] = (([a, b]) => [a, b ?? a])(String(opt('--days', '1-5')).split('-').map(Number));   // ('3' is day 3 alone)
 const CASINO = opt('--casino', 'none');
 const BANK = opt('--bank', null) != null ? Number(opt('--bank')) : null;
 const WHY = args.includes('--why'), accHist = [], WHYLOG = [];
