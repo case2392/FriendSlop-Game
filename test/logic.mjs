@@ -177,19 +177,20 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     `casino: last call settles a point still being rolled and runs the Derby (${inPlay} in play; ringtail ${dv.order?.[0]} won, the ticket on 3 paid $${last.find(x => x.p === E)?.back})`);
   // the house's edge, played many times: the pass line wins 244 in 495, Double or Nothing 48.5%, a Derby ticket 1 in 4 at x3.8
   const cas3 = new Casino(spots, mulberry32(9)), P = mk(9, 'Pat');
-  at(P, 'craps1'); cas3.sit(P, 'craps1'); at(P, 'flip2'); cas3.sit(P, 'flip2');
   let wins = 0, games = 0, flips = 0, fw = 0, tt = 0;
   const S = cas3.st.get('craps1'), Fm = cas3.st.get('flip2');
-  S.bet = 100; Fm.bet = 100;
-  while (games < 20000) {
+  // (one game at a time: the craps first, then the coin; a refused roll or pull ends the loop short)
+  at(P, 'craps1'); cas3.sit(P, 'craps1'); S.bet = 100;
+  for (let i = 0; games < 20000 && i < 400000; i++) {
     cas3.act(P, 'craps1', 'go', 0, tt, 1e9);
     if (!S.pend) { tt += 1; continue; }
     const r = cas3.crapsLand(S, tt);
     if (r.length) { games++; if (r[0].won > 0) wins++; S.state = 'bet'; }
   }
-  while (flips < 20000) { cas3.act(P, 'flip2', 'go', 0, tt, 1e9); const r = cas3.flipLand(Fm, tt); flips++; if (r[0].won > 0) fw++; Fm.state = 'bet'; }
+  at(P, 'flip2'); cas3.sit(P, 'flip2'); Fm.bet = 100;
+  for (let i = 0; flips < 20000 && i < 40000; i++) { if (cas3.act(P, 'flip2', 'go', 0, tt, 1e9).err) continue; const r = cas3.flipLand(Fm, tt); flips++; if (r[0].won > 0) fw++; Fm.state = 'bet'; }
   const pr = wins / games, fr = fw / flips;
-  check(Math.abs(pr - 244 / 495) < 0.012 && Math.abs(fr - FLIP_ODDS) < 0.012 && DERBY.PAYS * 0.25 < 1,
+  check(games === 20000 && flips === 20000 && Math.abs(pr - 244 / 495) < 0.012 && Math.abs(fr - FLIP_ODDS) < 0.012 && DERBY.PAYS * 0.25 < 1,
     `casino: the house wins in the long run (the pass line won ${(pr * 100).toFixed(1)}% of ${games}, theory 49.3%; the coin ${(fr * 100).toFixed(1)}%; a Derby ticket returns ${(DERBY.PAYS * 25).toFixed(0)}%)`);
 }
 
