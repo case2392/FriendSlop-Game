@@ -849,15 +849,15 @@ shot({
     dbg({ op: 'mobs', on: false });
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 18.6 }); dbg({ op: 'rvhp', hp: 38 });
     for (const b of Object.values(bots)) unseat(b);
-    dbg({ op: 'tpRV', x: -1.5, z: W.town.z + 32, yaw: 0.5 });
+    dbg({ op: 'tpRV', x: -1.4, z: W.town.z + 2.5, yaw: 0.25 });
   },
   tick(t) {
-    const { Dave, Steve, Kyle } = bots, z = W.town.z + 27, C0 = { x: 10.5, z: W.town.z + 19 };
-    Dave.at(3.6, z, yawTo({ x: 3.6, z }, C0)); Steve.at(5.2, z + 1.2, yawTo({ x: 5.2, z: z + 1.2 }, C0)); Kyle.at(6.6, z - 0.4, yawTo({ x: 6.6, z: z - 0.4 }, C0));
+    const { Dave, Steve, Kyle } = bots, z = W.town.z - 2.0, C0 = { x: 7.0, z: W.town.z - 9.5 };
+    Dave.at(1.5, z, yawTo({ x: 1.5, z }, C0)); Steve.at(3.0, z + 0.9, yawTo({ x: 3.0, z: z + 0.9 }, C0)); Kyle.at(4.5, z - 0.3, yawTo({ x: 4.5, z: z - 0.3 }, C0));
     if (every(t, 2.8, 0.05)) for (const b of [Dave, Steve, Kyle]) b.say({ t: 'emote', e: '👑' });
   },
-  cam: t => ({ p: { x: 10.5 - t * 0.2, y: W.town.y + 1.55, z: W.town.z + 19 + t * 0.15 }, t: { x: 4.2, y: W.town.y + 1.5, z: W.town.z + 28.5 } }),
-  body: () => ({ x: 15, z: W.town.z + 14 }),
+  cam: t => ({ p: { x: 7.0 - t * 0.2, y: H(7, W.town.z - 9.5) + 1.5, z: W.town.z - 9.5 + t * 0.2 }, t: { x: 2.6, y: H(2.6, W.town.z) + 1.4, z: W.town.z - 0.5 } }),
+  body: () => ({ x: 13, z: W.town.z - 16 }),
 });
 
 const DAYS = [1, 2, 3, 4, 5];
@@ -893,7 +893,7 @@ async function stills() {
   await page.evaluate(() => { const S = window.__nmd; window.__cam = null; S.noRender = false; });
   if (room.day !== 5) await toDay(5);
   dbg({ op: 'clock', h: 18.6 }); dbg({ op: 'phase', ph: 'road' });
-  await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(10.5, T.y + 0.05, T.z + 19, 0); S.aimAt(4.2, T.y + 1.5, T.z + 28.5); });
+  await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(7.0, T.y + 0.05, T.z - 9.5, 0); S.aimAt(2.6, T.y + 1.4, T.z - 0.5); });
   dbg({ op: 'win' });
   await page.waitForFunction(() => !document.getElementById('overScreen').classList.contains('hidden'), null, { timeout: 120000 });
   await show('#overScreen');
@@ -909,6 +909,7 @@ async function stills() {
   dbg({ op: 'tpRV', x: 0, z: W.town.z + 12, yaw: 0 });
   await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(2, T.y + 0.05, T.z + 4, 0); S.aimAt(7.5, T.y + 2.2, T.z + 24); S.setSetting('uiScale', 1.6); });
   await show('#hud');
+  await page.addStyleTag({ content: '#hCode, #tracker, #tracker * { visibility: hidden !important; }' });
   await page.waitForTimeout(1000);
   dbg({ op: 'clock', h: 23.984 });
   await page.waitForTimeout(160);   // (a few snapshots with the new time, then the server held still at 11:59 PM)
@@ -1203,7 +1204,7 @@ const EDL = [
   { shot: 'neon', secs: 1.25, cards: [['c_bet', 0.05, 1.25]] },
   { shot: 'blackjack', secs: 1.25, from: 8 },
   { shot: 'coinflip', secs: 2.5, from: 6, sfx: [[0.15, 'coin', 0.9]], cues: [[toastIs(/Double or Nothing/), 'lose', 1.0, 0.0]] },
-  { still: 'hud.png', secs: 1.25, zoom: 1.06, crop: [0.18, 0, 0.64, 0.36], cards: [['c_miss', 0.05, 1.25]] },
+  { still: 'hud.png', secs: 1.25, zoom: 1.06, crop: [0.06, 0, 0.74, 0.74], cards: [['c_miss', 0.05, 1.25]] },
   { shot: 'repoman', secs: 2.5, cards: [['c_takes', 0.1, 2.5]], sfx: [[0.1, 'repo', 1.0]] },
   { shot: 'repoman', secs: 1.25, from: 'end', dim: 0.35, cards: [['c_repod', 0.0, 1.25]], sfx: [[0.0, 'repoArrives', 1.0]] },
   // again
