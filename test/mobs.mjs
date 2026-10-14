@@ -2,6 +2,7 @@
 // shove, why a knock happened (and who pays for it), and the mobs themselves.
 process.env.FRIENDSLOP_TEST = '1';
 process.env.FRIENDSLOP_FAST = '1';
+process.env.FRIENDSLOP_NOLOCKER = '1';   // (loose loot in the RV's cabin, as before the locker; its own tests turn it on)
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
@@ -1232,6 +1233,22 @@ function byTheRV(day, names = ['Ann'], side = -1) {
     res.push(`${side < 0 ? 'door side' : 'far side'}: ${ok ? 'home' : 'FAILED'} (stolen $${room.dayStats.stolen}, counted ${D.thefts}, vase $${Math.round(sim.props.get(vase.id)?.value ?? 0)})`);
   }
   check(res.every(r => /: home/.test(r)), `raids: the RV left open with nobody by it, a ringtail takes the vase out of it and home, its den off either side (${res.join('; ')})`);
+}
+{
+  // P1b: the RV's locker: the vase in it, not loose (sim.js stowStep); left open with nobody by it, a ringtail
+  // pries the locker open and takes it home. The door shut, the locker keeps it
+  const res = [];
+  for (const shut of [false, true]) {
+    const { room, ps: [A], sim, m, vase } = byTheRV(2, ['Ann'], -1);
+    sim.lockerOn = true;
+    sim.stow(vase);
+    if (shut) sim.setDoor(false);
+    let home = null;
+    for (let i = 0; i < 60 * 45 && !home; i++) { tick(room, 1 / 60); home = mobEvs(A, 'stash').find(e => room.sim.props.get(e.item)?.type === 'vase'); }
+    const D = sim.mobs.denOf(m), t = home && at(room, home.item);
+    res.push(shut ? (home || sim.locker.length !== 1 ? 'shut: TAKEN' : 'shut: kept') : (home && !sim.locker.length && Math.hypot(t.x - D.x, t.z - D.z) < 3 && room.dayStats.stolen > 0 ? 'open: taken home' : `open: FAILED (home ${!!home}, locker ${sim.locker.length}, stolen $${room.dayStats.stolen})`));
+  }
+  check(res.join() === 'open: taken home,shut: kept', `raids: a ringtail in the open RV pries the locker open and takes the vase home; with the door shut the locker keeps it (${res.join(', ')})`);
 }
 {
   // P2: a shut door, a bungee'd vase, someone by the door, or day 1: nothing goes

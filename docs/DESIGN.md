@@ -253,7 +253,7 @@ the difficulty curve stays in the quota.
 | **Rockfall** (days 3–5) | Loose rock on the rim above the boulder and the gate narrows (a LOOSE ROCK sign, "HONK FIRST" on the map). The RV coming close, or a shove on the boulder, brings it down after a rumble: a rock falling fast knocks out whoever it hits, a rolling one bowls them over | Honk at the sign and it falls before you get there; or hear the rumble and get clear of the walls. Afterwards the rocks are ammunition | timing + the driver's horn |
 | **The Grumphorn** (days 2–5) | A one-ton beast asleep on the road past the mud (day 2), behind the ranger gate (3), past the boulder (4), or both (5). Woken, it charges a fixed line and tosses the first person in its horns | Sneak past crouched, creep the RV by, or wear out its patience: throw junk (a heap of stones waits by its sign), shove, ram it with everyone braced, winch it. Two friends shoving its side while it sleeps tip it over for 12 s. At zero it drops its cowbell and leaves for good | physics + headcount |
 | **The Hoard** (day 5) | One den (the junkyard's) with six ringtails at home (four against a lone player, five against two) on the week's best stash, about $2,500 | A mob of teeth: shove them off, honk, lure them away with a cheese wheel, and carry it out together. The danger's way to make the balloon payment without the casino | headcount |
-| **Ringtails** (every day) | Masked thieves in dens beside the stops (1 den on day 1, 3 by day 5). They sneak up on loot nobody is watching and run it home to their pile. From day 2 they raid an RV left open with nobody by its door, and nip anyone at their den (a stumble, and you drop what you carry) | Watch your loot (stand facing it); grab the thief (it drops it; from day 2 it bites a lone holder, so hold it with a friend), shove it, throw something at it, honk, or raid the den and take it all back. Shut the RV's door or bungee the cargo. A den steals at most 2–3 things a day | headcount + attention |
+| **Ringtails** (every day) | Masked thieves in dens beside the stops (1 den on day 1, 3 by day 5). They sneak up on loot nobody is watching and run it home to their pile. From day 2 they raid an RV left open with nobody by its door, and nip anyone at their den (a stumble, and you drop what you carry) | Watch your loot (stand facing it); grab the thief (it drops it; from day 2 it bites a lone holder, so hold it with a friend), shove it, throw something at it, honk, or raid the den and take it all back. Shut the RV's door (a ringtail that gets in pries the locker open). A den steals at most 2–3 things a day | headcount + attention |
 
 **POIs** are worth the detour and cost time. Abandoned gas stations,
 wrecked semis, yard sales, crash sites on top of a butte (climb up and get
@@ -338,6 +338,14 @@ roof, then the RV; it made the first four days too forgiving.)
   Ed's loading zone out front and the bell sells its whole load too, sight
   unseen, at 80%: carrying the good stuff in is worth it, carrying the junk in
   isn't. (Unloading 20 things one at a time ate three game hours.)
+- **The RV's locker** (playtest ask: loot in the RV kept losing value, and
+  lay in the aisle to trip over): loot that comes to rest in the cabin goes
+  in the locker by the bunks, out of the physics, safe from the road's
+  knocks. E on the locker hands you its best thing; Ed's loading zone buys
+  the whole locker with the load; it rides into the next day. The risk moves
+  to getting the loot *to* the RV, and to the door: a ringtail that gets in
+  pries the locker open. (Bungee cords now strap down what rides on the
+  roof.)
 - **Casino:** every game bets *the shared bank*, and *anyone* can bet it.
   That's GWYF's comedy and it's ours too. Each player can be at a different
   game at the same time (one at blackjack, one at craps, one on the coin

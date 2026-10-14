@@ -7,6 +7,7 @@ import WebSocket from 'ws';
 
 process.env.FRIENDSLOP_TEST = '1';
 process.env.FRIENDSLOP_FAST = '1';
+process.env.FRIENDSLOP_NOLOCKER = '1';   // (loose loot in the RV's cabin, as before the locker; its own tests turn it on)
 process.env.FRIENDSLOP_NOMOBS = '1';   // (the wildlife has its own suite: test/mobs.mjs)
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');

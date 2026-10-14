@@ -4,7 +4,7 @@
 
 import * as C from '/shared/constants.js';
 import { LOOT } from '/shared/loot.js';
-import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
+import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { G } from './phys.js';
 import { STOCK } from '/shared/garage.js';
 
@@ -43,6 +43,7 @@ export class Me {
     this.crouch = false; this.sprinting = false;
     this.climb = null;           // {n, rv}
     this.seat = null;
+    this.bunk = null;            // asleep in a bunk: which (shared/rv.js RV_BUNKS), from the server's 'bed'
     this.koT = 0;
     this.holding = null;         // {id, type}
     this.hasHook = false;
@@ -66,10 +67,14 @@ export class Me {
     if (yaw != null) this.yaw = yaw;
     this.par = 0; this.lp = null;
     if (this.mode === 'climb' || this.mode === 'seat') this.mode = 'walk';
-    this.climb = null;
+    this.climb = null; this.bunk = null;
   }
 
   eye(rv) {
+    if (this.bunk != null && rv) {   // (lying on your back, your head on the pillow)
+      const b = RV_BUNKS[this.bunk];
+      return toWorld(rv.p, rv.q, v3(b.x + b.head * 0.78, b.y + 0.16, b.z));
+    }
     if (this.mode === 'seat' && rv) {
       const s = RV_SEATS[this.seat];
       return toWorld(rv.p, rv.q, v3(s.x, s.y, s.z));
@@ -167,6 +172,17 @@ export class Me {
     this.stamMax = ST.MAX - Math.min(ST.WEIGHT_CAP, (L ? L.mass : 0) * ST.WEIGHT_PER_KG) - (this.hasHook ? 4 : 0);
     if (this.stamina > this.stamMax) this.stamina = this.stamMax;
 
+    // asleep in a bunk: lying there, riding with the RV
+    if (this.bunk != null) {
+      if (!rv) return;
+      const b = RV_BUNKS[this.bunk];
+      this.par = 1;
+      this.lp = v3(b.x, b.y, b.z);
+      this.pos = toWorld(rv.p, rv.q, this.lp);
+      this.vel = v3();
+      this.regen(dt);
+      return;
+    }
     if (this.mode === 'seat') {
       if (!rv) return;
       const s = RV_SEATS[this.seat ?? 0];

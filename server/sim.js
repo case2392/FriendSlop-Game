@@ -11,8 +11,8 @@ import RAPIER from '@dimforge/rapier3d-compat';
 import * as C from '../shared/constants.js';
 import { LOOT, CARRY, carried, carryDist } from '../shared/loot.js';
 import {
-  RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_HULL,
-  toWorld, toLocal, insideRV, qRotate, qConj, hitZone,
+  RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_LOCKER, RV_HULL,
+  toWorld, toLocal, insideRV, inCabin, qRotate, qConj, hitZone,
 } from '../shared/rv.js';
 import { inMud } from '../shared/world.js';
 import { Mobs } from './mobs.js';
@@ -28,6 +28,9 @@ import { partMods } from '../shared/garage.js';
 
 // stuff people bump into but a 3-ton RV flattens
 const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
+// what goes in the RV's locker: loot with a price (not a tool, a Road Card tin or a critter)
+const lockable = p => { const L = LOOT[p.type]; return !!L && p.max > 0 && !L.tool && !L.find && !L.mob; };
+const STOW_T = 0.6;   // s lying still in the RV's cabin before it's put in the locker
 
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
 const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });
@@ -114,6 +117,10 @@ export class Sim {
     this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
     this.riding = new Map();         // prop id -> its RV-local pose: loot riding the RV (rideStep)
     this.calm = new Map();           // prop id -> how long it has sat still in the moving RV
+    this.locker = [];                // the RV's locker: [{ type, value, max }], loot stowed out of the physics (stowStep)
+    // (FRIENDSLOP_NOLOCKER: the tests of loose loot riding in the cabin, the walls holding it, raids on it)
+    this.lockerOn = typeof process === 'undefined' || process.env.FRIENDSLOP_NOLOCKER !== '1';
+    this.stowT = new Map();          // prop id -> how long it has lain still in the cabin
     // the RV's condition, as it drives (the room keeps the number: shared/constants.js RVH), and the crash
     // being measured; nothing counts for the first moments of a day (or after a teleport)
     this.setRvCond(cond);
@@ -134,6 +141,7 @@ export class Sim {
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const toTie = [];
     for (const c of carry) {
+      if (c.locker) { this.locker.push({ type: c.type, value: c.value, max: c.max }); continue; }   // (still in the locker)
       const w = toWorld(rp, rq, v3(c.lx, c.ly + 0.04, c.lz));
       const q = mulQ(rq, c.q);
       const pr = this.addProp(c.type, w, q, c.value, c.max);
@@ -211,6 +219,7 @@ export class Sim {
     this.rv = this.world.createRigidBody(bd);
     this.rvCols = {};
     for (const [name, hx, hy, hz, cx, cy, cz, o] of RV_PARTS) {
+      if (o.page) continue;   // (the pages' alone: shared/rv.js)
       const vol = 8 * hx * hy * hz;
       const cd = RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(cx, cy, cz)
         .setDensity(o.mass ? o.mass / vol : 0).setFriction(name === 'chassis' ? 0.4 : 0.75)
@@ -582,10 +591,68 @@ export class Sim {
     for (const p of this.props.values()) {
       if (p.type === 'map' || p.type === 'boulder' || LOOT[p.type].mob) continue;
       const l = toLocal(rp, rq, p.body.translation());
-      if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) continue;
+      // (on the roof only what's bungee'd down rides into tomorrow)
+      if (!insideRV(l.x, l.y, l.z, 0.05) || (l.y > RV_DIM.ROOF_Y - 0.1 && !this.tied.has(p.id))) continue;
       list.push({ type: p.type, value: p.value, max: p.max, lx: l.x, ly: l.y, lz: l.z, q: mulQ(conjQ(rq), p.body.rotation()), tied: this.tied.has(p.id) });
     }
+    for (const it of this.locker) list.push({ ...it, locker: true });
     return list;
+  }
+
+  // ---- the RV's locker ------------------------------------------------------------------------------
+  // Loot that comes to rest in the RV's cabin goes in the locker (STOW_T s still: something thrown in lands
+  // first): out of the physics, so the road's knocks and the RV's lurches can't touch it and nobody trips over
+  // it. Not what someone holds, what's bungee'd or on the winch, nor what a ringtail has in its jaws or is
+  // going in after. Ed buys the locker with the rest of the load at his loading zone; E on it takes the best
+  // thing out (unstow)
+  stowStep(dt) {
+    if (!this.lockerOn) return;
+    const rp = this.rv.translation(), rq = this.rv.rotation();
+    const jaws = this.mobs?.carriedBy, wanted = this.mobs?.raidTargets?.();
+    for (const p of [...this.props.values()]) {
+      if (!lockable(p)) continue;
+      const t = p.body.translation();
+      if ((t.x - rp.x) ** 2 + (t.z - rp.z) ** 2 > 25 || p.holders.size || this.tied.has(p.id) || jaws?.has(p.id) || wanted?.has(p.id) || this.hook.attach?.id === p.id) { this.stowT.delete(p.id); continue; }
+      const l = toLocal(rp, rq, t);
+      if (!inCabin(l.x, l.y, l.z)) { this.stowT.delete(p.id); continue; }
+      let still = this.riding.has(p.id) || p.body.isSleeping();
+      if (!still) { const v = p.body.linvel(), r = this.rv.velocityAtPoint(t); still = Math.hypot(v.x - r.x, v.y - r.y, v.z - r.z) < 0.3; }
+      if (!still) { this.stowT.delete(p.id); continue; }
+      const k = (this.stowT.get(p.id) || 0) + dt;
+      if (k < STOW_T) { this.stowT.set(p.id, k); continue; }
+      this.stow(p);
+    }
+  }
+  stow(p) {
+    this.stowT.delete(p.id);
+    this.locker.push({ type: p.type, value: p.value, max: p.max });
+    this.out.push({ k: 'stowed', id: p.id, type: p.type, value: Math.round(p.value), n: this.locker.length, total: this.lockerValue() });
+    this.removeProp(p.id);
+  }
+  lockerValue() { return this.locker.reduce((a, it) => a + Math.round(it.value), 0); }
+  // the locker's most valuable thing (or the light ones' only: light, for a ringtail's jaws) -> its index or -1
+  lockerBest(light = false) {
+    let i = -1;
+    for (let k = 0; k < this.locker.length; k++) {
+      if (light && LOOT[this.locker[k].type].mass > 15) continue;
+      if (i < 0 || this.locker[k].value > this.locker[i].value) i = k;
+    }
+    return i;
+  }
+  // a thing out of the locker, a real prop again: on its lid (taken out by hand), or on the floor in front of
+  // it (pried out by a ringtail) -> the prop, or null
+  unstow(i = this.lockerBest(), floor = false) {
+    if (i < 0 || i >= this.locker.length) return null;
+    const it = this.locker.splice(i, 1)[0], L = LOOT[it.type];
+    const sh = L.shape, r = sh[0] === 'cap' ? sh[1] + sh[2] : Math.max(...sh.slice(1));   // (its biggest half-size: clear of the lid)
+    const rp = this.rv.translation(), rq = this.rv.rotation();
+    const at = toWorld(rp, rq, floor ? v3(RV_LOCKER.front - 0.1 - r, r + 0.05, RV_LOCKER.z) : v3(RV_LOCKER.x - 0.05, RV_LOCKER.y + r + 0.04, RV_LOCKER.z));
+    const p = this.addProp(it.type, at, rq, it.value, it.max);
+    if (!p) return null;
+    p.ours = true;
+    p.body.setLinvel(this.rv.linvel(), true);
+    this.out.push({ k: 'spawn', p: this.describe(p) });
+    return p;
   }
 
   // ---- intents from players ------------------------------------------------------------
@@ -963,7 +1030,7 @@ export class Sim {
     if (T > 3000 && Math.random() < dt * 4) this.out.push({ k: 'creak' });
   }
 
-  // ---- bungee cords: everything in the RV gets tied down until someone grabs it ---------
+  // ---- bungee cords: everything on the RV's roof gets tied down until someone grabs it ---------
 
   tieDown() {
     let n = 0;
@@ -974,7 +1041,8 @@ export class Sim {
     if (this.tied.has(p.id) || p.type === 'map' || p.type === 'boulder' || LOOT[p.type].mob) return false;
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const l = toLocal(rp, rq, p.body.translation());
-    if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) return false;
+    // (on the roof: what's set down in the cabin goes in the locker)
+    if (!insideRV(l.x, l.y, l.z, 0.05) || (this.lockerOn && l.y < RV_DIM.ROOF_Y - 0.1)) return false;
     this.unride(p);
     const rel = mulQ(conjQ(rq), p.body.rotation());
     const j = this.world.createImpulseJoint(
@@ -1232,6 +1300,7 @@ export class Sim {
 
     this.rideStep(dt, struck);
     this.keepLoad();
+    this.stowStep(dt);
 
     // anything that fell out of the world goes back to the road (and anything whose motion went
     // non-finite, which nothing else would ever fix: the test is written so NaN fails it)

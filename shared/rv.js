@@ -20,6 +20,8 @@ export const RV_DIM = {
 //   opts.use    — what pressing E on it does
 //   opts.loot   — stops only loot (things with a price) and critters, in the server's world: not people (the
 //                 pages skip it), not stones or the boulder
+//   opts.page   — only in the pages' worlds: people bump into it and the crosshair finds it; the server's
+//                 physics never sees it (the RV drives exactly as it did without it)
 //   (the door is present only while closed: sim.setDoor, phys.js setDoor)
 const D = RV_DIM;
 const H = D.WALL_H / 2;
@@ -70,6 +72,9 @@ export const RV_PARTS = [
   ['showerB',   0.4, 1.1, 0.03,    -0.8, 1.1, -2.75,  { mass: 3 }],
   ['showerLip', 0.03, 0.09, 0.5,   -0.4, 0.09, -2.25, { mass: 1 }],
   ['icebox',    0.21, 0.35, 0.4,    0.94, 0.35, -1.0, { mass: 8 }],
+  // the locker, against the driver's-side wall by the bunks: loot set down in the RV goes in it, safe from
+  // knocks (server/sim.js stowStep), and E on it takes the best thing out into your hands
+  ['locker',    0.28, 0.42, 0.6,    0.87, 0.42, -2.2, { mass: 0, use: 'locker', page: true }],
   // the bunks
   ['bed',       1.2, 0.28, 0.48,    0, 0.28, -3.42,   { mass: 20, use: 'bunk' }],
   ['bunkUp',    1.2, 0.05, 0.48,    0, 1.45, -3.42,   { mass: 8, use: 'bunk' }],
@@ -110,6 +115,14 @@ export function hitZone(v) {
   return v.x < 0 ? 'left' : 'right';
 }
 export const RV_MAP_SPOT = { x: -0.45, y: 0.95, z: 3.55 };   // on the dash, passenger side
+export const RV_LOCKER = { x: 0.87, y: 0.84, z: -2.2, front: 0.59 };   // the locker's lid (its top) and its front face (x)
+// where a sleeper lies (local; the middle of the body on the quilt, lying across the RV with the head toward
+// x = head): two to a bunk, the lower then the upper, the near side first; a crew of five or six, the floor
+export const RV_BUNKS = [
+  { x: 0, y: 0.57, z: -3.62, head: -1 }, { x: 0, y: 1.56, z: -3.62, head: 1 },
+  { x: 0, y: 0.57, z: -3.2, head: -1 }, { x: 0, y: 1.56, z: -3.2, head: 1 },
+  { x: -0.1, y: 0.02, z: -0.5, head: -1 }, { x: -0.25, y: 0.02, z: 0.95, head: -1 },
+];
 
 export const RV_WHEELS = [
   // [x, y(connection), z, steer, drive]
