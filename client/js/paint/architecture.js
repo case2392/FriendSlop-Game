@@ -11,9 +11,9 @@
 // Trim, metal, cloth (256, tile): timber_dark  wood_light  wood_white  iron_wrought  brass  metal_green  metal_red  canvas_awnings (3 bands)
 // Wall decals (alpha): wall_holes (4×2 atlas: holes and patches; a splash strip for the adobe foot)  arch_streak
 // Interiors: floor_planks + carpet_casino (512, tile)  floor_flags + floor_granite (one flag per 2×2 cell)
-//   rug_red (256)  felt_table (512×256)  adobe_pier (a sign pier, wrapped once round)
+//   rug_red (256)  felt_table, felt_craps (512×256)  derby_lanes (512×128)  adobe_pier (a sign pier, wrapped once round)
 //   shelf_goods + store_goods (512×256, tile across)
-// Pieces (no tiling): door_plank  window_lead  lantern_glass  slot_face  flip_face  coin_face  pad_hit  pad_stand
+// Pieces (no tiling): door_plank  window_lead  lantern_glass  slot_face  flip_face  coin_face
 //   repo_plate  banner_red  barrel  crate  flowerbox  embers  glow_soft
 // Signs: signCanvas(lines, opts) paints a sign face (wooden board, gilded board, billboard or a
 // paint daub) for town3d.js; sign_demo_* are registered so the gallery shows them.
@@ -1462,31 +1462,94 @@ register('rug_red', {
   },
 });
 
+// The casino's felts. Each maps onto its table's top with the players' side at the bottom of the canvas
+// (town3d.js: u along the table, v across it), so the boxes below are where main.js lays the cards and dice.
+const SERIF = `Georgia, 'Liberation Serif', 'DejaVu Serif', serif`;
+function baize(g, W, H, rnd, base, cols, dark) {
+  g.fillStyle = base; g.fillRect(0, 0, W, H);
+  for (let i = 0; i < 40; i++) blob(g, rnd() * W, rnd() * H, range(rnd, 20, 70), range(rnd, 14, 50), rnd() * 3, pick(rnd, cols), 0.35, 0.1);
+  g.fillStyle = grad(g, 0, 0, 0, H, [[0, dark, 0.35], [0.5, dark, 0], [1, dark, 0.25]]); g.fillRect(0, 0, W, H);
+}
+function nap(g, W, H, rnd, cols) {
+  for (let i = 0; i < 1800; i++) ellipse(g, rnd() * W, rnd() * H, 0.8, 0.8, 0, rnd() < 0.5 ? cols[0] : cols[1], 0.35);
+  glaze(g, W, H, '#fff0c0', 0.08, 'soft-light');
+}
+const goldBox = (g, x, y, w, hh, a = 0.75, lw = 2.5) => { g.save(); g.strokeStyle = rgba('#e8d8a0', a); g.lineWidth = lw; g.beginPath(); g.roundRect(x, y, w, hh, 6); g.stroke(); g.restore(); };
+function arcText(g, txt, cx, cy, R, px, step) {
+  const n = txt.length, span = n * step / R;
+  for (let i = 0; i < n; i++) { const a = Math.PI / 2 + span * (0.5 - i / (n - 1)); g.save(); g.translate(cx + Math.cos(a) * R, cy + Math.sin(a) * R); g.rotate(a - Math.PI / 2); g.fillText(txt[i], 0, 0); g.restore(); }
+}
+// three seats along a 3.6 m table (x = -1.2, 0, 1.2): a dealer's box each at the top, the gold arc and
+// its lettering, a player's box each and a betting circle under it
+export const BJ_SEAT_U = [1 / 6, 1 / 2, 5 / 6];
 register('felt_table', {
-  family: F, w: 512, h: 256, note: 'blackjack felt: green baize, gold arc and lettering, card boxes (player side at the bottom)',
-  paint(g, s, rnd, H, cv) {
-    const W = 512;
-    g.fillStyle = '#2c6a40'; g.fillRect(0, 0, W, H);
-    for (let i = 0; i < 40; i++) blob(g, rnd() * W, rnd() * H, range(rnd, 20, 70), range(rnd, 14, 50), rnd() * 3, pick(rnd, ['#327448', '#24603a', '#2e6e42']), 0.35, 0.1);
-    g.fillStyle = grad(g, 0, 0, 0, H, [[0, '#1a3a26', 0.35], [0.5, '#1a3a26', 0], [1, '#1a3a26', 0.25]]); g.fillRect(0, 0, W, H);
-    // the arc
-    const cx = W / 2, cy = -H * 0.95, R = H * 1.62;
-    g.save(); g.lineWidth = 5; g.strokeStyle = '#d8b460'; g.beginPath(); g.arc(cx, cy, R, Math.PI * 0.28, Math.PI * 0.72); g.stroke();
-    g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R - 14, Math.PI * 0.3, Math.PI * 0.7); g.stroke(); g.restore();
-    g.save(); g.fillStyle = '#e4c470'; g.font = `bold 21px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`; g.textAlign = 'center'; g.textBaseline = 'middle';
-    const txt = 'BLACKJACK PAYS 3 TO 2', R2 = R - 34;
-    const n = txt.length, span = n * 13 / R2;
-    for (let i = 0; i < n; i++) { const a = Math.PI / 2 + span * (0.5 - i / (n - 1)); g.save(); g.translate(cx + Math.cos(a) * R2, cy + Math.sin(a) * R2); g.rotate(a - Math.PI / 2); g.fillText(txt[i], 0, 0); g.restore(); }
-    g.font = `bold 14px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`; g.fillStyle = '#c8b070';
-    g.fillText('DEALER STANDS ON 17', cx, H * 0.24);
+  family: F, w: 512, h: 256, note: 'blackjack felt: green baize, gold arc and lettering, a dealer box, a card box and a betting circle for each of three seats (player side at the bottom)',
+  paint(g, s, rnd, H) {
+    const W = 512, cx = W / 2;
+    baize(g, W, H, rnd, '#2c6a40', ['#327448', '#24603a', '#2e6e42'], '#1a3a26');
+    const R = 415, cy = 126 - R;
+    g.save(); g.lineWidth = 5; g.strokeStyle = '#d8b460'; g.beginPath(); g.arc(cx, cy, R, Math.PI * 0.27, Math.PI * 0.73); g.stroke();
+    g.lineWidth = 2; g.beginPath(); g.arc(cx, cy, R - 12, Math.PI * 0.29, Math.PI * 0.71); g.stroke(); g.restore();
+    g.save(); g.fillStyle = '#e4c470'; g.font = `bold 19px ${SERIF}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    arcText(g, 'BLACKJACK PAYS 3 TO 2', cx, cy, R - 28, 19, 12);
+    g.font = `bold 12px ${SERIF}`; g.fillStyle = '#c8b070'; g.fillText('DEALER STANDS ON 17', cx, 142);
     g.restore();
-    // card spots: dealer row and player row
-    const box = (x, y, w, hh) => { g.save(); g.strokeStyle = rgba('#e8d8a0', 0.75); g.lineWidth = 2.5; g.beginPath(); g.roundRect(x, y, w, hh, 6); g.stroke(); g.restore(); };
-    box(cx - 46, H * 0.06, 92, 44);
-    box(cx - 56, H * 0.62, 112, 56);
-    for (let k = 0; k < 2; k++) { ellipse(g, cx + (k ? 150 : -150), H * 0.8, 24, 24, 0, '#e8d8a0', 0.18); ellipse(g, cx + (k ? 150 : -150), H * 0.8, 20, 20, 0, '#2c6a40', 1); }
-    for (let i = 0; i < 1800; i++) ellipse(g, rnd() * W, rnd() * H, 0.8, 0.8, 0, rnd() < 0.5 ? '#3a8052' : '#1e4e30', 0.35);
-    glaze(g, W, H, '#fff0c0', 0.08, 'soft-light');
+    for (const u of BJ_SEAT_U) {
+      const x = u * W;
+      goldBox(g, x - 30, 24, 60, 48, 0.6);
+      goldBox(g, x - 38, 156, 76, 52);
+      ellipse(g, x, 230, 15, 15, 0, '#e8d8a0', 0.3); ellipse(g, x, 230, 12, 12, 0, '#2c6a40', 1);
+    }
+    nap(g, W, H, rnd, ['#3a8052', '#1e4e30']);
+  },
+});
+// craps: oxblood baize. The pass line along the players' side, turning up at both ends; the point boxes
+// (4, 5, SIX, 8, NINE, 10) across the middle; the far side, where the dice land, plain
+register('felt_craps', {
+  family: F, w: 512, h: 256, note: 'craps felt: oxblood baize, a gold pass line along the players\' side, the six point boxes',
+  paint(g, s, rnd, H) {
+    const W = 512;
+    baize(g, W, H, rnd, '#6a1c26', ['#74222c', '#5e1820', '#6e2028'], '#2a0a10');
+    g.save(); g.strokeStyle = '#d8b460'; g.lineWidth = 4;
+    g.beginPath(); g.moveTo(18, 120); g.lineTo(18, 222); g.quadraticCurveTo(18, 238, 34, 238); g.lineTo(W - 34, 238); g.quadraticCurveTo(W - 18, 238, W - 18, 222); g.lineTo(W - 18, 120); g.stroke();
+    g.lineWidth = 2; g.beginPath(); g.moveTo(46, 120); g.lineTo(46, 196); g.quadraticCurveTo(46, 208, 58, 208); g.lineTo(W - 58, 208); g.quadraticCurveTo(W - 46, 208, W - 46, 196); g.lineTo(W - 46, 120); g.stroke();
+    g.fillStyle = '#e4c470'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 20px ${SERIF}`;
+    g.fillText('P A S S   L I N E', W / 2, 223);
+    g.font = `bold 13px ${SERIF}`; g.fillStyle = '#c8b070'; g.fillText('PAYS EVEN MONEY', W / 2, 190);
+    const pts = ['4', '5', 'SIX', '8', 'NINE', '10'], bw = 62, x0 = (W - bw * 6) / 2;
+    pts.forEach((t, i) => {
+      const x = x0 + i * bw;
+      goldBox(g, x + 3, 104, bw - 6, 56, 0.8, 2.5);
+      g.font = `bold ${t.length > 2 ? 17 : 28}px ${SERIF}`; g.fillStyle = '#f0dcb0'; g.fillText(t, x + bw / 2, 133);
+    });
+    g.font = `bold 14px ${SERIF}`; g.fillStyle = rgba('#e4c470', 0.8); g.fillText('LUCKY SLOP · CRAPS', W / 2, 26);
+    g.restore();
+    nap(g, W, H, rnd, ['#82303a', '#4a1018']);
+  },
+});
+// the Ringtail Derby's top: four lanes of raked sand along a 6.6 m track (lane 1 nearest the players, at
+// the bottom), the stalls' painted numbers at the start (left) and a chequered finish line at x = +2.7 m
+export const DERBY_COLS = ['#c8322a', '#2e5aa8', '#2e8a44', '#e0b020'];
+register('derby_lanes', {
+  family: F, w: 512, h: 128, note: 'derby track: four lanes of raked sand, white lane lines, numbered starts, a chequered finish',
+  paint(g, s, rnd, H) {
+    const W = 512, px = x => (x + 3.3) / 6.6 * W;
+    g.fillStyle = '#c8a46a'; g.fillRect(0, 0, W, H);
+    for (let i = 0; i < 50; i++) blob(g, rnd() * W, rnd() * H, range(rnd, 10, 40), range(rnd, 6, 14), 0, pick(rnd, ['#d4b07a', '#b8925a', '#c09c64']), 0.3, 0.2);
+    for (let y = 1; y < H; y += 2.5) line(g, [[0, y + (rnd() - 0.5)], [W, y + (rnd() - 0.5)]], 0.7, rnd() < 0.5 ? '#9a7848' : '#e0c08a', 0.25);
+    g.fillStyle = '#3a5a30'; g.fillRect(0, 0, px(-2.95), H);
+    g.fillStyle = '#5a3a24'; g.fillRect(px(3.0), 0, W - px(3.0), H);
+    for (const y of [0, 32, 64, 96, 128]) line(g, [[px(-2.95), y], [px(3.0), y]], y % 128 ? 2.2 : 3, '#f4ecd8', 0.9);
+    const fx = px(2.7);
+    for (let k = 0; k < 16; k++) for (let j = 0; j < 2; j++) { g.fillStyle = (k + j) % 2 ? '#111' : '#f4f0e4'; g.fillRect(fx - 5 + j * 5, k * 8, 5, 8); }
+    g.save(); g.textAlign = 'center'; g.textBaseline = 'middle'; g.font = `bold 18px ${SERIF}`;
+    for (let i = 0; i < 4; i++) {
+      const y = H - 16 - i * 32;
+      ellipse(g, px(-2.72), y, 11, 11, 0, '#f4ecd8'); ellipse(g, px(-2.72), y, 9, 9, 0, DERBY_COLS[i]);
+      g.fillStyle = '#fff'; g.fillText(String(i + 1), px(-2.72), y + 1);
+    }
+    g.restore();
+    for (let i = 0; i < 400; i++) ellipse(g, rnd() * W, rnd() * H, 0.9, 0.9, 0, rnd() < 0.5 ? '#8a6a40' : '#e8d0a0', 0.4);
   },
 });
 
@@ -1690,30 +1753,6 @@ register('coin_face', {
     g.fillStyle = vg; g.fillRect(0, 0, s, s);
   },
 });
-
-function padRug(g, s, rnd, { field, border, text, fg }) {
-  const c = s / 2;
-  g.clearRect(0, 0, s, s);
-  // a frayed fringe all round, then the border bands, the field, a worn middle
-  for (let k = 0; k < 200; k++) { const a = k / 200 * TAU + rnd() * 0.02, r0 = c - 14, r1 = c - range(rnd, 1, 5); line(g, [[c + Math.cos(a) * r0, c + Math.sin(a) * r0], [c + Math.cos(a) * r1 + (rnd() - 0.5) * 2, c + Math.sin(a) * r1 + (rnd() - 0.5) * 2]], 1.6, rnd() < 0.7 ? '#d8c8a0' : '#b8a880', 0.95); }
-  const ring = (r, col) => ellipse(g, c, c, r, r, 0, col);
-  ring(c - 12, '#d8c090'); ring(c - 18, border); ring(c - 30, '#b89858'); ring(c - 35, field);
-  for (let k = 0; k < 24; k++) { const a = k / 24 * TAU; ellipse(g, c + Math.cos(a) * (c - 24), c + Math.sin(a) * (c - 24), 3.6, 3.6, 0, '#d8c080'); }
-  for (let i = 0; i < 30; i++) blob(g, c + (rnd() - 0.5) * s * 0.55, c + (rnd() - 0.5) * s * 0.55, range(rnd, 10, 30), range(rnd, 8, 20), 0, rnd() < 0.5 ? lightOf(field, 0.18) : shadowOf(field, 0.2), 0.25, 0.2);
-  blob(g, c + 6, c + 10, s * 0.24, s * 0.18, 0.4, shadowOf(field, 0.35), 0.25, 0.1);   // trodden
-  g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
-  let size = 66; g.font = `bold ${size}px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`;
-  while (g.measureText(text).width > s * 0.62) { size -= 3; g.font = `bold ${size}px Georgia, 'Liberation Serif', 'DejaVu Serif', serif`; }
-  g.fillStyle = rgba(INK, 0.5); g.fillText(text, c + 2.5, c + 4.5);
-  g.fillStyle = fg; g.fillText(text, c, c + 2); g.restore();
-  // woven rows, a worn bald patch and the edge darkened with grime
-  g.save(); g.globalCompositeOperation = 'source-atop';
-  for (let y = 0; y < s; y += 3) line(g, [[0, y], [s, y]], 0.8, '#2a2030', 0.07);
-  for (let i = 0; i < 18; i++) blob(g, rnd() * s, rnd() * s, range(rnd, 6, 18), range(rnd, 4, 10), 0, '#c8b890', 0.16, 0.3);
-  g.restore();
-}
-register('pad_hit', { family: F, size: 256, alpha: true, note: 'round woven rug: HIT, worn and fringed', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#8a3428', border: '#3a2430', text: 'HIT', fg: '#f0dcb0' }); } });
-register('pad_stand', { family: F, size: 256, alpha: true, note: 'round woven rug: STAND, faded blue, worn and fringed', paint(g, s, rnd) { padRug(g, s, rnd, { field: '#34507a', border: '#2a2438', text: 'STAND', fg: '#ecdcb4' }); } });
 
 // A hanging cloth banner (alpha): soft vertical folds, an embroidered border with a darker outline
 // and stitching, an emblem, wear and stains, and a frayed bottom (swallowtail or straight).

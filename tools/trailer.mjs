@@ -4,7 +4,8 @@
 // game's server runs inside this process and is ticked by hand, and the page's clock (performance.now and
 // requestAnimationFrame) is virtual. Each video frame is exactly 1/30 s of game time: two server ticks, the
 // snapshot for that moment, one page frame, and the canvas grabbed as a JPEG. The actors are bots on fake
-// connections (they send a pose every tick, as a page would; a knock throws them through the air); the
+// connections that move with the page's own controller (tools/actor.mjs: round fences and walls, thrown by a
+// knock with real collisions) and send a pose every tick, as a page would; the
 // camera is the page's own player, whose eye is moved anywhere (in the world, or riding along with the RV).
 // The HUD, the nameplates and the hands are left out; the words are set afterwards in the game's own type.
 // The sounds are the game's own synthesizers (client/js/sfx.js, ambience.js), rendered offline; the music is
@@ -24,6 +25,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+import { Stage, Actor } from './actor.mjs';
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const STEP_CMD = argv[0] || 'capture';
@@ -55,6 +57,19 @@ function sendSnaps() {
     for (const p of r.players.values()) { const c = p.conn; if (c && r.wantsSnapshots(p) && c.readyState === 1) c.send(s, { unreliable: true }); }
   }
 }
+// the actors' physics world (tools/actor.mjs): the day's, with the RV where the server has it, its door and
+// the gates the server has opened
+let stage = null;
+const rvNow = () => { const r = room.sim.rv; return { p: r.translation(), q: r.rotation(), v: r.linvel() }; };
+function stageNow() {
+  if (!stage || stage.W !== W) { stage?.free(); stage = new Stage(W); }
+  return stage;
+}
+function stepStage() {
+  const st = stageNow();
+  for (const id of room.gatesOpen || []) st.lw.openGate(id);
+  st.step(rvNow(), !!room.sim.doorOpen);
+}
 // sec of game time: 1/60 s ticks, each one after the actors have moved; a snapshot every third
 function stepServer(sec, act) {
   const STEP = 1 / C.SIM_HZ, SNAP = 1 / C.SNAP_HZ;
@@ -62,6 +77,7 @@ function stepServer(sec, act) {
   while (acc >= STEP - 1e-9) {
     acc -= STEP;
     act?.(tickT);
+    stepStage();
     for (const b of Object.values(bots)) b.tick(STEP);
     for (const r of host.rooms.values()) if (!r.closed) r.tick(STEP);
     tickT += STEP;
@@ -71,8 +87,10 @@ function stepServer(sec, act) {
 }
 
 // ---- the actors: bots on fake connections --------------------------------------------------------
-// A bot's pose is set by the shot (where it stands or walks, riding the RV or not); each tick it's sent as a
-// page sends it. A knock from the server throws it (a page's own physics does that, so the bot does too).
+// A shot says where a bot should stand (riding the RV or not); on the ground it walks there as a player would,
+// with the page's own controller on the page's own physics (tools/actor.mjs): round fences and walls, up
+// steps, off edges. Each tick its pose is sent as a page sends it. A knock from the server throws it, and the
+// same controller flies it, lands it and slides it to a stop.
 class Bot {
   constructor(name) {
     this.name = name;
@@ -99,53 +117,64 @@ class Bot {
     this.par = 0; this.mode = C.MODE.WALK; this.flags = 0;
     this.fly = null; this.downed = false;
     this.last = null; this.extraFlags = 0;
+    this.actor = new Actor(); this.placed = false; this.direct = false; this.want = null;
   }
   get P() { return room.players.get(this.id); }
-  // stand (or walk: the velocity is worked out from the last pose) at x, z on the ground, facing yaw
+  // stand at x, z on the ground facing yaw: the bot walks there (put straight there when it's more than 3 m
+  // off, or coming off the RV); with y, put exactly there (a climb: no controller)
   at(x, z, yaw = this.yaw, { y = null, crouch = false, sprint = false, pitch = this.pitch } = {}) {
     if (this.fly || this.downed) return;
-    this.par = 0; this.mode = C.MODE.WALK;
-    this.pos = { x, y: y ?? W.heightAt(x, z) + 0.02, z }; this.yaw = yaw; this.pitch = pitch;
+    this.mode = C.MODE.WALK; this.pitch = pitch;
     this.flags = (crouch ? C.FLAG.CROUCH : 0) | (sprint ? C.FLAG.SPRINT : 0);
+    const a = this.actor;
+    if (y != null) { this.direct = true; this.placed = false; this.par = 0; this.pos = { x, y, z }; this.yaw = yaw; this.want = null; return; }
+    if (this.direct || this.par || !this.placed || Math.hypot(a.pos.x - x, a.pos.z - z) > 3) {
+      a.place(x, W.heightAt(x, z) + 0.3, z, yaw);   // (dropped onto whatever floor is there)
+      this.placed = true;
+      this.pos = { x, y: W.heightAt(x, z) + 0.02, z }; this.yaw = yaw;
+    }
+    this.direct = false; this.par = 0;
+    this.want = { x, z, yaw, crouch, speed: sprint ? C.PLAYER.SPRINT : null };
   }
   // riding: RV-local feet
   ride(x, z, yaw = 0, { y = 0.1, crouch = false, pitch = this.pitch } = {}) {
     if (this.fly || this.downed) return;
+    this.placed = false; this.want = null;
     this.par = 1; this.mode = C.MODE.WALK;
     this.pos = { x, y, z }; this.yaw = yaw; this.pitch = pitch; this.flags = crouch ? C.FLAG.CROUCH : 0;
   }
   eye() { const p = this.P?.pos || this.pos; return { x: p.x, y: p.y + C.PLAYER.EYE, z: p.z }; }
-  seat() { this.par = 1; this.mode = C.MODE.SEAT; this.pos = { x: 0.62, y: 0.02, z: 2.72 }; this.yaw = 0; this.flags = 0; }
+  seat() { this.placed = false; this.want = null; this.par = 1; this.mode = C.MODE.SEAT; this.pos = { x: 0.62, y: 0.02, z: 2.72 }; this.yaw = 0; this.flags = 0; }
   onKnock(m) {
     if (this.mode === C.MODE.SEAT) return;
     // where it is now, in the world (riding: the RV's velocity comes along when the knock says so)
     const P = this.P, w = P?.pos || this.pos;
     const base = m.rel && this.par ? (() => { const v = room.sim.rv.linvel(); return { x: v.x, y: v.y, z: v.z }; })() : { x: 0, y: 0, z: 0 };
-    this.par = 0;
+    this.par = 0; this.direct = false; this.want = null;
     this.pos = { x: w.x, y: w.y, z: w.z };
-    this.fly = { v: { x: base.x + m.v[0], y: base.y + m.v[1], z: base.z + m.v[2] } };
+    const me = this.actor.me;
+    this.actor.place(w.x, w.y, w.z, this.yaw); this.placed = true;
+    me.vel = { x: base.x + m.v[0], y: base.y + m.v[1], z: base.z + m.v[2] }; me.grounded = false; me.jumped = true;
+    this.fly = true;
     this.mode = C.MODE.AIR;
-    if (m.ko) { this.downed = true; this.say({ t: 'ko', why: m.why || 'fall' }); }
+    if (m.ko) { this.downed = true; me.mode = 'ko'; me.koT = 1e9; this.say({ t: 'ko', why: m.why || 'fall' }); }
   }
   tick(dt) {
-    if (this.fly) {
-      const f = this.fly, g = 20;   // (the game's gravity: shared/constants.js PLAYER.GRAVITY)
-      f.v.y -= g * dt;
-      this.pos = { x: this.pos.x + f.v.x * dt, y: this.pos.y + f.v.y * dt, z: this.pos.z + f.v.z * dt };
-      const gy = W.heightAt(this.pos.x, this.pos.z) + 0.02;
-      if (this.pos.y <= gy && f.v.y < 0) {
-        this.pos.y = gy;
-        // a bounce, then a slide to a stop
-        if (Math.abs(f.v.y) > 6) { f.v.y = -f.v.y * 0.25; f.v.x *= 0.6; f.v.z *= 0.6; }
-        else { f.v.y = 0; const k = this.downed ? 0.949 : 0.85; f.v.x *= k; f.v.z *= k; if (Math.hypot(f.v.x, f.v.z) < 0.3) { this.fly = null; } }
-      }
+    if (!this.par && this.mode !== C.MODE.SEAT && !this.direct && this.placed) {
+      const A = this.actor, me = A.me, w = this.want;
+      A.goal = this.fly || this.downed ? null : w;
+      A.speed = w?.speed ?? null;
+      A.step(dt, stageNow(), rvNow(), { crouch: !!w?.crouch });
+      this.pos = { x: me.pos.x, y: me.pos.y, z: me.pos.z };
+      if (this.fly && me.grounded && Math.hypot(me.vel.x, me.vel.z) < 0.4) this.fly = null;
+      if (w && !this.fly && !this.downed) this.yaw = Math.hypot(w.x - me.pos.x, w.z - me.pos.z) > 0.1 ? me.yaw : w.yaw;
       this.mode = this.fly ? C.MODE.AIR : this.downed ? C.MODE.KO : C.MODE.WALK;
     }
     const v = this.last && this.par === this.last.par ? [(this.pos.x - this.last.x) / dt, (this.pos.y - this.last.y) / dt, (this.pos.z - this.last.z) / dt] : [0, 0, 0];
     this.last = { ...this.pos, par: this.par };
     this.say({ t: 'p', par: this.par, x: this.pos.x, y: this.pos.y, z: this.pos.z, yaw: this.yaw, pitch: this.pitch, m: this.downed && !this.fly ? C.MODE.KO : this.mode, f: this.flags | this.extraFlags, v });
   }
-  wake() { if (this.downed) { this.downed = false; this.fly = null; this.mode = C.MODE.WALK; this.say({ t: 'wake' }); } }
+  wake() { if (this.downed) { this.downed = false; this.fly = null; this.mode = C.MODE.WALK; this.actor.wake(); this.say({ t: 'wake' }); } }
 }
 
 // ---- driving: the driver bot's keys, from where the RV is ------------------------------------------
@@ -591,22 +620,27 @@ shot({
   body: () => ({ x: 3, z: W.town.z + 40 }),
 });
 
-// body-vote blackjack: the whole bank on the table, the three of them on the HIT pad
+// the casino: one bank, a game each. Kyle shoves the lot in at blackjack seat 2, Dave plays seat 1, Steve rolls
+// craps behind them (server/casino.js: each sits down at his own station, everything comes out of one bank)
+const casStation = id => W.town.casino_stations.find(s => s.id === id);
+const casUse = id => W.uses.findIndex(u => u.kind === 'cas' && u.arg === id);
+const onTable = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
+const sitDown = (bot, id) => { const st = casStation(id), u = W.uses[casUse(id)]; bot.at(st.x, st.z, yawTo(st, u)); bot.tick(1 / 60); };
 shot({
   id: 'blackjack', day: 1, secs: 2.0, pre: 0.5, fov: 58,
   setup() {
-    const B = W.town.bj, all = W.uses.findIndex(u => u.kind === 'bj' && u.arg === 'all'), deal = W.uses.findIndex(u => u.kind === 'bj' && u.arg === 'deal');
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.6 }); dbg({ op: 'bank', v: 6000 });
-    const { Kyle } = bots, u = W.uses[all];
-    Kyle.at(u.x - 1.3, u.z, Math.PI / 2); Kyle.tick(1 / 60); room.tick(1 / 60);
-    Kyle.say({ t: 'use', id: all }); Kyle.say({ t: 'use', id: deal });
-    this.B = B;
+    const { Kyle, Dave, Steve } = bots;
+    sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1');
+    room.tick(1 / 60);
+    for (const [b, id] of [[Kyle, 'bj2'], [Dave, 'bj1'], [Steve, 'craps1']]) b.say({ t: 'use', id: casUse(id) });
+    Dave.say({ t: 'cas', s: 'bj1', a: 'b500' }); Dave.say({ t: 'cas', s: 'bj1', a: 'go' });
+    Kyle.say({ t: 'cas', s: 'bj2', a: 'ball' }); Kyle.say({ t: 'cas', s: 'bj2', a: 'go' });
+    Steve.say({ t: 'cas', s: 'craps1', a: 'b500' }); Steve.say({ t: 'cas', s: 'craps1', a: 'go' });
   },
-  tick() {
-    const { Dave, Steve, Kyle } = bots, h = this.B.hit, f = yawTo(h, this.B.table);
-    Dave.at(h.x, h.z, f); Steve.at(h.x - 0.45, h.z + 0.35, f); Kyle.at(h.x + 0.4, h.z - 0.35, f);
-  },
-  cam: t => { const B = SHOTS.find(s => s.id === 'blackjack').B; return { p: { x: B.table.x - 0.6 - t * 0.15, y: B.table.y + 0.95, z: B.table.z + 2.6 }, t: { x: B.hit.x, y: B.table.y + 0.05, z: B.hit.z + 0.2 } }; },
+  tick() { const { Dave, Steve, Kyle } = bots; sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1'); },
+  // (over the dealer's shoulder, the cards and the players' faces)
+  cam: t => { const B = W.town.bj; return { p: onTable(B.table, B.ry, 0.9 - t * 0.15, 0.95, -2.3), t: onTable(B.table, B.ry, -0.2, 0.25, 1.0) }; },
   body: () => ({ x: W.town.bj.table.x - 2, z: W.town.bj.table.z + 7 }),
 });
 
@@ -615,32 +649,30 @@ shot({
   id: 'coinflip', day: 1, secs: 3.4, pre: 0.4, fov: 62,
   setup() {
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.8 }); dbg({ op: 'bank', v: 4500 });
-    this.all = W.uses.findIndex(u => u.kind === 'flip' && u.arg === 'all');
-    this.pull = W.uses.findIndex(u => u.kind === 'flip' && u.arg === 'pull');
-    room.flip.rng = () => 0.99;
-    const { Kyle } = bots, F = W.town.flip;
-    Kyle.at(F.x - 2.1, F.z + 0.7, Math.PI / 2); Kyle.tick(1 / 60); room.tick(1 / 60);
-    Kyle.say({ t: 'use', id: this.all });
+    const { Kyle } = bots;
+    sitDown(Kyle, 'flip1');
+    room.tick(1 / 60);
+    Kyle.say({ t: 'use', id: casUse('flip1') });
+    Kyle.say({ t: 'cas', s: 'flip1', a: 'ball' });
     this.pulled = false; this.sad = false;
   },
   tick(t) {
-    const { Dave, Kyle, Steve } = bots, F = W.town.flip;
-    // (seen from beside the machine: Kyle at the lever facing us, Steve by the dome, Dave behind)
-    Kyle.at(F.x - 2.1, F.z + 0.7, Math.PI / 2);
-    Dave.at(F.x - 2.9, F.z - 0.5, yawTo({ x: F.x - 2.9, z: F.z - 0.5 }, F));
-    Steve.at(F.x - 1.0, F.z + 2.2, yawTo({ x: F.x - 1.0, z: F.z + 2.2 }, F));
-    if (!this.pulled && t > 0.5) { this.pulled = true; Kyle.say({ t: 'use', id: this.pull }); }
+    const { Dave, Kyle, Steve } = bots, F = W.town.flips[0], st = casStation('flip1');
+    // (seen from beside the machine: Kyle at his stake facing it, Steve and Dave watching from the side)
+    sitDown(Kyle, 'flip1');
+    const d = onTable({ ...st, y: 0 }, F.ry, -1.3, 0, 0.6), s2 = onTable({ ...st, y: 0 }, F.ry, 1.2, 0, 0.9);
+    Dave.at(d.x, d.z, yawTo(d, F)); Steve.at(s2.x, s2.z, yawTo(s2, F));
+    if (!this.pulled && t > 0.5) { this.pulled = true; const rng = room.casino.rng; room.casino.rng = () => 0.99; Kyle.say({ t: 'cas', s: 'flip1', a: 'go' }); room.casino.rng = rng; }
     if (!this.sad && t > 2.3) { this.sad = true; Kyle.say({ t: 'emote', e: '😭' }); Dave.say({ t: 'emote', e: '🤬' }); Steve.say({ t: 'emote', e: '💀' }); }
   },
-  cam: () => { const F = W.town.flip; return { p: { x: F.x - 1.2, y: F.y + 2.05, z: F.z - 4.0 }, t: { x: F.x - 1.3, y: F.y + 1.55, z: F.z + 0.8 } }; },
-  body: () => ({ x: W.town.flip.x - 6, z: W.town.flip.z + 5 }),
+  cam: () => { const F = W.town.flips[0], st = casStation('flip1'); return { p: onTable({ ...st, y: F.y }, F.ry, 1.4, 2.05, 2.6), t: onTable({ ...F }, F.ry, 0, 1.6, 0) }; },
+  body: () => ({ x: W.town.flips[0].x - 6, z: W.town.flips[0].z + 5 }),
 });
 
 // the Repo Man by his tow truck, at night (a slow push in)
 shot({
   id: 'repoman', day: 1, secs: 4.0, pre: 0.4, fov: 52,
   setup() {
-    room.flip.rng = Math.random;
     offstage(bots.Dave, bots.Steve, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 22.9 });
   },

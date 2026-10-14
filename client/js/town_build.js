@@ -630,11 +630,11 @@ const FLOORS = {
   alpine: { kind: 'flags', mat: 'floor_granite', cols: ['#f4f6fa', '#eef0f4', '#f8f6f2', '#e8ebf0'], grout: '#4a464c', wear: '#ffffff' },
   adobe: { kind: 'flags', mat: 'floor_flags', cols: ['#fff4e8', '#f8ecdc', '#fcf0e0', '#f4e6d2'], grout: '#6a5040', wear: '#fffaf0' },
 };
-// where feet go (building frame): the walk in from the door, and on to the counter or the tables, the
-// slots, the machine and the bar
+// where feet go (building frame): the walk in from the door, and on to the counter or the casino's games
+// (the blackjack seats, the craps rails, the two machines, the Derby's counter), the slots and the bar
 function wearAt(c) {
   const { b, iz } = c;
-  const segs = b.kind === 'casino' ? [[0, iz, 0, -1.2], [0, -0.9, -5.2, -1.6], [-5.2, -1.6, -6.6, -7.4], [0, -0.6, 5.4, -5.5], [0, 2.2, 8.6, 2.6], [-1, 3.5, -7.2, 0.8], [1, 3.5, -2.8, 0.8]]
+  const segs = b.kind === 'casino' ? [[0, iz, 0, -1.2], [0, -0.9, -6.2, -1.3], [-5.2, -1.4, -6.6, -7.4], [0, -0.6, 5.5, -5.2], [0, -1.2, 2.3, -5.2], [0, -0.7, 7.0, -0.75], [0, 2.2, 8.6, 2.6], [0, 2.4, -5.8, 2.45]]
     : b.kind === 'gas' ? [[0, iz, 0, -iz * 0.4]] : [[0, iz, 0, -0.95], [-2.6, -1.0, 2.6, -1.0]];
   return (x, z) => {
     let w = 0;
@@ -2761,9 +2761,9 @@ function dress(c) {
 function casinoDress(c) {
   const { K, S, ix, iz, H, R } = c;
   const I = S.int || {}, C = I.casino || { floor: 'planks', rugs: [], chandelier: 'ring' };
-  // two or three big worn rugs at their own angles, clear of the table, the HIT/STAND rugs, the slots,
-  // the machine and the bar
-  const spots = [[3.4, 3.2, 0.32], [-3.0, 6.3, -0.22], [1.6, -3.4, 1.05], [-8.6, 4.8, 0.6]];
+  // two or three big worn rugs at their own angles, clear of the games (world gen: the blackjack and craps
+  // tables, the machines, the Derby's track), the slots and the bar
+  const spots = [[3.4, 3.2, 0.32], [-3.0, 6.6, -0.22], [0.2, -3.7, 1.05], [-8.6, 4.8, 0.6]];
   let si = 0;
   for (const [name, n] of C.rugs || []) for (let k = 0; k < n && si < spots.length; k++, si++) { const [x, z, ry] = spots[si]; rugAt(c, name, x, z, ry + (R() - 0.5) * 0.3, 1.12 + R() * 0.22, 0.104 + si * 0.002); }
   for (const [x, z] of [[-ix * 0.45, -iz * 0.2], [ix * 0.45, -iz * 0.2], [0, iz * 0.45]]) chandelier(c, x, H - 1.6, z, C.chandelier);

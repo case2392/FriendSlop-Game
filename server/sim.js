@@ -42,6 +42,7 @@ const r3 = n => Math.round(n * 1000) / 1000;
 // what a crash into the world's parts is called (the toast: "Sam put the RV into the ranger gate")
 const CYL_NAMES = { tree: 'a tree', deadtree: 'a dead tree', deadtree_decor: 'a dead tree', rock: 'a rock', post: 'a post', cactus: 'a cactus', haybale: 'a hay bale', cairn: 'a cairn', windmill: 'the windmill' };
 function staticName(s) {
+  if (s.part === 'fence') return 'a fence';
   if (s.part === 'rim_slab') return 'the canyon wall';
   if (s.part === 'parked_rv') return 'a parked RV';
   if (s.part === 'keypad_post') return 'the keypad post';
@@ -162,13 +163,15 @@ export class Sim {
   buildStatics() {
     const W = this.W;
     this.statics = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
+    this.flimsy = new Set();   // what the RV's wheels roll through (cacti, fences)
     for (const s of W.statics) {
+      const fence = s.part === 'fence';
       const col = this.world.createCollider(RAPIER.ColliderDesc.cuboid(s.hx, s.hy, s.hz)
         .setTranslation(s.x, s.y, s.z).setRotation(yawQ(s.ry)).setFriction(0.8)
-        .setCollisionGroups(GROUPS.world), this.statics);
+        .setCollisionGroups(fence ? GROUPS.fence : GROUPS.world), this.statics);
+      if (fence) this.flimsy.add(col.handle);
       this.colTag.set(col.handle, staticName(s));
     }
-    this.flimsy = new Set();
     for (const c of W.cyls) {
       const col = this.world.createCollider(RAPIER.ColliderDesc.cylinder(c.hh, c.r)
         .setTranslation(c.x, c.y, c.z).setCollisionGroups(FLIMSY.has(c.mat) ? GROUPS.flimsy : GROUPS.world), this.statics);

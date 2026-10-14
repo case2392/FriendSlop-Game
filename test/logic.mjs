@@ -5,7 +5,7 @@ import WebSocket from 'ws';
 import { generateLeg, butteRadius } from '../shared/world.js';
 import { QUOTAS, medBill } from '../shared/constants.js';
 import { Blackjack, handTotal } from '../server/blackjack.js';
-import { BJTable } from '../server/casino.js';
+import { Casino, FLIP_ODDS, DERBY } from '../server/casino.js';
 import http from 'node:http';
 import { mulberry32 } from '../shared/rng.js';
 
@@ -105,35 +105,93 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(sites > 40 && !bad.length, `world: ${sites} crash buttes are convex leaning masses with room on top, clear of the road, the same every time${bad.length ? ': ' + bad.slice(0, 4).join('; ') : ''}`);
 }
 
-// --- body-vote blackjack: votes left standing after a hit wait for the timer (pure logic) ---
-// (a crew still on the HIT pad, reading its new card, used to be dealt another every 1.2 s until it bust)
+// --- the casino: one bank, a game each (pure logic: server/casino.js) ---
 {
-  const spot = { hit: { x: 0, z: 0, r: 1 }, stand: { x: 5, z: 0, r: 1 } };
-  // one hand, a lone player on HIT from the deal; leave = walk to STAND 0.3 s after the first hit
-  const play = (seed, leave) => {
-    const T = new BJTable(spot, mulberry32(seed));
-    T.bet = 100;
-    if (T.deal(0, 1000)?.outcome) return null;   // a natural: no voting
-    const me = [{ id: 1, pos: { x: 0, y: 0, z: 0 } }];
-    const hitsAt = [];
-    let endAt = null;
-    for (let t = 0; t < 30 && endAt == null; t += 0.05) {
-      if (leave && hitsAt.length && t > hitsAt[0] + 0.3) me[0].pos = { x: 5, y: 0, z: 0 };
-      const n0 = T.hand.squad.length, r = T.tick(t, me, me);
-      if (T.hand.squad.length > n0) hitsAt.push(t);
-      if (r?.outcome) endAt = t;
-    }
-    return { hitsAt, endAt };
-  };
-  let held = null, moved = null;
-  for (let seed = 1; seed < 500 && (held === null || moved === null); seed++) {
-    const a = play(seed, false), b = play(seed, true);
-    // only hands that went on after the first card tell us anything
-    if (held === null && a && a.hitsAt.length >= 2) held = a.hitsAt[1] - a.hitsAt[0];
-    if (moved === null && b && b.hitsAt.length === 1 && b.endAt != null && b.endAt > b.hitsAt[0]) moved = b.endAt - b.hitsAt[0];
+  const W = generateLeg(4242, 1), spots = W.town.casino_stations;
+  const kinds = spots.reduce((o, s) => ({ ...o, [s.kind]: (o[s.kind] || 0) + 1 }), {});
+  check(kinds.bj === 3 && kinds.craps === 2 && kinds.flip === 2 && kinds.derby === 1 && W.uses.filter(u => u.kind === 'cas').length === 8,
+    `casino: three blackjack seats, two craps rails, two Double or Nothing machines and the Derby, each with its button (${JSON.stringify(kinds)})`);
+  const at = (p, id) => { const s = spots.find(q => q.id === id); p.pos = { x: s.x, y: 0, z: s.z }; };
+  const mk = (id, name) => ({ id, name, connected: true, pos: null });
+  // Ann at blackjack, Bob at craps, Cy on Double or Nothing: all at once, all out of one bank
+  const cas = new Casino(spots, mulberry32(77));
+  const A = mk(1, 'Ann'), B = mk(2, 'Bob'), Cy = mk(3, 'Cy'), players = new Map([[1, A], [2, B], [3, Cy]]);
+  at(A, 'bj1'); at(B, 'craps1'); at(Cy, 'flip1');
+  let bank = 3000, t = 0;
+  const done = [];   // every settled game, as it settles
+  const play = (p, id, a, n) => { const r = cas.act(p, id, a, n, t, bank); bank -= r.spend || 0; for (const x of r.results || []) { bank += x.back; done.push(x); } return r; };
+  const settle = list => { for (const x of list) { bank += x.back; done.push(x); } return list; };
+  check(cas.sit(A, 'bj1').ok && cas.sit(B, 'craps1').ok && cas.sit(Cy, 'flip1').ok && cas.sit(B, 'bj1').err && play(B, 'bj1', 'b100').err,
+    'casino: a seat is whoever sat down first; somebody else can\'t sit there or bet on it');
+  play(A, 'bj1', 'b500'); play(B, 'craps1', 'b500'); play(B, 'craps1', 'b100'); play(Cy, 'flip1', 'b100'); play(Cy, 'flip1', 'b100');
+  const bets = [cas.st.get('bj1').bet, cas.st.get('craps1').bet, cas.st.get('flip1').bet];
+  const r1 = play(A, 'bj1', 'go'), r2 = play(B, 'craps1', 'go'), r3 = play(Cy, 'flip1', 'go');
+  const spent = (r1.spend || 0) + (r2.spend || 0) + (r3.spend || 0);
+  check(bets.join() === '500,600,200' && spent === 1300 && bank === 3000 - 1300 + (r1.results?.[0]?.back || 0),
+    `casino: three games at once take their own stakes from the one bank ($${bets.join(', $')}: $${spent} out, bank $${bank})`);
+  // Ann plays her hand out; the dice and the coin land on their own time
+  for (let i = 0; i < 12 && cas.st.get('bj1').state === 'play'; i++) play(A, 'bj1', cas.st.get('bj1').hand.squadTotal() < 15 ? 'hit' : 'stand');
+  const settled = id => done.filter(x => x.id === id);
+  for (t = 0; t < 400 && (!settled('craps1').length || !settled('flip1').length); t += 0.5) {
+    settle(cas.tick(t));
+    const c = cas.st.get('craps1');
+    if (c.state === 'point' && !c.pend) play(B, 'craps1', 'go');
   }
-  check(held !== null && held > 9, `blackjack: a vote left on HIT waits out the timer before the next card (${held?.toFixed(1)} s after the first)`);
-  check(moved !== null && moved < 4, `blackjack: stepping onto STAND after a hit still decides early (${moved?.toFixed(1)} s)`);
+  const one = ['bj1', 'craps1', 'flip1'].map(id => settled(id));
+  const net = done.reduce((a, x) => a + x.won, 0);
+  check(one.every(l => l.length === 1) && bank === 3000 + net && one[0][0].p === A && one[1][0].p === B && one[2][0].p === Cy,
+    `casino: each game settles back into the bank, credited to who played it (blackjack ${one[0][0]?.won}, craps ${one[1][0]?.won}, the coin ${one[2][0]?.won}: bank $${bank} = $3,000 ${net >= 0 ? '+' : '-'} $${Math.abs(net)})`);
+  // one game at a time: Bob moving over to the other rail gives up the one he had (nothing on it now)
+  const moved = cas.sit(B, 'craps2', t);
+  check(moved.ok && !moved.results.length && cas.st.get('craps1').owner === null && cas.st.get('craps2').owner === B.id,
+    'casino: one game at a time: sitting down at another gives up the one you had');
+  cas.sit(B, 'craps1', t);
+  // walking off mid-hand: the house plays it out (you stand) and the seat is free again
+  t += 10; settle(cas.tick(t));
+  play(A, 'bj1', 'b100');
+  let dealt = null;
+  for (let k = 0; k < 20 && !dealt; k++) { const r = play(A, 'bj1', 'go'); if (cas.st.get('bj1').state === 'play') dealt = r; else { t += 10; settle(cas.tick(t)); } }
+  const b0 = bank;
+  A.pos = { x: A.pos.x + 5, y: 0, z: A.pos.z };
+  const gone = settle(cas.release(players, t));
+  check(dealt && gone.length === 1 && gone[0].p === A && cas.st.get('bj1').owner === null && cas.st.get('bj1').state === 'result' && bank === b0 + gone[0].back,
+    `casino: walk away mid-hand and the dealer plays it out as a stand (${gone[0]?.won >= 0 ? '+' : ''}${gone[0]?.won}); the seat is free`);
+  // last call: a point on the table rolls on to a decision, the Derby runs with its tickets
+  const cas2 = new Casino(spots, mulberry32(5));
+  const D = mk(4, 'Di'), E = mk(5, 'Ed');
+  at(D, 'craps2'); at(E, 'derby');
+  cas2.sit(D, 'craps2');
+  let bk = 5000, pointed = false, clock = 0;
+  cas2.act(D, 'craps2', 'b100', 0, clock, bk);
+  for (let k = 0; k < 50 && !pointed; k++) {
+    const g = cas2.act(D, 'craps2', 'go', 0, clock, bk); bk -= g.spend || 0;
+    clock += 5; for (const x of cas2.tick(clock)) bk += x.back;
+    pointed = cas2.st.get('craps2').state === 'point';
+    if (!pointed) { clock += 10; for (const x of cas2.tick(clock)) bk += x.back; }
+  }
+  cas2.act(E, 'derby', 'b500', 0, clock, bk); const tk = cas2.act(E, 'derby', 'go', 3, clock, bk); bk -= tk.spend || 0;
+  const inPlay = cas2.inPlay(), last = cas2.closeAll(clock + 1);
+  for (const x of last) bk += x.back;
+  const dv = cas2.st.get('derby');
+  check(pointed && inPlay === 600 && last.length === 2 && cas2.inPlay() === 0 && dv.order && last.find(x => x.p === E).back === (dv.order[0] === 3 ? 500 * DERBY.PAYS : 0),
+    `casino: last call settles a point still being rolled and runs the Derby (${inPlay} in play; ringtail ${dv.order?.[0]} won, the ticket on 3 paid $${last.find(x => x.p === E)?.back})`);
+  // the house's edge, played many times: the pass line wins 244 in 495, Double or Nothing 48.5%, a Derby ticket 1 in 4 at x3.8
+  const cas3 = new Casino(spots, mulberry32(9)), P = mk(9, 'Pat');
+  let wins = 0, games = 0, flips = 0, fw = 0, tt = 0;
+  const S = cas3.st.get('craps1'), Fm = cas3.st.get('flip2');
+  // (one game at a time: the craps first, then the coin; a refused roll or pull ends the loop short)
+  at(P, 'craps1'); cas3.sit(P, 'craps1'); S.bet = 100;
+  for (let i = 0; games < 20000 && i < 400000; i++) {
+    cas3.act(P, 'craps1', 'go', 0, tt, 1e9);
+    if (!S.pend) { tt += 1; continue; }
+    const r = cas3.crapsLand(S, tt);
+    if (r.length) { games++; if (r[0].won > 0) wins++; S.state = 'bet'; }
+  }
+  at(P, 'flip2'); cas3.sit(P, 'flip2'); Fm.bet = 100;
+  for (let i = 0; flips < 20000 && i < 40000; i++) { if (cas3.act(P, 'flip2', 'go', 0, tt, 1e9).err) continue; const r = cas3.flipLand(Fm, tt); flips++; if (r[0].won > 0) fw++; Fm.state = 'bet'; }
+  const pr = wins / games, fr = fw / flips;
+  check(games === 20000 && flips === 20000 && Math.abs(pr - 244 / 495) < 0.012 && Math.abs(fr - FLIP_ODDS) < 0.012 && DERBY.PAYS * 0.25 < 1,
+    `casino: the house wins in the long run (the pass line won ${(pr * 100).toFixed(1)}% of ${games}, theory 49.3%; the coin ${(fr * 100).toFixed(1)}%; a Derby ticket returns ${(DERBY.PAYS * 25).toFixed(0)}%)`);
 }
 
 // --- painted textures: dependency tracking, adopted pictures, cache keys (pure logic) ---
@@ -425,7 +483,7 @@ class Player {
   g() { return this.snap?.g; }
   rv() { const r = this.snap.rv; return { x: r[0], y: r[1], z: r[2] }; }
   prop(id) { const a = this.snap?.pr.find(p => p[0] === id); return a ? { x: a[1], y: a[2], z: a[3] } : null; }
-  async until(fn, ms = 8000, label = '') { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (this.snap && fn(this.snap.g, this.snap)) return true; await sleep(40); } throw new Error(`${this.name}: timed out: ${label} — g=${JSON.stringify({ ...this.snap?.g, bj: undefined, flip: undefined })} rv=${JSON.stringify(this.snap?.rv.slice(0, 3))}`); }
+  async until(fn, ms = 8000, label = '') { const t0 = Date.now(); while (Date.now() - t0 < ms) { if (this.snap && fn(this.snap.g, this.snap)) return true; await sleep(40); } throw new Error(`${this.name}: timed out: ${label} — g=${JSON.stringify({ ...this.snap?.g, cas: undefined })} rv=${JSON.stringify(this.snap?.rv.slice(0, 3))}`); }
   async hold(ms, fn) { const t0 = Date.now(); while (Date.now() - t0 < ms) { fn?.(); this.pose(); await sleep(33); } }
 }
 
@@ -604,37 +662,40 @@ try {
   await A.until(g => g.bank === bank0 + offer, 3000, 'bank up');
   ok(`pawned the TV: +$${offer} (bank $${A.g().bank})`);
 
-  // ---- casino: blackjack ------------------------------------------------------------------------
+  // ---- casino: a game each, one bank ---------------------------------------------------------------
+  // Ann sits down at blackjack seat 1 while Bob plays Double or Nothing: neither waits on the other
   A.send({ t: 'dbg', op: 'clock', h: 9 });
-  const bjU = arg => W.uses.find(u => u.kind === 'bj' && u.arg === arg);
   A.send({ t: 'dbg', op: 'bank', v: 1000 });
-  const b500 = bjU('+500');
-  A.at(b500.x - 1.2, T.y + 0.05, b500.z, Math.PI / 2, 0, 0);
-  await sleep(100);
-  A.send({ t: 'use', id: b500.id });
-  await A.until(g => g.bj.bet === 500, 3000, 'bet 500');
-  A.send({ t: 'use', id: bjU('deal').id });
-  await A.until(g => g.bj.st !== 'bet', 3000, 'dealt');
-  const st = T.bj.stand;
-  A.at(st.x, T.y + 0.05, st.z, 0, 0, 0);
-  B.at(st.x + 0.3, T.y + 0.05, st.z, 0, 0, 0);
-  await A.until(g => g.bj.st === 'result', 12000, 'hand resolved');
-  const out = A.g().bj.out, bankAfter = A.g().bank;
-  const expect = { win: 1500, natural: 1750, push: 1000, lose: 500 }[out];
-  check(bankAfter === expect, `blackjack by body-vote: ${out} — bank $1000 → $${bankAfter}`);
-
-  // ---- casino: double or nothing ---------------------------------------------------------------
-  A.send({ t: 'dbg', op: 'bank', v: 1000 });
-  const fU = arg => W.uses.find(u => u.kind === 'flip' && u.arg === arg);
-  A.at(fU('+100').x - 1.2, T.y + 0.05, fU('+100').z, Math.PI / 2, 0, 0);
-  await sleep(100);
-  A.send({ t: 'use', id: fU('+100').id });
-  await A.until(g => g.flip.stake === 100, 3000, 'stake');
+  const casU = id => W.uses.find(u => u.kind === 'cas' && u.arg === id);
+  const casAt = id => W.town.casino_stations.find(q => q.id === id);
+  const bjS = casAt('bj1'), fS = casAt('flip1');
+  A.at(bjS.x, T.y + 0.05, bjS.z, 0, 0, 0);
+  B.at(fS.x, T.y + 0.05, fS.z, 0, 0, 0);
+  await sleep(150);
+  A.send({ t: 'use', id: casU('bj1').id });
+  B.send({ t: 'use', id: casU('flip1').id });
+  await A.wait(m => m.t === 'cas' && m.at === 'bj1', 3000, 'a blackjack seat');
+  await B.wait(m => m.t === 'cas' && m.at === 'flip1', 3000, 'a machine');
+  A.send({ t: 'cas', s: 'bj1', a: 'b500' });
+  B.send({ t: 'cas', s: 'flip1', a: 'b100' });
+  await A.until(g => g.cas?.bj1?.bet === 500 && g.cas?.flip1?.bet === 100 && g.cas.bj1.o === A.id && g.cas.flip1.o === B.id, 3000, 'two bets');
+  B.send({ t: 'cas', s: 'bj1', a: 'b500' });   // (not his seat)
+  await sleep(150);
+  const poached = A.g().cas.bj1.bet !== 500;
   A.events.length = 0;
-  A.send({ t: 'use', id: fU('pull').id });
-  await A.until(() => A.events.some(e => e.k === 'bet'), 6000, 'flip result');
-  await sleep(100);
-  check([900, 1100].includes(A.g().bank), `double or nothing: bank $1000 → $${A.g().bank}`);
+  A.send({ t: 'cas', s: 'bj1', a: 'go' });
+  B.send({ t: 'cas', s: 'flip1', a: 'go' });
+  await A.until(g => g.cas.bj1.st !== 'bet', 3000, 'dealt');
+  if (A.g().cas.bj1.st === 'play') A.send({ t: 'cas', s: 'bj1', a: 'stand' });
+  await A.until(() => A.events.filter(e => e.k === 'bet').length >= 2, 8000, 'both settled');
+  await sleep(150);
+  const bjOut = A.events.find(e => e.k === 'bet' && e.by === A.id), flOut = A.events.find(e => e.k === 'bet' && e.by === B.id);
+  check(!poached && bjOut && flOut && A.g().bank === 1000 + bjOut.won + flOut.won,
+    `casino over the wire: Ann's blackjack (${bjOut?.won}) and Bob's coin (${flOut?.won}) played at once out of one bank ($1,000 -> $${A.g().bank}); Bob can't bet on Ann's seat`);
+  // Ann walks off: her seat is free again
+  A.at(bjS.x + 4, T.y + 0.05, bjS.z, 0, 0, 0);
+  await A.until(g => g.cas.bj1.o == null, 3000, 'the seat freed');
+  ok('casino: walking off a seat frees it');
 
   // ---- store -------------------------------------------------------------------------------------
   A.send({ t: 'dbg', op: 'bank', v: 1000 });

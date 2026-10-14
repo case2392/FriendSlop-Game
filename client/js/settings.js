@@ -8,6 +8,7 @@ const SPEC = {
   sens: [1, 'num', 0.2, 3],                 // mouse sensitivity (x 0.0022 rad per pixel)
   invertY: [false, 'bool'],
   fov: [74, 'num', 60, 100],                 // degrees (sprinting adds 6)
+  headBob: [true, 'bool'],                  // the view bobs a little as you walk, dips as you land
   master: [0.8, 'num', 0, 1],                // volumes: the bus gain is the square
   music: [0.5, 'num', 0, 1],
   sfx: [0.8, 'num', 0, 1],

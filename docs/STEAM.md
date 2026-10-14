@@ -222,8 +222,8 @@ as "a hand-painted early-2000s MMO look" and leave it there.
 
 Answer these in Steamworks before the store page goes to review:
 
-- **Simulated gambling: yes.** Developer's content description: *"Contains simulated gambling (blackjack
-  and a double-or-nothing coin flip) played only with the crew's in-game money. There is no real-money
+- **Simulated gambling: yes.** Developer's content description: *"Contains simulated gambling (blackjack,
+  craps, a double-or-nothing coin flip and betting on a race) played only with the crew's in-game money. There is no real-money
   wagering and nothing to buy."*
 - **Violence:** mild cartoon slapstick (players get knocked out, and run over by the RV); no blood.
 - **User-generated content:** voice chat between players, and the names players type.

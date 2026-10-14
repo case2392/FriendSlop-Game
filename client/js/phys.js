@@ -13,7 +13,7 @@ export { RAPIER };
 let ready = null;
 export function initPhys() { return (ready ||= RAPIER.init()); }
 
-export const G = { WORLD: 1, RV: 2, PROP: 4, PLAYER: 8, SELF: 16, USE: 32, HOOK: 64 };
+export const G = { WORLD: 1, RV: 2, PROP: 4, PLAYER: 8, SELF: 16, USE: 32, HOOK: 64, FENCE: 128 };   // (FENCE: world gen's fences, solid to walk into, see-through to the crosshair)
 const grp = (m, f) => ((m << 16) | f) >>> 0;
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
 
@@ -41,8 +41,8 @@ export class LocalWorld {
     this.info.set(t.handle, { kind: 'terrain' });
     for (const s of W.statics) {
       const c = this.world.createCollider(RAPIER.ColliderDesc.cuboid(s.hx, s.hy, s.hz).setTranslation(s.x, s.y, s.z)
-        .setRotation(yawQ(s.ry)).setCollisionGroups(grp(G.WORLD, 0xffff)), fixed);
-      this.info.set(c.handle, { kind: 'static', mat: s.mat });
+        .setRotation(yawQ(s.ry)).setCollisionGroups(grp(s.part === 'fence' ? G.FENCE : G.WORLD, 0xffff)), fixed);
+      this.info.set(c.handle, { kind: 'static', mat: s.mat, part: s.part });
     }
     for (const cy of W.cyls) {
       const c = this.world.createCollider(RAPIER.ColliderDesc.cylinder(cy.hh, cy.r).setTranslation(cy.x, cy.y, cy.z)
@@ -167,7 +167,8 @@ export class LocalWorld {
   // ---- queries ----------------------------------------------------------------------
 
   // KCC move of my capsule. Returns {move, grounded, hits:[{kind,id,part,normal,point}]}
-  moveSelf(center, desired, exclude, climbing = false) {
+  // (riding the RV, its fences don't push you about as it drives through them)
+  moveSelf(center, desired, exclude, climbing = false, riding = false) {
     this.self.setTranslation(center);
     if (climbing !== this._climbMode) {
       // on a wall the slope rules don't apply — you're holding on
@@ -180,7 +181,7 @@ export class LocalWorld {
     }
     const pred = exclude ? (c => !exclude.has(c.handle)) : undefined;
     this.cc.computeColliderMovement(this.self, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
-      grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER), pred);
+      grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER | (riding ? 0 : G.FENCE)), pred);
     const mv = this.cc.computedMovement();
     const hits = [];
     for (let i = 0; i < this.cc.numComputedCollisions(); i++) {

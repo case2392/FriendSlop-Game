@@ -20,8 +20,8 @@ payment and he takes the RV.
 | **Climb anything steep**, on a stamina bar (PEAK rules). | **The ranger gate code** is painted up on the rim. Shout it down. |
 | ![carrying a CRT TV](docs/screenshots/carrying.jpg) | ![the paper road map](docs/screenshots/map.jpg) |
 | **Fragile physics loot.** Every bump costs money. | **One paper map, and the driver can't see it.** Each morning picks a driver and a navigator; the navigator calls out the road. |
-| ![body-vote blackjack](docs/screenshots/casino.jpg) | ![the pawn counter](docs/screenshots/pawn.jpg) |
-| **The Lucky Slop.** Bet the *shared* bank, vote HIT/STAND with your body. | **Honest Ed's Pawn.** Put it on the counter, ring the bell (or park in his loading zone: he buys the whole load). |
+| ![the casino](docs/screenshots/casino.jpg) | ![the pawn counter](docs/screenshots/pawn.jpg) |
+| **The Lucky Slop.** Everyone plays their own game (blackjack, craps, Double or Nothing, the Ringtail Derby) out of the *shared* bank. | **Honest Ed's Pawn.** Put it on the counter, ring the bell (or park in his loading zone: he buys the whole load). |
 | ![the Repo Man](docs/screenshots/repo-man.jpg) | ![night at the campfire](docs/screenshots/night.jpg) |
 | **The Repo Man** collects at midnight. | **Night.** Receipt, campfire, store, bunks, day 2. |
 
@@ -181,9 +181,9 @@ on.
 | `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch (in the RV: **brace**, a crash can't knock you out) |
 | **hold `LMB`** | **GRAB**: loot, or any steep rock or wall to **climb** it (`Space` = lunge) |
 | `RMB` · `Q` · wheel | throw (empty-handed: **shove**) · drop · hold distance |
-| `E` | use: driver seat, door, winch, pawn bell, casino buttons, keypad, bunk. Hold it on a knocked-out friend to pick them up. |
+| `E` | use: driver seat, door, winch, pawn bell, a casino game's button (sit down to play it), keypad, bunk. Hold it on a knocked-out friend to pick them up. |
 | driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `E` get up (the RV keeps rolling) |
-| `MMB` · `1-6` | ping · emotes |
+| `MMB` · `1-6` | ping · emotes (at a casino game the number keys play it: 1-4 the stake, 5 deal/roll/pull, 6 stand; at the Derby 5-8 a ticket on ringtail 1-4) |
 | `V` · `M` · `T` | push-to-talk · mute · walkie-talkie |
 
 **A day:** each morning picks a driver and a navigator at random (whoever
@@ -231,7 +231,7 @@ server/   host.js      every connection (the host's page, friends over Steam, br
           sim.js       Rapier 3D physics: heightfield, RV on raycast wheels, loot, grab springs,
                        push intents, winch cable + anchors + reel, impact damage, run-over checks
           room.js      the run: days, clock, shared bank, pawn, casino, store, Repo Man, KO bills
-          casino.js    body-vote blackjack + double-or-nothing
+          casino.js    the casino: a game each on one bank (blackjack, craps, double or nothing, the Derby)
 client/   player.js    first-person controller: walk/sprint/jump, stamina climbing, riding the
                        moving RV (RV-local coordinates), lurching when it brakes, knockouts
           phys.js      local Rapier world of kinematic copies, for the controller
@@ -281,7 +281,7 @@ npm test
 - `test/logic.mjs` plays a whole run over real WebSockets with two fake
   players and real physics (71 checks). It drives, carries and throws a vase
   (it chips), cracks the ranger gate, winches the RV up the grade, pawns a
-  TV, wins or loses blackjack by standing on a pad, flips double-or-nothing,
+  TV, plays blackjack and double-or-nothing at once out of one bank,
   buys a walkie, pays the Repo Man, sleeps into day 2, gets billed for a KO,
   gets revived for free, gets run over, misses a payment and is repo'd on the
   spot, starts over, and wins on day 5.
@@ -305,8 +305,8 @@ npm test
   inside, and the passenger stays glued in on both screens. They carry a TV,
   climb a canyon wall, read the map to the driver (only the day's navigator
   takes it, only while the driver drives, and the driver's screen never shows
-  it), play blackjack by
-  body-vote, talk over proximity voice, drop and get their seat back. The
+  it), play the casino (blackjack at one seat and Double or Nothing at the same
+  time, then a Derby ticket each), talk over proximity voice, drop and get their seat back. The
   test fails on any page error.
 - `npm run test:desktop` drives the real desktop app (needs a display, or
   `xvfb-run`): the locked-down shell, a trip, Quit, and two copies of the app

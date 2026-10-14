@@ -424,6 +424,7 @@ window.addEventListener('keydown', e => {
   else if (k === 't') voice.setWalkieKey(true);
   else if (k === 'f1' || k === '?') { e.preventDefault(); $('help').classList.toggle('hidden'); }
   else if (k === 'g' && !e.repeat) { if (garageOpen()) closePanel('garage'); else openPanel('garage'); }   // (held down: not open-then-shut)
+  else if (/^[1-8]$/.test(k) && casinoKey(Number(k))) { /* (at a casino station the number keys play it) */ }
   else if (/^[1-6]$/.test(k)) net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
   else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); }
 });
@@ -814,6 +815,8 @@ async function buildDay(m) {
   if (S.lw) S.lw.free();
   for (const p of S.props.values()) { scene.remove(p.mesh); p.view?.dispose(); }
   S.props.clear();
+  freeDerby();
+  S.casAt = null;
   S.W = W;
   S.door = !!m.door;
   S.gatesOpen = new Set();
@@ -1142,7 +1145,7 @@ function meEvent(e) {
   if (e.k === 'step') sfx.step();
   else if (e.k === 'climbstep') sfx.climb();
   else if (e.k === 'jump') sfx.jump();
-  else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); }
+  else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); feel.dipV -= Math.min(2.2, e.s * 0.13); }
   else if (e.k === 'grabwall') sfx.wall();
   else if (e.k === 'lunge') sfx.lunge();
   else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
@@ -1235,8 +1238,10 @@ function onEvent(e) {
     case 'buzz': sfx.buzz(); break;
     case 'slip': if (e.by === S.selfId) { me.holding = null; toast({ bean: 'Beaned! You dropped it.', bite: 'OW. It bit you, and you let go.', wriggle: 'It wriggled free.', nip: 'A ringtail nipped you, and you dropped it. Keep away from their den, or see them off first.', rock: 'A rock bowled you over, and you dropped it.' }[e.why] || 'It slipped out of your hands.', '#ffb4a2', e.why === 'nip' ? 4 : 2); } break;
     case 'throw': break;
-    case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click)(); break;
-    case 'flip': sfx.coin(); break;
+    // a game settled: your own is a fanfare; a friend's win rings the till (the bank went up), a loss is quiet
+    case 'bet': S.bets = (S.bets || 0) + 1; S.lastBet = e; (S.betLog ||= []).push(e); if (S.betLog.length > 20) S.betLog.shift(); (e.by === S.selfId ? (e.won > 0 ? sfx.win : e.won < 0 ? sfx.lose : sfx.click) : e.won > 0 ? sfx.kaching : () => {})(); break;
+    // a coin spun, the dice thrown: heard at the machine or the table
+    case 'flip': case 'dice': { const st = casStation(e.s), y = S.W?.town?.casino?.y ?? 0; sfxAt(st ? { x: st.x, y: y + 1, z: st.z } : null, e.k === 'flip' ? sfx.coin : sfx.dice); break; }
     case 'repo': shake(0.4); break;   // (the game-over screen that follows plays the Repo Man's sting)
     // somebody else knocked about: heard where they are (my own knock has its own sound)
     case 'thud': { const o = e.id !== S.selfId && S.others?.get(e.id); if (o) positional(o.pos, () => sfx.thunk(e.why === 'shove' ? 0.5 : 1), 40); break; }
@@ -1546,6 +1551,7 @@ const SETTINGS_UI = [
   ['sens', 'Mouse sensitivity', 'range', 0.3, 2.5, 0.05, v => v.toFixed(2)],
   ['invertY', 'Invert mouse up and down', 'check'],
   ['fov', 'Field of view', 'range', 60, 100, 1, v => `${v}°`],
+  ['headBob', 'Head bob (the view bobs as you walk and dips as you land)', 'check'],
   ['Audio'],
   ['master', 'Master volume', 'range', 0, 1, 0.05, pct],
   ['music', 'Music', 'range', 0, 1, 0.05, pct],
@@ -1713,6 +1719,26 @@ $('sensInput').oninput = e => setSetting('sens', e.target.value);
 // ---- the frame ------------------------------------------------------------------------------
 
 let lastT = performance.now(), time = 0;
+// the camera's feel (none of it moves you, only the view): the eye eases up a step and down into a crouch (a
+// jump, a fall, a teleport or a seat snaps), bobs a little with each stride (Settings: head bob), and dips on a
+// hard landing (a spring); the sprint's wider view eases in
+const feel = { y: null, ph: 0, side: 0, dip: 0, dipV: 0, fov: 74 };
+function cameraFeel(dt, eye) {
+  const ease = me.mode === 'walk' && me.grounded && feel.y != null && Math.abs(eye.y - feel.y) < 0.7;
+  feel.y = ease ? feel.y + (eye.y - feel.y) * Math.min(1, dt * 16) : eye.y;
+  // the stride: a full bob up and down each step, a sway each pair of them
+  const sp = Math.hypot(me.vel.x, me.vel.z);   // (your own walking: riding, the RV's motion isn't in it)
+  const on = settings.headBob && me.mode === 'walk' && me.grounded && sp > 0.6;
+  const amp = on ? Math.min(1, sp / C.PLAYER.WALK) * (me.sprinting ? 0.042 : me.crouch ? 0.018 : 0.028) : 0;
+  feel.ph += dt * Math.max(0, sp) * Math.PI / 0.95;   // (a step every 0.95 m)
+  feel.bob = (feel.bob || 0) + ((on ? -Math.abs(Math.sin(feel.ph)) * amp * 2 + amp : 0) - (feel.bob || 0)) * Math.min(1, dt * 12);
+  feel.side += ((on ? Math.sin(feel.ph) * amp * 0.6 : 0) - feel.side) * Math.min(1, dt * 12);
+  // the landing's dip: a stiff spring back to level
+  feel.dipV += (-140 * feel.dip - 19 * feel.dipV) * dt;
+  feel.dip = Math.max(-0.22, Math.min(0.05, feel.dip + feel.dipV * dt));
+  if (!settings.headBob) { feel.dip = 0; feel.dipV = 0; }
+  return feel.y + feel.bob + feel.dip;
+}
 const _v = new THREE.Vector3();
 
 // if a frame's logic throws, the view still draws (and the error is reported once per frame, as before)
@@ -1823,13 +1849,16 @@ requestAnimationFrame(frame);
   // camera
   const eye = me.eye(rv), look = me.look();
   let ex = eye.x, ey = eye.y, ez = eye.z;
+  ey = cameraFeel(dt, eye);
+  if (settings.headBob && me.mode === 'walk' && me.grounded) { ex += feel.side * Math.cos(me.yaw); ez -= feel.side * Math.sin(me.yaw); }
   if (shakeAmt > 0) { ex += (Math.random() - 0.5) * shakeAmt * 0.3; ey += (Math.random() - 0.5) * shakeAmt * 0.3; shakeAmt = Math.max(0, shakeAmt - dt * 1.5); }
   camera.position.set(ex, ey, ez);
   if (me.mode === 'ko') {
     camera.lookAt(ex + Math.sin(me.yaw), ey + 0.9, ez + Math.cos(me.yaw));
     camera.rotation.z += Math.sin(time * 0.7) * 0.25;
   } else camera.lookAt(ex + look.x, ey + look.y, ez + look.z);
-  camera.fov = settings.fov + (me.sprinting ? 6 : 0);
+  feel.fov += (settings.fov + (me.sprinting ? 6 : 0) - feel.fov) * Math.min(1, dt * 7);   // (the sprint's wider view eases in and out)
+  camera.fov = feel.fov;
   camera.updateProjectionMatrix();
 
   // views of other players
@@ -1855,6 +1884,7 @@ requestAnimationFrame(frame);
   updateSun(me.pos);
   updateWorld(S.wv, dt, time, camera.position);
   updateCasino(dt);
+  updateTownLabels();
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
@@ -2058,8 +2088,12 @@ function earshotNudge(eye, others) {
   toast(`Nobody's close enough to hear you. Voices carry about ${C.VOICE.RANGE} m; walkie-talkies ($150 at the store) reach anyone else who has one.`, '#fff', 6);
 }
 
-// ---- the casino table -----------------------------------------------------------------------
+// ---- the casino: one bank, a game each --------------------------------------------------------
+// (server/casino.js) g.cas has every station's game; the cards, dice, coins and the Derby's ringtails are
+// laid out from it here. S.casAt is the station this page sat down at (the server said so: 'cas'), kept while
+// you stand within reach of it: then the number keys play it (the emotes come back when you walk off).
 
+const TAU = Math.PI * 2;
 const cardTex = new Map();
 function cardTexture(code) {
   if (cardTex.has(code)) return cardTex.get(code);
@@ -2079,46 +2113,236 @@ function cardTexture(code) {
   cardTex.set(code, t);
   return t;
 }
-// one card shape and one material per card face, shared by every deal (a hand is re-laid on each change)
-const cardGeo = new THREE.PlaneGeometry(0.32, 0.44), cardMats = new Map();
+// one card shape and one material per card face, shared by every deal (a hand is re-laid on each change);
+// a seat's cards overlap like a dealt fan, so five fit in its box on the felt (paint: felt_table)
+const cardGeo = new THREE.PlaneGeometry(0.24, 0.33), cardMats = new Map();
 function cardMaterial(code) {
   if (!cardMats.has(code)) cardMats.set(code, new THREE.MeshStandardMaterial({ map: cardTexture(code), roughness: 0.6 }));
   return cardMats.get(code);
 }
-let lastCards = '';
+const betChipGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.012, 12), betChipMats = ['#e8dcc0', '#c0392b', '#2e4a7a', '#1e1a20'].map(c => new THREE.MeshLambertMaterial({ color: c }));
+// a point in a table's frame (x along it, z toward its players)
+const onTable = (o, ry, lx, ly, lz) => new THREE.Vector3(o.x + lx * Math.cos(ry) + lz * Math.sin(ry), o.y + ly, o.z - lx * Math.sin(ry) + lz * Math.cos(ry));
+// a stack of chips for a bet: one chip a $100, at most ten (white $100s, red $500s, blue $1,000s, black more)
+function chipStack(group, amount, p) {
+  if (!(amount > 0)) return;
+  const n = Math.min(10, Math.max(1, Math.round(amount / 100))), m = betChipMats[amount >= 5000 ? 3 : amount >= 1000 ? 2 : amount >= 500 ? 1 : 0];
+  for (let i = 0; i < n; i++) { const c = new THREE.Mesh(betChipGeo, m); c.position.set(p.x + (i % 3) * 0.002, p.y + 0.008 + i * 0.012, p.z); group.add(c); }
+}
+const nameOfId = id => S.meta?.players.find(q => q.id === id)?.name || 'Somebody';
+const GAME_NAME = { bj: 'Blackjack', craps: 'Craps', flip: 'Double or Nothing', derby: 'The Ringtail Derby' };
+const OUT_WORD = { win: 'WIN', natural: 'BLACKJACK!', push: 'PUSH', lose: 'LOSE' };
+const moneyCol = won => (won > 0 ? '#7CFC00' : won < 0 ? '#ff5252' : '#fff');
+const casStation = id => S.W?.town?.casino_stations?.find(s => s.id === id);
+const myStation = () => {
+  const id = S.casAt, st = id && casStation(id), v = id && S.g?.cas?.[id] && { ...CAS_BLANK, ...S.g.cas[id] };   // (the latest snapshot's, not the last frame's)
+  if (!st || !v || !me.pos || me.mode === 'seat') return null;
+  if (Math.hypot(me.pos.x - st.x, me.pos.z - st.z) > C.CASINO.SEAT_R) return null;
+  if (st.kind !== 'derby' && v.o !== S.selfId) return null;
+  return { id, st, v };
+};
+net.on('cas', m => { S.casAt = m.at; sfx.click(); });
+// the number keys at a station: 1-4 set the stake (+$100, +$500, all in, clear); 5 deals (hits, in a hand),
+// rolls or pulls, 6 stands; at the Derby 5-8 buy a ticket on ringtail 1-4
+function casinoKey(n) {
+  const at = myStation();
+  if (!at) return false;
+  const send = (a, x) => net.send({ t: 'cas', s: at.id, a, n: x });
+  if (n <= 4) { send(['b100', 'b500', 'ball', 'bclr'][n - 1]); sfx.click(); return true; }
+  if (at.st.kind === 'derby') { send('go', n - 4); return true; }
+  if (n === 5) send(at.st.kind === 'bj' && at.v.st === 'play' ? 'hit' : 'go');
+  else if (n === 6 && at.st.kind === 'bj') send('stand');
+  else return n <= 6;
+  return true;
+}
+function casinoPanel(at, g) {
+  const el = $('casPanel');
+  if (!at) { el.classList.add('hidden'); return; }
+  const v = at.v, k = at.st.kind, seat = at.id.replace(/\D/g, '');
+  const bet = k === 'derby' ? v.bets?.[S.selfId] || 0 : v.bet;
+  const title = k === 'bj' ? `Blackjack · seat ${seat}` : k === 'craps' ? `Craps · rail ${seat}` : GAME_NAME[k];
+  let line = '', keysTxt = '';
+  const K = (n, t) => `<kbd>${n}</kbd> ${t}`;
+  const stakeKeys = [K(1, '+$100'), K(2, '+$500'), K(3, 'ALL IN'), K(4, 'clear')].join(' ');
+  if (k === 'bj') {
+    if (v.st === 'play') { line = `You ${v.tot} · the dealer shows ${v.up}`; keysTxt = `${K(5, 'HIT')} ${K(6, 'STAND')}`; }
+    else { line = v.st === 'result' ? `${OUT_WORD[v.out] || ''} ${v.won ? (v.won > 0 ? '+' : '') + fmt$(v.won) : ''} · you ${v.tot}, the dealer ${v.dt ?? '-'}` : 'Blackjack pays 3 to 2. The dealer stands on 17.'; keysTxt = `${stakeKeys} ${K(5, 'DEAL')}`; }
+  } else if (k === 'craps') {
+    const rolling = v.dice && !v.land;
+    line = rolling ? 'Rolling…' : v.st === 'point' ? `The point is ${v.pt}: roll a ${v.pt} before a 7` : v.st === 'result' ? `${v.won > 0 ? 'Winner' : 'Loser'}: ${v.dice ? v.dice[0] + v.dice[1] : ''} · ${v.won > 0 ? '+' : ''}${fmt$(v.won)}` : 'The pass line: a 7 or 11 wins, 2, 3 or 12 loses, anything else is the point. Even money.';
+    keysTxt = v.st === 'point' ? K(5, 'ROLL') : `${stakeKeys} ${K(5, 'ROLL')}`;
+  } else if (k === 'flip') {
+    line = v.spin ? 'Flipping…' : v.st === 'result' ? (v.won > 0 ? `DOUBLED! +${fmt$(v.won)}` : `NOTHING. ${fmt$(v.won)}`) : 'Your stake doubles or it\'s gone. It stays set: pull again.';
+    keysTxt = `${stakeKeys} ${K(5, 'PULL')}`;
+  } else {
+    const mine = (v.tix || []).filter(x => x[0] === S.selfId).map(x => `${fmt$(x[2])} on No. ${x[1]}`);
+    line = v.st === 'race' ? 'They\'re off!' : v.st === 'result' ? `No. ${v.order?.[0]} wins: tickets on it pay x3.8` : v.left != null ? `Off in ${v.left} s${mine.length ? ` · yours: ${mine.join(', ')}` : ''}` : 'Four ringtails, one winner, x3.8. The race runs 12 s after the first ticket.';
+    keysTxt = `${stakeKeys} · a ticket on ${[1, 2, 3, 4].map(n => K(n + 4, `No. ${n}`)).join(' ')}`;
+  }
+  const html = `<div class="cas-h">${title}<span>the bank ${fmt$(g.bank)}</span></div><div class="cas-l">${line}</div><div class="cas-b">${k === 'derby' ? 'Your ticket' : 'Bet'} <b>${fmt$(bet)}</b>${v.stake && (v.st === 'play' || v.st === 'point' || v.spin) ? ` · in play ${fmt$(v.stake)}` : ''}</div><div class="cas-k">${keysTxt}</div><div class="cas-x">Walk away to leave it</div>`;
+  if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
+  el.classList.remove('hidden');
+}
+// the dice: thrown from the rail to the far wall, a bounce back, then lying with their numbers up
+// (box faces: +x 3, -x 4, +y 1, -y 6, +z 2, -z 5)
+const DIE_UP = { 1: [0, 0, 0], 6: [Math.PI, 0, 0], 2: [-Math.PI / 2, 0, 0], 5: [Math.PI / 2, 0, 0], 3: [0, 0, Math.PI / 2], 4: [0, 0, -Math.PI / 2] };
+const diceRoll = new Map();
+function placeDice(T, rail, pair, v) {
+  if (!v.dice) { for (const d of pair) d.visible = false; diceRoll.delete(rail.id); return; }
+  let r = diceRoll.get(rail.id);
+  if (!r || v.roll < r.last - 0.05 || r.key !== v.dice.join()) {
+    const h = (v.dice[0] * 7 + v.dice[1] * 13 + Math.floor(time * 10)) % 997, R = n => ((h * 9301 + n * 49297) % 233280) / 233280;
+    r = { key: v.dice.join(), t0: time - (v.roll || 0), spin: [0, 1].map(i => ({ ax: new THREE.Vector3(R(i * 5) - 0.5, R(i * 5 + 1) - 0.5, R(i * 5 + 2) - 0.5).normalize(), w: 18 + R(i * 5 + 3) * 10, yaw: R(i * 5 + 4) * TAU, dx: (i ? 0.07 : -0.07) + (R(i + 9) - 0.5) * 0.08, dz: (R(i + 11) - 0.5) * 0.12 })) };
+    diceRoll.set(rail.id, r);
+  }
+  r.last = v.roll || 0;
+  const u = Math.min(1, (time - r.t0) / 1.3), C2 = T.craps, top = 0.04;
+  pair.forEach((d, i) => {
+    const sp = r.spin[i], x = rail.dx * 0.55 + sp.dx;
+    // flight to the far wall (0 - 0.55), the bounce back (0.55 - 0.85), still (0.85 - 1)
+    const z0 = 0.62, z1 = -0.52, z2 = -0.32 + sp.dz;
+    let z, y;
+    if (u < 0.55) { const k = u / 0.55; z = z0 + (z1 - z0) * k; y = top + 0.25 * Math.sin(Math.PI * k) + 0.18 * (1 - k); }
+    else if (u < 0.85) { const k = (u - 0.55) / 0.3; z = z1 + (z2 - z1) * Math.sin(k * Math.PI / 2); y = top + 0.06 * Math.sin(Math.PI * k); }
+    else { z = z2; y = top; }
+    d.position.copy(onTable(C2.table, C2.ry, x, y, z));
+    d.visible = true;
+    const face = DIE_UP[v.dice[i]] || [0, 0, 0], left = Math.max(0, 1 - u / 0.9);
+    d.rotation.set(0, sp.yaw + C2.ry, 0);
+    const die = d.children[0];
+    die.rotation.set(face[0], 0, face[2]);
+    if (left > 0) die.rotateOnWorldAxis(sp.ax, sp.w * left * left);
+  });
+}
+// the Derby's ringtails: four of the real thing, small, numbered; each lane's progress drawn from the race's
+// seed, the winner first over the line (lane 1 nearest the players)
+let derby = null;
+const LANE_COLS = ['#c8322a', '#2e5aa8', '#2e8a44', '#e0b020'];
+function buildDerby() {
+  const T = S.W?.town;
+  if (!T?.derby) return null;
+  const racers = [0, 1, 2, 3].map(i => {
+    const { obj, view } = buildMob('ringtail', S.W);
+    obj.scale.setScalar(0.42);
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#f4ecd8'; g.beginPath(); g.arc(32, 32, 30, 0, TAU); g.fill();
+    g.fillStyle = LANE_COLS[i]; g.beginPath(); g.arc(32, 32, 25, 0, TAU); g.fill();
+    g.fillStyle = '#fff'; g.font = 'bold 38px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(String(i + 1), 32, 34);
+    const tex = new THREE.CanvasTexture(cv); tex.colorSpace = THREE.SRGBColorSpace;
+    const tag = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, depthWrite: false }));
+    tag.scale.set(0.16, 0.16, 1);
+    scene.add(obj, tag);
+    return { obj, view, tag, tex };
+  });
+  return { racers, race: -1, t0: 0 };
+}
+function freeDerby() {
+  if (!derby) return;
+  for (const r of derby.racers) { scene.remove(r.obj, r.tag); r.view.dispose(); r.tag.material.dispose(); r.tex.dispose(); }
+  derby = null;
+}
+const raceRng = seed => () => { seed = (seed + 0x6D2B79F5) | 0; let t = Math.imul(seed ^ (seed >>> 15), 1 | seed); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+function updateDerby(dt, v) {
+  const T = S.W?.town?.derby;
+  if (!T || !v) return;
+  if (!derby) derby = buildDerby();
+  const near = camera.position.distanceTo(new THREE.Vector3(T.x, T.y, T.z)) < 40;
+  const rt = v.rt || 7;
+  let el = 0;
+  if (v.st === 'race') {
+    if (derby.race !== v.race) { derby.race = v.race; derby.t0 = time - (v.el || 0); }
+    el = time - derby.t0;
+    if (Math.abs(el - (v.el || 0)) > 0.6) { derby.t0 = time - (v.el || 0); el = v.el || 0; }
+  } else if (v.st === 'result' && v.order) el = rt;
+  const x0 = -2.82, x1 = 2.7, w = T.w, lz = T.lz ?? 0;
+  derby.racers.forEach((r, i) => {
+    let p = 0;
+    if (v.order && el > 0) {
+      const place = v.order.indexOf(i + 1), R = raceRng((v.seed | 0) + i * 7919);
+      const f = rt * (0.72 + 0.065 * place + 0.02 * R()), a = 0.045 + 0.015 * R(), b = 1 + Math.floor(R() * 2), ph = R() * TAU;
+      const u = Math.min(1, el / f);
+      p = el < f ? u + a * Math.sin(Math.PI * u) * Math.sin(TAU * b * u + ph) : 1 + Math.min(0.05, (el - f) * 0.12);
+    }
+    const pos = onTable(T, T.ry, x0 + (x1 - x0) * p, 0, lz + w / 2 - w / 8 - i * w / 4);
+    r.obj.position.copy(pos);
+    r.obj.rotation.y = T.ry + Math.PI / 2;
+    r.tag.position.set(pos.x, pos.y + 0.36, pos.z);
+    r.obj.visible = r.tag.visible = near;
+    if (near) r.view.update(dt, time, v.st === 'race' && p < 1.04 ? RST.RUN : RST.SNEAK, camera.position);
+  });
+}
+// a station's view with what the server leaves out when it's unset (server/casino.js view)
+const CAS_BLANK = { o: null, bet: 0, stake: 0, won: 0, out: null, pt: 0, land: 0, spin: 0 };
 function updateCasino(dt) {
-  const w = S.wv, g = S.g;
-  if (!w || !g) return;
-  const bj = g.bj;
-  const T = S.W.town;
-  const key = JSON.stringify([bj.cards, bj.up, bj.dl]);
+  const w = S.wv, g = S.g, T = S.W?.town;
+  if (!w || !g || !T) return;
+  const cas = g.cas ? Object.fromEntries(Object.entries(g.cas).map(([id, v]) => [id, { ...CAS_BLANK, ...v }])) : null, c = w.cas;
+  S.cas = cas;
+  // the cards and chips are re-laid whenever any seat's hand or bet changes
+  const key = cas ? JSON.stringify(T.bj.seats.map(s => { const v = cas[s.id]; return v ? [v.cards, v.up, v.dl, v.bet, v.stake, v.st] : 0; }).concat(T.craps.rails.map(r => [cas[r.id]?.bet, cas[r.id]?.stake, cas[r.id]?.st]))) : '';
   if (key !== lastCards) {
     lastCards = key;
-    while (w.cardGroup.children.length) w.cardGroup.remove(w.cardGroup.children[0]);
-    const place = (codes, row) => codes.forEach((c, i) => {
-      const m = new THREE.Mesh(cardGeo, cardMaterial(c));
+    while (c.cards.children.length) c.cards.remove(c.cards.children[0]);
+    const lay = (seat, codes, row) => codes.forEach((code, i) => {
+      const m = new THREE.Mesh(cardGeo, cardMaterial(code));
       m.rotation.x = -Math.PI / 2;
-      const off = (i - (codes.length - 1) / 2) * 0.36;
-      const s = Math.sin(T.bj.ry), co = Math.cos(T.bj.ry);
-      const lx = off, lz = row;
-      m.position.set(T.bj.table.x + lx * co + lz * s, T.bj.table.y + 0.01 + i * 0.002, T.bj.table.z - lx * s + lz * co);
       m.rotation.z = T.bj.ry;
-      w.cardGroup.add(m);
+      m.position.copy(onTable(T.bj.table, T.bj.ry, seat.dx + (i - (codes.length - 1) / 2) * 0.17, 0.01 + i * 0.002, row));
+      c.cards.add(m);
     });
-    if (bj.cards) place(bj.cards, 0.35);
-    if (bj.dl) place(bj.dl, -0.45);
-    else if (bj.up) place([bj.up, '??'], -0.45);
+    if (cas) for (const seat of T.bj.seats) {
+      const v = cas[seat.id];
+      if (!v) continue;
+      if (v.cards) lay(seat, v.cards, 0.42);
+      if (v.dl) lay(seat, v.dl, -0.62);
+      else if (v.up) lay(seat, [v.up, '??'], -0.62);
+      chipStack(c.cards, v.st === 'play' || v.st === 'result' ? v.stake : v.bet, onTable(T.bj.table, T.bj.ry, seat.dx, 0, 0.8));
+    }
+    if (cas) for (const rail of T.craps.rails) { const v = cas[rail.id]; if (v) chipStack(c.cards, v.st === 'point' || v.st === 'roll' ? v.stake : v.bet, onTable(T.craps.table, T.craps.ry, rail.dx, 0, 0.62)); }
   }
-  const voteTxt = bj.st === 'vote' ? `HIT ${bj.hit.length} · STAND ${bj.stand.length} · ${bj.left}s` : '';
-  w.bjLabel.userData.set(
-    bj.st === 'bet' ? `BLACKJACK · bet ${fmt$(bj.bet)}${bj.bet ? ' · press DEAL' : ''}`
-      : bj.st === 'vote' ? `YOU: ${bj.tot} vs ${bj.up} · ${voteTxt}`
-        : `${(bj.out || '').toUpperCase()} — you ${bj.tot} · dealer ${bj.dt}`,
-    bj.st === 'result' ? (bj.out === 'win' || bj.out === 'natural' ? '#7CFC00' : bj.out === 'push' ? '#fff' : '#ff5252') : '#fff');
-  const f = g.flip;
-  w.flipLabel.userData.set(f.busy ? 'FLIPPING…' : f.last && f.last.ago < 4 ? (f.last.win ? `DOUBLED! +${fmt$(f.last.stake)}` : `NOTHING. -${fmt$(f.last.stake)}`) : `DOUBLE OR NOTHING · stake ${fmt$(f.stake)}`,
-    f.busy ? '#ffd166' : f.last && f.last.ago < 4 ? (f.last.win ? '#7CFC00' : '#ff5252') : '#ffd166');
-  w.coin.rotation.z += dt * (f.busy ? 25 : 0.6);
+  if (!cas) { casinoPanel(null); return; }
+  // the placards over each station
+  for (const [id, l] of c.labels) {
+    const v = cas[id];
+    if (!v) continue;
+    const who = v.o ? nameOfId(v.o).toUpperCase() : null, n = id.replace(/\D/g, '');
+    let t = '', col = '#fff';
+    if (v.k === 'bj') {
+      if (!who) { t = `SEAT ${n} · OPEN`; col = '#c8b890'; }
+      else if (v.st === 'play') t = `${who} · ${v.tot} vs ${v.up}`;
+      else if (v.st === 'result') { t = `${who} · ${OUT_WORD[v.out] || ''} ${v.won ? (v.won > 0 ? '+' : '') + fmt$(v.won) : ''}`; col = moneyCol(v.won); }
+      else t = `${who} · BET ${fmt$(v.bet)}`;
+    } else if (v.k === 'craps') {
+      if (!who) { t = `RAIL ${n} · OPEN`; col = '#c8b890'; }
+      else if (v.dice && !v.land) t = `${who} · ROLLING…`;
+      else if (v.st === 'point') t = `${who} · POINT ${v.pt}`;
+      else if (v.st === 'result') { t = `${who} · ${v.won > 0 ? 'WINNER' : 'LOSER'} ${v.won > 0 ? '+' : ''}${fmt$(v.won)}`; col = moneyCol(v.won); }
+      else t = `${who} · BET ${fmt$(v.bet)}`;
+    } else if (v.k === 'flip') {
+      if (v.spin) { t = 'FLIPPING…'; col = '#ffd166'; }
+      else if (v.st === 'result') { t = v.won > 0 ? `DOUBLED! +${fmt$(v.won)}` : `NOTHING. ${fmt$(v.won)}`; col = moneyCol(v.won); }
+      else { t = who ? `${who} · STAKE ${fmt$(v.bet)}` : 'DOUBLE OR NOTHING'; col = '#ffd166'; }
+    } else if (v.k === 'derby') {
+      col = '#ffd166';
+      t = v.st === 'race' ? 'THEY\'RE OFF!' : v.st === 'result' ? `No. ${v.order?.[0]} WINS! · PAYS x3.8` : v.left != null ? `RINGTAIL DERBY · OFF IN ${v.left} s · ${(v.tix || []).length} TICKETS` : 'RINGTAIL DERBY · TICKETS AT THE COUNTER';
+    }
+    l.userData.set(t, col);
+  }
+  for (const [id, coin] of c.coins) coin.rotation.z += dt * (cas[id]?.spin ? 25 : 0.6);
+  for (const rail of T.craps.rails) placeDice(T, rail, c.dice.get(rail.id), cas[rail.id] || {});
+  updateDerby(dt, cas.derby);
+  const at = myStation();
+  if (!at && S.casAt) {
+    const st = casStation(S.casAt);
+    if (!st || !me.pos || Math.hypot(me.pos.x - st.x, me.pos.z - st.z) > C.CASINO.SEAT_R + 0.5) S.casAt = null;
+  }
+  casinoPanel(at, g);
+}
+let lastCards = '';
+function updateTownLabels() {
+  const w = S.wv, g = S.g;
+  if (!w || !g) return;
   const offer = (g.pawn || 0) + (g.dock || 0);
   w.pawnLabel.userData.set(offer ? `ED OFFERS ${fmt$(offer)}${g.dock ? ' FOR THE LOT' : ''} · ring the bell` : 'LOOT ON THE COUNTER, OR THE RV OUTSIDE', offer ? '#7CFC00' : '#ffe9a8');
   if (w.gusLabel) {
@@ -2126,8 +2350,6 @@ function updateCasino(dt) {
     w.gusLabel.userData.set(hp >= 100 ? 'SHE\'S RUNNING FINE' : g.day >= C.DAYS || g.ph === 'over' ? `RV ${hp}% · CLOSED: NO NIGHT ON THE LAST DAY` : !open ? `RV ${hp}% · OPEN ONCE THE REPO MAN'S PAID`
       : `RV ${hp}% · ${q.pts}% FOR ${fmt$(q.cash)} · ${fmt$(q.loan)} ON THE ${g.day === C.DAYS - 1 ? 'BALLOON' : 'LOAN'}`, hp < 100 && open ? '#7CFC00' : '#ffe9a8');
   }
-  w.hitPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.sin(time * 6) * 0.2 : 0.15;
-  w.standPad.material.emissiveIntensity = bj.st === 'vote' ? 0.4 + Math.cos(time * 6) * 0.2 : 0.15;
 }
 
 // ---- hud ------------------------------------------------------------------------------------------

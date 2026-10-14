@@ -1059,23 +1059,27 @@ function* town(day) {
     done();
   }
 }
-// Double or Nothing till the bank covers the payment (or it's gone)
+// Double or Nothing till the bank covers the payment (or it's gone): machine 1, the stake set to what's short
 function* gamble(b) {
-  const W0 = W(), U = arg => W0.uses.find(u => u.kind === 'flip' && u.arg === arg);
+  const W0 = W(), st = W0.town.casino_stations.find(q => q.id === 'flip1'), u = W0.uses.find(q => q.kind === 'cas' && q.arg === 'flip1');
+  const M = () => room.casino.st.get('flip1'), cas = a => room.handle(b.P, { t: 'cas', s: 'flip1', a });
   yield* walk(b, { x: 12 - 0.8, z: W0.LEN + 58 });
-  yield* walk(b, { x: U('+500').x - 1.0, z: U('+500').z });
-  for (let n = 0; n < 40 && room.bank < room.due && room.bank >= 100 && room.clock < 23.98; n++) {
+  yield* walk(b, { x: st.x, z: st.z });
+  b.useId(u);
+  yield;
+  for (let n = 0; n < 40 && room.bank < room.due && room.bank >= 100 && room.clock < 23.98 && M().owner === b.P.id; n++) {
     const want = Math.min(room.bank, Math.ceil((room.due - room.bank) / 100) * 100);
-    while (room.flip.stake + 500 <= want) { b.useId(U('+500')); yield; }
-    while (room.flip.stake + 100 <= want) { b.useId(U('+100')); yield; }
-    if (room.flip.stake < 100) b.useId(U('all'));
+    cas('bclr');
+    while (M().bet + 500 <= want) cas('b500');
+    while (M().bet + 100 <= want) cas('b100');
+    if (M().bet < 100) cas('ball');
     yield;
-    b.useId(U('pull'));
-    yield* until(() => !room.pendingFlip, 4);
+    cas('go');
+    yield* until(() => !M().pend, 4);
     yield* wait(0.6);
   }
   yield* walk(b, { x: 12 - 0.8, z: W0.LEN + 58 });
-  yield* walk(b, { x: W0.uses.find(u => u.kind === 'pay').x - 1.0, z: W0.uses.find(u => u.kind === 'pay').z });
+  yield* walk(b, { x: W0.uses.find(q => q.kind === 'pay').x - 1.0, z: W0.uses.find(q => q.kind === 'pay').z });
 }
 // night: Gus for cash if the RV is under 61% and the bank has it; then everyone into a bunk (the RV is at the lot)
 function* night() {

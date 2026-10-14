@@ -23,7 +23,7 @@ import { LOOT, fmt$ } from '../shared/loot.js';
 import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, RV_HATCH, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
 import { STOP_NAMES } from '../shared/mobs.js';
-import { BJTable, FlipMachine } from './casino.js';
+import { Casino, SEAT_R } from './casino.js';
 import { fnv1a, isPid } from '../shared/profile.js';
 import { rollTin, rollCard, CONTAINER } from '../shared/cards.js';
 import { findSpots } from '../shared/finds.js';
@@ -125,9 +125,7 @@ export class Room {
     this.dayStats = { sold: 0, bills: 0, broken: 0, gamble: 0, stolen: 0, recovered: 0, rv: { dmg: 0, src: {}, cash: 0, loan: 0 } };
     this.theftQ = new Map();         // den -> the thefts its ringtails made that the crew hasn't been told of yet
     this.theftToastAt = new Map();   // den -> when the crew was last told
-    this.bj = new BJTable(this.W.town.bj);
-    this.flip = new FlipMachine();
-    this.pendingFlip = null;
+    this.casino = new Casino(this.W.town.casino_stations, this.rand);   // (a game each, one bank: server/casino.js)
     this.gatesOpen = new Set();
     this.bedAt = null;
     this.receipt = null;
@@ -608,6 +606,7 @@ export class Room {
         return;
       case 'use': return this.onUse(p, m);
       case 'kit': return this.onKit(p, m);
+      case 'cas': return this.onCasino(p, m);
       case 'terms': return this.onTerms(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       // holding E at the engine hatch of a broken-down RV, or letting go (fixStep does the work)
@@ -849,22 +848,12 @@ export class Room {
       }
     } else if (u.kind === 'pawnBell') {
       if (!this.sellCounter(p.id)) this.toast('Ed looks at the empty counter. Ed looks at you. (Loot on the counter, or the RV in his loading zone.)', '#fff', 4, p);
-    } else if (u.kind === 'bj') {
-      if (u.arg === 'deal') {
-        const r = this.bj.deal(this.t, this.bank);
-        if (r?.err) return this.toast(r.err, '#fff', 3, p);
-        if (r) this.applyBet(r, p, 'Blackjack');
-      } else this.bj.adjust(u.arg, Math.max(0, this.bank));
-    } else if (u.kind === 'flip') {
-      if (u.arg === 'pull') {
-        const r = this.flip.pull(this.t, this.bank);
-        if (r?.err) return this.toast(r.err, '#fff', 3, p);
-        if (r) {
-          this.bank -= r.stake;                 // in it goes
-          this.pendingFlip = { ...r, by: p, at: r.revealAt };
-          this.broadcast({ t: 'ev', list: [{ k: 'flip', by: p.id, stake: r.stake }] });
-        }
-      } else this.flip.adjust(u.arg, Math.max(0, this.bank), this.t);
+    } else if (u.kind === 'cas') {
+      // a seat at one of the games (the Derby's window: a ticket for anybody)
+      const r = this.casino.sit(p, u.arg, this.t);
+      if (r.err) return this.toast(r.err, '#fff', 3, p);
+      this.casinoResults(r.results);
+      this.send(p, { t: 'cas', at: u.arg });
     } else if (u.kind === 'buy') {
       const what = u.arg, price = PRICES[what];
       if (this.bank < price) return this.toast(`${fmt$(price)}. The bank has ${fmt$(this.bank)}. No.`, '#ff8a80', 3, p);
@@ -1030,10 +1019,23 @@ export class Room {
     this.toast(`Gus fixed ${q.pts}% ${paidHow}. RV ${R.hp}%.`, '#7CFC00', 4);
   }
 
-  applyBet(r, p, game) {
-    this.bank += r.delta;
+  // a play at one of the casino's games ({ t: 'cas', s: station, a: action, n: the Derby's lane }): the stake
+  // leaves the shared bank as it's played, the winnings come back as the game settles
+  onCasino(p, m) {
+    p.activeAt = this.t;
+    const id = String(m.s || ''), st = this.casino.st.get(id);
+    if (!st || p.ko || !p.pos || Math.hypot(p.pos.x - st.x, p.pos.z - st.z) > SEAT_R + 0.3) return;
+    const r = this.casino.act(p, id, String(m.a || ''), +m.n || 0, this.t, this.bank);
+    if (r.err) return this.toast(r.err, '#fff', 3, p);
+    if (r.spend) {
+      this.bank -= r.spend;
+      if (st.kind === 'flip' || st.kind === 'craps') this.broadcast({ t: 'ev', list: [{ k: st.kind === 'flip' ? 'flip' : 'dice', by: p.id, s: id, stake: r.spend }] });
+    }
     if (r.msg) this.toast(r.msg, '#ffd166', 3);
-    if (r.outcome) this.betResult(r.won, game, p);
+    this.casinoResults(r.results);
+  }
+  casinoResults(list) {
+    for (const r of list || []) { this.bank += r.back; this.betResult(r.won, r.game, r.p); }
   }
 
   betResult(won, game, p) {
@@ -1041,8 +1043,9 @@ export class Room {
     this.stats.gamble += won;
     if (won > 0 && (!this.stats.bestWin || won > this.stats.bestWin.amt)) this.stats.bestWin = { amt: won, name: p?.name, game };
     if (won < 0 && (!this.stats.worstLoss || won < this.stats.worstLoss.amt)) this.stats.worstLoss = { amt: won, name: p?.name, game };
-    this.broadcast({ t: 'ev', list: [{ k: 'bet', won, game }] });
-    this.toast(won > 0 ? `${game}: +${fmt$(won)}!` : won < 0 ? `${game}: ${fmt$(won)}. Ouch.` : `${game}: push.`, won > 0 ? '#7CFC00' : won < 0 ? '#ff8a80' : '#fff', 4);
+    this.broadcast({ t: 'ev', list: [{ k: 'bet', won, game, by: p?.id ?? 0 }] });
+    const who = p ? `${p.name} at ${game}` : game;
+    this.toast(won > 0 ? `${who}: +${fmt$(won)}!` : won < 0 ? `${who}: ${fmt$(won)}. Ouch.` : `${who}: push.`, won > 0 ? '#7CFC00' : won < 0 ? '#ff8a80' : '#fff', 4);
   }
 
   pay(p = null) {
@@ -1218,19 +1221,11 @@ export class Room {
 
   // money still on the casino tables when the day ends (at midnight, before the Repo Man counts it, and at
   // dawn): a blackjack hand being voted on is played out as a stand, a coin flip in the air lands now
+  // last call: every game on the floor played out (a hand stands, the dice roll on, the Derby runs)
   settleTables() {
-    const r = this.bj?.callIt(this.t);
-    if (r) {
-      this.bank += r.delta;
-      this.toast('Last call: the dealer plays out the hand on the table (you stand).', '#ffd166', 4);
-      this.betResult(r.won, 'Blackjack', null);
-    }
-    if (this.pendingFlip) {
-      const f = this.pendingFlip;
-      this.pendingFlip = null;
-      if (f.win) this.bank += f.stake * 2;
-      this.betResult(f.win ? f.stake : -f.stake, 'Double or Nothing', f.by);
-    }
+    const r = this.casino?.closeAll(this.t) || [];
+    if (r.length) this.toast('Last call: the house plays out what\'s on the tables.', '#ffd166', 4);
+    this.casinoResults(r);
   }
 
   // ---- simulation -------------------------------------------------------------------------
@@ -1305,19 +1300,9 @@ export class Room {
     }
 
     // casino
-    const inCasino = [...this.players.values()].filter(p => p.pos && this.inCasino(p.pos));
-    const r = this.bj.tick(this.t, inCasino, inCasino);
-    if (r) {
-      this.bank += r.delta || 0;
-      if (r.msg) this.toast(r.msg, '#ffd166', 2);
-      if (r.outcome) this.betResult(r.won, 'Blackjack', null);
-    }
-    if (this.pendingFlip && this.t >= this.pendingFlip.at) {
-      const f = this.pendingFlip;
-      this.pendingFlip = null;
-      if (f.win) this.bank += f.stake * 2;
-      this.betResult(f.win ? f.stake : -f.stake, 'Double or Nothing', f.by);
-    }
+    // (a game each: one walked away from is played out for them, the house's way)
+    this.casinoResults(this.casino.release(this.players, this.t));
+    this.casinoResults(this.casino.tick(this.t));
 
     // an RV on its back or side gets towed (for a price) after 7 s; rocking back over the line for a moment
     // doesn't start the count again (it counts down at twice the speed)
@@ -1427,11 +1412,6 @@ export class Room {
     }
   }
 
-  inCasino(pos) {
-    const c = this.W.town.casino;
-    return Math.abs(pos.x - c.x) < 9.2 && Math.abs(pos.z - c.z) < 11.2 && pos.y > c.y - 1 && pos.y < c.y + 6;
-  }
-
   gameState() {
     const sim = this.sim;
     const pawnIds = sim.propsIn(this.W.town.pawn);
@@ -1442,7 +1422,7 @@ export class Room {
       ph: this.phase, day: this.day, clk: Math.round(this.clock * 100) / 100,
       bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0,
       town: this.inTown ? 1 : 0, door: sim.doorOpen ? 1 : 0,
-      bj: this.bj.view(this.t), flip: this.flip.view(this.t), pawn, pawnIds, dock,
+      ...(this.inTown || this.phase === 'night' ? { cas: this.casino.view(this.t) } : {}), pawn, pawnIds, dock,
       gates: [...this.gatesOpen], beds: [...this.players.values()].filter(p => p.bed).map(p => p.id),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,
