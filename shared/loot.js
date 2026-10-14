@@ -27,6 +27,10 @@ export const LOOT = {
   safe:     { name: 'Rusty Safe',       shape: ['box', 0.4, 0.42, 0.4],   mass: 150, value: 1300, frag: 0.1, cls: 'heavy', tough: 25 },
   dino:     { name: 'Fiberglass Dino Head', shape: ['box', 0.55, 0.45, 0.75], mass: 120, value: 1700, frag: 0.7, cls: 'heavy', tough: 10 },
   // not loot: tools
+  // Road Card tins (shared/cards.js, shared/finds.js): worth nothing to Ed (he doesn't buy cards), so never
+  // in a docked load and never knocked about; set one down in the RV and it's in the glovebox
+  tin:      { name: 'Road Card Tin',    shape: ['box', 0.12, 0.045, 0.09], mass: 0.8, value: 0,   frag: 0,   cls: '1h',    tough: 99, find: 'tin' },
+  goldtin:  { name: 'Gold Card Tin',    shape: ['box', 0.12, 0.045, 0.09], mass: 0.8, value: 0,   frag: 0,   cls: '1h',    tough: 99, find: 'goldtin' },
   map:      { name: 'Road Map',         shape: ['box', 0.2, 0.02, 0.14],  mass: 0.4, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true },
   boulder:  { name: 'Boulder',          shape: ['box', 2.0, 1.3, 1.5],    mass: 1000,value: 0,    frag: 0,   cls: 'heavy', tough: 99, tool: true },
   // what comes down off the rim in a rockfall (and makes good ammunition after); adamp: it rolls to a stop;

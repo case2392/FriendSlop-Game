@@ -1,18 +1,24 @@
 // The Garage: your save's own panel (the menu's Garage button, the Esc card's, or G on a trip). It stops the
 // game's keys while it's open, like Settings.
+//   ALBUM    your Road Cards (shared/cards.js), set by set: the ones you keep (and how many), the ones you've
+//            seen go by, the ones the Repo Man took, card backs for the rest; the odds; this trip's glovebox
 //   LOGBOOK  your records (one board per loan terms), the crews you've finished trips with, the seeds you've
 //            practised on, and your lifetime counters
 //   SAVE     where the save lives and how it is; Export and Import (a code to copy and paste)
 import { fmt$ } from '/shared/loot.js';
 import { fmtRoad, fmtClockH } from '/shared/profile.js';
 import { profile, profileStatus, exportCode, importCode } from './profile.js';
+import { CARDS, SETS, odds } from '/shared/cards.js';
+import { cardHTML } from './cards.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const row = (k, v, cls = '') => `<div class="rrow ${cls}"><span>${k}</span><b>${v}</b></div>`;
 const date = ms => (ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 const TERMS = { std: 'Standard terms', bad: 'Bad Credit' };
-let tab = 'log', canImport = () => true;
+let tab = 'album', canImport = () => true, glovebox = () => [];
+const fresh = new Set();   // cards new to the album this session (NEW marks)
+export const markFresh = ids => { for (const id of ids || []) fresh.add(id); };
 
 // a board: the fastest payoff, the best time of day each day was paid, the biggest haul, the cleanest
 // delivery. Empty: what it takes to set one
@@ -46,6 +52,27 @@ function logbook() {
   h += '<h3>Lifetime</h3>';
   h += row('Trips', L.trips) + row('RVs paid off', L.wins) + row('Days paid', L.days) + row('Pawned', fmt$(L.pawned));
   h += row('Knocked out', L.kos) + row('Friends picked up', L.revives) + row('RV damage as the driver', `${L.rvDmg}%`) + row('Spent at Gus\'s', fmt$(L.repairs));
+  h += row('Road Cards kept', L.cards) + row('Road Cards lost to the Repo Man', L.cardsLost);
+  return h;
+}
+
+function album() {
+  const p = profile(), n = CARDS.filter(c => p.cards[c.id]).length, copies = Object.values(p.cards).reduce((a, x) => a + x, 0);
+  const o = odds('std'), pc = x => Math.round(x * 100);
+  let h = `<p class="album-odds">${n} of 30 cards kept (${copies} copies). Tins at the dangerous places, and in the safes and suitcases Ed pries open: set a tin down in the RV and it's in the glovebox; pay the RV off on day 5 and everyone aboard keeps a copy.</p>`;
+  const gb = glovebox().flatMap(g => g.cards);
+  if (gb.length) h += `<h3>In the glovebox this trip</h3><div class="album-cards">${gb.map(id => cardHTML(id, { small: true, fresh: !p.cards[id] && !p.seen.includes(id) })).join('')}</div>`;
+  for (const set of SETS) {
+    const list = CARDS.filter(c => c.set === set.n);
+    h += `<div class="album-set"><h3>${set.n}. ${esc(set.name)}</h3><div class="album-cards">`;
+    for (const c of list) {
+      const kept = p.cards[c.id] || 0, lost = p.lost[c.id];
+      const state = kept ? 'owned' : lost ? 'lost' : p.seen.includes(c.id) ? 'seen' : 'unseen';
+      h += cardHTML(c.id, { n: kept, state, fresh: fresh.has(c.id), small: true, note: lost && !kept ? `Lost to the Repo Man, day ${lost}` : '' });
+    }
+    h += '</div></div>';
+  }
+  h += `<p class="album-odds">A card is from the day's road 85% of the time, an earlier road's 15%. On Standard terms: kit ${pc(o.kit)}%, common ${pc(o.common)}%, uncommon ${pc(o.uncommon)}%. The rare cards come only on Bad Credit. A safe holds a card half the time, a suitcase a quarter.</p>`;
   return h;
 }
 
@@ -71,7 +98,7 @@ function saveTab() {
 
 function render() {
   for (const b of document.querySelectorAll('#garage .gtab')) b.classList.toggle('on', b.dataset.tab === tab);
-  $('garageBody').innerHTML = tab === 'save' ? saveTab() : logbook();
+  $('garageBody').innerHTML = tab === 'save' ? saveTab() : tab === 'album' ? album() : logbook();
   if (tab !== 'save') return;
   $('gxExport').onclick = () => { $('gxOut').value = exportCode(); $('gxOut').select(); };
   $('gxCopy').onclick = async () => {
@@ -87,9 +114,10 @@ function render() {
   };
 }
 
-// opts.canImport: () => true while a save may change (on the menu)
+// opts.canImport: () => true while a save may change (on the menu); opts.glovebox: () => this trip's glovebox
 export function initGarage(opts = {}) {
   if (opts.canImport) canImport = opts.canImport;
+  if (opts.glovebox) glovebox = opts.glovebox;
   for (const b of document.querySelectorAll('#garage .gtab')) b.onclick = () => { tab = b.dataset.tab; render(); };
 }
 // (main.js shows the panel: openPanel('garage') renders it first)
@@ -101,6 +129,24 @@ export const garageOpen = () => !$('garage').classList.contains('hidden');
 // the game-over's lines for what this trip set ('NEW RECORD'), from creditTrip's answer
 export function recordLines(trip, res) {
   if (!trip || !res?.counted) return '';
+  return records(trip, res) + cardLines(trip, res);
+}
+// the trip's cards on the game-over: into the album, or TAKEN
+function cardLines(trip, res) {
+  if (res.cards?.length) {
+    markFresh(res.fresh);
+    const uniq = [...new Set(res.cards)];
+    return `<div class="rrow good"><span>Into your album</span><b>${res.cards.length} card${res.cards.length > 1 ? 's' : ''}${res.fresh.length ? ` (${res.fresh.length} new)` : ''}</b></div>`
+      + `<div class="over-cards">${uniq.slice(0, 12).map(id => cardHTML(id, { small: true, fresh: res.fresh.includes(id) })).join('')}</div>`;
+  }
+  if (res.lost?.length) {
+    const uniq = [...new Set(res.lost)];
+    return `<div class="rrow bad"><span>The glovebox went with the Repo Man</span><b>${res.lost.length} card${res.lost.length > 1 ? 's' : ''}${res.lostNew.length ? `, ${res.lostNew.length} you've never had` : ''}</b></div>`
+      + `<div class="over-cards"><div class="taken">${uniq.slice(0, 6).map(id => cardHTML(id, { small: true })).join('')}</div></div>`;
+  }
+  return '';
+}
+function records(trip, res) {
   const p = profile(), b = p.best[trip.tier === 'bad' ? 'bad' : 'std'], NEW = ' <span class="newrec">NEW RECORD</span>';
   const has = k => res.newRecords.includes(k);
   let h = '';

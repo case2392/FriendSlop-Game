@@ -86,6 +86,8 @@ export class Mobs {
     this.started = true;
     for (const b of this.sim.W.beds || []) this.spawn('grumphorn', b.x, b.z, { yaw: b.ry, st: GST.SLEEP, bed: b });
     for (const d of this.sim.W.dens || []) this.rtSpawnDen(d);
+    // a den's Road Card tin is on its pile: theirs till somebody picks it up
+    for (const [id, s] of this.sim.finds || []) if (s.den != null && this.dens.has(s.den)) this.toHoard(id, s.den);
     this.rockfalls = (this.sim.W.rockfalls || []).map(r => this.rfArm(r));
   }
 
@@ -303,6 +305,14 @@ export class Mobs {
     this.setSt(m, GST.TIPPED);
     this.sim.out.push({ k: 'mob', id: m.id, s: 'tip', side: m.tipSide });
     this.ghCost(m, p, GH.COST.tip);
+    // a Road Card tin falls out of its fur (once a beast), on the side it fell away from
+    if (!m.furGiven) {
+      m.furGiven = true;
+      const t = p.body.translation(), sx = -Math.cos(yaw) * m.tipSide, sz = Math.sin(yaw) * m.tipSide;
+      const x = t.x + sx * 1.5, z = t.z + sz * 1.5;
+      const tin = this.sim.addProp('tin', v3(x, this.sim.W.heightAt(x, z) + 0.3, z), yawQ(yaw), 0, 0);
+      if (tin) this.sim.out.push({ k: 'spawn', p: this.sim.describe(tin), fur: m.id });
+    }
   }
   // the driver leaned on the horn (where the RV is): any grumphorn in earshot wakes, and goes for the RV; loose
   // rock up ahead comes down (early: on nobody, if they had the sense to honk well back)
@@ -532,7 +542,7 @@ export class Mobs {
       if (!this.seenFromDen(den, it, it_t)) continue;
       if (this.watched(it, players)) continue;
       const dropped = this.droppedByDowned.get(it.id);
-      const score = (L.bait ? RT.BAIT_V : it.value) / (8 + dm) * (dropped && dropped > this.t ? 1.5 : 1);
+      const score = (L.bait ? RT.BAIT_V : L.find ? RT.SHINY_V : it.value) / (8 + dm) * (dropped && dropped > this.t ? 1.5 : 1);
       if (score > bs) { bs = score; best = it.id; }
     }
     return best;
@@ -965,7 +975,7 @@ export class Mobs {
       if (!L || (L.tool && !L.bait) || L.mob || L.mass > 15 || it.holders.size || sim.tied.has(it.id) || this.carriedBy.has(it.id) || taken.has(it.id)) continue;
       const l = sim.rvToLocal(it.body.translation());
       if (!insideRV(l.x, l.y, l.z, 0) || l.y > 1.5) continue;
-      const v = L.bait ? RT.BAIT_V : it.value;
+      const v = L.bait ? RT.BAIT_V : L.find ? RT.SHINY_V : it.value;
       if (v > bv) { bv = v; best = it.id; }
     }
     return best;

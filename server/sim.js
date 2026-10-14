@@ -81,8 +81,9 @@ const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 const halfMin = t => HALF_MIN[t] ??= (s => s[0] === 'box' ? Math.min(s[1], s[2], s[3]) : s[0] === 'cyl' ? Math.min(s[1], s[2]) : s[0] === 'cap' ? s[2] : s[1])(LOOT[t]?.shape || ['ball', 0.2]);
 
 export class Sim {
-  // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday
-  constructor(W, { carry = [], spawnAt = null, cond = 100 } = {}) {
+  // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday; finds: the day's Road Card
+  // tins (shared/finds.js)
+  constructor(W, { carry = [], spawnAt = null, cond = 100, finds = [] } = {}) {
     this.W = W;
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
@@ -133,6 +134,12 @@ export class Sim {
     // (bungee cords stay on overnight: what was tied down yesterday still is)
     for (const pr of toTie) this.tieProp(pr);
     this.spawnMap();
+    // the day's Road Card tins, where they lie (id -> its spot: a den's are the ringtails', server/mobs.js)
+    this.finds = new Map();
+    for (const s of finds) {
+      const pr = this.addProp(s.type, v3(s.x, s.y + LOOT[s.type].shape[2] + 0.02, s.z), yawQ(s.ry), 0, 0);
+      if (pr) this.finds.set(pr.id, s);
+    }
   }
 
   // ---- building the world --------------------------------------------------------
@@ -558,6 +565,7 @@ export class Sim {
       local.y = Math.max(-1.2, Math.min(1.2, local.y));
       local.z = Math.max(-1.2, Math.min(1.2, local.z));
       p.holders.add(pid);
+      p.lastBy = pid;   // (who set it down: a tin's finder)
       if (!p.mob) p.ours = true;   // (in the crew's hands once: theirs, so a ringtail taking it is a theft)
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();

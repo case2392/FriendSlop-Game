@@ -13,18 +13,24 @@
 //   life   lifetime counters: trips, wins (paid off with you aboard at the end: the wins the host's server
 //          is told of), days paid, money pawned, knockouts, friends picked up, RV damage done driving, repairs
 //   runs   the ids of the last 32 trips credited (a trip delivered twice counts once)
+//   cards  your Road Cards (shared/cards.js): { id: copies }
+//   seen   the cards you've had in a glovebox, kept or not (the Album shows the rest as card backs)
+//   lost   the ones you've only ever seen go with the Repo Man: { id: the day it happened }
 //   sum    an FNV-1a hash of the rest: it catches a torn write; it isn't anti-cheat (it's your save)
 //
 // Times: ROAD TIME is the game clock at each day's payment less 6:00, summed over the five days (a payment
 // made by midnight's auto-pay counts 18 hours), shown as real time (45 s a game hour): paying at 2 PM every
 // day is 40 game hours, 30:00.
 
+import { CARD } from './cards.js';
+
 export const PROFILE_V = 1;
 export const MAX_BYTES = 64 * 1024;   // the most a save may take (a bigger one is refused, not trimmed)
 export const ROAD_HOUR_SEC = 45;       // real seconds a game hour, for showing road time
 const RUNS = 32, CREWS = 12, SEEDS = 20, NAMES = 6;
 const TERMS = ['std', 'bad'];
-export const LIFE = ['trips', 'wins', 'days', 'pawned', 'kos', 'revives', 'rvDmg', 'repairs'];
+export const LIFE = ['trips', 'wins', 'days', 'pawned', 'kos', 'revives', 'rvDmg', 'repairs', 'cards', 'cardsLost'];
+const MAX_COPIES = 99;
 
 // ---- small checks ------------------------------------------------------------------------------------
 const isObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
@@ -52,7 +58,7 @@ export const crewKey = hashes => [...hashes].map(String).sort().join('.');
 // ---- the shape ---------------------------------------------------------------------------------------
 const board = () => ({ fast: null, splits: [null, null, null, null, null], haul: null, clean: null });
 export function fresh(pid, now = 0) {
-  return { v: PROFILE_V, pid, made: now, saved: now, rev: 0, best: { std: board(), bad: board() }, crews: [], seeds: [], life: Object.fromEntries(LIFE.map(k => [k, 0])), runs: [] };
+  return { v: PROFILE_V, pid, made: now, saved: now, rev: 0, best: { std: board(), bad: board() }, crews: [], seeds: [], life: Object.fromEntries(LIFE.map(k => [k, 0])), runs: [], cards: {}, seen: [], lost: {} };
 }
 
 function cleanBoard(b) {
@@ -84,6 +90,11 @@ export function validate(o) {
   }
   if (isObj(o.life)) for (const k of LIFE) p.life[k] = int(o.life[k], 0, 1e12);
   if (Array.isArray(o.runs)) p.runs = [...new Set(o.runs.filter(isRun))].slice(-RUNS);
+  // (cards nobody has heard of are dropped: a save from a later version keeps what this one knows)
+  if (isObj(o.cards)) for (const [id, n] of Object.entries(o.cards)) if (CARD[id] && int(n, 0, MAX_COPIES) > 0) p.cards[id] = int(n, 0, MAX_COPIES);
+  if (Array.isArray(o.seen)) p.seen = [...new Set(o.seen.filter(id => typeof id === 'string' && CARD[id]))];
+  for (const id of Object.keys(p.cards)) if (!p.seen.includes(id)) p.seen.push(id);
+  if (isObj(o.lost)) for (const [id, d] of Object.entries(o.lost)) if (CARD[id] && !p.cards[id]) p.lost[id] = int(d, 1, 5, 1);
   return p;
 }
 
@@ -122,8 +133,11 @@ export function parse(text) {
 //     cleanest delivery) and the crew's tally only when you were aboard when the RV left camp on day 1 and
 //     still aboard at the end. A time record needs a win; the haul needs days 1-4 paid.
 // newRecords: what this trip set: 'fast', 'haul', 'clean', 'split1'..'split5', 'crew'.
+// The cards (not on a practice trip): won, a copy of each card stowed while you were aboard (res.cards, and
+// res.fresh the ones new to you); lost, the glovebox went with the Repo Man (res.lost, and res.lostNew the
+// ones you've never had: grey outlines in the Album, 'Lost to the Repo Man, day 3').
 export function creditTrip(prof, trip, { acceptTest = false, now = 0 } = {}) {
-  const res = { counted: false, dup: false, newRecords: [] };
+  const res = { counted: false, dup: false, newRecords: [], cards: [], fresh: [], lost: [], lostNew: [] };
   if (!isObj(trip) || !isRun(trip.run)) return res;
   if (prof.runs.includes(trip.run)) { res.dup = true; return res; }
   if (trip.practice === 'test' && !acceptTest) return res;
@@ -153,6 +167,18 @@ export function creditTrip(prof, trip, { acceptTest = false, now = 0 } = {}) {
   }
   const L = prof.life;
   L.trips++; if (won && you.atEnd) L.wins++;
+  const ids = v => (Array.isArray(v) ? v.filter(id => typeof id === 'string' && CARD[id]).slice(0, 200) : []);
+  if (won) for (const id of ids(you.cards)) {
+    if (!prof.cards[id]) res.fresh.push(id);
+    prof.cards[id] = Math.min(MAX_COPIES, (prof.cards[id] || 0) + 1);
+    delete prof.lost[id];
+    if (!prof.seen.includes(id)) prof.seen.push(id);
+    res.cards.push(id); L.cards++;
+  } else for (const id of ids(you.lost)) {
+    if (!prof.cards[id] && !res.lostNew.includes(id)) { res.lostNew.push(id); prof.lost[id] = int(trip.day, 1, 5, 1); }
+    if (!prof.seen.includes(id)) prof.seen.push(id);
+    res.lost.push(id); L.cardsLost++;
+  }
   L.days += days; L.pawned += sold;
   L.kos += int(you.kos, 0, 1e6); L.revives += int(you.revives, 0, 1e6); L.rvDmg += int(you.rvDmg, 0, 1e6);
   L.repairs += int(trip.repairs, 0, 1e9);

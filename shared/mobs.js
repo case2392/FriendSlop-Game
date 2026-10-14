@@ -28,6 +28,7 @@ export const RT = {
   HORN_R: 20, HORN_DEAF: 15, SPOOK_T: 4,             // the horn scatters them (then they ignore it a while)
   STASH_R: 1.2, HOME_R: 3, COOLDOWN: [5, 9], TRAP_T: 8,
   RAID_R: 40, RAID_CLEAR: 6, RAID_T: 8, HOP_IN: [2.5, 5.6], HOP_OUT: [2.5, 2.5],   // raids on the RV left open
+  SHINY_V: 900,                                      // a Road Card tin, to a ringtail (shiny: above most of what it can carry)
   BAIT_V: 1500,                                      // a cheese wheel, to a ringtail picking what to go for
   NIP_R: 7, NIP_CD: 3, NIP_REST: 5,                  // a stranger at the den is nipped (each player every NIP_CD s)
 };
