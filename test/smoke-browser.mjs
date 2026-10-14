@@ -337,9 +337,12 @@ try {
     const sat = [await seated(host), await seated(joiner)];
     await digit(host, 2); await digit(host, 2); await digit(joiner, 1);
     await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.bet === 1000 && window.__nmd.g.cas.flip1?.bet === 100, null, { timeout: 24000 });
+    // (each panel is redrawn on its page's next frame: at about 1 fps here, a while after the snapshot)
+    const shows = (p, re) => p.waitForFunction(re => new RegExp(re).test(document.getElementById('casPanel').textContent.replace(/\s+/g, ' ')), re, { timeout: 24000 }).catch(() => {});
+    await shows(host, 'Bet \\$1,000'); await shows(joiner, 'Bet \\$100');
     const panels = [await panel(host), await panel(joiner)];
     check(sat.every(Boolean) && /Sit down at seat 2/.test(aimed[0]) && /Double or Nothing/.test(aimed[1]) && /Blackjack · seat 2/.test(panels[0]) && /Bet \$1,000/.test(panels[0]) && /Double or Nothing/.test(panels[1]) && /Bet \$100/.test(panels[1]),
-      `the casino: Steve sits down at blackjack seat 2 and Dave at a Double or Nothing machine ("${aimed.join('", "')}"); each one's keys set his own stake ("${panels[0].slice(0, 70)}" / "${panels[1].slice(0, 60)}")`);
+      `the casino: Steve sits down at blackjack seat 2 and Dave at a Double or Nothing machine ("${aimed.join('", "')}"); each one's keys set his own stake ("${panels[0].replace(/Blackjack pays.*?17\./, ' ').slice(0, 70)}" / "${panels[1].replace(/Your stake.*?again\./, ' ').slice(0, 60)}")`);
     await digit(host, 5); await digit(joiner, 5);
     await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.st !== 'bet', null, { timeout: 24000 });
     await host.evaluate(() => { const S = window.__nmd; if (S.g.cas.bj2.st === 'play') for (const t of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(t, { key: '6', code: 'Digit6', bubbles: true })); });
