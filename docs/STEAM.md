@@ -167,6 +167,35 @@ SCENE_W=1920 SCENE_H=1080 node tools/scene.mjs casinoin,night dist/store/screens
 
 (The pictures in `docs/screenshots/` are 1280 × 720, too small for Steam: they're for the README.)
 
+### The trailer
+
+`tools/trailer.mjs` films a 60-second trailer from the game itself, 1920 × 1080 at 30 fps, H.264 and
+AAC: the store page's video slot (Steamworks > Store Page Admin > Trailers) takes the MP4 as it is.
+
+```bash
+xvfb-run -a -s "-screen 0 1920x1080x24" node tools/trailer.mjs capture   # the shots (about an hour)
+node tools/trailer.mjs audio                                              # the music and the sounds
+xvfb-run -a -s "-screen 0 1920x1080x24" node tools/trailer.mjs cards     # the words and the title
+node tools/trailer.mjs edit                                               # dist/trailer/trailer.mp4
+```
+
+- **The picture** is the game, not a mock-up. Software GL can't draw it in real time, so the capture
+  runs the game's server in-process and ticks it by hand, with the page's clock made virtual: every
+  video frame is exactly 1/30 s of game time. The crew (Dave, Steve, Kyle) are bots; the camera is
+  the page's own player. Seed 777, so every take is the same road. No HUD in the picture; the lines
+  on it are set afterwards in the game's own type (Cinzel, Marcellus) and its toasts' words.
+- **The sound** is the game's own: its synthesized music (the menu's country song, the casino's
+  lounge band, the last hour's midnight station) and its sound effects, rendered offline. No outside
+  music or samples, so nothing to license.
+- **The cut** is the `EDL` in the tool: the hook (the SLOPMASTER RVs / NO MONEY DOWN!!! billboard),
+  the pitch, the verbs (map, haul, climb, winch, pawn), the chaos (the ranger gate, the Grumphorn,
+  a ringtail, the RV running Steve over, a breakdown), the stakes (the casino, a minute to
+  midnight, the Repo Man), the five days, the payoff, the title, a stinger and WISHLIST ON STEAM.
+  Change a line or a cut and run `edit` again (a minute or two); `capture --only <shot>` films one
+  shot again.
+- Steam's rules for it: no other game's footage or name, nothing promised that isn't in the game.
+  The casino lines are the in-game bank's money.
+
 ### Words
 
 Steam's rule: the page must not name other games, or their worlds and characters. Describe the look
@@ -229,7 +258,7 @@ Answer these in Steamworks before the store page goes to review:
 - [ ] Frame rate checked on a low-end laptop GPU and on a Steam Deck
 - [ ] The App ID is in `package.json`, and `steam_appid.txt` is not in the depot (the depot file
       excludes it)
-- [ ] Store pictures (`tools/storeart.mjs`), 5+ screenshots, the content survey and the AI disclosure
+- [ ] Store pictures (`tools/storeart.mjs`), 5+ screenshots, the trailer (`tools/trailer.mjs`), the content survey and the AI disclosure
       done; the store page passed review and was "Coming Soon" for 2+ weeks; the build passed review
 
 ## Steam Cloud for the save (optional, once the real App ID exists)
@@ -278,5 +307,6 @@ without Steam features. Until that's solved, Proton running the Windows build is
 | `test/steamnet.mjs` | the Steam networking against a stand-in Steam (`test/fakesteam/`) |
 | `test/desktop-smoke.mjs` | the real desktop app, two copies over the stand-in Steam |
 | `tools/storeart.mjs` | the store and library pictures, from the game's title art (`dist/store/`) |
+| `tools/trailer.mjs` | the 60-second trailer, filmed by the game itself (`dist/trailer/trailer.mp4`) |
 | `tools/namecheck.mjs` | fails `npm test` if another game's place names or real brands get into the text players see |
 | `tools/notices.mjs` | writes `desktop/THIRD_PARTY_NOTICES.txt`, the licences shipped next to the executable |
