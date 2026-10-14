@@ -67,7 +67,7 @@ const qOf = (yaw, pitch = 0, roll = 0) => {
   const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2), cr = Math.cos(roll / 2), sr = Math.sin(roll / 2);
   return { w: cy * cp * cr + sy * sp * sr, x: cy * sp * cr + sy * cp * sr, y: sy * cp * cr - cy * sp * sr, z: cy * cp * sr - sy * sp * cr };
 };
-const aisle = [];
+const aisle = [], roof = [];
 for (const [pitch, roll] of [[0, 0], [0.012, 0], [0, 0.03], [0.03, -0.02], [-0.08, 0.04]]) {
   const rv0 = { p: { x: at.x + 8, y: at.g + 0.9, z: at.z - 8 }, q: qOf(0.3, pitch, roll), v: { x: 0, y: 0, z: 0 } };
   const me = new Me();
@@ -83,9 +83,17 @@ for (const [pitch, roll] of [[0, 0], [0.012, 0], [0, 0.03], [0.03, -0.02], [-0.0
   const z0 = toLocal(rv0.p, rv0.q, me.pos).z;
   go(42, { f: 1 });   // 0.7 s
   aisle.push({ pitch, roll, went: toLocal(rv0.p, rv0.q, me.pos).z - z0, jumped: me.events.some(e => e.k === 'jump') });
+  // and on its roof (the planks the ladder comes up to): the same walk, back to front
+  const r0 = toWorld(rv0.p, rv0.q, { x: 0.6, y: 2.43, z: -3.2 });
+  me.teleport(r0.x, r0.y, r0.z, 0.3);
+  go(20, {});
+  const rz0 = toLocal(rv0.p, rv0.q, me.pos).z;
+  go(42, { f: 1 });
+  roof.push(toLocal(rv0.p, rv0.q, me.pos).z - rz0);
 }
 const short = aisle.filter(a => a.went < 2.2);
 check(!short.length, `movement: in the RV parked level or a degree or more out, 0.7 s down its aisle goes ${aisle.map(a => a.went.toFixed(1)).join(', ')} m (walking pace is ${C.PLAYER.WALK} m/s)`);
+check(roof.every(d => d > 2.2), `movement: on the RV's roof, the same 0.7 s goes ${roof.map(d => d.toFixed(1)).join(', ')} m`);
 // a hand on its walls: from inside (the shower stall's wall), nothing; from outside (its side), a climb
 {
   const rv = { p: { x: at.x + 8, y: at.g + 0.9, z: at.z - 8 }, q: qOf(0, 0, 0), v: { x: 0, y: 0, z: 0 } };

@@ -852,7 +852,6 @@ async function buildDay(m) {
     try { q.fn(); } catch (e) { (window.reportError || console.error)(e); }
   }
   S.builtAt = performance.now();   // tools/loadtime.mjs: the world (and its loot) is in
-  if ($('help').classList.contains('hidden')) setTimeout(askVoice, 1500);
   // the loading screen stays up until the new world has drawn; then, once things are quiet, what was
   // painted this session goes into the texture cache (the workers encode and write it in the
   // background) and the list of what this build asked for is kept for next time
