@@ -1665,6 +1665,48 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   check(t1 && n1 === n0 + 1 && sp?.fur === id && t2 && n2 === n1, `tins: tipping a sleeping Grumphorn over shakes a tin out of its fur (${n1 - n0}, ${sp?.fur === id ? 'its spawn names the beast' : 'no spawn event'}); tipping it again (${t2 ? 'over' : 'not over'}), none (${n2 - n1})`);
 }
 
+// ---- the Garage (shared/garage.js): the Air Horn's reach, Work Gloves against a bite -------------------------
+{
+  // K8: an Air Horn II carries x1.5: a sleeping Grumphorn wakes at 59 m off its flank, not at 61 (stock: 39 and
+  // 41); loose rock comes down from 89 m, not 91 (stock: not from 61)
+  const beast = (d, k) => {
+    const { room, ps: [A] } = crew(['Ann']);
+    room.mobsOn = false;
+    const r = roadAt(room, 200);
+    const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw });
+    tick(room, 0.5);
+    const p = room.sim.mobs.get(id), t = p.body.translation(), yaw = yawOf(p.body.rotation());
+    room.sim.mobs.horn({ x: t.x + Math.cos(yaw) * d, y: t.y, z: t.z - Math.sin(yaw) * d }, k);   // (d m off its flank)
+    tick(room, 0.2);
+    const woke = stOf(room, id) !== GST.SLEEP;
+    room.sim.free?.();
+    return woke;
+  };
+  const rock = (d, k) => {
+    const { room, W, mobs } = narrows(4, ['Ann']);
+    const rf = mobs.rockfalls[0];
+    mobs.horn({ x: W.roadX(rf.obz), y: 0, z: rf.obz - d }, k);   // (d m short of the spot under it)
+    const down = rf.st !== 'armed';
+    room.sim.free?.();
+    return down;
+  };
+  const w = [beast(59, 1.5), beast(61, 1.5), beast(39, 1), beast(41, 1)], rk = [rock(89, 1.5), rock(91, 1.5), rock(59, 1), rock(61, 1)];
+  check(w.join() === 'true,false,true,false' && rk.join() === 'true,false,true,false',
+    `garage: an Air Horn II wakes a sleeping Grumphorn at 59 m (${w[0]}) but not 61 (${w[1]}), stock at 39 (${w[2]}) not 41 (${w[3]}); it brings loose rock down from 89 m (${rk[0]}) not 91 (${rk[1]}), stock from 59 (${rk[2]}) not 61 (${rk[3]})`);
+}
+{
+  // K9: Work Gloves: a ringtail held alone bites after 3 s (stock 2)
+  const { clampKit } = await import('../shared/garage.js');
+  const { room, ps: [A], id } = thief(['Ann'], 2);
+  room.setKit(A, clampKit({ perks: { gloves: 1 } }));
+  tick(room, 0.3);
+  grabIt(room, A, id);
+  const t0 = room.t;
+  let bite = null;
+  for (let i = 0; i < 60 * 4.5 && bite == null; i++) { tick(room, 1 / 60); if (mobEvs(A, 'bite').length) bite = room.t - t0; }
+  check(bite != null && Math.abs(bite - 3) <= 0.12 && !room.sim.holds.has(A.id), `garage: with Work Gloves a ringtail held alone bites at ${bite?.toFixed(2)} s (stock ${RT.BITE_T} s)`);
+}
+
 if (failed) { console.error('\nSome wildlife checks FAILED'); process.exit(1); }
 console.log('\nAll wildlife checks passed');
 process.exit(0);

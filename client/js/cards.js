@@ -14,8 +14,8 @@ const W_ART = 168, H_ART = 120;
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 // a card as HTML. state: 'owned' | 'seen' (had one in a glovebox, never kept) | 'lost' (the Repo Man took
-// it before you ever kept one) | 'unseen' (a card back). n: copies (x2 shows); fresh: a NEW badge; note: a
-// line under it ('Lost to the Repo Man, day 3')
+// it before you ever kept one) | 'unseen' (a card back). n: copies (x2 shows; a kit card's level in the
+// Garage); fresh: a NEW badge; note: a line under it ('Lost to the Repo Man, day 3')
 export function cardHTML(id, { n = 0, fresh = false, state = 'owned', note = '', small = false } = {}) {
   const c = CARD[id];
   if (!c) return '';
@@ -25,7 +25,7 @@ export function cardHTML(id, { n = 0, fresh = false, state = 'owned', note = '',
   return `<div class="rcard r-${c.rarity}${state !== 'owned' ? ' grey' : ''}${sz}" data-ck="${id}" title="${esc(`${c.name}: ${c.line}`)}"${url ? ` data-art="1" style="--art:url(${url})"` : ''}>`
     + `<div class="rc-art" data-emb="${set?.emblem || ''}"></div><div class="rc-name">${esc(c.name)}</div><div class="rc-line">${esc(c.line)}</div>`
     + `<div class="rc-no">${String(c.no).padStart(2, '0')}/30</div>${n > 1 ? `<div class="rc-n">x${n}</div>` : ''}${fresh ? '<div class="rc-new">NEW</div>' : ''}`
-    + `${c.kind === 'kit' && state === 'owned' ? '<div class="rc-kit">Unlocks in the Garage soon</div>' : ''}${note ? `<div class="rc-note">${esc(note)}</div>` : ''}</div>`;
+    + `${c.kind === 'kit' && state === 'owned' ? `<div class="rc-kit">${n >= 2 ? 'Garage: level II' : n === 1 ? 'Garage: level I' : 'A Garage upgrade'}</div>` : ''}${note ? `<div class="rc-note">${esc(note)}</div>` : ''}</div>`;
 }
 // the picture's data URL ('' till it's made: the elements showing it are filled in when it is)
 function art(id) {

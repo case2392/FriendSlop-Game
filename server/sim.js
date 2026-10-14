@@ -24,6 +24,7 @@ const FULL_SHARE = 32;
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
 import { GROUPS, looseGroup } from './groups.js';
+import { partMods } from '../shared/garage.js';
 
 // stuff people bump into but a 3-ton RV flattens
 const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
@@ -78,12 +79,14 @@ const HALF_MIN = {};
 const HALF_MAX = {};
 const halfMax = t => HALF_MAX[t] ??= (s => s[0] === 'box' ? Math.max(s[1], s[2], s[3]) : s[0] === 'cyl' ? Math.max(s[1], s[2]) : s[0] === 'cap' ? s[1] + s[2] : s[1])(LOOT[t]?.shape || ['ball', 0.2]);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const BUMPER_KG = RV_PARTS.find(r => r[0] === 'bumperF')[7].mass;    // (the Bull Bar's iron goes on it)
+const WHEELBASE = RV_WHEELS[0][2] - RV_WHEELS[2][2];                   // 5.25 m
 const halfMin = t => HALF_MIN[t] ??= (s => s[0] === 'box' ? Math.min(s[1], s[2], s[3]) : s[0] === 'cyl' ? Math.min(s[1], s[2]) : s[0] === 'cap' ? s[2] : s[1])(LOOT[t]?.shape || ['ball', 0.2]);
 
 export class Sim {
   // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday; finds: the day's Road Card
-  // tins (shared/finds.js)
-  constructor(W, { carry = [], spawnAt = null, cond = 100, finds = [] } = {}) {
+  // tins (shared/finds.js); parts: the RV parts fitted for the trip (shared/garage.js partMods)
+  constructor(W, { carry = [], spawnAt = null, cond = 100, finds = [], parts = null } = {}) {
     this.W = W;
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
@@ -119,6 +122,8 @@ export class Sim {
     const camp = W.camp.rv;
     const sp = spawnAt || { x: camp.x, z: camp.z, yaw: camp.yaw };
     this.buildRV(sp.x, W.heightAt(sp.x, sp.z) + 1.45, sp.z, sp.yaw);
+    this.assist = false;             // the driver has Steady Hands II (the room sets it each tick)
+    this.setParts(parts || partMods(null));
     for (const p of W.props) this.addProp(p.type, v3(p.x, p.y, p.z), yawQ(p.ry), p.value, p.value, p.id);
     this.hook = { state: 'stowed', body: null, len: 0, reeling: false, holder: null, anchor: null, attach: null };
     // yesterday's loot, back where it was in the RV
@@ -181,6 +186,14 @@ export class Sim {
       this.gateCols.set(g.id, col);
       this.colTag.set(col.handle, 'the ranger gate');
     }
+  }
+
+  // the RV's parts for the trip (fitted when it leaves camp on day 1): the Bull Bar's iron on the nose (its
+  // mass on the front bumper's collider), the winch's reel speed; the room reads the rest (the horn, the fix,
+  // the front's knocks)
+  setParts(pm) {
+    this.parts = pm;
+    this.rvCols.bumperF.setMass(BUMPER_KG + pm.bullKg);
   }
 
   buildRV(x, y, z, yaw) {
@@ -866,7 +879,7 @@ export class Sim {
     // stretched. It used to wind on regardless, storing metres of stretch, and flung the RV up a grade when it
     // broke free; the drum's speed limit below keeps even a full stretch from doing that)
     if (H.reeling && d - H.len < C.WINCH.FORCE / C.WINCH.STIFF) {
-      H.len = Math.max(0.6, H.len - C.WINCH.REEL_SPEED * dt);
+      H.len = Math.max(0.6, H.len - this.parts.reel * dt);
     }
     // carried hook: the spool pays out freely
     if (H.state === 'out' && H.holder != null) {
@@ -894,15 +907,15 @@ export class Sim {
     const sep = (otherVel.x - rvVel.x) * dir.x + (otherVel.y - rvVel.y) * dir.y + (otherVel.z - rvVel.z) * dir.z;
     let T = C.WINCH.STIFF * (d - H.len) + C.WINCH.DAMP * Math.max(0, sep);
     T = Math.min(T, C.WINCH.FORCE);
-    // the drum winds no faster than REEL_SPEED: a load already coming faster than that (the RV breaking free
-    // of a snag, a loose hook flying home) pulls the cable along no harder, so the pull fades out over
-    // OVERRUN m/s past it, and the RV comes up a grade at about the drum's speed, never flung. Hauled at an
-    // angle (a post off to the side of the road) it runs on along its wheels faster than the cable shortens:
+    // the drum winds no faster than its reel speed (faster with a Winch Motor fitted): a load already coming
+    // faster than that (the RV breaking free of a snag, a loose hook flying home) pulls the cable along no
+    // harder, so the pull fades out over OVERRUN m/s past it, and the RV comes up a grade at about the drum's
+    // speed, never flung. Hauled at an angle (a post off to the side of the road) it runs on along its wheels faster than the cable shortens:
     // that's no reason to pull harder either (it came over the crest at a run and into the far post). Pulled
     // away from it, the cable holds as hard as ever
     let fast = -sep;
     if (H.state === 'anchored' && sep <= 0) { const v = this.rv.linvel(); fast = Math.max(fast, Math.hypot(v.x, v.y, v.z)); }
-    if (fast > C.WINCH.REEL_SPEED) T *= Math.max(0, 1 - (fast - C.WINCH.REEL_SPEED) / C.WINCH.OVERRUN);
+    if (fast > this.parts.reel) T *= Math.max(0, 1 - (fast - this.parts.reel) / C.WINCH.OVERRUN);
     if (H.state === 'out' && H.holder == null) {
       // loose hook: just drag it in, the RV doesn't care about a 9 kg hook
       H.body.applyImpulse(mul(dir, -Math.min(T, 900) * dt), true);
@@ -959,7 +972,17 @@ export class Sim {
     // the brakes
     if (this.rvMods.dead || this.t < this.rvMods.stallUntil) { engine = 0; if (brake !== C.RV.BRAKE) brake = th < -0.05 ? C.RV.BRAKE : 0.6; }
     if (hb) { brake = C.RV.BRAKE * 1.6; engine = 0; }
-    const steerTarget = st * C.RV.STEER_MAX * (1 - 0.5 * Math.min(1, Math.abs(sp) / C.RV.TOP_SPEED));
+    let steerTarget = st * C.RV.STEER_MAX * (1 - 0.5 * Math.min(1, Math.abs(sp) / C.RV.TOP_SPEED));
+    // Steady Hands II at the wheel: stability control. At speed, no more lock than gives 0.8 g sideways on flat
+    // ground (a = v^2 tan(lock) / wheelbase); and since a sudden full lock overshoots that as the RV turns in
+    // (0.95 g at 13 m/s, measured), the wheel also backs off while the RV turns faster than 0.85 of what 0.8 g
+    // allows. It only ever takes lock away (test/rv.mjs K7: 0.71 g at most at 13 m/s, stock 1.07)
+    if (this.assist && Math.abs(sp) > 1) {
+      const lim = Math.atan(0.8 * 9.81 * WHEELBASE / (sp * sp));
+      steerTarget = clamp(steerTarget, -lim, lim);
+      const r = this.rv.angvel().y, over = sp > 3 ? Math.abs(r) / (0.8 * 9.81 / sp) - 0.85 : 0;
+      if (over > 0 && Math.sign(r) === Math.sign(steerTarget)) steerTarget *= Math.max(0, 1 - over * 8);
+    }
     this.steer += (steerTarget - this.steer) * Math.min(1, dt * 5);
     let mudWheels = 0;
     RV_WHEELS.forEach(([, , , steer, drive], i) => {
@@ -995,7 +1018,7 @@ export class Sim {
         if (!p) { this.holds.delete(pid); continue; }
         const body = p.body;
         const gp = toWorld(body.translation(), body.rotation(), h.local);
-        if (len(sub(gp, pl.eye)) > C.PLAYER.REACH + 1.6) {     // it got away from you
+        if (len(sub(gp, pl.eye)) > C.PLAYER.REACH + (pl.mods?.slip ?? 1.6)) {     // it got away from you (Work Gloves: further)
           this.release(pid);
           this.out.push({ k: 'slip', id: p.id, by: pid });
           continue;
@@ -1008,14 +1031,14 @@ export class Sim {
         // (and steered to the middle of the doorway)
         const goal = door ? add(target, qRotate(this.rv.rotation(), v3(0, lift, Math.max(-0.8, Math.min(0.8, RV_DIM.DOOR_Z - door.z))))) : target;
         let F = add(mul(add(mul(sub(goal, gp), C.GRAB.KP), mul(sub(tv, vp), C.GRAB.KD)), m), v3(0, m * 9.81, 0));
-        const fl = len(F);
-        if (fl > C.GRAB.FMAX) {
+        const fl = len(F), fmax = pl.mods?.fmax ?? C.GRAB.FMAX;   // (Work Gloves II: stronger hands)
+        if (fl > fmax) {
           if (lift > 0 && F.y > 0) {
             // over the sill, the hands hold it up first and push it along with what strength is left
-            const fy = Math.min(F.y, C.GRAB.FMAX), fh = Math.hypot(F.x, F.z);
-            const k = fh > 1e-6 ? Math.min(1, Math.sqrt(C.GRAB.FMAX ** 2 - fy * fy) / fh) : 0;
+            const fy = Math.min(F.y, fmax), fh = Math.hypot(F.x, F.z);
+            const k = fh > 1e-6 ? Math.min(1, Math.sqrt(fmax ** 2 - fy * fy) / fh) : 0;
             F = v3(F.x * k, fy, F.z * k);
-          } else F = mul(F, C.GRAB.FMAX / fl);
+          } else F = mul(F, fmax / fl);
         }
         // at the door the hands guide it without wrenching it round (turnToDoor does the turning)
         if (door) body.applyImpulse(mul(F, dt), true);

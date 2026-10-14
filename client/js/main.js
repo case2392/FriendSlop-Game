@@ -18,14 +18,15 @@ import { Me } from './player.js';
 import { Interp } from './interp.js';
 import { buildWorld, updateWorld } from './world3d.js';
 import { RVView } from './rv3d.js';
-import { buildProp, mapCanvas, prewarm as prewarmProps } from './props3d.js';
+import { buildProp, mapCanvas, prewarm as prewarmProps, setBeaconRange, beaconRange } from './props3d.js';
+import { kitMods, PERKS, PARTS, ROMAN } from '/shared/garage.js';
 import { buildMob } from './mobs3d.js';
 import { RST, GST, RT, ST_MASK, ST_CARRY } from '/shared/mobs.js';
 import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
 import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
-import { profile, profileStatus, forServer, credit } from './profile.js';
+import { profile, profileStatus, forServer, credit, myKit } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
 import { cardHTML } from './cards.js';
 import { TINS } from '/shared/cards.js';
@@ -490,6 +491,12 @@ function computeTarget() {
   const hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
   // broken down, and standing behind it: the engine hatch (looking at the RV's back, the ground or the sky)
   const fix = atHatch() ? { kind: 'fix', label: `[Hold E] fix the engine${S.g.fix ? ` (${S.g.fix}%)` : ''}` } : null;
+  // Keen Eye II: a thing's price read from further off than a hand reaches (nothing to grab there)
+  if (!hit && !fix && !me.holding && me.mods.labelReach > C.PLAYER.REACH) {
+    const far = S.lw.ray(eye, look, me.mods.labelReach, G.WORLD | G.RV | G.PROP, excludeSet(), true);
+    const p = far?.kind === 'prop' ? S.props.get(far.id) : null, L = p && LOOT[p.type];
+    if (L && !L.mob && !L.find && p.type !== 'boulder' && p.type !== 'map') return { kind: 'peek', label: `${L.name} · ${fmt$(p.value)}${p.value < p.max ? ` (was ${fmt$(p.max)})` : ''}` };
+  }
   if (!hit) return fix || (doorNear() ? { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` } : null);
   if (hit.kind === 'prop') {
     if (me.holding) return null;   // hands full: a grab would do nothing, so don't promise one
@@ -1089,6 +1096,9 @@ function onMeta(m) {
   renderVoiceUI();
   const mine = m.players.find(p => p.id === S.selfId);
   if (mine) { hands.setColor(mine.color); S.myWalkie = mine.walkie; S.myColor = mine.color; me.hat = !!mine.hat; }
+  // my kit as the host's server has it (the Garage's perks: shared/garage.js), and the RV's fitted parts
+  if (mine) { S.myKit = mine.kit || null; me.mods = kitMods(S.myKit); }
+  rvView?.setParts(m.trip?.parts || {});
   // paint other players' looks while the browser is idle, so someone joining mid-game doesn't stall a frame
   const idle = window.requestIdleCallback || (f => setTimeout(f, 30));
   for (const p of m.players) {
@@ -1108,6 +1118,7 @@ net.on('s', m => {
   S.interp.push(m, performance.now());
   S.g = m.g;
   if (!m.g.gb && S.glove?.length) S.glove = [];   // (a new trip: an empty glovebox)
+  setBeaconRange(m.g.ph === 'night' || m.g.clk >= 20 ? me.mods.farNight : me.mods.far);   // (Keen Eye)
   onPhase(m.g.ph);
   updatePresence();
   S.door = !!m.g.door;
@@ -1145,7 +1156,7 @@ net.on('seat', inOrder(m => {
 net.on('grabbed', inOrder(m => { if (me.holding?.id !== m.id) return; if (m.ok) me.holding.ok = true; else me.holding = null; }));
 net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));
 net.on('drink', inOrder(() => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); }));
-net.on('revived', inOrder(() => { me.revive(); sfx.wake(); }));
+net.on('revived', inOrder(m => { me.revive(m.stam); sfx.wake(); }));   // (stam: a Medic Bag gets you up with more)
 net.on('emote', inOrder(m => { const v = S.views.get(m.id); if (v) v.emote = { e: m.e, t: 3 }; if (m.id === S.selfId) toast(`you: ${m.e}`, '#fff', 1.5); }));
 net.on('ping', inOrder(addPing));
 net.on('receipt', inOrder(showReceipt));
@@ -1158,6 +1169,7 @@ net.on('trip', inOrder(m => {
   res.saved.then(ok => { if (ok) net.send({ t: 'tripAck', run: m.run }); });
   if (res.dup) return;   // (already shown: the game-over keeps its lines, see showOver)
   S.lastTrip = { m, res };
+  if (res.unlocked?.length) sendKit();   // (a perk the trip unlocked takes an empty slot: the next trip has it)
   if (m.run === S.overRun && !$('overScreen').classList.contains('hidden')) { const el = $('overRecords'); if (el) el.innerHTML = recordLines(m, res); }
   else if (res.counted) toast(`Your last trip (${m.won ? 'paid off' : 'repo\'d'}) is in your Logbook${res.newRecords.length ? ': a new record!' : '.'} (G)`, '#ffd166', 6);
 }));
@@ -1594,7 +1606,9 @@ $('settingsBtn').onclick = () => { sfx.click(); openPanel('settings'); };
 $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
 $('ctpGarage').onclick = () => openPanel('garage');
 $('garageClose').onclick = () => closePanel('garage');
-initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [] });
+initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [], kitOpen: () => !S.meta || !!S.meta.trip?.kitOpen, onKit: sendKit });
+// my kit to the host's server (it takes it in camp on day 1 and during the game-over; otherwise it says so)
+function sendKit() { if (S.phase !== 'menu' && S.meta?.trip?.kitOpen) net.send({ t: 'kit', kit: myKit() }); }
 $('ctpSettings').onclick = () => openPanel('settings');
 $('settingsClose').onclick = () => closePanel('settings');
 $('settingsReset').onclick = () => { resetSettings(); renderSettings(); };
@@ -1711,6 +1725,7 @@ S.press = (fn) => ({ grab: onGrabPress, release: onGrabRelease, use: onUse, thro
 S.key = (k, down) => { keys[k] = !!down; };   // (a key held or let go, for the tests: the E of a held fix)
 S.uiOpen = () => uiOpen();   // (tests: a panel is up, and the game's keys are off)
 S.profile = profile; S.profileStatus = profileStatus;   // (tests: this player's save)
+S.beacon = beaconRange;   // (tests: how far loot glints reach, Keen Eye's)
 S.target = () => target;
 S.send = m => net.send(m);
 S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?
@@ -1847,7 +1862,7 @@ requestAnimationFrame(frame);
   $('prompt').classList.toggle('hidden', !target?.label || reading);   // the raised map covers the view
   if (target?.kind === 'revive' && keys.e && reviveT > 0) {
     reviveT += dt;
-    if (reviveT >= C.PLAYER.REVIVE_HOLD) { net.send({ t: 'use', kind: 'revive', id: target.id }); reviveT = 0; }
+    if (reviveT >= me.mods.holdT) { net.send({ t: 'use', kind: 'revive', id: target.id }); reviveT = 0; }
   } else if (!keys.e) reviveT = 0;
   // the roadside fix: E held at the engine hatch. It starts with the hatch in view (its prompt up), however
   // long E has been down, and goes on while E is down and I'm still at the hatch, whatever crosses the
@@ -1855,7 +1870,7 @@ requestAnimationFrame(frame);
   const fixWant = !!keys.e && atHatch() && (fixHeld || target?.kind === 'fix');
   if (fixWant !== fixHeld) { fixHeld = fixWant; net.send({ t: 'fix', on: fixWant ? 1 : 0 }); }
   $('holdBar').classList.toggle('hidden', !(reviveT > 0 || fixHeld));
-  $('holdBar').firstElementChild.style.width = `${fixHeld ? Math.min(100, S.g?.fix || 0) : Math.min(100, reviveT / C.PLAYER.REVIVE_HOLD * 100)}%`;
+  $('holdBar').firstElementChild.style.width = `${fixHeld ? Math.min(100, S.g?.fix || 0) : Math.min(100, reviveT / me.mods.holdT * 100)}%`;
 
   // fx
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -1902,6 +1917,8 @@ requestAnimationFrame(frame);
   const tx = new Set([...others].filter(([, s]) => s.flags & C.FLAG.WALKIE_TX).map(([id]) => id));
   if (S.myWalkie) for (const id of tx) if (!lastWalkieTx.has(id)) sfx.radio();
   lastWalkieTx = tx;
+  updateCallsigns(others, tx);
+  steadyHands(dt, rv);
 
   hud(rv);
   if (!S.noRender) render();
@@ -1927,6 +1944,94 @@ function updateVoice(others) {
   });
   earshotNudge(eye, others);
 }
+// Call Sign (a perk): while somebody who has it talks on their walkie, everyone else holding one sees a radio
+// marker over them however far off; level II adds an arrow at the edge of the screen, with how far
+const callMarks = new Map();   // player id -> { sp, el }
+let callMat = null;
+const callV = new THREE.Vector3();
+function callMarker() {
+  if (!callMat) {
+    const cv = document.createElement('canvas');
+    cv.width = cv.height = 64;
+    const g = cv.getContext('2d');
+    g.lineCap = 'round'; g.lineWidth = 5;
+    g.strokeStyle = '#1b130b'; g.fillStyle = '#ffd166';
+    g.beginPath(); g.roundRect(22, 22, 20, 34, 5); g.fill(); g.stroke();      // the walkie
+    g.beginPath(); g.moveTo(37, 22); g.lineTo(37, 6); g.stroke();             // its aerial
+    g.strokeStyle = '#ffd166'; g.lineWidth = 4;
+    for (const r of [12, 20]) { g.beginPath(); g.arc(37, 10, r, -1.0, -0.2); g.stroke(); g.beginPath(); g.arc(37, 10, r, Math.PI + 0.2, Math.PI + 1.0); g.stroke(); }
+    const tex = new THREE.CanvasTexture(cv);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    callMat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthTest: false, fog: false, sizeAttenuation: false });
+  }
+  const sp = new THREE.Sprite(callMat);
+  sp.scale.set(0.06, 0.06, 1);
+  sp.renderOrder = 11;
+  scene.add(sp);
+  const el = document.createElement('div');
+  el.className = 'callArrow hidden';
+  el.innerHTML = '<i></i><span></span>';
+  document.body.appendChild(el);
+  return { sp, el };
+}
+function updateCallsigns(others, tx) {
+  const seen = new Set();
+  if (S.myWalkie) for (const id of tx) {
+    const lv = S.meta?.players.find(q => q.id === id)?.kit?.perks?.callsign || 0, s = others.get(id);
+    if (!lv || !s) continue;
+    seen.add(id);
+    let m = callMarks.get(id);
+    if (!m) callMarks.set(id, m = callMarker());
+    m.sp.visible = true;
+    m.sp.position.set(s.pos.x, s.pos.y + 2.3, s.pos.z);
+    // (level II) off the screen: an arrow at its edge, pointing their way, with how far
+    callV.copy(m.sp.position).project(camera);
+    const behind = callV.z > 1, onScreen = !behind && Math.abs(callV.x) < 0.95 && Math.abs(callV.y) < 0.9;
+    if (lv < 2 || onScreen) { m.el.classList.add('hidden'); continue; }
+    let x = behind ? -callV.x : callV.x, y = behind ? -callV.y : callV.y;
+    const k = 0.9 / Math.max(Math.abs(x), Math.abs(y), 1e-3);
+    x *= k; y *= k;
+    m.el.classList.remove('hidden');
+    m.el.style.left = `${(x * 0.5 + 0.5) * 100}%`;
+    m.el.style.top = `${(-y * 0.5 + 0.5) * 100}%`;
+    m.el.firstElementChild.style.transform = `rotate(${-Math.atan2(y, x)}rad)`;
+    m.el.lastElementChild.textContent = `${Math.round(Math.hypot(s.pos.x - me.pos.x, s.pos.z - me.pos.z))} m`;
+  }
+  for (const [id, m] of callMarks) if (!seen.has(id)) { m.sp.visible = false; m.el.classList.add('hidden'); }
+}
+
+// Steady Hands (a perk), at the wheel. Level I: a creak and the tip lamp when the RV leans hard (past 0.6 g
+// sideways: its speed times its turn rate, smoothed over a sixth of a second), and reversing beeps that
+// quicken as the back nears something (three rays back from the rear bumper, in this page's physics).
+// Level II's stability control is the server's (sim.js).
+let tipG = 0, tipYaw = null, creakAt = 0, beepAt = 0;
+const REAR_RAYS = [-0.9, 0, 0.9];
+function steadyHands(dt, rv) {
+  let lamp = false;
+  if (rv && me.mode === 'seat' && me.seat === 0 && me.mods.tipWarn) {
+    const yaw = qYaw(rv.q), sp = Math.hypot(rv.v.x, rv.v.z), now = performance.now();
+    if (tipYaw != null && dt > 0) {
+      const dy = Math.atan2(Math.sin(yaw - tipYaw), Math.cos(yaw - tipYaw));
+      tipG += (Math.abs(sp * dy / dt) / 9.81 - tipG) * Math.min(1, dt / 0.16);
+    }
+    tipYaw = yaw;
+    lamp = tipG > 0.6;
+    if (lamp && now - creakAt > 700) { creakAt = now; sfx.creak(); }
+    const f = toWorld(rv.p, rv.q, { x: 0, y: 0, z: 1 }), back = (f.x - rv.p.x) * rv.v.x + (f.y - rv.p.y) * rv.v.y + (f.z - rv.p.z) * rv.v.z < -0.3;
+    if (back && S.lw) {
+      let d = Infinity;
+      for (const x of REAR_RAYS) {
+        const o = toWorld(rv.p, rv.q, { x, y: -0.2, z: -4.3 }), e = toWorld(rv.p, rv.q, { x, y: -0.2, z: -5.3 });
+        const hit = S.lw.ray(o, { x: e.x - o.x, y: e.y - o.y, z: e.z - o.z }, 6, G.WORLD | G.PROP | G.PLAYER, null, true);
+        if (hit) d = Math.min(d, hit.toi);
+      }
+      const gap = d < 0.8 ? 120 : d < 2 ? 250 : d < 4 ? 450 : d < 6 ? 800 : 0;
+      if (gap && now - beepAt > gap) { beepAt = now; sfx.beep(d < 0.8 ? 2000 : 1600); }
+    }
+  } else { tipYaw = null; tipG = 0; }
+  $('tipLamp').classList.toggle('on', lamp);
+}
+
 // Talking, and nobody in voice is close enough to hear it (nor on a walkie line with me): say so, once a
 // day. Voices carry C.VOICE.RANGE m; past that only walkie-talkies get through
 let earshotDay = null;
@@ -2161,6 +2266,13 @@ function beastNear(r) {
   }
   return false;
 }
+// 'Your kit: Work Gloves II, Climbing Chalk I; you bring the Winch Motor II' (or nothing, with no kit)
+function kitLine(kit) {
+  const perks = Object.entries(kit?.perks || {}).map(([id, lv]) => `${PERKS[id]?.name} ${ROMAN[lv]}`);
+  const part = kit?.part ? `you bring the ${PARTS[kit.part.id]?.name} ${ROMAN[kit.part.lv]}` : '';
+  if (!perks.length && !part) return '';
+  return `Your kit: ${[perks.join(', '), part].filter(Boolean).join('; ')}`;
+}
 function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
   const town = townName(S.W), L = [];
@@ -2185,6 +2297,8 @@ function questTracker(g) {
     else if (pr === 'test') L.push(['Test trip: nothing is recorded', 'warn']);
     const crew = crewBest(profile(), (S.meta?.players || []).map(p => p.h).filter(Boolean));
     if (crew && !pr) L.push([`Best with this crew: ${crew.fast != null ? fmtRoad(crew.fast) : `${crew.wins}/${crew.trips} paid off`}${crew.haul != null ? `, ${fmt$(crew.haul)} pawned` : ''}`, '']);
+    const kit = kitLine(S.myKit);
+    if (kit) L.push([keysIn(`${kit}. Change it in the Garage [G] till the RV leaves`), '']);
   }
   else if (g.ph === 'road') {
     if (!g.town) {
@@ -2232,7 +2346,7 @@ function rosterBars() {
         if (!koSince.has(id)) koSince.set(id, now);
         const left = Math.max(0, C.PLAYER.KO_TIME - (now - koSince.get(id)) / 1000);
         st = 'ko'; f = left / C.PLAYER.KO_TIME; t = `Knocked out ${Math.ceil(left)}s`;
-        if (target?.kind === 'revive' && target.id === id && reviveT > 0) { r = Math.min(1, reviveT / C.PLAYER.REVIVE_HOLD); t = 'Picking up...'; }
+        if (target?.kind === 'revive' && target.id === id && reviveT > 0) { r = Math.min(1, reviveT / me.mods.holdT); t = 'Picking up...'; }
       } else if (s) koSince.delete(id);
     }
     f = Math.max(0, Math.min(1, f)); cap = Math.max(0, Math.min(1, cap));

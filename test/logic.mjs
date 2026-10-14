@@ -298,6 +298,46 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     `save: a win's cards go in (gnome x${p.cards.gnome}, Work Gloves x${p.cards.gloves}, ${w.fresh.length} new); a loss marks the ones you never had (Honest Ed, day ${p.lost.ed}); a practice trip keeps nothing; it all reads back`);
 }
 
+// --- the Garage (shared/garage.js): the kit a server takes, the levels cards give, the parts the RV is fitted with ---
+{
+  const Gx = await import('../shared/garage.js'), P = await import('../shared/profile.js'), { mulberry32: rng } = await import('../shared/rng.js'), { CARD: CARD_OF } = await import('../shared/cards.js');
+  // K1: clampKit: unknown ids go, levels are the integers 1 and 2, at most 3 perks (in the catalogue's order), one part;
+  // anything that isn't an object is an empty kit
+  const r = rng(77), pick = a => a[Math.floor(r() * a.length)];
+  const IDS = [...Gx.PERK_IDS, ...Gx.PART_IDS, 'bogus', 'toString', '__proto__', 'constructor', ''], LVS = [0, 1, 2, 3, 1.5, '2', -1, null, NaN, 2, 1];
+  let bad = 0;
+  for (let i = 0; i < 4000; i++) {
+    const perks = {};
+    for (let j = 0; j < 1 + Math.floor(r() * 8); j++) perks[pick(IDS)] = pick(LVS);
+    const raw = pick([{ perks, part: { id: pick(IDS), lv: pick(LVS) } }, { perks }, null, 7, 'kit', [1, 2], { perks: [1, 2] }, { part: 'winch' }]);
+    const k = Gx.clampKit(raw), ids = Object.keys(k.perks);
+    if (ids.length > 3 || ids.some(id => !Gx.PERK_IDS.includes(id) || ![1, 2].includes(k.perks[id])) || ids.join() !== Gx.PERK_IDS.filter(id => ids.includes(id)).join()) bad++;
+    if (k.part && (!Gx.PART_IDS.includes(k.part.id) || ![1, 2].includes(k.part.lv) || Object.keys(k.part).length !== 2)) bad++;
+    const m = Gx.kitMods(raw);
+    if (!(m.fmax <= 1045 && m.slip <= 2.2 && m.climbMul >= 0.76 && m.far <= 38 && m.farNight <= 45 && m.holdT >= 1.6 && m.stam <= 60)) bad++;
+  }
+  const five = Gx.clampKit({ perks: { medic: 2, eye: 2, gloves: 2, chalk: 1, steady: 9, bogus: 2 }, part: { id: 'winch', lv: 2 } });
+  check(bad === 0 && JSON.stringify(five) === '{"perks":{"gloves":2,"chalk":1,"eye":2},"part":{"id":"winch","lv":2}}' && JSON.stringify(Gx.clampKit('x')) === '{"perks":{},"part":null}',
+    `garage: 4000 fuzzed kits clamp to known ids at levels 1-2, at most 3 perks and 1 part (five asked for: ${Object.keys(five.perks).join(', ')}); no number past its cap`);
+  // K2: levelFrom: 1 copy I, 2 II, 5 still II; 3 doubles make a pick; a pick can't take a rare
+  const pid = '0123456789abcdef', trip = (run, o) => ({ run: run.padEnd(10, '0'), won: true, practice: null, tier: 'std', splits: [14, 14, 14, 14, 14], sold: 1000, day: 5, rvEnd: 50, crew: [], ...o });
+  const p = P.fresh(pid, 0);
+  const t1 = P.creditTrip(p, trip('a1', { you: { fromStart: true, atEnd: true, cards: ['gloves', 'gloves', 'gloves', 'gnome', 'gnome', 'gnome', 'winch'] } }));
+  const lvs = [0, 1, 2, 5].map(n => Gx.levelFrom({ gloves: n }, 'gloves'));
+  const rare = P.spendPick(p, 'slopmaster'), spent = P.spendPick(p, 'chalk');
+  const t2 = P.creditTrip(p, trip('a2', { rvEnd: 85, you: { fromStart: true, atEnd: true, cards: [] } }));
+  const back = P.parse(P.serialize(p)).prof;
+  check(lvs.join() === '0,1,2,2' && t1.picks === 1 && p.doubles === 0 && !rare && spent && p.cards.chalk === 1 && P.pickable(p).every(id => CARD_OF[id].rarity !== 'rare')
+    && t2.mint && t2.picks === 1 && p.picks === 1 && JSON.stringify(p.kit) === '{"perks":["gloves","chalk"],"part":null}' && P.partOf(p) === 'winch'
+    && JSON.stringify(P.kitFor(p)) === '{"perks":{"gloves":2,"chalk":1},"part":{"id":"winch","lv":1}}' && back.picks === 1 && JSON.stringify(back.kit) === JSON.stringify(p.kit),
+    `garage: a card's copies give levels ${lvs.join(', ')} (0, 1, 2, 5 copies); 3 doubles made a pick, spent on Climbing Chalk (a rare refused); a MINT win (RV ${t2.mint ? 85 : '?'}%) made another; new perks took empty slots; it reads back`);
+  // K3: fitParts: one part each, the best level per kind (the first to bring it on a tie), the rest spares
+  const f = Gx.fitParts([{ id: 1, name: 'Ann', part: { id: 'winch', lv: 1 } }, { id: 2, name: 'Bob', part: { id: 'winch', lv: 2 } }, { id: 3, name: 'Cat', part: { id: 'horn', lv: 1 } },
+    { id: 4, name: 'Dan', part: { id: 'horn', lv: 1 } }, { id: 5, name: 'Eve', part: null }, { id: 6, name: 'Fay', part: { id: 'toString', lv: 2 } }]);
+  check(JSON.stringify(f.parts) === '{"winch":2,"horn":1}' && f.by.winch === 'Bob' && f.by.horn === 'Cat' && f.spares.length === 2 && Gx.spareLine(f.spares[0]) === "Ann's Winch Motor I is a spare: Bob's II is fitted",
+    `garage: fitted ${JSON.stringify(f.parts)}; spares: ${f.spares.map(Gx.spareLine).join('; ')}`);
+}
+
 // --- the desktop build's save files (desktop/save.cjs): an atomic write leaves the last save as the backup,
 // an unreadable one goes aside (the last 3 kept), and a player's copy never takes test switches ---
 {

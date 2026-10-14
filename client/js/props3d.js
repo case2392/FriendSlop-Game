@@ -1484,6 +1484,9 @@ function demoWorld() {
 // high the ground is.
 const TW = { N: 40, MOTES: 6, far: 30, fade: 10, near: 0.7, lift: 0.04, mote: [8, 15], star: [16, 26], flare: 34 };
 TW.Q = TW.MOTES + 2;                      // quads per piece: the motes, the star, the ring
+// Keen Eye: how far the glints reach (main.js sets it from my kit: 38 m, or 45 after 20:00 at level II)
+export function setBeaconRange(far) { TW.far = far; }
+export const beaconRange = () => TW.far;
 const twLoose = new Set();
 let twCloud = null, twSeq = 0, twLast = 0, twDemo = false;
 const twC = new V3(), twE = [];

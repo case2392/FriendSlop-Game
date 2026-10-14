@@ -113,6 +113,27 @@ try {
   await host.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
   await joiner.waitForFunction(() => window.__nmd.views.size === 1, null, { timeout: 60000 });
   ok('each client renders the other player');
+  // ---- the Garage's Kit tab, in camp on day 1: Steve (his save given two Climbing Chalk cards and a Keen Eye)
+  // takes them; the host has them, and his page climbs on 0.76 of the stamina and sees glints from 38 m ----
+  {
+    const kit = await host.evaluate(() => {
+      const p = window.__nmd.profile();
+      p.cards.chalk = 2; p.cards.eye = 1;
+      document.getElementById('clickToPlay').classList.remove('hidden');
+      document.getElementById('ctpGarage').click();
+      document.querySelector('#garage .gtab[data-tab="kit"]').click();
+      for (const id of ['chalk', 'eye']) document.querySelector(`#garageBody [data-perk="${id}"]`)?.click();
+      const shown = [...document.querySelectorAll('#garageBody .kit-item.on b')].map(b => b.textContent);
+      document.getElementById('garageClose').click();
+      return shown;
+    });
+    const echo = await host.waitForFunction(() => {
+      const S = window.__nmd, k = S.meta?.players.find(p => p.id === S.selfId)?.kit;
+      return k?.perks?.chalk === 2 && k.perks.eye === 1 && S.beacon() === 38 && { perks: k.perks, climb: S.me.mods.climbMul, beacon: S.beacon() };
+    }, null, { timeout: 15000 }).then(h => h.jsonValue(), () => null);
+    check(echo && echo.climb === 0.76 && kit.some(t => /Climbing Chalk II/.test(t)) && kit.some(t => /Keen Eye I$/.test(t)),
+      `the Garage: Steve takes Climbing Chalk II and Keen Eye I in the Kit tab (${kit.join(', ')}); the host has them (${JSON.stringify(echo?.perks)}), and his page climbs on x${echo?.climb} the stamina and sees glints from ${echo?.beacon} m`);
+  }
 
   // ---- camp screenshot: Dave looks at Steve and the RV ----
   await host.evaluate(() => { const S = window.__nmd; S.me.teleport(-3.5, 0.05, -38, 0); });
@@ -567,10 +588,11 @@ try {
       return S.overRun && P.runs?.includes(S.overRun) && document.getElementById('overRecords')?.textContent.includes('Road time') && S.overRun;
     }, null, { timeout: 120000 }).then(h => h.jsonValue(), () => null);
     const overLine = await host.evaluate(() => document.getElementById('overRecords')?.textContent.replace(/\s+/g, ' ').trim() || '');
-    // G on the trip: the Album (the tin's cards kept, paid off), then the Logbook
+    // G on the trip: the Album tab (the tin's cards kept, paid off), then the Logbook
     const logbook = await host.evaluate(ids => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', bubbles: true }));
       window.dispatchEvent(new KeyboardEvent('keyup', { key: 'g', code: 'KeyG', bubbles: true }));
+      document.querySelector('#garage .gtab[data-tab="album"]').click();
       const kept = (ids || []).every(id => document.querySelector(`#garageBody .album-set .rcard[data-ck="${id}"]:not(.grey)`));
       document.querySelector('#garage .gtab[data-tab="log"]').click();
       const txt = document.getElementById('garageBody').textContent.replace(/\s+/g, ' ');

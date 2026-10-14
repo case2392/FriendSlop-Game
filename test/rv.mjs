@@ -10,6 +10,7 @@ const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
 const { RV_HATCH, RV_WHEELS, RV_DIM, qRotate, toWorld, toLocal, insideRV } = await import('../shared/rv.js');
 const { generateLeg } = await import('../shared/world.js');
+const { LOOT } = await import('../shared/loot.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -723,6 +724,168 @@ function gateRun(speed, driver) {
   tick(room, 0.5);
   const l3 = toLocal(r, q, sim.props.get(top.id).body.translation());
   check(l3.x > 1.5, `load: a gnome off the roof isn't pulled inside (RV-local x ${l3.x.toFixed(2)})`);
+}
+
+// ---- K5-K7: the Garage's parts and perks (shared/garage.js) ---------------------------------------------------
+// a player with a save's kit (shared/profile.js kitFor's shape), in `room`
+const kitted = (room, name, kit, n) => {
+  const c = new FakeConn(), p = room.addPlayer(c, name).player;
+  p.key = 'tok:' + name; room.setProfile(p, { pid: String(n).repeat(16), kit }); room.welcome(p); p.conn = c;
+  return p;
+};
+// the RV out of camp on day 1 (the trip's parts are fitted then)
+const depart = room => { room.sim.placeRV(room.W.roadX(room.W.camp.exitZ + 8), room.W.camp.exitZ + 8, 0); tick(room, 1 / HZ); };
+// what a crash at dv m/s into `zone` costs an RV at 100%
+const crashCost = (room, dv, zone) => {
+  room.rvc.hp = 100; room.rvc.inc = null; room.sim.setRvCond(100);
+  room.onRVHit({ why: 'crash', dv, zone, what: 'a test wall' });
+  return 100 - room.rvc.hp;
+};
+{
+  // K5: fitted as the RV leaves camp on day 1 (the best of each kind among everyone aboard, a guest's too), on
+  // every day's RV after; a late joiner's waits. The Bull Bar II: +250 kg on the nose, and a head-on crash at
+  // 8 m/s costs 0.7 of what it did; one into the side the same
+  const room = new Room('KIT', 4242);
+  const A = kitted(room, 'Ann', { perks: {}, part: { id: 'bullbar', lv: 2 } }, 'a');
+  kitted(room, 'Bob', { perks: { gloves: 1 }, part: { id: 'winch', lv: 1 } }, 'b');
+  tick(room, 0.5);
+  const m0 = room.sim.rv.mass(), before = JSON.stringify(room.partMods);
+  depart(room);
+  tick(room, 0.2);
+  const m1 = room.sim.rv.mass(), fitted = JSON.stringify(room.fit.parts), departed = room.departed;
+  kitted(room, 'Lou', { perks: {}, part: { id: 'toolbox', lv: 2 } }, 'c');
+  room.nextDay();
+  tick(room, 0.2);
+  const m2 = room.sim.rv.mass(), reel2 = room.sim.parts.reel, fix2 = room.partMods.fixX, meta = A.conn.last('meta')?.trip;
+  const front = crashCost(room, 8, 'front'), side = crashCost(room, 8, 'left');
+  const stock = new Room('STK', 4242);
+  kitted(stock, 'Cat', null, 'd');
+  const sFront = crashCost(stock, 8, 'front'), sSide = crashCost(stock, 8, 'left');
+  check(departed && before === JSON.stringify(stock.partMods) && fitted === '{"bullbar":2,"winch":1}' && Math.abs(m1 - m0 - 250) <= 1 && Math.abs(m2 - m1) <= 1 && reel2 === 2.0 && fix2 === 1
+    && JSON.stringify(meta?.parts) === fitted && Math.abs(front - sFront * 0.7) <= 0.5 && side === sSide && sFront === C.crashDamage(8),
+    `garage: the RV left camp fitted with ${fitted} (Ann's Bull Bar II, Bob's Winch Motor I), +${(m1 - m0).toFixed(1)} kg, still fitted on day 2 (${(m2 - m0).toFixed(1)} kg, reel ${reel2} m/s); Lou's Toolbox, joining late, waits; an 8 m/s crash head-on costs ${front}% (stock ${sFront}%), into the side ${side}% (stock ${sSide}%)`);
+  room.sim.free?.(); stock.sim.free?.();
+}
+{
+  // K6: Winch Motor II reels at 2.4 m/s, the cable still 42 m; a Toolbox II fix takes 4 s alone; Medic II gets a
+  // friend up with 60 stamina; one pair of Gloves II hands can't lift the 120 kg dino head 0.3 m in 3 s, but can
+  // the 85 kg slot machine, and two people the head
+  const reelRate = kit => {
+    const room = new Room('WIN', 4242);
+    const A = kitted(room, 'Ann', kit, 'a');
+    depart(room);
+    const sim = room.sim;
+    flatSpot(room);
+    const f = fwdOf(room), w = sim.winchWorld(), anc = { x: w.x + f.x * 20, y: w.y + 1, z: w.z + f.z * 20 };
+    Object.assign(sim.hook, { state: 'anchored', body: null, anchor: anc, attach: null, holder: null, reeling: true, len: Math.hypot(anc.x - w.x, anc.y - w.y, anc.z - w.z) + 0.2 });
+    tick(room, 2);
+    const l0 = sim.hook.len;
+    tick(room, 2);
+    const rate = (l0 - sim.hook.len) / 2;
+    room.sim.free?.();
+    return rate;
+  };
+  const stockReel = reelRate(null), fastReel = reelRate({ perks: {}, part: { id: 'winch', lv: 2 } });
+  const fixAlone = kit => {
+    const room = new Room('FIX', 4242);
+    const A = kitted(room, 'Ann', kit, 'a');
+    depart(room);
+    flatSpot(room);
+    room.debug(A, { op: 'rvhp', hp: 0 });
+    behind(room, A, 1.5);
+    fixing(room, [A], true);
+    let t = null;
+    for (let i = 0; i < 12 * HZ && t == null; i++) { room.tick(1 / HZ); if (room.rvc.hp > 0) t = (i + 1) / HZ; }
+    room.sim.free?.();
+    return t;
+  };
+  const fixT = fixAlone({ perks: {}, part: { id: 'toolbox', lv: 2 } });
+  const revive = kit => {
+    const room = new Room('MED', 4242);
+    const A = kitted(room, 'Ann', kit, 'a'), B = kitted(room, 'Bob', null, 'b');
+    tick(room, 0.3);
+    stand(room, A, 0, 20); stand(room, B, 1.5, 20);
+    tick(room, 1 / HZ);
+    B.ko = true;
+    room.handle(A, { t: 'use', kind: 'revive', id: B.id });
+    room.sim.free?.();
+    return B.conn.last('revived')?.stam;
+  };
+  const stam = [revive(null), revive({ perks: { medic: 2 }, part: null })];
+  // how high hands get the thing in 3 s, aiming 0.8 m above where they hold it (every holder from 1.6 m off)
+  const lift = (type, kits) => {
+    const room = new Room('LFT', 4242);
+    const ps = kits.map((k, i) => kitted(room, 'P' + i, k, 'abc'[i]));
+    tick(room, 0.3);
+    const g = { x: room.W.roadX(60), z: 60 }, y = room.W.heightAt(g.x, g.z), half = LOOT[type].shape[2];
+    const pr = room.sim.addProp(type, { x: g.x, y: y + half + 0.05, z: g.z }, { x: 0, y: 0, z: 0, w: 1 }, 500, 500);
+    tick(room, 1.5);
+    const t0 = pr.body.translation(), top = { x: t0.x, y: t0.y + LOOT[type].shape[2] * 0.6, z: t0.z };
+    ps.forEach((p, i) => {
+      const a = i * Math.PI, px = t0.x + Math.sin(a) * 1.6, pz = t0.z + Math.cos(a) * 1.6, py = room.W.heightAt(px, pz);
+      const eye = { x: px, y: py + C.PLAYER.EYE, z: pz }, aim = { x: top.x, y: top.y + 0.8, z: top.z };
+      const dx = aim.x - eye.x, dy = aim.y - eye.y, dz = aim.z - eye.z;
+      room.onPose(p, { x: px, y: py, z: pz, yaw: Math.atan2(dx, dz), pitch: -Math.atan2(dy, Math.hypot(dx, dz)), m: C.MODE.WALK, f: 0, v: [0, 0, 0] });
+      tick(room, 1 / HZ);
+      room.handle(p, { t: 'grab', kind: 'prop', id: pr.id, pt: [top.x, top.y, top.z], d: Math.hypot(dx, dy, dz) });
+    });
+    let up = 0;
+    for (let i = 0; i < 3 * HZ; i++) { room.tick(1 / HZ); up = Math.max(up, pr.body.translation().y - t0.y); }
+    const held = room.sim.holds.size;
+    room.sim.free?.();
+    return { up, held };
+  };
+  const G2 = { perks: { gloves: 2 }, part: null };
+  const head1 = lift('dino', [G2]), slot1 = lift('slot', [G2]), head2 = lift('dino', [G2, null]), slotStock = lift('slot', [null]);
+  check(Math.abs(stockReel - C.WINCH.REEL_SPEED) < 0.08 && Math.abs(fastReel - 2.4) < 0.08 && C.WINCH.MAX_LEN === 42,
+    `garage: the winch reels ${stockReel.toFixed(2)} m/s stock, ${fastReel.toFixed(2)} m/s with a Winch Motor II (2.4); the cable is still ${C.WINCH.MAX_LEN} m`);
+  check(fixT != null && Math.abs(fixT - 4) < 0.05, `garage: a Toolbox II fix takes ${fixT?.toFixed(2)} s alone (stock 8)`);
+  check(stam[0] === 40 && stam[1] === 60, `garage: picked up by a friend, you get up with ${stam[0]} stamina; by one with a Medic Bag II, ${stam[1]}`);
+  check(head1.up < 0.3 && slot1.up >= 0.3 && head2.up >= 0.3 && slotStock.up >= 0.3,
+    `garage: Gloves II hands alone get the dino head ${head1.up.toFixed(2)} m up in 3 s (it takes two: ${head2.up.toFixed(2)} m), the slot machine ${slot1.up.toFixed(2)} m (stock hands ${slotStock.up.toFixed(2)} m)`);
+}
+{
+  // K7: Steady Hands II at the wheel: full lock held for 5 s at 13 m/s on open ground keeps the RV under
+  // 0.82 g sideways and on its wheels; the same input without it peaks higher (the perk never makes it worse)
+  const run = kit => {
+    let best = null;
+    const room = new Room('STD', 4242);
+    const A = kitted(room, 'Ann', kit, 'a');
+    depart(room);
+    const W = room.W, sim = room.sim;
+    for (const g of W.gates) sim.openGate(g.id);
+    // the flattest open 72 m square off the road, nothing standing in it (2.2 m of rise at most, seed 4242's day 1);
+    // the RV started 18 m from its middle, the turn's side (full right turns it toward its +x) taking it round it
+    let bs = Infinity;
+    for (let z = 80; z < W.LEN - 80; z += 6) for (let off = -120; off <= 120; off += 10) {
+      if (Math.abs(off) < 12) continue;
+      const x = W.roadX(z) + off, h = W.heightAt(x, z);
+      if (W.statics.some(b => Math.hypot(b.x - x, b.z - z) < 40) || W.cyls.some(c => Math.hypot(c.x - x, c.z - z) < 40) || (W.hulls || []).some(c => Math.hypot(c.x - x, c.z - z) < 40 + c.r)) continue;
+      let dev = 0;
+      for (let dx = -36; dx <= 36 && dev < bs; dx += 6) for (let dz = -36; dz <= 36; dz += 6) dev = Math.max(dev, Math.abs(W.heightAt(x + dx, z + dz) - h));
+      if (dev < bs) { bs = dev; best = { x, z, dev }; }
+    }
+    sim.placeRV(best.x - 18, best.z, 0);
+    tick(room, 1.5);
+    const f = fwdOf(room);
+    sim.rv.setLinvel({ x: f.x * 13, y: 0, z: f.z * 13 }, true);
+    let peak = 0, g = 0, upright = 1;
+    A.seat = 0;
+    for (let i = 0; i < 5 * HZ; i++) {
+      const v = sim.rvSpeed();
+      room.handle(A, { t: 'drv', th: v < 12.7 ? 1 : 0, st: 1, hb: 0 });
+      room.tick(1 / HZ);
+      const lv = sim.rv.linvel(), w = sim.rv.angvel();
+      g += (Math.abs(w.y) * Math.hypot(lv.x, lv.z) / 9.81 - g) * (1 / HZ) / 0.1;   // (smoothed over a tenth of a second)
+      peak = Math.max(peak, g);
+      upright = Math.min(upright, qRotate(sim.rv.rotation(), { x: 0, y: 1, z: 0 }).y);
+    }
+    room.sim.free?.();
+    return { peak, upright, dev: best.dev };
+  };
+  const off = run(null), on = run({ perks: { steady: 2 }, part: null });
+  check(on.peak <= 0.82 && on.upright > 0.7 && off.peak > on.peak,
+    `garage: full lock at 13 m/s for 5 s: with Steady Hands II the RV peaks at ${on.peak.toFixed(2)} g sideways and stays up (its roof at ${on.upright.toFixed(2)}); without, ${off.peak.toFixed(2)} g (roof ${off.upright.toFixed(2)}) (ground within ${on.dev.toFixed(1)} m)`);
 }
 
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }

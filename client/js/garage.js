@@ -1,14 +1,17 @@
 // The Garage: your save's own panel (the menu's Garage button, the Esc card's, or G on a trip). It stops the
 // game's keys while it's open, like Settings.
+//   KIT      the upgrades your kit cards unlock (shared/garage.js): the three perks you take, the RV part you
+//            bring, and the picks your doubles and MINT wins have earned
 //   ALBUM    your Road Cards (shared/cards.js), set by set: the ones you keep (and how many), the ones you've
 //            seen go by, the ones the Repo Man took, card backs for the rest; the odds; this trip's glovebox
 //   LOGBOOK  your records (one board per loan terms), the crews you've finished trips with, the seeds you've
 //            practised on, and your lifetime counters
 //   SAVE     where the save lives and how it is; Export and Import (a code to copy and paste)
 import { fmt$ } from '/shared/loot.js';
-import { fmtRoad, fmtClockH } from '/shared/profile.js';
-import { profile, profileStatus, exportCode, importCode } from './profile.js';
-import { CARDS, SETS, odds } from '/shared/cards.js';
+import { fmtRoad, fmtClockH, pickable, partOf, DOUBLES_PER_PICK, MINT_HP } from '/shared/profile.js';
+import { profile, profileStatus, exportCode, importCode, spend, changeKit } from './profile.js';
+import { CARDS, CARD, SETS, odds } from '/shared/cards.js';
+import { PERKS, PARTS, PERK_IDS, PART_IDS, SLOTS, ROMAN, levelFrom } from '/shared/garage.js';
 import { cardHTML } from './cards.js';
 
 const $ = id => document.getElementById(id);
@@ -16,7 +19,7 @@ const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': 
 const row = (k, v, cls = '') => `<div class="rrow ${cls}"><span>${k}</span><b>${v}</b></div>`;
 const date = ms => (ms ? new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : '');
 const TERMS = { std: 'Standard terms', bad: 'Bad Credit' };
-let tab = 'album', canImport = () => true, glovebox = () => [];
+let tab = 'kit', canImport = () => true, glovebox = () => [], kitOpen = () => true, onKit = () => {};
 const fresh = new Set();   // cards new to the album this session (NEW marks)
 export const markFresh = ids => { for (const id of ids || []) fresh.add(id); };
 
@@ -53,6 +56,37 @@ function logbook() {
   h += row('Trips', L.trips) + row('RVs paid off', L.wins) + row('Days paid', L.days) + row('Pawned', fmt$(L.pawned));
   h += row('Knocked out', L.kos) + row('Friends picked up', L.revives) + row('RV damage as the driver', `${L.rvDmg}%`) + row('Spent at Gus\'s', fmt$(L.repairs));
   h += row('Road Cards kept', L.cards) + row('Road Cards lost to the Repo Man', L.cardsLost);
+  return h;
+}
+
+// what a level does, the level you have lit
+function levels(def, lv) {
+  return def.lv.map((t, i) => `<li class="${lv > i ? 'have' : ''}"><b>${ROMAN[i + 1]}</b> ${esc(t)}</li>`).join('');
+}
+function kit() {
+  const p = profile(), k = p.kit, part = partOf(p);
+  let h = `<p class="hint">One copy of a kit card unlocks its level I, a second level II. ${kitOpen() ? 'Your kit goes with you when the RV leaves camp on day 1.' : 'This trip\'s kit is set: what you change now is for your next trip.'}</p>`;
+  h += `<h3>Perks: yours, up to ${SLOTS} (${k.perks.length} taken)</h3><div class="kit-list">`;
+  for (const id of PERK_IDS) {
+    const lv = levelFrom(p.cards, id), on = k.perks.includes(id), full = !on && k.perks.length >= SLOTS;
+    const btn = !lv ? `<span class="kit-need">Keep a ${esc(CARD[id].name)} card</span>`
+      : `<button class="btn small ${on ? 'green' : 'gray'}" data-perk="${id}"${full ? ' disabled title="Three perks at most: put one back first"' : ''}>${on ? 'Taken' : 'Take it'}</button>`;
+    h += `<div class="kit-item${lv ? '' : ' locked'}${on ? ' on' : ''}"><div class="kit-head"><b>${esc(PERKS[id].name)}${lv ? ` ${ROMAN[lv]}` : ''}</b>${btn}</div><ul>${levels(PERKS[id], lv)}</ul></div>`;
+  }
+  h += `</div><h3>RV parts: the crew's (you bring one)</h3><p class="hint">The RV leaves camp fitted with the best of each kind anyone aboard brings. ${k.part ? '' : 'Yours is your best one till you choose.'}</p><div class="kit-list">`;
+  for (const id of PART_IDS) {
+    const lv = levelFrom(p.cards, id), on = part === id;
+    const btn = !lv ? `<span class="kit-need">Keep a ${esc(CARD[id].name)} card</span>`
+      : `<button class="btn small ${on ? 'green' : 'gray'}" data-part="${id}">${on ? 'Bringing it' : 'Bring it'}</button>`;
+    h += `<div class="kit-item${lv ? '' : ' locked'}${on ? ' on' : ''}"><div class="kit-head"><b>${esc(PARTS[id].name)}${lv ? ` ${ROMAN[lv]}` : ''}</b>${btn}</div><ul>${levels(PARTS[id], lv)}</ul></div>`;
+  }
+  h += '</div><h3>Picks</h3>';
+  h += `<p class="hint">A copy past what's worth keeping (a kit card's third, any other card's second) is a double: every ${DOUBLES_PER_PICK} doubles make a pick, and so does a MINT win (the RV paid off at ${MINT_HP}% or better). A pick is a copy of any card you're missing, never a rare. You have ${p.picks} pick${p.picks === 1 ? '' : 's'}, and ${p.doubles} of ${DOUBLES_PER_PICK} doubles toward the next.</p>`;
+  if (p.picks > 0) {
+    // (the kit cards first: a pick is most often a level)
+    const ids = pickable(p).sort((a, b) => (CARD[a].kind === 'kit' ? 0 : 1) - (CARD[b].kind === 'kit' ? 0 : 1) || CARD[a].no - CARD[b].no);
+    h += `<div class="album-cards picks">${ids.map(id => `<div class="pick">${cardHTML(id, { small: true, n: p.cards[id] || 0, state: p.cards[id] ? 'owned' : p.seen.includes(id) ? 'seen' : 'unseen' })}<button class="btn small pink" data-pick="${id}">Pick ${CARD[id].kind === 'kit' ? `(${ROMAN[(p.cards[id] || 0) + 1]})` : ''}</button></div>`).join('')}</div>`;
+  }
   return h;
 }
 
@@ -98,7 +132,18 @@ function saveTab() {
 
 function render() {
   for (const b of document.querySelectorAll('#garage .gtab')) b.classList.toggle('on', b.dataset.tab === tab);
-  $('garageBody').innerHTML = tab === 'save' ? saveTab() : tab === 'album' ? album() : logbook();
+  $('garageBody').innerHTML = tab === 'save' ? saveTab() : tab === 'album' ? album() : tab === 'kit' ? kit() : logbook();
+  if (tab === 'kit') {
+    const p = profile(), k = p.kit;
+    const changed = ok => { if (ok) onKit(); render(); };
+    for (const b of document.querySelectorAll('#garageBody [data-perk]')) b.onclick = () => {
+      const id = b.dataset.perk;
+      changed(changeKit({ ...k, perks: k.perks.includes(id) ? k.perks.filter(x => x !== id) : [...k.perks, id] }));
+    };
+    for (const b of document.querySelectorAll('#garageBody [data-part]')) b.onclick = () => changed(changeKit({ ...k, part: b.dataset.part }));
+    for (const b of document.querySelectorAll('#garageBody [data-pick]')) b.onclick = () => { markFresh([b.dataset.pick]); changed(spend(b.dataset.pick)); };
+    return;
+  }
   if (tab !== 'save') return;
   $('gxExport').onclick = () => { $('gxOut').value = exportCode(); $('gxOut').select(); };
   $('gxCopy').onclick = async () => {
@@ -115,9 +160,12 @@ function render() {
 }
 
 // opts.canImport: () => true while a save may change (on the menu); opts.glovebox: () => this trip's glovebox
+// opts.kitOpen: () => whether the trip takes a new kit now; opts.onKit: the kit changed (main.js tells the server)
 export function initGarage(opts = {}) {
   if (opts.canImport) canImport = opts.canImport;
   if (opts.glovebox) glovebox = opts.glovebox;
+  if (opts.kitOpen) kitOpen = opts.kitOpen;
+  if (opts.onKit) onKit = opts.onKit;
   for (const b of document.querySelectorAll('#garage .gtab')) b.onclick = () => { tab = b.dataset.tab; render(); };
 }
 // (main.js shows the panel: openPanel('garage') renders it first)
@@ -136,9 +184,13 @@ function cardLines(trip, res) {
   if (res.cards?.length) {
     markFresh(res.fresh);
     const uniq = [...new Set(res.cards)];
+    const ups = (res.unlocked || []).filter((u, i, a) => !a.some((v, j) => j > i && v.id === u.id));   // (the highest each)
     return `<div class="rrow good"><span>Into your album</span><b>${res.cards.length} card${res.cards.length > 1 ? 's' : ''}${res.fresh.length ? ` (${res.fresh.length} new)` : ''}</b></div>`
-      + `<div class="over-cards">${uniq.slice(0, 12).map(id => cardHTML(id, { small: true, fresh: res.fresh.includes(id) })).join('')}</div>`;
+      + `<div class="over-cards">${uniq.slice(0, 12).map(id => cardHTML(id, { small: true, fresh: res.fresh.includes(id) })).join('')}</div>`
+      + (ups.length ? row('Unlocked in the Garage', ups.map(u => `${esc((PERKS[u.id] || PARTS[u.id]).name)} ${ROMAN[u.lv]}`).join(', '), 'good') : '')
+      + (res.picks ? row(res.mint ? `MINT: the RV paid off at ${trip.rvEnd}%` : 'Doubles', `+${res.picks} pick${res.picks > 1 ? 's' : ''} (spend ${res.picks > 1 ? 'them' : 'it'} in the Garage's Kit tab)`, 'good') : '');
   }
+  if (res.picks) return row(`MINT: the RV paid off at ${trip.rvEnd}%`, `+${res.picks} pick (spend it in the Garage's Kit tab)`, 'good');
   if (res.lost?.length) {
     const uniq = [...new Set(res.lost)];
     return `<div class="rrow bad"><span>The glovebox went with the Repo Man</span><b>${res.lost.length} card${res.lost.length > 1 ? 's' : ''}${res.lostNew.length ? `, ${res.lostNew.length} you've never had` : ''}</b></div>`
