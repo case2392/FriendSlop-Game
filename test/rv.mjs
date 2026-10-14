@@ -8,7 +8,7 @@ process.env.FRIENDSLOP_NOMOBS = '1';
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
-const { RV_HATCH, RV_WHEELS, qRotate, toWorld } = await import('../shared/rv.js');
+const { RV_HATCH, RV_WHEELS, RV_DIM, qRotate, toWorld, toLocal, insideRV } = await import('../shared/rv.js');
 const { generateLeg } = await import('../shared/world.js');
 
 let failed = false;
@@ -117,7 +117,8 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
     const stopAt = Math.min(...room.W.obstacles.filter(o => o.type === 'boulder').map(o => o.z - 60), Infinity);
     const seen = hits(room);
     let top = 0, secs = 0;
-    drive(room, A, 14, 30, { onTick: i => { top = Math.max(top, sim.rvSpeed()); secs = (i + 1) / HZ; return sim.rv.translation().z < stopAt; } });
+    // (the handbrake from cruise: at the first moment past 20 s at 11 m/s or more, else at 30 s)
+    drive(room, A, 14, 30, { onTick: i => { top = Math.max(top, sim.rvSpeed()); secs = (i + 1) / HZ; return sim.rv.translation().z < stopAt && !(secs > 20 && sim.rvSpeed() > 11); } });
     const v0 = sim.rvSpeed(), inside = sim.cargo().length;
     pedal(room, A, 0, 4, 0, 1);
     out.push({ day, top, v0, secs, inside, stop: sim.rvSpeed(), worst: worst(seen), hp: room.rvc.hp });
@@ -677,6 +678,51 @@ function gateRun(speed, driver) {
   tick(room, 4);
   check(room.phase === 'camp' && room.day === 1 && room.rvc.hp === 100 && room.sim.rvMods.band === 'FINE' && room.stats.rv.dmg === 0 && room.loanAdd === 0,
     'rv: a new trip, a new RV: 100%, nothing owed');
+}
+
+// ---- the load: what rides inside the RV --------------------------------------------------------------------
+{
+  // L1: a knock is what a thing felt. Two slot machines in a parked RV, one jammed between the seats and into
+  // the dash (the forces from each side cancel and it doesn't move), one pressed into the cab's rail. Jammed
+  // things used to be counted as knocks, every step: two slot machines in the cab broke within four seconds
+  const { room } = crew(['Ann']);
+  const sim = room.sim, r = sim.rv.translation(), q = sim.rv.rotation();
+  const a = sim.addProp('slot', toWorld(r, q, { x: 0, y: 0.75, z: 3.2 }), q, 950, 950);
+  const b = sim.addProp('slot', toWorld(r, q, { x: -0.21, y: 0.75, z: 2.1 }), q, 950, 950);
+  tick(room, 4);
+  const va = sim.props.get(a.id)?.value, vb = sim.props.get(b.id)?.value;
+  check(va > 900 && vb > 900, `load: two slot machines jammed into a parked RV's cab keep their value (${Math.round(va ?? 0)} and ${Math.round(vb ?? 0)} of 950)`);
+  // and a real knock still counts: a vase dropped from 3 m onto the road
+  const g = { x: r.x + 6, z: r.z + 6 }, y0 = room.W.heightAt(g.x, g.z);
+  const v = sim.addProp('vase', { x: g.x, y: y0 + 3, z: g.z }, { x: 0, y: 0, z: 0, w: 1 }, 520, 520);
+  tick(room, 2);
+  const left = sim.props.get(v.id)?.value ?? 0;
+  check(left < 470, `load: a vase dropped 3 m onto the road still takes the knock (${Math.round(left)} of 520 left)`);
+}
+{
+  // L2: the RV's walls hold its load. A gnome riding inside that ends up out past the windshield (pressed
+  // through it by a pile on a hard stop) is back inside on the next step; one out through the open door
+  // stays out; one on the roof was never inside and is left alone
+  const { room } = crew(['Ann']);
+  const sim = room.sim, r = sim.rv.translation(), q = sim.rv.rotation();
+  const gn = sim.addProp('gnome', toWorld(r, q, { x: 0.2, y: 0.3, z: 1.0 }), q, 70, 70);
+  tick(room, 0.5);
+  sim.props.get(gn.id).body.setTranslation(toWorld(r, q, { x: 0.2, y: 0.5, z: 4.45 }), true);
+  tick(room, 1 / HZ);
+  const l = toLocal(r, q, sim.props.get(gn.id).body.translation());
+  check(insideRV(l.x, l.y, l.z, -0.05), `load: a gnome pressed out through the windshield is back inside (RV-local z ${l.z.toFixed(2)})`);
+  sim.setDoor(true);
+  tick(room, 0.3);
+  sim.props.get(gn.id).body.setTranslation(toWorld(r, q, { x: -1.7, y: 0.4, z: RV_DIM.DOOR_Z }), true);
+  tick(room, 0.5);
+  const l2 = toLocal(r, q, sim.props.get(gn.id).body.translation());
+  check(l2.x < -1.3, `load: a gnome out through the open door stays out (RV-local x ${l2.x.toFixed(2)})`);
+  const top = sim.addProp('gnome', toWorld(r, q, { x: 0, y: RV_DIM.ROOF_Y + 0.3, z: 0 }), q, 70, 70);
+  tick(room, 0.5);
+  sim.props.get(top.id).body.setTranslation(toWorld(r, q, { x: 2.5, y: 0.5, z: 0 }), true);
+  tick(room, 0.5);
+  const l3 = toLocal(r, q, sim.props.get(top.id).body.translation());
+  check(l3.x > 1.5, `load: a gnome off the roof isn't pulled inside (RV-local x ${l3.x.toFixed(2)})`);
 }
 
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }

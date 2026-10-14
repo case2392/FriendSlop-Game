@@ -18,6 +18,8 @@ export const RV_DIM = {
 // Every collider: [name, hx, hy, hz, cx, cy, cz, opts]
 //   opts.mass   — kg contribution (the chassis carries almost all of it)
 //   opts.use    — what pressing E on it does
+//   opts.loot   — stops only loot (things with a price) and critters, in the server's world: not people (the
+//                 pages skip it), not stones or the boulder
 //   (the door is present only while closed: sim.setDoor, phys.js setDoor)
 const D = RV_DIM;
 const H = D.WALL_H / 2;
@@ -33,12 +35,30 @@ export const RV_PARTS = [
   ['doorHeader',0.05, 0.16, D.DOOR_HALF, -1.2, D.WALL_H - 0.16, D.DOOR_Z, { mass: 2 }],
   ['door',      0.04, 1.02, D.DOOR_HALF - 0.02, -1.2, 1.04, D.DOOR_Z, { mass: 0, use: 'door' }],
   ['wallRear',  1.25, H, 0.05,      0, H, -3.95,      { mass: 40 }],
-  ['windshield',1.25, H, 0.05,      0, H, 3.95,       { mass: 40 }],
+  // (25 cm thick, all of it outside the cab, as far out as the grille and the headlamps already stand: at
+  // 10 cm the load piled against it by a hard stop was pressed through it)
+  ['windshield',1.25, H, 0.125,     0, H, 4.025,      { mass: 40 }],
   ['roof',      1.25, 0.05, D.HALF_L, 0, D.ROOF_Y - 0.05, 0, { mass: 80 }],
   // the cockpit
   ['dash',      1.15, 0.28, 0.28,   0, 0.62, 3.62,    { mass: 20 }],
+  // loot stops short of the windshield (opts.loot: the server's loot and critters stop on these, people don't).
+  // A hard stop piled the load into the cab, and the windshield's 10 cm box let what was pressed into it
+  // through onto the road: the footwell under the dash is closed, and loot on the dash stays 25 cm off the
+  // glass (the map's spot is clear of it)
+  ['footwell',  1.15, 0.17, 0.28,   0, 0.17, 3.62,    { mass: 0, loot: true }],
+  ['glassGuard',1.15, 0.7, 0.125,   0, 1.6, 3.775,    { mass: 0, loot: true }],
+  // and under the windshield's foot and the back wall's, below the floor: the walls stand on the floor, which
+  // ends there, and a thin thing pressed into the floor by the load on top of it slid out under them (the
+  // bumpers are 24 cm lower). (Along the sides the chassis closes it)
+  ['skirtF',    1.25, 0.15, 0.125,  0, -0.15, 4.025,  { mass: 0, loot: true }],
+  ['skirtB',    1.25, 0.15, 0.05,   0, -0.15, -3.95,  { mass: 0, loot: true }],
   ['seatDriver',0.28, 0.24, 0.28,   0.62, 0.24, 2.85, { mass: 10, use: 'seat0' }],
   ['seatPass',  0.28, 0.24, 0.28,  -0.62, 0.24, 2.85, { mass: 10, use: 'seat1' }],
+  // the load stays out of the cab: across it where the seats' high backs stand, up to their tops (the pages
+  // draw the backs; people walk through). A hard stop slid a safe between the seats and into the dash, where
+  // the physics, pushing it out of three of the RV's parts at once, rocked the RV up onto two wheels.
+  // Thrown over it, a thing lands in the cab
+  ['cabRail',   1.15, 0.625, 0.085, 0, 0.625, 2.485, { mass: 0, loot: true }],
   // the living room
   ['table',     0.42, 0.04, 0.38,   0.78, 0.74, 1.15, { mass: 5 }],
   ['tableLeg',  0.05, 0.35, 0.05,   0.78, 0.35, 1.15, { mass: 2 }],

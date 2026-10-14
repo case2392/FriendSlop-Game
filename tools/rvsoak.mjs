@@ -27,6 +27,9 @@ const { initPhysics } = await import('../server/sim.js');
 const { RV_HATCH, qRotate, toWorld } = await import('../shared/rv.js');
 const { generateLeg } = await import('../shared/world.js');
 await initPhysics();
+// (the room draws each day's driver at random, and a draw can take the wheel off the soak's driver: seeded
+// for each seed and day, a run is the same run every time, alone or in the whole soak)
+const { mulberry32 } = await import('../shared/rng.js');
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
@@ -44,6 +47,7 @@ const roadYaw = (W, z) => Math.atan2(W.roadX(z + 3) - W.roadX(z - 3), 6);
 // a room on (seed, day) with Ann at the wheel and Bob on foot; every hit the room hears, tagged with what
 // the driver was doing
 function setup(seed, day) {
+  Math.random = mulberry32((seed * 7919 + day) >>> 0);
   const room = new Room('SOAK', seed);
   const [A, B] = ['Ann', 'Bob'].map(n => { const p = room.addPlayer(new FakeConn(), n).player; room.welcome(p); return p; });
   if (day > 1) room.debug(A, { op: 'day', d: day });
