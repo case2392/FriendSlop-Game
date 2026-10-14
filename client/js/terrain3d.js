@@ -51,6 +51,7 @@ import { THREE, tex, renderer } from './gfx.js';
 import { canvasFor, has } from './paint/index.js';
 import { atmo, setSkyline } from './atmosphere.js';
 import { fbm, noise2 } from '/shared/rng.js';
+import { findSpots } from '/shared/finds.js';
 import { BIOME_BY_DAY } from '/shared/world.js';
 import { buildButtes, butteGround, butteForms } from './terrain_butte.js';
 
@@ -1486,8 +1487,10 @@ function butteTufts(W, cfg, biome) {
   if (biome !== 'meadow' && biome !== 'fields') return [];
   const out = [], C = cfg.clutter, cards = biome === 'meadow' ? [0, 0, 1, 6] : [0, 0, 3, 5], flowers = C.flowerCards || [];
   const stat = (W.statics || []).filter(s => s.poi !== undefined), props = W.props || [];
+  // (and the day's Road Card tin on the lookout, shared/finds.js: no grass over it)
+  const tins = findSpots(W).filter(s => s.kind === 'lookout');
   const free = (x, z, pad) => !stat.some(s => { const dx = x - s.x, dz = z - s.z, c = Math.cos(s.ry || 0), sn = Math.sin(s.ry || 0); return Math.abs(dx * c - dz * sn) < s.hx + pad && Math.abs(dx * sn + dz * c) < s.hz + pad; })
-    && !props.some(q => Math.hypot(q.x - x, q.z - z) < pad + 0.5);
+    && !props.some(q => Math.hypot(q.x - x, q.z - z) < pad + 0.5) && !tins.some(q => Math.hypot(q.x - x, q.z - z) < pad + 0.8);
   for (const F of butteForms(W)) {
     const r = cellRng(Math.round(F.p.x * 10), Math.round(F.p.z * 10), W.seed + 41), top = butteGround(W, F.p);
     for (const B of [F.main, F.bench]) {

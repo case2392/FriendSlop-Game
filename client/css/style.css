@@ -540,3 +540,43 @@ input[type=radio]:checked { background: radial-gradient(circle at 36% 32%, #fff0
 .voice-ask b { font-family: var(--display); color: #5b3a12; font-size: 15px; }
 .voice-ask p { margin: 4px 0 8px; font-size: 13px; line-height: 1.35; color: #3b2710; }
 .voice-ask .row { display: flex; gap: 8px; }
+
+/* ---- Road Cards (client/js/cards.js): a card, the reveal strip, the Album ---------------------------- */
+.rcard { position: relative; display: inline-flex; flex-direction: column; width: 150px; height: 214px; box-sizing: border-box; padding: 7px 7px 6px; margin: 4px; border-radius: 9px;
+  background: #efe3c4; border: 3px solid #b9a27a; box-shadow: 0 2px 6px rgba(40, 24, 8, 0.45), inset 0 0 0 1px rgba(255, 250, 230, 0.6); color: #3b2410; font-family: var(--display); text-align: center; vertical-align: top; }
+.rcard.r-uncommon { background: #e3eee6; border-color: #2f7f7a; }
+.rcard.r-kit { background: #f1e2b8; border-color: #b8862b; }
+.rcard.r-rare { background: linear-gradient(160deg, #f8e7a6, #e7c766 45%, #fff2bd 55%, #d9b04a); border-color: #9a7414; }
+.rc-art { height: 100px; border-radius: 5px; background: #f6ecd4 var(--art, none) center / contain no-repeat; border: 1px solid rgba(90, 58, 26, 0.35); }
+.rcard:not([data-art]) .rc-art::after { content: '\2726'; display: block; line-height: 100px; font-size: 34px; color: rgba(90, 58, 26, 0.35); }
+.rc-name { font-size: 14px; margin: 6px 0 3px; line-height: 1.1; letter-spacing: 0.3px; }
+.rc-line { font: italic 12px/1.25 Georgia, serif; color: #5a3d1c; flex: 1; }
+.rc-no { position: absolute; bottom: 4px; right: 8px; font: 10px Georgia, serif; color: #7a5a30; }
+.rc-n { position: absolute; top: 4px; right: 6px; padding: 0 5px; border-radius: 3px; background: #3b2410; color: #f6e7c4; font-size: 12px; }
+.rc-new { position: absolute; top: 4px; left: 6px; padding: 0 5px; border-radius: 3px; background: #b8860b; color: #fff8e0; font-size: 11px; letter-spacing: 0.6px; }
+.rc-kit { font: 10px Georgia, serif; color: #8a5a10; margin-bottom: 10px; }
+.rc-note { font: italic 10px Georgia, serif; color: #8c2a1a; margin-bottom: 10px; }
+.rcard.grey { filter: grayscale(1); opacity: 0.55; }
+.rcard.back { background: repeating-linear-gradient(45deg, #6b1e0a 0 8px, #7d2a12 8px 16px); border-color: #4a1406; }
+.rcard.back .rc-back { flex: 1; margin: 10px; border: 2px solid rgba(246, 231, 196, 0.5); border-radius: 6px; }
+.rcard.back .rc-no { color: #f6e7c4; }
+.rcard.small { width: 96px; height: 138px; padding: 4px; margin: 3px; border-width: 2px; }
+.rcard.small .rc-art { height: 60px; }
+.rcard.small .rc-name { font-size: 10px; margin: 3px 0 1px; }
+.rcard.small .rc-line, .rcard.small .rc-kit { display: none; }
+.rcard.small .rc-note { font-size: 8px; margin-bottom: 8px; }
+#cardReveal { position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%); display: flex; flex-direction: column; align-items: center; pointer-events: none; z-index: 30; transition: opacity 0.4s; }
+#cardReveal.hidden { display: none; }
+#cardReveal .rv-title { font-family: var(--display); font-size: 18px; color: #f6e7c4; text-shadow: 0 2px 4px #000; margin-bottom: 4px; }
+#cardReveal .rv-cards { display: flex; }
+#cardReveal .rcard { animation: cardflip 0.5s ease-out both; }
+#cardReveal .rcard:nth-child(2) { animation-delay: 0.15s; }
+#cardReveal .rcard:nth-child(3) { animation-delay: 0.3s; }
+@keyframes cardflip { from { transform: perspective(600px) rotateY(90deg) translateY(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.album-set { margin: 8px 0 4px; }
+.album-set h3 { margin: 6px 0 2px; }
+.album-cards { display: flex; flex-wrap: wrap; justify-content: center; }
+.album-odds { font-size: 13px; color: #3b2710; margin: 4px 0 8px; text-align: center; }
+.over-cards { display: flex; flex-wrap: wrap; justify-content: center; margin-top: 4px; }
+.taken { position: relative; display: inline-block; }
+.taken::after { content: 'TAKEN'; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%) rotate(-16deg); padding: 2px 14px; border: 4px solid #b3261e; color: #b3261e; font: bold 30px var(--display); letter-spacing: 3px; background: rgba(255, 240, 220, 0.6); border-radius: 6px; }

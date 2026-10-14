@@ -356,6 +356,17 @@ const GOLD = [1.18, 1.06, 0.78];
 const IRON = [1.25, 1.2, 1.15];
 const RUST = [1.6, 0.85, 0.55];
 
+function cardTin(body, tint) {
+  const B = new Build();
+  B.add(rbox(0.236, 0.064, 0.176, 0.014, 2), body, { uv: 'box', at: mat4(0, -0.013, 0), ...(tint ? { tint } : {}) });
+  B.add(rbox(0.242, 0.026, 0.182, 0.011, 2), body, { uv: 'box', at: mat4(0, 0.031, 0), ...(tint ? { tint } : {}) });
+  for (const y of [0.019, 0.043]) B.add(rbox(0.246, 0.005, 0.186, 0.004, 1), R.brass, { uv: 'box', at: mat4(0, y, 0) });
+  B.add(rbox(0.15, 0.004, 0.1, 0.01, 1), R.ivory, { uv: 'box', at: mat4(0, 0.045, 0) });
+  B.add(rbox(0.11, 0.003, 0.012, 0.0015, 1), R.red, { uv: 'box', at: mat4(0, 0.0475, 0.02), tint: [0.7, 0.3, 0.25] });
+  B.add(rbox(0.07, 0.003, 0.008, 0.0015, 1), R.red, { uv: 'box', at: mat4(0, 0.0475, -0.018), tint: [0.7, 0.3, 0.25] });
+  return B.done({ ao: 0.2, aoH: 0.04 });
+}
+
 const BUILDERS = {
   gnome() {
     const B = new Build();
@@ -510,6 +521,11 @@ const BUILDERS = {
     B.add(new THREE.TorusGeometry(0.035, 0.009, 6, 12, Math.PI), R.strap, { at: mat4(0, 0.094, 0) });
     return B.done({ ao: 0.22, aoH: 0.06 });
   },
+
+  // Road Card tins (shared/cards.js): a tobacco tin of a thing, red enamel with brass lid bands and a cream
+  // label on the lid; the Hoard's gold tin is all gilt (it glints like the loot)
+  tin() { return cardTin(R.red, [0.95, 0.42, 0.36]); },
+  goldtin() { return cardTin(R.gilt, null); },
 
   // bait from the store: a wheel of cheese in red wax (ringtails can't resist it), the top cut to show the cheese
   cheese() {

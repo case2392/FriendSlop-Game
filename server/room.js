@@ -10,6 +10,11 @@
 // their part in it, for their own save (shared/profile.js; client/js/profile.js keeps it). Each one is held
 // for that player's profile id until their page says it has it ('tripAck'), so somebody who dropped gets
 // theirs when they come back, from this trip or a later one in the same room.
+//
+// Road Cards (shared/cards.js): a tin set down in the RV goes into the glovebox (stowFinds), and so does a
+// card Ed finds in a safe or a suitcase he buys (sellCounter). Each entry remembers who was aboard when it
+// went in (by profile id): pay the RV off and each of them keeps a copy of it (their trip message's cards);
+// miss a payment and the Repo Man drives off with the glovebox (lost).
 
 import crypto from 'node:crypto';
 import * as C from '../shared/constants.js';
@@ -20,6 +25,8 @@ import { Sim } from './sim.js';
 import { STOP_NAMES } from '../shared/mobs.js';
 import { BJTable, FlipMachine } from './casino.js';
 import { fnv1a, isPid } from '../shared/profile.js';
+import { rollTin, rollCard, CONTAINER } from '../shared/cards.js';
+import { findSpots } from '../shared/finds.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -40,7 +47,8 @@ const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
 export class Room {
-  // opts.typed: the seed was typed on the menu (that first trip is practice: shared/profile.js)
+  // opts.typed: the seed was typed on the menu (that first trip is practice: shared/profile.js); opts.rand:
+  // the dice for the cards (the tests seed it)
   constructor(code, seed = null, opts = {}) {
     this.code = code;
     this.players = new Map();
@@ -57,6 +65,7 @@ export class Room {
     this.serverTest = C.TEST || C.FAST;
     this.typedSeed = !!opts.typed;
     this.pending = new Map();          // profile id -> { name, list }: the 'trip' messages that player hasn't taken yet
+    this.rand = opts.rand || Math.random;
     this.newRun(seed);
   }
 
@@ -83,6 +92,7 @@ export class Room {
     this.loanAdd = 0;
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
+    this.glovebox = [];              // [{ cards, kind, day, by, aboard }]: what's been stowed this trip
     for (const p of this.players.values()) this.enroll(p);   // (aboard as this trip begins)
     this.startDay([]);
   }
@@ -93,7 +103,7 @@ export class Room {
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
     // (a new run drops whatever the last one left on the casino tables: it starts with $200, that's all)
     this.W = generateLeg(this.seed, this.day);
-    this.sim = new Sim(this.W, { carry, cond: this.rvc.hp });   // (nothing heals it overnight but Gus)
+    this.sim = new Sim(this.W, { carry, cond: this.rvc.hp, finds: findSpots(this.W) });   // (nothing heals it overnight but Gus)
     this.phase = 'camp';
     this.clock = C.DAY_START;
     this.paid = false;
@@ -165,16 +175,19 @@ export class Room {
     const time = won && splits.every(h => h != null) ? Math.round(splits.reduce((a, h) => a + h - C.DAY_START, 0) * 1000) / 1000 : null;
     const practice = this.practice();
     return {
-      id: this.runId, won, practice, ...(practice === 'seed' ? { seed: this.seed } : {}), tier: 'std',
+      id: this.runId, won, practice, ...(practice === 'seed' ? { seed: this.seed } : {}), tier: this.tier(), day: this.over?.day ?? this.day,
       time, splits, sold: this.stats.sold, surplus: won ? Math.round(this.bank) : null, casino: this.stats.gamble,
       rvEnd: this.stats.rv.end, repairs: this.stats.rv.cash + this.stats.rv.loan,
       crew: [...this.roster.values()].filter(e => e.fromStart && e.here).map(e => ({ h: e.h, name: e.name })),
     };
   }
   // one player's 'trip' message: the run, and their part in it
+  // (won: a copy of every card stowed while they were aboard; lost: the whole glovebox went with the RV)
   tripMsg(e) {
-    const { id, ...run } = this.run;
-    return { t: 'trip', run: id, ...run, you: { fromStart: e.fromStart, atEnd: e.here, kos: e.kos, revives: e.revives, rvDmg: e.rvDmg } };
+    const { id, ...run } = this.run, won = !!this.over?.won;
+    const cards = won ? this.glovebox.filter(g => g.aboard.includes(e.pid)).flatMap(g => g.cards) : [];
+    const lost = won ? [] : this.glovebox.flatMap(g => g.cards);
+    return { t: 'trip', run: id, ...run, you: { fromStart: e.fromStart, atEnd: e.here, kos: e.kos, revives: e.revives, rvDmg: e.rvDmg, cards, lost } };
   }
   // held for that profile id until their page takes it (a page that's here gets it now)
   queueTrip(e, msg) {
@@ -354,6 +367,7 @@ export class Room {
     if (this.phase === 'over' && this.over) this.send(p, this.overMsg());
     // (during the game-over they weren't on the trip that ended: the next one is theirs)
     if (this.phase !== 'over') this.enroll(p);
+    this.send(p, { t: 'glovebox', list: this.gloveList() });
     this.deliver(p);
     this.checkRoles();
     this.sendMeta();
@@ -567,6 +581,14 @@ export class Room {
     else if (m.op === 'phase') this.phase = m.ph;
     else if (m.op === 'day') { this.day = Math.max(0, (+m.d | 0) - 1); this.nextDay(); }
     else if (m.op === 'roles') { this.setRoles(+m.drv || 0, +m.nav || 0); this.rolesCrew = this.crewKey(); }
+    // a Road Card tin where you say (kind 'tin' or 'goldtin'), or its cards straight into the glovebox
+    else if (m.op === 'card') {
+      const kind = m.kind === 'goldtin' ? 'goldtin' : 'tin';
+      if (m.stow) { this.stow(rollTin(kind, this.day, this.tier(), this.rand), kind, p.name); return; }
+      const pr = sim.addProp(kind, { x: +m.x, y: +m.y, z: +m.z }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+      if (pr) this.broadcast({ t: 'ev', list: [{ k: 'spawn', p: sim.describe(pr) }] });
+      this.send(p, { t: 'dbg', op: 'spawned', id: pr?.id });
+    }
     else if (m.op === 'spawn') {
       const pr = sim.addProp(m.type, { x: +m.x, y: +m.y, z: +m.z }, { x: 0, y: 0, z: 0, w: 1 }, +m.value || 100, +m.value || 100);
       if (pr) this.broadcast({ t: 'ev', list: [{ k: 'spawn', p: sim.describe(pr) }] });
@@ -1033,6 +1055,35 @@ export class Room {
   }
 
   // the RV parked in Ed's loading zone, stopped: his bell buys its load too
+  // ---- Road Cards ----------------------------------------------------------------------------------
+  tier() { return 'std'; }   // (the loan terms: Bad Credit's rare cards come with its PR)
+  // into the glovebox: these cards, with everyone aboard right now (here, or their seat kept) on the list
+  stow(cards, kind, by) {
+    const g = { cards, kind, day: this.day, by, aboard: [...new Set([...this.players.values()].map(p => p.pid).filter(Boolean))] };
+    this.glovebox.push(g);
+    this.broadcast({ t: 'ev', list: [{ k: 'stow', kind, cards, by }] });
+    return g;
+  }
+  gloveList() { return this.glovebox.map(({ cards, kind, day, by }) => ({ cards, kind, day, by })); }
+  gloveCards() { return this.glovebox.reduce((n, g) => n + g.cards.length, 0); }
+  // a tin set down in the RV (below the roof, nobody holding it, not in a ringtail's jaws) is in the glovebox
+  // on the next tick: out of the physics world for good, its cards rolled now
+  stowFinds() {
+    if (this.phase === 'over') return;
+    const sim = this.sim;
+    for (const p of [...sim.props.values()]) {
+      const kind = LOOT[p.type]?.find;
+      if (!kind || p.holders.size || sim.mobs?.carriedBy.has(p.id)) continue;
+      const l = sim.rvToLocal(p.body.translation());
+      if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) continue;
+      const finder = [...this.players.values()].find(q => q.id === p.lastBy);
+      sim.mobs?.onSold([p.id]);   // (a stolen tin brought back counts as got back)
+      sim.removeProp(p.id);
+      this.broadcast({ t: 'ev', list: [{ k: 'gone', ids: [p.id], how: 'stow' }] });
+      this.stow(rollTin(kind, this.day, this.tier(), this.rand), kind, finder ? finder.name : null);
+    }
+  }
+
   docked() {
     const d = this.W.town.dock, sim = this.sim;
     if (!d || !this.inTown || sim.rvFlipped()) return false;
@@ -1049,14 +1100,18 @@ export class Room {
     sim.mobs?.onSold([...ids, ...load]);   // (a stolen thing sold counts as got back)
     let total = 0, lot = 0;
     const names = [];
+    const opened = [];
     for (const id of ids) {
       const pr = sim.props.get(id);
       total += Math.round(pr.value);
       names.push(LOOT[pr.type].name);
+      opened.push(pr.type);
       sim.removeProp(id);
     }
     for (const id of load) {
-      lot += Math.round(sim.props.get(id).value * C.DOCK_RATE);
+      const pr = sim.props.get(id);
+      lot += Math.round(pr.value * C.DOCK_RATE);
+      opened.push(pr.type);
       sim.removeProp(id);
     }
     total += lot;
@@ -1065,6 +1120,13 @@ export class Room {
     this.stats.sold += total; this.dayStats.sold += total;
     this.broadcast({ t: 'ev', list: [{ k: 'sold', ids: [...ids, ...load], total, by }] });
     this.toast(`${late ? 'Ed rang it up himself: ' : 'SOLD: '}${names.join(', ')} → +${fmt$(total)}`, '#7CFC00', 5);
+    // a safe or a suitcase he pries open may have a Road Card in it (not once the trip's over)
+    if (this.phase !== 'over') for (const type of opened) {
+      if (!(this.rand() < (CONTAINER[type] || 0))) continue;
+      const card = rollCard(this.day, this.tier(), this.rand);
+      this.stow([card], type, 'Ed');
+      this.toast(`Ed pried the ${LOOT[type].name} open: a Road Card! It's in the glovebox.`, '#ffd166', 5);
+    }
     return total;
   }
 
@@ -1113,6 +1175,7 @@ export class Room {
     // on its own timer, so even a PC drawing a frame a second keeps driving)
     if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
     sim.step(dt, this.players);
+    this.stowFinds();
     this.fixStep(dt);
     // (an incident is told once it's over)
     if (this.rvc.inc && !this.rvc.inc.told && this.t - this.rvc.inc.last > C.RVH.GAP) this.tellIncident();
@@ -1260,6 +1323,7 @@ export class Room {
       if (e.ours) { this.stats.stolen += e.value; this.dayStats.stolen += e.value; }
       const q = this.theftQ.get(e.den) || { n: 0, value: 0, what: null, poi: e.poi, ours: false, at: Math.max(this.t, (this.theftToastAt.get(e.den) ?? -99) + 3) };
       q.n++; q.value += e.value; q.what = LOOT[e.type]?.name || 'loot'; q.ours = q.ours || !!e.ours; q.raid = q.raid || !!e.raid;
+      q.tin = (q.tin || 0) + (LOOT[e.type]?.find ? 1 : 0);
       this.theftQ.set(e.den, q);
     } else if (e.s === 'rumble') {
       const where = e.ob === 'gate' ? 'the ranger gate' : 'the boulder';
@@ -1281,10 +1345,12 @@ export class Room {
       const where = q.poi ? ` at ${STOP_NAMES[q.poi] || 'the stop'}` : '';
       // (the stop's own loot nobody had touched yet: they beat you to it)
       const from = q.raid ? ' out of the RV' : '';
-      if (!q.ours) this.toast(q.n === 1 ? `A ringtail beat you to the ${q.what} (${fmt$(q.value)})${where}. Its den is close by.`
-        : `Ringtails beat you to ${q.n} things (${fmt$(q.value)})${where}. Their den is close by.`, '#ffd166', 4);
-      else this.toast((q.n === 1 ? `A ringtail ran off with the ${q.what} (${fmt$(q.value)})${from}${where}! Its den is close by.`
-        : `Ringtails ran off with ${q.n} things (${fmt$(q.value)})${from}${where}! Their den is close by.`) + (q.raid ? ' Shut the door when you leave the RV.' : ''), '#ffb74d', 5);
+      // (a Road Card tin is worth nothing to Ed: it's named without a price)
+      const price = q.tin === q.n ? '' : ` (${fmt$(q.value)})`;
+      if (!q.ours) this.toast(q.n === 1 ? `A ringtail beat you to the ${q.what}${price}${where}. Its den is close by.`
+        : `Ringtails beat you to ${q.n} things${price}${where}. Their den is close by.`, '#ffd166', 4);
+      else this.toast((q.n === 1 ? `A ringtail ran off with the ${q.what}${price}${from}${where}! Its den is close by.`
+        : `Ringtails ran off with ${q.n} things${price}${from}${where}! Their den is close by.`) + (q.raid ? ' Shut the door when you leave the RV.' : ''), '#ffb74d', 5);
     }
   }
 
@@ -1309,6 +1375,7 @@ export class Room {
       mud: sim.mudWheels || 0,
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
       rfd: sim.mobs?.rockfalls.filter(r => r.st !== 'armed').map(r => r.id) || [],   // the loose rock that's come down
+      gb: this.gloveCards(),   // the cards in the glovebox
       rvh: Math.round(this.rvc.hp),   // the RV's condition (and, only when they apply: broken down, the fix's progress, stalled, tomorrow's due with Gus's loan)
       ...(this.rvc.hp <= 0 ? { brk: 1 } : {}),
       ...(this.rvc.fix > 0 ? { fix: Math.round(this.rvc.fix * 100) } : {}),

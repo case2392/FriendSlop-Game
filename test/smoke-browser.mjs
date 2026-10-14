@@ -555,22 +555,31 @@ try {
       document.getElementById('garageClose').click();
       return up && !window.__nmd.uiOpen();
     });
+    // Road Cards: a tin's two cards going into the glovebox flip up at the bottom of the screen
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'card', kind: 'tin', stow: true }));
+    const revealed = await host.waitForFunction(() => {
+      const el = document.getElementById('cardReveal'), cs = el ? [...el.querySelectorAll('.rcard')] : [];
+      return el && !el.classList.contains('hidden') && cs.length === 2 && cs.every(c => c.querySelector('.rc-name')?.textContent) && cs.map(c => c.dataset.ck);
+    }, null, { timeout: 20000 }).then(h => h.jsonValue(), () => null);
     await host.evaluate(() => { window.__nmd.acceptTestRuns = true; window.__nmd.send({ t: 'dbg', op: 'win' }); });
     const run = await host.waitForFunction(() => {
       const S = window.__nmd, P = JSON.parse(localStorage.getItem('nmdProfile') || '{}');
       return S.overRun && P.runs?.includes(S.overRun) && document.getElementById('overRecords')?.textContent.includes('Road time') && S.overRun;
     }, null, { timeout: 120000 }).then(h => h.jsonValue(), () => null);
     const overLine = await host.evaluate(() => document.getElementById('overRecords')?.textContent.replace(/\s+/g, ' ').trim() || '');
-    // G on the trip: the Logbook
-    const logbook = await host.evaluate(() => {
+    // G on the trip: the Album (the tin's cards kept, paid off), then the Logbook
+    const logbook = await host.evaluate(ids => {
       window.dispatchEvent(new KeyboardEvent('keydown', { key: 'g', code: 'KeyG', bubbles: true }));
       window.dispatchEvent(new KeyboardEvent('keyup', { key: 'g', code: 'KeyG', bubbles: true }));
+      const kept = (ids || []).every(id => document.querySelector(`#garageBody .album-set .rcard[data-ck="${id}"]:not(.grey)`));
+      document.querySelector('#garage .gtab[data-tab="log"]').click();
       const txt = document.getElementById('garageBody').textContent.replace(/\s+/g, ' ');
       const up = !document.getElementById('garage').classList.contains('hidden');
       document.getElementById('garageClose').click();
-      return { up, txt };
-    });
+      return { up, txt, kept };
+    }, revealed);
     const fast = /Fastest payoff\s*(\d+:\d\d)/.exec(logbook.txt)?.[1];
+    check(revealed?.length === 2 && logbook.kept, `road cards: a tin stowed in the RV flips its 2 cards up at the bottom of the screen (${revealed?.join(', ')}); paid off, the Album has them kept (${logbook.kept})`);
     check(fromEsc && run && /NEW RECORD/.test(overLine) && logbook.up && fast,
       `the save: the Garage opens from the Esc card and holds the game's keys (${fromEsc}); a trip paid off is in the host's save (run ${run}), the game-over says "${overLine.slice(0, 60)}", and G opens the Logbook with the fastest payoff ${fast}`);
     // a reload (the menu): still there; Export, then Import that code: the same save; a garbled code is refused
@@ -579,6 +588,7 @@ try {
     const io = await host.evaluate(async () => {
       const tick = () => new Promise(r => setTimeout(r, 50));   // (Import is async: it waits for the write)
       document.getElementById('garageBtn').click();
+      document.querySelector('#garage .gtab[data-tab="log"]').click();
       const kept = /Fastest payoff\s*(\d+:\d\d)/.exec(document.getElementById('garageBody').textContent)?.[1];
       document.querySelector('#garage .gtab[data-tab="save"]').click();
       document.getElementById('gxExport').click();
