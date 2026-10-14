@@ -300,6 +300,16 @@ export class Sim {
     this.out.push({ k: 'spawn', p: this.describe(prop) });
   }
 
+  // (the test lever) the map back on the dash, wherever it slid to on the drive
+  mapHome() {
+    const map = [...this.props.values()].find(p => p.type === 'map');
+    if (!map || map.holders.size) return;
+    map.body.setTranslation(toWorld(this.rv.translation(), this.rv.rotation(), RV_MAP_SPOT), true);
+    map.body.setRotation(this.rv.rotation(), true);
+    map.body.setLinvel(this.rv.linvel(), true);
+    map.body.setAngvel({ x: 0, y: 0, z: 0 }, true);
+  }
+
   describe(p) {
     const t = p.body.translation(), q = p.body.rotation();
     const d = { id: p.id, type: p.type, value: Math.round(p.value), max: Math.round(p.max),
