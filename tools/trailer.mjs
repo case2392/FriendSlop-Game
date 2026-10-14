@@ -7,12 +7,15 @@
 // connections (they send a pose every tick, as a page would; a knock throws them through the air); the
 // camera is the page's own player, whose eye is moved anywhere (in the world, or riding along with the RV).
 // The HUD, the nameplates and the hands are left out; the words are set afterwards in the game's own type.
-// Music and sound are the game's own synthesizers (client/js/music.js, sfx.js), rendered offline.
+// The sounds are the game's own synthesizers (client/js/sfx.js, ambience.js), rendered offline; the music is
+// a score written for the cut (tools/trailer-score.js), synthesized the same way.
 //
 //   xvfb-run -a -s "-screen 0 1920x1080x24" node tools/trailer.mjs capture [--only a,b] [--w 1920 --h 1080]
-//   node tools/trailer.mjs audio        the music beds and the sounds, as WAVs
+//   node tools/trailer.mjs audio        the sounds and the beds, as WAVs
+//   node tools/trailer.mjs score        the music, scored to the cut [--solo drums,bass,guitars,banjo,lead,keys,fx]
 //   node tools/trailer.mjs cards        the words, as transparent PNGs
 //   node tools/trailer.mjs edit         cut it together: dist/trailer/trailer.mp4
+//   node tools/trailer.mjs plan         the cut's timing (each entry's start, each sound's), to score against
 // Everything goes in dist/trailer (not in git). Capture is the slow part (about an hour at 1080p); the others
 // take a minute or two, so the cut can be changed without filming it again.
 import fs from 'node:fs';
@@ -971,13 +974,6 @@ const BEDS = [
   ['night', 10, () => ({ amb: { biome: 'fields', night: true, inside: false } })],
   ['campfire', 10, () => ({ amb: { biome: 'meadow', night: false, inside: false, fires: [{ x: 0, y: 0, z: 2 }] } })],
 ];
-// the music: [name, station, seed, secs, first bar, tension from, tension to] (the menu theme is country on
-// seed 7; the casino's lounge band; the last hour's midnight station, its tension rising)
-const MUSIC = [
-  ['country', 'country', 7, 100, 0, 0, 0],
-  ['lounge', 'lounge', 4, 12, 0, 0, 0],
-  ['midnight', 'midnight', 7, 14, 0, 0.5, 1],
-];
 const wavOf = (sr, ch) => {
   const n = ch[0].length, nc = ch.length, b = Buffer.alloc(44 + n * nc * 2);
   b.write('RIFF', 0); b.writeUInt32LE(36 + n * nc * 2, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20);
@@ -997,32 +993,6 @@ async function audio() {
   const pg = await br.newPage();
   pg.on('pageerror', e => log('page error:', e.message));
   pg.setDefaultTimeout(600000);
-  const get = async (fn, arg) => { const r = await pg.evaluate(fn, arg); return r.map(a => Float32Array.from(a)); };
-  // music: each station in its own offline context. The radio schedules a bar ahead from a 50 ms timer: its
-  // timer is caught and run by hand at every 0.1 s of the render
-  for (const [name, station, seed, secs, bar0, tension, tension1] of MUSIC) {
-    await pg.goto(`http://localhost:${port}/__blank`);
-    const ch = await get(async ([station, seed, secs, bar0, tension, tension1]) => {
-      const ticks = [];
-      window.setInterval = fn => { ticks.push(fn); return ticks.length; };
-      window.clearInterval = () => {};
-      const { createRadio } = await import('/js/music.js');
-      const sr = 48000, ctx = new OfflineAudioContext(2, Math.round(sr * secs), sr);
-      const lim = ctx.createDynamicsCompressor(); lim.threshold.value = -4; lim.knee.value = 0; lim.ratio.value = 20; lim.attack.value = 0.003; lim.release.value = 0.25;
-      const g = ctx.createGain(); g.gain.value = 0.42; g.connect(lim); lim.connect(ctx.destination);
-      const r = createRadio(ctx, g, { seed, station });
-      r.setTension(tension);
-      // (start(s) begins with the bar after s: just short of the next bar line, it begins at once, on bar0)
-      const { STATIONS } = await import('/js/music.js'), barLen = 240 / STATIONS[station].bpm;
-      r.start((bar0 + 1) * barLen - 0.02);
-      r.output.gain.cancelScheduledValues(0); r.output.gain.setValueAtTime(1, 0);
-      for (let t = 0.1; t < secs; t += 0.1) ctx.suspend(t).then(() => { r.setTension(tension + (tension1 - tension) * t / secs); for (const f of ticks) f(); ctx.resume(); });
-      const buf = await ctx.startRendering();
-      return [Array.from(buf.getChannelData(0)), Array.from(buf.getChannelData(1))];
-    }, [station, seed, secs, bar0, tension, tension1]);
-    fs.writeFileSync(path.join(dir, `music-${name}.wav`), wavOf(48000, ch));
-    log(`music ${name}: ${secs} s`);
-  }
   // the sounds and the beds: sfx.js and ambience.js on one offline context (audio.js makes it: AudioContext is
   // swapped for an offline one before they're imported)
   await pg.goto(`http://localhost:${port}/__blank`);
@@ -1034,6 +1004,9 @@ async function audio() {
     const { updateAmbience, quietAmbience } = await import('/js/ambience.js');
     initAudio();
     const ctx = window.__nmdAudio.ctx;
+    // (the page's ambience plays only while its context is 'running'; an offline context reads 'suspended' in
+    // the suspend() callbacks that step it, so it's told it's running)
+    Object.defineProperty(ctx, 'state', { get: () => 'running', configurable: true });
     const at = {};
     REEL.forEach(([n, ...a], i) => { const t = 0.25 + i * GAP; at[`${n}${a.length ? ':' + a.join(',') : ''}`] = t; ctx.suspend(t).then(() => { try { sfx[n](...a); } catch (e) { console.log('sfx', n, e.message); } ctx.resume(); }); });
     // the beds: the loops and the ambience updated every 0.05 s, as a page's frames would
@@ -1057,6 +1030,31 @@ async function audio() {
   fs.writeFileSync(path.join(dir, 'reel.wav'), wavOf(48000, res.ch.map(a => Float32Array.from(a))));
   fs.writeFileSync(path.join(dir, 'reel.json'), JSON.stringify({ gap: REEL_GAP, at: res.at, beds: res.beds, bedLen: Object.fromEntries(BEDS.map(b => [b[0], b[1]])) }, null, 1));
   log(`sounds: ${REEL.length} on the reel, ${BEDS.length} beds`);
+  await br.close();
+}
+
+// the music: tools/trailer-score.js, rendered in a page (it needs OfflineAudioContext) against the cut's timing.
+// --solo <buses> renders only those (to set the balance by ear or by meter)
+async function score() {
+  const dir = path.join(OUT, 'audio'), solo = opt('--solo', null);
+  fs.mkdirSync(dir, { recursive: true });
+  const { secs, sfx } = plan();
+  const T = { secs, sfx, cuts: EDL.map(e => [e.at, e.shot || e.still]) };
+  const { chromium } = await import('playwright-core');
+  const br = await chromium.launch({ executablePath: process.env.CHROMIUM_PATH || '/opt/pw-browsers/chromium-1194/chrome-linux/chrome' });
+  const pg = await br.newPage();
+  pg.on('pageerror', e => log('page error:', e.message));
+  pg.setDefaultTimeout(600000);
+  const src = fs.readFileSync(path.join(ROOT, 'tools/trailer-score.js'), 'utf8');
+  const res = await pg.evaluate(async ([src, T, solo]) => {
+    const m = await import('data:text/javascript;base64,' + btoa(unescape(encodeURIComponent(src))));
+    const { ch, warn } = await m.renderScore(T, { solo });
+    return { ch: ch.map(a => Array.from(a)), warn };
+  }, [src, T, solo]);
+  for (const w of res.warn) log('!! score:', w);
+  const file = path.join(dir, solo ? `score-${solo.replace(/,/g, '+')}.wav` : 'music-score.wav');
+  fs.writeFileSync(file, wavOf(48000, res.ch.map(a => Float32Array.from(a))));
+  log(`score: ${path.relative(OUT, file)} (${secs.toFixed(2)} s)`);
   await br.close();
 }
 
@@ -1173,8 +1171,8 @@ async function cards() {
 // EDL entries: { shot (a folder in OUT/shots) | still (a PNG in OUT/cards), from (the first frame), secs,
 //   card (a card's id) with cardIn/cardOut (s into the entry), gray (the knocked-out look), zoom (a still's
 //   push-in, 1 -> zoom), fadeIn/fadeOut (from/to black, s) }
-// SFX: [time in the trailer (s), reel name, gain]; MUSIC_CUES: [music bed, from (s into it), at (trailer s),
-//   secs, gain, fadeIn, fadeOut]; BED_CUES: [bed, at, secs, gain]
+// SFX: [time in the trailer (s), reel name, gain]; BED_CUES: [bed, at, secs, gain]; the music is the score
+//   (tools/trailer-score.js), the length of the cut
 // an event in a shot's log: a toast whose text matches, or an 'ev' of kind k
 const toastIs = re => e => e.t === 'toast' && re.test(e.text);
 const evIs = (k, more = () => true) => e => e.t === 'ev' && e.list?.some(x => x.k === k && more(x));
@@ -1222,47 +1220,56 @@ const EDL = [
   { shot: 'payoff', secs: 1.25, from: 'end', dim: 0.25, cards: [['c_owned', 0.0, 1.25]], sfx: [[0.0, 'owned', 0.9]] },
   // the title, the stinger, the end card
   { still: 'title.png', secs: 3.75, zoom: 1.06, cards: [['c_features', 1.2, 3.75]] },
-  { shot: 'gnome', secs: 2.5, from: 8, cards: [['t_beaned', 1.2, 2.5]], cues: [[toastIs(/beaned/), 'bonk', 1.0, -0.05]], sfx: [[0.75, 'throw', 0.9]] },
+  { shot: 'gnome', secs: 2.5, from: 8, cards: [['t_beaned', 1.2, 2.5]], cues: [[toastIs(/beaned/), 'bonk', 1.0, -0.05]], sfx: [[0.0, 'throw', 0.6]] },
   { still: 'title.png', secs: 2.5, zoom: 1.02, cards: [['c_wishlist', 0.15, 2.5]], fadeOut: 0.6, sfx: [[0.25, 'horn', 0.7], [0.62, 'horn', 0.7]] },
 ];
-// the music (bed, s into it, at, secs, gain, fade in, fade out); the engine and the air (bed, at, secs, gain)
-const MUSIC_CUES = [
-  ['country', 0, 2.5, 13.6, 0.8, 0.02, 0.06],          // in on the RV's pass; cut dead by the crunch
-  ['country', 17.5, 17.5, 12.5, 0.75, 0.6, 0.2],      // back under the beast, on to the fix
-  ['lounge', 0, 30.0, 4.4, 0.75, 0.02, 0.05],         // the casino's band; cut at NOTHING
-  ['midnight', 0, 35.0, 3.75, 0.85, 0.02, 0.4],       // a minute to midnight
-  ['country', 40.0, 41.25, 13.9, 0.85, 0.02, 0.7],    // again: five days, the payoff, the title
-];
+// the engine and the air under the music (bed, at, secs, gain): louder where the music stops for a gag, so the
+// stop is a held breath, not a dropout
+const MUSIC_LEVEL = 0.8, BED_LEVEL = 0.6;   // (against the sounds, which play at their reel gains)
 const BED_CUES = [
   ['fields', 0, 1.6, 0.9], ['engine', 0.6, 2.0, 0.9], ['cabin', 2.5, 2.5, 0.7], ['engine', 5.0, 1.25, 0.6], ['campfire', 6.25, 1.25, 0.8],
-  ['snow', 8.75, 1.25, 0.6], ['badlands', 10.0, 1.25, 0.6], ['engine', 15.0, 1.2, 0.7], ['fields', 17.5, 4.0, 0.7], ['fields', 22.5, 2.5, 0.6],
-  ['engine', 25.0, 1.6, 0.7], ['night', 27.5, 2.5, 0.6], ['night', 35.0, 6.25, 0.5], ['campfire', 40.0, 1.25, 0.6],
-  ['engine', 41.25, 6.25, 0.55], ['desert', 47.5, 2.5, 0.5], ['meadow', 55.0, 2.5, 0.6],
+  ['snow', 8.75, 1.25, 0.6], ['badlands', 10.0, 1.25, 0.6], ['engine', 15.0, 1.2, 0.7], ['meadow', 15.0, 2.6, 2.0], ['fields', 17.5, 4.0, 0.7], ['fields', 22.5, 2.5, 0.6],
+  ['engine', 25.0, 1.6, 0.7], ['night', 27.5, 2.5, 1.6], ['night', 35.0, 6.25, 0.5], ['campfire', 40.0, 1.25, 0.6],
+  ['engine', 41.25, 6.25, 0.55], ['desert', 47.5, 2.5, 0.5], ['meadow', 55.0, 2.5, 2.0], ['campfire', 55.0, 2.5, 1.0],
 ];
-const SFX = [];
 const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], { stdio: ['ignore', 'inherit', 'inherit'] });
-async function edit() {
-  const tmp = path.join(OUT, 'edit');
-  fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
-  const clips = [];
-  let t = 0;
-  let edge = 0;   // (cut points on the frame nearest each one's time: the cuts stay on the music's half bars)
-  for (const [i, e] of EDL.entries()) {
-    const n = Math.round((edge + e.secs) * FPS) - Math.round(edge * FPS), out = path.join(tmp, `c${String(i).padStart(3, '0')}.mp4`);
+// the cut's timing, from the EDL and the shots' logs: each entry's start (s), length (frames) and first frame,
+// and every sound's time. The edit and the score both read it
+function plan() {
+  const sfx = [];
+  let t = 0, edge = 0;   // (cut points on the frame nearest each one's time: the cuts stay on the music's half bars)
+  for (const e of EDL) {
+    const n = Math.round((edge + e.secs) * FPS) - Math.round(edge * FPS);
     edge += e.secs;
-    const inputs = [], filt = [];
+    e.at = t; e.n = n; e.start = 0;
     if (e.shot) {
       const dir = path.join(OUT, 'shots', e.shot);
       const have = fs.readdirSync(dir).filter(f => f.endsWith('.jpg')).length;
       const evs = fs.existsSync(path.join(dir, 'events.json')) ? JSON.parse(fs.readFileSync(path.join(dir, 'events.json'), 'utf8')) : [];
       let want = e.from === 'end' ? have - n : e.from ?? 0;
       if (e.align) { const hit = evs.find(e.align[0]); if (hit) want = hit.f - Math.round(e.align[1] * FPS); else log(`!! ${e.shot}: the event to line up on isn't in its log`); }
-      const from = Math.max(0, Math.min(want, have - n));
+      e.start = Math.max(0, Math.min(want, have - n));
       for (const [test, sound, gain = 1, off = 0] of e.cues || []) {
-        const hit = evs.find(x => test(x) && x.f >= from && x.f < from + n);
-        if (hit) SFX.push([t + (hit.f - from) / FPS + off, sound, gain]); else log(`  (${e.shot}: no event for ${sound})`);
+        const hit = evs.find(x => test(x) && x.f >= e.start && x.f < e.start + n);
+        if (hit) sfx.push([t + (hit.f - e.start) / FPS + off, sound, gain]); else log(`  (${e.shot}: no event for ${sound})`);
       }
       if (have < n) log(`!! ${e.shot}: ${have} frames, the cut wants ${n}`);
+    }
+    for (const [at, sound, gain = 1] of e.sfx || []) sfx.push([t + at, sound, gain]);
+    t += n / FPS;
+  }
+  return { secs: t, sfx: sfx.sort((a, b) => a[0] - b[0]) };
+}
+async function edit() {
+  const tmp = path.join(OUT, 'edit');
+  fs.rmSync(tmp, { recursive: true, force: true }); fs.mkdirSync(tmp, { recursive: true });
+  const { secs: t, sfx: SFX } = plan();
+  const clips = [];
+  for (const [i, e] of EDL.entries()) {
+    const n = e.n, from = e.start, out = path.join(tmp, `c${String(i).padStart(3, '0')}.mp4`);
+    const inputs = [], filt = [];
+    if (e.shot) {
+      const dir = path.join(OUT, 'shots', e.shot);
       inputs.push('-framerate', String(FPS), '-start_number', String(from), '-i', path.join(dir, 'f%04d.jpg'));
       filt.push(`[0:v]scale=1920:1080:flags=lanczos,setsar=1,trim=end_frame=${n},setpts=PTS-STARTPTS${e.speed ? `,setpts=${(1 / e.speed).toFixed(4)}*PTS` : ''}[v0]`);
     } else {
@@ -1290,32 +1297,38 @@ async function edit() {
     if (e.fadeOut) { filt.push(`[${v}]fade=t=out:st=${(e.secs - e.fadeOut).toFixed(3)}:d=${e.fadeOut}[fo]`); v = 'fo'; }
     ff(...inputs, '-filter_complex', filt.join(';'), '-map', `[${v}]`, '-frames:v', String(n), '-r', String(FPS), '-c:v', 'libx264', '-preset', 'fast', '-crf', '12', '-pix_fmt', 'yuv420p', out);
     clips.push(out);
-    for (const [at, sound, gain = 1] of e.sfx || []) SFX.push([t + at, sound, gain]);
-    e.at = t; t += n / FPS;
   }
   const list = path.join(tmp, 'list.txt');
   fs.writeFileSync(list, clips.map(c => `file '${c}'`).join('\n'));
   const video = path.join(tmp, 'video.mp4');
   ff('-f', 'concat', '-safe', '0', '-i', list, '-c', 'copy', video);
   log(`picture: ${EDL.length} cuts, ${t.toFixed(2)} s`);
-  // the sound: the music beds, the engine and the air, and the sounds, each placed and mixed
+  // the sound: the score, the engine and the air, and the sounds, each placed; the music ducks a little under
+  // the sounds (a crunch, a bonk, the till) so they cut through, then the three are mixed and levelled
   const A = path.join(OUT, 'audio'), reel = JSON.parse(fs.readFileSync(path.join(A, 'reel.json'), 'utf8'));
-  const ins = [], parts = [];
-  let k = 0;
-  const add = (file, chain) => { ins.push('-i', file); parts.push(`[${k}:a]${chain}[a${k}]`); k++; };
-  for (const [bed, from, at, secs, gain = 1, fin = 0.05, fout = 0.3] of MUSIC_CUES)
-    add(path.join(A, `music-${bed}.wav`), `atrim=start=${from}:duration=${secs},asetpts=PTS-STARTPTS,afade=t=in:d=${fin},afade=t=out:st=${Math.max(0, secs - fout)}:d=${fout},volume=${gain},adelay=${Math.round(at * 1000)}:all=1`);
+  const score = path.join(A, 'music-score.wav');
+  if (!fs.existsSync(score)) throw new Error('no score yet: node tools/trailer.mjs score');
+  const ins = ['-i', score], parts = [], beds = [], fx = [];
+  let k = 1;
+  const add = (file, chain, to) => { ins.push('-i', file); parts.push(`[${k}:a]${chain}[a${k}]`); to.push(`[a${k}]`); k++; };
   for (const [bed, at, secs, gain = 1] of BED_CUES) {
-    const from = reel.beds[bed] + 0.5;
-    add(path.join(A, 'reel.wav'), `atrim=start=${from}:duration=${secs},asetpts=PTS-STARTPTS,afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, secs - 0.25)}:d=0.25,volume=${gain},adelay=${Math.round(at * 1000)}:all=1`);
+    const from = reel.beds[bed] + 2.5;   // (past each bed's fade in)
+    add(path.join(A, 'reel.wav'), `atrim=start=${from}:duration=${secs},asetpts=PTS-STARTPTS,afade=t=in:d=0.15,afade=t=out:st=${Math.max(0, secs - 0.25)}:d=0.25,volume=${(gain * BED_LEVEL).toFixed(3)},adelay=${Math.round(at * 1000)}:all=1`, beds);
   }
   for (const [at, name, gain = 1, len = 2.3] of SFX) {
     const from = reel.at[name];
     if (from == null) { log(`!! no sound '${name}' on the reel`); continue; }
-    add(path.join(A, 'reel.wav'), `atrim=start=${from}:duration=${len},asetpts=PTS-STARTPTS,volume=${gain},adelay=${Math.round(at * 1000)}:all=1`);
+    add(path.join(A, 'reel.wav'), `atrim=start=${from}:duration=${len},asetpts=PTS-STARTPTS,volume=${gain},adelay=${Math.round(at * 1000)}:all=1`, fx);
   }
+  const graph = [
+    `[0:a]atrim=duration=${t.toFixed(3)},volume=${MUSIC_LEVEL}[mus]`, ...parts,
+    `${beds.join('')}amix=inputs=${beds.length}:normalize=0:duration=longest[beds]`,
+    `${fx.join('')}amix=inputs=${fx.length}:normalize=0:duration=longest,asplit=2[fx][key]`,
+    `[mus][key]sidechaincompress=threshold=0.05:ratio=3:attack=6:release=280:makeup=1[duck]`,
+    `[duck][beds][fx]amix=inputs=3:normalize=0:duration=longest,atrim=duration=${t.toFixed(3)},alimiter=limit=0.89,loudnorm=I=-15:TP=-1.5:LRA=9[out]`,
+  ];
   const mix = path.join(tmp, 'mix.wav');
-  ff(...ins, '-filter_complex', `${parts.join(';')};${parts.map((_, i) => `[a${i}]`).join('')}amix=inputs=${k}:normalize=0:duration=longest,atrim=duration=${t.toFixed(3)},alimiter=limit=0.89,loudnorm=I=-15:TP=-1.5:LRA=9[out]`, '-map', '[out]', '-ar', '48000', '-ac', '2', mix);
+  ff(...ins, '-filter_complex', graph.join(';'), '-map', '[out]', '-ar', '48000', '-ac', '2', mix);
   const final = path.join(OUT, 'trailer.mp4');
   ff('-i', video, '-i', mix, '-map', '0:v', '-map', '1:a', '-c:v', 'libx264', '-preset', 'slow', '-crf', '17', '-pix_fmt', 'yuv420p', '-profile:v', 'high', '-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart', '-shortest', final);
   log(`trailer: ${final} (${(fs.statSync(final).size / 1048576).toFixed(1)} MB, ${t.toFixed(2)} s)`);
@@ -1324,6 +1337,14 @@ async function edit() {
 // ================================================================================================
 if (STEP_CMD === 'capture') { await capture(); process.exit(0); }
 else if (STEP_CMD === 'audio') { await audio(); process.exit(0); }
+else if (STEP_CMD === 'score') { await score(); process.exit(0); }
 else if (STEP_CMD === 'cards') { await cards(); process.exit(0); }
 else if (STEP_CMD === 'edit') { await edit(); process.exit(0); }
+else if (STEP_CMD === 'plan') {   // the cut's timing, to score against: each entry's start, and every sound's
+  const { secs, sfx } = plan();
+  for (const e of EDL) log(`${e.at.toFixed(3).padStart(7)}  ${e.shot || e.still}${e.cards ? '  [' + e.cards.map(c => c[0]).join(' ') + ']' : ''}`);
+  for (const [at, name] of sfx) log(`${at.toFixed(3).padStart(7)}    ~ ${name}`);
+  log(`${secs.toFixed(3)} s`);
+  process.exit(0);
+}
 else { console.error('usage: node tools/trailer.mjs capture|audio|cards|edit'); process.exit(2); }
