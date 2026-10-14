@@ -14,6 +14,7 @@ const SPEC = {
   sfx: [0.8, 'num', 0, 1],
   amb: [0.7, 'num', 0, 1],
   voice: [1, 'num', 0, 1],
+  voiceMode: ['open', 'pick', 'open', 'ptt'],   // your mic: open (it sends while you talk) or push-to-talk (V)
   muteInBackground: [true, 'bool'],
   score: [true, 'bool'],                     // the score under the game (score.js)
   radio: [true, 'bool'],                     // the RV's radio plays while someone drives

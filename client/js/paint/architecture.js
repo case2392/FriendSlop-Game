@@ -1483,7 +1483,7 @@ function arcText(g, txt, cx, cy, R, px, step) {
 // its lettering, a player's box each and a betting circle under it
 export const BJ_SEAT_U = [1 / 6, 1 / 2, 5 / 6];
 register('felt_table', {
-  family: F, w: 512, h: 256, note: 'blackjack felt: green baize, gold arc and lettering, a dealer box, a card box and a betting circle for each of three seats (player side at the bottom)',
+  family: F, w: 512, h: 256, note: 'blackjack felt: green baize, gold arc and lettering, the dealer\'s box in the middle, a card box and a betting circle for each of three seats (player side at the bottom)',
   paint(g, s, rnd, H) {
     const W = 512, cx = W / 2;
     baize(g, W, H, rnd, '#2c6a40', ['#327448', '#24603a', '#2e6e42'], '#1a3a26');
@@ -1494,9 +1494,9 @@ register('felt_table', {
     arcText(g, 'BLACKJACK PAYS 3 TO 2', cx, cy, R - 28, 19, 12);
     g.font = `bold 12px ${SERIF}`; g.fillStyle = '#c8b070'; g.fillText('DEALER STANDS ON 17', cx, 142);
     g.restore();
+    goldBox(g, cx - 100, 22, 200, 52, 0.6);   // (the dealer's one hand: the table plays a round together)
     for (const u of BJ_SEAT_U) {
       const x = u * W;
-      goldBox(g, x - 30, 24, 60, 48, 0.6);
       goldBox(g, x - 38, 156, 76, 52);
       ellipse(g, x, 230, 15, 15, 0, '#e8d8a0', 0.3); ellipse(g, x, 230, 12, 12, 0, '#2c6a40', 1);
     }

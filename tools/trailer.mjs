@@ -623,8 +623,8 @@ shot({
   body: () => ({ x: 3, z: W.town.z + 40 }),
 });
 
-// the casino: one bank, a game each. Kyle shoves the lot in at blackjack seat 2, Dave plays seat 1, Steve rolls
-// craps behind them (server/casino.js: each sits down at his own station, everything comes out of one bank)
+// the casino: one bank. Kyle bets big at blackjack seat 2, Dave plays seat 1 in the same round, Steve rolls craps
+// behind them (server/casino.js: each sits down at his own station, everything comes out of one bank)
 const casStation = id => W.town.casino_stations.find(s => s.id === id);
 const casUse = id => W.uses.findIndex(u => u.kind === 'cas' && u.arg === id);
 const onTable = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
@@ -640,7 +640,8 @@ shot({
     room.tick(1 / 60);
     for (const [b, id] of [[Kyle, 'bj2'], [Dave, 'bj1'], [Steve, 'craps1']]) b.say({ t: 'use', id: casUse(id) });
     Dave.say({ t: 'cas', s: 'bj1', a: 'b500' }); Dave.say({ t: 'cas', s: 'bj1', a: 'go' });
-    Kyle.say({ t: 'cas', s: 'bj2', a: 'ball' }); Kyle.say({ t: 'cas', s: 'bj2', a: 'go' });
+    for (let i = 0; i < 6; i++) Kyle.say({ t: 'cas', s: 'bj2', a: 'b500' });
+    Kyle.say({ t: 'cas', s: 'bj2', a: 'go' });
     Steve.say({ t: 'cas', s: 'craps1', a: 'b500' }); Steve.say({ t: 'cas', s: 'craps1', a: 'go' });
   },
   tick() { const { Dave, Steve, Kyle } = bots; sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1'); },

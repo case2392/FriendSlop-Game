@@ -294,13 +294,16 @@ try {
   await joiner.waitForFunction(() => window.__nmd.me.mode === 'walk', null, { timeout: 24000 });
   // the roles hold on screen: Dave's map prompt says no peeking; Steve's seat prompt says Dave drives (and Steve
   // reads the map), and the server refuses Steve the wheel; each tracker says whose job is what. (Both move
-  // first: just up from the wheel, Dave stands in Steve's line to the seat, and Steve where Dave reads the map
-  // from. By now the RV has driven and turned a little, so both stand in the RV's own frame)
+  // first: just up from the wheel, Dave stands in Steve's line to the seat. Dave stands between the counter and
+  // the passenger seat, Steve back in the aisle: each clear of the furniture and of the other, or the walk
+  // pushes him out of it and his aim is off. By now the RV has driven and turned a little, so both stand in the
+  // RV's own frame, and aim once they've landed)
   const rvNow = await host.evaluate(() => ({ p: window.__nmd.rv.p, q: window.__nmd.rv.q }));
   const inRV = (x, y, z) => toWorld(rvNow.p, rvNow.q, { x, y, z });
-  await host.evaluate(([a, t]) => { const S = window.__nmd; S.me.teleport(a.x, a.y, a.z, 0); S.aimAt(t.x, t.y, t.z); }, [inRV(0.25, 0.1, 2.0), inRV(0.62, 0.4, 2.85)]);
-  await joiner.evaluate(a => { const S = window.__nmd; S.me.teleport(a.x, a.y, a.z, 0); }, inRV(-0.1, 0.1, 2.25));
-  await wait(joiner, 600);
+  await host.evaluate(a => { const S = window.__nmd; S.me.teleport(a.x, a.y, a.z, 0); }, inRV(0, 0.1, 1.5));
+  await joiner.evaluate(a => { const S = window.__nmd; S.me.teleport(a.x, a.y, a.z, 0); }, inRV(-0.2, 0.1, 2.2));
+  await wait(joiner, 600); await wait(host, 300);
+  await host.evaluate(() => { const S = window.__nmd; const t = S.rvWorld({ x: 0.62, y: 0.4, z: 2.85 }); S.aimAt(t.x, t.y, t.z); });
   await joiner.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
   await wait(joiner, 600);
   await wait(host, 300);
@@ -339,16 +342,22 @@ try {
     const seated = p => p.waitForFunction(id => window.__nmd.g?.cas?.[id]?.o === window.__nmd.selfId && !document.getElementById('casPanel').classList.contains('hidden'), p === host ? 'bj2' : 'flip1', { timeout: 24000 }).then(() => true, () => false);
     const sat = [await seated(host), await seated(joiner)];
     await digit(host, 2); await digit(host, 2); await digit(joiner, 1);
-    await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.bet === 1000 && window.__nmd.g.cas.flip1?.bet === 100, null, { timeout: 24000 });
+    await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.bet === 1000 && window.__nmd.g.cas.flip1?.bet === 100, null, { timeout: 24000 })
+      .catch(async () => { throw new Error(`the casino bets never went down (sat ${sat}; aimed "${aimed.join('", "')}"; ${JSON.stringify(await host.evaluate(() => ({ bj2: window.__nmd.g?.cas?.bj2, flip1: window.__nmd.g?.cas?.flip1, casAt: window.__nmd.casAt })))})`); });
     // (each panel is redrawn on its page's next frame: at about 1 fps here, a while after the snapshot)
     const shows = (p, re) => p.waitForFunction(re => new RegExp(re).test(document.getElementById('casPanel').textContent.replace(/\s+/g, ' ')), re, { timeout: 24000 }).catch(() => {});
     await shows(host, 'Bet \\$1,000'); await shows(joiner, 'Bet \\$100');
     const panels = [await panel(host), await panel(joiner)];
     check(sat.every(Boolean) && /Sit down at seat 2/.test(aimed[0]) && /Double or Nothing/.test(aimed[1]) && /Blackjack · seat 2/.test(panels[0]) && /Bet \$1,000/.test(panels[0]) && /Double or Nothing/.test(panels[1]) && /Bet \$100/.test(panels[1]),
       `the casino: Steve sits down at blackjack seat 2 and Dave at a Double or Nothing machine ("${aimed.join('", "')}"); each one's keys set his own stake ("${panels[0].replace(/Blackjack pays.*?17\./, ' ').slice(0, 70)}" / "${panels[1].replace(/Your stake.*?again\./, ' ').slice(0, 60)}")`);
+    // (Steve's alone at the table: his DEAL deals at once, round the table to him and the dealer, the dealer's
+    // second card face down; then it's his turn: hit, stand, or double on two cards. He stands)
     await digit(host, 5); await digit(joiner, 5);
-    await host.waitForFunction(() => window.__nmd.g?.cas?.bj2?.st !== 'bet', null, { timeout: 24000 });
-    await host.evaluate(() => { const S = window.__nmd; if (S.g.cas.bj2.st === 'play') for (const t of ['keydown', 'keyup']) window.dispatchEvent(new KeyboardEvent(t, { key: '6', code: 'Digit6', bubbles: true })); });
+    await host.waitForFunction(() => ['turn', 'result'].includes(window.__nmd.g?.cas?.bjt?.st), null, { timeout: 24000 });
+    const turn = await host.evaluate(() => { const b = window.__nmd.g.cas.bjt; return { st: b.st, turn: b.turn, dl: b.dl }; });
+    if (turn.st === 'turn') await shows(host, 'YOUR TURN');
+    const turnPanel = await panel(host);
+    if (turn.st === 'turn') await digit(host, 6);
     await host.waitForFunction(() => (window.__nmd.betLog || []).length >= 2, null, { timeout: 135000 })
       .catch(async () => { throw new Error(`the games never settled: ${JSON.stringify(await host.evaluate(() => ({ cas: window.__nmd.g?.cas, log: window.__nmd.betLog })))}`); });
     await wait(host, 400);
@@ -357,6 +366,8 @@ try {
     const bj = res.log.find(e => e.by === res.me && e.game === 'Blackjack'), fl = res.log.find(e => e.by === dave && e.game === 'Double or Nothing');
     check(bj && fl && res.bank === 2600 + bj.won + fl.won && /STEVE/.test(res.label),
       `the casino: Steve's blackjack (${bj?.won}) and Dave's coin (${fl?.won}) played at once out of one bank ($2,600 -> $${res.bank}); Steve's seat reads "${res.label}"`);
+    check(turn.st === 'result' || (turn.turn === 'bj2' && turn.dl.length === 2 && turn.dl[1] === '??' && /YOUR TURN/.test(turnPanel) && /HIT/.test(turnPanel) && /STAND/.test(turnPanel) && /DOUBLE/.test(turnPanel)),
+      `blackjack: dealt round the table, the dealer's second card face down (${turn.dl.join(' ')}); in Steve's turn his panel says so and offers the moves ("${turnPanel.replace(/^.*?(YOUR TURN)/, '$1').slice(0, 90)}")`);
     // (the target, not the level: the level eases on the page's frame clock, slow at the test's frame rate)
     const casTune = await host.evaluate(() => window.__nmd.music?.score?.targets?.lead ?? -1);
     check(casTune >= 0 && casTune < 0.01, `in the casino the score gives the floor to its band (the tune's target ${casTune.toFixed(2)})`);

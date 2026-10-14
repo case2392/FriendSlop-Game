@@ -37,7 +37,7 @@ export const V = {
   on: false,                       // am I in voice (hearing whoever is in earshot)?
   mic: false,                      // and is my mic on it?
   connecting: false,
-  mode: load('mode', 'open'),      // 'open' | 'ptt'
+  get mode() { return settings.voiceMode; },     // 'open' | 'ptt' (Settings > Audio)
   ptt: false,                      // push-to-talk key held right now
   walkieKey: false,                // T held: talking on the walkie
   muted: load('muted', false),     // self-mute toggle
@@ -436,8 +436,7 @@ function stopMeter() {
 // ---- knobs the UI turns ---------------------------------------------------------------------
 
 export function setMode(mode) {
-  V.mode = mode === 'ptt' ? 'ptt' : 'open';
-  store('mode', V.mode);
+  setSetting('voiceMode', mode === 'ptt' ? 'ptt' : 'open');
   emitChange();
 }
 

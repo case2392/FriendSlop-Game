@@ -49,6 +49,20 @@ export const LOOT = {
 };
 
 export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);
+// Carried in your hands (what one person picks up: not the heavy things two of you drag, not a live animal,
+// not the map, which is read): held by its middle at chest height, just past your hands, turning as you turn.
+// The server holds it there (sim.js) and your page draws it there (main.js); the hands go round it (people.js)
+export const CARRY = { DROP: 0.3, HANDS: 0.34, MIN: 0.45, MAX: 2.2 };
+export const carried = type => { const L = LOOT[type]; return !!L && !L.mob && L.cls !== 'heavy' && type !== 'map'; };
+// its farthest point from its middle (it clears your face however it's turned), and its half width
+export function carrySize(type) {
+  const s = LOOT[type]?.shape || ['ball', 0.2], [k, a, b, c] = s;
+  const r = k === 'box' ? Math.hypot(a, b, c) : k === 'cyl' ? Math.hypot(a, b) : k === 'cap' ? a + b : a;
+  const half = k === 'box' ? Math.max(a, c) : k === 'cyl' ? b : k === 'cap' ? b : a;
+  return { r: Math.max(0.08, Math.min(0.9, r)), half: Math.max(0.05, Math.min(0.5, half)) };
+}
+// how far from the eye its middle is held
+export const carryDist = type => Math.max(CARRY.MIN, CARRY.HANDS + carrySize(type).r * 0.85);
 // What each kind of stop tends to have lying around.
 export const POI_LOOT = {
   gas:   ['register', 'gnome', 'toaster', 'neon', 'tv', 'lamp', 'tire'],

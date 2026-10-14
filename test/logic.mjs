@@ -4,8 +4,8 @@ import { spawn } from 'node:child_process';
 import WebSocket from 'ws';
 import { generateLeg, butteRadius } from '../shared/world.js';
 import { QUOTAS, medBill } from '../shared/constants.js';
-import { Blackjack, handTotal } from '../server/blackjack.js';
-import { Casino, FLIP_ODDS, DERBY } from '../server/casino.js';
+import { BJTable, BJ, handTotal } from '../server/blackjack.js';
+import { Casino, FLIP_ODDS, DERBY, ODDS } from '../server/casino.js';
 import http from 'node:http';
 import { mulberry32 } from '../shared/rng.js';
 
@@ -17,17 +17,107 @@ const fail = m => { console.error('❌', m); failed = true; };
 const check = (c, m) => (c ? ok(m) : fail(m));
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-// --- blackjack engine sanity (pure logic) ---
+// --- the blackjack table (pure logic: server/blackjack.js): the seats play one round together ---
 {
-  let bad = 0;
-  const tally = { win: 0, lose: 0, push: 0, natural: 0 };
-  for (let i = 0; i < 3000; i++) {
-    const h = new Blackjack();
-    while (h.state === 'voting') h.act(h.squadTotal() < 17 ? 'hit' : 'stand');
-    tally[h.outcome]++;
-    if (h.outcome === 'win' && handTotal(h.dealer) <= 21 && handTotal(h.squad) <= handTotal(h.dealer)) bad++;
+  // a shoe stacked from the top (what's drawn first, first), over a full one so it doesn't reshuffle
+  const stack = (T, cards) => { T.draw(); T.shoe = [...T.shoe.slice(0, 200), ...[...cards].reverse()]; };
+  const run = (T, t) => { let r = null; for (let k = 0; k < 200 && !r && (T.state === 'deal' || T.state === 'dealer'); k++) { t = Math.max(t, T.until); r = T.step(t); } return { r, t }; };
+  // Ann (seat 1) and Cy (seat 3) bet; Ann's DEAL starts the count, Cy's makes it now; the cards go round
+  // seat 1, seat 3, the dealer, seat 1, seat 3, the dealer's hole card
+  {
+    const T = new BJTable(['bj1', 'bj2', 'bj3'], mulberry32(9));
+    let t = 0;
+    T.callDeal('bj1', ['bj1', 'bj3'], t);
+    const counting = T.state === 'count' && T.until === t + BJ.COUNT_T;
+    T.callDeal('bj3', ['bj1', 'bj3'], t);
+    const now = T.until === t;
+    T.begin(new Map([['bj1', 100], ['bj3', 200]]), t);
+    stack(T, ['5♠', '6♠', '9♣', '7♠', '8♠', '9♦']);   // Ann 5 7, Cy 6 8, the dealer 9 and 9 down
+    const order = [], n = () => [T.hands.get('bj1').hands[0].cards.length, T.hands.get('bj3').hands[0].cards.length, T.dealer.length];
+    while (T.state === 'deal') { const b0 = n(); t = T.until; T.step(t); const b1 = n(); order.push(['Ann', 'Cy', 'dealer'][b1.findIndex((x, i) => x > b0[i])]); }
+    const shown = T.view(t).dl.join(' ');
+    // Ann's turn first; Cy can't act in it; Ann hits to 16 and stands, then it's Cy's
+    const first = T.view(t).turn, cyEarly = T.act('bj3', 'hit', t).ok;
+    stack(T, ['4♥', '10♣']);   // Ann's hit: 16; then Cy's: 24 (bust)
+    T.act('bj1', 'hit', t); T.act('bj1', 'stand', t);
+    const second = T.view(t).turn;
+    T.act('bj3', 'hit', t);
+    const after = T.state;
+    const { r } = run(T, t);   // the dealer turns his 9: 18, stands
+    const ann = r.find(x => x.id === 'bj1'), cy = r.find(x => x.id === 'bj3');
+    check(counting && now && order.join() === 'Ann,Cy,dealer,Ann,Cy,dealer' && shown === '9♣ ??' && first === 'bj1' && !cyEarly && second === 'bj3' && after === 'dealer'
+      && ann.out[0] === 'lose' && cy.out[0] === 'bust' && ann.won === -100 && cy.won === -200,
+      `blackjack table: the first DEAL starts the count, everyone in deals it now; dealt ${order.join(', ')} (the dealer's hole card down: ${shown}); Ann plays first (Cy can't), then Cy; the dealer plays when they're done (Ann 16 vs 18: ${ann.out[0]}, Cy ${cy.out[0]})`);
   }
-  check(bad === 0 && tally.lose > tally.win, `blackjack engine: 3000 hands consistent ${JSON.stringify(tally)}`);
+  // a pair split, one of its hands doubled: three stakes in all, each hand settled on its own
+  {
+    const T = new BJTable(['bj1', 'bj2', 'bj3'], mulberry32(3));
+    let t = 0;
+    T.callDeal('bj2', ['bj2'], t); T.begin(new Map([['bj2', 100]]), t);
+    stack(T, ['8♠', '10♥', '8♦', '7♣', '3♠', '10♠', '10♦']);   // 8 8 vs 10 + 7 down; split: 8 3 and 8 10; double the 11: 21
+    ({ t } = run(T, t));
+    const opts = T.options();
+    const sp = T.act('bj2', 'split', t), opts2 = T.options(), db = T.act('bj2', 'double', t), mid = T.view(t);
+    T.act('bj2', 'stand', t);
+    const { r } = run(T, t), x = r[0];
+    check(opts.split && opts.double && sp.spend === 100 && !opts2.split && db.spend === 100 && mid.hand === 1 && x.out.join() === 'win,win' && x.back === 600 && x.won === 300,
+      `blackjack table: split a pair of 8s (another $100), double the first hand to 21 (another $100) and stand the second on 18 against 17: both win, $600 back on $300 (${x.out.join(', ')}, ${x.won >= 0 ? '+' : ''}${x.won})`);
+  }
+  // the dealer's blackjack ends the round at the deal: a natural pushes, the rest lose
+  {
+    const T = new BJTable(['bj1', 'bj2', 'bj3'], mulberry32(4));
+    let t = 0;
+    T.callDeal('bj1', ['bj1', 'bj2'], t); T.callDeal('bj2', ['bj1', 'bj2'], t); T.begin(new Map([['bj1', 100], ['bj2', 100]]), t);
+    stack(T, ['A♠', '10♣', 'A♥', 'K♠', '9♦', 'K♥']);
+    const { r } = run(T, t);
+    check(T.state === 'result' && r.find(x => x.id === 'bj1').out[0] === 'push' && r.find(x => x.id === 'bj2').out[0] === 'lose',
+      `blackjack table: the dealer's blackjack ends it at the deal (Ann's natural pushes, Bob's 19 loses)`);
+  }
+  // nobody in a seat whose turn it is: its hand stands at once; last call plays out a round mid-turn
+  {
+    const T = new BJTable(['bj1', 'bj2', 'bj3'], mulberry32(5));
+    let t = 0;
+    T.callDeal('bj1', ['bj1', 'bj3'], t); T.callDeal('bj3', ['bj1', 'bj3'], t); T.begin(new Map([['bj1', 100], ['bj3', 100]]), t);
+    stack(T, ['10♠', '9♠', '6♣', '7♠', '8♠', '9♦']);
+    ({ t } = run(T, t));
+    T.vacated('bj1', t); t += 0.01; T.step(t);
+    const moved = T.view(t).turn;
+    const r = T.close(t);
+    check(moved === 'bj3' && r.length === 2 && T.state === 'result',
+      `blackjack table: a seat walked away from in its turn stands at once (the turn moves on to seat ${moved?.slice(2)}); last call plays the round out (${r.map(x => x.out[0]).join(', ')})`);
+  }
+  // 20,000 rounds of three seats: every dollar accounted for, every hand settled by the rules, the house ahead
+  {
+    const T = new BJTable(['bj1', 'bj2', 'bj3'], mulberry32(11)), pick = mulberry32(12);
+    let t = 0, staked = 0, back = 0, bad = 0, rounds = 0, splits = 0, doubles = 0;
+    for (; rounds < 20000; rounds++) {
+      for (const id of ['bj1', 'bj2', 'bj3']) T.callDeal(id, ['bj1', 'bj2', 'bj3'], t);
+      T.begin(new Map([['bj1', 100], ['bj2', 100], ['bj3', 100]]), t); staked += 300;
+      for (let k = 0; k < 400 && T.state !== 'result'; k++) {
+        t = Math.max(t, T.until);
+        if (T.state === 'turn') {
+          const c = T.current(), o = T.options(), v = handTotal(c.h.cards);
+          const a = o.split && pick() < 0.5 ? 'split' : o.double && v >= 9 && v <= 11 ? 'double' : v < 17 ? 'hit' : 'stand';
+          const r = T.act(c.id, a, t); staked += r.spend || 0; if (a === 'split') splits++; if (a === 'double') doubles++;
+          continue;
+        }
+        const r = T.step(t);
+        if (r) for (const x of r) {
+          back += x.back;
+          const s = T.hands.get(x.id), d = handTotal(T.dealer);
+          for (const h of s.hands) {
+            const v = handTotal(h.cards);
+            if ((h.out === 'bust') !== (v > 21) || (h.out === 'win' && d <= 21 && v <= d) || (h.out === 'lose' && v <= 21 && d <= 21 && v > d && !(T.dealer.length === 2 && d === 21))) bad++;
+          }
+          if (x.won !== x.back - s.stake) bad++;
+        }
+      }
+      t = T.until; T.step(t);   // (the result's shown, then the table's open again)
+    }
+    const edge = (staked - back) / staked;
+    check(bad === 0 && edge > 0 && edge < 0.08 && splits > 300 && doubles > 1000,
+      `blackjack table: 20,000 rounds of three seats (${splits} splits, ${doubles} doubles): every hand settled by the rules, $${back.toLocaleString('en-US')} back on $${staked.toLocaleString('en-US')} (the house ${(edge * 100).toFixed(1)}% ahead with this crude play)`);
+  }
 }
 
 // --- world gen: the gate code's paint is clear of the ground; every boulder has its sign (pure logic) ---
@@ -120,20 +210,24 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   let bank = 3000, t = 0;
   const done = [];   // every settled game, as it settles
   const play = (p, id, a, n) => { const r = cas.act(p, id, a, n, t, bank); bank -= r.spend || 0; for (const x of r.results || []) { bank += x.back; done.push(x); } return r; };
-  const settle = list => { for (const x of list) { bank += x.back; done.push(x); } return list; };
+  const settle = list => { for (const x of list) { if (x.spend != null) { bank -= x.spend; continue; } if (x.back == null) continue; bank += x.back; done.push(x); } return list; };
   check(cas.sit(A, 'bj1').ok && cas.sit(B, 'craps1').ok && cas.sit(Cy, 'flip1').ok && cas.sit(B, 'bj1').err && play(B, 'bj1', 'b100').err,
     'casino: a seat is whoever sat down first; somebody else can\'t sit there or bet on it');
   play(A, 'bj1', 'b500'); play(B, 'craps1', 'b500'); play(B, 'craps1', 'b100'); play(Cy, 'flip1', 'b100'); play(Cy, 'flip1', 'b100');
   const bets = [cas.st.get('bj1').bet, cas.st.get('craps1').bet, cas.st.get('flip1').bet];
-  const r1 = play(A, 'bj1', 'go'), r2 = play(B, 'craps1', 'go'), r3 = play(Cy, 'flip1', 'go');
-  const spent = (r1.spend || 0) + (r2.spend || 0) + (r3.spend || 0);
-  check(bets.join() === '500,600,200' && spent === 1300 && bank === 3000 - 1300 + (r1.results?.[0]?.back || 0),
+  // (Ann's the only one at the table: her DEAL deals at once, and the stake goes down as the cards come)
+  play(A, 'bj1', 'go'); const r2 = play(B, 'craps1', 'go'), r3 = play(Cy, 'flip1', 'go');
+  const bj0 = cas.tick(t, bank).find(x => x.spend != null);
+  settle([bj0].filter(Boolean));
+  const spent = (bj0?.spend || 0) + (r2.spend || 0) + (r3.spend || 0);
+  check(bets.join() === '500,600,200' && spent === 1300 && bank === 3000 - 1300,
     `casino: three games at once take their own stakes from the one bank ($${bets.join(', $')}: $${spent} out, bank $${bank})`);
   // Ann plays her hand out; the dice and the coin land on their own time
-  for (let i = 0; i < 12 && cas.st.get('bj1').state === 'play'; i++) play(A, 'bj1', cas.st.get('bj1').hand.squadTotal() < 15 ? 'hit' : 'stand');
   const settled = id => done.filter(x => x.id === id);
-  for (t = 0; t < 400 && (!settled('craps1').length || !settled('flip1').length); t += 0.5) {
-    settle(cas.tick(t));
+  for (t = 0; t < 400 && (!settled('bj1').length || !settled('craps1').length || !settled('flip1').length); t += 0.5) {
+    settle(cas.tick(t, bank));
+    const T = cas.bj;
+    if (T.state === 'turn' && T.current()?.id === 'bj1') play(A, 'bj1', handTotal(T.current().h.cards) < 15 ? 'hit' : 'stand');
     const c = cas.st.get('craps1');
     if (c.state === 'point' && !c.pend) play(B, 'craps1', 'go');
   }
@@ -146,16 +240,22 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(moved.ok && !moved.results.length && cas.st.get('craps1').owner === null && cas.st.get('craps2').owner === B.id,
     'casino: one game at a time: sitting down at another gives up the one you had');
   cas.sit(B, 'craps1', t);
-  // walking off mid-hand: the house plays it out (you stand) and the seat is free again
-  t += 10; settle(cas.tick(t));
-  play(A, 'bj1', 'b100');
-  let dealt = null;
-  for (let k = 0; k < 20 && !dealt; k++) { const r = play(A, 'bj1', 'go'); if (cas.st.get('bj1').state === 'play') dealt = r; else { t += 10; settle(cas.tick(t)); } }
-  const b0 = bank;
+  // walking off mid-hand: the seat is free at once; the hand stands when its turn comes, the round plays on,
+  // and what it pays is still Ann's
+  let dealt = false;
+  for (let k = 0; k < 20 && !dealt; k++) {
+    t += 10; settle(cas.tick(t, bank));   // (the last round's result cleared)
+    play(A, 'bj1', 'bclr'); play(A, 'bj1', 'b100'); play(A, 'bj1', 'go');
+    for (let i = 0; i < 40 && cas.bj.state !== 'turn' && cas.bj.state !== 'result'; i++) { t += 0.5; settle(cas.tick(t, bank)); }
+    dealt = cas.bj.state === 'turn';
+  }
+  const b0 = bank, mine = cas.bj.hands.get('bj1').hands[0];
   A.pos = { x: A.pos.x + 5, y: 0, z: A.pos.z };
-  const gone = settle(cas.release(players, t));
-  check(dealt && gone.length === 1 && gone[0].p === A && cas.st.get('bj1').owner === null && cas.st.get('bj1').state === 'result' && bank === b0 + gone[0].back,
-    `casino: walk away mid-hand and the dealer plays it out as a stand (${gone[0]?.won >= 0 ? '+' : ''}${gone[0]?.won}); the seat is free`);
+  const gone = settle(cas.release(players, t)), free = cas.st.get('bj1').owner === null;
+  let paid = null;
+  for (let i = 0; i < 80 && !paid; i++) { t += 0.5; paid = settle(cas.tick(t, bank)).find(x => x.id === 'bj1'); }
+  check(dealt && !gone.length && free && paid?.p === A && mine.cards.length === 2 && bank === b0 + paid.back,
+    `casino: walk away mid-hand and the seat is free at once; the hand stands on its two cards and the round plays on (${paid?.won >= 0 ? '+' : ''}${paid?.won}, Ann's)`);
   // last call: a point on the table rolls on to a decision, the Derby runs with its tickets
   const cas2 = new Casino(spots, mulberry32(5));
   const D = mk(4, 'Di'), E = mk(5, 'Ed');
@@ -192,6 +292,30 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const pr = wins / games, fr = fw / flips;
   check(games === 20000 && flips === 20000 && Math.abs(pr - 244 / 495) < 0.012 && Math.abs(fr - FLIP_ODDS) < 0.012 && DERBY.PAYS * 0.25 < 1,
     `casino: the house wins in the long run (the pass line won ${(pr * 100).toFixed(1)}% of ${games}, theory 49.3%; the coin ${(fr * 100).toFixed(1)}%; a Derby ticket returns ${(DERBY.PAYS * 25).toFixed(0)}%)`);
+  // craps odds: behind the line once there's a point, up to 3x the line, paid at true odds (a 4 pays 2 to 1,
+  // a 6 pays 6 to 5) on top of the line's even money; a seven-out takes the line and the odds
+  {
+    const cas4 = new Casino(spots, mulberry32(1)), Q = mk(7, 'Quinn'), K = cas4.st.get('craps1');
+    at(Q, 'craps1'); cas4.sit(Q, 'craps1'); K.bet = 100;
+    const point = (sum, bk) => { const g = cas4.act(Q, 'craps1', 'go', 0, 0, bk); K.pend = { at: 0, out: 'point', sum, p: Q }; cas4.crapsLand(K, 0); return g.spend; };
+    const odds = bk => cas4.act(Q, 'craps1', 'odds', 0, 0, bk);
+    const early = odds(1000).err;
+    const line = point(4, 1000), o = [odds(900), odds(800), odds(700)], full = odds(600).err;
+    K.pend = { at: 0, out: 'win', sum: 4, p: Q };
+    const w4 = cas4.crapsLand(K, 0)[0];
+    K.state = 'bet';
+    point(6, 1000); odds(900); odds(800);
+    K.pend = { at: 0, out: 'win', sum: 6, p: Q };
+    const w6 = cas4.crapsLand(K, 0)[0];
+    K.state = 'bet';
+    point(9, 1000); odds(900);
+    K.pend = { at: 0, out: 'lose', sum: 7, p: Q };
+    const l9 = cas4.crapsLand(K, 0)[0];
+    const short = (K.state = 'bet', point(10, 1000), odds(50));
+    check(early && line === 100 && o.every(x => x.spend === 100) && full && w4.back === 1100 && w4.won === 700 && w6.back === 640 && w6.won === 340 && l9.back === 0 && l9.won === -200
+      && short.err && ODDS[5] === 1.5 && ODDS[8] === 1.2,
+      `casino: craps odds go behind the line only on a point, up to 3x; the 4 made pays the line 1 to 1 and $300 odds 2 to 1 (+$${w4.won}), the 6 pays $200 odds 6 to 5 (+$${w6.won}), a seven-out loses both (${l9.won})`);
+  }
 }
 
 // --- painted textures: dependency tracking, adopted pictures, cache keys (pure logic) ---
@@ -697,13 +821,15 @@ try {
   A.events.length = 0;
   A.send({ t: 'cas', s: 'bj1', a: 'go' });
   B.send({ t: 'cas', s: 'flip1', a: 'go' });
-  await A.until(g => g.cas.bj1.st !== 'bet', 3000, 'dealt');
-  if (A.g().cas.bj1.st === 'play') A.send({ t: 'cas', s: 'bj1', a: 'stand' });
+  // (Ann's alone at the table: her DEAL deals at once; in her turn she stands)
+  await A.until(g => g.cas.bjt?.st === 'turn' || g.cas.bjt?.st === 'result', 3000, 'dealt');
+  const dealtTo = A.g().cas.bj1.hands?.[0]?.length, dlr = A.g().cas.bjt.dl.length;
+  if (A.g().cas.bjt.st === 'turn') A.send({ t: 'cas', s: 'bj1', a: 'stand' });
   await A.until(() => A.events.filter(e => e.k === 'bet').length >= 2, 8000, 'both settled');
   await sleep(150);
   const bjOut = A.events.find(e => e.k === 'bet' && e.by === A.id), flOut = A.events.find(e => e.k === 'bet' && e.by === B.id);
-  check(!poached && bjOut && flOut && A.g().bank === 1000 + bjOut.won + flOut.won,
-    `casino over the wire: Ann's blackjack (${bjOut?.won}) and Bob's coin (${flOut?.won}) played at once out of one bank ($1,000 -> $${A.g().bank}); Bob can't bet on Ann's seat`);
+  check(!poached && bjOut && flOut && A.g().bank === 1000 + bjOut.won + flOut.won && dealtTo === 2 && dlr === 2,
+    `casino over the wire: Ann's blackjack (two cards each to her and the dealer; ${bjOut?.won}) and Bob's coin (${flOut?.won}) played at once out of one bank ($1,000 -> $${A.g().bank}); Bob can't bet on Ann's seat`);
   // Ann walks off: her seat is free again
   A.at(bjS.x + 4, T.y + 0.05, bjS.z, 0, 0, 0);
   await A.until(g => g.cas.bj1.o == null, 3000, 'the seat freed');

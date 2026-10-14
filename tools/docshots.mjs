@@ -215,6 +215,8 @@ await shot(steve, 'repo-man');
   await ev(steve, () => window.__nmd.press('use'));
   await steve.waitForFunction(() => window.__nmd.g?.cas?.bj2?.o === window.__nmd.selfId, null, { timeout: 120000 });
   for (const a of ['b500', 'b500', 'b500', 'go']) { await ev(steve, a => window.__nmd.send({ t: 'cas', s: 'bj2', a }), a); await wait(steve, 250); }
+  // (alone at the table, the DEAL deals at once: a card at a time round to Steve and the dealer)
+  await steve.waitForFunction(() => ['turn', 'result'].includes(window.__nmd.g?.cas?.bjt?.st), null, { timeout: 120000 });
   await ev(dave, T => { const S = window.__nmd, B = T.bj, c = Math.cos(B.ry), s = Math.sin(B.ry), at = (lx, lz) => ({ x: B.table.x + lx * c + lz * s, z: B.table.z - lx * s + lz * c }); const p = at(-2.6, 3.4), t = at(0.2, 0.1); S.me.teleport(p.x, T.casino.y + 0.05, p.z, 0); S.aimAt(t.x, B.table.y - 0.1, t.z); }, T);
   await shot(dave, 'casino');
 }
