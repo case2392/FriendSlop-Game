@@ -500,7 +500,11 @@ export function generateLeg(seed, day, opts = {}) {
   for (const o of obstacles) {
     const rx = roadX(o.z);
     if (o.type === 'grade') {
-      const zt = o.z1 + 9;
+      // (12 m past the top: the crest rounds off over 4-5 m, and the winch can only drag the RV's nose up to
+      // the posts. At 9 m it left the back wheels on the curve, where the RV can't pull itself over (it climbs
+      // about 6 degrees on its own) and rolled back down once unhooked; and the cable still reaches from the
+      // foot: 41 m of its 42 on the longest grade)
+      const zt = o.z1 + 12;
       const xt = roadX(zt);
       for (const s of [-1, 1]) {
         const ax = xt + s * 3.4, az = zt, ay = heightAt(ax, az);
@@ -1240,6 +1244,21 @@ export function generateLeg(seed, day, opts = {}) {
   {
     const c = lots.find(b => b.kind === 'casino');
     if (c) { const F = frame(c.x, c.y, c.z, c.ry); tagNow = { town: 'casino' }; lbox(F, c.ry + Math.PI / 2, 9.6, 0.55, 2.5, 2.5, 0.55, 0.35, 'wood', null, 'casino_bar'); tagNow = null; }
+  }
+
+  // Gus's Garage: a workbench by the RV lot (10 m from where the RV parks at night) and his sign; he fixes the
+  // RV once the day's payment is made, for cash or on the loan (server/room.js repair)
+  {
+    const gx = -7.5, gz = T + 131, ry = Math.PI / 2;
+    town.gus = { x: gx, z: gz, y: townY, ry };
+    tagNow = { town: 'gus' };
+    box(gx, townY + 0.45, gz, 0.6, 0.45, 0.3, ry, 'wood', '#7a5a3a', 'gus_bench');
+    tagNow = null;
+    // (his sign hangs high: his name over his head, 2.2-2.55 m up, reads under it, not on its words)
+    signs.push({ x: gx - 1.2, y: townY + 3.2, z: gz, ry: Math.PI / 2, w: 2.6, h: 1.1, lines: ["GUS'S GARAGE", 'WE FIX RVs. MOSTLY.'], bg: '#2b2d42', fg: '#f4d35e', post: true });
+    // (his two buttons sit on the front of the bench's top, 0.4 m apart: small targets, so they never overlap)
+    use('repair', gx + 0.12, townY + 0.99, gz - 0.2, 'Gus: fix 25% (cash)', 'cash', 0.18);
+    use('repair', gx + 0.12, townY + 0.99, gz + 0.2, 'Gus: fix 25% (on the loan)', 'loan', 0.18);
   }
 
   // world edges

@@ -8,8 +8,8 @@
 //              straight line and tosses whoever it hits. It has patience, not health: hit it, ram it, winch
 //              it, or let it wear itself out, and it wanders off for good (dropping its brass cowbell).
 //
-// Nothing here ever touches the bank: wildlife costs loot (which you can get back), time, and the doctor's
-// bill if nobody picks you up.
+// Nothing here ever touches the bank directly: wildlife costs loot (which you can get back), time, the doctor's
+// bill if nobody picks you up, and dents in the RV (shared/constants.js RVH), which cost money only through Gus.
 
 // ringtail (RT) and grumphorn (GH) tunables: metres, seconds, kilograms, m/s, newtons
 export const RT = {

@@ -24,7 +24,7 @@ export function keyLabel(L) {
 }
 
 export const keysIn = s => !layout || !s ? s
-  : s.replace(/\[([A-Z])\]/g, (_, L) => `[${keyLabel(L)}]`).replace(/\bWASD\b/g, () => 'WASD'.split('').map(keyLabel).join(''));
+  : s.replace(/\[(Hold )?([A-Z])\]/g, (_, h, L) => `[${h || ''}${keyLabel(L)}]`).replace(/\bWASD\b/g, () => 'WASD'.split('').map(keyLabel).join(''));
 
 export function relabelPage(root = document) {
   ready.then(() => {

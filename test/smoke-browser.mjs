@@ -409,6 +409,49 @@ try {
     check(hatOk && hatMode !== 'ko' && down && woke, `a knockout from the server reaches it: the hard hat takes the first (${hatOk}, ${hatMode}); the second puts Steve down for the crew to see (${down}); waking up alone bills the ambulance (${woke})`);
   }
 
+  // ---- the RV's condition: the top bar on both pages; broken down, the fix at the engine hatch ----
+  {
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'rvhp', hp: 70 }));
+    const pill = p => p.waitForFunction(() => document.getElementById('hRV').textContent === 'RV 70%', null, { timeout: 24000 }).then(() => true, () => false);
+    const pills = await Promise.all([pill(host), pill(joiner)]);
+    check(pills.every(Boolean), `the RV at 70%: the top bar says "RV 70%" on both pages (${pills.join(', ')})`);
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'rvhp', hp: 0 }));
+    await host.waitForFunction(() => window.__nmd.g?.brk === 1, null, { timeout: 24000 });
+    // E already held before he gets there: the fix starts when he does, without a fresh press
+    await host.evaluate(() => window.__nmd.key('e', true));
+    // Steve 1.5 m behind the engine hatch on the RV's back wall, facing it
+    await host.evaluate(() => {
+      const S = window.__nmd, { p, q } = S.rv;
+      const rot = v => { const x = q.y * v.z - q.z * v.y, y = q.z * v.x - q.x * v.z, z = q.x * v.y - q.y * v.x;
+        const x2 = q.y * z - q.z * y, y2 = q.z * x - q.x * z, z2 = q.x * y - q.y * x;
+        return { x: v.x + 2 * (q.w * x + x2), y: v.y + 2 * (q.w * y + y2), z: v.z + 2 * (q.w * z + z2) }; };
+      const b = rot({ x: 0, y: 0, z: -5.65 }), f = rot({ x: 0, y: 0, z: 1 }), x = p.x + b.x, z = p.z + b.z;
+      S.me.teleport(x, S.W.heightAt(x, z) + 0.05, z, Math.atan2(f.x, f.z));
+      S.aimAt(p.x + rot({ x: 0, y: 0.3, z: -4.15 }).x, p.y + rot({ x: 0, y: 0.3, z: -4.15 }).y, p.z + rot({ x: 0, y: 0.3, z: -4.15 }).z);
+    });
+    const fixLabel = await host.waitForFunction(() => window.__nmd.target()?.kind === 'fix' && window.__nmd.target().label, null, { timeout: 20000 }).then(h => h.jsonValue(), () => '');
+    const t0 = Date.now();
+    const started = await host.waitForFunction(() => (window.__nmd.g?.fix || 0) > 0, null, { timeout: 8000, polling: 100 }).then(() => true, () => false);
+    // a TV dropped at his feet and a look at it: the crosshair is on the TV now, and his hands stay on the engine
+    const tvAt = await host.evaluate(() => {
+      const S = window.__nmd, { p, q } = S.rv;
+      const rot = v => { const x = q.y * v.z - q.z * v.y, y = q.z * v.x - q.x * v.z, z = q.x * v.y - q.y * v.x;
+        const x2 = q.y * z - q.z * y, y2 = q.z * x - q.x * z, z2 = q.x * y - q.y * x;
+        return { x: v.x + 2 * (q.w * x + x2), y: v.y + 2 * (q.w * y + y2), z: v.z + 2 * (q.w * z + z2) }; };
+      const b = rot({ x: 0.7, y: 0, z: -4.95 }), x = p.x + b.x, z = p.z + b.z, y = S.W.heightAt(x, z);
+      S.send({ t: 'dbg', op: 'spawn', type: 'tv', x, y: y + 0.5, z, value: 260 });
+      return { x, y, z };
+    });
+    await host.waitForTimeout(1500);
+    await host.evaluate(at => window.__nmd.aimAt(at.x, at.y + 0.2, at.z), tvAt);
+    const blocked = await host.waitForFunction(() => window.__nmd.target()?.kind === 'prop', null, { timeout: 10000, polling: 100 }).then(() => true, () => false);
+    const fixed = await host.waitForFunction(() => window.__nmd.g?.rvh === 20 && !window.__nmd.g?.brk, null, { timeout: 20000, polling: 100 }).then(() => true, () => false);
+    const took = (Date.now() - t0) / 1000;
+    await host.evaluate(() => window.__nmd.key('e', false));
+    check(/\[Hold E\] fix the engine/.test(fixLabel) && started && blocked && fixed && took > 6 && took < 14, `broken down, behind the RV the crosshair says "${fixLabel}"; E held from before he got there starts the fix (${started}), a TV dropped into his crosshair doesn't stop it (${blocked}), and it's running again at 20% (${took.toFixed(1)} s)`);
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'rvhp', hp: 100 }));
+  }
+
   // ---- painted textures: got ready off the main thread, written to the cache, read back next time ----
   const tx = await host.evaluate(() => window.__nmd.texCache.stats());
   check(tx.workers > 0 && !tx.fails && tx.workerPaints > 0, `paint workers painted the day's textures (${tx.workers} workers: ${tx.workerPaints} textures off the main thread, ${tx.pagePaints} on it)`);

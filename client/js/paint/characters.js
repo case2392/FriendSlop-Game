@@ -196,6 +196,7 @@ const OUTFITS = {
   ed:     { torso: 'shirt', arms: 'rolled', hands: 'bare', legs: 'wool', boots: 'short', pauldrons: 'none', belt: false, apron: true, hat: 'none', bulk: 1.08, belly: 0.045, armBulk: 1.08, forearm: 1.15, look: { hair: 'bald', hairColor: '#a3918a', facial: 'beard', beard: 1.3, female: false } },
   clerk:  { torso: 'bodice', arms: 'blouse', hands: 'bare', legs: 'wool', boots: 'shoe', pauldrons: 'none', belt: false, dress: true, hat: 'none', armBulk: 0.84, collar: true, look: { hair: 'bun', hairColor: '#8e3a1c', female: true, facial: 'none' } },
   dealer: { torso: 'vest', arms: 'shirt', hands: 'bare', legs: 'black', boots: 'shoe', pauldrons: 'none', belt: true, hat: 'visor', armBulk: 0.86, shoulderK: 1.08, collar: true, look: { hair: 'slick', hairColor: '#17121a', facial: 'pencil', female: false, stern: true } },
+  gus:    { torso: 'overalls', arms: 'flannel', hands: 'workglove', legs: 'overalls', boots: 'work', pauldrons: 'none', belt: false, hat: 'cap', bulk: 1.03, belly: 0.03, armBulk: 1.0, forearm: 1.1, bib: true, look: { hair: 'short', hairColor: '#7a716a', facial: 'mustache', female: false } },
   repo:   { torso: 'overalls', arms: 'flannel', hands: 'workglove', legs: 'overalls', boots: 'work', pauldrons: 'none', belt: false, hat: 'beanie', bulk: 1.12, brute: true, belly: 0.06, armBulk: 1.0, forearm: 1.14, chain: true, bib: true, shades: true, look: { hair: 'buzz', hairColor: '#1d1716', facial: 'stubble', female: false, stern: true } },
 };
 
@@ -2041,11 +2042,11 @@ function paintAcc(g, r, S, rnd) {
   });
 }
 
-// The apron region (252 × 64): the hood's capelet (players), or the Repo Man's overall bib.
+// The apron region (252 × 64): the hood's capelet (players), or an overall bib (the Repo Man's, Gus's).
 function paintApron(g, r, S, rnd) {
   const U = u => RX(r, u), V = v => RY(r, v), c = S.color;
   clip(g, r, () => {
-    if (S.outfit === 'repo') {
+    if (S.bib) {
       // the bib (u across, v up): heavy canvas, double-stitched edges, a chest pocket, brass clasps at the top corners
       const ov = c;
       cloth(g, r, r.x, r.y, r.w, r.h, ov, rnd, { folds: 5, light: 0.3, foldW: [3, 5] });

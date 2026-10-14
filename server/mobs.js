@@ -9,7 +9,7 @@
 import RAPIER from '@dimforge/rapier3d-compat';
 import { LOOT } from '../shared/loot.js';
 import { RT, GH, RF, PLAN, GST, RST, ST_CARRY, ST_MOOD, crewFactor, cowbellValue, ringtailsPerDen, hoardRingtails } from '../shared/mobs.js';
-import { FLAG, MODE } from '../shared/constants.js';
+import { FLAG, MODE, RVH, beastDamage } from '../shared/constants.js';
 import { toLocal, qRotate, insideRV, RV_DIM } from '../shared/rv.js';
 import { inMud, bedExit } from '../shared/world.js';
 import { mulberry32 } from '../shared/rng.js';
@@ -451,17 +451,32 @@ export class Mobs {
     if (part.rv) {
       if (!m.rvTouch) {
         m.rvTouch = true;
+        // (along the ground, across where they touch: the contact's normal, pointed from the RV at the beast;
+        // the line between their middles only when the touch is on its roof or under it. A front corner
+        // brushing past its flank closes slowly across the touch, however fast the RV goes)
+        const rt = this.sim.rv.translation(), vr = this.vRV, N = part.rvN;
+        let nx = t.x - rt.x, nz = t.z - rt.z;
+        if (N && Math.hypot(N.x, N.z) > 0.3) { const s = N.x * nx + N.z * nz < 0 ? -1 : 1; nx = N.x * s; nz = N.z * s; }
+        const nl = Math.hypot(nx, nz) || 1;
         // a ram: what it costs goes by how fast the RV comes at it (the RV's own speed toward it: it charging
         // a parked RV, or into the back of one driving off, only winds itself)
-        const rt = this.sim.rv.translation(), vr = this.vRV, nx = t.x - rt.x, nz = t.z - rt.z, nl = Math.hypot(nx, nz) || 1;
         const at = Math.max(0, (vr.x * nx + vr.z * nz) / nl);
+        // and what it costs the RV: how fast they close, just before they touched (the RV toward it, less
+        // the RV away from it): a charge into a parked RV dents it, one into the back of an RV driving off
+        // at 5 m/s closes at only 2 m/s, and doesn't
+        const vb = this.vPre.get(m.id) || v3(), closing = Math.max(0, ((vr.x - vb.x) * nx + (vr.z - vb.z) * nz) / nl);
+        if (closing >= RVH.GH_FREE) {
+          const l = this.sim.rvToLocal(t), zone = l.z > 2.5 ? 'front' : l.z < -2.5 ? 'rear' : l.x > 0 ? 'left' : 'right';
+          this.sim.out.push({ k: 'rvhit', why: 'beast', amt: beastDamage(closing), zone, how: m.st === GST.CHARGE ? 'charge' : 'ram', at: [r3(t.x), r3(t.y + 0.8), r3(t.z)] });
+        }
         if (asleep) this.ghWake(m, p, rt, true);
         if (at >= 2) this.ghCost(m, p, GH.COST.rvPerMs * at);
         if (m.st === GST.CHARGE) { m.rvWoke = false; this.ghWinded(m, p, true); }
       }
     } else m.rvTouch = false;
-    // a charge into a wall or the gate's bars stops it short
-    if (m.st === GST.CHARGE && part.statics && this.dv(p) >= 1.5) this.ghWinded(m, p, true);
+    // a charge into a wall or the gate's bars stops it short (along the ground: a fold in the road it runs
+    // over bumps it up, which is no wall)
+    if (m.st === GST.CHARGE && part.statics && this.dv(p, true) >= 1.5) this.ghWinded(m, p, true);
   }
 
   // ---- ringtails -----------------------------------------------------------------------------------------
@@ -737,6 +752,8 @@ export class Mobs {
   // it's had enough for the day: a puff, and it's gone
   rtVanish(m, p, how = 'gone') {
     this.rtDrop(m, p);
+    // (out through a window: it cracks it)
+    if (how === 'window') { const t = p.body.translation(); this.sim.out.push({ k: 'rvhit', why: 'window', amt: RVH.WINDOW, zone: 'side', at: [r3(t.x), r3(t.y), r3(t.z)] }); }
     this.sim.out.push({ k: 'gone', ids: [m.id], how });
     this.sim.removeProp(m.id);
   }
@@ -1048,6 +1065,15 @@ export class Mobs {
         const p = this.get(fr.id);
         if (!p) continue;
         if (p.holders.size || p.thrownBy != null) { fr.at = -Infinity; continue; }
+        // one landing on the RV still coming down fast dents it (once a rock; how fast it was going as it hit)
+        if (!fr.rv && this.partners(p).rv) {
+          const vp = this.vPre.get(fr.id), vr = this.vRV;
+          if (vp && Math.hypot(vp.x - vr.x, vp.y - vr.y, vp.z - vr.z) >= RF.KO_V) {
+            fr.rv = true;
+            const pt = p.body.translation(), l = this.sim.rvToLocal(pt);
+            this.sim.out.push({ k: 'rvhit', why: 'rock', amt: RVH.ROCK, zone: l.y > RV_DIM.ROOF_Y - 0.3 ? 'roof' : 'side', at: [r3(pt.x), r3(pt.y), r3(pt.z)] });
+          }
+        }
         const v = p.body.linvel(), t = p.body.translation(), w = this.sim.rv.velocityAtPoint(t);
         const rel = v3(v.x - w.x, v.y - w.y, v.z - w.z);
         if (Math.hypot(v.x, v.y, v.z) < RF.BUMP_V && Math.hypot(rel.x, rel.y, rel.z) < RF.BUMP_V) continue;
@@ -1394,28 +1420,28 @@ export class Mobs {
     }
   }
 
-  // what a critter is touching right now (a live contact, not just overlapping boxes): the RV, the solid
-  // world, and which props
+  // what a critter is touching right now (a live contact, not just overlapping boxes): the RV (and the
+  // contact's normal there, world space, either sign), the solid world, and which props
   partners(p) {
-    const out = { rv: false, statics: false, props: [] }, w = this.sim.world, rv = this.sim.rv.handle;
+    const out = { rv: false, rvN: null, statics: false, props: [] }, w = this.sim.world, rv = this.sim.rv.handle;
     w.contactPairsWith(p.col, c2 => {
       if (!c2) return;
-      let live = false;
-      w.contactPair(p.col, c2, man => { if (man.numContacts() > 0) live = true; });
+      let live = false, n = null;
+      w.contactPair(p.col, c2, man => { if (man.numContacts() > 0) { live = true; n ||= man.normal(); } });
       if (!live) return;
       const id = this.sim.byCollider.get(c2.handle);
       if (id != null) out.props.push(id);
-      else if (c2.parent()?.handle === rv) out.rv = true;
+      else if (c2.parent()?.handle === rv) { out.rv = true; out.rvN ||= n && { x: n.x, y: n.y, z: n.z }; }
       else out.statics = true;
     });
     return out;
   }
-  // how much a body's velocity changed in the last step (gravity's share taken out)
-  dv(p) {
+  // how much a body's velocity changed in the last step (gravity's share taken out); flat: along the ground only
+  dv(p, flat = false) {
     const a = this.vPre.get(p.id);
     if (!a) return 0;
     const b = p.body.linvel();
-    return Math.hypot(b.x - a.x, b.y - a.y + 9.81 * this.sim.world.timestep, b.z - a.z);
+    return Math.hypot(b.x - a.x, flat ? 0 : b.y - a.y + 9.81 * this.sim.world.timestep, b.z - a.z);
   }
   // nothing solid (the ground, walls, the RV) between a and b
   // (except: a body that doesn't count, e.g. the RV's own shell round its middle when it's the RV in sight)

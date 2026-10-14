@@ -635,6 +635,7 @@ const NPCS = {
   'CLERK': ['Clerk', '<General Goods>', '#4fd93a'],
   'THE DEALER': ['The Dealer', '<Games of Chance>', '#ffd100'],
   'THE REPO MAN': ['The Repo Man', '<Collections>', '#ff4a2e'],
+  'GUS': ['Gus', '<Mechanic>', '#4fd93a'],
 };
 
 const ICONS = { '📍': 'ui_ico_ping', '🔊': 'ui_ico_speaker', '📻': 'ui_ico_walkie', '🎙': 'ui_ico_mic', '🔇': 'ui_ico_micoff' };

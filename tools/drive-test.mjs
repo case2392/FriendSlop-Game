@@ -8,11 +8,13 @@ const W = generateLeg(seed, day);
 const sim = new Sim(W);
 const players = new Map();
 const dt = 1 / 60;
+// every window the crash detector closes (sim.js rvContact: dv, what it touched), for tuning shared/constants.js RVH
+const step = () => { sim.step(dt, players); for (const e of sim.out.splice(0)) if (e.k === 'rvhit') console.log(`  rvhit: ${e.dv} m/s into ${e.what} (${e.zone}) at z ${e.at[2].toFixed(1)}`); };
 let t = 0, lastLog = -1;
 const grade = W.obstacles.find(o => o.type === 'grade');
 console.log('obstacles', W.obstacles.map(o => `${o.type}@${o.z}`).join(' '), 'LEN', W.LEN);
 // settle
-for (let i = 0; i < 120; i++) sim.step(dt, players);
+for (let i = 0; i < 120; i++) step();
 let p = sim.rv.translation();
 console.log('settled at', p.x.toFixed(2), p.y.toFixed(2), p.z.toFixed(2), 'ground', W.heightAt(p.x, p.z).toFixed(2));
 // open gates so we only test driving
@@ -27,7 +29,7 @@ for (t = 0; t < 140; t += dt) {
   let err = want - yaw; while (err > Math.PI) err -= 2 * Math.PI; while (err < -Math.PI) err += 2 * Math.PI;
   const st = Math.max(-1, Math.min(1, err * 2.5));
   sim.setDrive({ th: 1, st, hb: 0 });
-  sim.step(dt, players);
+  step();
   const sp = sim.rvSpeed();
   maxSpeed = Math.max(maxSpeed, sp);
   if (Math.floor(t) !== lastLog && Math.floor(t) % 5 === 0) {
@@ -54,7 +56,7 @@ if (grade) {
   for (let i = 0; i < 360; i++) {
     const f = i / 360;
     fake.pos = { x: from.x + (anchor.x - from.x) * f, y: from.y + (anchor.y - 1.2 - from.y) * f, z: from.z + (anchor.z - from.z) * f };
-    sim.step(dt, players);
+    step();
   }
   console.log('hook at', JSON.stringify(sim.hookPos()), 'len', sim.hook.len.toFixed(1));
   console.log('anchor:', sim.anchorHook(99, fake), 'state', sim.hook.state, 'len', sim.hook.len.toFixed(1));
@@ -62,7 +64,7 @@ if (grade) {
   console.log('reel:', sim.toggleReel());
   for (let t2 = 0; t2 < 40; t2 += dt) {
     sim.setDrive({ th: 0.6, st: 0, hb: 0 });
-    sim.step(dt, players);
+    step();
     const q = sim.rv.translation();
     if (Math.round(t2 * 60) % 120 === 0) console.log(`  winch t=${t2.toFixed(0)} z=${q.z.toFixed(1)} y=${q.y.toFixed(1)} len=${sim.hook.len.toFixed(1)} flipped=${sim.rvFlipped()}`);
     if (q.z > grade.z1 + 2) { console.log('  ✅ winched over the top at', t2.toFixed(1), 's'); break; }

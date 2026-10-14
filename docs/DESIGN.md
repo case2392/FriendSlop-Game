@@ -39,6 +39,10 @@ Working title. The repo stays `FriendSlop-Game`. The menu calls it a
   past an obstacle; from day 3 loose rock waits above the narrows): every
   theft costs loot you can go and take back, every toss costs time and, if
   nobody picks you up, a bill.
+- **The RV has a condition, not the players.** Crashes and the wildlife dent
+  it; worn, it's slower; at 0% it breaks down until somebody holds E at the
+  engine hatch; Gus fixes it in town for cash or on the loan. It costs time
+  and money, never the run: only a missed payment ends a trip.
 
 ---
 
@@ -301,6 +305,26 @@ the road map lying on it, a dinette, a kitchenette, a shower stall
 that holds fragile loot, and bunks. The roof is walkable and is the best
 view in the game. Falling off it is the second-best clip in the game.
 
+**Condition** (0-100%, one per trip, shown in the top bar once it's hurt).
+A crash is how much the RV's velocity changes across the physics step
+itself, along the ground in its own frame: free up to 2 m/s (where an
+unbraced rider is already thrown), then 3% per m/s; into the closed ranger
+gate at 8 m/s it's about 18%, and the toast names the driver ("CRUNCH. Sam
+put the RV into the ranger gate: -18%"). Everything within 2 s of the first
+hit is one incident, capped at 25% (a roll is one dent and the $800 tow).
+The wildlife dents it too: a Grumphorn by how fast they close across where
+they touch (a charge into the parked RV about 8%; into the back of one
+driving off, or a corner brushing past its flank, little or nothing), a live
+rock landing on it 3%, a ringtail breaking out through a window 2%. Worn
+down it loses its top end, never its pull (FINE above 60%, 12.9 m/s;
+SMOKING to 31%, 12.1; LIMPING to 1%, 11.2, and a knock stalls the engine for
+3 s); an incident of 10% or more throws the door open. At 0% it breaks
+down: whoever holds E at the engine hatch on its back gets it running at
+20% in 8 s (two hands 4 s, three 2.7 s; the day's second breakdown 12 s).
+A breakdown 700 m out of town costs about 14 s, a third of a game hour
+(tools/rvsoak.mjs). **Gus** fixes it by the RV lot at night once the Repo
+Man is paid: 25% a press, for cash or on tomorrow's payment.
+
 **Repossession** is all or nothing: one missed payment and the Repo Man
 hooks the RV. (An earlier build took a part per miss, the doors, then the
 roof, then the RV; it made the first four days too forgiving.)
@@ -367,8 +391,14 @@ playtests with real friends before anyone trusts them (confidence: moderate).
   the coin flip 3%). The casino is variance you choose, never free money.
 - Medical bill: $250 + $50 × day per KO, unless a friend picks you up.
   Getting run over by your own RV: $500. RV on its back for 7 seconds: an
-  $800 tow.
+  $800 tow, and the truck sets it back on its wheels on the road nearby
+  (never past a gate, the mud, the boulder or a grade).
 - Missing a payment: the Repo Man takes the RV. The run is over.
+- Gus's repairs: 25% of the RV's condition a press, $8 a point rising 22% a
+  day like the loot (days 1-4: $200 / $245 / $290 / $330 cash, or $250 /
+  $305 / $360 / $415 on the next day's payment; night 4's goes on the
+  balloon, so the first press only says what it'll cost). Nothing heals
+  overnight but Gus.
 
 ## 9. Voice and communication
 
@@ -400,6 +430,10 @@ Things the systems will produce without being scripted:
 - The TV breaking in the back on a hard turn ("WHO LEFT IT ON THE TABLE").
 - Falling off the roof at 50 km/h.
 - Running over your friend: a $500 bill, and the toast names the driver.
+- "CRUNCH. Sam put the RV into the ranger gate: -18%." The receipt that
+  night: "RV 58% (-34% today: Sam -18%, the Grumphorn -8%, rocks -9%)".
+- Broken down 700 m from town at 22:00, three people holding E at the back
+  of the RV while the driver yells at them.
 - Going ALL IN on the coin flip with the payment money at 23:58.
 - Going ALL IN on blackjack with the payment money at 23:58, and losing the
   RV with it.
@@ -422,7 +456,8 @@ Things the systems will produce without being scripted:
 - **Text chat.** Voice, pings and emotes only.
 - **Health bars, weapons, aim combat.** The wildlife is fought with the verbs
   the game already has (grab, throw, shove, the RV, the winch, the horn), and
-  it costs time and loot, never the bank. The antagonists are still the Repo
+  it costs time and loot, and dents in the RV, never the bank directly. The
+  RV's condition is the one bar in the game, and it never ends a run. The antagonists are still the Repo
   Man and gravity.
 - **Cosmetic shop and progression unlocks.** Later, if ever.
 
