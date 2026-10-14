@@ -41,6 +41,8 @@ export const PLAYER = {
   ACCEL_GROUND: 38,
   ACCEL_AIR: 8,
   JUMP: 6.6,
+  COYOTE: 0.12,             // s after walking off an edge that a jump still works
+  JUMP_BUFFER: 0.14,        // s a jump pressed before you land is kept for
   GRAVITY: 20,
   MAX_SLOPE_DEG: 38,        // steeper than this you can't walk — you climb or you slide
   STEP: 0.46,

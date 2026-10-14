@@ -46,6 +46,8 @@ export class Me {
     this.pushes = [];
     this.pushCd = new Map();
     this.airT = 0;
+    this.jumpBuf = 0;            // a jump pressed just before landing, still wanted (PLAYER.JUMP_BUFFER)
+    this.jumped = false;         // jumped since last on the ground (so the coyote time gives one jump, not two)
     this.stepT = 0;
     this.lastLand = 0;
   }
@@ -53,6 +55,7 @@ export class Me {
   teleport(x, y, z, yaw = null) {
     this.pos = v3(x, y, z);
     this.vel = v3();
+    this.airT = 1; this.jumpBuf = 0;   // (put down in the air: no coyote-time jump till you've stood somewhere)
     if (yaw != null) this.yaw = yaw;
     this.par = 0; this.lp = null;
     if (this.mode === 'climb' || this.mode === 'seat') this.mode = 'walk';
@@ -85,6 +88,7 @@ export class Me {
     this.climb = null;
     this.vel = v3(base.x + v[0], base.y + v[1], base.z + v[2]);
     this.grounded = false;
+    this.jumped = true;          // (flung: no coyote-time jump out of it)
     if (ko && !down) this.ko(why);
   }
 
@@ -225,9 +229,15 @@ export class Me {
     this.vel.y -= P.GRAVITY * dt;
     if (this.sprinting && wl > 0.1) this.spend(ST.SPRINT * dt);
 
-    if (inp.jump && this.grounded && this.stamina > 3 && !limp) {
+    // a jump: on the ground, or a moment after walking off an edge (coyote time); pressed a moment before
+    // landing, it happens as you land (the buffer)
+    this.jumpBuf = inp.jump ? P.JUMP_BUFFER : Math.max(0, this.jumpBuf - dt);
+    const footing = this.grounded || (this.airT < P.COYOTE && !this.jumped);
+    if (this.jumpBuf > 0 && footing && this.stamina > 3 && !limp) {
       this.vel.y = P.JUMP * (this.buffT > 0 ? 1.08 : 1);
       this.grounded = false;
+      this.jumped = true;
+      this.jumpBuf = 0;
       this.spend(ST.JUMP);
       this.events.push({ k: 'jump' });
     }
@@ -270,6 +280,7 @@ export class Me {
       }
       this.vel.y = Math.max(this.vel.y, -1);
       this.airT = 0;
+      if (this.vel.y <= 0) this.jumped = false;
     } else this.airT += dt;
     this.grounded = res.grounded;
 

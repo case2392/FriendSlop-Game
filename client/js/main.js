@@ -1138,7 +1138,7 @@ function meEvent(e) {
   if (e.k === 'step') sfx.step();
   else if (e.k === 'climbstep') sfx.climb();
   else if (e.k === 'jump') sfx.jump();
-  else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); }
+  else if (e.k === 'land') { sfx.land(e.s); if (e.s > 9) shake(Math.min(0.5, e.s / 30)); feel.dipV -= Math.min(2.2, e.s * 0.13); }
   else if (e.k === 'grabwall') sfx.wall();
   else if (e.k === 'lunge') sfx.lunge();
   else if (e.k === 'letgo' || e.k === 'exhausted') { sfx.letgo(); if (e.k === 'exhausted') toast('Out of stamina — you let go.', '#ffb4a2', 2); }
@@ -1541,6 +1541,7 @@ const SETTINGS_UI = [
   ['sens', 'Mouse sensitivity', 'range', 0.3, 2.5, 0.05, v => v.toFixed(2)],
   ['invertY', 'Invert mouse up and down', 'check'],
   ['fov', 'Field of view', 'range', 60, 100, 1, v => `${v}°`],
+  ['headBob', 'Head bob (the view bobs as you walk and dips as you land)', 'check'],
   ['Audio'],
   ['master', 'Master volume', 'range', 0, 1, 0.05, pct],
   ['music', 'Music', 'range', 0, 1, 0.05, pct],
@@ -1707,6 +1708,26 @@ $('sensInput').oninput = e => setSetting('sens', e.target.value);
 // ---- the frame ------------------------------------------------------------------------------
 
 let lastT = performance.now(), time = 0;
+// the camera's feel (none of it moves you, only the view): the eye eases up a step and down into a crouch (a
+// jump, a fall, a teleport or a seat snaps), bobs a little with each stride (Settings: head bob), and dips on a
+// hard landing (a spring); the sprint's wider view eases in
+const feel = { y: null, ph: 0, side: 0, dip: 0, dipV: 0, fov: 74 };
+function cameraFeel(dt, eye) {
+  const ease = me.mode === 'walk' && me.grounded && feel.y != null && Math.abs(eye.y - feel.y) < 0.7;
+  feel.y = ease ? feel.y + (eye.y - feel.y) * Math.min(1, dt * 16) : eye.y;
+  // the stride: a full bob up and down each step, a sway each pair of them
+  const sp = Math.hypot(me.vel.x, me.vel.z);   // (your own walking: riding, the RV's motion isn't in it)
+  const on = settings.headBob && me.mode === 'walk' && me.grounded && sp > 0.6;
+  const amp = on ? Math.min(1, sp / C.PLAYER.WALK) * (me.sprinting ? 0.042 : me.crouch ? 0.018 : 0.028) : 0;
+  feel.ph += dt * Math.max(0, sp) * Math.PI / 0.95;   // (a step every 0.95 m)
+  feel.bob = (feel.bob || 0) + ((on ? -Math.abs(Math.sin(feel.ph)) * amp * 2 + amp : 0) - (feel.bob || 0)) * Math.min(1, dt * 12);
+  feel.side += ((on ? Math.sin(feel.ph) * amp * 0.6 : 0) - feel.side) * Math.min(1, dt * 12);
+  // the landing's dip: a stiff spring back to level
+  feel.dipV += (-140 * feel.dip - 19 * feel.dipV) * dt;
+  feel.dip = Math.max(-0.22, Math.min(0.05, feel.dip + feel.dipV * dt));
+  if (!settings.headBob) { feel.dip = 0; feel.dipV = 0; }
+  return feel.y + feel.bob + feel.dip;
+}
 const _v = new THREE.Vector3();
 
 // if a frame's logic throws, the view still draws (and the error is reported once per frame, as before)
@@ -1817,13 +1838,16 @@ requestAnimationFrame(frame);
   // camera
   const eye = me.eye(rv), look = me.look();
   let ex = eye.x, ey = eye.y, ez = eye.z;
+  ey = cameraFeel(dt, eye);
+  if (settings.headBob && me.mode === 'walk' && me.grounded) { ex += feel.side * Math.cos(me.yaw); ez -= feel.side * Math.sin(me.yaw); }
   if (shakeAmt > 0) { ex += (Math.random() - 0.5) * shakeAmt * 0.3; ey += (Math.random() - 0.5) * shakeAmt * 0.3; shakeAmt = Math.max(0, shakeAmt - dt * 1.5); }
   camera.position.set(ex, ey, ez);
   if (me.mode === 'ko') {
     camera.lookAt(ex + Math.sin(me.yaw), ey + 0.9, ez + Math.cos(me.yaw));
     camera.rotation.z += Math.sin(time * 0.7) * 0.25;
   } else camera.lookAt(ex + look.x, ey + look.y, ez + look.z);
-  camera.fov = settings.fov + (me.sprinting ? 6 : 0);
+  feel.fov += (settings.fov + (me.sprinting ? 6 : 0) - feel.fov) * Math.min(1, dt * 7);   // (the sprint's wider view eases in and out)
+  camera.fov = feel.fov;
   camera.updateProjectionMatrix();
 
   // views of other players
