@@ -1585,7 +1585,9 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   const bad = [];
   for (const seed of [4242, 7, 777]) for (let day = 1; day <= 5; day++) {
     const W = generateLeg(seed, day), O = generateLeg(seed, day, { mobs: false });
-    for (const k of ['pois', 'obstacles', 'statics', 'cyls', 'hulls', 'uses', 'anchors', 'gates', 'mud', 'landmarks']) if (!same(W[k], O[k])) bad.push(`${seed}/${day} ${k}`);
+    for (const k of ['pois', 'obstacles', 'cyls', 'hulls', 'uses', 'anchors', 'gates', 'mud', 'landmarks']) if (!same(W[k], O[k])) bad.push(`${seed}/${day} ${k}`);
+    // (the wildlife's own signs, a Grumphorn crossing or loose rock, stand on solid posts like every sign: those come last)
+    if (!same(W.statics.slice(0, O.statics.length), O.statics) || W.statics.slice(O.statics.length).some(s => s.part !== 'signpost')) bad.push(`${seed}/${day} statics`);
     if (W.heights.length !== O.heights.length || W.heights.some((h, i) => h !== O.heights[i])) bad.push(`${seed}/${day} heights`);
     for (const k of ['signs', 'decor', 'props']) if (!same(W[k].slice(0, O[k].length), O[k])) bad.push(`${seed}/${day} ${k} prefix`);
     const maxOld = Math.max(0, ...O.props.map(p => p.id));
