@@ -613,6 +613,7 @@ export class Room {
     const sim = this.sim;
     if (m.op === 'tpRV') sim.placeRV(+m.x, +m.z, +m.yaw || 0);
     else if (m.op === 'clock') this.clock = +m.h;
+    else if (m.op === 'mapHome') sim.mapHome();
     else if (m.op === 'bank') this.bank = +m.v;
     else if (m.op === 'phase') this.phase = m.ph;
     else if (m.op === 'day') { this.day = Math.max(0, (+m.d | 0) - 1); this.nextDay(); }
