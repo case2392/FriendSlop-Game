@@ -5,16 +5,19 @@
 //    grade, floored backwards against the winch cable clipped to the post ahead, winched up and out, then
 //    floored forwards against the cable still clipped;
 //  - a handbrake stop from cruise with 12 loose things aboard (2 safes);
-//  - every stop's apron: slow to 4 m/s, turn in, stop 4 m short of the nearest solid thing ahead, back out
-//    8 m, rejoin the road;
+//  - every stop's apron (the crash sites too): slow to 4 m/s, turn in, stop 4 m short of the nearest solid
+//    thing ahead (a wall, a post, loot, a fallen rock, ground too steep to drive), back out 8 m, rejoin the road;
 //  - backing into Ed's loading zone at 3 m/s;
-//  - put down elsewhere at 15 m/s, and set back on its wheels from its side (the tow).
+//  - put down elsewhere, and set back on its wheels from its side (the tow);
+//  - every grade hauled up with nobody at the wheel (the crew outside working the winch), and with a driver
+//    sat with their hands off, the reel stopped once it's over and 3 s more; and the winch never has the RV
+//    going faster than its drum's speed (plus OVERRUN).
 // Every window the crash detector closes is listed (dv, what) for tuning. Then the crash table (the ranger
-// gate at 3, 5, 8, 12 m/s) and the breakdown bound: day 5, 700 m out of town, broken down: one player's fix
-// and limping in costs at most half a game hour more than the same run healthy, and broken down there at
-// 22:00 the crew still docks before midnight.
-//   node tools/rvsoak.mjs [--seeds 12] [--days 1-5] [--quick]     exit code 1 when a gate fails
-// (--quick: the road, the handbrake and the teleports only)
+// gate at 3, 5, 8, 12 m/s: dearer the faster, never free from 5 m/s) and the breakdown bound: day 5, 700 m out
+// of town, broken down: one player's fix and limping in costs at most half a game hour more than the same run
+// healthy (the clock it docks at is printed). A gate whose part didn't run says so and doesn't pass.
+//   node tools/rvsoak.mjs [--seeds 12] [--days 1-5] [--quick] [--only soak,hauls,table,bound] [--poi crash]
+// (--quick: no aprons)     exit code 1 when a gate fails
 process.env.FRIENDSLOP_TEST = '1';
 process.env.FRIENDSLOP_NOMOBS = '1';   // (the wildlife's hits on the RV are test/mobs.mjs's)
 delete process.env.FRIENDSLOP_FAST;    // (a real clock: half a game hour is 22.5 s)
@@ -30,7 +33,7 @@ const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] :
 const SEEDS = opt("--seed", null) ? [Number(opt("--seed"))] : Array.from({ length: Number(opt("--seeds", 12)) }, (_, i) => [4242, 7, 777][i] ?? 1000 + i * 7919);
 const [D0, D1] = String(opt('--days', '1-5')).split('-').map(Number);
 const QUICK = args.includes('--quick'), TRACE = args.includes('--trace');
-const ONLY = new Set(String(opt('--only', 'soak,table,bound')).split(','));
+const ONLY = new Set(String(opt('--only', 'soak,hauls,table,bound')).split(','));
 const POI = opt('--poi', null);   // (only this kind of stop's apron, traced with --trace)
 const HZ = C.SIM_HZ;
 
@@ -103,6 +106,20 @@ function clearance(sim, W, dir = 1) {
     if (Math.hypot(cy.x - rp.x, cy.z - rp.z) > 26 || !ahead(cy.x, cy.z)) continue;
     for (const n of nose) best = Math.min(best, Math.hypot(n.x - cy.x, n.z - cy.z) - cy.r);
   }
+  // (the buttes' fallen rocks, as round as they reach)
+  for (const hl of W.hulls || []) {
+    if (Math.hypot(hl.x - rp.x, hl.z - rp.z) > 26 + hl.r || !ahead(hl.x, hl.z)) continue;
+    for (const n of nose) best = Math.min(best, Math.hypot(n.x - hl.x, n.z - hl.z) - hl.r);
+  }
+  // (ground too steep to drive up: a rise of more than 0.8 m a metre, walked out ahead of each corner)
+  for (const n of nose) {
+    let prev = W.heightAt(n.x, n.z);
+    for (let d = 0.5; d < Math.min(best, 25); d += 0.5) {
+      const x = n.x + f.x * d, z = n.z + f.z * d, h = W.heightAt(x, z);
+      if (h - prev > 0.4) { best = Math.min(best, d - 0.5); break; }
+      prev = h;
+    }
+  }
   return best;
 }
 
@@ -112,7 +129,7 @@ function road(ctx, { until = null, handbrake = false, floored = true } = {}) {
   const { room } = ctx, sim = room.sim, W = room.W;
   const end = until ?? W.LEN + 30;
   const obs = W.obstacles.filter(o => o.type === 'mud' || o.type === 'grade').map(o => ({ type: o.type, z0: o.z0 ?? o.z, z1: o.z1 ?? o.z + 20, done: false }));
-  let braked = !handbrake, stuck = 0;
+  let braked = !handbrake, stuck = 0, beached = 0;
   for (let g = 0; g < 900 * HZ; g++) {
     const p = sim.rv.translation();
     if (p.z > end) return true;
@@ -133,6 +150,17 @@ function road(ctx, { until = null, handbrake = false, floored = true } = {}) {
     if (TRACE && g % (5 * HZ) === 0) console.log(`  [${ctx.t.toFixed(0)} s] z ${p.z.toFixed(1)} x-road ${(p.x - W.roadX(p.z)).toFixed(1)} v ${sim.rvSpeed().toFixed(1)}${ob ? ' at the ' + ob.type : ''} hp ${ctx.room.rvc.hp}`);
     step(ctx, roadAhead(W, p), ob ? (ob.type === 'grade' ? 3 : 5) : 30);
     stuck = ob?.type === 'mud' && Math.abs(sim.rvSpeed()) < 0.4 ? stuck + 1 / HZ : 0;
+    // (beached on loot that fell out and ended up under it: the crew drags it clear, as they would. The loose
+    // loot is chaos: the smallest change upstream decides whether a safe rolls out, and where)
+    beached = Math.abs(sim.rvSpeed()) < 0.3 ? beached + 1 / HZ : 0;
+    if (beached > 3) {
+      beached = 0;
+      for (const q of [...sim.props.values()]) {
+        if (q.type === 'boulder' || q.type === 'map') continue;
+        const l = sim.rvToLocal(q.body.translation());
+        if (Math.abs(l.x) < 1.6 && Math.abs(l.z) < 5 && l.y < 0) { sim.removeProp(q.id); ctx.notes.push(`beached on a ${q.type} that fell out, at ${p.z.toFixed(0)}: dragged clear`); }
+      }
+    }
     // (stuck in the mud: the winch, once a post past it is in reach; till then it crawls on)
     if (stuck > 2) { ctx.doing = 'mud'; if (winch(ctx, ob, floored)) ob.done = true; stuck = 0; ctx.doing = 'road'; }
   }
@@ -174,6 +202,36 @@ function winch(ctx, ob, floored = true) {
   stop(ctx);
   sim.stowHook();
   return true;
+}
+// a grade hauled up from its foot with nobody steering: nobody in the seat (the crew outside on the winch), or
+// a driver sat with their hands off (pressed R, nothing else); the reel stopped once the back wheels are 2 m
+// over the top (or the winch gains nothing more), then 3 s more. The fastest the RV went on the cable
+function haul(ctx, ob, seated) {
+  const { room, A } = ctx, sim = room.sim, W = room.W;
+  const rz = ob.z0 - 5.5;
+  sim.placeRV(W.roadX(rz), rz, roadYaw(W, rz));
+  ctx.doing = 'placed'; settle(ctx, 1.5);
+  const w = sim.winchWorld();
+  const anc = W.anchors.filter(a => a.z > ob.z1 - 3 && Math.hypot(a.x - w.x, a.y - w.y, a.z - w.z) < C.WINCH.MAX_LEN - 2)
+    .sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z))[0];
+  if (!anc) return null;
+  Object.assign(sim.hook, { state: 'anchored', body: null, anchor: { x: anc.x, y: anc.y, z: anc.z }, attach: null, holder: null, reeling: true, len: Math.hypot(anc.x - w.x, anc.y - w.y, anc.z - w.z) + 0.2 });
+  ctx.doing = seated ? 'haul (hands off)' : 'haul (nobody driving)';
+  A.seat = seated ? 0 : null;
+  const tick = () => { if (seated) room.handle(A, { t: 'drv', th: 0, st: 0, hb: 0 }); room.tick(1 / HZ); ctx.t += 1 / HZ; };
+  let vmax = 0, best = -Infinity, bestAt = 0;
+  for (let i = 0; i < 60 * HZ && sim.rv.translation().z - 2.6 < ob.z1 + 2 && (i < 3 * HZ || i - bestAt < 2 * HZ); i++) {
+    tick();
+    const v = sim.rv.linvel(), z = sim.rv.translation().z;
+    vmax = Math.max(vmax, Math.hypot(v.x, v.y, v.z));
+    if (z > best + 0.05) { best = z; bestAt = i; }
+  }
+  sim.hook.reeling = false;
+  for (let i = 0; i < 3 * HZ; i++) tick();
+  const over = sim.rv.translation().z - 2.6 > ob.z1 + 1;
+  sim.stowHook();
+  A.seat = 0;
+  return { vmax, over };
 }
 // a stop's apron: in at 4 m/s, 4 m short of whatever is ahead, back out 8 m, back onto the road
 function apron(ctx, poi) {
@@ -224,13 +282,11 @@ function dock(ctx) {
   stop(ctx);
   return room.docked();
 }
-// put down elsewhere at 15 m/s; set on its side (that fall is the setup, not part of the gate), then the tow
+// put down elsewhere; set on its side (that fall is the setup, not part of the gate), then the tow
 function teleports(ctx) {
   const { room } = ctx, sim = room.sim, W = room.W, z = W.LEN - 140;
-  const f = fwd(sim);
-  sim.rv.setLinvel({ x: f.x * 15, y: 0, z: f.z * 15 }, true);
   sim.placeRV(W.roadX(z), z, roadYaw(W, z));
-  ctx.doing = 'placed at 15 m/s'; settle(ctx, 3);
+  ctx.doing = 'placed'; settle(ctx, 3);
   const t = sim.rv.translation(), hp = room.rvc.hp;
   sim.rv.setTranslation({ x: t.x, y: t.y + 1.5, z: t.z }, true);
   sim.rv.setRotation({ x: 0, y: 0, z: Math.sin(Math.PI / 4), w: Math.cos(Math.PI / 4) }, true);
@@ -259,8 +315,8 @@ if (ONLY.has('soak')) for (const seed of SEEDS) for (let day = D0; day <= Math.m
   teleports(ctx);
   let aprons = 0;
   if (!QUICK) for (const poi of W.pois) {
-    if (poi.type === 'crash' || Math.abs((poi.padY ?? poi.y) - W.heightAt(W.roadX(poi.z), poi.z)) > 2.5) continue;
     if (POI && poi.type !== POI) continue;
+    if (Math.abs((poi.padY ?? poi.y) - W.heightAt(W.roadX(poi.z), poi.z)) > 2.5) continue;   // (a stop up on a ledge: no apron to drive)
     room.clock = 9;
     if (apron(ctx, poi) !== false) aprons++;
   }
@@ -269,6 +325,24 @@ if (ONLY.has('soak')) for (const seed of SEEDS) for (let day = D0; day <= Math.m
   all.push(...own);
   const d = days[days.length - 1];
   console.log(`seed ${seed} day ${day}: road ${made ? `${roadT.toFixed(0)} s` : 'DIDN\'T MAKE IT'}, ${aboard} of ${LOOSE.length} loose things still aboard${broke.length ? ` (broke: ${broke.join(', ')})` : ''}${out.length ? ` (fell out: ${out.join(', ')})` : ''}, docked ${!!ctx.docked}, ${aprons} aprons; ${own.length} windows, ${d.priced.length} cost anything; RV ${room.rvc.hp}%${ctx.notes.length ? '; ' + ctx.notes.join('; ') : ''}`);
+}
+
+// every grade, hauled with nobody steering (nobody in the seat; a driver sat with their hands off)
+const hauls = [];
+if (ONLY.has('hauls')) for (const seed of SEEDS) for (let day = D0; day <= Math.min(C.DAYS, D1 || D0); day++) {
+  const grades = generateLeg(seed, day).obstacles.filter(o => o.type === 'grade');
+  for (let gi = 0; gi < grades.length; gi++) for (const seated of [false, true]) {
+    const ctx = setup(seed, day), { room } = ctx, sim = room.sim, W = room.W;
+    for (const g of W.gates) sim.openGate(g.id);
+    for (const p of [...sim.props.values()]) if (p.type === 'boulder') sim.removeProp(p.id);
+    const ob = W.obstacles.filter(o => o.type === 'grade')[gi];
+    const r = haul(ctx, ob, seated);
+    if (!r) { ctx.notes.push(`seed ${seed} day ${day}: no post in reach up the grade at ${ob.z0.toFixed(0)}`); continue; }
+    const own = ctx.hits.filter(h => h.doing !== 'placed');
+    hauls.push({ seed, day, gi, seated, ...r, priced: own.filter(h => h.priced), hp: room.rvc.hp });
+    all.push(...own);
+    if (TRACE || own.some(h => h.priced) || !r.over) console.log(`  haul: seed ${seed} day ${day} grade ${gi} (${seated ? 'hands off' : 'nobody driving'}): ${r.over ? 'over' : 'NOT OVER'}, fastest ${r.vmax.toFixed(2)} m/s, RV ${room.rvc.hp}%`);
+  }
 }
 
 // every window the crash detector closed, by what was going on and what it touched
@@ -340,12 +414,26 @@ if (ONLY.has('bound')) for (const seed of SEEDS) {
 let failed = false;
 const gate = (ok, msg) => { console.log(`${ok ? 'ok  ' : 'FAIL'} ${msg}`); if (!ok) failed = true; };
 console.log(`\n(${((Date.now() - t0) / 1000).toFixed(0)} s)`);
-gate(days.every(d => d.made), `every road run made it to town (${days.filter(d => d.made).length} of ${days.length})`);
-gate(days.every(d => !d.priced.length && d.hp === 100), `none of it cost the RV anything (${all.filter(h => h.priced).length} of ${all.length} windows did; worst ${Math.max(0, ...all.map(h => h.dv)).toFixed(2)} m/s)`);
-gate(days.every(d => !d.made || d.docked), `backed into Ed's loading zone every time (${days.filter(d => d.docked).length})`);
-gate(table.every(({ h }, i) => h && (i % 4 === 0 || h.amt >= table[i - 1].h?.amt)), 'the crash table rises with speed');
+// (a part that didn't run says so: it neither passes nor fails)
+const ran = (part, n) => { if (!n) console.log(`--   ${part}: didn't run`); return n > 0; };
+if (ran('the soak', days.length)) {
+  gate(days.every(d => d.made), `every road run made it to town (${days.filter(d => d.made).length} of ${days.length})`);
+  gate(days.every(d => !d.priced.length && d.hp === 100), `none of it cost the RV anything (${days.reduce((n, d) => n + d.priced.length, 0)} of ${days.reduce((n, d) => n + d.n, 0)} windows did; worst ${Math.max(0, ...all.map(h => h.dv)).toFixed(2)} m/s)`);
+  gate(days.every(d => !d.made || d.docked), `backed into Ed's loading zone every time (${days.filter(d => d.docked).length})`);
+}
+if (ran('the hauls', hauls.length)) {
+  gate(hauls.every(h => h.over && !h.priced.length && h.hp === 100), `every grade hauled up with nobody steering made it over, and none of it cost the RV anything (${hauls.filter(h => h.over).length} of ${hauls.length} over; ${hauls.filter(h => h.priced.length).length} cost something)`);
+  const fastest = Math.max(...hauls.map(h => h.vmax));
+  gate(fastest < C.WINCH.REEL_SPEED + C.WINCH.OVERRUN + 0.4, `the winch never had the RV going faster than its drum (${C.WINCH.REEL_SPEED} m/s, plus ${C.WINCH.OVERRUN}): fastest ${fastest.toFixed(2)} m/s`);
+}
+if (ran('the crash table', table.length)) {
+  // (each seed's four rows: every one a hit on the gate, dearer the faster, never free from 5 m/s)
+  const rows = [...new Set(table.map(r => r.seed))].map(sd => table.filter(r => r.seed === sd));
+  gate(rows.every(r => r.length === 4 && r.every(({ h }) => h && h.what === 'the ranger gate') && r.every(({ h, speed }, i) => (speed < 5 || h.amt > 0) && (i === 0 || h.amt > r[i - 1].h.amt))),
+    `the crash table rises with speed (${rows.map(r => r.map(({ h }) => h ? `${h.amt}%` : '-').join('/')).join(', ')})`);
+}
 const HALF = C.HOUR_SEC / 2;
-gate(bound.every(b => b.made && b.extra <= HALF), `a breakdown 700 m out costs at most half a game hour (${HALF} s): worst +${Math.max(...bound.map(b => b.extra)).toFixed(1)} s`);
+if (ran('the breakdown bound', bound.length)) gate(bound.every(b => b.made && b.extra <= HALF), `a breakdown 700 m out costs at most half a game hour (${HALF} s): worst +${Math.max(...bound.map(b => b.extra)).toFixed(1)} s`);
 // (day 5's last 700 m always has a grade or two to winch up: from there at 22:00 a healthy crew misses
 // midnight too, so what's gated is what the breakdown itself costs; the clock is printed)
 const clk = s => { const h = 22 + s / C.HOUR_SEC; return `${Math.floor(h) % 24}:${String(Math.floor((h % 1) * 60)).padStart(2, '0')}`; };

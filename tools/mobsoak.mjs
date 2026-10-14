@@ -10,8 +10,11 @@
 // thefts careless vs guarded.
 // Gates: reach >= 95%, stash >= 85%, carried loss p90 <= $30, 0 non-finite, the wildlife's share of a
 // step <= 0.3 ms (mean), grumphorn charges within 20 m of the road, LEAVE ends by its exit (1.2 m) and at least
-// 6.5 m off the road's middle.
+// LEFT_OFF_ROAD (6.3 m) off the road's middle.
 import path from 'node:path';
+// a grumphorn out of patience lies down at least this far off the road's middle (its exit is 7.5 m or more out,
+// and it lies within 1.2 m of it; test/mobs.mjs G-exit uses the same)
+export const LEFT_OFF_ROAD = 6.3;
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -222,6 +225,6 @@ if (isMain) {
   gate(beds.every(b => b.off <= 20), `grumphorn charges stay within 20 m of the road (worst ${Math.max(0, ...beds.map(b => b.off)).toFixed(1)} m)`);
   // (an exit is 7.5 m or more off the road's middle, which is 3 m either side; lying down within 1.2 m of it
   // leaves it 6.3 m or more off the middle)
-  gate(beds.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= 6.3), `every grumphorn that ran out of patience lay down by its exit, clear of the road (worst ${Math.max(0, ...beds.map(b => b.fromExit)).toFixed(2)} m from its spot, nearest ${Math.min(99, ...beds.map(b => b.fromRoad)).toFixed(1)} m from the road's middle; ${beds.filter(b => b.replan).length} couldn't get back to its own and took the nearest; ${beds.filter(b => b.st !== GST.LEFT).length} never did)`);
+  gate(beds.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= LEFT_OFF_ROAD), `every grumphorn that ran out of patience lay down by its exit, clear of the road (worst ${Math.max(0, ...beds.map(b => b.fromExit)).toFixed(2)} m from its spot, nearest ${Math.min(99, ...beds.map(b => b.fromRoad)).toFixed(1)} m from the road's middle; ${beds.filter(b => b.replan).length} couldn't get back to its own and took the nearest; ${beds.filter(b => b.st !== GST.LEFT).length} never did)`);
   process.exit(failed ? 1 : 0);
 }

@@ -127,16 +127,17 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
     out.map(o => `(day ${o.day}: ${o.secs.toFixed(0)} s, top ${o.top.toFixed(1)} m/s, braked from ${o.v0.toFixed(1)} with ${o.inside} aboard, worst ${o.worst.toFixed(2)} m/s)`).join(' '));
 }
 {
-  // teleports: the RV put somewhere else while doing 15 m/s, and set back on its wheels
-  const { room, ps: [A] } = crew(['Ann']);
-  const sim = room.sim, W = room.W, seen = hits(room);
-  drive(room, A, 14, 6);
-  const f = fwdOf(room);
-  sim.rv.setLinvel({ x: f.x * 15, y: 0, z: f.z * 15 }, true);
-  sim.placeRV(W.roadX(200), 200, roadYaw(W, 200));
+  // a teleport is no crash: the RV put down with its nose 0.6 m into the closed ranger gate's bars (day 3) is
+  // shoved back out of them (without the settle window that's a 4 m/s knock, 6%), and nothing counts till it
+  // has settled. Then on its side, settled, and set back on its wheels (the tow)
+  const { room, ps: [A] } = crew(['Ann'], 3);
   A.seat = null;
+  const sim = room.sim, W = room.W, g = W.gates[0], seen = hits(room), gz = g.z - 4.25 + 0.6;
+  sim.placeRV(W.roadX(gz), gz, roadYaw(W, gz));
   tick(room, 3);
-  const afterPlace = worst(seen);
+  const afterPlace = worst(seen), shoved = gz - sim.rv.translation().z, hpPlaced = room.rvc.hp;
+  sim.placeRV(W.roadX(200), 200, roadYaw(W, 200));
+  tick(room, 2);
   // on its side, settled, then righted (the tow)
   const t = sim.rv.translation();
   sim.rv.setTranslation({ x: t.x, y: t.y + 1.5, z: t.z }, true);
@@ -146,8 +147,8 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
   sim.rightRV();
   tick(room, 3);
   const righted = seen.slice(n);
-  check(afterPlace <= C.RVH.FREE && flipped && !sim.rvFlipped() && worst(righted) <= C.RVH.FREE,
-    `rv: put down elsewhere at 15 m/s (worst ${afterPlace.toFixed(2)} m/s) and set back on its wheels from its side (worst ${worst(righted).toFixed(2)} m/s): no crash`);
+  check(afterPlace <= C.RVH.FREE && hpPlaced === 100 && shoved > 0.3 && flipped && !sim.rvFlipped() && worst(righted) <= C.RVH.FREE,
+    `rv: put down with its nose in the gate's bars it's shoved back ${shoved.toFixed(2)} m and nothing counts (RV ${hpPlaced}%), and set back on its wheels from its side (worst ${worst(righted).toFixed(2)} m/s): no crash`);
 }
 {
   // on its side on the steepest bank by the road (day 1, about 45 degrees): after 7 s the tow truck puts it back
@@ -189,12 +190,52 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
   const z0 = sim.rv.translation().z;
   pedal(room, A, -1, 5);
   const held = Math.abs(sim.rv.translation().z - z0);
-  // reeled in up the grade, the driver feathering the throttle
+  // reeled in up the grade, the driver feathering the throttle, till the back wheels are 2 m over the top (where
+  // a crew stops the reel), then the reel stopped and 3 s more
   sim.hook.reeling = true;
   let up = false;
-  for (let i = 0; i < 30 * HZ && !up; i++) { pedal(room, A, 0.5, 1 / HZ); up = sim.rv.translation().z > grade.z1 + 1.5; }
+  for (let i = 0; i < 40 * HZ && !up; i++) { pedal(room, A, 0.5, 1 / HZ); up = sim.rv.translation().z - 2.6 > grade.z1 + 2; }
+  sim.hook.reeling = false;
+  pedal(room, A, 0, 3);
   check(held < 1.5 && up && worst(seen) <= C.RVH.FREE && room.rvc.hp === 100,
-    `rv: day ${day}: flooring it against the clipped winch (it moved ${held.toFixed(2)} m) and winching up the ${grade.h.toFixed(1)} m grade: no crash (worst ${worst(seen).toFixed(2)} m/s)`);
+    `rv: day ${day}: flooring it against the clipped winch (it moved ${held.toFixed(2)} m) and winching up the ${grade.h.toFixed(1)} m grade and over: no crash (worst ${worst(seen).toFixed(2)} m/s)`);
+}
+{
+  // every grade on two seeds, hauled with nobody at the wheel (the crew outside working the winch) till the
+  // back wheels are over the top, the reel stopped, 3 s more: a post clipped off to the side of the road has it
+  // run on along its wheels faster than the cable shortens, so the winch gives no more pull past the drum's
+  // speed: it never comes over at a run and into the post across the road. Nothing costs the RV anything
+  const runs = [];
+  for (const seed of [4242, 777]) for (let day = 1; day <= 5; day++) {
+    const n = generateLeg(seed, day).obstacles.filter(o => o.type === 'grade').length;
+    for (let gi = 0; gi < n; gi++) {
+      const { room, ps: [A] } = crew(['Ann'], day, seed);
+      A.seat = null;
+      const W = room.W, sim = room.sim, grade = W.obstacles.filter(o => o.type === 'grade')[gi];
+      for (const g of W.gates) sim.openGate(g.id);
+      for (const p of [...sim.props.values()]) if (p.type === 'boulder') sim.removeProp(p.id);
+      const rz = grade.z0 - 5.5;
+      sim.placeRV(W.roadX(rz), rz, roadYaw(W, rz));
+      tick(room, 1.5);
+      const w = sim.winchWorld(), anc = W.anchors.filter(a => a.z > grade.z1 - 3 && Math.hypot(a.x - w.x, a.y - w.y, a.z - w.z) < C.WINCH.MAX_LEN - 2)
+        .sort((a, b) => Math.hypot(a.x - w.x, a.z - w.z) - Math.hypot(b.x - w.x, b.z - w.z))[0];
+      Object.assign(sim.hook, { state: 'anchored', body: null, anchor: { x: anc.x, y: anc.y, z: anc.z }, attach: null, holder: null, reeling: true, len: Math.hypot(anc.x - w.x, anc.y - w.y, anc.z - w.z) + 0.2 });
+      const seen = hits(room);
+      let vmax = 0, best = -Infinity, bestAt = 0, i = 0;
+      for (; i < 60 * HZ && sim.rv.translation().z - 2.6 < grade.z1 + 2 && (i < 3 * HZ || i - bestAt < 2 * HZ); i++) {
+        room.tick(1 / HZ);
+        const v = sim.rv.linvel(), z = sim.rv.translation().z;
+        vmax = Math.max(vmax, Math.hypot(v.x, v.y, v.z));
+        if (z > best + 0.05) { best = z; bestAt = i; }
+      }
+      sim.hook.reeling = false;
+      tick(room, 3);
+      runs.push({ seed, day, gi, over: sim.rv.translation().z - 2.6 > grade.z1 + 1, vmax, cost: seen.filter(h => h.priced).reduce((s, h) => s + h.amt, 0) });
+    }
+  }
+  const fast = Math.max(...runs.map(r => r.vmax));
+  check(runs.length >= 10 && runs.every(r => r.over && !r.cost) && fast < C.WINCH.REEL_SPEED + C.WINCH.OVERRUN + 0.4,
+    `rv: ${runs.length} grades hauled with nobody at the wheel: all over the top (${runs.filter(r => r.over).length}), nothing off the RV (${runs.filter(r => r.cost).map(r => `seed ${r.seed} day ${r.day}: -${r.cost}%`).join(', ') || 'none'}), never faster than ${fast.toFixed(2)} m/s on the cable`);
 }
 {
   // the steepest grade there is (day 5, seed 120: 14.5 m), three safes aboard (450 kg) and nobody at the

@@ -413,9 +413,9 @@ function driveAt(room, A, speed, secs, onTick = null) {
   // G-exit: out of patience on the wrong side of the boulder (its charges took it back down the road, and the
   // boulder's still there), it can't get back to its own way off: it takes the nearest, off the road all the
   // same (the soak's own case: seed 80190's day 5, a fake player walking up to each beast for a minute)
-  const { soakBeds } = await import('../tools/mobsoak.mjs');
+  const { soakBeds, LEFT_OFF_ROAD } = await import('../tools/mobsoak.mjs');
   const r = soakBeds(80190, 5);
-  check(r.length === 2 && r.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= 6.5) && r.some(b => b.replan),
+  check(r.length === 2 && r.every(b => b.st === GST.LEFT && b.fromExit <= 1.2 && b.fromRoad >= LEFT_OFF_ROAD) && r.some(b => b.replan),
     `grumphorn: out of patience, each lies down by its way off the road, clear of it (${r.map(b => `${b.ob}: ${b.fromExit.toFixed(2)} m from it, ${b.fromRoad.toFixed(1)} m off the road${b.replan ? ', the nearest way off from behind the boulder' : ''}`).join('; ')})`);
 }
 {
@@ -584,6 +584,21 @@ const billed = (room, fn) => { const M = room.sim.mobs, f = M.ghCost.bind(M), lo
   check(bh.length === 1 && bh[0].amt >= 6 && bh[0].amt <= 10 && bh[0].how === 'charge' && !seen.some(h => h.why === 'crash') && evs(A.conn, 'rvhit').length === 1,
     `grumphorn: its charge into the parked RV costs ${bh[0]?.amt}% (${bh.length} hit, the ${bh[0]?.zone}), and no crash`);
   A.seat = null;
+}
+{
+  // a charge into the closed ranger gate stops short at its bars, winded (the wall check goes by the change in
+  // its speed along the ground: MRV3's charge runs over a fold in the road, which is no wall)
+  const { room, ps: [A] } = crew(['Ann']);
+  room.debug(A, { op: 'day', d: 3 });
+  tick(room, 0.2);
+  room.mobsOn = false;
+  const sim = room.sim, g = room.W.gates[0], r = roadAt(room, g.z - 9);
+  const id = mobAt(room, A, 'grumphorn', r.x, r.z, { yaw: r.yaw, st: GST.ROAM }), m = mobOf(room, id);
+  sim.mobs.force(m, GST.CHARGE);
+  sim.props.get(id).body.setLinvel({ x: Math.sin(r.yaw) * GH.CHARGE, y: 0, z: Math.cos(r.yaw) * GH.CHARGE }, true);
+  let at = null;
+  for (let i = 0; i < 4 * C.SIM_HZ && !at; i++) { tick(room, 1 / C.SIM_HZ); if (m.st === GST.WINDED) at = sim.props.get(id).body.translation(); }
+  check(g && at && Math.abs(at.z - g.z) < 3, `grumphorn: its charge into the closed ranger gate stops at the bars, winded (${at ? `${(at.z - g.z).toFixed(1)} m from them` : 'it never was'})`);
 }
 {
   // MRV3: a charge into the back of an RV driving off at 5 m/s closes at 2 m/s: no damage

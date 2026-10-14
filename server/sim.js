@@ -713,8 +713,13 @@ export class Sim {
     T = Math.min(T, C.WINCH.FORCE);
     // the drum winds no faster than REEL_SPEED: a load already coming faster than that (the RV breaking free
     // of a snag, a loose hook flying home) pulls the cable along no harder, so the pull fades out over
-    // OVERRUN m/s past it, and the RV comes up a grade at about the drum's speed, never flung
-    if (-sep > C.WINCH.REEL_SPEED) T *= Math.max(0, 1 - (-sep - C.WINCH.REEL_SPEED) / C.WINCH.OVERRUN);
+    // OVERRUN m/s past it, and the RV comes up a grade at about the drum's speed, never flung. Hauled at an
+    // angle (a post off to the side of the road) it runs on along its wheels faster than the cable shortens:
+    // that's no reason to pull harder either (it came over the crest at a run and into the far post). Pulled
+    // away from it, the cable holds as hard as ever
+    let fast = -sep;
+    if (H.state === 'anchored' && sep <= 0) { const v = this.rv.linvel(); fast = Math.max(fast, Math.hypot(v.x, v.y, v.z)); }
+    if (fast > C.WINCH.REEL_SPEED) T *= Math.max(0, 1 - (fast - C.WINCH.REEL_SPEED) / C.WINCH.OVERRUN);
     if (H.state === 'out' && H.holder == null) {
       // loose hook: just drag it in, the RV doesn't care about a 9 kg hook
       H.body.applyImpulse(mul(dir, -Math.min(T, 900) * dt), true);
@@ -996,12 +1001,17 @@ export class Sim {
       else { this.hit = null; return; }
     }
     if (h >= C.RVH.GATE) {
-      if (!this.hit) this.hit = { x: 0, z: 0, last: this.t, partner: this.rvPartner() };
-      this.hit.x += d.x; this.hit.z += d.z; this.hit.last = this.t;
+      // (each step goes to what the RV touched most in it: a step on the wildlife is the wildlife's to price
+      // (mobs.js), and leaves the window to whatever the RV carries on into: the gate's bars behind a beast)
+      const partner = this.rvPartner();
+      if (partner === 'mob') { if (this.hit) this.hit.last = this.t; }
+      else {
+        if (!this.hit) this.hit = { x: 0, z: 0, last: this.t, partner };
+        this.hit.x += d.x; this.hit.z += d.z; this.hit.last = this.t;
+      }
     } else if (this.hit && this.t - this.hit.last > C.RVH.WIN) {
       const hit = this.hit, dv = Math.hypot(hit.x, hit.z);
       this.hit = null;
-      if (hit.partner === 'mob') return;
       const t = this.rv.translation();
       this.out.push({ k: 'rvhit', why: 'crash', dv: r3(dv), zone: hitZone(hit), what: hit.partner, at: [r3(t.x), r3(t.y + 1.2), r3(t.z)] });
     }
