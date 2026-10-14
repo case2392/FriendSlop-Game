@@ -1,7 +1,7 @@
 // A player's save: what they keep from one trip to the next, on their own machine (the page loads and
 // writes it: client/js/profile.js). Pure, so the page, the tests and the tools share it. The host's server
-// never sees more of it than forServer() in client/js/profile.js hands over (the profile id and the
-// number of wins).
+// never sees more of it than forServer() in client/js/profile.js hands over (the profile id, the number of
+// wins and the kit's levels).
 //
 // Version 1, about 2-10 KB of JSON:
 //   v      1
@@ -16,13 +16,19 @@
 //   cards  your Road Cards (shared/cards.js): { id: copies }
 //   seen   the cards you've had in a glovebox, kept or not (the Album shows the rest as card backs)
 //   lost   the ones you've only ever seen go with the Repo Man: { id: the day it happened }
+//   doubles copies past the most worth keeping (a kit card's third, a lore card's second), toward a pick: 0-2
+//   picks  unspent picks: every 3 doubles make one, and so does a MINT win (the balloon paid with the RV at
+//          80% or better, you aboard): a pick is a copy of any card you're missing (never a rare)
+//   kit    what you take on a trip (shared/garage.js): { perks: [up to 3 perk ids], part: an RV part's id, or
+//          null for your best one }
 //   sum    an FNV-1a hash of the rest: it catches a torn write; it isn't anti-cheat (it's your save)
 //
 // Times: ROAD TIME is the game clock at each day's payment less 6:00, summed over the five days (a payment
 // made by midnight's auto-pay counts 18 hours), shown as real time (45 s a game hour): paying at 2 PM every
 // day is 40 game hours, 30:00.
 
-import { CARD } from './cards.js';
+import { CARD, CARDS, maxCopies } from './cards.js';
+import { PERKS, PERK_IDS, PART_IDS, SLOTS, levelFrom } from './garage.js';
 
 export const PROFILE_V = 1;
 export const MAX_BYTES = 64 * 1024;   // the most a save may take (a bigger one is refused, not trimmed)
@@ -31,6 +37,8 @@ const RUNS = 32, CREWS = 12, SEEDS = 20, NAMES = 6;
 const TERMS = ['std', 'bad'];
 export const LIFE = ['trips', 'wins', 'days', 'pawned', 'kos', 'revives', 'rvDmg', 'repairs', 'cards', 'cardsLost'];
 const MAX_COPIES = 99;
+export const DOUBLES_PER_PICK = 3, MINT_HP = 80;
+const MAX_PICKS = 99;
 
 // ---- small checks ------------------------------------------------------------------------------------
 const isObj = o => !!o && typeof o === 'object' && !Array.isArray(o);
@@ -58,7 +66,7 @@ export const crewKey = hashes => [...hashes].map(String).sort().join('.');
 // ---- the shape ---------------------------------------------------------------------------------------
 const board = () => ({ fast: null, splits: [null, null, null, null, null], haul: null, clean: null });
 export function fresh(pid, now = 0) {
-  return { v: PROFILE_V, pid, made: now, saved: now, rev: 0, best: { std: board(), bad: board() }, crews: [], seeds: [], life: Object.fromEntries(LIFE.map(k => [k, 0])), runs: [], cards: {}, seen: [], lost: {} };
+  return { v: PROFILE_V, pid, made: now, saved: now, rev: 0, best: { std: board(), bad: board() }, crews: [], seeds: [], life: Object.fromEntries(LIFE.map(k => [k, 0])), runs: [], cards: {}, seen: [], lost: {}, doubles: 0, picks: 0, kit: { perks: [], part: null } };
 }
 
 function cleanBoard(b) {
@@ -95,6 +103,8 @@ export function validate(o) {
   if (Array.isArray(o.seen)) p.seen = [...new Set(o.seen.filter(id => typeof id === 'string' && CARD[id]))];
   for (const id of Object.keys(p.cards)) if (!p.seen.includes(id)) p.seen.push(id);
   if (isObj(o.lost)) for (const [id, d] of Object.entries(o.lost)) if (CARD[id] && !p.cards[id]) p.lost[id] = int(d, 1, 5, 1);
+  p.doubles = int(o.doubles, 0, DOUBLES_PER_PICK - 1); p.picks = int(o.picks, 0, MAX_PICKS);
+  if (isObj(o.kit)) p.kit = cleanKit(p, o.kit);
   return p;
 }
 
@@ -122,6 +132,55 @@ export function parse(text) {
   return prof.pid ? { prof, status: 'ok' } : { prof: null, status: 'corrupt' };
 }
 
+// ---- the Garage (shared/garage.js has what each upgrade does) ------------------------------------------
+// a copy past the most worth keeping: three of them make a pick
+function double(prof) {
+  if (++prof.doubles >= DOUBLES_PER_PICK) { prof.doubles = 0; prof.picks = Math.min(MAX_PICKS, prof.picks + 1); }
+}
+// one more copy of a card in the save -> the upgrade level it unlocks, or 0 (a new perk takes an empty slot
+// by itself, so a player who never opens the Garage still has it)
+function addCopy(prof, id) {
+  const before = levelFrom(prof.cards, id);
+  prof.cards[id] = Math.min(MAX_COPIES, (prof.cards[id] || 0) + 1);
+  delete prof.lost[id];
+  if (!prof.seen.includes(id)) prof.seen.push(id);
+  const lv = levelFrom(prof.cards, id);
+  if (lv <= before) return 0;
+  if (PERKS[id] && before === 0 && !prof.kit.perks.includes(id) && prof.kit.perks.length < SLOTS) prof.kit.perks.push(id);
+  return lv;
+}
+// the kit as a save may hold it: perks you have, at most SLOTS, no repeats; a part you have, or null (your best)
+function cleanKit(prof, k) {
+  const perks = Array.isArray(k.perks) ? [...new Set(k.perks.filter(id => typeof id === 'string' && PERK_IDS.includes(id) && levelFrom(prof.cards, id) > 0))].slice(0, SLOTS) : [];
+  const part = typeof k.part === 'string' && PART_IDS.includes(k.part) && levelFrom(prof.cards, k.part) > 0 ? k.part : null;
+  return { perks, part };
+}
+// the cards a pick can buy: any you're missing a copy of (a kit card's second level too), never a rare
+export const pickable = prof => CARDS.filter(c => c.rarity !== 'rare' && (prof.cards[c.id] || 0) < maxCopies(c.id)).map(c => c.id);
+// spend a pick on a card -> whether it was spent
+export function spendPick(prof, id) {
+  if (prof.picks < 1 || !pickable(prof).includes(id)) return false;
+  prof.picks--;
+  addCopy(prof, id);
+  return true;
+}
+// change what you take (the Garage's KIT tab): only what you have, at most SLOTS perks
+export function setKit(prof, k) { prof.kit = cleanKit(prof, isObj(k) ? k : {}); return prof.kit; }
+// the RV part you bring: the one you chose, else your best (the higher level; on a tie the catalogue's first)
+export function partOf(prof) {
+  if (prof.kit.part && levelFrom(prof.cards, prof.kit.part) > 0) return prof.kit.part;
+  let best = null;
+  for (const id of PART_IDS) if (levelFrom(prof.cards, id) > (best ? levelFrom(prof.cards, best) : 0)) best = id;
+  return best;
+}
+// what the host's server is told of the kit: each perk you take and your part, with their levels
+export function kitFor(prof) {
+  const perks = {};
+  for (const id of prof.kit.perks) { const lv = levelFrom(prof.cards, id); if (lv) perks[id] = lv; }
+  const part = partOf(prof);
+  return { perks, part: part ? { id: part, lv: levelFrom(prof.cards, part) } : null };
+}
+
 // ---- a trip, credited ----------------------------------------------------------------------------------
 // trip: the server's 'trip' message (server/room.js tripMsg). Returns { counted, dup, newRecords } and
 // changes prof in place. The rules:
@@ -135,9 +194,11 @@ export function parse(text) {
 // newRecords: what this trip set: 'fast', 'haul', 'clean', 'split1'..'split5', 'crew'.
 // The cards (not on a practice trip): won, a copy of each card stowed while you were aboard (res.cards, and
 // res.fresh the ones new to you); lost, the glovebox went with the Repo Man (res.lost, and res.lostNew the
-// ones you've never had: grey outlines in the Album, 'Lost to the Repo Man, day 3').
+// ones you've never had: grey outlines in the Album, 'Lost to the Repo Man, day 3'). A won copy past the
+// most worth keeping is a double (res.picks: the picks they and a MINT win made; res.unlocked: the Garage
+// levels the trip's cards opened, { id, lv }).
 export function creditTrip(prof, trip, { acceptTest = false, now = 0 } = {}) {
-  const res = { counted: false, dup: false, newRecords: [], cards: [], fresh: [], lost: [], lostNew: [] };
+  const res = { counted: false, dup: false, newRecords: [], cards: [], fresh: [], lost: [], lostNew: [], picks: 0, mint: false, unlocked: [] };
   if (!isObj(trip) || !isRun(trip.run)) return res;
   if (prof.runs.includes(trip.run)) { res.dup = true; return res; }
   if (trip.practice === 'test' && !acceptTest) return res;
@@ -168,11 +229,12 @@ export function creditTrip(prof, trip, { acceptTest = false, now = 0 } = {}) {
   const L = prof.life;
   L.trips++; if (won && you.atEnd) L.wins++;
   const ids = v => (Array.isArray(v) ? v.filter(id => typeof id === 'string' && CARD[id]).slice(0, 200) : []);
+  const picks0 = prof.picks;
   if (won) for (const id of ids(you.cards)) {
     if (!prof.cards[id]) res.fresh.push(id);
-    prof.cards[id] = Math.min(MAX_COPIES, (prof.cards[id] || 0) + 1);
-    delete prof.lost[id];
-    if (!prof.seen.includes(id)) prof.seen.push(id);
+    if ((prof.cards[id] || 0) >= maxCopies(id)) double(prof);
+    const lv = addCopy(prof, id);
+    if (lv) res.unlocked.push({ id, lv });
     res.cards.push(id); L.cards++;
   } else for (const id of ids(you.lost)) {
     if (!prof.cards[id] && !res.lostNew.includes(id)) { res.lostNew.push(id); prof.lost[id] = int(trip.day, 1, 5, 1); }
@@ -182,6 +244,9 @@ export function creditTrip(prof, trip, { acceptTest = false, now = 0 } = {}) {
   L.days += days; L.pawned += sold;
   L.kos += int(you.kos, 0, 1e6); L.revives += int(you.revives, 0, 1e6); L.rvDmg += int(you.rvDmg, 0, 1e6);
   L.repairs += int(trip.repairs, 0, 1e9);
+  // MINT: the balloon paid with the RV at 80% or better, and you aboard for it
+  if (won && you.atEnd && int(trip.rvEnd, 0, 100) >= MINT_HP) { res.mint = true; prof.picks = Math.min(MAX_PICKS, prof.picks + 1); }
+  res.picks = prof.picks - picks0;
   if (!whole) return res;
   const b = prof.best[trip.tier === 'bad' ? 'bad' : 'std'];
   const crew = Array.isArray(trip.crew) ? trip.crew.filter(isObj) : [];

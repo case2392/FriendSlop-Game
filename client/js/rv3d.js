@@ -860,6 +860,69 @@ function buildWinch(b) {
   for (const sx of [-1, 1]) b.trim.add(at(beam(0.04, 0.32, 0.06, TRIM.iron), x + sx * 0.22, y - 0.01, z + 0.145));
 }
 
+// ---- the Garage's RV parts (shared/garage.js): drawn only; no collider changes, so the pages' physics copy of
+// the RV stays as it is. Each is built the first time it's fitted (RVView.setParts) ----------------------------
+const PART_ART = {
+  // an iron frame on the nose, clear of the headlamps and the winch's strap; II: a middle rail and wings
+  bullbar(b, lv) {
+    const z = HL + 0.42, y0 = -0.6, y1 = lv >= 2 ? 0.58 : 0.46, sx0 = 0.5;
+    for (const sx of [-1, 1]) {
+      b.trim.add(rodAB(0.045, [sx * sx0, y0, z - 0.1], [sx * sx0, y1, z], TRIM.iron, { segs: 8 }));
+      b.trim.add(rodAB(0.03, [sx * sx0, y0 + 0.08, z - 0.09], [sx * sx0, y0 + 0.08, HL + 0.24], TRIM.iron, { segs: 6 }));
+      b.trim.add(at(toBand(new THREE.SphereGeometry(0.055, 10, 6), TRIM.brass), sx * sx0, y1, z));
+      for (const y of [-0.1, y1 - 0.12]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.02, 5, 3), TRIM.brass), sx * sx0, y, z + 0.04));
+    }
+    b.trim.add(at(rod(0.04, sx0 * 2, TRIM.iron, { segs: 8 }), 0, y1, z, 0, 0, PI / 2));
+    b.trim.add(at(rod(0.035, sx0 * 2, TRIM.iron, { segs: 8 }), 0, -0.1, z - 0.05, 0, 0, PI / 2));
+    if (lv >= 2) {
+      b.trim.add(at(rod(0.035, sx0 * 2, TRIM.iron, { segs: 8 }), 0, 0.24, z - 0.02, 0, 0, PI / 2));
+      for (const sx of [-1, 1]) {
+        b.trim.add(rodAB(0.035, [sx * sx0, 0.24, z - 0.02], [sx * 1.18, -0.02, HL + 0.26], TRIM.iron, { segs: 8 }));
+        b.trim.add(rodAB(0.035, [sx * sx0, -0.4, z - 0.07], [sx * 1.18, -0.32, HL + 0.26], TRIM.iron, { segs: 8 }));
+        b.trim.add(at(toBand(new THREE.SphereGeometry(0.045, 8, 6), TRIM.brass), sx * 1.18, -0.02, HL + 0.26));
+      }
+    }
+  },
+  // a red booster barrel strapped over the winch's motor, brass bands; II: bigger brass flanges on the drum
+  winch(b, lv) {
+    const { x, y, z } = DRUM, mx = x - 0.45;
+    b.trim.add(at(rod(0.085, 0.3, TRIM.red, { segs: 14 }), mx, y + 0.24, z - 0.04, 0, 0, PI / 2));
+    for (const dx of [-0.11, 0.11]) b.trim.add(at(ring(0.088, 0.012, TRIM.brass, 14), mx + dx, y + 0.24, z - 0.04, 0, PI / 2, 0));
+    b.trim.add(rodAB(0.016, [mx + 0.16, y + 0.24, z - 0.04], [x - 0.3, y + 0.12, z - 0.04], TRIM.copper, { segs: 6 }));
+    if (lv >= 2) for (const sx of [-1, 1]) {
+      b.trim.add(at(rod(0.245, 0.03, TRIM.brass, { segs: 22 }), x + sx * 0.3, y, z, 0, 0, PI / 2));
+      b.trim.add(at(ring(0.245, 0.02, TRIM.iron, 22), x + sx * 0.317, y, z, 0, PI / 2, 0));
+    }
+  },
+  // brass trumpets on the roof's front corners, bells forward; II: longer, with copper bells
+  horn(b, lv) {
+    const L = lv >= 2 ? 0.62 : 0.46, y = D.ROOF_Y + 0.17, z = HL - 0.5;
+    for (const sx of [-1, 1]) {
+      const x = sx * 0.95;
+      b.trim.add(at(toBand(new THREE.CylinderGeometry(lv >= 2 ? 0.12 : 0.1, 0.025, L, 14, 1, true), lv >= 2 ? TRIM.copper : TRIM.brass), x, y, z + L / 2, PI / 2, 0, 0));
+      b.trim.add(at(ring(lv >= 2 ? 0.12 : 0.1, 0.012, TRIM.brass, 14), x, y, z + L));
+      b.trim.add(at(rod(0.04, 0.1, TRIM.brass, { segs: 10 }), x, y, z - 0.03, PI / 2, 0, 0));
+      b.trim.add(at(beam(0.06, 0.17, 0.08, TRIM.iron), x, y - 0.09, z + 0.05));
+    }
+    b.trim.add(rodAB(0.012, [-0.95, D.ROOF_Y + 0.12, HL - 0.56], [0.95, D.ROOF_Y + 0.12, HL - 0.56], TRIM.copper, { segs: 5 }));
+  },
+  // a red steel toolbox strapped behind the rear ladder, a brass handle and latches; II: a second box on it
+  toolbox(b, lv) {
+    const x = 0.81, z = -4.27 - 0.03 - 0.16;
+    const box = (y, w, h, d) => {
+      b.trim.add(at(rboxB(w, h, d, 0.02, TRIM.red, 2), x, y, z));
+      b.trim.add(at(rod(0.012, w * 0.5, TRIM.brass, { segs: 6 }), x, y + h / 2 + 0.03, z, 0, 0, PI / 2));
+      for (const sx of [-1, 1]) {
+        b.trim.add(at(rod(0.01, 0.04, TRIM.brass, { segs: 5 }), x + sx * w * 0.25, y + h / 2 + 0.015, z));
+        b.trim.add(at(beam(0.03, 0.05, 0.012, TRIM.brass), x + sx * w * 0.3, y + h * 0.25, z - d / 2 - 0.006));
+      }
+    };
+    box(0.72, 0.36, 0.2, 0.18);
+    for (const dx of [-0.12, 0.12]) b.trim.add(at(beam(0.03, 0.26, 0.2, TRIM.leather), x + dx, 0.72, z));
+    if (lv >= 2) box(0.94, 0.28, 0.14, 0.15);
+  },
+};
+
 function buildUnder(b) {
   b.trim.add(at(beam(2.36, 0.03, 7.9, TRIM.iron, 0.6), 0, A.y0 + 0.02, 0));
   for (const az of A.archZ) {
@@ -1590,6 +1653,7 @@ export class RVView {
     const gf = new THREE.Shape(); gf.moveTo(-HW, A.y0); gf.lineTo(HW, A.y0); gf.lineTo(HW, 1.02); gf.lineTo(-HW, 1.02); gf.closePath();
     main.grime.add(setUV(wallGeo(gf, 'z', HL + 0.004, 1), (x, y) => [(x + HW) / 2.5, 0.5 * GV(y)]));
     emit(g, main);
+    this.emit = emit;
     // dents, scrapes and rust (rv_dents), one overlay a side so each side shows its own knocks: three steps
     // by alpha, shown by lowering the alpha test as it wears (setCond). +x is the driver's (left) side
     const dentMat = () => new THREE.MeshLambertMaterial({ map: tex('rv_dents'), alphaTest: 0.999, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
@@ -1700,6 +1764,27 @@ export class RVView {
     this._v = new V3(); this._dir = new V3(); this._up = new V3(0, 1, 0);
     this.setBiome(atmo.biome);
     repaintBodyWhenFontLoads();
+  }
+
+  // the RV parts fitted for the trip ({ bullbar: 2, ... }: the server's meta, shared/garage.js)
+  setParts(parts) {
+    const key = JSON.stringify(parts || {});
+    if (key === this.partsKey) return;
+    this.partsKey = key;
+    this.partGroups ||= {};
+    for (const grp of Object.values(this.partGroups)) grp.visible = false;
+    for (const [id, lv] of Object.entries(parts || {})) {
+      const build = PART_ART[id], k = id + lv;
+      if (!build || !(lv === 1 || lv === 2)) continue;
+      if (!this.partGroups[k]) {
+        const bk = buckets(), grp = new THREE.Group();
+        build(bk, lv);
+        this.emit(grp, bk);
+        this.g.add(grp);
+        this.partGroups[k] = grp;
+      }
+      this.partGroups[k].visible = true;
+    }
   }
 
   setBiome(b) {

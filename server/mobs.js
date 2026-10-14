@@ -315,16 +315,17 @@ export class Mobs {
     }
   }
   // the driver leaned on the horn (where the RV is): any grumphorn in earshot wakes, and goes for the RV; loose
-  // rock up ahead comes down (early: on nobody, if they had the sense to honk well back)
-  horn(at) {
-    for (const r of this.rockfalls) if (r.st === 'armed' && Math.hypot(at.x - this.sim.W.roadX(r.obz), at.z - r.obz) < RF.HONK_R) this.rfTrigger(r, 'horn');
+  // rock up ahead comes down (early: on nobody, if they had the sense to honk well back). k: how far it
+  // carries (an Air Horn fitted: x1.25 or x1.5, every one of these reaches, both ways)
+  horn(at, k = 1) {
+    for (const r of this.rockfalls) if (r.st === 'armed' && Math.hypot(at.x - this.sim.W.roadX(r.obz), at.z - r.obz) < RF.HONK_R * k) this.rfTrigger(r, 'horn');
     for (const m of [...this.list.values()]) {
       const p = this.get(m.id);
       if (!p) continue;
-      if (m.type === 'grumphorn') { if (this.ghDist(p, at) < GH.WAKE_HORN) this.ghWake(m, p, at, true); continue; }
+      if (m.type === 'grumphorn') { if (this.ghDist(p, at) < GH.WAKE_HORN * k) this.ghWake(m, p, at, true); continue; }
       // ringtails near the RV drop what they carry and scatter (then pay the horn no mind for a while)
       const t = p.body.translation();
-      if (Math.hypot(t.x - at.x, t.z - at.z) > RT.HORN_R || (m.deafUntil || 0) > this.t) continue;
+      if (Math.hypot(t.x - at.x, t.z - at.z) > RT.HORN_R * k || (m.deafUntil || 0) > this.t) continue;
       if (m.st === RST.HELD || m.st === RST.STUN || m.st === RST.GONE || m.st === RST.FLUNG) continue;
       m.deafUntil = this.t + RT.HORN_DEAF;
       this.rtSpook(m, p);
@@ -684,11 +685,12 @@ export class Mobs {
       }
       case S.HELD: {
         if (!p.holders.size) { this.rtLoose(m, p); return; }
-        // (it bites one holder 2 s after it's down to one: a friend letting go doesn't get the other bitten at once)
+        // (it bites one holder 2 s after it's down to one: a friend letting go doesn't get the other bitten at once;
+        // Work Gloves hold it 3 s)
         if (p.holders.size > 1) m.soloAt = null;
         else m.soloAt ??= now;
-        if (this.plan.bites && m.soloAt != null && now - m.soloAt >= RT.BITE_T) {
-          const pid = [...p.holders][0];
+        const pid = [...p.holders][0], biteT = this.players?.get(pid)?.mods?.biteT ?? RT.BITE_T;
+        if (this.plan.bites && m.soloAt != null && now - m.soloAt >= biteT) {
           this.sim.release(pid);
           this.sim.out.push({ k: 'slip', id: m.id, by: pid, why: 'bite' });
           this.sim.out.push({ k: 'mob', id: m.id, s: 'bite', by: pid });

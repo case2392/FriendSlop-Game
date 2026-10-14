@@ -6,6 +6,7 @@ import * as C from '/shared/constants.js';
 import { LOOT } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
 import { G } from './phys.js';
+import { STOCK } from '/shared/garage.js';
 
 const P = C.PLAYER, ST = C.STAMINA;
 const CH = P.HALF_H + P.RADIUS;             // capsule center above the feet
@@ -31,6 +32,7 @@ export class Me {
     this.par = 0; this.lp = null;
     this.grounded = false;
     this.stamina = ST.MAX; this.stamMax = ST.MAX; this.regenT = 0;
+    this.mods = STOCK;   // my kit's numbers (shared/garage.js kitMods), from the server's echo
     this.crouch = false; this.sprinting = false;
     this.climb = null;           // {n, rv}
     this.seat = null;
@@ -98,11 +100,12 @@ export class Me {
     this.events.push({ k: 'ko', why });
   }
 
-  revive() {
+  // stam: what the friend who picked me up gets me up with (a Medic Bag: 60)
+  revive(stam = 40) {
     if (this.mode !== 'ko') return;
     this.mode = 'walk';
     this.koT = 0;
-    this.stamina = Math.max(this.stamina, 40);
+    this.stamina = Math.max(this.stamina, Math.min(this.stamMax, stam));
   }
 
   sit(seat) {
@@ -325,12 +328,13 @@ export class Me {
     const ml = len(mv);
     if (ml > 1) mv = mul(mv, 1 / ml);
     const moving = ml > 0.1;
-    this.spend((moving ? C.STAMINA.CLIMB_MOVE : C.STAMINA.CLIMB_HANG) * dt * (this.buffT > 0 ? 0.6 : 1));
+    // (Climbing Chalk: x0.88 or x0.76)
+    this.spend((moving ? C.STAMINA.CLIMB_MOVE : C.STAMINA.CLIMB_HANG) * dt * (this.buffT > 0 ? 0.6 : 1) * this.mods.climbMul);
 
-    if (inp.jump && this.stamina > C.STAMINA.LUNGE * 0.5) {   // lunge for the next hold
+    if (inp.jump && this.stamina > this.mods.lunge * 0.5) {   // lunge for the next hold
       const dir = moving ? norm(mv) : tUp;
       this.vel = add(mul(dir, C.CLIMB.LUNGE), mul(c.n, 0.6));
-      this.spend(C.STAMINA.LUNGE);
+      this.spend(this.mods.lunge);
       this.mode = 'walk'; this.climb = null; this.regrabT = 0.16;
       this.events.push({ k: 'lunge' });
       return;

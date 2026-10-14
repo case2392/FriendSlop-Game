@@ -27,6 +27,7 @@ import { BJTable, FlipMachine } from './casino.js';
 import { fnv1a, isPid } from '../shared/profile.js';
 import { rollTin, rollCard, CONTAINER } from '../shared/cards.js';
 import { findSpots } from '../shared/finds.js';
+import { clampKit, kitMods, partMods, fitParts, spareLine } from '../shared/garage.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -93,6 +94,10 @@ export class Room {
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.glovebox = [];              // [{ cards, kind, day, by, aboard }]: what's been stowed this trip
+    // the RV's parts (shared/garage.js): none till it leaves camp on day 1, then the best each kind among
+    // everyone aboard, for the whole trip
+    this.fit = { parts: {}, by: {}, spares: [] };
+    this.partMods = partMods(null);
     for (const p of this.players.values()) this.enroll(p);   // (aboard as this trip begins)
     this.startDay([]);
   }
@@ -103,7 +108,7 @@ export class Room {
     if (this.sim) { const old = this.sim; setImmediate(() => old.free()); }
     // (a new run drops whatever the last one left on the casino tables: it starts with $200, that's all)
     this.W = generateLeg(this.seed, this.day);
-    this.sim = new Sim(this.W, { carry, cond: this.rvc.hp, finds: findSpots(this.W) });   // (nothing heals it overnight but Gus)
+    this.sim = new Sim(this.W, { carry, cond: this.rvc.hp, finds: findSpots(this.W), parts: this.partMods });   // (nothing heals it overnight but Gus)
     this.phase = 'camp';
     this.clock = C.DAY_START;
     this.paid = false;
@@ -217,21 +222,51 @@ export class Room {
     p.pid = pid;
     const v = prof?.wins, w = Math.round(typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
     p.wins = Number.isFinite(w) ? Math.max(0, Math.min(100000, w)) : 0;
+    // the kit: what the save says, clamped (shared/garage.js); once the RV has left camp on day 1, the one
+    // this profile came aboard with (leaving and rejoining doesn't swap it)
+    const e = this.roster.get(pid);
+    this.setKit(p, this.kitLocked() && e?.kit ? e.kit : clampKit(prof?.kit));
+  }
+  // ---- the Garage's kits (shared/garage.js) ------------------------------------------------------
+  // a kit can change in camp on day 1 till the RV leaves, and during the game-over (for the next trip)
+  kitLocked() { return this.departed && this.phase !== 'over'; }
+  setKit(p, kit) {
+    p.kit = kit; p.mods = kitMods(kit);
+    const e = p.pid ? this.roster.get(p.pid) : null;
+    if (e && !this.kitLocked()) e.kit = kit;
+  }
+  // the Garage's KIT tab, or a pick that unlocked something: the page's new kit
+  onKit(p, m) {
+    if (this.kitLocked() || !(this.phase === 'over' || (this.phase === 'camp' && this.day === 1))) {
+      this.toast('Your kit is set for this trip. Change it in camp on day 1, or once the trip is over.', '#ffd166', 4, p);
+      this.sendMeta();   // (the page shows the kit it has here)
+      return;
+    }
+    this.setKit(p, clampKit(m.kit));
+    this.sendMeta();
   }
   // on the trip's roster (by profile id): aboard now, and what they did on it
   enroll(p) {
     if (!p.pid) this.setProfile(p, null);
     let e = this.roster.get(p.pid);
-    if (!e) this.roster.set(p.pid, e = { pid: p.pid, h: fnv1a(p.pid), name: p.name, fromStart: false, here: true, rode: false, kos: 0, revives: 0, rvDmg: 0 });
+    if (!e) this.roster.set(p.pid, e = { pid: p.pid, h: fnv1a(p.pid), name: p.name, fromStart: false, here: true, rode: false, kos: 0, revives: 0, rvDmg: 0, kit: null });
     e.name = p.name; e.here = true;
+    if (!e.kit || !this.kitLocked()) e.kit = p.kit || clampKit(null);   // (a late joiner's kit: from their join)
     if (this.phase === 'road' && p.connected) e.rode = true;
     return e;
   }
   entry(p) { return p ? this.roster.get(p.pid) : null; }
-  // the RV leaves camp on day 1: everyone aboard (here, or their seat kept) went from the start
+  // the RV leaves camp on day 1: everyone aboard (here, or their seat kept) went from the start, their kits are
+  // set for the trip, and the RV is fitted with the best part of each kind among them (a late joiner's part
+  // waits for the next trip; one whose owner leaves stays bolted on)
   depart() {
     this.departed = true;
-    for (const p of this.players.values()) { const e = this.entry(p) || this.enroll(p); e.fromStart = true; }
+    for (const p of this.players.values()) { const e = this.entry(p) || this.enroll(p); e.fromStart = true; e.kit = p.kit || clampKit(null); }
+    this.fit = fitParts([...this.players.values()].map(p => ({ id: p.id, name: p.name, part: p.kit?.part })));
+    this.partMods = partMods(this.fit.parts);
+    this.sim.setParts(this.partMods);
+    for (const sp of this.fit.spares) this.toast(`${spareLine(sp)}.`, '#ffd166', 5);
+    this.sendMeta();   // (the parts, and the kits closed for the trip)
   }
   // someone on foot well down the road from camp, for 2 s (not a pose sent before this morning's teleport)
   walkedOut(dt) {
@@ -507,10 +542,10 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '' })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
       // the trip: practice or not (what it records), and whose summary is still waiting for them
-      trip: { practice: this.practice(), pending: this.undelivered() },
+      trip: { practice: this.practice(), pending: this.undelivered(), parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
     });
   }
 
@@ -539,9 +574,10 @@ export class Room {
       case 'horn':
         if (p.seat !== 0) return;
         this.broadcast({ t: 'ev', list: [{ k: 'horn' }] });
-        this.sim.mobs?.horn(this.sim.rv.translation());   // (it scatters ringtails, and wakes a grumphorn)
+        this.sim.mobs?.horn(this.sim.rv.translation(), this.partMods.hornK);   // (it scatters ringtails, and wakes a grumphorn; an Air Horn carries further)
         return;
       case 'use': return this.onUse(p, m);
+      case 'kit': return this.onKit(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       // holding E at the engine hatch of a broken-down RV, or letting go (fixStep does the work)
       case 'fix': p.activeAt = this.t; p.fixing = !!m.on; return;
@@ -577,6 +613,7 @@ export class Room {
     const sim = this.sim;
     if (m.op === 'tpRV') sim.placeRV(+m.x, +m.z, +m.yaw || 0);
     else if (m.op === 'clock') this.clock = +m.h;
+    else if (m.op === 'mapHome') sim.mapHome();
     else if (m.op === 'bank') this.bank = +m.v;
     else if (m.op === 'phase') this.phase = m.ph;
     else if (m.op === 'day') { this.day = Math.max(0, (+m.d | 0) - 1); this.nextDay(); }
@@ -758,7 +795,7 @@ export class Room {
       q.ko = false;
       const e = this.entry(p);
       if (e) e.revives++;
-      this.send(q, { t: 'revived', by: p.id });
+      this.send(q, { t: 'revived', by: p.id, stam: p.mods?.stam ?? 40 });   // (a Medic Bag: up with more puff)
       this.toast(`${p.name} picked ${q.name} up off the ground. No ambulance bill.`, '#7CFC00', 3);
       return;
     }
@@ -844,6 +881,8 @@ export class Room {
     if (this.phase === 'over') return false;
     const R = this.rvc, now = this.t;
     let amt = e.why === 'crash' ? C.crashDamage(e.dv) : Math.round(e.amt || 0);
+    // a Bull Bar takes some of a head-on knock: a crash or a Grumphorn into the front
+    if ((e.why === 'crash' || e.why === 'beast') && e.zone === 'front') amt = Math.round(amt * this.partMods.frontX);
     if (amt <= 0 || R.hp <= 0) return false;
     const drv = [...this.players.values()].find(q => q.seat === 0);
     if (!R.inc || now - R.inc.last > C.RVH.GAP) {
@@ -918,7 +957,8 @@ export class Room {
       names.push(p.name);
     }
     if (!names.length) return;
-    R.fix += dt * Math.min(names.length, C.RVH.FIX_HANDS) / C.RVH.FIX_T[Math.max(1, Math.min(R.brokeN, C.RVH.FIX_T.length)) - 1];
+    // (a Toolbox fitted: x0.75 or x0.5 the time)
+    R.fix += dt * Math.min(names.length, C.RVH.FIX_HANDS) / (C.RVH.FIX_T[Math.max(1, Math.min(R.brokeN, C.RVH.FIX_T.length)) - 1] * this.partMods.fixX);
     if (R.fix < 1) return;
     R.fix = 0; R.hp = C.RVH.FIX_TO;
     this.sim.setRvCond(R.hp);
@@ -1174,6 +1214,7 @@ export class Room {
     // (a driver unheard from for a second has frozen or dropped: off the pedals. The page sends 20 a second
     // on its own timer, so even a PC drawing a frame a second keeps driving)
     if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
+    sim.assist = !!drv?.mods?.assist;   // (Steady Hands II: the driver's own)
     sim.step(dt, this.players);
     this.stowFinds();
     this.fixStep(dt);

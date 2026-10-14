@@ -16,7 +16,7 @@
 // honest and says so if it ever moves a porter faster.
 //
 //   node tools/econbot.mjs [--seeds 20 | --seed N] [--crew 3] [--days 1-5] [--casino none|bold] [--bank N]
-//                          [--trace] [--json file] [--gate] [--part k/n]
+//                          [--trace] [--json file] [--gate] [--part k/n] [--kit stock|max|<perk or part id>]
 //   node tools/econbot.mjs --merge a.json b.json ...   (the summary of runs split with --part k/n --json)
 // --bank N: the bank at the start of each day (to run the whole flow without loot); --gate: exit 1 on a bot
 // failure (a stuck porter or RV, a run-over, a move faster than a page allows)
@@ -42,6 +42,18 @@ const MERGE = args.includes('--merge') ? args.slice(args.indexOf('--merge') + 1)
 const CREW = Math.max(1, Math.min(C.MAX_PLAYERS, Number(opt('--crew', 3))));
 const [D0, D1] = (([a, b]) => [a, b ?? a])(String(opt('--days', '1-5')).split('-').map(Number));   // ('3' is day 3 alone)
 const CASINO = opt('--casino', 'none');
+// the Garage (shared/garage.js): 'max' is the money-relevant kit maxed (Work Gloves II, Climbing Chalk II and Medic
+// Bag II on everyone; a Winch Motor II and a Bull Bar II fitted); a perk's or a part's id, that one at II alone.
+// (The bot models no stamina, sight or hold times: Chalk, Medic, Keen Eye, Call Sign and Steady Hands I do
+// nothing a bot can measure)
+const KIT = opt('--kit', 'stock');
+const { PERK_IDS, PART_IDS } = await import('../shared/garage.js');
+const kitFor = slot => {
+  if (KIT === 'max') return { perks: { gloves: 2, chalk: 2, medic: 2 }, part: [{ id: 'winch', lv: 2 }, { id: 'bullbar', lv: 2 }][slot] || null };
+  if (PERK_IDS.includes(KIT)) return { perks: { [KIT]: 2 }, part: null };
+  if (PART_IDS.includes(KIT)) return { perks: {}, part: slot === 0 ? { id: KIT, lv: 2 } : null };
+  return null;
+};
 const BANK = opt('--bank', null) != null ? Number(opt('--bank')) : null;
 const WHY = args.includes('--why'), accHist = [], WHYLOG = [];
 const TRACE = args.includes('--trace'), GATE = args.includes('--gate'), JSON_OUT = opt('--json', null);
@@ -90,6 +102,7 @@ class Bot {
     this.crouch = false; this.mode = C.MODE.WALK; this.seat = null; this.ko = false; this.koAt = null;
     this.P = room.addPlayer(this.conn, this.name).player;
     this.P.key = 'bot:' + slot;
+    room.setProfile(this.P, { pid: String(slot + 1).repeat(16), wins: 0, kit: kitFor(slot) });
     room.welcome(this.P);   // (its 'tp' puts the bot at its camp spawn)
     this.last = { ...this.feet };
   }
@@ -1167,7 +1180,7 @@ for (const seed of MERGE ? [] : SEEDS) {
   }
   console.log(`seed ${seed}: ${r.won ? 'WON' : r.days.at(-1)?.paid ? `stopped after day ${r.days.at(-1).day}` : `lost on day ${r.days.at(-1)?.day}`} (${((Date.now() - t0) / 1000).toFixed(0)} s so far)`);
 }
-console.log(`\n${trips.length} trips, crew of ${CREW}, casino ${CASINO}: won ${trips.filter(t => t.won).length}`);
+console.log(`\n${trips.length} trips, crew of ${CREW}, casino ${CASINO}, kit ${KIT}: won ${trips.filter(t => t.won).length}`);
 if (WHY) {   // what knocked the loot riding in the RV: the RV's sharpest acceleration in the 0.15 s before each knock
   const by = {};
   for (const w of WHYLOG) { const k = `${w.cause}`; (by[k] ||= { n: 0, lost: 0, g: 0 }); by[k].n++; by[k].lost += w.lost; by[k].g = Math.max(by[k].g, Math.max(w.fz, w.fx, w.fy) / 9.81); }

@@ -154,6 +154,7 @@ export const sfx = {
   engineStop: () => { tone(70, 0.5, 'sawtooth', 0.1, 35); noise(0.3, 400, 0.12, 120, 'lowpass', 0.1); },
   brake: (k = 1) => { tone(2300, 0.35, 'sawtooth', 0.03 * k, 2100); noise(0.3, 3500, 0.06 * k, 1800, 'bandpass'); },
   hook: () => { tone(1200, 0.05, 'triangle', 0.25); tone(900, 0.08, 'triangle', 0.2, null, 0.05); },
+  beep: (f = 1600) => tone(f, 0.07, 'square', 0.12),   // reversing (Steady Hands)
   creak: () => tone(120 + Math.random() * 60, 0.4, 'sawtooth', 0.05, 90),
   gate: () => { for (let i = 0; i < 5; i++) noise(0.08, 1500, 0.25, null, 'bandpass', i * 0.12); tone(200, 0.6, 'square', 0.1, 120); },
   buzz: () => tone(110, 0.35, 'square', 0.25),

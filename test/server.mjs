@@ -926,6 +926,40 @@ const paidBack = bj => ({ natural: Math.floor(bj.stake * 2.5), win: bj.stake * 2
   room.sim.free?.();
 }
 
+// ---- in process: the Garage's kit (shared/garage.js) --------------------------------------------------------
+{
+  // K4: the kit a page brings: clamped (five perks asked for and a bogus one: three known, levels I-II, in the
+  // catalogue's order), echoed in the meta. A 'kit' in day-1 camp is taken, on the road refused (with a toast),
+  // during the game-over taken; and once the RV has left camp, leaving and rejoining with another kit keeps the
+  // one you came aboard with
+  const room = new Room('KIT', 4242);
+  const ca = new FakeConn(), A = room.addPlayer(ca, 'Ann').player, B = room.addPlayer(new FakeConn(), 'Bob').player;
+  A.key = 'tok:a'; B.key = 'tok:b';
+  room.setProfile(A, { pid: 'aaaaaaaaaaaaaaaa', kit: { perks: { medic: 2, eye: 2, gloves: 2, chalk: 3, steady: 1, bogus: 2 }, part: { id: 'horn', lv: 2 } } });
+  room.setProfile(B, { pid: 'bbbbbbbbbbbbbbbb' });
+  room.welcome(A); room.welcome(B);
+  const echo = JSON.stringify(ca.last('meta').players.find(p => p.id === A.id).kit);
+  room.handle(A, { t: 'kit', kit: { perks: { chalk: 2 }, part: { id: 'horn', lv: 2 } } });
+  const inCamp = JSON.stringify(A.kit), climb = A.mods.climbMul;
+  room.sim.placeRV(room.W.roadX(room.W.camp.exitZ + 8), room.W.camp.exitZ + 8, 0);
+  tick(room, 0.3);
+  const departed = room.departed && room.phase === 'road';
+  room.handle(A, { t: 'kit', kit: { perks: { gloves: 2 }, part: null } });
+  const onRoad = JSON.stringify(A.kit), told = ca.has(m => m.t === 'toast' && /kit is set for this trip/.test(m.text));
+  room.handle(A, { t: 'leave' });
+  const cc = new FakeConn(), A2 = room.addPlayer(cc, 'Ann').player;
+  A2.key = 'tok:a2'; room.setProfile(A2, { pid: 'aaaaaaaaaaaaaaaa', kit: { perks: { eye: 1 }, part: null } }); room.welcome(A2);
+  const rejoined = JSON.stringify(A2.kit);
+  room.finish(false);
+  tick(room, 0.3);
+  room.handle(A2, { t: 'kit', kit: { perks: { eye: 1 }, part: null } });
+  const over = JSON.stringify(A2.kit);
+  check(echo === '{"perks":{"gloves":2,"steady":1,"eye":2},"part":{"id":"horn","lv":2}}' && inCamp === '{"perks":{"chalk":2},"part":{"id":"horn","lv":2}}' && climb === 0.76
+    && departed && onRoad === inCamp && told && rejoined === inCamp && over === '{"perks":{"eye":1},"part":null}',
+    `garage: a page's kit is clamped and echoed (${echo}); camp takes a new one (${inCamp}), the road refuses one, leaving and coming back keeps it (${rejoined}), the game-over takes one (${over})`);
+  room.sim.free?.();
+}
+
 // ---- in process: trip codes (GameHost) -----------------------------------------------------------------
 {
   const { GameHost } = await import('../server/host.js');
