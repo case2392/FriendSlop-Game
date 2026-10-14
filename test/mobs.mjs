@@ -974,8 +974,9 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
     if (i % 3 === 0) { const L = JSON.stringify(room.snapshot()).length; max = Math.max(max, L); sum += L; n++; }
   });
   // (the mean: 2,520 B before the Hoard, whose six awake cost 150 B more than a den of three; the RV's
-  // condition, 40 B more)
-  check(max <= 4752 && sum / n <= 2800, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
+  // condition, 40 B more; and about 100 B more once things stopped breaking from being wedged against the
+  // RV's fittings (a knock is what the thing felt): two more of the twenty ride to the end)
+  check(max <= 4752 && sum / n <= 2900, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
 }
 
 {

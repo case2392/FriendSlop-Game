@@ -73,6 +73,7 @@ export class LocalWorld {
     this.rv = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -100, 0));
     this.rvCols = {};
     for (const [name, hx, hy, hz, cx, cy, cz, o] of RV_PARTS) {
+      if (o.loot) continue;   // (it stops the server's loot, not people)
       const c = this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(cx, cy, cz)
         .setCollisionGroups(grp(G.RV, 0xffff)), this.rv);
       this.info.set(c.handle, { kind: 'rv', part: name, use: o.use || null });
