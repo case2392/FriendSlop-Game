@@ -238,7 +238,7 @@ export class Casino {
     return n;
   }
 
-  // ---- what the pages see ------------------------------------------------------------------------------
+  // ---- what the pages see (the client fills in what's left out: 0 or nothing) -----------------------------
   view(t) {
     const out = {};
     for (const s of this.st.values()) {
@@ -254,6 +254,8 @@ export class Casino {
           el: s.state === 'race' ? Math.round((DERBY.RACE_T - (s.until - t)) * 10) / 10 : null,
           tix: s.tickets.map(k => [k.pid, k.lane, k.stake]), bets: Object.fromEntries(s.bets) });
       }
+      // (only what's set: an idle station is a few bytes in every snapshot)
+      for (const k of Object.keys(v)) if (v[k] == null || v[k] === 0 || v[k] === false) delete v[k];
       out[s.id] = v;
     }
     return out;

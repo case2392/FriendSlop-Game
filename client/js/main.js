@@ -2111,7 +2111,7 @@ const OUT_WORD = { win: 'WIN', natural: 'BLACKJACK!', push: 'PUSH', lose: 'LOSE'
 const moneyCol = won => (won > 0 ? '#7CFC00' : won < 0 ? '#ff5252' : '#fff');
 const casStation = id => S.W?.town?.casino_stations?.find(s => s.id === id);
 const myStation = () => {
-  const id = S.casAt, st = id && casStation(id), v = id && S.g?.cas?.[id];
+  const id = S.casAt, st = id && casStation(id), v = id && S.cas?.[id];
   if (!st || !v || !me.pos || me.mode === 'seat') return null;
   if (Math.hypot(me.pos.x - st.x, me.pos.z - st.z) > C.CASINO.SEAT_R) return null;
   if (st.kind !== 'derby' && v.o !== S.selfId) return null;
@@ -2248,10 +2248,13 @@ function updateDerby(dt, v) {
     if (near) r.view.update(dt, time, v.st === 'race' && p < 1.04 ? RST.RUN : RST.SNEAK, camera.position);
   });
 }
+// a station's view with what the server leaves out when it's unset (server/casino.js view)
+const CAS_BLANK = { o: null, bet: 0, stake: 0, won: 0, out: null, pt: 0, land: 0, spin: 0 };
 function updateCasino(dt) {
   const w = S.wv, g = S.g, T = S.W?.town;
   if (!w || !g || !T) return;
-  const cas = g.cas || null, c = w.cas;
+  const cas = g.cas ? Object.fromEntries(Object.entries(g.cas).map(([id, v]) => [id, { ...CAS_BLANK, ...v }])) : null, c = w.cas;
+  S.cas = cas;
   // the cards and chips are re-laid whenever any seat's hand or bet changes
   const key = cas ? JSON.stringify(T.bj.seats.map(s => { const v = cas[s.id]; return v ? [v.cards, v.up, v.dl, v.bet, v.stake, v.st] : 0; }).concat(T.craps.rails.map(r => [cas[r.id]?.bet, cas[r.id]?.stake, cas[r.id]?.st]))) : '';
   if (key !== lastCards) {
