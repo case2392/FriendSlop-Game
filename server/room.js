@@ -1184,8 +1184,9 @@ export class Room {
       this.betResult(f.win ? f.stake : -f.stake, 'Double or Nothing', f.by);
     }
 
-    // a flipped RV gets towed (for a price)
-    if (sim.rvFlipped()) {
+    // an RV on its back or side gets towed (for a price) after 7 s; rocking back over the line for a moment
+    // doesn't start the count again (it counts down at twice the speed)
+    if (sim.rvBeached()) {
       this.flippedT += dt;
       if (this.flippedT > 7) {
         this.flippedT = 0;
@@ -1194,7 +1195,7 @@ export class Room {
         this.rvc.inc = null;
         this.bill(800, 'The RV was on its back. Tow truck: $800.');
       }
-    } else this.flippedT = 0;
+    } else this.flippedT = Math.max(0, this.flippedT - 2 * dt);
 
     // KO'd too long: you wake up and pay
     // (the client normally sends 'wake' itself; this is the backstop)

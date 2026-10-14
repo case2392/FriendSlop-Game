@@ -13,7 +13,7 @@ import { FLAG, MODE, RVH, beastDamage } from '../shared/constants.js';
 import { toLocal, qRotate, insideRV, RV_DIM } from '../shared/rv.js';
 import { inMud, bedExit } from '../shared/world.js';
 import { mulberry32 } from '../shared/rng.js';
-import { GROUPS } from './groups.js';
+import { GROUPS, looseGroup } from './groups.js';
 
 const v3 = (x = 0, y = 0, z = 0) => ({ x, y, z });
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
@@ -217,7 +217,7 @@ export class Mobs {
     if (m) m.carry = false;
     const it = this.get(j.item);
     if (it) {
-      it.col.setCollisionGroups(GROUPS.prop);
+      it.col.setCollisionGroups(looseGroup(it.type));
       if (!it.holders.size) it.body.setAngularDamping(LOOT[it.type]?.adamp ?? 0.3);
       it.body.wakeUp();
     }
@@ -229,7 +229,7 @@ export class Mobs {
     const m = p.mob;
     // a player took hold of what a ringtail carries: three times its grip, the jaws let go
     if (!m) {
-      if (this.hoard.delete(p.id)) p.col.setCollisionGroups(GROUPS.prop);
+      if (this.hoard.delete(p.id)) p.col.setCollisionGroups(looseGroup(p.type));
       if (this.stolen.get(p.id)?.ours === false) this.stolen.delete(p.id);
       const mid = this.carriedBy.get(p.id), c = mid != null ? this.list.get(mid) : null;
       if (c) { const cp = this.get(c.id); if (cp) this.rtSpook(c, cp); }
@@ -391,7 +391,7 @@ export class Mobs {
       const held = it.holders.size && den && Math.hypot(t.x - den.x, t.z - den.z) > 10;
       if (inRV || held) {
         this.stolen.delete(id);
-        if (this.hoard.delete(id)) it.col.setCollisionGroups(GROUPS.prop);
+        if (this.hoard.delete(id)) it.col.setCollisionGroups(looseGroup(it.type));
         if (st.ours) this.sim.out.push({ k: 'mob', id: st.mob, s: 'recovered', item: id, value: Math.round(it.value) });
       }
     }
