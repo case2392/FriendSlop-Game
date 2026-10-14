@@ -1707,6 +1707,37 @@ function byTheRV(day, names = ['Ann'], side = -1) {
   check(bite != null && Math.abs(bite - 3) <= 0.12 && !room.sim.holds.has(A.id), `garage: with Work Gloves a ringtail held alone bites at ${bite?.toFixed(2)} s (stock ${RT.BITE_T} s)`);
 }
 
+// ---- the loan terms: Bad Credit's wildlife ------------------------------------------------------------------
+{
+  // T4: on Bad Credit a den may steal one more a day; ringtails sneak at 4.0 m/s (from 3.5); the glare on day
+  // 4 lasts 0.7 s (from 0.8); a crew of 4's Grumphorn has 138 patience (from 115); loose rock falls 1.0 s after
+  // the rumble (from 1.5). T5: and no more bodies: day 5's cast is the same size
+  const { Mobs } = await import('../server/mobs.js');
+  const { PLAN, crewFactor: cf } = await import('../shared/mobs.js');
+  const cast = (tier, day) => {
+    const { room, ps: [A] } = crew(['Ann', 'Bob', 'Cat', 'Dee']);
+    room.debug(A, { op: 'day', d: day });
+    tick(room, 0.2);
+    room.terms = tier;
+    room.phase = 'road';
+    tick(room, 0.2);
+    const M = room.sim.mobs;
+    const gh = [...M.list.values()].find(m => m.type === 'grumphorn');
+    const rf = M.rockfalls[0];
+    let warn = null;
+    if (rf) { const t0 = M.t; M.rfTrigger(rf, 'test'); warn = rf.at - t0; }
+    const out = { cap: M.plan.cap, glare: M.plan.glare, sneak: RT.SNEAK * M.rtK, patience: gh ? Math.round(gh.patienceMax) : null, warn, bodies: M.list.size, crew: M.crew };
+    room.sim.free?.();
+    return out;
+  };
+  const bad4 = cast('bad', 4), std4 = cast('std', 4), bad5 = cast('bad', 5), std5 = cast('std', 5);
+  const caps = d => PLAN[d - 1].cap;
+  check(bad4.cap === caps(4) + 1 && std4.cap === caps(4) && Math.abs(bad4.sneak - 4.025) < 1e-9 && std4.sneak === RT.SNEAK && Math.abs(bad4.glare - 0.7) < 1e-9 && std4.glare === 0.8
+    && bad4.patience === 138 && std4.patience === Math.round(GH.PATIENCE * cf(4)) && Math.abs(bad4.warn - 1.0) < 1e-9 && Math.abs(std4.warn - RF.WARN) < 1e-9,
+    `loan terms: Bad Credit's day 4 (crew of ${bad4.crew}): a den steals ${bad4.cap} (Standard ${std4.cap}), ringtails sneak at ${bad4.sneak.toFixed(2)} m/s (${std4.sneak}), the Grumphorn glares ${bad4.glare.toFixed(1)} s (${std4.glare}) and has ${bad4.patience} patience (${std4.patience}), loose rock falls ${bad4.warn?.toFixed(1)} s after the rumble (${std4.warn?.toFixed(1)})`);
+  check(bad5.bodies === std5.bodies && bad5.bodies > 0, `loan terms: Bad Credit's day 5 has no more bodies than Standard's (${bad5.bodies} and ${std5.bodies}): the snapshot budget is the same`);
+}
+
 if (failed) { console.error('\nSome wildlife checks FAILED'); process.exit(1); }
 console.log('\nAll wildlife checks passed');
 process.exit(0);

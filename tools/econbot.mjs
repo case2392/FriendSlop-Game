@@ -17,6 +17,7 @@
 //
 //   node tools/econbot.mjs [--seeds 20 | --seed N] [--crew 3] [--days 1-5] [--casino none|bold] [--bank N]
 //                          [--trace] [--json file] [--gate] [--part k/n] [--kit stock|max|<perk or part id>]
+//                          [--tier std|bad]
 //   node tools/econbot.mjs --merge a.json b.json ...   (the summary of runs split with --part k/n --json)
 // --bank N: the bank at the start of each day (to run the whole flow without loot); --gate: exit 1 on a bot
 // failure (a stuck porter or RV, a run-over, a move faster than a page allows)
@@ -47,6 +48,8 @@ const CASINO = opt('--casino', 'none');
 // (The bot models no stamina, sight or hold times: Chalk, Medic, Keen Eye, Call Sign and Steady Hands I do
 // nothing a bot can measure)
 const KIT = opt('--kit', 'stock');
+// the loan terms: 'bad' makes every bot a veteran (two kept wins), so the crew gets Bad Credit
+const TIER = opt('--tier', 'std');
 const { PERK_IDS, PART_IDS } = await import('../shared/garage.js');
 const kitFor = slot => {
   if (KIT === 'max') return { perks: { gloves: 2, chalk: 2, medic: 2 }, part: [{ id: 'winch', lv: 2 }, { id: 'bullbar', lv: 2 }][slot] || null };
@@ -102,7 +105,7 @@ class Bot {
     this.crouch = false; this.mode = C.MODE.WALK; this.seat = null; this.ko = false; this.koAt = null;
     this.P = room.addPlayer(this.conn, this.name).player;
     this.P.key = 'bot:' + slot;
-    room.setProfile(this.P, { pid: String(slot + 1).repeat(16), wins: 0, kit: kitFor(slot) });
+    room.setProfile(this.P, { pid: String(slot + 1).repeat(16), wins: TIER === 'bad' ? 2 : 0, kit: kitFor(slot) });
     room.welcome(this.P);   // (its 'tp' puts the bot at its camp spawn)
     this.last = { ...this.feet };
   }
@@ -1056,23 +1059,27 @@ function* town(day) {
     done();
   }
 }
-// Double or Nothing till the bank covers the payment (or it's gone)
+// Double or Nothing till the bank covers the payment (or it's gone): machine 1, the stake set to what's short
 function* gamble(b) {
-  const W0 = W(), U = arg => W0.uses.find(u => u.kind === 'flip' && u.arg === arg);
+  const W0 = W(), st = W0.town.casino_stations.find(q => q.id === 'flip1'), u = W0.uses.find(q => q.kind === 'cas' && q.arg === 'flip1');
+  const M = () => room.casino.st.get('flip1'), cas = a => room.handle(b.P, { t: 'cas', s: 'flip1', a });
   yield* walk(b, { x: 12 - 0.8, z: W0.LEN + 58 });
-  yield* walk(b, { x: U('+500').x - 1.0, z: U('+500').z });
-  for (let n = 0; n < 40 && room.bank < room.due && room.bank >= 100 && room.clock < 23.98; n++) {
+  yield* walk(b, { x: st.x, z: st.z });
+  b.useId(u);
+  yield;
+  for (let n = 0; n < 40 && room.bank < room.due && room.bank >= 100 && room.clock < 23.98 && M().owner === b.P.id; n++) {
     const want = Math.min(room.bank, Math.ceil((room.due - room.bank) / 100) * 100);
-    while (room.flip.stake + 500 <= want) { b.useId(U('+500')); yield; }
-    while (room.flip.stake + 100 <= want) { b.useId(U('+100')); yield; }
-    if (room.flip.stake < 100) b.useId(U('all'));
+    cas('bclr');
+    while (M().bet + 500 <= want) cas('b500');
+    while (M().bet + 100 <= want) cas('b100');
+    if (M().bet < 100) cas('ball');
     yield;
-    b.useId(U('pull'));
-    yield* until(() => !room.pendingFlip, 4);
+    cas('go');
+    yield* until(() => !M().pend, 4);
     yield* wait(0.6);
   }
   yield* walk(b, { x: 12 - 0.8, z: W0.LEN + 58 });
-  yield* walk(b, { x: W0.uses.find(u => u.kind === 'pay').x - 1.0, z: W0.uses.find(u => u.kind === 'pay').z });
+  yield* walk(b, { x: W0.uses.find(q => q.kind === 'pay').x - 1.0, z: W0.uses.find(q => q.kind === 'pay').z });
 }
 // night: Gus for cash if the RV is under 61% and the bank has it; then everyone into a bunk (the RV is at the lot)
 function* night() {
@@ -1180,7 +1187,7 @@ for (const seed of MERGE ? [] : SEEDS) {
   }
   console.log(`seed ${seed}: ${r.won ? 'WON' : r.days.at(-1)?.paid ? `stopped after day ${r.days.at(-1).day}` : `lost on day ${r.days.at(-1)?.day}`} (${((Date.now() - t0) / 1000).toFixed(0)} s so far)`);
 }
-console.log(`\n${trips.length} trips, crew of ${CREW}, casino ${CASINO}, kit ${KIT}: won ${trips.filter(t => t.won).length}`);
+console.log(`\n${trips.length} trips, crew of ${CREW}, casino ${CASINO}, kit ${KIT}, terms ${TIER}: won ${trips.filter(t => t.won).length}`);
 if (WHY) {   // what knocked the loot riding in the RV: the RV's sharpest acceleration in the 0.15 s before each knock
   const by = {};
   for (const w of WHYLOG) { const k = `${w.cause}`; (by[k] ||= { n: 0, lost: 0, g: 0 }); by[k].n++; by[k].lost += w.lost; by[k].g = Math.max(by[k].g, Math.max(w.fz, w.fx, w.fy) / 9.81); }

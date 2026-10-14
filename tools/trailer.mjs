@@ -591,22 +591,27 @@ shot({
   body: () => ({ x: 3, z: W.town.z + 40 }),
 });
 
-// body-vote blackjack: the whole bank on the table, the three of them on the HIT pad
+// the casino: one bank, a game each. Kyle shoves the lot in at blackjack seat 2, Dave plays seat 1, Steve rolls
+// craps behind them (server/casino.js: each sits down at his own station, everything comes out of one bank)
+const casStation = id => W.town.casino_stations.find(s => s.id === id);
+const casUse = id => W.uses.findIndex(u => u.kind === 'cas' && u.arg === id);
+const onTable = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
+const sitDown = (bot, id) => { const st = casStation(id), u = W.uses[casUse(id)]; bot.at(st.x, st.z, yawTo(st, u)); bot.tick(1 / 60); };
 shot({
   id: 'blackjack', day: 1, secs: 2.0, pre: 0.5, fov: 58,
   setup() {
-    const B = W.town.bj, all = W.uses.findIndex(u => u.kind === 'bj' && u.arg === 'all'), deal = W.uses.findIndex(u => u.kind === 'bj' && u.arg === 'deal');
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.6 }); dbg({ op: 'bank', v: 6000 });
-    const { Kyle } = bots, u = W.uses[all];
-    Kyle.at(u.x - 1.3, u.z, Math.PI / 2); Kyle.tick(1 / 60); room.tick(1 / 60);
-    Kyle.say({ t: 'use', id: all }); Kyle.say({ t: 'use', id: deal });
-    this.B = B;
+    const { Kyle, Dave, Steve } = bots;
+    sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1');
+    room.tick(1 / 60);
+    for (const [b, id] of [[Kyle, 'bj2'], [Dave, 'bj1'], [Steve, 'craps1']]) b.say({ t: 'use', id: casUse(id) });
+    Dave.say({ t: 'cas', s: 'bj1', a: 'b500' }); Dave.say({ t: 'cas', s: 'bj1', a: 'go' });
+    Kyle.say({ t: 'cas', s: 'bj2', a: 'ball' }); Kyle.say({ t: 'cas', s: 'bj2', a: 'go' });
+    Steve.say({ t: 'cas', s: 'craps1', a: 'b500' }); Steve.say({ t: 'cas', s: 'craps1', a: 'go' });
   },
-  tick() {
-    const { Dave, Steve, Kyle } = bots, h = this.B.hit, f = yawTo(h, this.B.table);
-    Dave.at(h.x, h.z, f); Steve.at(h.x - 0.45, h.z + 0.35, f); Kyle.at(h.x + 0.4, h.z - 0.35, f);
-  },
-  cam: t => { const B = SHOTS.find(s => s.id === 'blackjack').B; return { p: { x: B.table.x - 0.6 - t * 0.15, y: B.table.y + 0.95, z: B.table.z + 2.6 }, t: { x: B.hit.x, y: B.table.y + 0.05, z: B.hit.z + 0.2 } }; },
+  tick() { const { Dave, Steve, Kyle } = bots; sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1'); },
+  // (over the dealer's shoulder, the cards and the players' faces)
+  cam: t => { const B = W.town.bj; return { p: onTable(B.table, B.ry, 0.9 - t * 0.15, 0.95, -2.3), t: onTable(B.table, B.ry, -0.2, 0.25, 1.0) }; },
   body: () => ({ x: W.town.bj.table.x - 2, z: W.town.bj.table.z + 7 }),
 });
 
@@ -615,32 +620,30 @@ shot({
   id: 'coinflip', day: 1, secs: 3.4, pre: 0.4, fov: 62,
   setup() {
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.8 }); dbg({ op: 'bank', v: 4500 });
-    this.all = W.uses.findIndex(u => u.kind === 'flip' && u.arg === 'all');
-    this.pull = W.uses.findIndex(u => u.kind === 'flip' && u.arg === 'pull');
-    room.flip.rng = () => 0.99;
-    const { Kyle } = bots, F = W.town.flip;
-    Kyle.at(F.x - 2.1, F.z + 0.7, Math.PI / 2); Kyle.tick(1 / 60); room.tick(1 / 60);
-    Kyle.say({ t: 'use', id: this.all });
+    const { Kyle } = bots;
+    sitDown(Kyle, 'flip1');
+    room.tick(1 / 60);
+    Kyle.say({ t: 'use', id: casUse('flip1') });
+    Kyle.say({ t: 'cas', s: 'flip1', a: 'ball' });
     this.pulled = false; this.sad = false;
   },
   tick(t) {
-    const { Dave, Kyle, Steve } = bots, F = W.town.flip;
-    // (seen from beside the machine: Kyle at the lever facing us, Steve by the dome, Dave behind)
-    Kyle.at(F.x - 2.1, F.z + 0.7, Math.PI / 2);
-    Dave.at(F.x - 2.9, F.z - 0.5, yawTo({ x: F.x - 2.9, z: F.z - 0.5 }, F));
-    Steve.at(F.x - 1.0, F.z + 2.2, yawTo({ x: F.x - 1.0, z: F.z + 2.2 }, F));
-    if (!this.pulled && t > 0.5) { this.pulled = true; Kyle.say({ t: 'use', id: this.pull }); }
+    const { Dave, Kyle, Steve } = bots, F = W.town.flips[0], st = casStation('flip1');
+    // (seen from beside the machine: Kyle at his stake facing it, Steve and Dave watching from the side)
+    sitDown(Kyle, 'flip1');
+    const d = onTable({ ...st, y: 0 }, F.ry, -1.3, 0, 0.6), s2 = onTable({ ...st, y: 0 }, F.ry, 1.2, 0, 0.9);
+    Dave.at(d.x, d.z, yawTo(d, F)); Steve.at(s2.x, s2.z, yawTo(s2, F));
+    if (!this.pulled && t > 0.5) { this.pulled = true; const rng = room.casino.rng; room.casino.rng = () => 0.99; Kyle.say({ t: 'cas', s: 'flip1', a: 'go' }); room.casino.rng = rng; }
     if (!this.sad && t > 2.3) { this.sad = true; Kyle.say({ t: 'emote', e: '😭' }); Dave.say({ t: 'emote', e: '🤬' }); Steve.say({ t: 'emote', e: '💀' }); }
   },
-  cam: () => { const F = W.town.flip; return { p: { x: F.x - 1.2, y: F.y + 2.05, z: F.z - 4.0 }, t: { x: F.x - 1.3, y: F.y + 1.55, z: F.z + 0.8 } }; },
-  body: () => ({ x: W.town.flip.x - 6, z: W.town.flip.z + 5 }),
+  cam: () => { const F = W.town.flips[0], st = casStation('flip1'); return { p: onTable({ ...st, y: F.y }, F.ry, 1.4, 2.05, 2.6), t: onTable({ ...F }, F.ry, 0, 1.6, 0) }; },
+  body: () => ({ x: W.town.flips[0].x - 6, z: W.town.flips[0].z + 5 }),
 });
 
 // the Repo Man by his tow truck, at night (a slow push in)
 shot({
   id: 'repoman', day: 1, secs: 4.0, pre: 0.4, fov: 52,
   setup() {
-    room.flip.rng = Math.random;
     offstage(bots.Dave, bots.Steve, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 22.9 });
   },

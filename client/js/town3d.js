@@ -3,15 +3,17 @@
 // boards hung between posts, a gilded casino board, roadside billboards that face the drivers, the
 // gate code brushed in house paint on a slab of rim rock with a rag-tied stake beside it); street lamps
 // (W.decor 'lamp'); the yards (town_yard.js: door aprons and the yard_* props); the town's furniture and
-// interactables (pawn counter and bell, Ed's chained placard, store goods and price boards, the blackjack
-// table, hit/stand rugs, coloured glass buttons with engraved brass plaques, the double-or-nothing
-// contraption, slot machines, the bar); the NPCs; the Repo Man's steam tow wagon; and the Westfall
+// interactables (pawn counter and bell, Ed's chained placard, store goods and price boards; the casino's
+// games: the blackjack table's three seats, the craps table's two rails, two double-or-nothing contraptions
+// and the Ringtail Derby's track, each station's glass button with its engraved brass plaque and its placard;
+// slot machines, the bar); the NPCs; the Repo Man's steam tow wagon; and the Westfall
 // windmills (world gen's, beside the road on the fields day, and one out past the end of the farm town). Lamps, windows and signs glow with atmo.night.
 // Static geometry is merged per material and per spatial cluster (the town, each roadside stop, each
 // lone sign), so far clusters are culled. Roadside stuff (POI furniture, gates, anchors, camp) is in
 // roadside3d.js.
-// API: buildStructures(W) -> { group, near, npcs, pawnLabel, bjLabel, flipLabel, gusLabel,
-//      cardGroup, coin, hitPad, standPad, update(dt, t, camPos) } and PREVIEW.
+// API: buildStructures(W) -> { group, near, npcs, pawnLabel, gusLabel, cas: { labels, coins, dice, cards },
+//      update(dt, t, camPos) } and PREVIEW. (main.js deals the cards, rolls the dice, spins the coins and runs
+//      the Derby's ringtails.)
 import { THREE, canvasTex, labelSprite, shadowy, tex } from './gfx.js';
 import { atmo } from './atmosphere.js';
 import { buildCharacter } from './people.js';
@@ -699,6 +701,23 @@ function dPath(hx, hz, rc = 0.45, inset = 0) {
   pts.push([X, -hz + 0.1]);
   return pts;
 }
+// a rounded rectangle (the craps table's tub) as a shape and as a closed path round it (x, z)
+function rrShape(hx, hz, r) {
+  const sh = new THREE.Shape();
+  sh.moveTo(-hx + r, -hz);
+  sh.lineTo(hx - r, -hz); sh.quadraticCurveTo(hx, -hz, hx, -hz + r);
+  sh.lineTo(hx, hz - r); sh.quadraticCurveTo(hx, hz, hx - r, hz);
+  sh.lineTo(-hx + r, hz); sh.quadraticCurveTo(-hx, hz, -hx, hz - r);
+  sh.lineTo(-hx, -hz + r); sh.quadraticCurveTo(-hx, -hz, -hx + r, -hz);
+  return sh;
+}
+function rrPath(hx, hz, r) {
+  const pts = [];
+  const corner = (cx, cz, a0) => { for (let i = 0; i <= 6; i++) { const a = a0 + i / 6 * Math.PI / 2; pts.push([cx + r * Math.cos(a), cz + r * Math.sin(a)]); } };
+  corner(hx - r, hz - r, 0); corner(-hx + r, hz - r, Math.PI / 2); corner(-hx + r, -hz + r, Math.PI); corner(hx - r, -hz + r, Math.PI * 1.5);
+  pts.push(pts[0]);
+  return pts;
+}
 
 // slot cabinets, one look per town (all share the painted reel front)
 function slotCabinet(K, hx, hz, top, st, tint, glows) {
@@ -860,6 +879,65 @@ function furniture(s, batch, ctx) {
     K.box(wd, 0.9, 0.05, 0.16, 0, top + 0.02, -hz + 0.14, { grain: 'x' });
     const chipCols = ['#b83a2a', '#2e4a7a', '#3a7a44', '#e8dcc0', '#1e1a20'];
     chipCols.forEach((cc, k) => { for (let j = 0; j < 2; j++) K.add(mat('wood_light'), new THREE.CylinderGeometry(0.045, 0.045, 0.12, 10), { uv: 'keep', at: matrix(-0.34 + k * 0.17, top + 0.07, -hz + 0.14, 0, 0, Math.PI / 2), tint: cc, shade: false }); });
+    return;
+  }
+  if (s.part === 'craps_table') {
+    // a tub: a rounded apron on four turned legs, a padded rail all round, the oxblood felt sunk inside it, the
+    // far wall studded with rubber pyramids for the dice to hit, and the stickman's hooked cane on the far rail
+    // (local +z is the players' side)
+    const wl = mat('wood_light'), wd = mat('timber_dark');
+    const ext = (shape, depth) => new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: false, curveSegments: 4, steps: 1 });
+    K.add(wl, ext(rrShape(hx - 0.12, hz - 0.12, 0.2), 0.3), { tile: 1.2, grain: 'x', at: matrix(0, top - 0.42, 0, 0, -Math.PI / 2), tint: '#6a3428' });
+    K.add(wd, ext(rrShape(hx, hz, 0.28), 0.12), { tile: 1.2, grain: 'x', at: matrix(0, top - 0.12, 0, 0, -Math.PI / 2) });
+    const felt = new THREE.ShapeGeometry(rrShape(hx - 0.1, hz - 0.1, 0.2), 4);
+    const p = felt.attributes.position, uv = felt.attributes.uv;
+    for (let i = 0; i < p.count; i++) uv.setXY(i, (p.getX(i) + hx) / (2 * hx), (p.getY(i) + hz) / (2 * hz));
+    K.add(mat('felt_craps'), felt, { uv: 'keep', at: matrix(0, top + 0.002, 0, 0, -Math.PI / 2), shade: false, cast: false });
+    const ring = rrPath(hx - 0.05, hz - 0.05, 0.24).map(([x, z]) => [x, top + 0.06, z]);
+    K.tube(mat('hide_patch'), ring, 0.085, { sides: 8, tile: 0.8, tint: '#3a2420' });
+    const studs = rrPath(hx - 0.05, hz - 0.05, 0.24);
+    for (let i = 0; i < studs.length - 1; i += 2) K.add(mat('brass'), new THREE.SphereGeometry(0.018, 5, 4), { uv: 'keep', at: matrix(studs[i][0], top - 0.05, studs[i][1]) });
+    // the far wall: a dark strip of rubber pyramids inside the rail
+    K.box(mat('iron_wrought'), 2 * hx - 0.5, 0.12, 0.03, 0, top + 0.06, -hz + 0.14, { tile: 0.5, tint: '#3a3436' });
+    for (let k = 0; k < 18; k++) for (let j = 0; j < 2; j++) K.add(mat('iron_wrought'), new THREE.ConeGeometry(0.022, 0.03, 4), { uv: 'keep', at: matrix(-hx + 0.32 + k * (2 * hx - 0.64) / 17, top + 0.03 + j * 0.055, -hz + 0.16, 0, Math.PI / 2), tint: '#4a4446' });
+    const leg = [[0, 0], [0.07, 0], [0.06, 0.08], [0.1, 0.2], [0.06, 0.32], [0.05, 0.4], [0.08, 0.46], [0, 0.46]].map(([r, h]) => new THREE.Vector2(r, h));
+    for (const [x, z] of [[-hx + 0.35, -hz + 0.3], [hx - 0.35, -hz + 0.3], [-hx + 0.35, hz - 0.3], [hx - 0.35, hz - 0.3]]) K.add(wl, new THREE.LatheGeometry(leg, 10), { uv: 'keep', at: matrix(x, 0, z), tint: '#6a3428' });
+    // the stickman's cane, laid along the far rail
+    K.cyl(mat('wood_light'), [-hx * 0.55, top + 0.15, -hz + 0.06], [hx * 0.35, top + 0.15, -hz + 0.07], 0.012, 0.012, { sides: 5, tint: '#c8a070' });
+    K.box(mat('wood_light'), 0.12, 0.02, 0.05, hx * 0.35 + 0.06, top + 0.15, -hz + 0.09, { ry: 0.6, tint: '#c8a070' });
+    return;
+  }
+  if (s.part === 'derby_track') {
+    // the Ringtail Derby: a long plank cabinet, four lanes of raked sand on top (the painted lanes: derby_lanes,
+    // 1.6 m across, their middle at lz), a counter along the front for the ticket button, a red-and-white
+    // starting gate at the left end, a finish post, and the tote board up behind on two brass posts
+    const wd = mat('timber_dark'), br = mat('brass'), lz = -0.15, w = 1.6;
+    K.box(mat('planks_weathered'), 2 * hx - 0.08, top - 0.16, 2 * hz - 0.08, 0, 0.08 + (top - 0.16) / 2, 0, { tile: 2.4, tint: '#a87850', seg: [3, 1, 1] });
+    K.box(wd, 2 * hx, 0.1, 2 * hz, 0, 0.05, 0, { grain: 'x' });
+    for (const x of [-hx + 0.05, -hx / 3, hx / 3, hx - 0.05]) K.box(wd, 0.08, top - 0.16, 0.05, x, 0.08 + (top - 0.16) / 2, hz - 0.02, { tile: 1.2 });
+    K.add(mat('derby_lanes'), new THREE.PlaneGeometry(2 * hx, w), { uv: 'keep', at: matrix(0, top + 0.003, lz, 0, -Math.PI / 2), shade: false, cast: false });
+    const cz = (lz + w / 2 + hz) / 2, cd = hz - (lz + w / 2);
+    K.box(wd, 2 * hx + 0.06, 0.08, cd + 0.04, 0, top - 0.035, cz, { grain: 'x', tile: 1.2 });
+    K.box(wd, 2 * hx + 0.06, 0.12, 0.05, 0, top + 0.02, -hz + 0.02, { grain: 'x' });
+    for (const x of [-hx + 0.03, hx - 0.03]) K.box(wd, 0.05, 0.12, w, x, top + 0.02, lz, { grain: 'z' });
+    K.cyl(br, [-hx + 0.1, top + 0.08, lz + w / 2 + 0.02], [hx - 0.1, top + 0.08, lz + w / 2 + 0.02], 0.016, 0.016, { sides: 6 });
+    for (let k = 0; k <= 6; k++) K.cyl(br, [-hx + 0.1 + k * (2 * hx - 0.2) / 6, top - 0.01, lz + w / 2 + 0.02], [-hx + 0.1 + k * (2 * hx - 0.2) / 6, top + 0.08, lz + w / 2 + 0.02], 0.012, 0.012, { sides: 5 });
+    // the starting gate: five posts across the lanes and a bar over them, painted red and white
+    const gx = -3.0;
+    for (let k = 0; k <= 4; k++) K.box(mat('wood_light'), 0.04, 0.24, 0.04, gx, top + 0.12, lz - w / 2 + 0.03 + k * (w - 0.06) / 4, { tint: k % 2 ? '#f0e8d8' : '#c03028' });
+    K.box(mat('wood_light'), 0.06, 0.05, w, gx, top + 0.26, lz, { tint: '#c03028' });
+    // the finish post at the far side, a chequered flag on it
+    K.cyl(br, [2.7, top, lz - w / 2 - 0.02], [2.7, top + 0.62, lz - w / 2 - 0.02], 0.018, 0.016, { sides: 6 });
+    for (let i = 0; i < 4; i++) for (let j = 0; j < 3; j++) K.box(mat('wood_light'), 0.05, 0.05, 0.004, 2.73 + i * 0.05, top + 0.5 + j * 0.05, lz - w / 2 - 0.02, { tint: (i + j) % 2 ? '#1a1a1a' : '#f4f0e4', shade: false });
+    // the tote board up behind the lanes (main.js writes the race on the placard in front of it)
+    for (const x of [-hx + 0.12, hx - 0.12]) K.cyl(br, [x, top, -hz + 0.06], [x, top + 1.3, -hz + 0.06], 0.035, 0.03, { sides: 8 });
+    K.box(wd, 2 * hx - 0.1, 0.62, 0.06, 0, top + 0.98, -hz + 0.04, { grain: 'x', tile: 1.2, seg: [3, 1, 1] });
+    K.box(br, 2 * hx - 0.06, 0.04, 0.08, 0, top + 1.31, -hz + 0.04, { tile: 1 });
+    K.box(br, 2 * hx - 0.06, 0.04, 0.08, 0, top + 0.65, -hz + 0.04, { tile: 1 });
+    for (let k = 0; k < 14; k++) ctx.glows.push({ p: V3(-hx + 0.25 + k * (2 * hx - 0.5) / 13, top + 1.37, -hz + 0.06).applyMatrix4(K.root), s: 0.28, col: '#ffd890' });
+    // the ticket counter: a brass ticket box beside the button
+    K.box(br, 0.34, 0.14, 0.18, 0.55, top + 0.07, cz, { tile: 1 });
+    K.box(mat('iron_wrought'), 0.18, 0.012, 0.04, 0.55, top + 0.145, cz, { tile: 0.5, tint: '#1a1414' });
     return;
   }
   if (s.part === 'flip_machine') {
@@ -1275,14 +1353,16 @@ function button(u, color, text, batch, lift = 0, labelUp = 0) {
   }
   return null;
 }
-// the engraved brass plaques naming the buttons, on little brackets at the rail in front of each dome
-// (their faces are in the sign atlas), tilted up toward whoever stands there
-const PLAQUE = { '+100': '+100', '+500': '+500', all: 'ALL IN', clear: 'CLEAR', deal: 'DEAL' };
+// the engraved brass plaques naming the casino's stations, on little brackets at the rail in front of each
+// station's dome (their faces are in the sign atlas), tilted up toward whoever stands there
+const casPlaque = id => { const n = id.replace(/\D/g, ''); return id.startsWith('bj') ? `SEAT ${n}` : id.startsWith('craps') ? `RAIL ${n}` : id.startsWith('flip') ? 'PLAY' : 'TICKETS'; };
+const casLift = id => (id.startsWith('bj') || id.startsWith('craps') ? 0.08 : 0);
+const casRy = (T, id) => (id.startsWith('craps') ? T.craps.ry : T.bj.ry);   // each faces its players
 function plaqueSpots(W, T) {
   const out = [];
-  for (const u of W.uses) {
-    if (u.kind === 'bj' && PLAQUE[u.arg]) out.push({ u, lines: [PLAQUE[u.arg]], w: 0.34, h: 0.12, ry: T.bj.ry, lift: 0.08, out: 0.17, drop: 0.13 });
-    else if (u.kind === 'flip' && u.arg !== 'pull' && PLAQUE[u.arg]) out.push({ u, lines: [PLAQUE[u.arg]], w: 0.3, h: 0.11, ry: T.flip.ry, lift: 0, out: 0.17, drop: 0.12 });
+  for (const u of W.uses) if (u.kind === 'cas') {
+    const w = u.arg === 'derby' ? 0.4 : 0.34;
+    out.push({ u, lines: [casPlaque(u.arg)], w, h: 0.12, ry: casRy(T, u.arg), lift: casLift(u.arg), out: 0.17, drop: 0.13 });
   }
   return out;
 }
@@ -1403,8 +1483,8 @@ export function buildStructures(W) {
   };
   npc({ ...T.pawnKeeper, y: T.pawnKeeper.y + 0.1, ry: T.pawnKeeper.ry }, '#c0392b', { hatIndex: 2, skinIndex: 3, outfit: 'ed' }, 'HONEST ED');
   npc({ ...T.clerk, y: T.clerk.y + 0.1, ry: T.clerk.ry }, '#2e86ab', { hatIndex: 0, skinIndex: 4, outfit: 'clerk' }, 'CLERK');
-  // the dealer keeps his spot (world.js) and turns to the players' edge of the table, between HIT and STAND
-  const dl = T.bj.dealer, tgt = { x: (T.bj.hit.x + T.bj.stand.x) / 2, z: (T.bj.hit.z + T.bj.stand.z) / 2 };
+  // the dealer keeps his spot (world.js) and turns to the players' edge of the table, the middle seat
+  const dl = T.bj.dealer, tgt = T.bj.seats[1] || T.bj.table;
   npc({ ...dl, y: dl.y + (style === 'timber' ? 0.12 : 0.1), ry: Math.atan2(tgt.x - dl.x, tgt.z - dl.z) }, '#111111', { hatIndex: 1, skinIndex: 4, eyeColor: '#d62828', outfit: 'dealer' }, 'THE DEALER');
   const repoSpot = { x: T.repo.x - 2.4, y: T.repo.y, z: T.repo.z + 0.6, ry: -Math.PI / 2 };   // street side, facing you
   npc(repoSpot, '#6b5640', { hatIndex: 0, skinIndex: 1, scale: 1.25, outfit: 'repo' }, 'THE REPO MAN');   // people.js gives him brass aviators
@@ -1454,42 +1534,52 @@ export function buildStructures(W) {
     local.add(gusLabel);
   }
 
-  const bj = T.bj;
-  // hit / stand: round woven rugs that pulse (main.js drives emissiveIntensity)
-  const pad = (z, name, color) => {
-    const t = tex(name);
-    const m = own(new THREE.MeshLambertMaterial({ map: t, emissive: new THREE.Color(color), emissiveMap: t, emissiveIntensity: 0.15, alphaTest: 0.5, polygonOffset: true, polygonOffsetFactor: -4 }));
-    const mesh = new THREE.Mesh(new THREE.CircleGeometry(z.r, 32), m);
-    mesh.rotation.x = -Math.PI / 2;
-    mesh.receiveShadow = true;
-    const holder = new THREE.Group();
-    holder.position.set(z.x, T.y + 0.13, z.z);
-    holder.rotation.y = bj.ry;
-    holder.add(mesh);
-    local.add(holder);
-    return mesh;
+  // the casino's games (server/casino.js): a placard over each station (main.js writes them), a coin in each
+  // machine's dome, a pair of dice at each craps rail; the cards are dealt into cardGroup
+  const cas = { labels: new Map(), coins: new Map(), dice: new Map(), cards: new THREE.Group() };
+  local.add(cas.cards);
+  const at = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
+  const placard = (id, p, sx, sy, color = '#fff') => {
+    const l = labelSprite('', color, 30);
+    own(l.material.map, l.material);
+    l.position.set(p.x, p.y, p.z);
+    l.scale.set(sx, sy, 1);
+    local.add(l);
+    cas.labels.set(id, l);
   };
-  const hitPad = pad(bj.hit, 'pad_hit', '#ffb070');
-  const standPad = pad(bj.stand, 'pad_stand', '#a8c8ff');
-  const cardGroup = new THREE.Group();
-  local.add(cardGroup);
-  const bjLabel = labelSprite('', '#fff', 32);
-  own(bjLabel.material.map, bjLabel.material);
-  bjLabel.position.set(bj.table.x, bj.table.y + 1.25, bj.table.z);
-  bjLabel.scale.set(3.4, 0.64, 1);
-  local.add(bjLabel);
-  const flipLabel = labelSprite('', '#ffd166', 30);
-  own(flipLabel.material.map, flipLabel.material);
-  flipLabel.position.set(T.flip.x, T.flip.y + 3.55, T.flip.z);
-  flipLabel.scale.set(3.4, 0.64, 1);
-  local.add(flipLabel);
-  // the coin, spinning in a glass dome on top of the machine
+  // over each seat's place at the blackjack table, the middle one a little higher (neighbours never overlap)
+  for (const [i, s] of T.bj.seats.entries()) placard(s.id, at(T.bj.table, T.bj.ry, s.dx, i === 1 ? 1.12 : 0.92, -0.15), 1.25, 0.24);
+  for (const r of T.craps.rails) placard(r.id, at(T.craps.table, T.craps.ry, r.dx, 0.95, -0.1), 1.45, 0.27);
+  for (const f of T.flips) placard(f.id, { x: f.x, y: f.y + 3.55, z: f.z }, 2.5, 0.47, '#ffd166');
+  placard('derby', at(T.derby, T.derby.ry, 0, 0.98, T.derby.lz - 0.75), 3.2, 0.6, '#ffd166');
+  // the coins, spinning in the glass domes on top of the machines
   const coinFace = own(new THREE.MeshLambertMaterial({ map: tex('coin_face'), emissive: new THREE.Color('#3a2a00'), emissiveMap: tex('coin_face'), emissiveIntensity: 0.6 }));
   const coinEdge = own(new THREE.MeshLambertMaterial({ map: tex('brass'), emissive: new THREE.Color('#2a1a00') }));
-  const coin = new THREE.Mesh(new THREE.CylinderGeometry(0.32, 0.32, 0.06, 24), [coinEdge, coinFace, coinFace]);
-  coin.position.set(T.flip.x, T.flip.y + 2.78, T.flip.z);
-  coin.rotation.x = Math.PI / 2;
-  local.add(coin);
+  const coinGeo = own(new THREE.CylinderGeometry(0.32, 0.32, 0.06, 24));
+  for (const f of T.flips) {
+    const coin = new THREE.Mesh(coinGeo, [coinEdge, coinFace, coinFace]);
+    coin.position.set(f.x, f.y + 2.78, f.z);
+    coin.rotation.x = Math.PI / 2;
+    local.add(coin);
+    cas.coins.set(f.id, coin);
+  }
+  // translucent red dice with white pips: +y 1, -y 6, +x 3, -x 4, +z 2, -z 5 (opposite faces add to 7)
+  const pip = n => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64;
+    const g = cv.getContext('2d');
+    g.fillStyle = '#c0182a'; g.fillRect(0, 0, 64, 64);
+    g.fillStyle = 'rgba(255,255,255,0.12)'; g.fillRect(4, 4, 56, 56);
+    const P = { 1: [[32, 32]], 2: [[18, 18], [46, 46]], 3: [[16, 16], [32, 32], [48, 48]], 4: [[18, 18], [46, 18], [18, 46], [46, 46]], 5: [[16, 16], [48, 16], [32, 32], [16, 48], [48, 48]], 6: [[18, 14], [46, 14], [18, 32], [46, 32], [18, 50], [46, 50]] }[n];
+    g.fillStyle = '#fff8ec';
+    for (const [x, y] of P) { g.beginPath(); g.arc(x, y, 6, 0, TAU); g.fill(); }
+    const t = own(canvasTex(cv));
+    return own(new THREE.MeshLambertMaterial({ map: t, emissive: new THREE.Color('#300008') }));
+  };
+  const dieMats = [3, 4, 1, 6, 2, 5].map(pip), dieGeo = own(new THREE.BoxGeometry(0.075, 0.075, 0.075));
+  for (const r of T.craps.rails) {
+    const pair = [0, 1].map(() => { const holder = new THREE.Group(), d = new THREE.Mesh(dieGeo, dieMats); d.castShadow = true; holder.add(d); holder.visible = false; local.add(holder); return holder; });
+    cas.dice.set(r.id, pair);
+  }
   const glassM = own(new THREE.MeshLambertMaterial({ color: '#d8ecf4', transparent: true, opacity: 0.3, depthWrite: false, emissive: new THREE.Color('#304858') }));
   for (const p of domes) {
     const dome = new THREE.Mesh(new THREE.SphereGeometry(0.52, 18, 10, 0, TAU, 0, Math.PI * 0.6), glassM);
@@ -1505,13 +1595,6 @@ export function buildStructures(W) {
   const pl = new THREE.PointLight(0xffe2b0, 10, 14, 1.4); pl.position.set(T.pawn.x, T.y + 3.2, T.pawn.z); group.add(pl);
 
   // interactable bits
-  // bet / stake buttons: neighbours' hover labels alternate high and low so they never overlap
-  const stagger = new Map();
-  for (const kind of ['bj', 'flip']) {
-    const us = W.uses.filter(u => u.kind === kind && u.arg !== 'pull');
-    const a = kind === 'bj' ? T.bj.ry : T.flip.ry, ax = Math.cos(a), az = -Math.sin(a);
-    us.sort((p, q) => (p.x * ax + p.z * az) - (q.x * ax + q.z * az)).forEach((u, i) => stagger.set(u, i % 2 ? 0.24 : 0));
-  }
   for (const u of W.uses) {
     if (u.kind === 'pawnBell') {
       const K = new Kit(batch, matrix(u.x, u.y - 0.08, u.z), () => 1);
@@ -1519,18 +1602,18 @@ export function buildStructures(W) {
       K.add(mat('brass'), new THREE.SphereGeometry(0.12, 14, 8, 0, TAU, 0, Math.PI / 2), { uv: 'keep', at: matrix(0, 0.03, 0) });
       K.cyl(mat('brass'), [0, 0.14, 0], [0, 0.2, 0], 0.02, 0.02, { sides: 6 });
       K.add(mat('brass'), new THREE.SphereGeometry(0.03, 8, 6), { uv: 'keep', at: matrix(0, 0.21, 0) });
-    } else if (u.kind === 'bj') {
-      const s = button(u, BTN[u.arg] ?? BTN.bet, u.label.replace('Bet ', ''), batch, 0.08, stagger.get(u) || 0);
-      if (s) local.add(s);
-    } else if (u.kind === 'flip') {
-      if (u.arg === 'pull') {
-        // the crank lever on the contraption's flank
-        const K = new Kit(batch, matrix(u.x, u.y - 0.3, u.z, T.flip.ry), () => 1);
+    } else if (u.kind === 'cas') {
+      // a station's glass button (its plaque names it); a Double or Nothing machine has its crank lever too
+      button(u, u.arg === 'derby' ? BTN.all : BTN.deal, null, batch, casLift(u.arg));
+      const f = T.flips.find(m => m.id === u.arg);
+      if (f) {
+        const lv = at({ ...f, y: f.y }, f.ry, 1.4, 1.1, 0.2);
+        const K = new Kit(batch, matrix(lv.x, lv.y, lv.z, f.ry), () => 1);
         K.box(mat('brass'), 0.2, 0.3, 0.2, 0, -0.2, 0, { tile: 1 });
         K.add(mat('brass'), new THREE.CylinderGeometry(0.14, 0.14, 0.05, 12), { uv: 'keep', at: matrix(0, -0.05, 0) });
         K.cyl(mat('iron_wrought'), [0, 0, 0], [0, 0.8, 0.1], 0.035, 0.03, { sides: 6 });
         K.add(mat('wood_light'), new THREE.SphereGeometry(0.12, 10, 8), { uv: 'keep', at: matrix(0, 0.85, 0.11), tint: '#c03a2a' });
-      } else { const s = button(u, u.arg === 'all' ? BTN.all : BTN.bet, u.label.replace('Stake ', ''), batch, 0, stagger.get(u) || 0); if (s) local.add(s); }
+      }
     } else if (u.kind === 'repair') {
       // Gus's two buttons on the front of his bench: green pays cash, gold puts it on the loan
       const s = button(u, u.arg === 'cash' ? BTN.deal : BTN.bet, u.arg === 'cash' ? 'CASH' : 'ON THE LOAN', batch, 0, u.arg === 'cash' ? 0 : 0.12);
@@ -1616,7 +1699,7 @@ export function buildStructures(W) {
       }
       if (gp) gp.material.uniforms.uOpacity.value = (0.16 + 0.84 * night) * (1 + 0.06 * Math.sin(t * 9.1) * Math.sin(t * 5.3));
     },
-    pawnLabel, bjLabel, flipLabel, gusLabel, cardGroup, coin, hitPad, standPad,
+    pawnLabel, gusLabel, cas,
   };
 }
 
@@ -1663,6 +1746,8 @@ function previewFurniture(style = 'timber') {
   for (const [i, st] of ['timber', 'farm', 'alpine', 'frontier', 'adobe'].entries()) furniture({ part: 'slot_bank', x: 7.2 + i * 1.1, y: 1.0, z: 3, hx: 0.45, hy: 1.0, hz: 0.4, ry: 0 }, batch, { ...ctx, styleName: st });
   furniture({ part: 'bj_table', x: 0, y: 0.45, z: 0, hx: 1.8, hy: 0.45, hz: 1.0, ry: 0 }, batch, ctx);
   furniture({ part: 'flip_machine', x: 4.5, y: 1.1, z: 0, hx: 1.0, hy: 1.1, hz: 0.6, ry: 0 }, batch, ctx);
+  furniture({ part: 'craps_table', x: 0, y: 0.45, z: 4.5, hx: 1.7, hy: 0.45, hz: 0.85, ry: 0 }, batch, ctx);
+  furniture({ part: 'derby_track', x: 6.5, y: 0.5, z: 5.0, hx: 3.3, hy: 0.5, hz: 0.95, ry: 0 }, batch, ctx);
   for (let i = 0; i < 2; i++) furniture({ part: 'slot_bank', x: 7.2 + i * 1.1, y: 1.0, z: 0, hx: 0.45, hy: 1.0, hz: 0.4, ry: 0 }, batch, { ...ctx, slotTint: () => (i ? [0.9, 1, 0.9] : [1, 0.85, 0.8]) });
   furniture({ part: 'counter', x: 11.5, y: 0.5, z: 0, hx: 2.0, hy: 0.5, hz: 0.55, ry: 0 }, batch, ctx);
   const g = new THREE.Group();
@@ -1688,7 +1773,9 @@ export const PREVIEW = {
   signs_alpine: () => previewTown('alpine', ['store'], true),
   signs_frontier: () => previewTown('frontier', ['store'], true),
   casino_furniture: () => previewFurniture(),
-  bj_table: () => { const b = new Batch(), g = new THREE.Group(); furniture({ part: 'bj_table', x: 0, y: 0.45, z: 0, hx: 1.8, hy: 0.45, hz: 1.0, ry: 0 }, b, { glows: [], domes: [], styleName: 'timber' }); for (const [i, x] of [-1.6, -0.9, -0.2, 0.5, 1.5].entries()) button({ x, y: 1.0, z: 1.0 }, [BTN.bet, BTN.bet, BTN.all, BTN.clear, BTN.deal][i], null, b, 0.08); b.build(g); return g; },
+  bj_table: () => { const b = new Batch(), g = new THREE.Group(); furniture({ part: 'bj_table', x: 0, y: 0.45, z: 0, hx: 1.8, hy: 0.45, hz: 1.0, ry: 0 }, b, { glows: [], domes: [], styleName: 'timber' }); for (const x of [-1.2, 0, 1.2]) button({ x, y: 1.0, z: 0.95 }, BTN.deal, null, b, 0.08); b.build(g); return g; },
+  craps_table: () => { const b = new Batch(), g = new THREE.Group(); furniture({ part: 'craps_table', x: 0, y: 0.45, z: 0, hx: 1.7, hy: 0.45, hz: 0.85, ry: 0 }, b, { glows: [], domes: [], styleName: 'timber' }); for (const x of [-0.8, 0.8]) button({ x, y: 1.0, z: 0.88 }, BTN.deal, null, b, 0.08); b.build(g); return g; },
+  derby_track: () => { const b = new Batch(), g = new THREE.Group(); furniture({ part: 'derby_track', x: 0, y: 0.5, z: 0, hx: 3.3, hy: 0.5, hz: 0.95, ry: 0 }, b, { glows: [], domes: [], styleName: 'timber' }); button({ x: 0, y: 1.06, z: 0.8 }, BTN.all, null, b); b.build(g); return g; },
   signs_farm: () => previewTown('farm', ['store'], true),
   signs_adobe: () => previewTown('adobe', ['store'], true),
   entry_signs_adobe: () => previewTown('adobe', [], true),

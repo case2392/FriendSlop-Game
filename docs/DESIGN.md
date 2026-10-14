@@ -339,12 +339,27 @@ roof, then the RV; it made the first four days too forgiving.)
   unseen, at 80%: carrying the good stuff in is worth it, carrying the junk in
   isn't. (Unloading 20 things one at a time ate three game hours.)
 - **Casino:** every game bets *the shared bank*, and *anyone* can bet it.
-  That's GWYF's comedy and it's ours too. In the first build:
-  - **Blackjack.** Squad vs. dealer. Anyone can set the bet on the big
-    +$100 / +$500 / ALL-IN buttons. Then **vote with your body**: stand on
-    the HIT or STAND floor pad. Majority rules, and ties hit.
-  - **Double or Nothing.** A coin-flip machine with a lever. It's 48.5%,
-    because the house always wins.
+  That's GWYF's comedy and it's ours too. But nobody waits for anybody: each
+  player plays their own game at the same time (one at blackjack, one at craps,
+  one on the coin machine), all of it out of the one bank. A station (a
+  blackjack seat, a craps rail, a machine) is yours once you press E at its
+  button and stays yours till you walk off. A game you leave half-played is
+  played out the house's way: a hand stands, the dice roll on. The number keys
+  play it: 1-4 set the stake (+$100, +$500, ALL IN, clear), 5 deals, rolls or
+  pulls, 6 stands. The stake leaves the bank when it's played; winnings come
+  back when the game settles; the crew sees every result with the player's name.
+  - **Blackjack.** Three seats, each your own hand against the dealer. A
+    natural pays 3 to 2, and the dealer stands on 17.
+  - **Craps.** Two rails, the pass line: 7 or 11 on the come-out wins, 2, 3 or
+    12 loses, anything else is the point; roll it again before a 7. Even
+    money, a 1.4% house edge.
+  - **Double or Nothing.** Two coin-flip machines with levers. It's 48.5%,
+    because the house always wins. The stake stays set: pull again.
+  - **The Ringtail Derby.** Everybody's game: four ringtails race down a
+    sand track, a ticket on one (any stake, any number of players) pays 3.8
+    times. The race runs 12 s after the first ticket, so the crew piles in.
+  - At midnight (and at dawn) it's last call: whatever's on the tables is
+    played out before the Repo Man counts the bank.
   - **Big Lever Slots** (M2): the lever needs two people.
   - **Roulette with physical chip stacks** (M2): chips are rigid bodies you
     carry from the cashier, which means chips can be stolen, thrown and
@@ -415,8 +430,19 @@ played. Real crews will haul more where they range further and less where they
 argue. Playtests decide (confidence that a practiced human crew out-hauls the
 bot: moderate; by how much: low).
 
+On **Bad Credit** (payments +15%, tougher wildlife: veteran crews) the same
+bold crew on the same 20 seeds (`econbot --tier bad --casino bold`) paid day 4
+on 14 of the 19 trips that reached it (Standard: 18 of 19) and reached day 5
+on 14 (Standard: 18): the 15% bites where it should. It paid the balloon on 4
+of 20 (Standard: 2 of 20), but twenty seeds can't tell those apart (95%
+intervals of about 8-42% and 3-30%): Bad Credit doesn't shut a bold crew out,
+and the casino's swings swamp the rest. The bot barely meets the tougher
+wildlife (ringtails stole nothing from it on either terms), so for human crews
+Bad Credit will cost more (confidence: moderate).
+
 - Every casino game has a house edge (blackjack about 1–2% played sensibly,
-  the coin flip 3%). The casino is variance you choose, never free money.
+  craps 1.4%, the coin flip 3%, a Derby ticket 5%). The casino is variance you
+  choose, never free money.
 - Medical bill: $250 + $50 × day per KO, unless a friend picks you up.
   Getting run over by your own RV: $500. RV on its back for 7 seconds: an
   $800 tow, and the truck sets it back on its wheels on the road nearby
@@ -596,7 +622,7 @@ over real WebSockets) and `test/smoke-browser.mjs` (two real Chromium clients):
 - Loot: 15 item types with mass, value, fragility and carry class.
   Spring-force grabbing, so co-carrying emerges. Throwing. Impact damage. The
   pawn counter with appraisal.
-- Casino: body-vote blackjack and double-or-nothing. Store: walkie-talkies,
+- Casino: a game each on one bank (blackjack seats, craps, two double-or-nothing machines, the Ringtail Derby). Store: walkie-talkies,
   energy drinks, bungee tie-downs, a hard hat, a cheese wheel (bait).
 - The Repo Man (one missed payment ends the run), night receipts, sleeping, and both
   endings.
