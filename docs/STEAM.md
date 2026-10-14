@@ -174,7 +174,8 @@ AAC: the store page's video slot (Steamworks > Store Page Admin > Trailers) take
 
 ```bash
 xvfb-run -a -s "-screen 0 1920x1080x24" node tools/trailer.mjs capture   # the shots (about an hour)
-node tools/trailer.mjs audio                                              # the music and the sounds
+node tools/trailer.mjs audio                                              # the sounds and the air
+node tools/trailer.mjs score                                              # the music, scored to the cut
 xvfb-run -a -s "-screen 0 1920x1080x24" node tools/trailer.mjs cards     # the words and the title
 node tools/trailer.mjs edit                                               # dist/trailer/trailer.mp4
 ```
@@ -184,9 +185,15 @@ node tools/trailer.mjs edit                                               # dist
   video frame is exactly 1/30 s of game time. The crew (Dave, Steve, Kyle) are bots; the camera is
   the page's own player. Seed 777, so every take is the same road. No HUD in the picture; the lines
   on it are set afterwards in the game's own type (Cinzel, Marcellus) and its toasts' words.
-- **The sound** is the game's own: its synthesized music (the menu's country song, the casino's
-  lounge band, the last hour's midnight station) and its sound effects, rendered offline. No outside
-  music or samples, so nothing to license.
+- **The music** is a score written for the cut (`tools/trailer-score.js`): a country-rock theme at
+  96 bpm, so every cut lands on a half bar, with its gags on the picture's events (the band stops dead
+  on the gate's crunch, the tape winds down when the RV breaks down, the casino gets a swing version,
+  midnight's ticking build lands on REPO'D, the payoff goes up a step). Every instrument is synthesized
+  there (plucked strings, drums, a fiddle, a vibraphone): no samples, nothing to license. `node
+  tools/trailer.mjs plan` prints the cut's timing to score against; `score --solo <group>` renders one
+  group of instruments, to check the balance.
+- **The sound** is the game's own: its sound effects and its ambience, rendered offline. The music
+  ducks a little under the big ones (the crunch, the till, the bonk).
 - **The cut** is the `EDL` in the tool: the hook (the SLOPMASTER RVs / NO MONEY DOWN!!! billboard),
   the pitch, the verbs (map, haul, climb, winch, pawn), the chaos (the ranger gate, the Grumphorn,
   a ringtail, the RV running Steve over, a breakdown), the stakes (the casino, a minute to
