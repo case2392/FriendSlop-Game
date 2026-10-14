@@ -16,7 +16,8 @@
 // honest and says so if it ever moves a porter faster.
 //
 //   node tools/econbot.mjs [--seeds 20 | --seed N] [--crew 3] [--days 1-5] [--casino none|bold] [--bank N]
-//                          [--trace] [--json file] [--gate]
+//                          [--trace] [--json file] [--gate] [--part k/n]
+//   node tools/econbot.mjs --merge a.json b.json ...   (the summary of runs split with --part k/n --json)
 // --bank N: the bank at the start of each day (to run the whole flow without loot); --gate: exit 1 on a bot
 // failure (a stuck porter or RV, a run-over, a move faster than a page allows)
 process.env.FRIENDSLOP_TEST = '1';            // (mutes the per-hit log line)
@@ -34,11 +35,15 @@ await initPhysics();
 
 const args = process.argv.slice(2);
 const opt = (k, d) => { const i = args.indexOf(k); return i >= 0 ? args[i + 1] : d; };
-const SEEDS = opt('--seed', null) != null ? [Number(opt('--seed'))] : Array.from({ length: Number(opt('--seeds', 20)) }, (_, i) => [4242, 7, 777][i] ?? 1000 + i * 7919);
+const PART = String(opt('--part', '0/1')).split('/').map(Number);   // (every n-th seed from the k-th: run in parallel)
+const SEEDS = (opt('--seed', null) != null ? [Number(opt('--seed'))] : Array.from({ length: Number(opt('--seeds', 20)) }, (_, i) => [4242, 7, 777][i] ?? 1000 + i * 7919))
+  .filter((_, i) => i % PART[1] === PART[0]);
+const MERGE = args.includes('--merge') ? args.slice(args.indexOf('--merge') + 1).filter(a => !a.startsWith('--')) : null;
 const CREW = Math.max(1, Math.min(C.MAX_PLAYERS, Number(opt('--crew', 3))));
 const [D0, D1] = String(opt('--days', '1-5')).split('-').map(Number).concat([5]).slice(0, 2);
 const CASINO = opt('--casino', 'none');
 const BANK = opt('--bank', null) != null ? Number(opt('--bank')) : null;
+const WHY = args.includes('--why'), accHist = [], WHYLOG = [];
 const TRACE = args.includes('--trace'), GATE = args.includes('--gate'), JSON_OUT = opt('--json', null);
 const HZ = C.SIM_HZ, DT = 1 / HZ, DZ = RV_DIM.DOOR_Z;
 const NAMES = ['Ann', 'Bob', 'Cat', 'Dan', 'Eve', 'Fay'];
@@ -50,7 +55,7 @@ const hyp = (a, b) => Math.hypot(a.x - b.x, a.z - b.z);
 const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 
 // ---- one trip's world: the room, the crew, the clock -------------------------------------------------------
-let room = null, crew = [], ev = [], trace = () => {}, health = null;
+let room = null, crew = [], ev = [], trace = () => {}, health = null, PHASE = '';
 const W = () => room.W, sim = () => room.sim;
 const rvPose = () => sim().rvPose();
 const rvAt = l => { const r = rvPose(); return toWorld(r.p, r.q, l); };
@@ -255,13 +260,13 @@ function* board() {
   }
   yield* until(() => setDoor(false), 3, 'shutting the door');
 }
-// a rider picks up what's in the doorway and sets it down at a free spot in the RV
+// a rider picks up what's in the doorway and sets it down at a free spot in the RV (one too heavy to lift alone
+// is dragged there along the floor: one pair of hands drags what it can't lift)
 function* tidy(bot) {
   for (let n = 0; n < 4; n++) {
     const p = [...sim().props.values()].find(q => q.type !== 'map' && LOOT[q.type] && !q.holders.size && inDoorway(q, 0));
     if (!p) return true;
-    const L = LOOT[p.type], half = halfOf(L);
-    if (hands(L) > 1) { trace(`  the ${p.type} is in the doorway, too heavy to tidy alone`); return false; }
+    const L = LOOT[p.type], half = halfOf(L), drag = hands(L) > 1;
     const spot = packer.take(L, p.type);
     if (!spot) { trace(`  nowhere to put the ${p.type} from the doorway`); return false; }
     const at = rvLocal(p.body.translation());
@@ -272,8 +277,10 @@ function* tidy(bot) {
     if (held(bot) !== p.id) { packer.give(spot); room.handle(bot.P, { t: 'rel' }); trace(`  couldn't pick up the ${p.type} in the doorway`); return false; }
     let GL = { ...at };
     const over = Math.min(1.75 - half, Math.max(half + 0.12, spot.y + half + 0.12, packer.top() + half + 0.12));
-    for (const q of [{ x: at.x, y: over, z: at.z }, { x: -0.55, y: over, z: at.z }, { x: spot.x, y: over, z: spot.z }, { x: spot.x, y: spot.y + half + 0.01, z: spot.z }]) {
-      const from = { ...GL }, steps = Math.max(1, Math.round(Math.hypot(q.x - from.x, q.y - from.y, q.z - from.z) / 0.8 * HZ));
+    const path = drag ? [{ x: -0.55, y: at.y, z: at.z }, { x: spot.x, y: at.y, z: spot.z }]
+      : [{ x: at.x, y: over, z: at.z }, { x: -0.55, y: over, z: at.z }, { x: spot.x, y: over, z: spot.z }, { x: spot.x, y: spot.y + half + 0.01, z: spot.z }];
+    for (const q of path) {
+      const from = { ...GL }, steps = Math.max(1, Math.round(Math.hypot(q.x - from.x, q.y - from.y, q.z - from.z) / (drag ? 0.45 : 0.8) * HZ));
       for (let i = 1; i <= steps; i++) {
         GL = { x: from.x + (q.x - from.x) * i / steps, y: from.y + (q.y - from.y) * i / steps, z: from.z + (q.z - from.z) * i / steps };
         const dx = GL.x - bot.feet.x, dz = GL.z - bot.feet.z, dd = Math.hypot(dx, dz);
@@ -294,26 +301,36 @@ function* tidy(bot) {
 
 // ---- driving ------------------------------------------------------------------------------------------------
 const pedals = { th: 0, st: 0, hb: 1 };
-// keyboard steering at a world point (st -1/0/+1 with 0.06 rad of slack)
+// keyboard steering at a world point, the way a careful driver taps A and D: the key is held for a share of
+// each 0.1 s that grows with the heading error (full lock only for a big one; at speed it takes a bigger
+// error), so the load isn't thrown about by a full-lock correction at 13 m/s (0.7 g sideways)
+const tap = duty => (room.t * 10) % 1 < duty;
 function steerAt(goal) {
   const p = sim().rv.translation(), f = fwd(), tx = goal.x - p.x, tz = goal.z - p.z;
   const err = -Math.atan2(f.x * tz - f.z * tx, f.x * tx + f.z * tz);
-  return err > 0.06 ? 1 : err < -0.06 ? -1 : 0;
+  if (Math.abs(err) < 0.015) return 0;
+  const full = Math.abs(rvV()) > 6 ? 0.3 : 0.18;
+  return tap(Math.min(1, Math.abs(err) / full)) ? Math.sign(err) : 0;
 }
 // the lane's middle `ahead` m on, `lat` m to the side of the road's middle
 const lane = (z, lat = 0, ahead = 10) => ({ x: W().roadX(z + ahead) + lat, z: z + ahead });
 // drive to `z` (the RV's middle) and stop there: as fast as `vmax`, braking in time; `lat(z)` the lane offset
 function* driveTo(zStop, { vmax = 13, lat = () => 0, stop = true, maxS = 300 } = {}) {
+  const was = PHASE; PHASE = `driving (${was})`;
   for (let i = 0; i < maxS * HZ; i++) {
     const z = rvZ(), v = rvV(), dz = zStop - z;
     if (dz < 0.6 || (!stop && dz < 2)) break;
-    const want = Math.min(vmax(z), Math.sqrt(2 * 2.2 * Math.max(0, dz - 0.5)));
+    // (slowing the way a careful driver does: off the throttle early and coasting, then taps of the brake that
+    // grow with how much too fast; a held brake only at a crawl. A held brake from cruise slides the load
+    // the length of the floor into the front wall)
+    const want = Math.min(vmax(z), Math.sqrt(2 * 1.0 * Math.max(0, dz - 0.8)) + 0.3), over = v - want;
     pedals.hb = 0;
-    pedals.th = v < want - 0.25 ? 1 : v > want + 0.6 ? -1 : 0;
-    pedals.st = steerAt(lane(z, lat(z), Math.max(6, v * 1.1)));
+    pedals.th = over < -0.25 ? 1 : over < 0.5 ? 0 : v < 2.5 ? -1 : tap(Math.min(1, (over - 0.5) / 2.5)) ? -1 : 0;
+    pedals.st = steerAt(lane(z, lat(z), Math.max(8, v * 1.6)));
     yield;
-    if (room.phase === 'over') return;
+    if (room.phase === 'over') { PHASE = was; return; }
   }
+  PHASE = was;
   if (stop) yield* halt();
 }
 // on the brakes to a standstill, then the handbrake
@@ -347,7 +364,9 @@ function latFor(z) {
   for (const bed of W().beds || []) {
     const m = beastAt(bed);
     if (!m || mobSt(m) === GST.LEFT) continue;
-    if (z > bed.z - 34 && z < bed.z + 24) return bedSide(bed) * 3.25;
+    // (eased over and back over 12 m: snapping back to the middle at 5 m/s threw the load at the wall)
+    const k = clamp(Math.min(z - (bed.z - 46), (bed.z + 36) - z) / 12, 0, 1);
+    if (k > 0) return bedSide(bed) * 3.25 * k;
   }
   return 0;
 }
@@ -952,8 +971,34 @@ function ledgerEvents(evs) {
   for (const e of evs) {
     const c = dayLog.carried.find(x => x.id === e.id && !x.fate);
     if (!c) continue;
-    if (e.k === 'break') c.fate = 'broken';
-    else if (e.k === 'dmg') c.knocks = (c.knocks || 0) + (e.lost || 0);
+    if (e.k === 'break') {
+      c.fate = 'broken';
+      const l = rvLocal(e), up = qRotate(rvPose().q, { x: 0, y: 1, z: 0 });
+      trace(`  BROKE: ${e.type} #${e.id} (in at ${fmt$(c.vIn)}, knocked ${c.knocks || 0} before) at RV-local ${l.x.toFixed(2)} ${l.y.toFixed(2)} ${l.z.toFixed(2)} (${insideRV(l.x, l.y, l.z, 0.1) ? 'inside' : 'outside'}); RV ${rvV().toFixed(1)} m/s, tilt ${(Math.acos(Math.min(1, up.y)) * 57.3).toFixed(0)} deg, ${PHASE}`);
+    }
+    else if (e.k === 'dmg') {
+      c.knocks = (c.knocks || 0) + (e.lost || 0);
+      if (WHY && accHist.length) {
+        const p = sim().props.get(e.id), l = p && rvLocal(p.body.translation());
+        if (l && insideRV(l.x, l.y, l.z, 0.1)) {
+          const pk = k => Math.max(...accHist.map(a => Math.abs(a[k])));
+          const fz = pk('z'), fx = pk('x'), fy = Math.max(...accHist.map(a => Math.abs(a.y - 9.81)));
+          const cause = Math.abs(rvV()) < 0.5 ? 'parked' : fz >= fx && fz >= fy ? 'fore-aft' : fx >= fy ? 'side' : 'bump';
+          // (what it's touching, and how deep: two bodies packed into each other get shoved apart hard every step)
+          const touch = [];
+          const w = sim().world, rvH = sim().rv.handle, rvName = new Map(Object.entries(sim().rvCols).map(([n, cc]) => [cc.handle, n]));
+          w.contactPairsWith(p.col, c2 => {
+            if (!c2) return;
+            let depth = 0, n = 0;
+            w.contactPair(p.col, c2, man => { n += man.numContacts(); for (let i = 0; i < man.numContacts(); i++) depth = Math.min(depth, man.contactDist(i)); });
+            if (!n) return;
+            const id = sim().byCollider.get(c2.handle), nm = id != null ? sim().props.get(id)?.type : c2.parent()?.handle === rvH ? 'rv:' + (rvName.get(c2.handle) || '?') : 'static';
+            touch.push(`${nm} ${(depth * 100).toFixed(1)}cm`);
+          });
+          WHYLOG.push({ touch: touch.join(', '), type: c.type, lost: e.lost, cause, fz, fx, fy, v: rvV(), phase: PHASE, z: rvZ(), x: sim().rv.translation().x - W().roadX(rvZ()), clock: room.clock, st: pedals.st, th: pedals.th, roll: Math.asin(Math.max(-1, Math.min(1, qRotate(rvPose().q, { x: 1, y: 0, z: 0 }).y))) * 57.3 });
+        }
+      }
+    }
     else if (e.k === 'mob' && e.s === 'steal') c.fate = 'stolen';
   }
 }
@@ -989,7 +1034,7 @@ function* town(day) {
   day.sold = room.dayStats.sold - sold0;
   if (BANK != null && room.bank < room.due) room.bank = room.due + BANK;
   if (room.bank < room.due && CASINO === 'bold') yield* gamble(pb);
-  const done = () => { day.paid = room.paid || room.over?.won === true; day.bank = room.bank; day.hp = Math.round(room.rvc.hp); };
+  const done = () => { day.paid = room.paid || room.over?.won === true; day.bank = room.bank; day.hp = Math.round(room.phase === 'over' ? room.stats.rv.end : room.rvc.hp); };   // (after a miss, the game-over has the RV's last condition)
   if (room.bank >= room.due) { pb.useId(pay); day.paidAt = room.clock; done(); yield; }
   else {
     trace(`  short: ${fmt$(room.bank)} of ${fmt$(room.due)}; waiting for midnight`);
@@ -1049,6 +1094,7 @@ function* dayScript(out) {
   for (const e of legPlan()) {
     if (room.phase !== 'road' && room.phase !== 'camp') break;
     const t0 = room.t;
+    PHASE = e.k;
     if (e.k === 'honk') yield* honk(e.rf);
     else if (e.k === 'gate') yield* gate(e.o);
     else if (e.k === 'boulder') yield* boulder(e.o);
@@ -1081,7 +1127,13 @@ async function runTrip(seed) {
       const dv = driver();
       if (dv) room.handle(dv.P, { t: 'drv', ...pedals });
       for (const b of crew) b.pose();
+      const v0 = sim().rv.linvel();
       room.tick(DT);
+      if (WHY && room.sim) {
+        const v1 = sim().rv.linvel(), q = rvPose().q, iq = { x: -q.x, y: -q.y, z: -q.z, w: q.w };
+        const a = qRotate(iq, { x: (v1.x - v0.x) / DT, y: (v1.y - v0.y) / DT + 9.81, z: (v1.z - v0.z) / DT });
+        accHist.push(a); if (accHist.length > 9) accHist.shift();
+      }
       if (TRACE && (++leaveTick % 5) === 0) watchLoad();
       if (ev.length) { for (const e of ev) if (e.k === 'sold') for (const id of e.ids || []) { const x = dayLog.carried.find(y => y.id === id && !y.fate); if (x) { x.fate = 'sold'; x.sold = vals.get(id) ?? 0; } } ledgerEvents(ev.filter(e => e.k !== 'sold')); ev.length = 0; }
       if (r.done || room.phase === 'over') break;
@@ -1091,6 +1143,10 @@ async function runTrip(seed) {
     if (room.day > D1) break;
   }
   const won = room.phase === 'over' && room.over?.won;
+  // (a missed payment ends the trip at midnight, in the middle of the day's script: close its day here)
+  const last = days.at(-1);
+  // (the bank as midnight came: the Repo Man's game-over says how short it was; the room's bank is gone by now)
+  if (last && last.hp == null) { last.paid = !!room.over?.won; last.bank = room.over ? room.over.due - room.over.short : room.bank; last.hp = Math.round(room.stats.rv.end); }
   room.sim.free?.();
   return { seed, won, days, stats: { sold: room.stats.sold, bills: room.stats.bills, broken: room.stats.broken, kos: room.stats.kos, rv: room.stats.rv } };
 }
@@ -1100,7 +1156,8 @@ function fmtClock(h) { const hh = Math.floor(h) % 24, mm = Math.floor((h % 1) * 
 health = { fails: [], kos: 0, doorLeftOpen: 0 };
 const trips = [];
 const t0 = Date.now();
-for (const seed of SEEDS) {
+if (MERGE) for (const f of MERGE) { const j = JSON.parse(fs.readFileSync(f, 'utf8')); trips.push(...j.trips); health.fails.push(...j.fails); }
+for (const seed of MERGE ? [] : SEEDS) {
   const r = await runTrip(seed);
   trips.push(r);
   for (const d of r.days) {
@@ -1111,11 +1168,34 @@ for (const seed of SEEDS) {
   console.log(`seed ${seed}: ${r.won ? 'WON' : r.days.at(-1)?.paid ? `stopped after day ${r.days.at(-1).day}` : `lost on day ${r.days.at(-1)?.day}`} (${((Date.now() - t0) / 1000).toFixed(0)} s so far)`);
 }
 console.log(`\n${trips.length} trips, crew of ${CREW}, casino ${CASINO}: won ${trips.filter(t => t.won).length}`);
+if (WHY) {   // what knocked the loot riding in the RV: the RV's sharpest acceleration in the 0.15 s before each knock
+  const by = {};
+  for (const w of WHYLOG) { const k = `${w.cause}`; (by[k] ||= { n: 0, lost: 0, g: 0 }); by[k].n++; by[k].lost += w.lost; by[k].g = Math.max(by[k].g, Math.max(w.fz, w.fx, w.fy) / 9.81); }
+  console.log('knocks to loot riding in the RV, by the RV\'s sharpest acceleration just before:');
+  for (const [k, v] of Object.entries(by).sort((a, b) => b[1].lost - a[1].lost)) console.log(`  ${k.padEnd(9)} ${String(v.n).padStart(5)} knocks, $${v.lost} lost, peak ${v.g.toFixed(2)} g`);
+  const sp = [[0, 0.5], [0.5, 3], [3, 6], [6, 9], [9, 14]];
+  for (const [lo, hi] of sp) { const xs = WHYLOG.filter(w => Math.abs(w.v) >= lo && Math.abs(w.v) < hi); console.log(`  RV at ${lo}-${hi} m/s: ${xs.length} knocks, $${xs.reduce((a, w) => a + w.lost, 0)}`); }
+  const ph = {};
+  for (const w of WHYLOG) { const k = `${w.phase} / ${w.cause}`; (ph[k] ||= { n: 0, lost: 0 }); ph[k].n++; ph[k].lost += w.lost; }
+  for (const [k, v] of Object.entries(ph).sort((a, b) => b[1].lost - a[1].lost).slice(0, 10)) console.log(`  ${k}: ${v.n} knocks, $${v.lost}`);
+  for (const w of [...WHYLOG].sort((a, b) => b.lost - a.lost).slice(0, 12)) console.log(`  $${w.lost} ${w.type} ${w.cause} ${w.phase} at ${fmtClock(w.clock)} z ${w.z.toFixed(0)} off-road ${w.x.toFixed(1)} m, ${w.v.toFixed(1)} m/s, roll ${w.roll.toFixed(0)} deg, fwd ${(w.fz / 9.81).toFixed(2)} g side ${(w.fx / 9.81).toFixed(2)} g up ${(w.fy / 9.81).toFixed(2)} g, st ${w.st} th ${w.th}; touching ${w.touch}`);
+}
+const mean = xs => xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : 0;
+const median = xs => { if (!xs.length) return 0; const s = [...xs].sort((a, b) => a - b); return s.length % 2 ? s[(s.length - 1) / 2] : (s[s.length / 2 - 1] + s[s.length / 2]) / 2; };
 for (let d = D0; d <= D1; d++) {
   const ds = trips.map(t => t.days.find(x => x.day === d)).filter(Boolean);
   if (!ds.length) continue;
-  const paid = ds.filter(x => x.paid).length, haul = ds.map(x => x.sold || 0);
-  console.log(`day ${d}: reached ${ds.length}, paid ${paid} (${Math.round(paid / ds.length * 100)}%), pawned mean ${fmt$(Math.round(haul.reduce((a, b) => a + b, 0) / ds.length))}`);
+  const paid = ds.filter(x => x.paid).length, haul = ds.map(x => x.sold || 0), at = ds.filter(x => x.paid && x.paidAt != null).map(x => x.paidAt);
+  const f = k => ds.reduce((a, x) => a + (x.fates?.[k] || 0), 0), n = ds.reduce((a, x) => a + (x.log?.carried.length || 0), 0);
+  const inV = ds.reduce((a, x) => a + (x.fates?.inValue || 0), 0), soldV = ds.reduce((a, x) => a + (x.fates?.soldValue || 0), 0);
+  console.log(`day ${d}: reached ${ds.length}, paid ${paid} (${Math.round(paid / ds.length * 100)}%)${at.length ? ` at ${fmtClock(mean(at))} on average` : ''}; pawned mean ${fmt$(Math.round(mean(haul)))} (median ${fmt$(Math.round(median(haul)))}); ${n} things carried in, worth ${fmt$(inV)}: ${f('sold')} sold (${Math.round(soldV / Math.max(1, inV) * 100)}% of the value), ${f('broken')} broken, ${f('stolen')} stolen, ${f('lost')} lost`);
+}
+// the whole trip: what a crew pawns over five days, and how short of the balloon it ends without the casino
+if (D0 === 1 && D1 === 5) {
+  const hauls = trips.map(t => t.days.reduce((a, x) => a + (x.sold || 0), 0)), reached5 = trips.filter(t => t.days.some(x => x.day === 5));
+  console.log(`the trip: pawned ${fmt$(Math.round(mean(hauls)))} on average (median ${fmt$(Math.round(median(hauls)))}); reached day 5 on ${reached5.length} of ${trips.length}; paid the balloon on ${trips.filter(t => t.won).length}`);
+  const short = reached5.filter(t => !t.won).map(t => { const d5 = t.days.find(x => x.day === 5); return d5.due - d5.bank; });
+  if (short.length) console.log(`  short of the balloon on day 5: ${fmt$(Math.round(median(short)))} (median), ${fmt$(Math.round(Math.min(...short)))} at best`);
 }
 if (health.fails.length) console.log(`\nbot failures (${health.fails.length}):\n  ${health.fails.slice(0, 30).join('\n  ')}`);
 if (JSON_OUT) fs.writeFileSync(JSON_OUT, JSON.stringify({ crew: CREW, casino: CASINO, trips, fails: health.fails }, null, 1));
