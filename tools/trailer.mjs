@@ -622,13 +622,14 @@ shot({
   },
   tick(t) {
     const { Dave, Kyle, Steve } = bots, F = W.town.flip;
+    // (seen from beside the machine: Kyle at the lever facing us, Steve by the dome, Dave behind)
     Kyle.at(F.x - 2.1, F.z + 0.7, Math.PI / 2);
-    Dave.at(F.x - 3.0, F.z - 1.3, Math.PI / 2 - 0.5);
-    Steve.at(F.x - 3.3, F.z + 2.0, Math.PI / 2 + 0.6);
+    Dave.at(F.x - 2.9, F.z - 0.5, yawTo({ x: F.x - 2.9, z: F.z - 0.5 }, F));
+    Steve.at(F.x - 1.0, F.z + 2.2, yawTo({ x: F.x - 1.0, z: F.z + 2.2 }, F));
     if (!this.pulled && t > 0.5) { this.pulled = true; Kyle.say({ t: 'use', id: this.pull }); }
-    if (!this.sad && t > 2.9) { this.sad = true; Kyle.say({ t: 'emote', e: '😭' }); Dave.say({ t: 'emote', e: '🤬' }); Steve.say({ t: 'emote', e: '💀' }); }
+    if (!this.sad && t > 2.3) { this.sad = true; Kyle.say({ t: 'emote', e: '😭' }); Dave.say({ t: 'emote', e: '🤬' }); Steve.say({ t: 'emote', e: '💀' }); }
   },
-  cam: () => { const F = W.town.flip; return { p: { x: F.x - 4.5, y: F.y + 1.65, z: F.z + 3.1 }, t: { x: F.x - 0.1, y: F.y + 1.35, z: F.z + 0.1 } }; },
+  cam: () => { const F = W.town.flip; return { p: { x: F.x - 1.2, y: F.y + 2.05, z: F.z - 4.0 }, t: { x: F.x - 1.3, y: F.y + 1.55, z: F.z + 0.8 } }; },
   body: () => ({ x: W.town.flip.x - 6, z: W.town.flip.z + 5 }),
 });
 
@@ -908,6 +909,7 @@ async function stills() {
   await toDay(4);
   dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'bank', v: 300 });
   dbg({ op: 'tpRV', x: 0, z: W.town.z + 12, yaw: 0 });
+  offstage(bots.Dave, bots.Steve, bots.Kyle);   // (the new trip's road: where the payoff left them is in the sky)
   await page.evaluate(() => { const S = window.__nmd, T = S.W.town; S.me.teleport(2, T.y + 0.05, T.z + 4, 0); S.aimAt(7.5, T.y + 2.2, T.z + 24); S.setSetting('uiScale', 1.6); });
   await show('#hud');
   await page.addStyleTag({ content: '#hCode, #hCode *, #tracker, #tracker * { visibility: hidden !important; } #connBox { display: none !important; }' });
@@ -1077,6 +1079,7 @@ card('c_climb', 'big', 'CLIMB ANYTHING.');
 card('c_winch', 'big', 'WINCH THE RV.');
 card('c_pawn', 'big', 'PAWN IT ALL.');
 card('c_bet', 'big', 'BET THE SHARED BANK.');
+card('c_double', 'big', 'DOUBLE OR NOTHING.');
 card('c_miss', 'big', 'MISS ONE PAYMENT…');
 card('c_takes', 'big', '…AND HE TAKES THE RV.');
 card('c_five', 'big', 'FIVE DAYS. FIVE PAYMENTS.');
@@ -1204,7 +1207,7 @@ const EDL = [
   // the stakes
   { shot: 'neon', secs: 1.25, cards: [['c_bet', 0.05, 1.25]] },
   { shot: 'blackjack', secs: 1.25, from: 8 },
-  { shot: 'coinflip', secs: 2.5, from: 6, sfx: [[0.15, 'coin', 0.9]], cues: [[toastIs(/Double or Nothing/), 'lose', 1.0, 0.0]] },
+  { shot: 'coinflip', secs: 2.5, from: 6, cards: [['c_double', 0.05, 1.45]], sfx: [[0.15, 'coin', 0.9]], cues: [[toastIs(/Double or Nothing/), 'lose', 1.0, 0.0]] },
   { still: 'hud.png', secs: 1.25, zoom: 1.06, crop: [0.06, 0, 0.74, 0.74], cards: [['c_miss', 0.05, 1.25]] },
   { shot: 'repoman', secs: 2.5, cards: [['c_takes', 0.1, 2.5]], sfx: [[0.1, 'repo', 1.0]] },
   { shot: 'repoman', secs: 1.25, from: 'end', dim: 0.35, cards: [['c_repod', 0.0, 1.25]], sfx: [[0.0, 'repoArrives', 1.0]] },
