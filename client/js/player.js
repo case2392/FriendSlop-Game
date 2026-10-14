@@ -151,6 +151,10 @@ export class Me {
     this.regrabT = Math.max(0, this.regrabT - dt);
     this.buffT = Math.max(0, this.buffT - dt);
 
+    // riding, and the RV isn't known yet (a new day's first moments, before its first snapshot): stay in it.
+    // Walking on meanwhile dropped you from it at yesterday's spot in the new day's world (its town, under
+    // its ground), while the RV waited at the new camp
+    if (this.par && this.lp && !rv) return;
     // ride the RV: re-anchor to wherever it is now, turn with it
     const rvYaw = rv ? qYaw(rv.q) : 0;
     if (rv && this.par && this.lp) {

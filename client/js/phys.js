@@ -6,7 +6,8 @@
 //
 // The copies are FIXED bodies moved by hand each frame, not kinematic ones: on a kinematic body's box
 // tilted a degree or so (the RV parked on uneven ground) the controller stalled on the floor at every
-// step, and you could only get about the RV by jumping. On a fixed body the same box walks.
+// step, and you could only get about the RV by jumping. On a fixed body the same box walks. (And it moves
+// your body across, then up or down: moveSelf)
 
 import RAPIER from '/vendor/rapier.mjs';
 import * as C from '/shared/constants.js';
@@ -100,9 +101,6 @@ export class LocalWorld {
     this.cc.setMinSlopeSlideAngle(C.PLAYER.MAX_SLOPE_DEG * Math.PI / 180);
     this.cc.enableSnapToGround(0.32);
     this.cc.setApplyImpulsesToDynamicBodies(false);
-    // (pushed back 1 cm off what it touches: at Rapier's default a walk across a level floor still stalled
-    // a frame now and then, and a stall stops you dead)
-    this.cc.setNormalNudgeFactor(0.01);
   }
 
   free() { try { this.world.free(); } catch { } }
@@ -186,19 +184,27 @@ export class LocalWorld {
       if (climbing) { this.cc.disableSnapToGround(); this.cc.disableAutostep(); }
       else { this.cc.enableSnapToGround(0.32); this.cc.enableAutostep(C.PLAYER.STEP, 0.18, false); }
     }
-    const pred = exclude ? (c => !exclude.has(c.handle)) : undefined;
-    this.cc.computeColliderMovement(this.self, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
-      grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER | (riding ? 0 : G.FENCE)), pred);
-    const mv = this.cc.computedMovement();
+    const pred = exclude ? (c => !exclude.has(c.handle)) : undefined, groups = grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER | (riding ? 0 : G.FENCE));
     const hits = [];
-    for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
-      const c = this.cc.computedCollision(i);
-      if (!c?.collider) continue;
-      const inf = this.info.get(c.collider.handle);
-      if (!inf) continue;
-      hits.push({ ...inf, normal: c.normal1, point: c.witness1 });
-    }
-    return { move: { x: mv.x, y: mv.y, z: mv.z }, grounded: this.cc.computedGrounded(), hits };
+    const pass = d => {
+      this.cc.computeColliderMovement(this.self, d, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, groups, pred);
+      for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
+        const c = this.cc.computedCollision(i);
+        const inf = c?.collider && this.info.get(c.collider.handle);
+        if (inf) hits.push({ ...inf, normal: c.normal1, point: c.witness1 });
+      }
+      const m = this.cc.computedMovement();
+      return { x: m.x, y: m.y, z: m.z };
+    };
+    if (climbing) { const m = pass(desired); return { move: m, grounded: this.cc.computedGrounded(), hits }; }
+    // on foot: across first, then up or down. In one move, gravity pressing into a level floor cut steps short
+    // now and then (Rapier's controller slid along the floor as if it were in the way), and each one stopped
+    // you dead: indoors, on a building's floor, every second or so. (Across, steps up and slopes still work:
+    // the autostep and the snap to the ground are in that pass too)
+    const a = pass({ x: desired.x, y: 0, z: desired.z }), ga = this.cc.computedGrounded();
+    this.self.setTranslation({ x: center.x + a.x, y: center.y + a.y, z: center.z + a.z });
+    const b = pass({ x: 0, y: desired.y, z: 0 });
+    return { move: { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }, grounded: desired.y === 0 ? ga : this.cc.computedGrounded(), hits };
   }
 
   // first thing along a ray: {kind,id,part,use,toi,point,normal}
