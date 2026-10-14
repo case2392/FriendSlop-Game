@@ -1602,6 +1602,13 @@ function playerPose(st, m) {
   let tip = 0, drop = 0, spin = 0;
   T.head = -st.pitch * 0.6;
   const br = Math.sin(t * 1.8 + id);
+  if (st.bed) {
+    // asleep in a bunk: flat on the back, arms by the sides, legs out straight, breathing slow
+    tip = Math.PI / 2 - 0.02;
+    T.lL = T.lR = 0.03; T.kL = T.kR = -0.06; T.fL = T.fR = 0.3; T.aL = T.aR = 0.1; T.abL = T.abR = 0.1; T.eL = T.eR = 0.25;
+    T.inL = T.inR = 0.2; T.head = -0.2; T.spread = 0.04; T.bend = 0.02 * Math.sin(t * 1.2 + id);
+    return { T, tip, drop: 0.2, spin: 0, grounded: false };
+  }
   if (st.mode === M.KO) {
     // flat on his back, one knee up, arms flung out, head lolling
     tip = Math.PI / 2 - 0.04;
@@ -1612,7 +1619,9 @@ function playerPose(st, m) {
     T.lL = T.lR = 1.5; T.kL = T.kR = kneeFor(1.5, drop); T.fL = T.fR = -T.lL - T.kL;
     T.aL = T.aR = 0.8; T.eL = T.eR = 0.85; T.inL = T.inR = 0.3; T.head = -st.pitch * 0.4; T.spread = 0.08; T.bend = 0.05;
   } else if (st.mode === M.CLIMB) {
-    const c = Math.sin(t * 5 + id);
+    // hand over hand in time with the climbing (m.cph: PlayerView.update); still, both hands up, hanging
+    const go = Math.min(1, (m.cv ?? 1) / 0.4), c = go * Math.sin(m.cph ?? t * 5 + id) + (1 - go) * 0.08 * Math.sin(t * 1.5 + id);
+    T.bob = 0.035 * go * Math.sin(2 * (m.cph ?? 0));   // (the body comes up in pulls, not in a glide)
     // (raised overhead, a positive ab would tip the arms in over the head: they spread out in a V
     // instead, the forearms straight on, so the hands reach up outside even a wide brim)
     T.aL = 2.75 + c * 0.35; T.aR = 2.75 - c * 0.35; T.eL = 0.35 - c * 0.25; T.eR = 0.35 + c * 0.25; T.abL = T.abR = -0.25;
@@ -1743,11 +1752,18 @@ export class PlayerView {
     // st: {pos, yaw, pitch, mode, flags, speaking, walkieTx}
     this.group.position.set(st.pos.x, st.pos.y, st.pos.z);
     // knocked out, the body lies centered on the feet along world z, like the physics capsule
-    const ko = this.sp('ko', st.mode === C.MODE.KO ? 1 : 0, dt, 60, 9);
+    // (in a bunk too, along the bunk: its yaw as it comes)
+    const ko = this.sp('ko', st.mode === C.MODE.KO || st.bed ? 1 : 0, dt, 60, 9);
     const snap = Math.round(st.yaw / Math.PI) * Math.PI;
-    this.group.rotation.y = st.yaw + (snap - st.yaw) * ko;
+    this.group.rotation.y = st.bed ? st.yaw : st.yaw + (snap - st.yaw) * ko;
     this.tilt.position.z = 0.9 * ko;
     let v = this.prev ? Math.hypot(st.pos.x - this.prev.x, st.pos.z - this.prev.z) / Math.max(dt, 1e-3) : 0;
+    // climbing: the hand-over-hand keeps time with the metres climbed (a reach a hand every 0.45 m), and
+    // stops when they stop (hanging there)
+    let cv = this.prev && st.mode === C.MODE.CLIMB ? Math.hypot(st.pos.x - this.prev.x, st.pos.y - this.prev.y, st.pos.z - this.prev.z) / Math.max(dt, 1e-3) : 0;
+    if (cv > 25) cv = 0;
+    this.cv = (this.cv || 0) + (cv - (this.cv || 0)) * Math.min(1, dt * 8);
+    this.cph = (this.cph || 0) + dt * this.cv * Math.PI / CLIMB_STROKE;
     if (v > 25) v = 0;   // teleports
     if (!this.prev) this.prev = { x: 0, y: 0, z: 0 };
     this.prev.x = st.pos.x; this.prev.y = st.pos.y; this.prev.z = st.pos.z;
@@ -1757,7 +1773,7 @@ export class PlayerView {
     // one stride (two steps) per ~1.5 m walked; a slow shuffle in place when barely moving
     this.phase += dt * (2.6 + v * 2.05);
     if (this.emote) { this.emote.t -= dt; if (this.emote.t <= 0) { this.emote = null; this.tilt.rotation.y = 0; } }
-    const { T, tip, drop, spin, grounded } = playerPose(st, { t, ph: this.phase, speed, id: this.id, emote: this.emote?.e });
+    const { T, tip, drop, spin, grounded } = playerPose(st, { t, ph: this.phase, speed, id: this.id, emote: this.emote?.e, cph: this.cph, cv: this.cv });
     if (spin) this.tilt.rotation.y += dt * spin;
     const P = this.P;
     for (const k of POSE_KEYS) {
@@ -1864,13 +1880,15 @@ function fpHand(side) {
 
 // where a fist closes round a rod (the wheel's rim, the map's roller): its grip from the wrist, in the hand's frame
 const FP_GRIP = new THREE.Vector3(0, -0.042, -0.126);
-// a hand on the wheel, turned relative to the wheel: Euler(0.95, -0.45 s, -1.25 s) seen from the driver's seat,
-// where the wheel sits in the RV (turned PI to face the camera) tilted back 0.9
-const WHEEL_GRIP = Object.fromEntries([-1, 1].map(s => [s, new THREE.Quaternion().setFromEuler(new THREE.Euler(0.9, Math.PI, 0, 'YXZ')).invert()
-  .multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(0.95, -0.45 * s, -1.25 * s)))]));
 const MAP_W = 0.46, MAP_H = 0.34;   // the raised map sheet
-const _hv = new THREE.Vector3(), _hv2 = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hqc = new THREE.Quaternion(), _hqw = new THREE.Quaternion(), _hqs = new THREE.Quaternion(), _he = new THREE.Euler();
+const _hv = new THREE.Vector3(), _hv2 = new THREE.Vector3(), _hq = new THREE.Quaternion(), _hqs = new THREE.Quaternion(), _he = new THREE.Euler();
 const _Z = new THREE.Vector3(0, 0, 1);
+export const CLIMB_STROKE = 0.45;   // m climbed per reach of a hand (the hands and the body keep time with it)
+// the grip on the steering wheel: the rim's radius, how far round from the top each fist sits (ten to two),
+// and where the forearms run back to (your elbows, down by your sides, in the camera's space; x mirrored
+// for the left): down and out from the rim, clear of its lower half
+const WHEEL_R = 0.18, WHEEL_AT = 1.0, WHEEL_SHOULDER = { x: 0.3, y: -0.55, z: 0.05 };
+const _hv3 = new THREE.Vector3(), _hv4 = new THREE.Vector3(), _bx = new THREE.Vector3(), _by = new THREE.Vector3(), _bz = new THREE.Vector3(), _hm = new THREE.Matrix4();
 export class Hands {
   constructor(camera, color) {
     this.g = new THREE.Group();
@@ -1955,19 +1973,31 @@ export class Hands {
     this.g.scale.set(this.fs, this.fs, 1);
     this.g.visible = st !== 'ko';
     if (st === 'climb') {
-      // fingers hooked on the rock, reaching up in turn as you climb, a slow sway while you hang
-      const c = moving ? Math.sin(now * 6.2) * 0.07 : Math.sin(now * 1.5) * 0.01;
-      pose(this.L, -0.21, -0.13 + c, -0.38, eul(1.25, -0.15, 0.35), 0.5);
-      pose(this.R, 0.21, -0.13 - c, -0.38, eul(1.25, 0.15, -0.35), 0.5);
+      // hand over hand, in time with the metres climbed (climbV: main.js): each hand in turn reaches up open,
+      // takes hold and pulls down past your face as you come up; still, both hold on with a slow sway
+      const v = this.climbV || 0, go = Math.min(1, v / 0.4);
+      this.cph = (this.cph || 0) + dt * v * Math.PI / CLIMB_STROKE;
+      const ph = this.cph, sn = Math.sin(ph) * go, cs = Math.cos(ph), hang = (1 - go) * Math.sin(now * 1.5) * 0.01;
+      pose(this.L, -0.21, -0.11 + sn * 0.13 + hang, -0.38 - sn * 0.04, eul(1.25 + sn * 0.25, -0.15, 0.35), 0.15 + 0.6 * go * Math.max(0, cs));
+      pose(this.R, 0.21, -0.11 - sn * 0.13 - hang, -0.38 + sn * 0.04, eul(1.25 - sn * 0.25, 0.15, -0.35), 0.15 + 0.6 * go * Math.max(0, -cs));
     } else if (onWheel) {
-      // both hands on the rim at ten to two: they turn with the wheel (20 degrees either way; past that
-      // the rim slides through the fists) and ride with the RV
-      cam.getWorldQuaternion(_hqc).invert(); wheel.getWorldQuaternion(_hqw);
+      // both fists round the rim at ten to two, the rim through each fist, the forearms back toward your
+      // shoulders (not through the wheel), the backs of the hands outward. They turn with the wheel (20
+      // degrees either way; past that the rim slides through the fists) and ride with the RV. Worked out in
+      // the camera's space from where the wheel is now
       const a = wheel.rotation.z, slip = a - Math.max(-0.35, Math.min(0.35, a));
       _hqs.setFromAxisAngle(_Z, -slip);
-      for (const [h, s] of [[this.L, -1], [this.R, 1]]) {
-        const q = _hq.copy(_hqc).multiply(_hqw).multiply(_hqs).multiply(WHEEL_GRIP[s]);
-        const p = cam.worldToLocal(wheel.localToWorld(_hv.set(s * 0.18 * Math.sin(0.85), 0.18 * Math.cos(0.85), 0).applyQuaternion(_hqs)));
+      const ctr = cam.worldToLocal(wheel.localToWorld(_hv3.set(0, 0, 0)));
+      // (the wheel faces you: its own x runs the other way to yours)
+      const mx = Math.sign(cam.worldToLocal(wheel.localToWorld(_hv4.set(1, 0, 0))).x - ctr.x) || 1;
+      for (const [h, s0] of [[this.L, -1], [this.R, 1]]) {
+        const A = WHEEL_AT, R = WHEEL_R, s = s0 * mx;
+        const p = cam.worldToLocal(wheel.localToWorld(_hv.set(s * R * Math.sin(A), R * Math.cos(A), 0).applyQuaternion(_hqs)));
+        const tan = cam.worldToLocal(wheel.localToWorld(_hv2.set(s * R * Math.sin(A + 0.05), R * Math.cos(A + 0.05), 0).applyQuaternion(_hqs))).sub(p).normalize();
+        const z = _bz.set(s0 * WHEEL_SHOULDER.x, WHEEL_SHOULDER.y, WHEEL_SHOULDER.z).sub(p).normalize();
+        const x = _bx.copy(tan).addScaledVector(z, -tan.dot(z)).normalize(), y = _by.crossVectors(z, x);
+        if (y.dot(_hv4.copy(p).sub(ctr)) < 0) { x.negate(); y.negate(); }
+        const q = _hq.setFromRotationMatrix(_hm.makeBasis(x, y, z));
         p.sub(_hv2.copy(FP_GRIP).applyQuaternion(q));
         pose(h, p.x / this.fs, p.y / this.fs, p.z, q, 0);
       }

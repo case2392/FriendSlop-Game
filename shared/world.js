@@ -1135,7 +1135,7 @@ export function generateLeg(seed, day, opts = {}) {
     tagNow = null;
     const w = F(-1.4, 1.1, -1.5); use('buy', w.x, y0 + 1.1, w.z, 'Walkie-talkie: talk to anyone else with one, at any range', 'walkie', 0.3);
     const d = F(0.2, 1.1, -1.5); use('buy', d.x, y0 + 1.1, d.z, 'Energy drink', 'drink', 0.3);
-    const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords', 'bungee', 0.3);
+    const r = F(1.6, 1.1, -1.5); use('buy', r.x, y0 + 1.1, r.z, 'Bungee cords (for the roof)', 'bungee', 0.3);
     const hh = F(-2.3, 1.1, -1.5); use('buy', hh.x, y0 + 1.1, hh.z, 'Hard hat: your next knockout is only a knock', 'hardhat', 0.3);
     const ch = F(2.4, 1.1, -1.5); use('buy', ch.x, y0 + 1.1, ch.z, 'Cheese wheel: ringtails can\'t resist it', 'cheese', 0.3);
     // (where a bought cheese wheel is put down: the bare counter between the drink and the bungees, clear of

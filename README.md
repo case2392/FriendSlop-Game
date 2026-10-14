@@ -70,9 +70,8 @@ with a friend); shove it or hit it with something and it's stunned; honk and the
 and it's squashed flat for a while. A den only steals so much a day, and everything it took is still
 there at its den: go and get it back. The tracker says what they're holding of yours.
 
-From day 2 they get bolder. Leave the RV parked with its door open and nobody near it, and one may hop in
-and run off with the best loose thing in the cabin: shut the door, stay by it, or bungee the cargo down
-($90 at the store). Drive off with one inside and it lets go and jumps out. Walk up to a den and they come
+From day 2 they get bolder. Leave the RV parked with its door open and nobody near it, and one may hop in,
+pry the locker open and run off with the best thing it can carry: shut the door or stay by it. Drive off with one inside and it lets go and jumps out. Walk up to a den and they come
 out to nip you: you stumble and drop whatever you carry (they leave alone anyone kneeling by a friend who
 is down, and anyone up out of reach).
 
@@ -179,7 +178,7 @@ on.
 | | |
 |---|---|
 | `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch (in the RV: **brace**, a crash can't knock you out) |
-| `E` | **pick up** loot (`E` again sets it down; `Q` drops it too); use: driver seat, door, winch, pawn bell, a casino game's button (sit down to play it), keypad, bunk. Hold it on a knocked-out friend to pick them up. |
+| `E` | **pick up** loot (`E` again sets it down; `Q` drops it too); use: driver seat, door, winch, the RV's locker (takes its best thing out: loot set down in the RV goes in it), pawn bell, a casino game's button (sit down to play it), keypad, bunk (lies you down; `E` or walking gets you up). Hold it on a knocked-out friend to pick them up. |
 | **hold `LMB`** | **climb** any steep rock or wall (`Space` = lunge) |
 | `RMB` · wheel | throw (empty-handed: **shove**) · reach |
 | driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `E` get up (the RV keeps rolling) |

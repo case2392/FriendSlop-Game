@@ -4,6 +4,7 @@
 // connections), the wildlife off (what it does to the RV is in test/mobs.mjs).
 process.env.FRIENDSLOP_TEST = '1';
 process.env.FRIENDSLOP_FAST = '1';
+process.env.FRIENDSLOP_NOLOCKER = '1';   // (loose loot in the RV's cabin, as before the locker; its own tests turn it on)
 process.env.FRIENDSLOP_NOMOBS = '1';
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
@@ -934,6 +935,92 @@ const crashCost = (room, dv, zone) => {
   turn = Math.atan2(Math.sin(turn), Math.cos(turn));
   check(tv.holders.has(A.id) && off1 < 0.12 && off2 < 0.12 && Math.abs(turn + Math.PI / 2) < 0.3,
     `rv: a TV carried is held ${d.toFixed(2)} m out at chest height (${(off1 * 100).toFixed(0)} cm off), and a quarter turn takes it round with her (${(off2 * 100).toFixed(0)} cm off; it turned ${(turn * 180 / Math.PI).toFixed(0)} deg)`);
+}
+
+// ---- the RV's locker: loot set down in the cabin goes in it and is safe there; E on it hands the best thing
+// back; it rides into tomorrow; Ed buys it with the rest of the load at his loading zone ----
+{
+  const { room, ps: [A, B] } = crew(['Ann', 'Bo']);
+  const sim = room.sim, rq = sim.rv.rotation(), at = (x, y, z) => sim.rvToWorld({ x, y, z });
+  sim.lockerOn = true;
+  const vase = sim.addProp('vase', at(0, 0.42, -1.0), rq, 400, 400), tv = sim.addProp('tv', at(-0.1, 0.33, 0.8), rq, 250, 260);
+  // (Bo holds a lamp up in the cabin the while: what's held stays out)
+  ride(room, B, 0.1, -0.5);
+  tick(room, 0.2);
+  const lamp = sim.addProp('lamp', at(0.1, 1.2, -0.25), rq, 140, 140), lc = lamp.body.translation();
+  room.handle(B, { t: 'grab', kind: 'prop', id: lamp.id, pt: [lc.x, lc.y, lc.z], d: carryDist('lamp') });
+  tick(room, 2);
+  const stowed = evs(A.conn, 'stowed'), g = room.gameState(), v0 = sim.lockerValue();
+  check(!sim.props.has(vase.id) && !sim.props.has(tv.id) && sim.props.has(lamp.id) && sim.locker.length === 2 && stowed.length === 2
+    && stowed.every(e => sim.locker.some(it => it.type === e.type && Math.round(it.value) === e.value)) && g.lk?.[0] === 2 && g.lk[1] === v0 && g.lk[2] === 'vase',
+    `rv: set down in the RV, a vase and a TV went in its locker (${stowed.map(e => `${e.type} $${e.value}`).join(', ')}); the lamp Bo is holding didn't; the page is told (${JSON.stringify(g.lk)})`);
+  // the road can't touch it: a hard run and a hard stop
+  sim.release(B.id);   // (the lamp let go of in the cabin: in it goes too)
+  tick(room, 1.5);
+  const v1 = sim.lockerValue(), n1 = sim.locker.length;
+  flatSpot(room);
+  drive(room, A, 12, 6);
+  pedal(room, A, -1, 1.5, 0, 1);
+  check(n1 === 3 && sim.lockerValue() === v1 && sim.locker.length === 3, `rv: the lamp let go of in the cabin went in too; the locker's ${sim.locker.length} things are worth $${sim.lockerValue()} after a hard run and a hard stop, as before it ($${v1}: nothing knocked off them)`);
+  // E on it: the best thing comes out into your hands; set down in the cabin again, back it goes
+  A.seat = null;
+  ride(room, A, 0.25, -2.0);
+  tick(room, 0.2);
+  room.handle(A, { t: 'use', kind: 'locker' });
+  const given = A.conn.last('given'), held = sim.holds.get(A.id), out = given && sim.props.get(given.id);
+  tick(room, 0.5);
+  const inHands = out && out.holders.has(A.id);
+  sim.release(A.id);
+  tick(room, 2);
+  check(given?.type === 'vase' && held && inHands && sim.locker.length === 3 && !sim.props.has(given.id),
+    `rv: E on the locker hands Ann its best thing (${given?.type}) and she holds it; set down in the cabin, it goes back in (${sim.locker.length} in the locker)`);
+  // overnight: still in the locker on day 2
+  room.nextDay();
+  room.sim.lockerOn = true;
+  tick(room, 0.5);
+  const day2 = room.sim.locker.map(it => it.type).sort().join();
+  check(day2 === 'lamp,tv,vase' && room.sim.lockerValue() === sim.lockerValue(), `rv: the locker rides into tomorrow (${day2}, $${room.sim.lockerValue()})`);
+  // Ed's loading zone: the locker sold with the load, at his 80%
+  const S2 = room.sim, d = room.W.town.dock;
+  room.phase = 'road';
+  S2.placeRV(d.x, d.z, 0);
+  tick(room, 1.5);
+  const want = S2.locker.reduce((a, it) => a + Math.round(it.value * C.DOCK_RATE), 0), offer = room.gameState().dock, b0 = room.bank;
+  const got = room.sellCounter(A.id);
+  check(room.docked() && offer === want && got === want && room.bank === b0 + want && !S2.locker.length,
+    `rv: parked in Ed's loading zone, he offers $${offer} for the locker (80%) and buys it (+$${got}); it's empty after`);
+}
+
+// ---- bungee cords strap down what rides on the roof (the cabin's load is in the locker), and it stays strapped
+// overnight ----
+{
+  const { room, ps: [A] } = crew(['Ann']);
+  const sim = room.sim, rq = sim.rv.rotation();
+  sim.lockerOn = true;
+  const tv = sim.addProp('tv', sim.rvToWorld({ x: 0.3, y: RV_DIM.ROOF_Y + 0.35, z: -2.0 }), rq, 250, 260);
+  const vase = sim.addProp('vase', sim.rvToWorld({ x: 0, y: 0.42, z: -1.0 }), rq, 300, 300);
+  tick(room, 1.5);
+  const n = sim.tieDown();
+  room.nextDay();
+  const S2 = room.sim, tied = [...S2.tied.keys()].map(id => S2.props.get(id)?.type);
+  check(n === 1 && sim.locker.length === 1 && tied.join() === 'tv' && S2.locker.length === 1,
+    `rv: the bungee straps down the TV on the roof (${n} tied; the vase went in the locker), and on day 2 it's still strapped there (${tied.join()})`);
+}
+
+// ---- bunks: into a bunk lays you down in one of your own; out of it frees it ----
+{
+  const { room, ps: [A, B, Cy] } = crew(['Ann', 'Bo', 'Cy']);
+  room.phase = 'night';
+  ride(room, A, 0, -2.5); ride(room, B, 0.2, -2.0); ride(room, Cy, -0.1, -1.6);
+  tick(room, 0.2);
+  room.handle(A, { t: 'use', kind: 'bunk' }); room.handle(B, { t: 'use', kind: 'bunk' });
+  const a = A.conn.last('bed'), b = B.conn.last('bed'), g = room.gameState();
+  room.handle(A, { t: 'use', kind: 'bunk' });
+  const up = A.conn.last('bed');
+  room.handle(Cy, { t: 'use', kind: 'bunk' });
+  const c = Cy.conn.last('bed'), g2 = room.gameState();
+  check(a?.on && a.slot === 0 && b?.on && b.slot === 1 && g.beds.join() === [A.id, B.id].join() && g.bk.join() === '0,1' && up && !up.on && c?.slot === 0 && g2.bk.join() === '1,0',
+    `bunks: Ann gets bunk ${a?.slot} and Bo bunk ${b?.slot}, each told to lie down; Ann gets up and Cy has her bunk (${c?.slot}); the crew sees who's where (${g2.bk.join(', ')})`);
 }
 
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }

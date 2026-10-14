@@ -19,8 +19,8 @@
 import crypto from 'node:crypto';
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
-import { LOOT, fmt$ } from '../shared/loot.js';
-import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, RV_HATCH, toWorld, qRotate, insideRV } from '../shared/rv.js';
+import { LOOT, fmt$, carried, carryDist } from '../shared/loot.js';
+import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, RV_HATCH, RV_BUNKS, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
 import { STOP_NAMES } from '../shared/mobs.js';
 import { Casino, SEAT_R } from './casino.js';
@@ -133,7 +133,7 @@ export class Room {
     for (const p of this.players.values()) {
       if (p.seat != null) this.send(p, { t: 'seat', seat: null });
       if (p.bed) p.activeAt = this.t;   // asleep in a bunk at dawn: here (the draw prefers who's here)
-      p.bed = false; p.seat = null; p.ko = false; this.awaitReady(p);
+      p.bed = false; p.bunk = null; p.seat = null; p.ko = false; this.awaitReady(p);
     }
     this.mapRead = new Set();   // who has had today's map in their hands
     this.drawRoles();   // a new morning, new roles
@@ -362,7 +362,7 @@ export class Room {
   hold(p, secs = HOLD_SECS, quiet = false) {
     if (!p.connected) return;
     p.connected = false; p.conn = null; p.heldAt = this.t; p.holdSecs = secs; p.ready = false;
-    p.seat = null; p.bed = false; p.ko = false; p.fixing = false;
+    p.seat = null; p.bed = false; p.bunk = null; p.ko = false; p.fixing = false;
     this.sim.release(p.id);
     this.sim.dropHook(p.id);
     p.raw = null; p.pos = null; p.eye = null; p.par = 0; p.lp = null;
@@ -782,6 +782,18 @@ export class Room {
       }
       return;
     }
+    // the RV's locker: the best thing in it out, into your hands (sim.js unstow; loot set down in the cabin
+    // goes back in by itself)
+    if (kind === 'locker') {
+      if (!inRV || p.seat != null) return;
+      if (sim.holds.has(p.id)) return this.toast('Your hands are full. Set it down in the RV and it goes in the locker.', '#fff', 3, p);
+      const pr = sim.unstow();
+      if (!pr) return this.toast('The locker\'s empty. Loot set down in the RV goes in it, safe from knocks.', '#fff', 3, p);
+      const c = pr.body.translation(), d = carried(pr.type) ? carryDist(pr.type) : C.GRAB.HOLD_DEFAULT, q = pr.body.rotation();
+      if (!sim.grab(p.id, p, { kind: 'prop', id: pr.id, pt: [c.x, c.y, c.z], d })) return;
+      this.send(p, { t: 'given', id: pr.id, type: pr.type, d, q: [q.x, q.y, q.z, q.w] });
+      return;
+    }
     if (kind === 'unseat') {
       const ex = RV_SEAT_EXIT[p.seat ?? 0];
       p.seat = null;
@@ -820,6 +832,13 @@ export class Room {
       if (!inRV) return;
       if (this.phase !== 'night') { this.toast('Not bedtime. The Repo Man doesn\'t sleep and neither do you.', '#fff', 3, p); return; }
       p.bed = !p.bed;
+      // (a bunk of your own while there's one free: shared/rv.js RV_BUNKS; the page lays you down in it)
+      if (p.bed) {
+        const used = new Set([...this.players.values()].filter(q => q !== p && q.bed).map(q => q.bunk));
+        p.bunk = Math.max(0, RV_BUNKS.findIndex((_, i) => !used.has(i)));
+        sim.release(p.id);
+      } else p.bunk = null;
+      this.send(p, { t: 'bed', on: p.bed, slot: p.bunk });
       this.toast(p.bed ? `${p.name} is in a bunk.` : `${p.name} got up.`, p.color, 2);
       return;
     }
@@ -865,9 +884,9 @@ export class Room {
       if (what === 'hardhat' && p.hat) return this.toast('You\'ve got one on already.', '#fff', 3, p);
       if (what === 'bungee') {
         const n = sim.tieDown();
-        if (!n) return this.toast('Nothing loose in the RV to tie down.', '#fff', 3, p);
+        if (!n) return this.toast('Nothing on the RV\'s roof to tie down. (What\'s set down inside goes in the locker.)', '#fff', 3, p);
         this.bank -= price;
-        this.toast(`${p.name} bungee'd ${n} things down in the RV (${fmt$(price)}). Grab one to untie it.`, p.color, 4);
+        this.toast(`${p.name} bungee'd ${n} things down on the RV's roof (${fmt$(price)}). Grab one to untie it.`, p.color, 4);
         return;
       }
       this.bank -= price;
@@ -1167,6 +1186,12 @@ export class Room {
     }
   }
 
+  // who's asleep, and in which bunk (shared/rv.js RV_BUNKS)
+  bedsView() {
+    const abed = [...this.players.values()].filter(p => p.bed);
+    return { beds: abed.map(p => p.id), bk: abed.map(p => p.bunk ?? 0) };
+  }
+
   docked() {
     const d = this.W.town.dock, sim = this.sim;
     if (!d || !this.inTown || sim.rvFlipped()) return false;
@@ -1179,7 +1204,8 @@ export class Room {
   sellCounter(by = 0, late = false) {
     const sim = this.sim, ids = sim.propsIn(this.W.town.pawn);
     const load = this.docked() ? sim.cargo().filter(id => !ids.includes(id)) : [];
-    if (!ids.length && !load.length) return 0;
+    const locked = this.docked() ? sim.locker.splice(0) : [];   // (the locker's whole, with the rest of the load)
+    if (!ids.length && !load.length && !locked.length) return 0;
     sim.mobs?.onSold([...ids, ...load]);   // (a stolen thing sold counts as got back)
     let total = 0, lot = 0;
     const names = [];
@@ -1197,8 +1223,10 @@ export class Room {
       opened.push(pr.type);
       sim.removeProp(id);
     }
+    for (const it of locked) { lot += Math.round(it.value * C.DOCK_RATE); opened.push(it.type); }
     total += lot;
-    if (load.length) names.push(`the RV's load (${load.length} thing${load.length > 1 ? 's' : ''}, ${fmt$(lot)})`);
+    const nLot = load.length + locked.length;
+    if (nLot) names.push(`the RV's load (${nLot} thing${nLot > 1 ? 's' : ''}, ${fmt$(lot)})`);
     this.bank += total;
     this.stats.sold += total; this.dayStats.sold += total;
     this.broadcast({ t: 'ev', list: [{ k: 'sold', ids: [...ids, ...load], total, by }] });
@@ -1434,13 +1462,18 @@ export class Room {
     const pawnIds = sim.propsIn(this.W.town.pawn);
     let pawn = 0, dock = 0;
     for (const id of pawnIds) pawn += Math.round(sim.props.get(id).value);
-    if (this.docked()) for (const id of sim.cargo()) if (!pawnIds.includes(id)) dock += Math.round(sim.props.get(id).value * C.DOCK_RATE);
+    if (this.docked()) {
+      for (const id of sim.cargo()) if (!pawnIds.includes(id)) dock += Math.round(sim.props.get(id).value * C.DOCK_RATE);
+      for (const it of sim.locker) dock += Math.round(it.value * C.DOCK_RATE);
+    }
+    const lb = sim.lockerBest();
     return {
       ph: this.phase, day: this.day, clk: Math.round(this.clock * 100) / 100,
       bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0,
       town: this.inTown ? 1 : 0, door: sim.doorOpen ? 1 : 0,
       ...(this.inTown || this.phase === 'night' ? { cas: this.casino.view(this.t) } : {}), pawn, pawnIds, dock,
-      gates: [...this.gatesOpen], beds: [...this.players.values()].filter(p => p.bed).map(p => p.id),
+      ...(lb >= 0 ? { lk: [sim.locker.length, sim.lockerValue(), sim.locker[lb].type] } : {}),   // (the locker: how many, worth, what comes out first)
+      gates: [...this.gatesOpen], ...this.bedsView(),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now

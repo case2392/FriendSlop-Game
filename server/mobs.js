@@ -959,8 +959,15 @@ export class Mobs {
     }
     return null;
   }
+  // the things ringtails are going into the RV after (the locker leaves them out: sim.js stowStep)
+  raidTargets() {
+    let out = null;
+    for (const o of this.list.values()) if ((o.st === RST.RAID || o.st === RST.INRV) && o.target != null) (out ||= new Set()).add(o.target);
+    return out;
+  }
   // what a ringtail could take from the RV (day 2 on): parked within RAID_R m of the den, its door open and
-  // nobody near it; the most valuable light thing loose in the cabin (bungee'd cargo is safe)
+  // nobody near it; the most valuable light thing loose in the cabin (bungee'd cargo is safe), or else the
+  // best light thing in its locker, pried out onto the floor for it (and back in if the raid comes to nothing)
   rtRaidTarget(den, players) {
     const sim = this.sim;
     if (!this.plan.raids || !sim.doorOpen || Math.abs(sim.rvSpeed()) > 0.5 || den.thefts >= this.plan.cap) return null;
@@ -986,6 +993,7 @@ export class Mobs {
       const v = L.bait ? RT.BAIT_V : L.find ? RT.SHINY_V : it.value;
       if (v > bv) { bv = v; best = it.id; }
     }
+    if (best == null) { const i = sim.lockerBest(true); if (i >= 0) best = sim.unstow(i, true)?.id ?? null; }
     return best;
   }
   // a stranger at the den: someone on foot within NIP_R m of it, not nipped in the last NIP_CD s, not by a

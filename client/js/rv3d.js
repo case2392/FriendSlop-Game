@@ -19,7 +19,7 @@ import { THREE, painted, tex, canvasTex } from './gfx.js';
 import { atmo } from './atmosphere.js';
 import { canvasFor, meta, rngFrom } from './paint/index.js';
 import { mergeGeometries, toCreasedNormals } from '/vendor/BufferGeometryUtils.js';
-import { RV_DIM, RV_WHEELS, SUSP_REST, RV_WINCH, RV_PARTS, RV_SEATS } from '/shared/rv.js';
+import { RV_DIM, RV_WHEELS, SUSP_REST, RV_WINCH, RV_PARTS, RV_SEATS, RV_LOCKER } from '/shared/rv.js';
 import { Hands } from './people.js';
 import { RV_ART as A, TRIM, SOFT, LAMPS, BODY, LETTER_FONT, GLASS_U, GINGHAM_PLEATS } from './paint/vehicle.js';
 
@@ -1179,6 +1179,19 @@ function buildInterior(b) {
   b.itrim.add(at(rod(0.1, 0.025, TRIM.iron, { segs: 12 }), -1.11, 1.02, 1.62, 0, 0, PI / 2));
   b.itrim.add(at(beam(0.02, 0.15, 0.025, TRIM.wood), -1.11, 1.17, 1.62));
 
+  // the locker (shared/rv.js): an oak strongbox against the wall by the bunks, strapped with iron, a brass hasp
+  // and padlock on its front; the crew's loot rides in it safe from the road (its plaque: RVView.setLocker)
+  {
+    const L = RV_LOCKER, w = (IN - L.front) , cx = L.front + w / 2;
+    b.itrim.add(at(beam(w, 0.8, 1.2, TRIM.oak), cx, 0.4, L.z));
+    b.itrim.add(at(beam(w + 0.04, 0.05, 1.24, TRIM.wood), cx - 0.02, L.y - 0.02, L.z));
+    for (const dz of [-0.48, 0.48]) b.itrim.add(at(beam(w + 0.02, 0.82, 0.05, TRIM.iron), cx - 0.01, 0.41, L.z + dz));
+    b.itrim.add(at(beam(w + 0.02, 0.05, 1.22, TRIM.iron), cx - 0.01, 0.08, L.z));
+    b.itrim.add(at(beam(0.03, 0.14, 0.09, TRIM.brass), L.front - 0.015, 0.72, L.z + 0.3));
+    b.itrim.add(at(toBand(new THREE.TorusGeometry(0.032, 0.009, 5, 10), TRIM.brass), L.front - 0.03, 0.63, L.z + 0.3, 0, PI / 2, 0));
+    b.itrim.add(at(beam(0.02, 0.07, 0.06, TRIM.iron), L.front - 0.03, 0.6, L.z + 0.3));
+  }
+
   // a sack of flour on the top bunk, a coil of rope hung flat on the wall (nothing to trip on)
   b.itrim.add(at(toBand(boxUV(lumpy(rbox(0.3, 0.22, 0.36, 0.1, 3), 0.02, 3)), TRIM.burlap), -0.82, 1.66, -3.25, 0, 0.3, 0.06));
   b.itrim.add(at(ring(0.13, 0.03, TRIM.rope, 14, TAU, 3), IN - 0.035, 1.35, -1.98, 0, PI / 2, 0));
@@ -1654,6 +1667,15 @@ export class RVView {
     main.grime.add(setUV(wallGeo(gf, 'z', HL + 0.004, 1), (x, y) => [(x + HW) / 2.5, 0.5 * GV(y)]));
     emit(g, main);
     this.emit = emit;
+    // the locker's plaque: how many things are in it and what they're worth (setLocker)
+    this.lockCv = document.createElement('canvas'); this.lockCv.width = 256; this.lockCv.height = 96;
+    this.lockTex = canvasTex(this.lockCv);
+    {
+      const pl = new THREE.Mesh(new THREE.PlaneGeometry(0.4, 0.15), new THREE.MeshLambertMaterial({ map: this.lockTex }));
+      pl.position.set(RV_LOCKER.front - 0.008, 0.48, RV_LOCKER.z - 0.12); pl.rotation.y = -PI / 2;
+      g.add(pl);
+    }
+    this.lockKey = null; this.setLocker(0, 0);
     // dents, scrapes and rust (rv_dents), one overlay a side so each side shows its own knocks: three steps
     // by alpha, shown by lowering the alpha test as it wears (setCond). +x is the driver's (left) side
     const dentMat = () => new THREE.MeshLambertMaterial({ map: tex('rv_dents'), alphaTest: 0.999, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
@@ -1896,6 +1918,18 @@ export class RVView {
   }
 
   // cond: { hp, brk, zones: { front, rear, left, right: % taken there this trip } } (main.js), or null
+  setLocker(n, v) {
+    const key = n + '|' + v;
+    if (key === this.lockKey) return;
+    this.lockKey = key;
+    const g = this.lockCv.getContext('2d');
+    g.fillStyle = '#3a2614'; g.fillRect(0, 0, 256, 96);
+    g.strokeStyle = '#c9a24a'; g.lineWidth = 6; g.strokeRect(5, 5, 246, 86);
+    g.fillStyle = '#ecd7a0'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.font = `bold 30px ${LETTER_FONT}`; g.fillText('LOCKER', 128, 32);
+    g.font = `24px ${LETTER_FONT}`; g.fillText(n ? `${n} thing${n > 1 ? 's' : ''} · $${Math.round(v).toLocaleString('en-US')}` : 'empty', 128, 68);
+    this.lockTex.needsUpdate = true;
+  }
   update(dt, rv, door, night, hook, odo, clockStr, cond = null) {
     if (!rv) return;
     this.t += dt;
@@ -1996,13 +2030,15 @@ function previewRV({ yaw = 0, door = false, night = false, cutaway = false, stee
 }
 export const PREVIEW = {
   // the driver's view (tools/preview.mjs with band 'fp'): the RV round the camera, your hands on the wheel
-  ...Object.fromEntries([['fpdrive', 0], ['fpdrive_turn', 0.3]].map(([n, steer]) => [n, () => {
+  // (_down: looking down at the wheel, as you do)
+  ...Object.fromEntries([['fpdrive', 0, 0], ['fpdrive_turn', 0.3, 0], ['fpdrive_down', 0, 0.5], ['fpdrive_down_turn', 0.4, 0.5]].map(([n, steer, pitch]) => [n, () => {
     const root = new THREE.Group(), rvRoot = new THREE.Group(), v = new RVView(rvRoot), s = RV_SEATS[0];
     root.userData.fp = true;
     for (let i = 0; i < 30; i++) v.update(0.1, { p: { x: 0, y: 0, z: 0 }, q: { x: 0, y: 0, z: 0, w: 1 }, v: { x: 0, y: 0, z: 0 }, steer, wheels: [] }, false, false, null, 120, '9:41 AM');
     rvRoot.rotation.y = PI; rvRoot.position.set(s.x, -s.y, s.z);   // the driver's eye at the origin, looking down -z
+    const tilt = new THREE.Group(); tilt.rotation.x = pitch; tilt.add(rvRoot);
     const cam = new THREE.Group(), h = new Hands(cam, '#00E5FF');
-    root.add(rvRoot, cam);
+    root.add(tilt, cam);
     for (let i = 0; i < 40; i++) h.update(0.1, { mode: 'seat', seat: 0 }, false, false, v.steeringWheel);
     return root;
   }])),

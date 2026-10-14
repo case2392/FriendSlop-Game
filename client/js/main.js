@@ -2,7 +2,7 @@
 import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
 import { LOOT, fmt$, CARRY, carried, carryDist } from '/shared/loot.js';
-import { RV_DIM, RV_SEATS, RV_HATCH, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
+import { RV_DIM, RV_SEATS, RV_HATCH, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
 import * as net from './net.js';
 import * as voice from './voice.js';
@@ -488,6 +488,7 @@ function doorNear() {
 
 function computeTarget() {
   if (!S.lw) return null;
+  if (me.bunk != null) return { kind: 'bed', label: '[E] get up · everyone in a bunk starts the next day' };
   if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · hold [H] horn' : (mapWanted() ? '[E] get up (stand to read the map)' : '[E] get up') };
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
@@ -549,6 +550,11 @@ function computeTarget() {
     }
     if (u === 'seat1') return { kind: 'rvuse', use: 'seat1', label: '[E] ride shotgun' };
     if (u === 'door') return { kind: 'rvuse', use: 'door', label: '[E] open the door' };
+    if (u === 'locker') {   // (server/sim.js stowStep: what's set down in the RV goes in it)
+      const lk = S.g?.lk;
+      if (me.holding) return { kind: 'rvuse', use: 'locker', label: '[E] set it down in the RV: it goes in the locker' };
+      return { kind: 'rvuse', use: 'locker', label: lk ? `[E] take out the ${LOOT[lk[2]]?.name || 'loot'} · the locker: ${lk[0]} thing${lk[0] > 1 ? 's' : ''}, ${fmt$(lk[1])}` : 'The locker: empty. Loot set down in the RV goes in it, safe from knocks.' };
+    }
     if (u === 'bunk') return { kind: 'rvuse', use: 'bunk', label: S.g?.ph === 'night' ? '[E] sleep (everyone in a bunk = next day)' : 'bunks (bedtime is after the Repo Man gets paid)' };
     if (u === 'winch') return { kind: 'rvuse', use: 'winch', label: S.hook?.state === 0 ? '[E] take the winch hook' : `[E] ${S.hook?.reeling ? 'stop' : 'start'} reeling in` };
     if (doorNear()) return { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` };
@@ -692,6 +698,7 @@ function onUse() {
   initAudio();
   if (worldBuilding) return;
   if (me.mode === 'seat') { net.send({ t: 'use', kind: 'unseat' }); return; }
+  if (me.bunk != null) { net.send({ t: 'use', kind: 'bunk' }); return; }   // (up out of the bunk)
   if (me.holding) { onDrop(); return; }   // E picks a thing up and E sets it down
   const t = target;
   if (!t) return;
@@ -745,7 +752,8 @@ const TIPS = [
   'A Grumphorn sleeps past an obstacle some days. Crouch past it, creep the RV by, or wear out its patience: ram it, winch it, throw junk at it.',
   'Right mouse with empty hands shoves whatever is in front of you: friends, loot, wildlife.',
   'Ringtails steal loot nobody is watching and pile it at their den near the stop. Stand facing your pile, or go and take it back.',
-  'From day 2, leave the RV\'s door open with nobody by it and a ringtail may hop in and help itself. Shut the door, stay by it, or bungee the cargo down.',
+  'From day 2, leave the RV\'s door open with nobody by it and a ringtail may hop in and pry the locker open. Shut the door or stay by it.',
+  'Loot set down in the RV goes in its locker, safe from knocks. E on the locker takes the best thing out; Ed\'s loading zone buys the lot.',
   'From day 2, ringtails nip anyone who comes close to their den: you stumble and drop what you carry.',
   'From day 3, loose rock sits above the narrows. Honk at the yellow LOOSE ROCK sign and it comes down before you get there.',
   'A hard hat from the store ($80) turns your next knockout into a knock.',
@@ -1077,6 +1085,7 @@ net.on('_close', ev => {
 });
 net.on('world', m => {
   me.hasHook = false;   // a new world comes with the hook on its winch
+  me.bunk = null;       // and you up out of bed
   me.holding = null;    // and with empty hands: a new day (or a seat taken back after a dropped connection)
                         // holds nothing for you. A map kept in hand overnight showed the next day's map in camp
   // back after a dropped connection, on the same day: the world is already built (the props, the
@@ -1215,6 +1224,27 @@ net.on('seat', inOrder(m => {
 }));
 // the server's answer to a grab: no, and the hands are empty again; yes, and (the map) its sheet can go up
 net.on('grabbed', inOrder(m => { if (me.holding?.id !== m.id) return; if (m.ok) me.holding.ok = true; else me.holding = null; }));
+// out of the RV's locker, straight into your hands (server/room.js: E on the locker)
+net.on('given', inOrder(m => {
+  if (me.mode !== 'walk') return;
+  const carry = carried(m.type), q0 = Array.isArray(m.q) ? { x: m.q[0], y: m.q[1], z: m.q[2], w: m.q[3] } : { x: 0, y: 0, z: 0, w: 1 };
+  S.holdDist = +m.d || carryDist(m.type);
+  me.holding = { id: m.id, type: m.type, carry, rel: carry ? qMul(yawQ(-me.yaw), q0) : null, ok: true };
+  sfx.grab();
+}));
+// into a bunk (server/room.js): lying in it, on your back, looking down the bunk past your feet; out of it,
+// standing in the aisle in front of the bunks
+net.on('bed', inOrder(m => {
+  if (m.on && RV_BUNKS[m.slot]) {
+    if (me.holding) onGrabRelease();
+    me.bunk = m.slot;
+    me.yaw = (S.rv ? qYaw(S.rv.q) : me.yaw) - RV_BUNKS[m.slot].head * Math.PI / 2; me.pitch = -0.75;
+  } else if (me.bunk != null) {
+    me.bunk = null;
+    if (S.rv) { me.par = 1; me.lp = { x: 0.1, y: 0.05, z: -2.55 }; me.pos = toWorld(S.rv.p, S.rv.q, me.lp); }
+  }
+  S.bedAsk = false;
+}));
 net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));
 net.on('drink', inOrder(() => { me.buffT = 60; me.stamina = me.stamMax; sfx.drink(); }));
 net.on('revived', inOrder(m => { me.revive(m.stam); sfx.wake(); }));   // (stam: a Medic Bag gets you up with more)
@@ -1254,6 +1284,13 @@ function onEvent(e) {
       break;
     }
     case 'sold': for (const id of e.ids) removeProp(id, { color: '#7CFC00', n: 10, speed: 3 }); sfx.kaching(); break;
+    // set down in the RV, it went in the locker (server/sim.js stowStep)
+    case 'stowed': {
+      const p = S.props.get(e.id), at = p?.mesh.position.clone();
+      removeProp(e.id, { color: '#ffd166', n: 8, speed: 1.5 });
+      if (at) { floatText(at, `${LOOT[e.type]?.name || 'Loot'} → the locker`, '#ffd166'); positional(at, () => sfx.thunk(0.25)); }
+      break;
+    }
     // Road Cards into the glovebox (a tin set down in the RV, or a card Ed found in what he bought): the
     // glovebox clicks, and the cards flip up at the bottom of the screen
     case 'stow': (S.glove ||= []).push({ cards: e.cards, kind: e.kind, day: S.g?.day, by: e.by }); revealCards(e); sfx.click(); break;
@@ -1993,6 +2030,15 @@ requestAnimationFrame(frame);
   const eye = me.eye(rv), look = me.look();
   let ex = eye.x, ey = eye.y, ez = eye.z;
   ey = cameraFeel(dt, eye);
+  // climbing: how fast you're going up the rock (the hands keep time with it: people.js), and the view comes
+  // up in pulls, a lift with each hand's pull, not a smooth glide
+  {
+    const c = me.mode === 'climb', last = S.climbAt;
+    const v = c && last && dt > 0 ? Math.hypot(me.pos.x - last.x, me.pos.y - last.y, me.pos.z - last.z) / dt : 0;
+    hands.climbV = (hands.climbV || 0) + ((v < 8 ? v : 0) - (hands.climbV || 0)) * Math.min(1, dt * 8);
+    S.climbAt = c ? { x: me.pos.x, y: me.pos.y, z: me.pos.z } : null;
+    if (c) ey += 0.03 * Math.min(1, hands.climbV / 0.4) * Math.sin(2 * (hands.cph || 0));
+  }
   if (settings.headBob && me.mode === 'walk' && me.grounded) { ex += feel.side * Math.cos(me.yaw); ez -= feel.side * Math.sin(me.yaw); }
   if (shakeAmt > 0) { ex += (Math.random() - 0.5) * shakeAmt * 0.3; ey += (Math.random() - 0.5) * shakeAmt * 0.3; shakeAmt = Math.max(0, shakeAmt - dt * 1.5); }
   camera.position.set(ex, ey, ez);
@@ -2013,6 +2059,9 @@ requestAnimationFrame(frame);
     st.speaking = voice.V.speaking[id];
     st.walkieTx = !!(st.flags & C.FLAG.WALKIE_TX);
     st.hat = !!p?.hat;
+    // asleep: lying on the back in a bunk (shared/rv.js RV_BUNKS), the head on the pillow end
+    const bi = S.g?.beds?.indexOf(id) ?? -1, b = bi >= 0 && rv ? RV_BUNKS[S.g.bk?.[bi] ?? 0] : null;
+    if (b) { st.bed = true; st.pos = toWorld(rv.p, rv.q, b); st.yaw = qYaw(rv.q) - b.head * Math.PI / 2; } else st.bed = false;
     v.update(dt, time, st);
   }
   for (const [id, v] of S.views) if (!others.has(id)) v.group.visible = false; else v.group.visible = true;
@@ -2024,6 +2073,7 @@ requestAnimationFrame(frame);
   const cond = S.g ? { hp: S.g.rvh ?? 100, brk: !!S.g.brk, zones: S.rvZones } : null;
   rvView.groundAt = S.W.heightAt;
   rvView.update(dt, rv, S.door, night, S.hook, odo, S.g ? fmtClock(S.g.clk) : '', cond);
+  rvView.setLocker(S.g?.lk?.[0] || 0, S.g?.lk?.[1] || 0);
   rvSounds(dt, rvDistNow(rv));
   if (S.g) setTimeOfDay(S.g.clk, S.g.ph === 'night');
   updateSun(me.pos);
@@ -2033,6 +2083,11 @@ requestAnimationFrame(frame);
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
+  if (me.bunk != null) {
+    hands.g.visible = false;   // (lying down: nothing in your hands to see)
+    // walking (or jumping) gets you up, once
+    if ((inp.f || inp.r || inp.jump) && !S.bedAsk) { S.bedAsk = true; net.send({ t: 'use', kind: 'bunk' }); }
+  }
   // the real map shows only on its reader's own screen, once the server has said the grab took (a refused
   // grab never flashes it), and never in a seat (nobody seated holds anything anyway)
   const reading = me.holding?.type === 'map' && !!me.holding.ok && mapRaised && me.mode !== 'seat';
