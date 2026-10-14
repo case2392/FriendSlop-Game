@@ -506,6 +506,32 @@ a friend's summary is still waiting.
   roof).
 - There is no text chat. There are pings and emotes.
 
+### 9.1 Music under the voices
+
+The game is talked over, so its music has to get out of the way: the risk is a score fighting the
+proximity chat for the same ears (the reason Lethal Company and Peak lean on ambience). So
+(`client/js/score.js`, played by `client/js/western.js`):
+- **A tune per place**, in verses of about a minute (twice round a 16-bar tune), then a rest of 25-60 s
+  with only the wind and the wildlife. The Westmeadow Road (Travis-picked guitar, harmonica, G, 92 bpm),
+  the fields (banjo rolls, fiddle, train beat, D, 116), the snowy pass (a whistled waltz, D minor, 84,
+  in 3/4), the badlands (pedal steel over a twangy baritone arpeggio, A minor, 80), Lost Wages (a
+  spaghetti western: tremolo baritone, castanets, choir, whistle, E Phrygian dominant, 68); the night's
+  lullaby in the day's key; the menu's main theme on the full band.
+- **Layers that answer the game**, coming in at once and leaving slowly: tension (a sleeping Grumphorn
+  within 25 m, one waking or glaring within 45 m, the last 40 minutes before midnight), danger (a charge
+  within 60 m, a rockfall: the gallop, a low riff, the fiddle sawing; the tune ducks out of its way in
+  a fifth of a second), mischief (ringtails sneaking, snatching or raiding within 32 m), the clock (the
+  two hours before midnight till the payment's made). Stings off the beat: the whip as a charge
+  starts, a swell when one wakes, a pizzicato run on a theft, a slide whistle when you're knocked out,
+  a lick when the payment's made.
+- **It gives the floor away:** to the RV's radio when you can hear it (the radio itself is turned down
+  under a charge), to the casino's band within 45 m of it, and to anyone talking (it ducks 6 dB while
+  anyone near you speaks). Knocked out, it's under water like the voices. Settings: Music while you
+  play.
+- Each biome's ambience has its own wildlife too (`client/js/ambience.js`): a woodpecker and frogs in
+  the meadow, crows over the fields, ravens and a wolf on the pass, cicadas and coyotes in the badlands
+  and the desert, a rattlesnake in the desert.
+
 ## 10. Comedy engines
 
 Things the systems will produce without being scripted:

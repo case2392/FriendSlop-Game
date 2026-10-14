@@ -53,6 +53,8 @@ function pluckBuf(ctx, f, bright = 0.5) {
     line[p] = decay * 0.5 * (a + nx);
     p = (p + 1) % N;
   }
+  // (the line is N samples, and averaging with the next sample takes half of one off: tune by the rate)
+  b.rate = f * (N - 0.5) / sr;
   R.plucks.set(key, b);
   return b;
 }
@@ -68,7 +70,7 @@ function env(ctx, t, a, peak, dur, rel) {
 }
 const I = {
   pluck(ctx, out, t, midi, vel = 0.5, dur = 1.2) {
-    const s = ctx.createBufferSource(); s.buffer = pluckBuf(ctx, NOTE(midi), 0.55);
+    const s = ctx.createBufferSource(); s.buffer = pluckBuf(ctx, NOTE(midi), 0.55); s.playbackRate.value = s.buffer.rate || 1;
     const g = ctx.createGain(); g.gain.setValueAtTime(vel * 0.55, t); g.gain.setValueAtTime(vel * 0.55, t + dur * 0.7); g.gain.exponentialRampToValueAtTime(0.0001, t + dur * 0.7 + 0.35);
     s.connect(g).connect(out); s.start(t); s.stop(t + dur + 0.5);
   },

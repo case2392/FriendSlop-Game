@@ -424,7 +424,8 @@ function spawnMob(type, x, z, opts = {}) { return room.sim.ensureMobs({ day: roo
 const SHOTS = [];
 const shot = s => SHOTS.push(s);
 
-// ---- day 1 -----------------------------------------------------------------------------------------
+// ---- the shots. Each one's day is where it's filmed: 1 the meadow, 2 the fields, 3 the snowy pass, 4 the
+// badlands, 5 the desert (Lost Wages); they're filmed day by day, in the order they're written ----------
 // the crew at the campfire, not working: Steve spins, Kyle lies there, Dave cries
 shot({
   id: 'campfire', day: 1, secs: 3.0, pre: 0.6, fov: 52,
@@ -482,9 +483,9 @@ shot({
 
 // the navigator's own view: the paper road map held up in the cab (the camera's player holds it)
 shot({
-  id: 'mapfp', day: 1, secs: 1.8, pre: 3.0, fov: null, hands: true,
+  id: 'mapfp', day: 3, secs: 1.8, pre: 3.0, fov: null, hands: true,
   async setup() {
-    dbg({ op: 'phase', ph: 'camp' }); dbg({ op: 'clock', h: 7.6 }); dbg({ op: 'tpRV', x: 0, z: -42, yaw: 0 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'camp' }); dbg({ op: 'clock', h: 7.6 }); dbg({ op: 'tpRV', x: 0, z: -42, yaw: 0 });
     offstage(bots.Steve, bots.Kyle);
     seatDriver(bots.Dave, await me());
     // the map back on the dash, where the morning puts it (an earlier shot may have left it anywhere)
@@ -504,9 +505,9 @@ shot({
 
 // the winch: the cable taut up the washed-out grade, the RV crawling up
 shot({
-  id: 'winch', day: 1, secs: 2.6, pre: 1.2, fov: 60,
+  id: 'winch', day: 4, secs: 2.6, pre: 1.2, fov: 60,
   setup() {
-    const g = W.obstacles.find(o => o.type === 'grade');
+    dbg({ op: 'mobs', on: false }); const g = W.obstacles.find(o => o.type === 'grade');
     this.rz = g.z0 - 7; this.rx = W.roadX(this.rz);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 15.5 });
     dbg({ op: 'tpRV', x: this.rx, z: this.rz, yaw: 0 });
@@ -515,7 +516,8 @@ shot({
     const { Steve, Dave } = bots, w = room.sim.winchWorld();
     Steve.at(w.x, w.z + 1.2, Math.PI); Steve.tick(1 / 60); room.tick(1 / 60);
     Steve.say({ t: 'use', kind: 'winch' });
-    const anc = W.anchors[0];
+    // (the grade's own anchor: the nearest past its top; other obstacles have theirs)
+    const anc = [...W.anchors].sort((a, b) => Math.hypot(a.x - W.roadX(g.z1 ?? g.z0 + 15), a.z - (g.z1 ?? g.z0 + 15)) - Math.hypot(b.x - W.roadX(g.z1 ?? g.z0 + 15), b.z - (g.z1 ?? g.z0 + 15)))[0];
     this.anc = anc;
     for (let i = 1; i <= 16; i++) { Steve.at(lerp(w.x, anc.x - 0.8, i / 16), lerp(w.z + 1.2, anc.z - 0.8, i / 16), 0); Steve.tick(1 / 60); for (let k = 0; k < 6; k++) room.tick(1 / 60); }
     Steve.say({ t: 'use', kind: 'hook' });
@@ -529,9 +531,9 @@ shot({
 
 // Honest Ed's counter: ED OFFERS, the bell, the loot gone in a sparkle (ka-ching)
 shot({
-  id: 'pawn', day: 1, secs: 3.0, pre: 0.8, fov: 58,
+  id: 'pawn', day: 4, secs: 3.0, pre: 0.8, fov: 58,
   setup() {
-    const T = W.town;
+    dbg({ op: 'mobs', on: false }); const T = W.town;
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 18.3 });
     dbg({ op: 'tpRV', x: 0, z: W.LEN + 6, yaw: 0 });
     for (let k = 0; k < 10; k++) room.tick(1 / 60);
@@ -553,10 +555,10 @@ shot({
 
 // CRUNCH: Dave drives into the closed ranger gate (the riders lurch)
 shot({
-  id: 'gate', day: 1, secs: 3.0, pre: 1, fov: 62, preMax: 25,
+  id: 'gate', day: 3, secs: 3.0, pre: 1, fov: 62, preMax: 25,
   startWhen() { return rvPose().t.z > this.gz - 17; },
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.0 }); dbg({ op: 'rvhp', hp: 100 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.0 }); dbg({ op: 'rvhp', hp: 100 });
     this.gz = W.obstacles.find(o => o.type === 'gate').z;
     dbg({ op: 'tpRV', x: W.roadX(this.gz - 70), z: this.gz - 70, yaw: Math.atan2(W.roadX(this.gz - 62) - W.roadX(this.gz - 70), 8) });
     seatDriver(bots.Dave);
@@ -572,10 +574,10 @@ shot({
 
 // Dave runs Steve over
 shot({
-  id: 'runover', day: 1, secs: 3.0, pre: 1, fov: 62, preMax: 25,
+  id: 'runover', day: 4, secs: 3.0, pre: 1, fov: 62, preMax: 25,
   startWhen() { return rvPose().t.z > 192 - 24; },
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.5 }); dbg({ op: 'rvhp', hp: 100 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.5 }); dbg({ op: 'rvhp', hp: 100 });
     dbg({ op: 'tpRV', x: W.roadX(110), z: 110, yaw: Math.atan2(W.roadX(118) - W.roadX(110), 8) });
     seatDriver(bots.Dave);
     offstage(bots.Kyle);
@@ -591,9 +593,9 @@ shot({
 
 // broken down at dusk: smoke from the hatch, the hazards blinking, three of them at the engine, it catches
 shot({
-  id: 'breakdown', day: 1, secs: 4.0, pre: 2.0, fov: 58,
+  id: 'breakdown', day: 3, secs: 4.0, pre: 2.0, fov: 58,
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 20.55 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 20.55 });
     dbg({ op: 'tpRV', x: W.roadX(700), z: 700, yaw: Math.atan2(W.roadX(708) - W.roadX(700), 8) });
     for (const b of Object.values(bots)) unseat(b);
     dbg({ op: 'rvhp', hp: 0 });
@@ -610,9 +612,9 @@ shot({
 
 // the Lucky Slop's neon at night
 shot({
-  id: 'neon', day: 1, secs: 2.0, pre: 0.5, fov: 60,
+  id: 'neon', day: 5, secs: 2.0, pre: 0.5, fov: 60,
   setup() {
-    offstage(bots.Dave, bots.Steve, bots.Kyle);
+    dbg({ op: 'mobs', on: false }); offstage(bots.Dave, bots.Steve, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.4 });
     dbg({ op: 'tpRV', x: 0, z: W.town.lot.z, yaw: 0 });
   },
@@ -627,9 +629,9 @@ const casUse = id => W.uses.findIndex(u => u.kind === 'cas' && u.arg === id);
 const onTable = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
 const sitDown = (bot, id) => { const st = casStation(id), u = W.uses[casUse(id)]; bot.at(st.x, st.z, yawTo(st, u)); bot.tick(1 / 60); };
 shot({
-  id: 'blackjack', day: 1, secs: 2.0, pre: 0.5, fov: 58,
+  id: 'blackjack', day: 5, secs: 2.0, pre: 0.5, fov: 58,
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.6 }); dbg({ op: 'bank', v: 6000 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.6 }); dbg({ op: 'bank', v: 6000 });
     const { Kyle, Dave, Steve } = bots;
     sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1');
     room.tick(1 / 60);
@@ -646,9 +648,9 @@ shot({
 
 // double or nothing: ALL IN, the lever, FLIPPING..., NOTHING (the machine is told to lose)
 shot({
-  id: 'coinflip', day: 1, secs: 3.4, pre: 0.4, fov: 62,
+  id: 'coinflip', day: 5, secs: 3.4, pre: 0.4, fov: 62,
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.8 }); dbg({ op: 'bank', v: 4500 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.8 }); dbg({ op: 'bank', v: 4500 });
     const { Kyle } = bots;
     sitDown(Kyle, 'flip1');
     room.tick(1 / 60);
@@ -671,9 +673,9 @@ shot({
 
 // the Repo Man by his tow truck, at night (a slow push in)
 shot({
-  id: 'repoman', day: 1, secs: 4.0, pre: 0.4, fov: 52,
+  id: 'repoman', day: 3, secs: 4.0, pre: 0.4, fov: 52,
   setup() {
-    offstage(bots.Dave, bots.Steve, bots.Kyle);
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'rvhp', hp: 100 }); offstage(bots.Dave, bots.Steve, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 22.9 });
   },
   cam: t => { const R = W.town.repo; return { p: { x: lerp(R.x - 7.5, R.x - 5.6, ease(t / 3)), y: R.y + 1.6, z: lerp(R.z - 3.5, R.z - 2.8, ease(t / 3)) }, t: { x: R.x - 0.6, y: R.y + 1.5, z: R.z + 0.3 } }; },
@@ -801,21 +803,22 @@ shot({
 
 // a ringtail sneaks up on the vase Steve set down, snatches it, and runs (STOLEN $520)
 shot({
-  id: 'ringtail', day: 2, secs: 2.8, pre: 0.5, fov: 58, preMax: 24,
+  id: 'ringtail', day: 5, secs: 2.8, pre: 0.5, fov: 58, preMax: 24,
   startWhen() { const m = this.coon, p = m && room.sim.props.get(m.id), v = this.vase && room.sim.props.get(this.vase.id); if (!p || !v) return false; const a = p.body.translation(), b = v.body.translation(); return (m.st & 31) >= 1 && Math.hypot(a.x - b.x, a.z - b.z) < 4.2; },
   setup() {
     dbg({ op: 'mobs', on: false });
     offstage(bots.Dave, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 11.0 });
     dbg({ op: 'tpRV', x: W.roadX(150), z: 150, yaw: 0 });
-    const { Steve } = bots, v = { x: 9.5, z: 220 };
+    // (beside the road: the vase 6 m off it, the ringtail coming from 13.5 m off)
+    const { Steve } = bots, v = { x: W.roadX(220) - 6, z: 220 };
     Steve.at(v.x - 1.2, v.z, Math.PI / 2, { pitch: 0.5 }); Steve.tick(1 / 60); room.tick(1 / 60);
     this.vase = spawnProp('vase', v.x, H(v.x, v.z) + 0.45, v.z, 520);
     for (let k = 0; k < 20; k++) room.tick(1 / 60);
     if (grab(Steve, this.vase)) { for (let k = 0; k < 10; k++) room.tick(1 / 60); Steve.say({ t: 'rel' }); }
     for (let k = 0; k < 30; k++) room.tick(1 / 60);
     this.v = v;
-    this.coon = spawnMob('ringtail', 2, 214, { yaw: 0.8 });
+    this.coon = spawnMob('ringtail', W.roadX(214) - 13.5, 214, { yaw: 0.8 });
   },
   tick(t) { const { Steve } = bots; Steve.at(this.v.x - 2.6, this.v.z + 2.6, -Math.PI / 4); },
   cam(t) {
@@ -830,7 +833,7 @@ shot({
 shot({
   id: 'dino', day: 3, secs: 2.4, pre: 0.8, fov: 58,
   setup() {
-    dbg({ op: 'mobs', on: false });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'rvhp', hp: 100 });
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 11.0 });
     dbg({ op: 'tpRV', x: W.roadX(700), z: 700, yaw: 0 });
     offstage(bots.Dave);
@@ -1077,7 +1080,9 @@ async function score() {
   const pg = await br.newPage();
   pg.on('pageerror', e => log('page error:', e.message));
   pg.setDefaultTimeout(600000);
-  const src = fs.readFileSync(path.join(ROOT, 'tools/trailer-score.js'), 'utf8');
+  // (a data: module can't import by a relative path: the band it imports, client/js/western.js, goes in as one too)
+  const b64 = f => 'data:text/javascript;base64,' + Buffer.from(fs.readFileSync(path.join(ROOT, f), 'utf8')).toString('base64');
+  const src = fs.readFileSync(path.join(ROOT, 'tools/trailer-score.js'), 'utf8').replace("'../client/js/western.js'", `'${b64('client/js/western.js')}'`);
   const res = await pg.evaluate(async ([src, T, solo]) => {
     const m = await import('data:text/javascript;base64,' + btoa(unescape(encodeURIComponent(src))));
     const { ch, warn } = await m.renderScore(T, { solo });
@@ -1260,8 +1265,8 @@ const EDL = [
 const MUSIC_LEVEL = 0.8, BED_LEVEL = 0.6;   // (against the sounds, which play at their reel gains)
 const BED_CUES = [
   ['fields', 0, 1.6, 0.9], ['engine', 0.6, 2.0, 0.9], ['cabin', 2.5, 2.5, 0.7], ['engine', 5.0, 1.25, 0.6], ['campfire', 6.25, 1.25, 0.8],
-  ['snow', 8.75, 1.25, 0.6], ['badlands', 10.0, 1.25, 0.6], ['engine', 15.0, 1.2, 0.7], ['meadow', 15.0, 2.6, 2.0], ['fields', 17.5, 4.0, 0.7], ['fields', 22.5, 2.5, 0.6],
-  ['engine', 25.0, 1.6, 0.7], ['night', 27.5, 2.5, 1.6], ['night', 35.0, 6.25, 0.5], ['campfire', 40.0, 1.25, 0.6],
+  ['snow', 8.75, 1.25, 0.6], ['badlands', 10.0, 2.5, 0.6], ['engine', 15.0, 1.2, 0.7], ['snow', 15.0, 2.6, 2.0], ['fields', 17.5, 4.0, 0.7], ['desert', 22.5, 2.5, 0.6],
+  ['engine', 25.0, 1.6, 0.7], ['badlands', 25.0, 2.5, 0.5], ['snow', 27.5, 2.5, 1.6], ['night', 35.0, 2.5, 0.5], ['snow', 37.5, 2.5, 0.6], ['campfire', 40.0, 1.25, 0.6],
   ['engine', 41.25, 6.25, 0.55], ['desert', 47.5, 2.5, 0.5], ['meadow', 55.0, 2.5, 2.0], ['campfire', 55.0, 2.5, 1.0],
 ];
 const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], { stdio: ['ignore', 'inherit', 'inherit'] });

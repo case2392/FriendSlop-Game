@@ -1,27 +1,31 @@
-// The trailer's music: a country-rock theme scored to the cut. 96 bpm, so a bar is 2.5 s and every cut in the
-// trailer falls on a half bar. Every sound is synthesized here (plucked strings, drums, a fiddle, a lounge
-// vibraphone, a boom): no samples, nothing to license. It runs in a page (it needs OfflineAudioContext):
-// renderScore(timing) gives the two channels. timing: { secs, sfx: [[s, name]], cuts: [[s, id]] } from the
-// tool's plan(), so the hits land on the picture's events.
+// The trailer's music: a western theme scored to the cut. 96 bpm, so a bar is 2.5 s and every cut in the
+// trailer falls on a half bar. Every sound is synthesized here and in the game's own band
+// (client/js/western.js: the harmonica, the whistle, the saloon piano, the choir, the bell, the whip): no samples,
+// nothing to license. It runs in a page (it needs OfflineAudioContext): renderScore(timing) gives the two
+// channels. timing: { secs, sfx: [[s, name]], cuts: [[s, id]] } from the tool's plan(), so the hits land on the
+// picture's events.
 //
 // The form, in trailer seconds:
-//    0     the billboard: a twang chord, a banjo roll in
-//    2.5   the pitch: a train beat, strums, the bass on one and three
-//    7.5   the verbs: the theme on the twang guitar, a crash on each caption
+//    0     the billboard: a twang chord, a lone whistle, a banjo roll in
+//    2.5   the pitch: a train beat, strums, the bass on one and three, the harmonica answering the captions
+//    7.5   the verbs: the theme on the harmonica, the fiddle under it, a cymbal on each caption
 //   15.97  the gate: the band stops dead on the crunch
-//   17.5   the Grumphorn: a tiptoe, then (its bellow) the riff in E minor; a stab when Steve is tossed
+//   17.5   the Grumphorn asleep: pizzicato on tiptoe, a jaw harp; then (its bellow) a whip and the gallop:
+//          toms, a low riff, the fiddle sawing; the timpani when Steve is tossed
 //   21.5   knocked out: the band under water, a ringing
-//   22.5   the ringtail (a frantic banjo) and the run-over (a stab on the thunk)
-//   27.6   the breakdown: the tape winds down; fixed, a lick brings it back
-//   30     the casino: the theme as a swing tune on a vibraphone
+//   22.5   the ringtail (a frantic banjo) and the run-over (a whip and the timpani on the thunk)
+//   27.6   the breakdown: the tape winds down; fixed, a harmonica lick brings it back
+//   30     the casino: the theme as a rag on a saloon piano
 //   34.03  NOTHING: the tape stops
-//   35     a minute to midnight: a clock, a heartbeat, a rising cluster
-//   38.77  REPO'D: the boom
+//   35     a minute to midnight: a clock, a heartbeat, the church bell, a choir rising; 38.77 REPO'D: the boom
 //   40     again: one strum, a snare pick-up
-//   41.27  five days: the theme, the fiddle in, a crash on each day
-//   47.5   up a step for the payoff; 50 the arrival; 51.27 the title's last chord, left to ring
+//   41.27  five days: the gallop, the theme on the harmonica and the fiddle; each day its own colour (the
+//          snow's whistle, the badlands' steel, the desert's castanets)
+//   47.5   up a step for the payoff; 50 the arrival; 51.27 the title's last chord, a whistle and a choir
 //   55     the stinger: silence
-//   57.5   the button: a lick and the last chord
+//   57.5   the button: a harmonica lick and the last chord
+
+import { westernKit } from '../client/js/western.js';
 
 const BPM = 96, BEAT = 60 / BPM, BAR = 4 * BEAT, S16 = BEAT / 4, E8 = BEAT / 2;
 const hz = m => 440 * 2 ** ((m - 69) / 12);
@@ -115,14 +119,24 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
     acoustic: bus('guitars', { level: 0.4, pan: -0.32, send: 0.16, chain: [filt('highpass', 95), filt('peaking', 140, 1.2, 3), filt('peaking', 900, 1, -2), filt('highshelf', 5500, 0.7, 4), comp(-20, 3, 0.004, 0.1)] }),
     banjo: bus('banjo', { level: 1.2, pan: 0.42, send: 0.14, chain: [filt('highpass', 170), filt('peaking', 1300, 1.2, 6), filt('highshelf', 5000, 0.7, 2)] }),
     twang: bus('lead', { level: 0.33, pan: 0.1, send: 0.14, slapSend: 0.55, chain: [filt('highpass', 120), shaper(2.4), filt('peaking', 1700, 1, 5), filt('lowpass', 7200), comp(-18, 3)] }),
-    chug: bus('guitars', { level: 0.27, pan: -0.22, send: 0.08, chain: [filt('highpass', 85), shaper(7), filt('peaking', 120, 1, 4), filt('peaking', 700, 1, -4), filt('lowpass', 4800)] }),
     fiddle: bus('lead', { level: 0.2, pan: -0.15, send: 0.28, chain: [filt('peaking', 300, 1, 4), filt('peaking', 1150, 1.5, 5), filt('peaking', 2800, 2, 4), filt('lowpass', 6500), filt('highpass', 180)] }),
-    vibes: bus('keys', { level: 0.52, pan: 0.12, send: 0.34 }),
-    epiano: bus('keys', { level: 0.39, pan: -0.2, send: 0.24, chain: [filt('lowpass', 4200)] }),
     strings: bus('fx', { level: 0.18, send: 0.45, chain: [filt('lowpass', 2200)] }),
     fx: bus('fx', { level: 0.33, send: 0.35 }),
     clock: bus('fx', { level: 0.24, pan: 0.12, send: 0.08 }),
   };
+
+  // the rest of the band: the game's own (client/js/western.js), through its own bus ('band' for --solo)
+  const K = westernKit(ctx, bus('band', { level: 0.9, send: 0 }), { tremolo: [6.2, 0.6] });
+  // a melody on the kit's harmonica or whistle: [beat offset, beats long, midi, { bend, v }], from t0
+  function kline(inst, t0, notes, { v = 0.6 } = {}) {
+    let prev = null;
+    for (const [b, d, m, o = {}] of notes) {
+      const t = t0 + b * BEAT, dur = d * BEAT * 0.97, vv = (o.v ?? 1) * v;
+      if (inst === 'harmonica') K.harmonica(t, m, vv, dur, { bend: o.bend ? 1 : 0 });
+      else K.whistle(t, m, vv, dur, { from: prev != null && Math.abs(prev - m) <= 5 && prev !== m ? prev : null });
+      prev = m;
+    }
+  }
 
   // ---- the sounds --------------------------------------------------------------------------------------
   const env = (g, t, v, a, d) => { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + a); g.gain.exponentialRampToValueAtTime(0.0008, t + a + d); };
@@ -152,10 +166,8 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
     tone(B.snare, t, 'sine', 340, 300, v * 0.2, 0.05);
   }
   const brush = (t, v = 0.3, len = 0.11) => noiseHit(B.snare, t, 'bandpass', 4200, 0.45, v, len, 0.008);
-  const swish = (t, v = 0.22, len = 0.3) => noiseHit(B.snare, t, 'bandpass', 3000, 0.4, v, len, 0.09);
   const hat = (t, v = 0.3, open = false) => { noiseHit(B.hats, t, 'bandpass', 10500, 0.8, v, open ? 0.32 : 0.045, 0.001, METAL); noiseHit(B.hats, t, 'highpass', 9000, 0.7, v * 0.4, open ? 0.25 : 0.03); };
   const crash = (t, v = 0.5, len = 2.2) => { noiseHit(B.cym, t, 'highpass', 4200, 0.6, v, len, 0.002, METAL); noiseHit(B.cym, t, 'highpass', 5200, 0.6, v * 0.7, len * 0.85); };
-  const ride = (t, v = 0.25) => { noiseHit(B.cym, t, 'bandpass', 5600, 1.3, v, 0.7, 0.001, METAL); tone(B.cym, t, 'sine', 3950, 3950, v * 0.12, 0.5); };
   const tom = (t, f, v = 0.7) => { tone(B.toms, t, 'sine', f * 1.6, f, v, 0.34); noiseHit(B.toms, t, 'lowpass', 1100, 0.7, v * 0.28, 0.06); };
   const wood = (t, f, v = 0.35) => { tone(B.clock, t, 'sine', f, f * 0.97, v, 0.035); noiseHit(B.clock, t, 'bandpass', f * 1.6, 5, v * 0.5, 0.012); };
 
@@ -250,17 +262,6 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
     return n;
   }
   // a melody: [beat offset, beats long, midi, { bend }], from t0
-  function line(t0, notes, { v = 0.6, fid = false, fidV = 0.3, fidUp = 0 } = {}) {
-    for (const [b, d, m, o = {}] of notes) {
-      const t = t0 + b * BEAT;
-      twang(t, m, { v: (o.v ?? 1) * v, bend: o.bend || 0, len: d * BEAT * 0.98 });
-      if (fid) fiddle(t, m + fidUp, d * BEAT, { v: fidV * (o.v ?? 1), slide: o.bend ? o.bend * 0.6 : -40 });
-    }
-  }
-  // the rhythm guitar in the chaos: palm-muted power chords
-  function chug(t, root, { v = 0.55, len = 0.12 } = {}) {
-    for (const [iv, g] of [[0, 1], [7, 0.8], [12, 0.6]]) pluck(B.chug, t + iv * 0.0004, ksBuf(root + iv, { t60: 1.2, bright: 0.6, damp: 0.4, pick: 0.2, len: 1.2 }, 1), { v: v * g, mute: t + len });
-  }
   function fiddle(t, midi, dur, { v = 0.3, slide = -40 } = {}) {
     const g = ctx.createGain(), end = t + dur;
     g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.06); g.gain.setValueAtTime(v * 0.92, end - 0.02); g.gain.linearRampToValueAtTime(0, end + 0.12);
@@ -275,27 +276,6 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
     lfo.start(t); lfo.stop(end + 0.15);
     g.connect(B.fiddle);
     noiseHit(B.fiddle, t, 'bandpass', 3200, 1.2, v * 0.12, Math.max(0.05, dur * 0.8), 0.04);
-  }
-  function vibes(t, midi, dur, v = 0.35) {
-    const g = ctx.createGain(); g.gain.value = 1;
-    const trem = ctx.createOscillator(); trem.frequency.value = 5.2;
-    const tg = ctx.createGain(); tg.gain.value = 0.22; trem.connect(tg).connect(g.gain);
-    for (const [ratio, amp, dec] of [[1, 1, dur + 1.1], [4, 0.22, 0.45], [10, 0.06, 0.12]]) {
-      const o = ctx.createOscillator(); o.type = 'sine'; o.frequency.value = hz(midi) * ratio;
-      const e = ctx.createGain(); env(e, t, v * amp, 0.002, dec);
-      o.connect(e).connect(g); o.start(t); o.stop(t + dec + 0.1);
-    }
-    g.connect(B.vibes); trem.start(t); trem.stop(t + dur + 1.3);
-  }
-  function epiano(t, midis, dur, v = 0.22) {
-    for (const m of midis) {
-      const f = hz(m), c = ctx.createOscillator(), mo = ctx.createOscillator(), mg = ctx.createGain(), g = ctx.createGain();
-      c.frequency.value = f; mo.frequency.value = f;
-      mg.gain.setValueAtTime(f * 1.8, t); mg.gain.exponentialRampToValueAtTime(f * 0.25, t + 0.7);
-      mo.connect(mg).connect(c.frequency);
-      g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(v, t + 0.004); g.gain.exponentialRampToValueAtTime(v * 0.35, t + 0.6); g.gain.setTargetAtTime(0, t + dur, 0.05);
-      c.connect(g).connect(B.epiano); c.start(t); mo.start(t); c.stop(t + dur + 0.35); mo.stop(t + dur + 0.35);
-    }
   }
   // sustained, bowed-sounding cluster with a tremolo: the build to midnight
   function strings(t, midis, dur, v0, v1) {
@@ -340,8 +320,7 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
 
   // ---- the score ---------------------------------------------------------------------------------------
   const bar = n => n * BAR;
-  // drums: the train beat (brushes on 16ths, the backbeat accented), rock-a-billy (kick, snare, hats), the
-  // chaos (toms on 8ths), the swing (a ride, brushes)
+  // drums: the train beat (brushes on 16ths, the backbeat accented); the gallop is below
   const TRAIN = [0.42, 0.14, 0.22, 0.14, 0.7, 0.14, 0.24, 0.16, 0.42, 0.14, 0.22, 0.14, 0.7, 0.14, 0.26, 0.2];
   function trainBeat(t0, beats, v = 1) {
     for (let i = 0; i < beats * 4; i++) {
@@ -351,32 +330,28 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
       if (k === 0 || k === 8) kick(t, 0.62 * v);
     }
   }
-  function rockBeat(t0, beats, { v = 1, open = true } = {}) {
-    for (let i = 0; i < beats * 2; i++) {
-      const t = t0 + i * E8, k = i % 8;
-      if (k === 0 || k === 4 || k === 5) kick(t, (k === 5 ? 0.5 : 0.85) * v);
-      if (k === 2 || k === 6) snare(t, 0.78 * v);
-      hat(t, (k % 2 ? 0.16 : 0.26) * v, open && k === 7);
+  // the gallop: da-da-DUM on the toms and the kick every beat, the snare on two and four, brushes in 16ths
+  function gallop(t0, beats, v = 1) {
+    for (let i = 0; i < beats; i++) {
+      const t = t0 + i * BEAT;
+      kick(t, 0.8 * v); tom(t + E8, 96, 0.42 * v); tom(t + E8 + S16, 120, 0.5 * v);
+      if (i % 2) snare(t, 0.7 * v);
+      for (let q = 0; q < 4; q++) brush(t + q * S16, (q === 0 ? 0.3 : 0.16) * v, 0.08);
     }
   }
-  function chaosBeat(t0, beats, v = 1) {
-    for (let i = 0; i < beats * 2; i++) {
-      const t = t0 + i * E8, k = i % 8;
-      tom(t, k % 2 ? 72 : 96, (k % 2 ? 0.45 : 0.6) * v);
-      if (k === 0 || k === 4) kick(t, 0.9 * v);
-      if (k === 2 || k === 6) snare(t, 0.9 * v);
-      hat(t + E8 / 2, 0.12 * v);
-    }
-  }
+  // the fiddle sawing away on 16ths (the chase)
+  function saw(t0, beats, notes = [76, 71], v = 0.16) { for (let i = 0; i < beats * 4; i++) fiddle(t0 + i * S16, notes[i % notes.length], S16 * 0.9, { v: v * (i % 4 === 0 ? 1.2 : 1), slide: 0 }); }
+  // the low riff on the twang (muted but for the one), the bass doubling it
+  function wriff(t0, notes, v = 0.6) { notes.forEach((m, i) => { twang(t0 + i * E8, m, { v: (i % 4 === 0 ? 1.1 : 0.85) * v, len: i % 4 === 0 ? E8 * 1.6 : E8 * 0.5, keep: true }); bass(t0 + i * E8, m - 12, { v: 0.7, len: E8 * 0.8 }); }); }
   function fill(t0, n16, v0 = 0.3, v1 = 0.8, toms = false) {
     for (let i = 0; i < n16; i++) { const v = v0 + (v1 - v0) * i / Math.max(1, n16 - 1); if (toms) tom(t0 + i * S16, [150, 120, 96, 72][Math.floor(i * 4 / n16)], v); else snare(t0 + i * S16, v); }
   }
-  // the chaos riff in E minor: the root of each 8th's power chord
+  // the chase riff in E minor, on the twang's low strings
   const RIFF = [40, 40, 43, 40, 45, 43, 40, 38], RIFF2 = [45, 45, 48, 45, 47, 47, 43, 42];
-  function riff(t0, notes, v = 0.55) { notes.forEach((m, i) => { chug(t0 + i * E8, m, { v: (i % 4 === 0 ? 1.15 : 1) * v }); bass(t0 + i * E8, m - 12, { v: 0.75, len: E8 * 0.8 }); }); }
 
   // 0: the billboard. A twang chord rings; a banjo roll and a snare pick-up into the groove
   for (const [k, m] of [55, 59, 64, 67].entries()) twang(0.03 + k * 0.022, m, { v: 0.42, keep: true });
+  K.whistle(0.12, 74, 0.5, 0.5); K.whistle(0.62, 79, 0.55, 0.85, { from: 74 }); K.whistle(1.5, 78, 0.4, 0.3, { from: 79 }); K.whistle(1.8, 74, 0.45, 0.6, { from: 78 });
   riser(1.25, 1.25, 0.06);
   roll(bar(0) + 2 * BEAT, 'G', 8, 0.22, 0.8);
   fill(bar(0) + 3 * BEAT, 4, 0.2, 0.55);
@@ -386,22 +361,24 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
   strums(bar(1), ['G', 'G', 'C', 'D'], { v: 0.46 });
   boomChick(bar(1), ['G', 'G', 'C']); bass(bar(2) + 2 * BEAT, 38);
   roll(bar(2), 'C', 8, 0.18); roll(bar(2) + 2 * BEAT, 'D', 8, 0.2);
-  line(bar(1) + 3 * BEAT, [[0, 0.5, 71, { bend: -200 }], [0.5, 0.25, 74], [0.75, 0.25, 76]], { v: 0.5 });
-  line(bar(2) + 3 * BEAT, [[0.25, 0.25, 67], [0.5, 0.25, 69], [0.75, 0.25, 71]], { v: 0.5 });
+  kline('harmonica', bar(1) + 3 * BEAT, [[0, 0.5, 71, { bend: 1 }], [0.5, 0.25, 74], [0.75, 0.25, 76]], { v: 0.6 });
+  kline('harmonica', bar(2) + 3 * BEAT, [[0.25, 0.25, 67], [0.5, 0.25, 69], [0.75, 0.25, 71]], { v: 0.6 });
   bass(bar(2) + 3 * BEAT, 36, { v: 0.72, len: E8 * 0.85 }); bass(bar(2) + 3.5 * BEAT, 35, { v: 0.72, len: E8 * 0.85 });
 
   // 7.5: the verbs (G C | G D | C D) and the theme
   const T1 = bar(3);
-  rockBeat(T1, 12);
-  for (const [t, v] of [[T1, 0.55], [T1 + 2 * BEAT, 0.3], [bar(4), 0.5], [bar(4) + 2 * BEAT, 0.3], [bar(5), 0.5]]) crash(t, v, 1.8);
+  trainBeat(T1, 12, 1.2);
+  for (const [t, v] of [[T1, 0.45], [T1 + 2 * BEAT, 0.25], [bar(4), 0.4], [bar(4) + 2 * BEAT, 0.25], [bar(5), 0.4]]) crash(t, v, 1.6);
   strums(T1, ['G', 'C', 'G', 'D', 'C', 'D'], { v: 0.5 });
   boomChick(T1, ['G', 'C', 'G', 'D', 'C', 'D']);
   roll(T1, 'G', 8, 0.16); roll(T1 + 2 * BEAT, 'C', 8, 0.16); roll(bar(4), 'G', 8, 0.16); roll(bar(4) + 2 * BEAT, 'D', 8, 0.16); roll(bar(5), 'C', 8, 0.18); roll(bar(5) + 2 * BEAT, 'D', 8, 0.22, 0.6);
-  line(T1, [
+  const THEME = [
     [0, 1, 74], [1, 0.5, 71], [1.5, 0.5, 74], [2, 1, 76], [3, 0.5, 74], [3.5, 0.5, 72],
-    [4, 1, 71, { bend: -200 }], [5, 0.5, 69], [5.5, 0.5, 67], [6, 1.5, 69], [7.5, 0.5, 74],
+    [4, 1, 71, { bend: 1 }], [5, 0.5, 69], [5.5, 0.5, 67], [6, 1.5, 69], [7.5, 0.5, 74],
     [8, 1, 76], [9, 0.5, 74], [9.5, 0.5, 72], [10, 1, 71], [11, 0.5, 69], [11.5, 0.5, 71],
-  ], { v: 0.62 });
+  ];
+  kline('harmonica', T1, THEME, { v: 0.62 });
+  for (const [b, d, m] of THEME) fiddle(T1 + b * BEAT, m - 12, d * BEAT, { v: 0.14, slide: -30 });
   riser(bar(5) + 2 * BEAT, 2 * BEAT, 0.1);
   fill(bar(5) + 3 * BEAT, 4, 0.35, 0.85);
   // 15: the gate: on G till the RV hits it
@@ -414,39 +391,42 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
   twang(G0, 67, { v: 0.55 }); twang(G0, 71, { v: 0.45, keep: true });
 
   // 17.5: the Grumphorn asleep: a tiptoe on the bass
-  [40, 41, 42, 43, 44].forEach((m, i) => { bass(bar(7) + i * E8, m, { v: 0.5, len: 0.1 }); hat(bar(7) + i * E8 + E8 / 2, 0.08); });
+  [52, 53, 54, 55, 56].forEach((m, i) => { K.pizz(bar(7) + i * E8, m, 0.75, 0.12); bass(bar(7) + i * E8, m - 12, { v: 0.35, len: 0.08 }); });
+  K.jawharp(bar(7) + 2.75 * BEAT, 40, 0.7, 0.4);
   // 19: its bellow: the riff (on its own bar from the bellow), a stab when Steve goes up
   const C0 = cue('bellow');
-  crash(C0, 0.6, 2); chaosBeat(C0, 6); riff(C0, RIFF); riff(C0 + BAR, RIFF.slice(0, 4));
+  K.whip(C0 - 0.14, 0.9); crash(C0, 0.55, 2); gallop(C0, 6); wriff(C0, RIFF); wriff(C0 + BAR, RIFF.slice(0, 4)); saw(C0 + 2 * BEAT, 4);
   twang(C0, 76, { v: 0.5, bend: -200, bendT: 0.15, len: 1.0 });
-  brass(KNOCK, [52, 55, 59], 0.5, 0.35); crash(KNOCK, 0.55, 1.8); kick(KNOCK, 1);
+  K.timp(KNOCK, 40, 0.9); K.strings(KNOCK, 52, 0.7, 0.5); K.strings(KNOCK, 55, 0.6, 0.5); crash(KNOCK, 0.55, 1.8); kick(KNOCK, 1);
   // 21.5: knocked out: the band under water, a ringing in the ears
   koF.frequency.setValueAtTime(20000, KO); koF.frequency.exponentialRampToValueAtTime(360, KO + 0.06);
   koF.frequency.setValueAtTime(360, cutAt('ringtail', 22.5) - 0.08); koF.frequency.exponentialRampToValueAtTime(20000, 22.5);
   { const o = ctx.createOscillator(); o.frequency.value = 3300; const g = ctx.createGain(); g.gain.setValueAtTime(0, KO); g.gain.linearRampToValueAtTime(0.02, KO + 0.05); g.gain.linearRampToValueAtTime(0, 22.45); o.connect(g).connect(ctx.destination); o.start(KO); o.stop(22.5); }
   // 22.5: the ringtail (a frantic banjo) and the run-over (a stab on the thunk), into the breakdown
-  chaosBeat(bar(9), 8); crash(bar(9), 0.5, 1.8);
-  riff(bar(9), RIFF); riff(bar(10), RIFF2);
+  gallop(bar(9), 8); crash(bar(9), 0.5, 1.8);
+  wriff(bar(9), RIFF); wriff(bar(10), RIFF2); saw(bar(10), 4, [81, 76]);
   [64, 62, 59, 55, 59, 62, 64, 67, 71, 67, 64, 62, 64, 62, 59, 55].forEach((m, i) => banjo(bar(9) + i * S16, m, 0.36));
   [64, 67, 71, 76, 71, 67, 64, 62].forEach((m, i) => banjo(bar(9) + 2 * BEAT + i * S16 * 2, m, 0.3));
-  brass(RUNOVER, [46, 50, 53], 0.45, 0.35); crash(RUNOVER, 0.55, 1.6); kick(RUNOVER, 1);
-  chaosBeat(bar(11), 2); riff(bar(11), RIFF.slice(0, 4)); crash(bar(11), 0.5, 1.5);
+  K.whip(RUNOVER - 0.14, 0.8); K.timp(RUNOVER, 38, 0.85); crash(RUNOVER, 0.55, 1.6); kick(RUNOVER, 1);
+  gallop(bar(11), 2); wriff(bar(11), RIFF.slice(0, 4)); crash(bar(11), 0.5, 1.5);
   // fixed: a lick back in, into the casino
   const BACK = bar(11) + 3.5 * BEAT;
-  line(BACK, [[0, 0.25, 74], [0.25, 0.25, 76], [0.5, 0.5, 79]], { v: 0.55 });
+  kline('harmonica', BACK, [[0, 0.25, 74], [0.25, 0.25, 76], [0.5, 0.5, 79, { bend: 1 }]], { v: 0.65 });
   snare(BACK + 0.5 * BEAT, 0.5);
 
-  // 30: the casino: the theme as swing (Gm6 Cm9 | D7b9 Gm6), the vibraphone on the tune
-  const L0 = cutAt('neon', 30), SW = BEAT * 2 / 3;
-  for (let b = 0; b < 7; b++) {
-    const t = L0 + b * BEAT;
-    ride(t, 0.22); if (b % 2) { ride(t + SW, 0.15); swish(t, 0.2); hat(t, 0.14); }
-    kick(t, 0.22);
-  }
-  [[0, 43], [1, 47], [2, 48], [3, 49], [4, 50], [5, 44], [6, 43]].forEach(([b, m]) => bass(L0 + b * BEAT, m, { v: 0.7, len: BEAT * 0.9 }));
-  [[0, [58, 62, 64, 67]], [2, [63, 67, 70, 74]], [4, [60, 63, 66, 69]], [6, [58, 62, 64, 67]]].forEach(([b, ch]) => { epiano(L0 + b * BEAT, ch, 0.45); if (b < 6) epiano(L0 + (b + 1) * BEAT + SW, ch, 0.18, 0.15); });
-  [[0, 1, 74], [1, 0.67, 70], [1.67, 0.33, 74], [2, 1, 75], [3, 0.67, 74], [3.67, 0.33, 70], [4, 1, 69], [5, 0.67, 67], [5.67, 0.33, 69], [6, 2, 70]]
-    .forEach(([b, d, m]) => vibes(L0 + b * BEAT, m, d * BEAT, 0.36));
+  // 30: the casino: the theme as a rag on a saloon piano (stride: a bass note, then the chord), brushes
+  const L0 = cutAt('neon', 30);
+  const RAG = [['G', 43, [55, 59, 62]], ['G', 38, [55, 59, 62]], ['C', 36, [55, 60, 64]], ['C', 43, [55, 60, 64]], ['G', 43, [55, 59, 62]], ['D', 38, [54, 57, 62]], ['G', 43, [55, 59, 62]]];
+  RAG.forEach(([, b, ch], i) => {
+    const t = L0 + i * BEAT;
+    K.piano(t, b, 0.75, E8 * 0.9); K.piano(t, b + 12, 0.45, E8 * 0.9);
+    for (const n of ch) K.piano(t + E8, n, 0.5, E8 * 0.8);
+    brush(t, 0.3, 0.12); brush(t + E8, 0.18, 0.08);
+    bass(t, b - 12 + (b < 40 ? 12 : 0), { v: 0.55, len: BEAT * 0.85 });
+  });
+  // the right hand: the theme, ragged (a grace note into the long ones, the octave on top)
+  [[0, 1, 74], [1, 0.5, 71], [1.5, 0.5, 74], [2, 1, 76], [3, 0.5, 74], [3.5, 0.5, 72], [4, 1, 71], [5, 0.5, 69], [5.5, 0.5, 67], [6, 1, 71]]
+    .forEach(([b, d, m]) => { const t = L0 + b * BEAT; if (d >= 1) K.piano(t - 0.06, m - 1, 0.35, 0.06); K.piano(t, m, 0.6, d * BEAT * 0.9); K.piano(t, m + 12, 0.32, d * BEAT * 0.9); });
 
   // 35: a minute to midnight: a clock, a heartbeat, a drone, a rising cluster; 38.77: REPO'D, the boom
   const M0 = cutAt('hud.png', 35), HIT = REPOD;
@@ -455,40 +435,54 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
   { const g = ctx.createGain(); g.gain.setValueAtTime(0, M0); g.gain.linearRampToValueAtTime(0.28, HIT); g.gain.linearRampToValueAtTime(0, HIT + 0.02); const lp = filt('lowpass', 240, 0.8);
     for (const m of [28, 35, 40]) for (const dt of [-6, 5]) { const o = ctx.createOscillator(); o.type = 'sawtooth'; o.frequency.value = hz(m); o.detune.value = dt; o.connect(lp); o.start(M0); o.stop(HIT + 0.05); }
     lp.connect(g).connect(B.fx); }
-  strings(M0, [52, 53], 2 * BEAT, 0.05, 0.08); strings(M0 + 2 * BEAT, [53, 54], 2 * BEAT, 0.08, 0.12);
-  strings(M0 + 4 * BEAT, [54, 55, 66], BEAT, 0.12, 0.16); strings(M0 + 5 * BEAT, [55, 56, 67, 68], HIT - (M0 + 5 * BEAT), 0.16, 0.3);
+  strings(M0, [52, 53], 2 * BEAT, 0.04, 0.06); strings(M0 + 2 * BEAT, [53, 54], 2 * BEAT, 0.06, 0.09);
+  strings(M0 + 4 * BEAT, [54, 55, 66], BEAT, 0.09, 0.12); strings(M0 + 5 * BEAT, [55, 56, 67, 68], HIT - (M0 + 5 * BEAT), 0.12, 0.22);
+  // the church bell striking (the last one is the boom), a choir rising under it
+  for (const k of [0, 1, 2]) K.bell(M0 + k * 2 * BEAT, 45, 0.55 + 0.1 * k, 2.6);
+  K.choir(M0, 52, 0.45, 2 * BEAT, { vowel: 'o' }); K.choir(M0 + 2 * BEAT, 53, 0.5, 2 * BEAT, { vowel: 'o' });
+  K.choir(M0 + 4 * BEAT, 55, 0.55, HIT - (M0 + 4 * BEAT)); K.choir(M0 + 4 * BEAT, 58, 0.45, HIT - (M0 + 4 * BEAT));
   riser(M0 + 4 * BEAT, HIT - (M0 + 4 * BEAT), 0.2);
   for (let t = HIT - 0.625, i = 0; t < HIT - 0.01; t += S16 / 2, i++) snare(t, 0.1 + 0.45 * i / 8);
-  boom(HIT, 0.95); brass(HIT, [40, 46, 52], 1.3, 0.45); crash(HIT, 0.75, 3); tom(HIT, 60, 0.9);
+  boom(HIT, 0.95); K.whip(HIT - 0.14, 0.9); K.bell(HIT, 40, 0.9, 3.5); K.timp(HIT, 40, 1); brass(HIT, [40, 46, 52], 1.3, 0.3); crash(HIT, 0.75, 3); tom(HIT, 60, 0.9);
 
   // 40: again: one strum, a pick-up; 41.27: five days (G D Em C D E7), the fiddle on the tune
   const A0 = cutAt('campfire', 40, 1);
   strum(A0 + 0.02, 'G', { v: 0.45, spread: 0.02 });
   fill(A0 + BEAT, 2, 0.4, 0.55); fill(A0 + 1.5 * BEAT, 2, 0.6, 0.8);
   const F0 = cutAt('chase1', 41.25);
-  rockBeat(F0, 10);
-  for (let h = 0; h < 5; h++) crash(F0 + h * 2 * BEAT, h ? 0.45 : 0.6, 1.8);
+  trainBeat(F0, 10, 1.15); for (let i = 0; i < 10; i++) kick(F0 + i * BEAT, 0.55);
+  for (let h = 0; h < 5; h++) crash(F0 + h * 2 * BEAT, h ? 0.4 : 0.55, 1.6);
+  // each day its colour: the snow's whistle, the badlands' steel, the desert's castanets and tremolo twang
+  K.whistle(F0 + 4 * BEAT, 83, 0.35, 1.6 * BEAT);
+  K.steel(F0 + 6 * BEAT, 64, 0.45, 1.6 * BEAT, { from: 60 });
+  for (const x of [0, 0.5, 0.75, 1, 1.5]) K.castanets(F0 + 8 * BEAT + x * BEAT, 0.5);
   strums(F0, ['G', 'D', 'Em', 'C'], { v: 0.52 });
   strum(F0 + 8 * BEAT, 'D', { v: 0.52 }); strum(F0 + 8.5 * BEAT, 'D', { down: false, v: 0.3 });
   strum(F0 + 9 * BEAT, 'E7', { v: 0.52 }); strum(F0 + 9.5 * BEAT, 'E7', { down: false, v: 0.3 });
   boomChick(F0, ['G', 'D', 'Em', 'C']); bass(F0 + 8 * BEAT, 38); bass(F0 + 9 * BEAT, 28); bass(F0 + 9.5 * BEAT, 32, { len: E8 * 0.85 });
   roll(F0, 'G', 8, 0.2); roll(F0 + 2 * BEAT, 'D', 8, 0.2); roll(F0 + 4 * BEAT, 'Em', 8, 0.2); roll(F0 + 6 * BEAT, 'C', 8, 0.2); roll(F0 + 8 * BEAT, 'D', 4, 0.22); roll(F0 + 9 * BEAT, 'E7', 4, 0.25);
-  line(F0, [
+  const DAYS = [
     [0, 1, 74], [1, 0.5, 71], [1.5, 0.5, 74], [2, 1, 76], [3, 0.5, 74], [3.5, 0.5, 69],
-    [4, 1, 71, { bend: -200 }], [5, 0.5, 76], [5.5, 0.5, 79], [6, 1, 76], [7, 0.5, 74], [7.5, 0.5, 72],
+    [4, 1, 71, { bend: 1 }], [5, 0.5, 76], [5.5, 0.5, 79], [6, 1, 76], [7, 0.5, 74], [7.5, 0.5, 72],
     [8, 0.5, 74], [8.5, 0.5, 76], [9, 0.5, 78], [9.5, 0.5, 80],
-  ], { v: 0.62, fid: true, fidV: 0.24 });
+  ];
+  kline('harmonica', F0, DAYS, { v: 0.62 });
+  for (const [b, d, m] of DAYS) fiddle(F0 + b * BEAT, m, d * BEAT, { v: 0.2, slide: -30 });
   riser(F0 + 8 * BEAT, 2 * BEAT, 0.12); fill(F0 + 9 * BEAT, 4, 0.4, 0.9, true);
 
   // 47.5: up a step: the payoff in A (A | D E | A), the arrival on 50, a roll to the title
   const P0 = cutAt('payoff', 47.5);
-  rockBeat(P0, 4); crash(P0, 0.7, 2);
+  trainBeat(P0, 4, 1.2); for (let i = 0; i < 4; i++) kick(P0 + i * BEAT, 0.6); crash(P0, 0.7, 2);
+  K.choir(P0, 57, 0.45, 4 * BEAT); K.choir(P0, 64, 0.4, 4 * BEAT);
   strums(P0, ['A', null], { v: 0.55 }); strum(P0 + 2 * BEAT, 'D', { v: 0.55 }); strum(P0 + 2.5 * BEAT, 'D', { down: false, v: 0.3 }); strum(P0 + 3 * BEAT, 'E', { v: 0.55 }); strum(P0 + 3.5 * BEAT, 'E', { down: false, v: 0.3 });
   bass(P0, 33); bass(P0 + BEAT, 40); bass(P0 + 2 * BEAT, 38); bass(P0 + 3 * BEAT, 28);
   roll(P0, 'A', 8, 0.24); roll(P0 + 2 * BEAT, 'D', 4, 0.24); roll(P0 + 3 * BEAT, 'E', 4, 0.26);
-  line(P0, [[0, 1, 81], [1, 0.5, 76], [1.5, 0.5, 73], [2, 1, 78], [3, 0.5, 80], [3.5, 0.5, 83]], { v: 0.62, fid: true, fidV: 0.26, fidUp: -12 });
+  const PAY = [[0, 1, 81], [1, 0.5, 76], [1.5, 0.5, 73], [2, 1, 78], [3, 0.5, 80], [3.5, 0.5, 83]];
+  kline('harmonica', P0, PAY.map(([b, d, m]) => [b, d, m - 12]), { v: 0.6 });
+  kline('whistle', P0, PAY, { v: 0.45 });
+  for (const [b, d, m] of PAY) fiddle(P0 + b * BEAT, m - 12, d * BEAT, { v: 0.22, slide: -30 });
   const O0 = OWNED;
-  stab(O0, 'A', { v: 0.62, cym: 0.65 }); twang(O0, 81, { v: 0.62, len: 2 * BEAT - 0.05 }); fiddle(O0, 76, 2 * BEAT, { v: 0.26 });
+  stab(O0, 'A', { v: 0.62, cym: 0.65 }); K.timp(O0, 45, 0.8); K.whistle(O0, 81, 0.5, 2 * BEAT - 0.05); fiddle(O0, 76, 2 * BEAT, { v: 0.26 });
   bass(O0, 33, { len: 2 * BEAT });
   fill(O0 + BEAT, 4, 0.3, 0.85, true);
   // 51.27: the title: the last chord, left to ring
@@ -496,12 +490,13 @@ export async function renderScore(T, { sr = 48000, solo = null } = {}) {
   stab(E0, 'A6', { v: 0.7, cym: 0.75 }); tom(E0, 70, 0.8);
   for (const [k, m] of [69, 73, 78].entries()) twang(E0 + k * 0.03, m, { v: 0.5, keep: true });
   fiddle(E0, 76, 3.2, { v: 0.2 });
+  K.whistle(E0 + 0.08, 81, 0.5, 3.0, { from: 76 }); K.choir(E0, 57, 0.4, 3.3); K.choir(E0, 64, 0.35, 3.3); K.choir(E0, 69, 0.3, 3.3);
   [57, 61, 64, 69, 73, 76, 81].forEach((m, i) => banjo(E0 + 0.04 + i * S16 * 0.5, m, 0.26));
   bass(E0, 33, { len: 1.6 });
 
   // 57.5: the button: after the horns, a lick and the last chord
   const W0 = cutAt('title.png', 57.5, 1) + 1.5 * BEAT;
-  line(W0, [[0, 0.25, 76], [0.25, 0.25, 78]], { v: 0.5 });
+  kline('harmonica', W0, [[0, 0.25, 76], [0.25, 0.25, 78]], { v: 0.6 });
   const W1 = W0 + 0.5 * BEAT;
   kick(W1, 0.9); crash(W1, 0.45, 1.4); strum(W1, 'A6', { v: 0.6, spread: 0.014 }); bass(W1, 33, { len: 1.2 });
   for (const [k, m] of [69, 73, 78].entries()) twang(W1 + k * 0.02, m, { v: 0.45, keep: true });
