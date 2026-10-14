@@ -63,6 +63,53 @@ export function setLoops({ engineOn = false, rpm = 0, near = 1, winchOn = false,
   wind.f.frequency.setTargetAtTime(300 + windAmt * 900, t, 0.5);
 }
 
+// The horn: an RV's pair of electric horns a major third apart (335 and 420 Hz, the usual low and high
+// tone), each a diaphragm buzzing against its contact (a bright, reedy wave, a little overdriven) through its
+// flare (it cuts the lows and rings near 1.2 and 2.6 kHz). Each horn is two oscillators a hair apart (the
+// beat of a real pair). It comes up to pitch as it starts, sags as it stops, and sounds as long as it's
+// held. For any audio context (the game's, from the RV; a test's, offline)
+export function hornSynth(c, out, level = 0.2) {
+  const n = 48, re = new Float32Array(n), im = new Float32Array(n);
+  for (let k = 1; k < n; k++) im[k] = (k % 2 ? 1 : 0.55) / Math.pow(k, 0.85);
+  const wave = c.createPeriodicWave(re, im);
+  const sum = c.createGain(); sum.gain.value = 0.3;
+  const sh = c.createWaveShaper(), cv = new Float32Array(1024);
+  for (let i = 0; i < 1024; i++) { const x = i / 511.5 - 1; cv[i] = Math.tanh(x * 2.4) / Math.tanh(2.4); }
+  sh.curve = cv;
+  const filt = (type, f, q, gain = 0) => { const b = c.createBiquadFilter(); b.type = type; b.frequency.value = f; b.Q.value = q; b.gain.value = gain; return b; };
+  const chain = [sh, filt('highpass', 300, 0.8), filt('peaking', 1200, 1.6, 8), filt('peaking', 2600, 2.5, 5), filt('lowpass', 6000, 0.7)];
+  const g = c.createGain(); g.gain.value = 0;
+  sum.connect(chain[0]); for (let i = 1; i < chain.length; i++) chain[i - 1].connect(chain[i]); chain[chain.length - 1].connect(g); g.connect(out);
+  const oscs = [[335, 1], [336.3, 0.5], [420, 0.9], [421.6, 0.45]].map(([f, a]) => {
+    const o = c.createOscillator(), og = c.createGain();
+    o.setPeriodicWave(wave); o.frequency.value = f; og.gain.value = a;
+    o.connect(og); og.connect(sum); o.start();
+    return { o, f };
+  });
+  const hold = (prm, t) => { const v = prm.value; prm.cancelScheduledValues(t); prm.setValueAtTime(v, t); };   // (from where it is now)
+  return {
+    on(t = c.currentTime) {
+      for (const { o, f } of oscs) { o.frequency.cancelScheduledValues(t); o.frequency.setValueAtTime(f * 0.93, t); o.frequency.exponentialRampToValueAtTime(f, t + 0.06); }
+      hold(g.gain, t); g.gain.linearRampToValueAtTime(level * 1.15, t + 0.02); g.gain.setTargetAtTime(level, t + 0.02, 0.05);
+    },
+    off(t = c.currentTime) {
+      for (const { o, f } of oscs) { hold(o.frequency, t); o.frequency.exponentialRampToValueAtTime(f * 0.95, t + 0.09); }
+      hold(g.gain, t); g.gain.setTargetAtTime(0, t, 0.025);
+    },
+    stop(t = c.currentTime) { for (const { o } of oscs) o.stop(t); },
+  };
+}
+let hornS = null, hornTap = 0;
+// on: true while it's held, false when it's let go; null: a tap
+function horn(on = null) {
+  if (!ctx || !rvPan) return;
+  hornS ||= hornSynth(ctx, rvPan);
+  clearTimeout(hornTap);
+  if (on === false) { hornS.off(); return; }
+  hornS.on();
+  if (on == null) hornTap = setTimeout(() => hornS.off(), 450);
+}
+
 // where the next sounds come from: at(pos, () => sfx.shatter())
 let spot = null, ui = false;
 export function at(pos, fn) {
@@ -148,7 +195,7 @@ export const sfx = {
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },
   bell: () => { tone(1568, 0.6, 'sine', 0.22); tone(2350, 0.4, 'sine', 0.08, null, 0.01); },
   bill: () => { [392, 370, 349, 262].forEach((f, i) => tone(f, i === 3 ? 0.6 : 0.22, 'sawtooth', 0.18, i === 3 ? 230 : null, i * 0.22)); },
-  horn: () => { tone(330, 0.55, 'square', 0.25); tone(415, 0.55, 'square', 0.2); },
+  horn,
   door: () => { noise(0.15, 600, 0.3); tone(180, 0.1, 'triangle', 0.2, 120); },
   engineStart: () => { noise(0.5, 300, 0.25, 900); tone(55, 0.6, 'sawtooth', 0.12, 80, 0.15); },
   engineStop: () => { tone(70, 0.5, 'sawtooth', 0.1, 35); noise(0.3, 400, 0.12, 120, 'lowpass', 0.1); },

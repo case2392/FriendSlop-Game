@@ -1,6 +1,6 @@
 // The score (client/js/score.js) and its band (client/js/western.js), played offline in Chromium: every theme
 // renders, none clips, they sit within a few dB of each other, the layers that answer the wildlife and the
-// clock make sound, the strings are in tune, and the score's levels follow what's going on.
+// clock make sound, the strings are in tune, and the score's levels follow what's going on. And the RV's horn.
 //   node test/music.mjs                 the checks
 //   MUSIC_DEMO=dist/music node test/music.mjs   also writes each theme and a "what's going on" demo as WAVs
 import http from 'node:http';
@@ -134,6 +134,30 @@ for (const [layer, theme] of [['tension', 'badlands'], ['danger', 'fields'], ['m
   check(r.thieves.mischief > 0.9, `ringtails creeping in: the mischief layer (${r.thieves.mischief.toFixed(2)})`);
   check(r.radio.lead < 0.05 && r.town.lead < 0.05, `the tune gives the floor to the RV's radio (${r.radio.lead.toFixed(3)}) and to the town (${r.town.lead.toFixed(3)})`);
   check(r.late.clock > 0.9 && r.late.tension > 0.5, `five to midnight: the clock (${r.late.clock.toFixed(2)}) and the tension (${r.late.tension.toFixed(2)})`);
+}
+
+// 6. the RV's horn (client/js/sfx.js hornSynth): its two tones, held for 1.5 s then let go; loud but not
+//    clipping, sounding all the while it's held, silent 0.3 s after
+{
+  const r = await page.evaluate(async () => {
+    const { hornSynth } = await import('/js/sfx.js');
+    const sr = 48000, ctx = new OfflineAudioContext(1, sr * 2.2, sr), h = hornSynth(ctx, ctx.destination);
+    // (pressed and let go mid-render, as the game does it: at the context's own time)
+    ctx.suspend(0.2).then(() => { h.on(ctx.currentTime); ctx.resume(); });
+    ctx.suspend(1.7).then(() => { h.off(ctx.currentTime); ctx.resume(); });
+    const d = (await ctx.startRendering()).getChannelData(0);
+    const rms = (a, b) => { let q = 0; for (let i = Math.round(a * sr); i < Math.round(b * sr); i++) q += d[i] * d[i]; return Math.sqrt(q / ((b - a) * sr)); };
+    let peak = 0, nan = 0; for (const x of d) { if (!Number.isFinite(x)) nan++; else peak = Math.max(peak, Math.abs(x)); }
+    // the spectrum while held (0.6-1.4 s, 1 Hz steps, 250-600 Hz): its two strongest peaks
+    const a = Math.round(0.6 * sr), n = Math.round(0.8 * sr), spec = [];
+    for (let f = 250; f <= 600; f++) { let re = 0, im = 0; const w = 2 * Math.PI * f / sr; for (let i = 0; i < n; i++) { const x = d[a + i] * (0.5 - 0.5 * Math.cos(2 * Math.PI * i / n)); re += x * Math.cos(w * i); im += x * Math.sin(w * i); } spec.push([f, Math.hypot(re, im)]); }
+    const peaks = spec.filter(([f, m], i) => i > 0 && i < spec.length - 1 && m >= spec[i - 1][1] && m >= spec[i + 1][1]).sort((x, y) => y[1] - x[1]);
+    const floor = spec.map(s => s[1]).sort((x, y) => x - y)[Math.floor(spec.length / 2)];
+    return { peak, nan, before: rms(0, 0.18), held: [rms(0.3, 0.7), rms(1.2, 1.6)], after: rms(2.0, 2.2), tops: peaks.slice(0, 2).map(p => p[0]).sort((x, y) => x - y), over: peaks[1][1] / floor };
+  });
+  check(r.nan === 0 && r.peak < 0.9 && r.before < 1e-4 && Math.min(...r.held) > 0.05 && Math.abs(20 * Math.log10(r.held[1] / r.held[0])) < 1.5 && r.after < 0.002,
+    `the horn: silent before, sounds as long as it's held (${dB(r.held[0])} and ${dB(r.held[1])} dBFS RMS), peak ${dB(r.peak)} dBFS, gone 0.3 s after it's let go (${dB(r.after)} dBFS)`);
+  check(Math.abs(r.tops[0] - 335) <= 3 && Math.abs(r.tops[1] - 420) <= 3 && r.over > 10, `the horn: its two strongest pitches are its two horns (${r.tops.join(' and ')} Hz; 335 and 420), ${dB(r.over)} dB over the median between 250 and 600 Hz`);
 }
 
 await browser.close();

@@ -1754,7 +1754,8 @@ export class RVView {
     this.hook.castShadow = true;
     scene.add(this.hook);
     const strapMat = new THREE.MeshLambertMaterial({ map: tex('rv_trim'), emissive: new THREE.Color('#5a2a00') });   // a bright tow strap reads at 40 m
-    this.cableN = 16;
+    this.cableN = 32;
+    this.groundAt = null;   // (x, z) -> the terrain's height: the strap lies over it, never through it (main.js sets it)
     this.cable = new THREE.InstancedMesh(strapGeo(), strapMat, this.cableN);
     this.cable.castShadow = true;
     this.cable.frustumCulled = false;
@@ -1915,7 +1916,7 @@ export class RVView {
     // dash readout
     const s = `${String(Math.max(0, Math.round(odo))).padStart(4, '0')} m  ${clockStr}`;
     if (s !== this.odoLast) { this.odoLast = s; this.drawOdo(odo, clockStr); }
-    // winch strap: fairlead → hook with a lazy sag
+    // winch strap: fairlead → hook, sagging with its slack, over the ground and never through it
     const wp = this._v.copy(CABLE_START).applyQuaternion(this.g.quaternion).add(this.g.position);
     if (!hook || hook.state === 0) {
       this.hook.position.copy(HOOK_STOW).applyQuaternion(this.g.quaternion).add(this.g.position);
@@ -1926,11 +1927,31 @@ export class RVView {
       const d = wp.distanceTo(this.hook.position);
       const slack = Math.max(0, hook.len - d);
       const sag = Math.min(3, slack * 0.5 + 0.05 * d);
-      const P = this.cablePts;
-      for (let i = 0; i < P.length; i++) {
-        const t = i / (P.length - 1);
+      const P = this.cablePts, n = P.length - 1, G = this.groundAt, lo = this._lo ||= new Float32Array(n + 1);
+      for (let i = 0; i <= n; i++) {
+        const t = i / n;
         P[i].lerpVectors(wp, this.hook.position, t);
         P[i].y -= Math.sin(t * PI) * sag;
+        lo[i] = G ? G(P[i].x, P[i].z) + 0.05 : -Infinity;
+        if (i > 0 && i < n) P[i].y = Math.max(P[i].y, lo[i]);
+      }
+      // pulled taut over a rise it runs straight to the crest and down the other side: the upper hull of the
+      // ground under it and its two ends. Slack, it sags onto the ground; in between, a blend of the two
+      if (G) {
+        const h = i => (i === 0 ? P[0].y : i === n ? P[n].y : lo[i]), H = this._hull ||= [];
+        H.length = 0;
+        for (let i = 0; i <= n; i++) {
+          while (H.length >= 2) {
+            const a = H[H.length - 2], b = H[H.length - 1];
+            if ((h(b) - h(a)) * (i - a) <= (h(i) - h(a)) * (b - a)) H.pop(); else break;
+          }
+          H.push(i);
+        }
+        const w = Math.min(1, slack / 1.5);
+        for (let k = 0; k + 1 < H.length; k++) {
+          const a = H[k], b = H[k + 1];
+          for (let i = a + 1; i < b; i++) P[i].y += (1 - w) * (h(a) + (h(b) - h(a)) * (i - a) / (b - a) - P[i].y);
+        }
       }
       const o = this._cd;
       for (let i = 0; i < this.cableN; i++) {

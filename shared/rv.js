@@ -125,6 +125,11 @@ export const SUSP_REST = 0.48;
 export function insideRV(lx, ly, lz, pad = 0) {
   return Math.abs(lx) < D.HALF_W + pad && Math.abs(lz) < D.HALF_L + pad && ly > -0.6 - pad && ly < D.ROOF_Y + 0.4 + pad;
 }
+// A point on the RV's inside (local): its floor, its furniture, the inner faces of its walls, the windshield and
+// the ceiling. Nothing in there is climbed (the outside is: that's the way onto the roof)
+export function inCabin(lx, ly, lz) {
+  return Math.abs(lx) < D.HALF_W - 0.05 && Math.abs(lz) < D.HALF_L - 0.05 && ly > -0.05 && ly < D.ROOF_Y - 0.08;
+}
 
 // Quaternion helpers usable on both sides without three.js.
 export function qRotate(q, v) {

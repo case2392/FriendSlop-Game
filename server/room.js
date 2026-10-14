@@ -42,6 +42,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
 const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
+const HORN_MAX = 20;
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
 // a number from a client: finite and within +-lim, or 0
@@ -383,7 +384,7 @@ export class Room {
       if (p.key !== key) continue;
       if (p.connected) { const old = p.conn; this.hold(p, p.holdSecs || HOLD_SECS, true); try { old?.close?.(4002, 'replaced by a new connection'); } catch {} }
       p.conn = conn; p.connected = true; p.heldAt = null; p.rdy = !!opts.ready; p.activeAt = this.t;
-      p.voice = false;   // (a reloaded page isn't in voice yet; a page that is says so on its welcome: main.js)
+      p.voice = false; p.mic = false;   // (a reloaded page isn't in voice yet; a page that is says so on its welcome: main.js)
       this.awaitReady(p);
       if (!this.hostId || !this.players.get(this.hostId)?.connected) this.hostId = p.id;
       return p;
@@ -570,7 +571,7 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, mic: p.mic ? 1 : 0, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
       // the trip: practice or not (what it records), and whose summary is still waiting for them
       trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
@@ -589,7 +590,7 @@ export class Room {
   }
 
   handle(p, m) {
-    if (this.spam(p, m.t)) return;
+    if (this.spam(p, m.t === 'horn' && m.on === 0 ? 'hornUp' : m.t)) return;   // (letting go of the horn is never too soon)
     switch (m.t) {
       case 'p': return this.onPose(p, m);
       case 'ready': p.ready = true; p.activeAt = this.t; return;
@@ -599,9 +600,12 @@ export class Room {
       case 'hd': this.sim.holdDist(p.id, m.d); return;
       case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
       case 'drv': if (p.seat === 0) { p.drvAt = this.t; this.sim.setDrive(m); } return;
+      // the horn sounds while the driver holds H ({on: 1}, then {on: 0}); a message without on is a tap
       case 'horn':
+        if (m.on === 0) { if (this.hornBy === p.id) this.hornOff(); return; }
         if (p.seat !== 0) return;
-        this.broadcast({ t: 'ev', list: [{ k: 'horn' }] });
+        if (this.hornBy == null) { this.hornBy = p.id; this.broadcast({ t: 'ev', list: [{ k: 'horn', on: 1 }] }); }
+        this.hornUntil = this.t + (m.on === 1 ? HORN_MAX : 0.45);
         this.sim.mobs?.horn(this.sim.rv.translation(), this.partMods.hornK);   // (it scatters ringtails, and wakes a grumphorn; an Air Horn carries further)
         return;
       case 'use': return this.onUse(p, m);
@@ -625,7 +629,7 @@ export class Room {
         if (pt && pt.every(Number.isFinite)) this.broadcast({ t: 'ping', id: p.id, pt });
         return;
       }
-      case 'voice': p.voice = !!m.on; this.sendMeta(); return;
+      case 'voice': p.voice = !!m.on; p.mic = p.voice && m.mic !== false; this.sendMeta(); return;   // (in voice: hearing; mic: heard too)
       // the page has this trip's summary in its save: stop sending it
       case 'tripAck': {
         const held = this.pending.get(p.pid);
@@ -1230,9 +1234,17 @@ export class Room {
 
   // ---- simulation -------------------------------------------------------------------------
 
+  hornOff() {
+    if (this.hornBy == null) return;
+    this.hornBy = null;
+    this.broadcast({ t: 'ev', list: [{ k: 'horn', on: 0 }] });
+  }
+
   tick(dt) {
     this.t += dt;
     const sim = this.sim;
+    // the horn stops when it's let go, its driver gets up or drops, or it's been held HORN_MAX s (a stuck key)
+    if (this.hornBy != null) { const h = this.players.get(this.hornBy); if (!h?.connected || h.seat !== 0 || this.t > this.hornUntil) this.hornOff(); }
     for (const p of this.players.values()) this.resolvePlayer(p);
     // nobody at the wheel, or a driver who stopped sending (frozen tab, minimized window, dead link)? it
     // coasts ("WHO'S DRIVING?!") until it's nearly stopped, then the parking brake catches

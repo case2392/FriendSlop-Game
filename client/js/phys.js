@@ -1,8 +1,13 @@
 // Each client's local physics world. It never simulates anything dynamic —
-// it's the same seeded terrain plus KINEMATIC copies of the RV, the loot and
-// the other players, placed where the server says they are. Your own body
-// moves through it with Rapier's character controller, so walking, climbing
-// and riding the RV have zero input lag.
+// it's the same seeded terrain plus copies of the RV, the loot and the other
+// players, put where the server says they are. Your own body moves through it
+// with Rapier's character controller, so walking, climbing and riding the RV
+// have zero input lag.
+//
+// The copies are FIXED bodies moved by hand each frame, not kinematic ones: on a kinematic body's box
+// tilted a degree or so (the RV parked on uneven ground) the controller stalled on the floor at every
+// step, and you could only get about the RV by jumping. On a fixed body the same box walks. (And it moves
+// your body across, then up or down: moveSelf)
 
 import RAPIER from '/vendor/rapier.mjs';
 import * as C from '/shared/constants.js';
@@ -70,7 +75,7 @@ export class LocalWorld {
     }
 
     // the RV
-    this.rv = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(0, -100, 0));
+    this.rv = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(0, -100, 0));
     this.rvCols = {};
     for (const [name, hx, hy, hz, cx, cy, cz, o] of RV_PARTS) {
       if (o.loot) continue;   // (it stops the server's loot, not people)
@@ -109,8 +114,8 @@ export class LocalWorld {
   }
 
   setRV(p, q) {
-    this.rv.setNextKinematicTranslation(p);
-    this.rv.setNextKinematicRotation(q);
+    this.rv.setTranslation(p, false);
+    this.rv.setRotation(q, false);
   }
 
   setHook(p) { this.hook.setNextKinematicTranslation(p || { x: 0, y: -100, z: 0 }); }
@@ -119,7 +124,7 @@ export class LocalWorld {
     if (this.props.has(id)) return;
     const L = LOOT[type];
     if (!L) return;
-    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased().setTranslation(p.x, p.y, p.z).setRotation(q));
+    const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed().setTranslation(p.x, p.y, p.z).setRotation(q));
     // (a small critter is a sensor: you walk through it, the crosshair finds it)
     const desc = L.sensor ? RAPIER.ColliderDesc.ball(L.sensor).setSensor(true) : shapeDesc(L.shape);
     const col = this.world.createCollider(desc.setCollisionGroups(grp(G.PROP, 0xffff)), body);
@@ -129,8 +134,8 @@ export class LocalWorld {
   setProp(id, p, q) {
     const e = this.props.get(id);
     if (!e) return;
-    e.body.setNextKinematicTranslation(p);
-    e.body.setNextKinematicRotation(q);
+    e.body.setTranslation(p, false);
+    e.body.setRotation(q, false);
   }
   removeProp(id) {
     const e = this.props.get(id);
@@ -143,7 +148,7 @@ export class LocalWorld {
   setPlayer(id, feet, ko) {
     let e = this.players.get(id);
     if (!e) {
-      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.kinematicPositionBased());
+      const body = this.world.createRigidBody(RAPIER.RigidBodyDesc.fixed());
       const col = this.world.createCollider(RAPIER.ColliderDesc.capsule(C.PLAYER.HALF_H, C.PLAYER.RADIUS * 0.9)
         .setCollisionGroups(grp(G.PLAYER, 0xffff)), body);
       this.info.set(col.handle, { kind: 'player', id });
@@ -151,8 +156,8 @@ export class LocalWorld {
       this.players.set(id, e);
     }
     const ch = C.PLAYER.HALF_H + C.PLAYER.RADIUS;
-    e.body.setNextKinematicTranslation({ x: feet.x, y: feet.y + (ko ? 0.25 : ch), z: feet.z });
-    e.body.setNextKinematicRotation(ko ? { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 } : { x: 0, y: 0, z: 0, w: 1 });
+    e.body.setTranslation({ x: feet.x, y: feet.y + (ko ? 0.25 : ch), z: feet.z }, false);
+    e.body.setRotation(ko ? { x: Math.SQRT1_2, y: 0, z: 0, w: Math.SQRT1_2 } : { x: 0, y: 0, z: 0, w: 1 }, false);
   }
   removePlayer(id) {
     const e = this.players.get(id);
@@ -179,19 +184,27 @@ export class LocalWorld {
       if (climbing) { this.cc.disableSnapToGround(); this.cc.disableAutostep(); }
       else { this.cc.enableSnapToGround(0.32); this.cc.enableAutostep(C.PLAYER.STEP, 0.18, false); }
     }
-    const pred = exclude ? (c => !exclude.has(c.handle)) : undefined;
-    this.cc.computeColliderMovement(this.self, desired, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS,
-      grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER | (riding ? 0 : G.FENCE)), pred);
-    const mv = this.cc.computedMovement();
+    const pred = exclude ? (c => !exclude.has(c.handle)) : undefined, groups = grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER | (riding ? 0 : G.FENCE));
     const hits = [];
-    for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
-      const c = this.cc.computedCollision(i);
-      if (!c?.collider) continue;
-      const inf = this.info.get(c.collider.handle);
-      if (!inf) continue;
-      hits.push({ ...inf, normal: c.normal1, point: c.witness1 });
-    }
-    return { move: { x: mv.x, y: mv.y, z: mv.z }, grounded: this.cc.computedGrounded(), hits };
+    const pass = d => {
+      this.cc.computeColliderMovement(this.self, d, RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, groups, pred);
+      for (let i = 0; i < this.cc.numComputedCollisions(); i++) {
+        const c = this.cc.computedCollision(i);
+        const inf = c?.collider && this.info.get(c.collider.handle);
+        if (inf) hits.push({ ...inf, normal: c.normal1, point: c.witness1 });
+      }
+      const m = this.cc.computedMovement();
+      return { x: m.x, y: m.y, z: m.z };
+    };
+    if (climbing) { const m = pass(desired); return { move: m, grounded: this.cc.computedGrounded(), hits }; }
+    // on foot: across first, then up or down. In one move, gravity pressing into a level floor cut steps short
+    // now and then (Rapier's controller slid along the floor as if it were in the way), and each one stopped
+    // you dead: indoors, on a building's floor, every second or so. (Across, steps up and slopes still work:
+    // the autostep and the snap to the ground are in that pass too)
+    const a = pass({ x: desired.x, y: 0, z: desired.z }), ga = this.cc.computedGrounded();
+    this.self.setTranslation({ x: center.x + a.x, y: center.y + a.y, z: center.z + a.z });
+    const b = pass({ x: 0, y: desired.y, z: 0 });
+    return { move: { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z }, grounded: desired.y === 0 ? ga : this.cc.computedGrounded(), hits };
   }
 
   // first thing along a ray: {kind,id,part,use,toi,point,normal}
