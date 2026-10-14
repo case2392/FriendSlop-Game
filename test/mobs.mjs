@@ -974,8 +974,9 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
     if (i % 3 === 0) { const L = JSON.stringify(room.snapshot()).length; max = Math.max(max, L); sum += L; n++; }
   });
   // (the mean: 2,520 B before the Hoard, whose six awake cost 150 B more than a den of three; the RV's
-  // condition, 40 B more)
-  check(max <= 4752 && sum / n <= 2800, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
+  // condition, 40 B more; and about 100 B more once things stopped breaking from being wedged against the
+  // RV's fittings (a knock is what the thing felt): two more of the twenty ride to the end)
+  check(max <= 4752 && sum / n <= 2900, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
 }
 
 {
@@ -1610,6 +1611,58 @@ function byTheRV(day, names = ['Ann'], side = -1) {
     }
   }
   check(!bad.length, `world gen: the wildlife changes nothing else (3 seeds x 5 days), beds sit on the road past their obstacle, dens beside the stops${bad.length ? ': ' + bad.slice(0, 6).join('; ') : ''}`);
+}
+
+// ---- Road Card tins (shared/cards.js): what the wildlife makes of them -----------------------------------
+{
+  // F6: a tin and a $500 vase 6 m from a den, unwatched: the ringtail goes for the tin (shiny); brought back
+  // and set down in the RV, the stolen tin is in the glovebox and counts as got back
+  const { room, ps: [A], g } = thief(['Ann']);
+  stand(room, A, g.x + 30, g.z, Math.PI / 2);
+  const vase = putLoot(room, 'vase', g.x - 6, g.z, 500);
+  const tin = room.sim.addProp('tin', { x: g.x, y: room.W.heightAt(g.x, g.z + 6) + 0.2, z: g.z + 6 }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+  tin.ours = true;   // (the crew had it in hand once)
+  for (let i = 0; i < 60 * 25 && !mobEvs(A, 'stash').length; i++) tick(room, 1 / 60);
+  const first = mobEvs(A, 'steal')[0], stashed = mobEvs(A, 'stash')[0];
+  const told = A.conn.has(x => x.t === 'toast' && /Road Card Tin/.test(x.text)) && !A.conn.has(x => x.t === 'toast' && /Road Card Tin \(/.test(x.text));
+  const r = room.sim.rvPose(), n = room.glovebox.length;
+  room.sim.props.get(tin.id)?.body.setTranslation(toWorld(r.p, r.q, { x: 0, y: 0.3, z: -1 }), true);
+  tick(room, 0.2);
+  const back = mobEvs(A, 'recovered').some(e => e.item === tin.id);
+  check(first?.item === tin.id && stashed?.item === tin.id && told && !room.sim.props.has(tin.id) && room.glovebox.length === n + 1 && back && room.sim.props.has(vase.id),
+    `tins: a ringtail goes for a tin before a $500 vase (it took the ${first ? (first.item === tin.id ? 'tin' : 'vase') : 'nothing'}), named without a price (${told}); set down in the RV it's in the glovebox and counts as got back (${back})`);
+}
+{
+  // F6: a den's tin is on its pile, the ringtails', till somebody picks it up
+  const { room, ps: [A] } = crew(['Ann']);
+  room.debug(A, { op: 'day', d: 2 }); tick(room, 0.2);
+  const sim = room.sim, [id, spot] = [...sim.finds].find(([, s]) => s.kind === 'den') || [];
+  sim.startMobs({ day: 2, crew: 1, seed: room.seed });
+  const piled = id != null && sim.mobs.hoard.has(id);
+  tick(room, 1);
+  grabIt(room, A, id);
+  tick(room, 1 / 60);
+  check(piled && !sim.mobs.hoard.has(id) && spot.den != null, `tins: the den's tin is on the den's pile (${piled}) till somebody picks it up (${id != null && !sim.mobs.hoard.has(id)})`);
+}
+{
+  // F7: tipping a sleeping Grumphorn over shakes a tin out of its fur, once
+  const { room, ps: [A, B] } = crew(['Ann', 'Bob']);
+  room.mobsOn = false;
+  const g = openGround(room), id = mobAt(room, A, 'grumphorn', g.x, g.z, { yaw: 0, st: GST.SLEEP }), m = mobOf(room, id);
+  const tins = () => [...room.sim.props.values()].filter(p => p.type === 'tin').length;
+  const tip = () => {
+    stand(room, A, g.x - 1.6, g.z + 0.4, Math.PI / 2, C.FLAG.CROUCH); stand(room, B, g.x - 1.6, g.z - 0.4, Math.PI / 2, C.FLAG.CROUCH);
+    tick(room, 0.5);
+    room.handle(A, { t: 'shove' }); tick(room, 0.3); room.handle(B, { t: 'shove' }); tick(room, 1 / 60);
+    return m.st === GST.TIPPED;
+  };
+  const n0 = tins(), t1 = tip(), n1 = tins();
+  const sp = evs(A.conn, 'spawn').find(e => e.p?.type === 'tin');
+  tick(room, GH.TIP_T + 1);
+  // (and over again, however that comes about: the second time, nothing in its fur)
+  room.sim.mobs.ghTip(m, room.sim.props.get(id), 1, 0); tick(room, 1 / 60);
+  const t2 = m.st === GST.TIPPED, n2 = tins();
+  check(t1 && n1 === n0 + 1 && sp?.fur === id && t2 && n2 === n1, `tins: tipping a sleeping Grumphorn over shakes a tin out of its fur (${n1 - n0}, ${sp?.fur === id ? 'its spawn names the beast' : 'no spawn event'}); tipping it again (${t2 ? 'over' : 'not over'}), none (${n2 - n1})`);
 }
 
 if (failed) { console.error('\nSome wildlife checks FAILED'); process.exit(1); }

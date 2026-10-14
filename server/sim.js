@@ -23,7 +23,7 @@ let ready = null;
 const FULL_SHARE = 32;
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
-import { GROUPS } from './groups.js';
+import { GROUPS, looseGroup } from './groups.js';
 
 // stuff people bump into but a 3-ton RV flattens
 const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
@@ -73,9 +73,17 @@ export function shapeVolume(shape) {
     : k === 'cap' ? Math.PI * b * b * 2 * a + 4 / 3 * Math.PI * b ** 3 : 4 / 3 * Math.PI * a ** 3;
 }
 
+// a loot type's smallest half-size: how close to a wall its middle can be while it lies against it
+const HALF_MIN = {};
+const HALF_MAX = {};
+const halfMax = t => HALF_MAX[t] ??= (s => s[0] === 'box' ? Math.max(s[1], s[2], s[3]) : s[0] === 'cyl' ? Math.max(s[1], s[2]) : s[0] === 'cap' ? s[1] + s[2] : s[1])(LOOT[t]?.shape || ['ball', 0.2]);
+const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
+const halfMin = t => HALF_MIN[t] ??= (s => s[0] === 'box' ? Math.min(s[1], s[2], s[3]) : s[0] === 'cyl' ? Math.min(s[1], s[2]) : s[0] === 'cap' ? s[2] : s[1])(LOOT[t]?.shape || ['ball', 0.2]);
+
 export class Sim {
-  // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday
-  constructor(W, { carry = [], spawnAt = null, cond = 100 } = {}) {
+  // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday; finds: the day's Road Card
+  // tins (shared/finds.js)
+  constructor(W, { carry = [], spawnAt = null, cond = 100, finds = [] } = {}) {
     this.W = W;
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
@@ -97,6 +105,8 @@ export class Sim {
     this.mobs = null;                // the wildlife (server/mobs.js), from when the RV leaves camp till nightfall
     this.mobsDone = false;           // gone for the night: they don't come back the same day
     this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
+    this.riding = new Map();         // prop id -> its RV-local pose: loot riding the RV (rideStep)
+    this.calm = new Map();           // prop id -> how long it has sat still in the moving RV
     // the RV's condition, as it drives (the room keeps the number: shared/constants.js RVH), and the crash
     // being measured; nothing counts for the first moments of a day (or after a teleport)
     this.setRvCond(cond);
@@ -124,6 +134,12 @@ export class Sim {
     // (bungee cords stay on overnight: what was tied down yesterday still is)
     for (const pr of toTie) this.tieProp(pr);
     this.spawnMap();
+    // the day's Road Card tins, where they lie (id -> its spot: a den's are the ringtails', server/mobs.js)
+    this.finds = new Map();
+    for (const s of finds) {
+      const pr = this.addProp(s.type, v3(s.x, s.y + LOOT[s.type].shape[2] + 0.02, s.z), yawQ(s.ry), 0, 0);
+      if (pr) this.finds.set(pr.id, s);
+    }
   }
 
   // ---- building the world --------------------------------------------------------
@@ -179,7 +195,7 @@ export class Sim {
       const vol = 8 * hx * hy * hz;
       const cd = RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(cx, cy, cz)
         .setDensity(o.mass ? o.mass / vol : 0).setFriction(name === 'chassis' ? 0.4 : 0.75)
-        .setCollisionGroups(o.step ? GROUPS.rvStep : GROUPS.rv);
+        .setCollisionGroups(o.loot ? GROUPS.rvLoot : o.step ? GROUPS.rvStep : GROUPS.rv);
       const col = this.world.createCollider(cd, this.rv);
       this.rvCols[name] = col;
     }
@@ -217,7 +233,7 @@ export class Sim {
     } else {
       // the boulder: 1000 kg at friction 0.3 (0.6 against the ground's 0.9) slides at ~5.9 kN, more than
       // one shoving player (~4.5 kN), less than two; alone, it's the RV's bumper or the winch
-      cd = cd.setFriction(type === 'boulder' ? 0.3 : 0.6).setCollisionGroups(GROUPS.prop)
+      cd = cd.setFriction(type === 'boulder' ? 0.3 : 0.6).setCollisionGroups(looseGroup(type))
         .setActiveEvents(RAPIER.ActiveEvents.CONTACT_FORCE_EVENTS)
         .setContactForceEventThreshold(L.mass * L.tough * 9.81);
     }
@@ -239,6 +255,7 @@ export class Sim {
     this.mobs?.onRemoved(id);
     for (const [pid, h] of this.holds) if (h.kind === 'prop' && h.id === id) this.holds.delete(pid);
     if (this.tied.has(id)) this.tied.delete(id);
+    this.riding.delete(id); this.calm.delete(id);
     if (this.hook.attach && this.hook.attach.id === id) this.unhook();
     this.byCollider.delete(p.col.handle);
     this.mobCols.delete(p.col.handle);
@@ -315,6 +332,170 @@ export class Sim {
   }
 
   // Teleport the RV (night parking, morning camp). Loot inside comes along.
+  // ---- the load riding along -----------------------------------------------------------------------
+  // Loot at rest in the moving RV rides it: it goes where the RV goes, exactly, and touches none of it (a
+  // kinematic body moving at the RV's velocity at its spot, put back on its spot after every step). The
+  // physics engine copes badly with a pile of loose things in a fast, turning body: every so often its solver
+  // shoved the whole RV 15-20 cm in one step, which slid the load through the cab's rail and into the dash
+  // and rocked the RV up onto two wheels. A thing comes loose (a body of its own again, moving with the RV)
+  // when it would slide or lift: the RV braking, swerving or leaning past 0.8 g (a worn RV, rattling, shakes it
+  // loose sooner), dropping away under it, or parked; when somebody or
+  // something takes hold of it or ties it down; when another thing hits it hard.
+  // (before the step) the riders move at the RV's velocity where each one is
+  rideVel() {
+    if (!this.riding.size) return;
+    const w = this.rv.angvel();
+    for (const id of this.riding.keys()) {
+      const p = this.props.get(id);
+      if (!p) continue;
+      p.body.setLinvel(this.rv.velocityAtPoint(p.body.translation()), true);
+      p.body.setAngvel(w, true);
+    }
+  }
+  ride(p, on) {
+    if (on) {
+      const rp = this.rv.translation(), rq = this.rv.rotation();
+      this.riding.set(p.id, { l: toLocal(rp, rq, p.body.translation()), q: mulQ(conjQ(rq), p.body.rotation()) });
+      p.body.setBodyType(RAPIER.RigidBodyType.KinematicVelocityBased, true);
+      p.body.enableCcd(false);
+      p.col.setCollisionGroups(GROUPS.riding);
+    } else {
+      this.riding.delete(p.id);
+      const v = this.rv.velocityAtPoint(p.body.translation()), w = this.rv.angvel();
+      p.body.setBodyType(RAPIER.RigidBodyType.Dynamic, true);
+      p.body.enableCcd(LOOT[p.type].mass < 60);
+      p.col.setCollisionGroups(looseGroup(p.type));
+      p.body.setLinvel(v, true); p.body.setAngvel(w, true);
+    }
+    this.calm.delete(p.id);
+  }
+  unride(p) { if (this.riding.has(p.id)) this.ride(p, false); }
+  // (after the step) what the load feels: gravity less the floor's acceleration, in the RV's frame, smoothed
+  // over a tenth of a second (a pothole's jolt through the springs is no slide). struck: riders something hit
+  // hard this step
+  rideStep(dt, struck) {
+    const rp = this.rv.translation(), rq = this.rv.rotation(), v1 = this.rv.linvel(), w1 = this.rv.angvel();
+    const v0 = this.rvVprev || v1;
+    this.rvVprev = { x: v1.x, y: v1.y, z: v1.z };
+    const a = v3((v1.x - v0.x) / dt, (v1.y - v0.y) / dt, (v1.z - v0.z) / dt);
+    const g = qRotate(qConj(rq), v3(-a.x, -9.81 - a.y, -a.z));
+    const s = this.feel ||= g;
+    for (const k of ['x', 'y', 'z']) s[k] += (g[k] - s[k]) * 0.15;
+    // (a loaded floor holds better than a single box's friction: carpet, the pile leaning on itself; a worn RV
+    // rattles it loose sooner)
+    const mu = 0.8 * 0.5 / this.rvMods.rattle, sp = Math.hypot(v1.x, v1.z);
+    // (parked: still for a second; a winch's crawl up a grade is no stop)
+    this.stillT = sp < 0.1 && Math.hypot(w1.x, w1.y, w1.z) < 0.1 ? (this.stillT || 0) + dt : 0;
+    const loose = -s.y < 2 || Math.hypot(s.x, s.z) > mu * -s.y || this.stillT > 1;
+    const jaws = this.mobs?.carriedBy;
+    for (const [id, k] of [...this.riding]) {
+      const p = this.props.get(id);
+      if (!p) { this.riding.delete(id); continue; }
+      p.body.setTranslation(toWorld(rp, rq, k.l), true);
+      p.body.setRotation(mulQ(rq, k.q), true);
+      if (loose || struck.has(id) || p.holders.size || this.tied.has(id) || jaws?.has(id) || this.hook.attach?.id === id) this.ride(p, false);
+    }
+    if (loose) { this.calm.clear(); return; }
+    // the rest of the load: still in the RV for a quarter of a second, it rides
+    for (const p of this.props.values()) {
+      if (p.max <= 0 || this.riding.has(p.id) || p.holders.size || this.tied.has(p.id) || jaws?.has(p.id) || p.body.isSleeping()) continue;
+      const l = toLocal(rp, rq, p.body.translation());
+      if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1 || l.y < 0) { this.calm.delete(p.id); continue; }
+      const pv = p.body.linvel(), rv = this.rv.velocityAtPoint(p.body.translation()), pw = p.body.angvel();
+      if (Math.hypot(pv.x - rv.x, pv.y - rv.y, pv.z - rv.z) > 0.15 || Math.hypot(pw.x - w1.x, pw.y - w1.y, pw.z - w1.z) > 0.4) { this.calm.delete(p.id); continue; }
+      const t = (this.calm.get(p.id) || 0) + dt;
+      if (t >= 0.25) this.ride(p, true); else this.calm.set(p.id, t);
+    }
+  }
+
+  // The RV's walls hold its load. A thing riding inside that ends up outside without going through the open
+  // door, with nobody holding it (a person or a critter's jaws) and not on the winch or a bungee, went
+  // through a wall: a hard stop presses the whole pile forward, and a thin wall (the windshield's box was
+  // 10 cm) lets the front of it through onto the road. It goes back to where it was last inside, moving with
+  // the RV. Inside: all but a quarter of it within the walls, under the roof; out: more than half of it past
+  // the hull's outer faces. Half through a wall, it's left to the physics. A thing that keeps getting out (a
+  // safe on an RV lying on its side) is put back at most once a second and three times in ten seconds, then
+  // left to it: shoving it back and forth into a wall kicks the RV like a crash
+  keepLoad() {
+    const rp = this.rv.translation(), rq = this.rv.rotation(), D = RV_DIM;
+    const last = this.inLoad ||= new Map();
+    let jaws = null, taken = null;
+    for (const p of this.props.values()) {
+      if (p.max <= 0) continue;
+      const r = halfMin(p.type), l = toLocal(rp, rq, p.body.translation());
+      let k = last.get(p.id);
+      if (Math.abs(l.x) < D.HALF_W - 0.1 - r / 2 && Math.abs(l.z) < D.HALF_L - 0.1 - r / 2 && l.y > -0.05 && l.y < D.ROOF_Y - 0.1 - r / 2) {
+        if (!k) last.set(p.id, k = { n: 0, at: -99 });
+        k.l = l;
+        continue;
+      }
+      if (!k?.l || !(Math.abs(l.x) > D.HALF_W + r / 2 || l.z > D.HALF_L + 0.15 + r / 2 || l.z < -D.HALF_L - r / 2 || l.y > D.ROOF_Y + r / 2 || l.y < -0.65 - r / 2)) continue;
+      jaws ||= new Set([...(this.mobs?.jaws?.values() ?? [])].map(j => j.item));
+      const gone = p.holders.size || jaws.has(p.id) || this.hook.attach?.id === p.id || this.tied.has(p.id)
+        || (this.doorOpen && l.x < 0 && Math.abs(l.z - D.DOOR_Z) < D.DOOR_HALF + 0.25 && l.y < D.WALL_H)
+        || (k.n >= 3 && this.t - k.at < 10);
+      if (gone) { k.l = null; continue; }   // (taken out, out through the door, or given up on)
+      if (this.t - k.at < 1) continue;      // (put back a moment ago: again once a second at most)
+      const at = this.loadSpot(p, k.l, taken ||= []);
+      if (!at) { k.at = this.t; continue; } // (nowhere free: again in a second)
+      k.n = this.t - k.at < 10 ? k.n + 1 : 1; k.at = this.t;
+      p.body.setTranslation(toWorld(rp, rq, at), true);
+      p.body.setLinvel(this.rv.linvel(), true);
+      p.body.setAngvel(v3(), true);
+    }
+    for (const id of last.keys()) if (!this.props.has(id)) last.delete(id);
+    if (Math.round(this.t * C.SIM_HZ) % 15 === 0) this.unwedge(last, jaws, taken ||= []);
+  }
+  // Four times a second: loot sunk deep into the RV's own fittings (the floor, the bed, the counter: a
+  // violent tumble can jam a thing in there, where no wall sees it leave) for half a second is put somewhere
+  // free nearby, the same as a thing that went through a wall. Left there, the physics pushing it out of the
+  // floor and the bed at once rolled the RV over on flat ground
+  unwedge(last, jaws, taken) {
+    const rp = this.rv.translation(), rq = this.rv.rotation(), D = RV_DIM, w = this.world;
+    jaws ||= new Set([...(this.mobs?.jaws?.values() ?? [])].map(j => j.item));
+    for (const p of this.props.values()) {
+      if (p.max <= 0 || this.riding.has(p.id) || p.holders.size || this.tied.has(p.id) || jaws.has(p.id)) { p.wedged = 0; continue; }
+      const l = toLocal(rp, rq, p.body.translation());
+      if (Math.abs(l.x) > D.HALF_W || Math.abs(l.z) > D.HALF_L || l.y < -0.65 || l.y > D.ROOF_Y) { p.wedged = 0; continue; }
+      let deep = 0;
+      w.contactPairsWith(p.col, o => {
+        if (o.parent()?.handle !== this.rv.handle) return;
+        w.contactPair(p.col, o, m => { for (let i = 0; i < m.numContacts(); i++) deep = Math.min(deep, m.contactDist(i)); });
+      });
+      p.wedged = deep < -0.12 ? (p.wedged || 0) + 1 : 0;
+      if (p.wedged < 2) continue;
+      const k = last.get(p.id) || { n: 0, at: -99 };
+      if (this.t - k.at < 1 || (k.n >= 3 && this.t - k.at < 10)) continue;
+      const at = this.loadSpot(p, l, taken);
+      if (!at) continue;
+      k.n = this.t - k.at < 10 ? k.n + 1 : 1; k.at = this.t; k.l = at; last.set(p.id, k);
+      p.wedged = 0;
+      p.body.setTranslation(toWorld(rp, rq, at), true);
+      p.body.setLinvel(this.rv.linvel(), true);
+      p.body.setAngvel(v3(), true);
+    }
+  }
+  // Where in the RV a thing that went through a wall goes back (RV-local), or null: a spot clear of the hull by
+  // its own size where it touches nothing at all (the RV's insides, the rest of the load, the crew). Where it
+  // was last inside first, else the nearest free spot over the floor or up on something. (Put back without
+  // looking, a safe last seen half sunk into the floor, or into the counter, went back there: the physics
+  // threw it out of the floor and rolled the RV over with it.) `taken`: spots handed out this step
+  loadSpot(p, l, taken) {
+    const rp = this.rv.translation(), rq = this.rv.rotation(), D = RV_DIM, R = halfMax(p.type);
+    const fit = (x, y, z) => ({ x: clamp(x, -D.HALF_W + 0.1 + R, D.HALF_W - 0.1 - R), y: clamp(y, R + 0.02, D.ROOF_Y - 0.1 - R), z: clamp(z, -D.HALF_L + 0.1 + R, D.HALF_L - 0.1 - R) });
+    const near = [];
+    for (let y = R + 0.02; y < D.ROOF_Y - 0.1 - R; y += 0.6) for (let x = -0.8; x < 0.81; x += 0.4) for (let z = -3.4; z < 3.41; z += 0.4) near.push(fit(x, y, z));
+    near.sort((a, b) => Math.hypot(a.x - l.x, a.y - l.y, a.z - l.z) - Math.hypot(b.x - l.x, b.y - l.y, b.z - l.z));
+    const rot = p.col.rotation(), shape = p.col.shape;
+    for (const c of [fit(l.x, l.y, l.z), ...near]) {
+      if (taken.some(t => Math.hypot(t.x - c.x, t.y - c.y, t.z - c.z) < t.R + R)) continue;
+      let hit = false;
+      this.world.intersectionsWithShape(toWorld(rp, rq, c), rot, shape, () => (hit = true, false), RAPIER.QueryFilterFlags.EXCLUDE_SENSORS, GROUPS.loot, undefined, p.body);
+      if (!hit) { taken.push({ ...c, R }); return c; }
+    }
+    return null;
+  }
+
   placeRV(x, z, yaw) {
     // (a teleport is no crash: nothing counts till it has settled where it was put)
     this.quietUntil = this.t + C.RVH.QUIET; this.quietMax = this.t + C.RVH.QUIET_MAX;
@@ -377,12 +558,14 @@ export class Sim {
       const p = this.props.get(Number(m.id));
       if (!p) return false;
       if (this.tied.has(p.id)) { this.world.removeImpulseJoint(this.tied.get(p.id), true); this.tied.delete(p.id); }
+      this.unride(p);
       const local = toLocal(p.body.translation(), p.body.rotation(), pt);
       // clamp the grab point onto the object (hands, not telekinesis)
       local.x = Math.max(-1.2, Math.min(1.2, local.x));
       local.y = Math.max(-1.2, Math.min(1.2, local.y));
       local.z = Math.max(-1.2, Math.min(1.2, local.z));
       p.holders.add(pid);
+      p.lastBy = pid;   // (who set it down: a tin's finder)
       if (!p.mob) p.ours = true;   // (in the crew's hands once: theirs, so a ringtail taking it is a theft)
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();
@@ -743,6 +926,7 @@ export class Sim {
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const l = toLocal(rp, rq, p.body.translation());
     if (!insideRV(l.x, l.y, l.z, 0.05) || l.y > RV_DIM.ROOF_Y - 0.1) return false;
+    this.unride(p);
     const rel = mulQ(conjQ(rq), p.body.rotation());
     const j = this.world.createImpulseJoint(
       RAPIER.JointData.fixed(l, rel, v3(), { x: 0, y: 0, z: 0, w: 1 }), this.rv, p.body, true);
@@ -862,6 +1046,11 @@ export class Sim {
     v.updateVehicle(dt, undefined, undefined, c => c.parent()?.handle !== this.rv.handle && !this.flimsy.has(c.handle) && !this.mobCols.has(c.handle));
     this.mobs?.beforePhysics();
     const v0 = this.rv.linvel(), rvV0 = { x: v0.x, y: v0.y, z: v0.z };
+    // (each loot's velocity going into the step: what a knock did to it is read from the change, below)
+    const vIn = this.vIn ||= new Map();
+    vIn.clear();
+    for (const p of this.props.values()) if (p.max > 0) { const v = p.body.linvel(); vIn.set(p.id, { x: v.x, y: v.y, z: v.z }); }
+    this.rideVel();
     this.world.step(this.eq);
     this.rvContact(dt, rvV0);
     // the wildlife reads what just happened to it (hits, run over, stuck) and to its jaws: before the knocks
@@ -873,24 +1062,31 @@ export class Sim {
     // a guitar fifteen times). A knock is the step's hardest contact; within 0.12 s of one, only a harder
     // one adds (the part over it). Bungee'd loot is strapped down. Loot riding in the RV takes half (a
     // carpeted floor, and a rigid step makes every slide into a wall read like a fall), a third on the
-    // grade (the RV tipped past 20 degrees, or being winched up it): sliding about there is no crash
+    // grade (the RV tipped past 20 degrees, or being winched up it): sliding about there is no crash.
+    // A knock is what the thing itself felt: the contact force over its weight, but never more than its own
+    // change of velocity in the step (gravity's share taken out). A thing jammed between two surfaces (a slot
+    // machine slid into the cab, wedged between the seat and the dash) is pushed hard from both sides every
+    // step while it doesn't move at all: summing those forces wore it to pieces on a straight, smooth road
     const rq0 = this.rv.rotation(), rp0 = this.rv.translation();
     const upY = 1 - 2 * (rq0.x * rq0.x + rq0.z * rq0.z);
     const grade = this.hook.reeling || upY < 0.94;
-    const hits = new Map();
+    const hits = new Map(), struck = new Set();
     this.eq.drainContactForceEvents(e => {
       for (const h of [e.collider1(), e.collider2()]) {
         const id = this.byCollider.get(h);
         if (id == null) continue;
         const p = this.props.get(id);
+        if (p && this.riding.has(id)) { struck.add(id); continue; }   // (riding: hit hard, it comes loose: rideStep)
         if (!p || p.max <= 0 || this.tied.has(id)) continue;
         const g = e.totalForceMagnitude() / p.body.mass() / 9.81;
         if (g > (hits.get(id) || 0)) hits.set(id, g);
       }
     });
-    for (const [id, g] of hits) {
+    for (const [id, gF] of hits) {
       const p = this.props.get(id);
       if (!p) continue;
+      const a = vIn.get(id), b = p.body.linvel();
+      const g = a ? Math.min(gF, Math.hypot(b.x - a.x, b.y - a.y + 9.81 * dt, b.z - a.z) / dt / 9.81) : gF;
       const L = LOOT[p.type], knock = p.knockUntil > this.t;
       const over = g - Math.max(L.tough, knock ? p.knockG : 0);
       if (over <= 0) continue;
@@ -962,6 +1158,9 @@ export class Sim {
         }
       }
     }
+
+    this.rideStep(dt, struck);
+    this.keepLoad();
 
     // anything that fell out of the world goes back to the road (and anything whose motion went
     // non-finite, which nothing else would ever fix: the test is written so NaN fails it)
@@ -1053,6 +1252,16 @@ export class Sim {
   }
 
   // sitting still on its wheels (at least three on the ground)
+  // past saving without the tow truck: on its back or side, or lying past 53 degrees with fewer than three wheels
+  // down (it slid off its side onto a steep bank: not flipped, not on its wheels, and no way to drive it)
+  rvBeached() {
+    if (this.rvFlipped()) return true;
+    if (qRotate(this.rv.rotation(), v3(0, 1, 0)).y > 0.6) return false;
+    let on = 0;
+    for (let i = 0; i < RV_WHEELS.length; i++) if (this.vehicle.wheelIsInContact(i)) on++;
+    return on < 3;
+  }
+
   rvSettled() {
     const v = this.rv.linvel(), w = this.rv.angvel();
     let on = 0;

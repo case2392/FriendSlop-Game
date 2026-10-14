@@ -27,6 +27,8 @@ import * as texPrep from './texprep.js';
 import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 import { profile, profileStatus, forServer, credit } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
+import { cardHTML } from './cards.js';
+import { TINS } from '/shared/cards.js';
 import { fmtRoad, fmtClockH, crewBest } from '/shared/profile.js';
 
 const $ = id => document.getElementById(id);
@@ -497,6 +499,7 @@ function computeTarget() {
     if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
     if (L.mob) return { kind: 'prop', id: p.id, hit, label: mobLabel(p) };
     if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[Hold LMB] take the road map and call out the road to ${driverName()}` }; }
+    if (L.find) return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name}: set it down in the RV to keep it (${TINS[L.find]} cards)` };
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
     return { kind: 'prop', id: p.id, hit, label: `[Hold LMB] ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
@@ -738,6 +741,8 @@ const TIPS = [
   'The casino pays out to the whole crew. So do its losses.',
   'Every trip is timed and counted. G opens the Garage: your fastest payoff, your biggest haul, your crews.',
   'A trip from a typed seed is practice: it counts only on that seed\'s board in your Logbook.',
+  'Road Card tins wait at the dangerous places: up a crash butte, by a ringtail den, in a sleeping Grumphorn\'s fur. Set one down in the RV and it goes in the glovebox.',
+  'Pay off the RV on day 5 and everyone aboard keeps a copy of every Road Card in the glovebox. Miss a payment and the Repo Man takes the glovebox too.',
 ];
 let tipN = Math.floor(Math.random() * TIPS.length);
 function loadingBar(on, frac = 0, text = 'Loading the road') {
@@ -1102,6 +1107,7 @@ net.on('s', m => {
   if (!S.W || worldBuilding) return;
   S.interp.push(m, performance.now());
   S.g = m.g;
+  if (!m.g.gb && S.glove?.length) S.glove = [];   // (a new trip: an empty glovebox)
   onPhase(m.g.ph);
   updatePresence();
   S.door = !!m.g.door;
@@ -1155,6 +1161,8 @@ net.on('trip', inOrder(m => {
   if (m.run === S.overRun && !$('overScreen').classList.contains('hidden')) { const el = $('overRecords'); if (el) el.innerHTML = recordLines(m, res); }
   else if (res.counted) toast(`Your last trip (${m.won ? 'paid off' : 'repo\'d'}) is in your Logbook${res.newRecords.length ? ': a new record!' : '.'} (G)`, '#ffd166', 6);
 }));
+// what's in the glovebox already (on joining a trip): its cards flipped up as they go in after that
+net.on('glovebox', inOrder(m => { S.glove = Array.isArray(m.list) ? m.list : []; }));
 net.on('ev', m => afterWorld(() => { for (const e of m.list) onEvent(e); }));
 
 function onEvent(e) {
@@ -1173,6 +1181,9 @@ function onEvent(e) {
       break;
     }
     case 'sold': for (const id of e.ids) removeProp(id, { color: '#7CFC00', n: 10, speed: 3 }); sfx.kaching(); break;
+    // Road Cards into the glovebox (a tin set down in the RV, or a card Ed found in what he bought): the
+    // glovebox clicks, and the cards flip up at the bottom of the screen
+    case 'stow': (S.glove ||= []).push({ cards: e.cards, kind: e.kind, day: S.g?.day, by: e.by }); revealCards(e); sfx.click(); break;
     case 'bill': sfx.bill(); break;
     case 'horn': sfx.horn(); break;
     case 'door': S.door = e.open; sfx.door(); if (e.pop && S.rv) { positional(S.rv.p, () => sfx.thunk(0.7), 50); if (me.par) shake(0.3); } break;
@@ -1221,6 +1232,19 @@ function onEvent(e) {
   }
 }
 
+// the cards going into the glovebox, for 4 s (NEW against my own Album)
+let revealTimer = 0;
+function revealCards(e) {
+  let el = $('cardReveal');
+  if (!el) { el = document.createElement('div'); el.id = 'cardReveal'; el.className = 'hidden'; document.body.appendChild(el); }
+  const p = profile(), n = e.cards.length, name = LOOT[e.kind]?.name || 'tin';
+  const title = e.by === 'Ed' ? `Ed pried the ${name} open: a Road Card` : `${e.by ? escapeHtml(e.by) : 'Somebody'} set a ${name} down in the RV: ${n} card${n > 1 ? 's' : ''}`;
+  el.innerHTML = `<div class="rv-title">${title} · in the glovebox</div><div class="rv-cards">${e.cards.map(id => cardHTML(id, { fresh: !p.cards[id] && !p.seen.includes(id) })).join('')}</div>`;
+  el.classList.remove('hidden');
+  clearTimeout(revealTimer);
+  revealTimer = setTimeout(() => el.classList.add('hidden'), 4000);
+}
+
 // what the wildlife does, heard and seen (the server words the toasts)
 function onMobEvent(e) {
   const p = S.props.get(e.id), at = p?.mesh.position;
@@ -1240,7 +1264,7 @@ function onMobEvent(e) {
       positional(at, () => sfx.yoink(), 45);
       const it = S.props.get(e.item);
       // (the stop's own loot that nobody had touched yet: not yours to lose, but there it goes)
-      if (it) { floatText(it.mesh.position, e.ours === false ? 'YOINK!' : `STOLEN ${fmt$(e.value)}`, '#ff6b5a'); markStolen(e.item); }
+      if (it) { floatText(it.mesh.position, e.ours === false || LOOT[it.type]?.find ? 'YOINK!' : `STOLEN ${fmt$(e.value)}`, '#ff6b5a'); markStolen(e.item); }
       break;
     }
     case 'stash': case 'trapped': positional(at, () => sfx.chitter(), 25); break;
@@ -1269,7 +1293,7 @@ function onMobEvent(e) {
     case 'recovered': {
       unmark(e.item);
       const it = S.props.get(e.item);
-      if (it) floatText(it.mesh.position, `GOT IT BACK ${fmt$(e.value)}`, '#7CFC00');
+      if (it) floatText(it.mesh.position, LOOT[it.type]?.find ? 'GOT IT BACK' : `GOT IT BACK ${fmt$(e.value)}`, '#7CFC00');
       break;
     }
   }
@@ -1570,7 +1594,7 @@ $('settingsBtn').onclick = () => { sfx.click(); openPanel('settings'); };
 $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
 $('ctpGarage').onclick = () => openPanel('garage');
 $('garageClose').onclick = () => closePanel('garage');
-initGarage({ canImport: () => S.phase === 'menu' });
+initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [] });
 $('ctpSettings').onclick = () => openPanel('settings');
 $('settingsClose').onclick = () => closePanel('settings');
 $('settingsReset').onclick = () => { resetSettings(); renderSettings(); };
@@ -2024,6 +2048,7 @@ function hud(rv) {
     held = !p ? '' : p.type === 'map' ? 'ROAD MAP — [F] raise/lower · [Q] drop'
       : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [Q] let go`
       : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off'
+      : LOOT[p.type].find ? `${LOOT[p.type].name} · set it down in the RV to keep its cards · [RMB] throw · [Q] drop`
       : `${LOOT[p.type].name} · ${fmt$(p.value)} · [RMB] throw · [Q] drop · wheel: distance`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
@@ -2169,6 +2194,7 @@ function questTracker(g) {
     L.push([`Money for the Repo Man: ${fmt$(Math.max(0, g.bank))}/${fmt$(g.due)}`, g.bank >= g.due ? 'done' : '']);
     L.push(['Pay the Repo Man before midnight', '']);
     if (g.thf > 0) L.push([`Ringtails have ${fmt$(g.thf)} of your stuff at their den`, 'warn']);
+    if (g.gb > 0) L.push([`Glovebox: ${g.gb} Road Card${g.gb > 1 ? 's' : ''}. Yours if you pay off the RV on day 5`, '']);
   } else if (g.ph === 'night') {
     L.push([`Paid the Repo Man ${fmt$(g.due)}`, 'done']);
     const n = S.meta?.players.length || 1, b = Math.min(n, g.beds?.length || 0);

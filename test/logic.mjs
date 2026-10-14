@@ -194,6 +194,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 // record rules (pure logic) ---
 {
   const P = await import('../shared/profile.js');
+  const { CARD } = await import('../shared/cards.js');
   const rnd = mulberry32(99);
   // P1: whatever a save holds (junk, wrong types, huge lists, nesting), validate() returns something in bounds
   const junk = d => {
@@ -201,7 +202,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     if (d > 3 || r < 0.15) return [null, undefined, NaN, Infinity, -1e300, 1e300, '', 'x'.repeat(40), '0123456789abcdef', 7.5, -3, true, '<b>'][Math.floor(rnd() * 13)];
     if (r < 0.45) return Array.from({ length: Math.floor(rnd() * 60) }, () => junk(d + 1));
     const o = {};
-    for (const k of ['v', 'pid', 'made', 'saved', 'rev', 'best', 'std', 'bad', 'fast', 'h', 'at', 'crew', 'splits', 'haul', 'sold', 'surplus', 'casino', 'won', 'clean', 'hp', 'crews', 'key', 'names', 'trips', 'wins', 'seeds', 'seed', 'life', 'runs', 'days', 'pawned', 'kos', 'sum', '__proto__', 'constructor'])
+    for (const k of ['v', 'pid', 'made', 'saved', 'rev', 'best', 'std', 'bad', 'fast', 'h', 'at', 'crew', 'splits', 'haul', 'sold', 'surplus', 'casino', 'won', 'clean', 'hp', 'crews', 'key', 'names', 'trips', 'wins', 'seeds', 'seed', 'life', 'runs', 'days', 'pawned', 'kos', 'sum', 'cards', 'seen', 'lost', 'gnome', 'gloves', '__proto__', 'constructor'])
       if (rnd() < 0.35) o[k] = junk(d + 1);
     return o;
   };
@@ -215,7 +216,8 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
       && (b.fast === null || (inRange(b.fast.h, 0, 90) && b.fast.crew.length <= 6)) && (b.haul === null || inRange(b.haul.sold, 0, 1e9)) && (b.clean === null || inRange(b.clean.hp, 0, 100));
     const good = (p.pid === null || P.isPid(p.pid)) && boards.every(okBoard) && p.crews.length <= 12 && p.seeds.length <= 20 && p.runs.length <= 32
       && p.runs.every(P.isRun) && Object.values(p.life).every(v => inRange(v, 0, 1e12)) && Object.keys(p.life).length === P.LIFE.length
-      && p.crews.every(c => c.names.length <= 6 && c.names.every(n => typeof n === 'string' && n.length <= 16 && !/[<>]/.test(n)));
+      && p.crews.every(c => c.names.length <= 6 && c.names.every(n => typeof n === 'string' && n.length <= 16 && !/[<>]/.test(n)))
+      && Object.entries(p.cards).every(([id, n]) => CARD[id] && Number.isInteger(n) && n >= 1 && n <= 99) && p.seen.every(id => CARD[id]) && Object.entries(p.lost).every(([id, d]) => CARD[id] && !p.cards[id] && d >= 1 && d <= 5);
     if (!good) out++;
     try { P.serialize(p); } catch { threw++; }
   }
@@ -256,8 +258,44 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     P.creditTrip(full, { ...trip({ run: i.toString(16).padStart(10, '0') }), crew: hs.map((h, k) => ({ h, name: 'Abcdefghijklmnop'.slice(0, 16 - k) })), tier: i % 2 ? 'bad' : 'std' }, { now: Date.now() });
     P.creditTrip(full, { ...trip({ run: (1000 + i).toString(16).padStart(10, 'f') }), practice: 'seed', seed: 4000000000 - i }, { now: Date.now() });
   }
+  for (const id of Object.keys(CARD)) { full.cards[id] = 99; full.seen.push(id); }
   const bytes = P.serialize(full).length;
-  check(full.crews.length === 12 && full.seeds.length === 20 && full.runs.length === 32 && bytes <= 16 * 1024, `save: with every table full (12 crews of six, 20 seeds, 32 trips, both boards) it is ${(bytes / 1024).toFixed(1)} KB (at most 16)`);
+  check(full.crews.length === 12 && full.seeds.length === 20 && full.runs.length === 32 && bytes <= 16 * 1024, `save: with every table full (12 crews of six, 20 seeds, 32 trips, both boards, all 30 cards) it is ${(bytes / 1024).toFixed(1)} KB (at most 16)`);
+}
+
+// --- Road Cards (shared/cards.js): the catalogue, the odds, and what a trip puts in your save ---
+{
+  const K = await import('../shared/cards.js'), P = await import('../shared/profile.js');
+  // F9: 30 cards, unique; each set 2 kit cards, 2 common, 1 uncommon, 1 rare; the kit cards are the Garage's
+  // ten (its PR: shared/garage.js); on Standard terms a set's odds are kit 33%, common 50%, uncommon 17%, rare 0
+  const ids = K.CARDS.map(c => c.id), sets = [1, 2, 3, 4, 5].map(n => K.CARDS.filter(c => c.set === n));
+  const shape = sets.every(s => s.length === 6 && ['kit', 'kit', 'common', 'common', 'uncommon', 'rare'].every((r, i, a) => s.filter(c => c.rarity === r).length === a.filter(x => x === r).length));
+  const kit = K.CARDS.filter(c => c.kind === 'kit').map(c => c.id).sort().join();
+  const o = K.odds('std'), b = K.odds('bad'), pct = x => Math.round(x * 100);
+  check(new Set(ids).size === 30 && shape && kit === 'bullbar,callsign,chalk,eye,gloves,horn,medic,steady,toolbox,winch'
+    && pct(o.kit) === 33 && pct(o.common) === 50 && pct(o.uncommon) === 17 && !o.rare && Math.abs(b.rare - 1 / 13) < 1e-9,
+    `cards: 30 of them in five sets of six (2 kit, 2 common, 1 uncommon, 1 rare); Standard odds kit ${pct(o.kit)}%, common ${pct(o.common)}%, uncommon ${pct(o.uncommon)}%, no rares; Bad Credit's rare ${(b.rare * 100).toFixed(1)}%`);
+  // the draws: day 1 always set 1; later days mostly the day's set; a gold tin's first card is a kit card; no rare on Standard
+  const rnd = mulberry32(5);
+  let d1 = 0, own = 0, n = 0, gold = 0, rare = 0;
+  for (let i = 0; i < 4000; i++) {
+    if (K.CARD[K.rollCard(1, 'std', rnd)].set === 1) d1++;
+    const c = K.CARD[K.rollCard(4, 'std', rnd)]; n++; if (c.set === 4) own++; if (c.rarity === 'rare') rare++;
+    if (K.CARD[K.rollTin('goldtin', 3, 'std', rnd)[0]].kind === 'kit') gold++;
+  }
+  check(d1 === 4000 && Math.abs(own / n - 0.85) < 0.03 && gold === 4000 && rare === 0 && K.rollTin('tin', 2, 'std', rnd).length === 2 && K.rollTin('goldtin', 5, 'std', rnd).length === 3,
+    `cards: day 1 draws only set 1; day 4 draws its own set ${(own / n * 100).toFixed(0)}% of the time (85%); a gold tin holds three, the first a kit card; no rare on Standard`);
+  // P6: into the save. Won: a copy of each (a second copy counts); lost: the ones you never had are marked;
+  // a practice trip keeps nothing; ids nobody has heard of are dropped
+  const pid = '0123456789abcdef', trip = (run, o) => ({ run: run.padEnd(10, '0'), won: true, practice: null, tier: 'std', splits: [14, 14, 14, 14, 14], sold: 1000, day: 5, crew: [], ...o });
+  const p = P.fresh(pid, 0);
+  const w = P.creditTrip(p, trip('d1', { you: { fromStart: true, atEnd: true, cards: ['gnome', 'gloves', 'gloves', 'bogus'] } }));
+  const l = P.creditTrip(p, trip('d2', { won: false, day: 3, splits: [14, 14, null, null, null], you: { fromStart: true, atEnd: true, cards: [], lost: ['gnome', 'ed'] } }));
+  const pr = P.creditTrip(p, trip('d3', { practice: 'seed', seed: 9, you: { fromStart: true, atEnd: true, cards: ['vase'] } }));
+  const back = P.parse(P.serialize(p)).prof;
+  check(p.cards.gnome === 1 && p.cards.gloves === 2 && !p.cards.bogus && w.fresh.join() === 'gnome,gloves' && l.lostNew.join() === 'ed' && p.lost.ed === 3 && !p.lost.gnome
+    && !p.cards.vase && pr.counted && p.life.cards === 3 && p.life.cardsLost === 2 && JSON.stringify(back.cards) === JSON.stringify(p.cards) && back.seen.length === 3,
+    `save: a win's cards go in (gnome x${p.cards.gnome}, Work Gloves x${p.cards.gloves}, ${w.fresh.length} new); a loss marks the ones you never had (Honest Ed, day ${p.lost.ed}); a practice trip keeps nothing; it all reads back`);
 }
 
 // --- the desktop build's save files (desktop/save.cjs): an atomic write leaves the last save as the backup,
