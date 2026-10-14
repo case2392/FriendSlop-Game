@@ -627,6 +627,8 @@ shot({
 const casStation = id => W.town.casino_stations.find(s => s.id === id);
 const casUse = id => W.uses.findIndex(u => u.kind === 'cas' && u.arg === id);
 const onTable = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
+// a point in the casino's own frame (world gen's: lx across the room, lz from the door side, ly up from its floor)
+const casAt = (lx, ly, lz) => onTable(W.town.casino, -Math.PI / 2, lx, ly, lz);
 const sitDown = (bot, id) => { const st = casStation(id), u = W.uses[casUse(id)]; bot.at(st.x, st.z, yawTo(st, u)); bot.tick(1 / 60); };
 shot({
   id: 'blackjack', day: 5, secs: 2.0, pre: 0.5, fov: 58,
@@ -659,15 +661,16 @@ shot({
     this.pulled = false; this.sad = false;
   },
   tick(t) {
-    const { Dave, Kyle, Steve } = bots, F = W.town.flips[0], st = casStation('flip1');
-    // (seen from beside the machine: Kyle at his stake facing it, Steve and Dave watching from the side)
+    const { Dave, Kyle, Steve } = bots, F = W.town.flips[0];
+    // (Kyle at his stake facing the machine, Dave and Steve watching from his left: the camera's on his right)
     sitDown(Kyle, 'flip1');
-    const d = onTable({ ...st, y: 0 }, F.ry, -1.3, 0, 0.6), s2 = onTable({ ...st, y: 0 }, F.ry, 1.2, 0, 0.9);
+    const d = casAt(3.9, 0, -4.4), s2 = casAt(4.4, 0, -5.5);
     Dave.at(d.x, d.z, yawTo(d, F)); Steve.at(s2.x, s2.z, yawTo(s2, F));
     if (!this.pulled && t > 0.5) { this.pulled = true; const rng = room.casino.rng; room.casino.rng = () => 0.99; Kyle.say({ t: 'cas', s: 'flip1', a: 'go' }); room.casino.rng = rng; }
     if (!this.sad && t > 2.3) { this.sad = true; Kyle.say({ t: 'emote', e: '😭' }); Dave.say({ t: 'emote', e: '🤬' }); Steve.say({ t: 'emote', e: '💀' }); }
   },
-  cam: () => { const F = W.town.flips[0], st = casStation('flip1'); return { p: onTable({ ...st, y: F.y }, F.ry, 1.4, 2.05, 2.6), t: onTable({ ...F }, F.ry, 0, 1.6, 0) }; },
+  // (from the room, between the machines and the Derby's track, over Kyle's shoulder)
+  cam: () => ({ p: casAt(7.4, 1.7, -3.6), t: casAt(5.5, 1.45, -6.5) }),
   body: () => ({ x: W.town.flips[0].x - 6, z: W.town.flips[0].z + 5 }),
 });
 
