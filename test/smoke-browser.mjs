@@ -168,6 +168,9 @@ try {
   const daveOnSteve = await host.evaluate(() => { const S = window.__nmd; const v = [...S.views.values()][0]; return { p: v.group.position, rv: S.rv }; });
   const l2 = toLocal(daveOnSteve.rv.p, daveOnSteve.rv.q, daveOnSteve.p);
   check(insideRV(l2.x, l2.y, l2.z, 0.2), `on Steve's screen Dave is inside the RV too (local ${l2.x.toFixed(2)}, ${l2.y.toFixed(2)}, ${l2.z.toFixed(2)})`);
+  // the music: the meadow's tune under the game (score.js), and the RV's radio on while Steve drives
+  const mus = await host.evaluate(() => { const M = window.__nmd.music, s = M?.score; return { theme: s?.theme, radio: !!M?.rv?.on, ctx: window.__nmdAudio?.ctx?.state }; });
+  check(/^meadow/.test(mus.theme || '') && mus.radio, `the score plays the meadow's tune (${mus.theme}), and the RV's radio is on while Steve drives (audio ${mus.ctx})`);
   await host.keyboard.down('w');
   await joiner.evaluate(() => { const S = window.__nmd; S.me.yaw = Math.atan2(2 * (S.rv.q.w * S.rv.q.y + S.rv.q.x * S.rv.q.z), 1 - 2 * (S.rv.q.y ** 2 + S.rv.q.x ** 2)); S.me.pitch = 0.08; });
   await shot(joiner, 'riding');
@@ -354,6 +357,9 @@ try {
     const bj = res.log.find(e => e.by === res.me && e.game === 'Blackjack'), fl = res.log.find(e => e.by === dave && e.game === 'Double or Nothing');
     check(bj && fl && res.bank === 2600 + bj.won + fl.won && /STEVE/.test(res.label),
       `the casino: Steve's blackjack (${bj?.won}) and Dave's coin (${fl?.won}) played at once out of one bank ($2,600 -> $${res.bank}); Steve's seat reads "${res.label}"`);
+    // (the target, not the level: the level eases on the page's frame clock, slow at the test's frame rate)
+    const casTune = await host.evaluate(() => window.__nmd.music?.score?.targets?.lead ?? -1);
+    check(casTune >= 0 && casTune < 0.01, `in the casino the score gives the floor to its band (the tune's target ${casTune.toFixed(2)})`);
     await joiner.evaluate(T => { const S = window.__nmd, B = T.bj, c = Math.cos(B.ry), s = Math.sin(B.ry), at = (lx, lz) => ({ x: B.table.x + lx * c + lz * s, z: B.table.z - lx * s + lz * c }); const p = at(-2.6, 3.4), t = at(0.2, 0.1); S.me.teleport(p.x, T.casino.y + 0.05, p.z, 0); S.aimAt(t.x, B.table.y - 0.1, t.z); }, T);
     await wait(joiner, 700);
     await shot(joiner, 'casino');

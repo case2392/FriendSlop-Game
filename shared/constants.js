@@ -14,6 +14,8 @@ export const MAX_PLAYERS = 6;
 // ---- the run ----------------------------------------------------------------
 export const DAYS = 5;
 export const QUOTAS = [1000, 2500, 4500, 7500, 15000];   // due at midnight, per day: miss one and the RV is gone
+// what the RV cost: no money down, the five payments are its price ($30,500; Bad Credit's interest is on top)
+export const RV_PRICE = QUOTAS.reduce((a, b) => a + b, 0);
 // BAD CREDIT, the loan terms for a crew made only of veterans (everyone aboard as the RV leaves camp on day 1
 // with WINS or more kept wins): every payment x PAY, to the $50 ($1,150 / $2,900 / $5,200 / $8,650 / $17,250)
 export const BAD = { WINS: 2, PAY: 1.15 };

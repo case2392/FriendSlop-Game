@@ -1,6 +1,6 @@
 # NO MONEY DOWN
 
-> You and the boys bought a $250,000 motorhome with no money down.
+> You and the boys bought a $30,500 motorhome with no money down.
 > Payments are due every night. None of you have jobs.
 
 A 1–6 player **first-person co-op road trip**, built for proximity voice and
@@ -200,6 +200,20 @@ Five days, and the payment due at midnight grows each day ($1,000, $2,500,
 $4,500, $7,500, then the $15,000 balloon). Pay the balloon on day 5 and you own
 the RV. Come up short on any night and he takes the RV: the trip is over.
 
+## Music
+
+Every place has its own tune, played by a synthesized western band: a Travis-picked guitar and harmonica on
+the Westmeadow Road, a banjo-and-fiddle hoedown through the fields, a lonely whistled waltz on the snowy pass,
+slide guitar over a twangy baritone in the badlands, and a spaghetti western (tremolo guitar, castanets, a
+choir, the whistle) into Lost Wages. Under the payment, a lullaby by the fire.
+
+It follows what's happening near you: creep past a sleeping Grumphorn and the strings start to tremble and
+a heartbeat comes in; wake it and the timpani roll; when it charges a whip cracks and the band breaks into a
+gallop. Ringtails sneaking up bring pizzicato on tiptoe and a jaw harp. In the last hour before midnight a
+clock ticks under everything, and the church bell starts to toll. The tune plays a minute or so and then rests,
+leaves the floor to the RV's radio and the casino's band, and ducks whenever anyone talks. Settings: Music
+while you play turns it off (the radio and the casino's band stay).
+
 ## Voice
 
 Hit **JOIN VOICE**. It's **proximity chat**: each voice is Opus audio sent
@@ -247,6 +261,9 @@ client/   player.js    first-person controller: walk/sprint/jump, stamina climbi
           roadside3d.js              the stops, gates, camp, anchors, junk, the dino
           rv3d.js · props3d.js · people.js · labels.js   the RV, loot, characters, painted signs/HUD
           voice.js     Opus voice over the game connection + spatial audio · sfx.js: synthesized sound
+          score.js · western.js   the score: each biome's tune and the layers that follow the game, on a
+                       synthesized western band (also the trailer's) · music.js: the RV's radio, the casino's band
+          ambience.js  the wind and each biome's wildlife
 tools/    docshots.mjs  the README screenshots · scene.mjs  named in-game viewpoints per day
           gallery.mjs   every texture, tiled to show seams · preview.mjs  single 3D assets
           drive-test.mjs  headless autopilot down a leg (RV handling)
@@ -300,13 +317,18 @@ npm test
 - `test/steamnet.mjs` plays over a stand-in for Steam (`test/fakesteam/`):
   invites, the version check, a dropped link coming back to its seat, voice,
   packet loss, the host quitting or crashing.
+- `test/music.mjs` plays the score offline in Chromium: every biome's tune renders without
+  clipping, within a few dB of the others; the layers that answer the wildlife and the clock make
+  sound; the plucked strings are in tune; and the score's levels follow what's going on (a charge in
+  at once, the tune giving way to the radio and the town). `MUSIC_DEMO=dir` also writes them as WAVs.
 - `test/smoke-browser.mjs` runs two real Chromium clients in one room. They
   join through the menu and see each other. One drives while the other rides
   inside, and the passenger stays glued in on both screens. They carry a TV,
   climb a canyon wall, read the map to the driver (only the day's navigator
   takes it, only while the driver drives, and the driver's screen never shows
   it), play the casino (blackjack at one seat and Double or Nothing at the same
-  time, then a Derby ticket each), talk over proximity voice, drop and get their seat back. The
+  time, then a Derby ticket each; the score gives the floor to the casino's band), hear the meadow's
+  tune and the RV's radio, talk over proximity voice, drop and get their seat back. The
   test fails on any page error.
 - `npm run test:desktop` drives the real desktop app (needs a display, or
   `xvfb-run`): the locked-down shell, a trip, Quit, and two copies of the app

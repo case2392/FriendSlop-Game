@@ -15,6 +15,7 @@ const SPEC = {
   amb: [0.7, 'num', 0, 1],
   voice: [1, 'num', 0, 1],
   muteInBackground: [true, 'bool'],
+  score: [true, 'bool'],                     // the score under the game (score.js)
   radio: [true, 'bool'],                     // the RV's radio plays while someone drives
   quality: ['auto', 'pick', 'auto', 'low', 'medium', 'high'],
   fpsCap: [0, 'pick', 0, 30, 60, 120],       // 0 = the display's own rate

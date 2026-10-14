@@ -41,7 +41,7 @@ export class LocalWorld {
     this.info.set(t.handle, { kind: 'terrain' });
     for (const s of W.statics) {
       const c = this.world.createCollider(RAPIER.ColliderDesc.cuboid(s.hx, s.hy, s.hz).setTranslation(s.x, s.y, s.z)
-        .setRotation(yawQ(s.ry)).setCollisionGroups(grp(s.part === 'fence' ? G.FENCE : G.WORLD, 0xffff)), fixed);
+        .setRotation(yawQ(s.ry)).setCollisionGroups(grp(s.part === 'fence' || s.part === 'signpost' ? G.FENCE : G.WORLD, 0xffff)), fixed);
       this.info.set(c.handle, { kind: 'static', mat: s.mat, part: s.part });
     }
     for (const cy of W.cyls) {

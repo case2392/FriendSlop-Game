@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { Stage, Actor } from './actor.mjs';
+import { RV_PRICE } from '../shared/constants.js';   // (the five payments: what the RV cost)
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const STEP_CMD = argv[0] || 'capture';
@@ -424,7 +425,8 @@ function spawnMob(type, x, z, opts = {}) { return room.sim.ensureMobs({ day: roo
 const SHOTS = [];
 const shot = s => SHOTS.push(s);
 
-// ---- day 1 -----------------------------------------------------------------------------------------
+// ---- the shots. Each one's day is where it's filmed: 1 the meadow, 2 the fields, 3 the snowy pass, 4 the
+// badlands, 5 the desert (Lost Wages); they're filmed day by day, in the order they're written ----------
 // the crew at the campfire, not working: Steve spins, Kyle lies there, Dave cries
 shot({
   id: 'campfire', day: 1, secs: 3.0, pre: 0.6, fov: 52,
@@ -482,9 +484,9 @@ shot({
 
 // the navigator's own view: the paper road map held up in the cab (the camera's player holds it)
 shot({
-  id: 'mapfp', day: 1, secs: 1.8, pre: 3.0, fov: null, hands: true,
+  id: 'mapfp', day: 3, secs: 1.8, pre: 3.0, fov: null, hands: true,
   async setup() {
-    dbg({ op: 'phase', ph: 'camp' }); dbg({ op: 'clock', h: 7.6 }); dbg({ op: 'tpRV', x: 0, z: -42, yaw: 0 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'camp' }); dbg({ op: 'clock', h: 7.6 }); dbg({ op: 'tpRV', x: 0, z: -42, yaw: 0 });
     offstage(bots.Steve, bots.Kyle);
     seatDriver(bots.Dave, await me());
     // the map back on the dash, where the morning puts it (an earlier shot may have left it anywhere)
@@ -504,9 +506,9 @@ shot({
 
 // the winch: the cable taut up the washed-out grade, the RV crawling up
 shot({
-  id: 'winch', day: 1, secs: 2.6, pre: 1.2, fov: 60,
+  id: 'winch', day: 4, secs: 2.6, pre: 1.2, fov: 60,
   setup() {
-    const g = W.obstacles.find(o => o.type === 'grade');
+    dbg({ op: 'mobs', on: false }); const g = W.obstacles.find(o => o.type === 'grade');
     this.rz = g.z0 - 7; this.rx = W.roadX(this.rz);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 15.5 });
     dbg({ op: 'tpRV', x: this.rx, z: this.rz, yaw: 0 });
@@ -515,7 +517,8 @@ shot({
     const { Steve, Dave } = bots, w = room.sim.winchWorld();
     Steve.at(w.x, w.z + 1.2, Math.PI); Steve.tick(1 / 60); room.tick(1 / 60);
     Steve.say({ t: 'use', kind: 'winch' });
-    const anc = W.anchors[0];
+    // (the grade's own anchor: the nearest past its top; other obstacles have theirs)
+    const anc = [...W.anchors].sort((a, b) => Math.hypot(a.x - W.roadX(g.z1 ?? g.z0 + 15), a.z - (g.z1 ?? g.z0 + 15)) - Math.hypot(b.x - W.roadX(g.z1 ?? g.z0 + 15), b.z - (g.z1 ?? g.z0 + 15)))[0];
     this.anc = anc;
     for (let i = 1; i <= 16; i++) { Steve.at(lerp(w.x, anc.x - 0.8, i / 16), lerp(w.z + 1.2, anc.z - 0.8, i / 16), 0); Steve.tick(1 / 60); for (let k = 0; k < 6; k++) room.tick(1 / 60); }
     Steve.say({ t: 'use', kind: 'hook' });
@@ -529,9 +532,9 @@ shot({
 
 // Honest Ed's counter: ED OFFERS, the bell, the loot gone in a sparkle (ka-ching)
 shot({
-  id: 'pawn', day: 1, secs: 3.0, pre: 0.8, fov: 58,
+  id: 'pawn', day: 4, secs: 3.0, pre: 0.8, fov: 58,
   setup() {
-    const T = W.town;
+    dbg({ op: 'mobs', on: false }); const T = W.town;
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 18.3 });
     dbg({ op: 'tpRV', x: 0, z: W.LEN + 6, yaw: 0 });
     for (let k = 0; k < 10; k++) room.tick(1 / 60);
@@ -553,10 +556,10 @@ shot({
 
 // CRUNCH: Dave drives into the closed ranger gate (the riders lurch)
 shot({
-  id: 'gate', day: 1, secs: 3.0, pre: 1, fov: 62, preMax: 25,
+  id: 'gate', day: 3, secs: 3.0, pre: 1, fov: 62, preMax: 25,
   startWhen() { return rvPose().t.z > this.gz - 17; },
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.0 }); dbg({ op: 'rvhp', hp: 100 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.0 }); dbg({ op: 'rvhp', hp: 100 });
     this.gz = W.obstacles.find(o => o.type === 'gate').z;
     dbg({ op: 'tpRV', x: W.roadX(this.gz - 70), z: this.gz - 70, yaw: Math.atan2(W.roadX(this.gz - 62) - W.roadX(this.gz - 70), 8) });
     seatDriver(bots.Dave);
@@ -572,10 +575,10 @@ shot({
 
 // Dave runs Steve over
 shot({
-  id: 'runover', day: 1, secs: 3.0, pre: 1, fov: 62, preMax: 25,
+  id: 'runover', day: 4, secs: 3.0, pre: 1, fov: 62, preMax: 25,
   startWhen() { return rvPose().t.z > 192 - 24; },
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.5 }); dbg({ op: 'rvhp', hp: 100 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 10.5 }); dbg({ op: 'rvhp', hp: 100 });
     dbg({ op: 'tpRV', x: W.roadX(110), z: 110, yaw: Math.atan2(W.roadX(118) - W.roadX(110), 8) });
     seatDriver(bots.Dave);
     offstage(bots.Kyle);
@@ -591,9 +594,9 @@ shot({
 
 // broken down at dusk: smoke from the hatch, the hazards blinking, three of them at the engine, it catches
 shot({
-  id: 'breakdown', day: 1, secs: 4.0, pre: 2.0, fov: 58,
+  id: 'breakdown', day: 3, secs: 4.0, pre: 2.0, fov: 58,
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 20.55 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 20.55 });
     dbg({ op: 'tpRV', x: W.roadX(700), z: 700, yaw: Math.atan2(W.roadX(708) - W.roadX(700), 8) });
     for (const b of Object.values(bots)) unseat(b);
     dbg({ op: 'rvhp', hp: 0 });
@@ -610,9 +613,9 @@ shot({
 
 // the Lucky Slop's neon at night
 shot({
-  id: 'neon', day: 1, secs: 2.0, pre: 0.5, fov: 60,
+  id: 'neon', day: 5, secs: 2.0, pre: 0.5, fov: 60,
   setup() {
-    offstage(bots.Dave, bots.Steve, bots.Kyle);
+    dbg({ op: 'mobs', on: false }); offstage(bots.Dave, bots.Steve, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.4 });
     dbg({ op: 'tpRV', x: 0, z: W.town.lot.z, yaw: 0 });
   },
@@ -625,11 +628,13 @@ shot({
 const casStation = id => W.town.casino_stations.find(s => s.id === id);
 const casUse = id => W.uses.findIndex(u => u.kind === 'cas' && u.arg === id);
 const onTable = (o, ry, lx, ly, lz) => ({ x: o.x + lx * Math.cos(ry) + lz * Math.sin(ry), y: o.y + ly, z: o.z - lx * Math.sin(ry) + lz * Math.cos(ry) });
+// a point in the casino's own frame (world gen's: lx across the room, lz from the door side, ly up from its floor)
+const casAt = (lx, ly, lz) => onTable(W.town.casino, -Math.PI / 2, lx, ly, lz);
 const sitDown = (bot, id) => { const st = casStation(id), u = W.uses[casUse(id)]; bot.at(st.x, st.z, yawTo(st, u)); bot.tick(1 / 60); };
 shot({
-  id: 'blackjack', day: 1, secs: 2.0, pre: 0.5, fov: 58,
+  id: 'blackjack', day: 5, secs: 2.0, pre: 0.5, fov: 58,
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.6 }); dbg({ op: 'bank', v: 6000 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.6 }); dbg({ op: 'bank', v: 6000 });
     const { Kyle, Dave, Steve } = bots;
     sitDown(Kyle, 'bj2'); sitDown(Dave, 'bj1'); sitDown(Steve, 'craps1');
     room.tick(1 / 60);
@@ -646,9 +651,9 @@ shot({
 
 // double or nothing: ALL IN, the lever, FLIPPING..., NOTHING (the machine is told to lose)
 shot({
-  id: 'coinflip', day: 1, secs: 3.4, pre: 0.4, fov: 62,
+  id: 'coinflip', day: 5, secs: 3.4, pre: 0.4, fov: 62,
   setup() {
-    dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.8 }); dbg({ op: 'bank', v: 4500 });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 21.8 }); dbg({ op: 'bank', v: 4500 });
     const { Kyle } = bots;
     sitDown(Kyle, 'flip1');
     room.tick(1 / 60);
@@ -657,23 +662,24 @@ shot({
     this.pulled = false; this.sad = false;
   },
   tick(t) {
-    const { Dave, Kyle, Steve } = bots, F = W.town.flips[0], st = casStation('flip1');
-    // (seen from beside the machine: Kyle at his stake facing it, Steve and Dave watching from the side)
+    const { Dave, Kyle, Steve } = bots, F = W.town.flips[0];
+    // (Kyle at his stake facing the machine, Dave and Steve watching from his left: the camera's on his right)
     sitDown(Kyle, 'flip1');
-    const d = onTable({ ...st, y: 0 }, F.ry, -1.3, 0, 0.6), s2 = onTable({ ...st, y: 0 }, F.ry, 1.2, 0, 0.9);
+    const d = casAt(3.9, 0, -4.4), s2 = casAt(4.4, 0, -5.5);
     Dave.at(d.x, d.z, yawTo(d, F)); Steve.at(s2.x, s2.z, yawTo(s2, F));
     if (!this.pulled && t > 0.5) { this.pulled = true; const rng = room.casino.rng; room.casino.rng = () => 0.99; Kyle.say({ t: 'cas', s: 'flip1', a: 'go' }); room.casino.rng = rng; }
     if (!this.sad && t > 2.3) { this.sad = true; Kyle.say({ t: 'emote', e: '😭' }); Dave.say({ t: 'emote', e: '🤬' }); Steve.say({ t: 'emote', e: '💀' }); }
   },
-  cam: () => { const F = W.town.flips[0], st = casStation('flip1'); return { p: onTable({ ...st, y: F.y }, F.ry, 1.4, 2.05, 2.6), t: onTable({ ...F }, F.ry, 0, 1.6, 0) }; },
+  // (from the room, between the machines and the Derby's track, over Kyle's shoulder)
+  cam: () => ({ p: casAt(7.4, 1.7, -3.6), t: casAt(5.5, 1.45, -6.5) }),
   body: () => ({ x: W.town.flips[0].x - 6, z: W.town.flips[0].z + 5 }),
 });
 
 // the Repo Man by his tow truck, at night (a slow push in)
 shot({
-  id: 'repoman', day: 1, secs: 4.0, pre: 0.4, fov: 52,
+  id: 'repoman', day: 3, secs: 4.0, pre: 0.4, fov: 52,
   setup() {
-    offstage(bots.Dave, bots.Steve, bots.Kyle);
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'rvhp', hp: 100 }); offstage(bots.Dave, bots.Steve, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 22.9 });
   },
   cam: t => { const R = W.town.repo; return { p: { x: lerp(R.x - 7.5, R.x - 5.6, ease(t / 3)), y: R.y + 1.6, z: lerp(R.z - 3.5, R.z - 2.8, ease(t / 3)) }, t: { x: R.x - 0.6, y: R.y + 1.5, z: R.z + 0.3 } }; },
@@ -801,21 +807,22 @@ shot({
 
 // a ringtail sneaks up on the vase Steve set down, snatches it, and runs (STOLEN $520)
 shot({
-  id: 'ringtail', day: 2, secs: 2.8, pre: 0.5, fov: 58, preMax: 24,
+  id: 'ringtail', day: 5, secs: 2.8, pre: 0.5, fov: 58, preMax: 24,
   startWhen() { const m = this.coon, p = m && room.sim.props.get(m.id), v = this.vase && room.sim.props.get(this.vase.id); if (!p || !v) return false; const a = p.body.translation(), b = v.body.translation(); return (m.st & 31) >= 1 && Math.hypot(a.x - b.x, a.z - b.z) < 4.2; },
   setup() {
     dbg({ op: 'mobs', on: false });
     offstage(bots.Dave, bots.Kyle);
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 11.0 });
     dbg({ op: 'tpRV', x: W.roadX(150), z: 150, yaw: 0 });
-    const { Steve } = bots, v = { x: 9.5, z: 220 };
+    // (beside the road: the vase 6 m off it, the ringtail coming from 13.5 m off)
+    const { Steve } = bots, v = { x: W.roadX(220) - 6, z: 220 };
     Steve.at(v.x - 1.2, v.z, Math.PI / 2, { pitch: 0.5 }); Steve.tick(1 / 60); room.tick(1 / 60);
     this.vase = spawnProp('vase', v.x, H(v.x, v.z) + 0.45, v.z, 520);
     for (let k = 0; k < 20; k++) room.tick(1 / 60);
     if (grab(Steve, this.vase)) { for (let k = 0; k < 10; k++) room.tick(1 / 60); Steve.say({ t: 'rel' }); }
     for (let k = 0; k < 30; k++) room.tick(1 / 60);
     this.v = v;
-    this.coon = spawnMob('ringtail', 2, 214, { yaw: 0.8 });
+    this.coon = spawnMob('ringtail', W.roadX(214) - 13.5, 214, { yaw: 0.8 });
   },
   tick(t) { const { Steve } = bots; Steve.at(this.v.x - 2.6, this.v.z + 2.6, -Math.PI / 4); },
   cam(t) {
@@ -826,35 +833,42 @@ shot({
 });
 
 // ---- day 3 -----------------------------------------------------------------------------------------
-// Steve and Kyle carry the giant fiberglass dino head off (DINO WORLD / HEAD MISSING — REWARD)
+// the Slopasaurus (DINO WORLD / HANDS OFF THE HEAD): Kyle, up on its back, shoves its head off; it tumbles down
+// into the snow (thunk) while Steve backs away from under it
 shot({
-  id: 'dino', day: 3, secs: 2.4, pre: 0.8, fov: 58,
+  id: 'dino', day: 3, secs: 2.8, pre: 0.6, fov: 56,
   setup() {
-    dbg({ op: 'mobs', on: false });
+    dbg({ op: 'mobs', on: false }); dbg({ op: 'rvhp', hp: 100 });
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 11.0 });
     dbg({ op: 'tpRV', x: W.roadX(700), z: 700, yaw: 0 });
     offstage(bots.Dave);
-    const poi = W.pois.find(p => p.type === 'dino') || { x: 36, z: 729.5 };
-    let head = [...room.sim.props.values()].filter(p => p.type === 'dino').sort((a, b) => hyp(a.body.translation(), poi) - hyp(b.body.translation(), poi))[0];
-    if (!head) head = spawnProp('dino', poi.x - 3, H(poi.x - 3, poi.z) + 0.6, poi.z + 1.5, 1700);
-    this.head = head;
-    const c = head.body.translation(), toRoad = Math.sign(W.roadX(c.z) - c.x) || -1;
-    this.dir = toRoad;
-    const { Steve, Kyle } = bots;
-    Steve.at(c.x - toRoad * 1.3, c.z - 0.8, Math.atan2(toRoad, 0)); Kyle.at(c.x - toRoad * 1.3, c.z + 0.8, Math.atan2(toRoad, 0));
-    Steve.tick(1 / 60); Kyle.tick(1 / 60); room.tick(1 / 60);
-    this.a = grab(Steve, head, 0.35); this.b = grab(Kyle, head, 0.35);
-    this.s0 = { s: { x: Steve.pos.x, z: Steve.pos.z }, k: { x: Kyle.pos.x, z: Kyle.pos.z }, c };
-    log(`  dino head #${head.id}: ${this.a} ${this.b}`);
+    const poi = W.pois.find(p => p.type === 'dino'), D = poi.dino;
+    // (a point in the statue's frame: lx across, ly up from its ground, lz along it, its head end +lz)
+    this.at = (lx, ly, lz) => onTable(D, D.ry, lx, ly, lz);
+    this.D = D;
+    this.head = [...room.sim.props.values()].filter(p => p.type === 'dino').sort((a, b) => hyp(a.body.translation(), this.at(0, 7.9, 2.75)) - hyp(b.body.translation(), this.at(0, 7.9, 2.75)))[0];
+    log(`  the head: #${this.head?.id} at ${JSON.stringify(this.head?.body.translation())}`);
+    this.pushed = false;
   },
   tick(t) {
-    const { Steve, Kyle } = bots, u = Math.max(0, t - 0.3) * 1.1;
-    const s = this.s0;
-    const p = -Math.min(0.5, t * 0.6);
-    Steve.at(s.s.x + this.dir * u, s.s.z, Steve.yaw, { pitch: p }); Kyle.at(s.k.x + this.dir * u, s.k.z, Kyle.yaw, { pitch: p });
+    const { Steve, Kyle } = bots, D = this.D, k = this.at(0, 4.22, 0.25), h = this.at(0, 7.9, 2.75);
+    // Kyle stands on the dino's back behind its neck, reaching up for the head
+    Kyle.at(k.x, k.z, D.ry, { y: k.y, pitch: -0.75 });
+    // Steve in the snow in front, looking up; once it goes, he backs off out from under it
+    const s0 = this.at(-2.9, 0, 3.2), s1 = this.at(-4.4, 0, 4.4), s = t < 1.1 ? s0 : s1;
+    if (!Steve.fly && !Steve.downed) Steve.at(s.x, s.z, yawTo(s, h), { pitch: -0.6 });
+    if (!this.pushed && t > 0.8 && this.head) {
+      this.pushed = true;
+      Kyle.say({ t: 'shove' });
+      const b = this.head.body, m = b.mass(), f = { x: Math.sin(D.ry), z: Math.cos(D.ry) };
+      b.wakeUp?.();
+      b.applyImpulse({ x: f.x * m * 2.2, y: m * 0.6, z: f.z * m * 2.2 }, true);
+      b.setAngvel({ x: f.z * 2.2, y: 0.4, z: -f.x * 2.2 }, true);   // (tumbling forward)
+    }
   },
-  cam() { const c = this.s0.c; return { p: at(c.x + this.dir * 4.2, c.z - 5.6, 1.5), t: at(c.x + this.dir * 0.6, c.z + 0.6, 1.2) }; },
-  body() { const c = this.s0.c; return { x: c.x + this.dir * 8, z: c.z - 12 }; },
+  // (from the statue's far side from its sign, three-quarters on: the sign stays out of the picture)
+  cam() { const c = this.at(-6.8, 0, 7.6), t = this.at(0, 4.2, 2.2); return { p: { x: c.x, y: H(c.x, c.z) + 2.2, z: c.z }, t }; },
+  body() { const b = this.at(-14, 0, 14); return { x: b.x, z: b.z }; },
 });
 
 // ---- day 4 -----------------------------------------------------------------------------------------
@@ -1077,7 +1091,9 @@ async function score() {
   const pg = await br.newPage();
   pg.on('pageerror', e => log('page error:', e.message));
   pg.setDefaultTimeout(600000);
-  const src = fs.readFileSync(path.join(ROOT, 'tools/trailer-score.js'), 'utf8');
+  // (a data: module can't import by a relative path: the band it imports, client/js/western.js, goes in as one too)
+  const b64 = f => 'data:text/javascript;base64,' + Buffer.from(fs.readFileSync(path.join(ROOT, f), 'utf8')).toString('base64');
+  const src = fs.readFileSync(path.join(ROOT, 'tools/trailer-score.js'), 'utf8').replace("'../client/js/western.js'", `'${b64('client/js/western.js')}'`);
   const res = await pg.evaluate(async ([src, T, solo]) => {
     const m = await import('data:text/javascript;base64,' + btoa(unescape(encodeURIComponent(src))));
     const { ch, warn } = await m.renderScore(T, { solo });
@@ -1100,7 +1116,7 @@ const OUTLINE = '0 0 3px #000, 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000
 // top, in its colour), 'zone' (a day's name and its payment), 'end' (under the logo)
 const CARDS = {};
 const card = (id, kind, text, extra = {}) => { CARDS[id] = { kind, text, ...extra }; };
-card('c_bought', 'big', 'YOU AND THE BOYS<br>BOUGHT A $250,000 RV.');
+card('c_bought', 'big', `YOU AND THE BOYS<br>BOUGHT A $${RV_PRICE.toLocaleString('en-US')} RV.`);
 card('c_payments', 'big', 'PAYMENTS ARE DUE EVERY NIGHT.');
 card('c_jobs', 'big', 'NONE OF YOU HAVE JOBS.');
 card('c_map', 'big', 'READ THE MAP.');
@@ -1221,7 +1237,7 @@ const EDL = [
   { shot: 'campfire', secs: 1.25, from: 12, cards: [['c_jobs', 0.05, 1.25]] },
   // the verbs
   { shot: 'mapfp', secs: 1.25, from: 10, cards: [['c_map', 0.05, 1.25]], sfx: [[0.05, 'grab', 0.8]] },
-  { shot: 'dino', secs: 1.25, from: 18, cards: [['c_haul', 0.05, 1.25]], sfx: [[0.1, 'thunk:1.4', 0.8]] },
+  { shot: 'dino', secs: 1.25, align: [evIs('dmg'), 1.15], cards: [['c_haul', 0.05, 1.25]], cues: [[evIs('dmg'), 'thunk:1.4', 1.0, -0.02]] },
   { shot: 'climb', secs: 1.25, from: 10, cards: [['c_climb', 0.05, 1.25]] },
   { shot: 'winch', secs: 1.25, from: 12, cards: [['c_winch', 0.05, 1.25]], sfx: [[0.05, 'hook', 0.9]] },
   { shot: 'pawn', secs: 2.5, align: [evIs('sold'), 1.1], cards: [['c_pawn', 0.05, 2.5]], cues: [[evIs('sold'), 'bell', 0.9, -0.12], [evIs('sold'), 'kaching', 1.0, 0.08]] },
@@ -1260,8 +1276,8 @@ const EDL = [
 const MUSIC_LEVEL = 0.8, BED_LEVEL = 0.6;   // (against the sounds, which play at their reel gains)
 const BED_CUES = [
   ['fields', 0, 1.6, 0.9], ['engine', 0.6, 2.0, 0.9], ['cabin', 2.5, 2.5, 0.7], ['engine', 5.0, 1.25, 0.6], ['campfire', 6.25, 1.25, 0.8],
-  ['snow', 8.75, 1.25, 0.6], ['badlands', 10.0, 1.25, 0.6], ['engine', 15.0, 1.2, 0.7], ['meadow', 15.0, 2.6, 2.0], ['fields', 17.5, 4.0, 0.7], ['fields', 22.5, 2.5, 0.6],
-  ['engine', 25.0, 1.6, 0.7], ['night', 27.5, 2.5, 1.6], ['night', 35.0, 6.25, 0.5], ['campfire', 40.0, 1.25, 0.6],
+  ['snow', 8.75, 1.25, 0.6], ['badlands', 10.0, 2.5, 0.6], ['engine', 15.0, 1.2, 0.7], ['snow', 15.0, 2.6, 2.0], ['fields', 17.5, 4.0, 0.7], ['desert', 22.5, 2.5, 0.6],
+  ['engine', 25.0, 1.6, 0.7], ['badlands', 25.0, 2.5, 0.5], ['snow', 27.5, 2.5, 1.6], ['night', 35.0, 2.5, 0.5], ['snow', 37.5, 2.5, 0.6], ['campfire', 40.0, 1.25, 0.6],
   ['engine', 41.25, 6.25, 0.55], ['desert', 47.5, 2.5, 0.5], ['meadow', 55.0, 2.5, 2.0], ['campfire', 55.0, 2.5, 1.0],
 ];
 const ff = (...a) => execFileSync('ffmpeg', ['-y', '-loglevel', 'error', ...a], { stdio: ['ignore', 'inherit', 'inherit'] });

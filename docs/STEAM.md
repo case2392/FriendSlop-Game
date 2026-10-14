@@ -209,7 +209,7 @@ Steam's rule: the page must not name other games, or their worlds and characters
 as "a hand-painted early-2000s MMO look" and leave it there.
 
 - **Short description** (271 characters; Steam allows about 300):
-  > You and up to five friends bought a $250,000 RV with no money down. Drive it across five days of
+  > You and up to five friends bought a $30,500 RV with no money down. Drive it across five days of
   > hand-painted road, haul fragile junk to the pawn shop, bet the shared bank at the casino, and pay
   > the Repo Man by midnight, every night. Miss one payment and he takes the RV.
 - **Features:** online co-op for 1-6 players; proximity voice chat (a microphone is optional);
