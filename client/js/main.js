@@ -404,6 +404,8 @@ window.addEventListener('keydown', e => {
   if (keys[k]) return;
   keys[k] = true;
   if (S.phase === 'menu') return;
+  // the Garage holds the game's keys while it's open (it closes on G or Esc; the voice keys still work)
+  if (garageOpen() && !['g', 'escape', 'v', 't', 'm'].includes(k)) return;
   // the night's receipt (shown while the mouse is captured): any of these keys puts it away
   if (!$('receipt').classList.contains('hidden') && (k === 'e' || k === 'enter' || k === ' ' || k === 'escape')) { $('receipt').classList.add('hidden'); return; }
   if (k === 'e') onUse();
@@ -418,7 +420,7 @@ window.addEventListener('keydown', e => {
   }
   else if (k === 't') voice.setWalkieKey(true);
   else if (k === 'f1' || k === '?') { e.preventDefault(); $('help').classList.toggle('hidden'); }
-  else if (k === 'g') { if (garageOpen()) closePanel('garage'); else openPanel('garage'); }
+  else if (k === 'g' && !e.repeat) { if (garageOpen()) closePanel('garage'); else openPanel('garage'); }   // (held down: not open-then-shut)
   else if (/^[1-6]$/.test(k)) net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
   else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); }
 });
@@ -1146,8 +1148,10 @@ net.on('over', inOrder(showOver));
 // so one that arrives on a reconnect is a trip that ended while I was away)
 net.on('trip', inOrder(m => {
   const res = credit(m, { acceptTest: !!S.acceptTestRuns });
-  net.send({ t: 'tripAck', run: m.run });
-  S.lastTrip = { run: m.run, res };
+  // the server holds it till the page says it's saved (a failed write: it comes again on the next welcome)
+  res.saved.then(ok => { if (ok) net.send({ t: 'tripAck', run: m.run }); });
+  if (res.dup) return;   // (already shown: the game-over keeps its lines, see showOver)
+  S.lastTrip = { m, res };
   if (m.run === S.overRun && !$('overScreen').classList.contains('hidden')) { const el = $('overRecords'); if (el) el.innerHTML = recordLines(m, res); }
   else if (res.counted) toast(`Your last trip (${m.won ? 'paid off' : 'repo\'d'}) is in your Logbook${res.newRecords.length ? ': a new record!' : '.'} (G)`, '#ffd166', 6);
 }));
@@ -1322,7 +1326,7 @@ function showOver(m) {
     ${s.beanings ? `<div class="rrow"><span>Friends beaned</span><b>${s.beanings}</b></div>` : ''}
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
-    <div id="overRecords"></div>
+    <div id="overRecords">${S.lastTrip?.m.run === S.overRun && S.overRun ? recordLines(S.lastTrip.m, S.lastTrip.res) : ''}</div>
     ${practice}
     <p class="hint" id="overNext"></p>
     <div class="row"><button class="btn small pink" id="overLeave">Leave Trip</button></div>`;

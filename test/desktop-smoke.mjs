@@ -96,13 +96,14 @@ try {
   const saveDir = path.join(udHost, 'save'), saved = f => path.join(saveDir, f);
   const made = await until(() => fs.existsSync(saved('profile.json')), 10000);
   const pid1 = made ? JSON.parse(fs.readFileSync(saved('profile.json'), 'utf8')).pid : null;
-  const imp = await page.evaluate(() => {
+  const imp = await page.evaluate(async () => {
     document.getElementById('garageBtn').click();
     document.querySelector('#garage .gtab[data-tab="save"]').click();
     const where = document.getElementById('garageBody').textContent;
     document.getElementById('gxExport').click();
     document.getElementById('gxIn').value = document.getElementById('gxOut').value;
     document.getElementById('gxImport').click();
+    await new Promise(r => setTimeout(r, 500));   // (Import waits for the shell's write)
     document.getElementById('garageClose').click();
     return { pid: window.__nmd.profile().pid, st: window.__nmd.profileStatus().status, where: /On this PC/.test(where) };
   });

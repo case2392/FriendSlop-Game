@@ -80,8 +80,8 @@ function render() {
     const done = await (navigator.clipboard?.writeText($('gxOut').value).then(() => true, () => false) ?? false);
     if (!done) document.execCommand?.('copy');
   };
-  if ($('gxImport')) $('gxImport').onclick = () => {
-    const r = importCode($('gxIn').value);
+  if ($('gxImport')) $('gxImport').onclick = async () => {
+    const r = await importCode($('gxIn').value);
     if (!r.ok) { $('gxMsg').textContent = r.msg; return; }
     tab = 'log'; render();
   };

@@ -104,7 +104,9 @@ export function parse(text) {
   if (!isObj(o)) return { prof: null, status: 'corrupt' };
   if (toNum(o.v) > PROFILE_V) return { prof: validate(o), status: 'newer' };
   const { sum, ...rest } = o;
-  if (typeof sum !== 'string' || fnv1a(JSON.stringify(rest)) !== sum) return { prof: null, status: 'corrupt' };
+  let ok = false;
+  try { ok = typeof sum === 'string' && fnv1a(JSON.stringify(rest)) === sum; } catch {}   // (thousands of brackets deep: too deep to sum)
+  if (!ok) return { prof: null, status: 'corrupt' };
   const prof = validate(rest);
   return prof.pid ? { prof, status: 'ok' } : { prof: null, status: 'corrupt' };
 }

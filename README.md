@@ -15,7 +15,7 @@ payment and he takes the RV.
 | | |
 |---|---|
 | ![the crew at camp](docs/screenshots/camp.jpg) | ![winching the RV up a washed-out grade](docs/screenshots/winch.jpg) |
-| **Morning camp.** The clock doesn't start until the RV rolls out. | **The Grade.** Too steep to drive. Somebody climbs up with the winch hook. |
+| **Morning camp.** The clock doesn't start until the RV rolls out (or somebody wanders off down the road). | **The Grade.** Too steep to drive. Somebody climbs up with the winch hook. |
 | ![climbing a canyon wall](docs/screenshots/climbing.jpg) | ![the code painted on the canyon rim](docs/screenshots/rim-code.jpg) |
 | **Climb anything steep**, on a stamina bar (PEAK rules). | **The ranger gate code** is painted up on the rim. Shout it down. |
 | ![carrying a CRT TV](docs/screenshots/carrying.jpg) | ![the paper road map](docs/screenshots/map.jpg) |
@@ -279,7 +279,7 @@ npm test
   get into the text players can see (the store and the Steam agreement need
   everything shipped to be ours).
 - `test/logic.mjs` plays a whole run over real WebSockets with two fake
-  players and real physics (60 checks). It drives, carries and throws a vase
+  players and real physics (71 checks). It drives, carries and throws a vase
   (it chips), cracks the ranger gate, winches the RV up the grade, pawns a
   TV, wins or loses blackjack by standing on a pad, flips double-or-nothing,
   buys a walkie, pays the Repo Man, sleeps into day 2, gets billed for a KO,
@@ -289,7 +289,7 @@ npm test
   misbehave: kept seats, malformed frames, floods, a different build, silent
   connections, the goodbye when the server shuts down; and every trip's
   summary reaching whoever was on it (held for a dropped player till they're
-  back), and what counts as practice.
+  back, and only for who rode), and what counts as practice.
 - `test/rv.mjs` checks the RV's condition in process: what a crash costs and
   what must never count as one (keyboard driving, a handbrake stop with safes
   aboard, teleports, the tow off a steep bank, the winch), the winch hauling

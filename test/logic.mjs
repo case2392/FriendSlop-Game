@@ -268,14 +268,19 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   const SV = createRequire(import.meta.url)('../desktop/save.cjs');
   const dir = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'nmd-save-')), 'save');
   const none = SV.readSave(dir);
-  SV.writeSave(dir, 'one'); SV.writeSave(dir, 'two');
+  const ONE = '{"n":1}', TWO = '{"n":2}', THREE = '{"n":3}';
+  SV.writeSave(dir, ONE); SV.writeSave(dir, TWO);
   const two = SV.readSave(dir), listed = fs.readdirSync(dir).sort().join(',');
   for (let i = 0; i < 5; i++) { fs.writeFileSync(path.join(dir, 'profile.json'), `bad${i}`); SV.quarantineSave(dir, 1000 + i); }
   const kept = fs.readdirSync(path.join(dir, 'corrupt')).sort().join(','), after = SV.readSave(dir);
   const big = SV.writeSave(dir, 'x'.repeat(SV.SAVE_MAX + 1));
-  check(none.text === null && two.text === 'two' && two.bak === 'one' && listed === 'profile.bak.json,profile.json' && kept === 'profile-1002.json,profile-1003.json,profile-1004.json' && after.text === null && after.bak === 'one' && !big.ok,
-    `desktop save: written atomically with the last one as the backup (no .tmp left: ${listed}), an unreadable one kept aside (the last 3: ${kept}), a save too big refused`);
-  const env = { FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1', FRIENDSLOP_NOMOBS: '1', PATH: '/bin' };
+  fs.writeFileSync(path.join(dir, 'profile.json'), 'garbage');   // (one that doesn't read doesn't push out the backup)
+  SV.writeSave(dir, THREE);
+  const three = SV.readSave(dir);
+  check(none.text === null && two.text === TWO && two.bak === ONE && listed === 'profile.bak.json,profile.json' && kept === 'profile-1002.json,profile-1003.json,profile-1004.json' && after.text === null && after.bak === ONE && !big.ok
+    && three.text === THREE && three.bak === ONE,
+    `desktop save: written atomically with the last one as the backup (no .tmp left: ${listed}), an unreadable one kept aside (the last 3: ${kept}) and never made the backup, a save too big refused`);
+  const env = { FRIENDSLOP_TEST: '1', FRIENDSLOP_FAST: '1', friendslop_nomobs: '1', PATH: '/bin' };
   check(Object.keys(SV.serverEnv(env, true)).join() === 'PATH' && Object.keys(SV.serverEnv(env, false)).length === 4,
     'desktop save: a packaged game\'s server never takes FRIENDSLOP_* test switches from its environment (an unpackaged one does, for the tests)');
 }

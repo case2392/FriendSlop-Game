@@ -576,7 +576,8 @@ try {
     // a reload (the menu): still there; Export, then Import that code: the same save; a garbled code is refused
     await host.reload();
     await host.waitForFunction(() => window.__nmd && document.getElementById('garageBtn'), null, { timeout: 120000 });
-    const io = await host.evaluate(() => {
+    const io = await host.evaluate(async () => {
+      const tick = () => new Promise(r => setTimeout(r, 50));   // (Import is async: it waits for the write)
       document.getElementById('garageBtn').click();
       const kept = /Fastest payoff\s*(\d+:\d\d)/.exec(document.getElementById('garageBody').textContent)?.[1];
       document.querySelector('#garage .gtab[data-tab="save"]').click();
@@ -584,10 +585,12 @@ try {
       const code = document.getElementById('gxOut').value;
       document.getElementById('gxIn').value = code.slice(0, 40);
       document.getElementById('gxImport').click();
+      await tick();
       const refused = document.getElementById('gxMsg')?.textContent || '';
       const before = localStorage.getItem('nmdProfile');
       document.getElementById('gxIn').value = code;
       document.getElementById('gxImport').click();
+      await tick();
       const after = JSON.parse(localStorage.getItem('nmdProfile')), was = JSON.parse(before);
       const same = after.pid === was.pid && JSON.stringify(after.best) === JSON.stringify(was.best) && JSON.stringify(after.runs) === JSON.stringify(was.runs);
       const back = /Fastest payoff/.test(document.getElementById('garageBody').textContent);

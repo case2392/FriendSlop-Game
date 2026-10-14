@@ -201,7 +201,9 @@ A run is **5 days**, about 60–90 minutes. Each day has three phases:
 - **The clock is the pressure.** One game hour is 45 real seconds, so a day
   from 06:00 to midnight takes 13.5 minutes. Arrive at 17:00 and you get
   7 hours (about 5 minutes) of casino. Arrive at 23:00 and you're paying the
-  Repo Man with whatever you scavenged.
+  Repo Man with whatever you scavenged. The clock waits in camp until the RV
+  rolls out, or until someone sets off down the road on foot (30 m past the
+  camp's exit for 2 seconds): no walking to town on camp's frozen clock.
 - **Arriving early is a choice.** You can pay at the tow truck and leave,
   which ends the day early and safely. Or you can stay and gamble the
   surplus until midnight. That's push-your-luck.

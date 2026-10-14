@@ -13,6 +13,8 @@ const DESK = window.desktop?.profile || null;
 // the backup), 'reset' (the save and its backup were unreadable: started over, the bad one kept aside),
 // 'newer' (from a later version of the game: shown, never written), 'nostore' (this window can't keep one)
 let prof = null, status = 'fresh', readOnly = false, lastError = '';
+let unsaved = false;     // the last write failed: the next trip summary (even one already counted) writes again
+let newerText = null;    // a save from a later version, exactly as read (Export hands that out, not our cut of it)
 
 const randHex = n => {
   const a = new Uint8Array(n / 2);
@@ -22,6 +24,7 @@ const randHex = n => {
 const ls = {
   get: k => { try { return localStorage.getItem(k); } catch { return undefined; } },
   set: (k, v) => { try { localStorage.setItem(k, v); return true; } catch { return false; } },
+  del: k => { try { localStorage.removeItem(k); } catch {} },
 };
 
 function load() {
@@ -30,12 +33,12 @@ function load() {
   if (mainText === undefined) { prof = fresh(randHex(16), Date.now()); status = 'nostore'; return; }
   const main = parse(mainText);
   if (main.status === 'ok') { prof = main.prof; status = 'ok'; return; }
-  if (main.status === 'newer') { prof = main.prof; status = 'newer'; readOnly = true; if (!isPid(prof.pid)) prof.pid = randHex(16); return; }
+  if (main.status === 'newer') { prof = main.prof; status = 'newer'; readOnly = true; newerText = mainText; if (!isPid(prof.pid)) prof.pid = randHex(16); return; }
   const bak = parse(DESK ? boot?.bak ?? null : ls.get(BAK));
   if (main.status === 'corrupt') {
     // the bad one is kept aside (the desktop shell moves it into save/corrupt)
     if (DESK) DESK.quarantine?.().catch?.(() => {});
-    else ls.set(BAD, mainText);
+    else { ls.set(BAD, mainText); ls.del(KEY); }   // (so the write below doesn't make it the backup)
   }
   if (bak.status === 'ok') { prof = bak.prof; status = main.status === 'corrupt' ? 'bak' : 'ok'; save(); return; }
   prof = fresh(randHex(16), Date.now());
@@ -43,20 +46,24 @@ function load() {
   save();   // (the profile id has to last: a trip's summary finds its player by it)
 }
 
-// write it (never a save from a newer version); false if it couldn't be
+// write it (never a save from a newer version) -> a promise of whether it's on the disk (or in the browser's
+// storage) now
 export function save() {
-  if (readOnly || !prof) return false;
+  if (readOnly || !prof) return Promise.resolve(false);
   prof.saved = Date.now(); prof.rev++;
   const text = serialize(prof);
-  if (text.length > MAX_BYTES) { lastError = 'too big'; return false; }
+  const done = ok => { unsaved = !ok; if (ok) lastError = ''; else console.warn('profile not saved:', lastError); return ok; };
+  if (text.length > MAX_BYTES) { lastError = 'too big'; return Promise.resolve(done(false)); }
   if (DESK) {
-    DESK.save(text).then(r => { if (r && r.ok === false) { lastError = r.msg || 'not saved'; console.warn('profile not saved:', lastError); } }, e => { lastError = e.message; });
-    return true;
+    return DESK.save(text).then(r => {
+      if (r && r.ok === false) lastError = r.msg || 'not saved';
+      return done(!(r && r.ok === false));
+    }, e => { lastError = e?.message || 'not saved'; return done(false); });
   }
   const old = ls.get(KEY);
   if (old) ls.set(BAK, old);
-  if (!ls.set(KEY, text)) { lastError = 'storage full or blocked'; status = 'nostore'; return false; }
-  return true;
+  if (!ls.set(KEY, text)) { lastError = 'storage full or blocked'; status = 'nostore'; return Promise.resolve(done(false)); }
+  return Promise.resolve(done(true));
 }
 
 export const profile = () => prof;
@@ -65,22 +72,24 @@ export const profileStatus = () => ({ status, readOnly, error: lastError, deskto
 export const forServer = () => ({ v: PROFILE_V, pid: prof.pid, wins: prof.life.wins });
 
 // a trip's summary from the server: into the save. Returns creditTrip's answer ({ counted, dup, newRecords })
+// and saved: a promise of whether the save has it now (the page tells the server it has the summary only then)
 export function credit(trip, { acceptTest = false } = {}) {
-  if (readOnly) return { counted: false, dup: false, newRecords: [] };
+  if (readOnly) return { counted: false, dup: false, newRecords: [], saved: Promise.resolve(true) };
   const r = creditTrip(prof, trip, { acceptTest, now: Date.now() });
-  if (r.counted) save();
+  // (one already counted whose write failed: it's in the save in memory, this writes it again)
+  r.saved = r.counted || unsaved ? save() : Promise.resolve(true);
   return r;
 }
 
 // Export / Import: the whole save as one line of text to copy and paste (base64 of what's on disk)
 export function exportCode() {
-  const bytes = new TextEncoder().encode(serialize(prof));
+  const bytes = new TextEncoder().encode(status === 'newer' && newerText ? newerText : serialize(prof));
   let bin = '';
   for (const b of bytes) bin += String.fromCharCode(b);
   return 'NMD1.' + btoa(bin);
 }
-// -> { ok, msg }: a pasted code replaces this save (the old one stays as the backup)
-export function importCode(code) {
+// -> a promise of { ok, msg }: a pasted code replaces this save (the old one stays as the backup)
+export async function importCode(code) {
   const s = String(code || '').trim().replace(/\s+/g, '');
   if (!s.startsWith('NMD1.')) return { ok: false, msg: 'That isn\'t a save code. It starts with NMD1.' };
   let text;
@@ -91,7 +100,7 @@ export function importCode(code) {
   if (r.status !== 'ok') return { ok: false, msg: 'That code is cut short or garbled. Copy all of it.' };
   if (readOnly) return { ok: false, msg: 'This save is from a newer version of the game: update the game first.' };
   prof = validate(r.prof);
-  if (!save()) return { ok: false, msg: 'This window can\'t keep a save.' };
+  if (!(await save())) return { ok: false, msg: DESK ? `It couldn't be saved (${lastError}).` : 'This window can\'t keep a save.' };
   status = 'ok';
   return { ok: true, msg: 'Save imported.' };
 }

@@ -35,6 +35,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
 const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
+const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
 // a number from a client: finite and within +-lim, or 0
 const num = (v, lim) => { const x = +v; return Number.isFinite(x) ? Math.max(-lim, Math.min(lim, x)) : 0; };
 
@@ -100,6 +101,7 @@ export class Room {
     this.loanAdd = 0;
     this.rvc.inc = null; this.rvc.brokeN = 0; this.rvc.fix = 0; this.rvc.gusAsk = {};
     this.inTown = false;
+    this.walkT = 0;
     this.flippedT = 0;
     this.nightAt = 0;
     this.dayStats = { sold: 0, bills: 0, broken: 0, gamble: 0, stolen: 0, recovered: 0, rv: { dmg: 0, src: {}, cash: 0, loan: 0 } };
@@ -142,7 +144,7 @@ export class Room {
     this.over = { won, at: this.t, day: Math.min(this.day, C.DAYS), due: this.due, short };
     this.run = this.buildRun(won);
     this.broadcast(this.overMsg());
-    for (const e of this.roster.values()) this.queueTrip(e, this.tripMsg(e));
+    for (const e of this.roster.values()) if (e.rode) this.queueTrip(e, this.tripMsg(e));   // (never on the road: nothing to tell)
     this.sendMeta();
   }
 
@@ -196,18 +198,20 @@ export class Room {
   setProfile(p, prof, { resumed = false } = {}) {
     if (resumed && p.pid) return;
     let pid = prof && isPid(prof.pid) ? prof.pid : 'k:' + fnv1a(String(p.key || p.id));
-    // (two pages on one browser share a save: the second is known by its key)
-    if ([...this.players.values()].some(q => q !== p && q.pid === pid)) pid = 'k:' + fnv1a(String(p.key || p.id));
+    // (two pages on one browser share a save: the second is known by its key. A seat kept for someone who
+    // dropped doesn't count: that's them coming back in a new tab, and it's the same trip for them)
+    if ([...this.players.values()].some(q => q !== p && q.connected && q.pid === pid)) pid = 'k:' + fnv1a(String(p.key || p.id));
     p.pid = pid;
-    const w = Math.round(Number(prof?.wins));
+    const v = prof?.wins, w = Math.round(typeof v === 'number' ? v : typeof v === 'string' && v.trim() !== '' ? Number(v) : NaN);
     p.wins = Number.isFinite(w) ? Math.max(0, Math.min(100000, w)) : 0;
   }
   // on the trip's roster (by profile id): aboard now, and what they did on it
   enroll(p) {
     if (!p.pid) this.setProfile(p, null);
     let e = this.roster.get(p.pid);
-    if (!e) this.roster.set(p.pid, e = { pid: p.pid, h: fnv1a(p.pid), name: p.name, fromStart: false, here: true, kos: 0, revives: 0, rvDmg: 0 });
+    if (!e) this.roster.set(p.pid, e = { pid: p.pid, h: fnv1a(p.pid), name: p.name, fromStart: false, here: true, rode: false, kos: 0, revives: 0, rvDmg: 0 });
     e.name = p.name; e.here = true;
+    if (this.phase === 'road' && p.connected) e.rode = true;
     return e;
   }
   entry(p) { return p ? this.roster.get(p.pid) : null; }
@@ -216,6 +220,15 @@ export class Room {
     this.departed = true;
     for (const p of this.players.values()) { const e = this.entry(p) || this.enroll(p); e.fromStart = true; }
   }
+  // someone on foot well down the road from camp, for 2 s (not a pose sent before this morning's teleport)
+  walkedOut(dt) {
+    const z = this.W.camp.exitZ + WALK_OUT;
+    const p = [...this.players.values()].find(q => q.connected && (q.ready || !q.rdy) && !q.par && q.pos && q.pos.z > z);
+    this.walkT = p ? (this.walkT || 0) + dt : 0;
+    return this.walkT > 2 ? p : null;
+  }
+  // the day's road begins: whoever is here rode on this trip (a trip summary is only for them)
+  ride() { for (const p of this.players.values()) if (p.connected) (this.entry(p) || this.enroll(p)).rode = true; }
 
   worldMsg() {
     return { t: 'world', seed: this.seed, day: this.day, door: this.sim.doorOpen };
@@ -258,6 +271,7 @@ export class Room {
     this.players.delete(id);
     const e = this.entry(p);
     if (e && ![...this.players.values()].some(q => q.pid === p.pid)) e.here = false;   // (off the trip: not aboard at the end)
+    if (e && why === 'left') e.fromStart = false;   // (they chose to go: coming back later isn't the whole trip)
     if (this.hostId === id) this.hostId = [...this.players.values()].find(q => q.connected)?.id ?? null;
     if (this.players.size === 0) { this.closed = true; return; }
     if (why === 'left') this.toast(`${p.name} left the trip.`, '#ffb4a2', 4);
@@ -1110,11 +1124,15 @@ export class Room {
     } else this.hookedT = 0;
 
     const rvp = sim.rv.translation();
-    if (this.phase === 'camp' && rvp.z > this.W.camp.exitZ) {
+    // the day starts when the RV leaves camp, or when someone sets off down the road on foot (camp's clock
+    // waits for the crew to get going; it doesn't wait while someone walks to town)
+    const walker = this.phase === 'camp' ? this.walkedOut(dt) : null;
+    if (this.phase === 'camp' && (rvp.z > this.W.camp.exitZ || walker)) {
       this.phase = 'road';
       this.countJob('drv', this.roles.drv); this.countJob('nav', this.roles.nav);   // locked now: counted
       if (this.day === 1 && !this.departed) this.depart();
-      this.toast(`ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
+      this.ride();
+      this.toast(walker ? `${walker.name} set off on foot, so the day has started: ${fmt$(this.due)} due at midnight.` : `ON THE ROAD. ${fmt$(this.due)} due at midnight. Town is ${this.W.LEN} m out.`, '#ffd166', 6);
     }
     if (this.phase === 'road') {
       // the wildlife: today's cast, sized for the crew that's here as the road begins
