@@ -1099,6 +1099,10 @@ function onMeta(m) {
   // my kit as the host's server has it (the Garage's perks: shared/garage.js), and the RV's fitted parts
   if (mine) { S.myKit = mine.kit || null; me.mods = kitMods(S.myKit); }
   rvView?.setParts(m.trip?.parts || {});
+  // the loan terms: the trip leader can ask for Standard in day-1 camp (a crew of veterans is on Bad Credit)
+  const termsBtn = $('ctpTerms'), canAsk = m.host === S.selfId && !!m.trip?.kitOpen && S.g?.ph !== 'over' && (m.trip.tier === 'bad' || m.trip.askStd);
+  termsBtn.classList.toggle('hidden', !canAsk);
+  termsBtn.textContent = m.trip?.askStd ? 'Back to Bad Credit terms' : 'Ask for Standard terms';
   // paint other players' looks while the browser is idle, so someone joining mid-game doesn't stall a frame
   const idle = window.requestIdleCallback || (f => setTimeout(f, 30));
   for (const p of m.players) {
@@ -1362,6 +1366,7 @@ function showOver(m) {
     ${s.beanings ? `<div class="rrow"><span>Friends beaned</span><b>${s.beanings}</b></div>` : ''}
     ${s.bestWin ? `<div class="rrow good"><span>Best bet</span><b>${escapeHtml(s.bestWin.name || 'the crew')} +${fmt$(s.bestWin.amt)} (${s.bestWin.game})</b></div>` : ''}
     ${s.worstLoss ? `<div class="rrow bad"><span>Worst bet</span><b>${escapeHtml(s.worstLoss.name || 'the crew')} ${fmt$(s.worstLoss.amt)} (${s.worstLoss.game})</b></div>` : ''}
+    ${m.run?.tier === 'bad' ? '<div class="rrow bad"><span>Loan terms</span><b>BAD CREDIT (payments +15%)</b></div>' : ''}
     <div id="overRecords">${S.lastTrip?.m.run === S.overRun && S.overRun ? recordLines(S.lastTrip.m, S.lastTrip.res) : ''}</div>
     ${practice}
     <p class="hint" id="overNext"></p>
@@ -1605,6 +1610,7 @@ function closePanel(id) {
 $('settingsBtn').onclick = () => { sfx.click(); openPanel('settings'); };
 $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
 $('ctpGarage').onclick = () => openPanel('garage');
+$('ctpTerms').onclick = () => { sfx.click(); net.send({ t: 'terms', std: !S.meta?.trip?.askStd }); };
 $('garageClose').onclick = () => closePanel('garage');
 initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [], kitOpen: () => !S.meta || !!S.meta.trip?.kitOpen, onKit: sendKit });
 // my kit to the host's server (it takes it in camp on day 1 and during the game-over; otherwise it says so)
@@ -2298,6 +2304,9 @@ function questTracker(g) {
     else if (pr === 'test') L.push(['Test trip: nothing is recorded', 'warn']);
     const crew = crewBest(profile(), (S.meta?.players || []).map(p => p.h).filter(Boolean));
     if (crew && !pr) L.push([`Best with this crew: ${crew.fast != null ? fmtRoad(crew.fast) : `${crew.wins}/${crew.trips} paid off`}${crew.haul != null ? `, ${fmt$(crew.haul)} pawned` : ''}`, '']);
+    const terms = S.meta?.trip?.tier;
+    if (terms === 'bad') L.push([`Loan terms: BAD CREDIT. Everyone here has paid off an RV twice. Payments +15%${S.meta.host === S.selfId ? ' (Esc: ask for Standard)' : ''}`, 'warn']);
+    else if (S.meta?.trip?.askStd) L.push(['Loan terms: Standard, as the trip leader asked. No rare cards drop', '']);
     const kit = kitLine(S.myKit);
     if (kit) L.push([keysIn(`${kit}. Change it in the Garage [G] till the RV leaves`), '']);
   }

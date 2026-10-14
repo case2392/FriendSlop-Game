@@ -94,12 +94,15 @@ export class Room {
     this.over = null;
     this.jobs = new Map();           // id -> { drv, nav }: the days each has driven and navigated this trip
     this.glovebox = [];              // [{ cards, kind, day, by, aboard }]: what's been stowed this trip
+    this.terms = 'std';              // the loan terms ('std' | 'bad'): settled in day-1 camp, locked as the RV leaves
+    this.askStd = false;             // the trip leader asked for Standard terms
     // the RV's parts (shared/garage.js): none till it leaves camp on day 1, then the best each kind among
     // everyone aboard, for the whole trip
     this.fit = { parts: {}, by: {}, spares: [] };
     this.partMods = partMods(null);
     for (const p of this.players.values()) this.enroll(p);   // (aboard as this trip begins)
     this.startDay([]);
+    this.settleTerms();
   }
 
   startDay(carry) {
@@ -112,7 +115,7 @@ export class Room {
     this.phase = 'camp';
     this.clock = C.DAY_START;
     this.paid = false;
-    this.due = C.QUOTAS[this.day - 1] + this.loanAdd;   // (Gus's repairs on the loan)
+    this.due = C.dueOn(this.day, this.tier()) + this.loanAdd;   // (Gus's repairs on the loan)
     this.loanAdd = 0;
     this.rvc.inc = null; this.rvc.brokeN = 0; this.rvc.fix = 0; this.rvc.gusAsk = {};
     this.inTown = false;
@@ -227,6 +230,31 @@ export class Room {
     const e = this.roster.get(pid);
     this.setKit(p, this.kitLocked() && e?.kit ? e.kit : clampKit(prof?.kit));
   }
+  // ---- the loan terms ------------------------------------------------------------------------------
+  // BAD CREDIT is the default for a crew made only of veterans: everyone here with C.BAD.WINS or more kept wins
+  // (self-reported by their saves). A newcomer aboard keeps it Standard, and so does the trip leader asking for
+  // it. Settled in day-1 camp on every arrival, departure and ask (the day's payment with it); locked as the RV
+  // leaves camp (a newcomer joining after that changes nothing)
+  crewTier() {
+    const here = [...this.players.values()].filter(p => p.connected);
+    return !this.askStd && here.length > 0 && here.every(p => (p.wins || 0) >= C.BAD.WINS) ? 'bad' : 'std';
+  }
+  settleTerms() {
+    if (this.departed || this.day !== 1 || this.phase !== 'camp') return;
+    const t = this.crewTier();
+    if (t === this.terms) return;
+    this.terms = t;
+    this.due = C.dueOn(1, t);   // (no loan yet on day 1)
+    this.toast(t === 'bad' ? `Loan terms: BAD CREDIT. Everyone here has paid off an RV twice. Payments +15% (${fmt$(this.due)} today).` : `Loan terms: Standard. ${fmt$(this.due)} due today.`, '#ffd166', 6);
+  }
+  // the leader's Esc card: 'Ask for Standard terms' (then no rare cards drop), or back to what the crew gets
+  onTerms(p, m) {
+    if (p.id !== this.hostId || this.departed || this.day !== 1 || this.phase !== 'camp') return;
+    this.askStd = !!m.std;
+    this.settleTerms();
+    this.sendMeta();
+  }
+
   // ---- the Garage's kits (shared/garage.js) ------------------------------------------------------
   // a kit can change in camp on day 1 till the RV leaves, and during the game-over (for the next trip)
   kitLocked() { return this.departed && this.phase !== 'over'; }
@@ -322,6 +350,7 @@ export class Room {
     if (e && why === 'left') e.fromStart = false;   // (they chose to go: coming back later isn't the whole trip)
     if (this.hostId === id) this.hostId = [...this.players.values()].find(q => q.connected)?.id ?? null;
     if (this.players.size === 0) { this.closed = true; return; }
+    this.settleTerms();
     if (why === 'left') this.toast(`${p.name} left the trip.`, '#ffb4a2', 4);
     else if (why === 'expired' && p.heldAt != null) this.toast(`${p.name} didn't make it back. Their seat is free.`, '#ffb4a2', 4);
     if (roles) this.checkRoles();
@@ -402,6 +431,7 @@ export class Room {
     if (this.phase === 'over' && this.over) this.send(p, this.overMsg());
     // (during the game-over they weren't on the trip that ended: the next one is theirs)
     if (this.phase !== 'over') this.enroll(p);
+    this.settleTerms();
     this.send(p, { t: 'glovebox', list: this.gloveList() });
     this.deliver(p);
     this.checkRoles();
@@ -545,7 +575,7 @@ export class Room {
       players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
       // the trip: practice or not (what it records), and whose summary is still waiting for them
-      trip: { practice: this.practice(), pending: this.undelivered(), parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
+      trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
     });
   }
 
@@ -578,6 +608,7 @@ export class Room {
         return;
       case 'use': return this.onUse(p, m);
       case 'kit': return this.onKit(p, m);
+      case 'terms': return this.onTerms(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       // holding E at the engine hatch of a broken-down RV, or letting go (fixStep does the work)
       case 'fix': p.activeAt = this.t; p.fixing = !!m.on; return;
@@ -633,7 +664,7 @@ export class Room {
     // the wildlife: one critter where you say (its 'spawn' event goes out with the tick's events); the day's
     // cast on or off (off also clears whatever is out); a critter's state forced
     else if (m.op === 'mob') {
-      const mb = sim.ensureMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed }).spawn(String(m.type), +m.x, +m.z, { yaw: +m.yaw || 0, y: m.y != null ? +m.y : null, st: m.st != null ? +m.st | 0 : 0 });
+      const mb = sim.ensureMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed, tier: this.tier() }).spawn(String(m.type), +m.x, +m.z, { yaw: +m.yaw || 0, y: m.y != null ? +m.y : null, st: m.st != null ? +m.st | 0 : 0 });
       this.send(p, { t: 'dbg', op: 'mob', id: mb?.id ?? null });
     }
     else if (m.op === 'mobs') {
@@ -978,7 +1009,7 @@ export class Room {
     const q = C.repairQuote(this.day, R.hp), S = this.stats.rv, D = this.dayStats.rv;
     let paidHow;
     if (how === 'loan') {
-      const next = C.QUOTAS[this.day] + this.loanAdd, A = R.gusAsk[p.id];
+      const next = C.dueOn(this.day + 1, this.tier()) + this.loanAdd, A = R.gusAsk[p.id];
       // (night 4: each presser has their own ask, and it signs only the balloon they were told: if somebody
       // signed since, or the price moved, it asks afresh)
       if (this.day === C.DAYS - 1 && (!A || A.due !== next + q.loan || this.t - A.at > C.RVH.LOAN_CONFIRM)) {
@@ -1095,7 +1126,7 @@ export class Room {
 
   // the RV parked in Ed's loading zone, stopped: his bell buys its load too
   // ---- Road Cards ----------------------------------------------------------------------------------
-  tier() { return 'std'; }   // (the loan terms: Bad Credit's rare cards come with its PR)
+  tier() { return this.terms; }
   // into the glovebox: these cards, with everyone aboard right now (here, or their seat kept) on the list
   stow(cards, kind, by) {
     const g = { cards, kind, day: this.day, by, aboard: [...new Set([...this.players.values()].map(p => p.pid).filter(Boolean))] };
@@ -1239,7 +1270,7 @@ export class Room {
     }
     if (this.phase === 'road') {
       // the wildlife: today's cast, sized for the crew that's here as the road begins
-      if (this.mobsOn && !sim.mobsDone && !sim.mobs?.started) sim.startMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed });
+      if (this.mobsOn && !sim.mobsDone && !sim.mobs?.started) sim.startMobs({ day: this.day, crew: this.liveCrew(), seed: this.seed, tier: this.tier() });
       this.clock += dt / C.HOUR_SEC;
       if (!this.inTown && rvp.z > this.W.LEN - 8) {
         this.inTown = true;
@@ -1421,7 +1452,7 @@ export class Room {
       ...(this.rvc.hp <= 0 ? { brk: 1 } : {}),
       ...(this.rvc.fix > 0 ? { fix: Math.round(this.rvc.fix * 100) } : {}),
       ...(sim.t < sim.rvMods.stallUntil ? { stl: 1 } : {}),   // (limping, a knock has the engine stalled for a moment)
-      ...(this.loanAdd > 0 ? { nxt: (C.QUOTAS[this.day] ?? 0) + this.loanAdd } : {}),
+      ...(this.loanAdd > 0 ? { nxt: (this.day < C.DAYS ? C.dueOn(this.day + 1, this.tier()) : 0) + this.loanAdd } : {}),
     };
   }
 
