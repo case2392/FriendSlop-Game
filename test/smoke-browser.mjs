@@ -228,6 +228,8 @@ try {
   await rolesNow(ids.dave, ids.steve);
   await joiner.evaluate(() => { window.__nmd.me.yaw += 0.2; });   // (Dave looks around: here, not away, so nobody stands in)
   await host.waitForFunction(id => window.__nmd.meta?.roles?.nav === id && !window.__nmd.meta.roles.drvAway, ids.steve, { timeout: 24000 });
+  // (the drive slid the map off the dash somewhere in the cab, a different place each run: put it back)
+  await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'mapHome' }));
   await host.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.1, y: 0.1, z: 2.25 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); });
   await wait(host, 900);
   const aimAtMap = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
@@ -589,6 +591,7 @@ try {
     await joiner.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 24000 });
     const drv = await joiner.evaluate(() => window.__nmd.selfId);
     await host.waitForFunction(id => window.__nmd.g?.drv === id, drv, { timeout: 24000 });
+    await host.evaluate(() => window.__nmd.send({ t: 'dbg', op: 'mapHome' }));
     await host.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.1, y: 0.1, z: 2.25 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); });
     await wait(host, 900);
     await aimAtMap();

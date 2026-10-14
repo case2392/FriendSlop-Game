@@ -430,6 +430,16 @@ played. Real crews will haul more where they range further and less where they
 argue. Playtests decide (confidence that a practiced human crew out-hauls the
 bot: moderate; by how much: low).
 
+On **Bad Credit** (payments +15%, tougher wildlife: veteran crews) the same
+bold crew on the same 20 seeds (`econbot --tier bad --casino bold`) paid day 4
+on 14 of the 19 trips that reached it (Standard: 18 of 19) and reached day 5
+on 14 (Standard: 18): the 15% bites where it should. It paid the balloon on 4
+of 20 (Standard: 2 of 20), but twenty seeds can't tell those apart (95%
+intervals of about 8-42% and 3-30%): Bad Credit doesn't shut a bold crew out,
+and the casino's swings swamp the rest. The bot barely meets the tougher
+wildlife (ringtails stole nothing from it on either terms), so for human crews
+Bad Credit will cost more (confidence: moderate).
+
 - Every casino game has a house edge (blackjack about 1–2% played sensibly,
   craps 1.4%, the coin flip 3%, a Derby ticket 5%). The casino is variance you
   choose, never free money.
