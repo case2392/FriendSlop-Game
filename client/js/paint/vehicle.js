@@ -1673,6 +1673,54 @@ register('rv_snow', {
   },
 });
 
+// dents, scrapes and rust over the lower body, in three steps by alpha (rv3d.js shows more steps by lowering its
+// alpha test as the RV wears down: 1.0 the first knocks, 0.66 a battered RV, 0.33 a wreck). The same layout as
+// rv_grime: the sides on top (u along the body, front of the door side first), the ends below
+register('rv_dents', {
+  family: F, w: 1024, h: 256, alpha: true, note: 'dents and scrapes overlay in three alpha steps: sides (top), ends (bottom)',
+  paint(g, W, rnd, H) {
+    g.clearRect(0, 0, W, H);
+    const RH = H / 2;
+    // one dent: a crumpled hollow (dark at its deep side, a lit lip on the other), creases running off
+    // it, paint flaked off its rim, scrapes trailing it; rust in it once it's old
+    const dent = (c, x, y, s, rusty) => {
+      const rot = range(rnd, -0.5, 0.5);
+      blob(c, x, y, s * 1.25, s * 0.8, rot, '#4a3a2e', 0.9, 0.45);
+      blob(c, x - s * 0.25, y + s * 0.18, s * 0.8, s * 0.45, rot, '#241a14', 0.85, 0.5);
+      blob(c, x + s * 0.4, y - s * 0.3, s * 0.7, s * 0.22, rot, '#e8dcc0', 0.75, 0.6);
+      for (let k = 0; k < 3 + rnd() * 3; k++) {
+        const a = rnd() * TAU, L = s * range(rnd, 0.8, 1.8);
+        line(c, [[x + Math.cos(a) * s * 0.5, y + Math.sin(a) * s * 0.35], [x + Math.cos(a) * L, y + Math.sin(a) * L * 0.6]], range(rnd, 1, 2.2), '#2a1e16', 0.8);
+      }
+      for (let k = 0; k < 6; k++) { const a = rnd() * TAU; blob(c, x + Math.cos(a) * s * 1.1, y + Math.sin(a) * s * 0.75, range(rnd, 2, 5), range(rnd, 1.5, 3.5), rnd() * 3, '#cfc2a4', 0.8, 0.7); }
+      const sx = range(rnd, -1, 1) > 0 ? 1 : -1;
+      for (let k = 0; k < 4; k++) { const yy = y + range(rnd, -s * 0.5, s * 0.5); line(c, [[x + sx * s * 0.6, yy], [x + sx * s * range(rnd, 2.5, 5), yy + range(rnd, -4, 4)]], range(rnd, 0.8, 1.8), '#e2d6b8', 0.85); }
+      if (rusty) for (let k = 0; k < 8; k++) blob(c, x + range(rnd, -s, s), y + range(rnd, -s * 0.6, s * 0.6), range(rnd, 2, 6), range(rnd, 1.5, 4), rnd() * 3, pick(rnd, ['#8a4a22', '#6e3a1a', '#a85a2a']), 0.85, 0.5);
+    };
+    // each step on its own sheet, then one pixel at a time the earliest step there wins, at its step's alpha
+    // (a mark's soft rim a little under it, so the rim fills in a step later; overlapping marks never add up
+    // into an earlier step)
+    const steps = [[1, 10, 8, 15, false], [0.66, 16, 9, 18, false], [0.33, 22, 10, 22, true]].map(([alpha, n, smin, smax, rusty]) => {
+      const cv = makeCanvas(W, H), c = cv.getContext('2d');
+      for (const oy of [0, RH]) {
+        c.save(); c.beginPath(); c.rect(0, oy, W, RH); c.clip();
+        for (let i = 0; i < (oy ? n * 0.6 : n); i++) dent(c, range(rnd, 20, W - 20), oy + range(rnd, 0.2, 0.92) * RH, range(rnd, smin, smax), rusty);
+        c.restore();
+      }
+      return { alpha, px: c.getImageData(0, 0, W, H).data };
+    });
+    const out = g.createImageData(W, H), o = out.data;
+    for (let i = 0; i < o.length; i += 4) {
+      for (const { alpha, px } of steps) {
+        if (px[i + 3] < 96) continue;
+        o[i] = px[i]; o[i + 1] = px[i + 1]; o[i + 2] = px[i + 2]; o[i + 3] = Math.round(255 * alpha * Math.min(1, px[i + 3] / 200));
+        break;
+      }
+    }
+    g.putImageData(out, 0, 0);
+  },
+});
+
 // Road grime thrown up by the wheels (alpha, painted white: the material tints it per biome).
 // Top half: a long side (u = 8 m, front at u=0 on one side and u=1 on the other: the arches sit
 // at u ≈ 0.17 and 0.83 either way). Bottom half: the front/rear (u = 2.5 m). v: y -0.6 → 1.02.

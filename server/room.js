@@ -1175,9 +1175,10 @@ export class Room {
       mud: sim.mudWheels || 0,
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
       rfd: sim.mobs?.rockfalls.filter(r => r.st !== 'armed').map(r => r.id) || [],   // the loose rock that's come down
-      rvh: Math.round(this.rvc.hp),   // the RV's condition (and, only when they apply: broken down, the fix's progress, tomorrow's due with Gus's loan)
+      rvh: Math.round(this.rvc.hp),   // the RV's condition (and, only when they apply: broken down, the fix's progress, stalled, tomorrow's due with Gus's loan)
       ...(this.rvc.hp <= 0 ? { brk: 1 } : {}),
       ...(this.rvc.fix > 0 ? { fix: Math.round(this.rvc.fix * 100) } : {}),
+      ...(sim.t < sim.rvMods.stallUntil ? { stl: 1 } : {}),   // (limping, a knock has the engine stalled for a moment)
       ...(this.loanAdd > 0 ? { nxt: (C.QUOTAS[this.day] ?? 0) + this.loanAdd } : {}),
     };
   }

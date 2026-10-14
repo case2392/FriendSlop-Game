@@ -76,7 +76,7 @@ class Bucket {
     return m;
   }
 }
-const KINDS = ['body', 'tin', 'trim', 'itrim', 'panel', 'floor', 'soft', 'glass', 'lamps', 'snow', 'grime', 'ceil', 'glow', ...BIOMES.map(b => 'bio_' + b)];
+const KINDS = ['body', 'tin', 'trim', 'itrim', 'panel', 'floor', 'soft', 'glass', 'lamps', 'haz', 'snow', 'grime', 'ceil', 'glow', ...BIOMES.map(b => 'bio_' + b)];
 const buckets = () => Object.fromEntries(KINDS.map(k => [k, new Bucket()]));
 
 const _o = new THREE.Object3D();
@@ -758,7 +758,7 @@ function buildFront(b) {
     b.trim.add(at(ring(0.242, 0.016, TRIM.iron, 18, thL), x, y - 0.008, hz + hoodL / 2, 0, 0, -PI / 6));
     for (const a of [0.15, PI / 2, PI - 0.15]) b.trim.add(at(toBand(new THREE.SphereGeometry(0.017, 5, 3), TRIM.iron), x + Math.cos(a) * 0.25, y + Math.sin(a) * 0.25, hz - 0.04, 0, 0, 0, [1, 1, 0.7]));
     b.trim.add(at(rod(0.066, 0.06, TRIM.brass, { segs: 12 }), x, -0.13, HL + 0.03, PI / 2, 0, 0));
-    b.lamps.add(at(toLamp(new THREE.CircleGeometry(0.054, 14), LAMPS.amber), x, -0.13, HL + 0.062));
+    b.haz.add(at(toLamp(new THREE.CircleGeometry(0.054, 14), LAMPS.amber), x, -0.13, HL + 0.062));
     b.glow.add(at(halo(1.2), x, y, HL + 0.17));
     b.glow.add(at(halo(0.4), x, -0.13, HL + 0.08));
   }
@@ -1341,6 +1341,24 @@ function buildRear(b, wheel) {
   b.trim.add(at(toSlot(new THREE.CircleGeometry(0.17, 20), TRIM.s.emblem), -0.4, 0.29, -HL - 0.014, 0, PI, 0));
   b.trim.add(at(ring(0.172, 0.024, TRIM.brass, 22), -0.4, 0.29, -HL - 0.012));
   for (let k = 0; k < 4; k++) { const a = k / 4 * TAU + PI / 4; b.trim.add(at(toBand(new THREE.SphereGeometry(0.015, 5, 3), TRIM.iron), -0.4 + Math.cos(a) * 0.172, 0.29 + Math.sin(a) * 0.172, -HL - 0.03, 0, 0, 0, [1, 1, 0.6])); }
+  // amber hazard lamps low on the corners, in brass cups (they blink while it's broken down)
+  for (const sx of [-1, 1]) {
+    b.trim.add(at(rod(0.066, 0.05, TRIM.brass, { segs: 12 }), sx * 1.12, 0.42, -HL - 0.025, PI / 2, 0, 0));
+    b.haz.add(at(toLamp(new THREE.CircleGeometry(0.054, 14), LAMPS.amber), sx * 1.12, 0.42, -HL - 0.052, 0, PI, 0));
+  }
+  // the engine hatch (shared/rv.js RV_HATCH: hold E here, broken down): an iron-framed panel of slanted
+  // louvers between the crest and the ladder, two strap hinges, a T latch
+  {
+    const hx = 0.05, hy = 0.3, hw = 0.42, hh = 0.32, z = -HL - 0.018;
+    b.trim.add(at(beam(hw + 0.05, 0.035, 0.03, TRIM.iron), hx, hy + hh / 2, z));
+    b.trim.add(at(beam(hw + 0.05, 0.035, 0.03, TRIM.iron), hx, hy - hh / 2, z));
+    for (const sx of [-1, 1]) b.trim.add(at(beam(0.035, hh, 0.03, TRIM.iron), hx + sx * hw / 2, hy, z));
+    b.trim.add(at(beam(hw, hh, 0.01, TRIM.soot), hx, hy, -HL - 0.006));
+    for (let i = 0; i < 5; i++) b.trim.add(at(beam(hw - 0.04, 0.012, 0.05, TRIM.iron), hx, hy - hh / 2 + 0.05 + i * 0.055, z - 0.008, -0.6, 0, 0));
+    for (const sy of [-1, 1]) b.trim.add(at(beam(0.11, 0.022, 0.012, TRIM.iron), hx - hw / 2 - 0.01, hy + sy * hh * 0.3, z - 0.014));
+    b.trim.add(at(rod(0.012, 0.05, TRIM.brass, { segs: 6 }), hx + hw / 2 - 0.05, hy, z - 0.035, PI / 2, 0, 0));
+    b.trim.add(at(rod(0.009, 0.08, TRIM.brass, { segs: 6 }), hx + hw / 2 - 0.05, hy, z - 0.06, 0, 0, 0));
+  }
   // the spare on its bracket
   b.trim.add(at(wheel.clone(), -0.4, 0.98, -4.24, 0, PI / 2, 0, 0.86));
   b.trim.add(at(beam(0.12, 0.12, 0.2, TRIM.iron), -0.4, 0.98, -4.08));
@@ -1443,6 +1461,82 @@ function repaintBodyWhenFontLoads() {
 
 // ---- the view ------------------------------------------------------------------------------------
 
+// The engine's smoke out of the hatch on the back: a pool of puffs, each born where the hatch was then (so a
+// moving RV leaves a trail behind it), rising, swelling and fading over its life. shade: 0 white .. 1
+// black; a spark is a puff with shade -1 (small, orange, quick). One instanced draw
+const PUFFS = 28, PUFF_LIFE = 2.6;
+class RVSmoke {
+  constructor(scene) {
+    const pg = new THREE.PlaneGeometry(1, 1), g = new THREE.InstancedBufferGeometry();
+    g.index = pg.index;
+    for (const k of ['position', 'normal', 'uv']) g.setAttribute(k, pg.attributes[k]);
+    this.birth = new Float32Array(PUFFS).fill(-99);
+    this.org = new Float32Array(PUFFS * 3);
+    this.look = new Float32Array(PUFFS * 3);   // [shade, seed, lift]
+    this.aBirth = new THREE.InstancedBufferAttribute(this.birth, 1);
+    this.aOrigin = new THREE.InstancedBufferAttribute(this.org, 3);
+    this.aLook = new THREE.InstancedBufferAttribute(this.look, 3);
+    g.setAttribute('aBirth', this.aBirth); g.setAttribute('aOrigin', this.aOrigin); g.setAttribute('aLook', this.aLook);
+    g.instanceCount = PUFFS;
+    this.T = { value: 0 };
+    const m = new THREE.MeshLambertMaterial({ map: tex('rs_puff'), transparent: true, depthWrite: false, emissive: new THREE.Color('#3a3638') });
+    m.onBeforeCompile = sh => {
+      sh.uniforms.uTime = this.T;
+      sh.vertexShader = sh.vertexShader
+        .replace('#include <common>', `#include <common>\nattribute float aBirth; attribute vec3 aOrigin; attribute vec3 aLook; uniform float uTime; varying float vK; varying float vShade;`)
+        .replace('#include <defaultnormal_vertex>', '#include <defaultnormal_vertex>\n transformedNormal = normalize(mat3(viewMatrix) * vec3(0.0, 0.75, 0.0) + vec3(0.0, 0.0, 0.6));')
+        .replace('#include <project_vertex>', `
+          float k = (uTime - aBirth) / ${PUFF_LIFE.toFixed(2)};
+          float spark = step(aLook.x, -0.5);
+          float live = step(0.0, k) * step(k, 1.0);
+          vec3 pc = aOrigin + vec3(sin(aLook.y * 40.0 + uTime * 0.9) * 0.25 * k, k * (spark > 0.5 ? 0.9 : 2.4 * aLook.z) + k * k * 0.6, cos(aLook.y * 31.0 + uTime * 0.8) * 0.25 * k);
+          float psc = live * (spark > 0.5 ? 0.07 * (1.0 - k) : mix(0.3, 1.5, sqrt(k)) * (0.8 + 0.4 * aLook.z));
+          float prot = aLook.y * 6.283 + uTime * 0.3 * (fract(aLook.y * 7.0) - 0.5);
+          vec2 pq = mat2(cos(prot), sin(prot), -sin(prot), cos(prot)) * position.xy * psc;
+          vec4 mvPosition = modelViewMatrix * vec4(pc, 1.0);
+          mvPosition.xy += pq;
+          gl_Position = projectionMatrix * mvPosition;
+          vK = k; vShade = aLook.x;`);
+      sh.fragmentShader = sh.fragmentShader
+        .replace('#include <common>', '#include <common>\nvarying float vK; varying float vShade;')
+        .replace('#include <map_fragment>', `#include <map_fragment>
+          if (vShade < -0.5) { diffuseColor.rgb = vec3(1.0, 0.55, 0.15); diffuseColor.a *= 0.95; }
+          else {
+            diffuseColor.rgb *= mix(vec3(0.96, 0.95, 0.93), vec3(0.08, 0.07, 0.07), vShade);
+            diffuseColor.a *= 0.62 * smoothstep(0.0, 0.08, vK) * (1.0 - smoothstep(0.55, 1.0, vK));
+          }`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+          totalEmissiveRadiance *= vShade < -0.5 ? 6.0 : (1.0 - 0.8 * vShade);`);
+    };
+    m.customProgramCacheKey = () => 'rv-smoke';
+    this.mesh = new THREE.Mesh(g, m);
+    this.mesh.frustumCulled = false; this.mesh.castShadow = false; this.mesh.receiveShadow = false;
+    this.mesh.renderOrder = 2; this.mesh.name = 'rv:smoke'; this.mesh.visible = false;
+    scene.add(this.mesh);
+    this.t = 0; this.acc = 0; this.next = 0; this.sparkAcc = 0; this.last = -99;
+  }
+  // a puff more from `at` now and then: rate puffs a second, shade 0 white..1 black, sparks a second, lift
+  update(dt, at, rate, shade, sparks = 0, lift = 1) {
+    this.t += dt; this.T.value = this.t;
+    let born = false;
+    const puff = (sh, lf) => {
+      const i = this.next++ % PUFFS;
+      this.birth[i] = this.t;
+      this.org[i * 3] = at.x + (Math.random() - 0.5) * 0.2; this.org[i * 3 + 1] = at.y; this.org[i * 3 + 2] = at.z + (Math.random() - 0.5) * 0.2;
+      this.look[i * 3] = sh; this.look[i * 3 + 1] = Math.random(); this.look[i * 3 + 2] = lf;
+      born = true; this.last = this.t;
+    };
+    this.acc = rate > 0 ? this.acc + dt * rate : 0;
+    while (this.acc >= 1) { this.acc -= 1; puff(Math.max(0, Math.min(1, shade + (Math.random() - 0.5) * 0.12)), lift * (0.85 + Math.random() * 0.3)); }
+    this.sparkAcc = sparks > 0 ? this.sparkAcc + dt * sparks : 0;
+    while (this.sparkAcc >= 1) { this.sparkAcc -= 1; puff(-1, 1); }
+    if (born) { this.aBirth.needsUpdate = true; this.aOrigin.needsUpdate = true; this.aLook.needsUpdate = true; }
+    this.mesh.visible = this.t - this.last < PUFF_LIFE;
+  }
+  // how many puffs are in the air (the smoke test)
+  live() { let n = 0; for (const b of this.birth) if (this.t - b < PUFF_LIFE) n++; return n; }
+}
+
 export class RVView {
   constructor(scene) {
     this.g = new THREE.Group();
@@ -1462,6 +1556,7 @@ export class RVView {
       glass: painted('rv_glass', { transparent: true }),
       snow: painted('rv_snow', { repeat: [3, 3], vertexColors: true }),
       lamps: new THREE.MeshLambertMaterial({ map: tex('rv_lamps'), emissiveMap: tex('rv_lamps'), emissive: 0x000000 }),
+      haz: new THREE.MeshLambertMaterial({ map: tex('rv_lamps'), emissiveMap: tex('rv_lamps'), emissive: 0x000000 }),
       // faces out: lit windows, portholes and lamp halos, seen from outside only, added on
       glow: new THREE.MeshBasicMaterial({ map: tex('rv_lamps'), transparent: true, opacity: 0.95, blending: THREE.AdditiveBlending, depthWrite: false }),
       ceil: painted('rv_ceiling', { emissive: '#7a5a3e', emissiveIntensity: 0.35 }),
@@ -1495,6 +1590,14 @@ export class RVView {
     const gf = new THREE.Shape(); gf.moveTo(-HW, A.y0); gf.lineTo(HW, A.y0); gf.lineTo(HW, 1.02); gf.lineTo(-HW, 1.02); gf.closePath();
     main.grime.add(setUV(wallGeo(gf, 'z', HL + 0.004, 1), (x, y) => [(x + HW) / 2.5, 0.5 * GV(y)]));
     emit(g, main);
+    // dents, scrapes and rust (rv_dents), one overlay a side so each side shows its own knocks: three steps
+    // by alpha, shown by lowering the alpha test as it wears (setCond). +x is the driver's (left) side
+    const dentMat = () => new THREE.MeshLambertMaterial({ map: tex('rv_dents'), alphaTest: 0.999, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    this.dents = { left: { m: dentMat(), meshes: [] }, right: { m: dentMat(), meshes: [] }, front: { m: dentMat(), meshes: [] }, rear: { m: dentMat(), meshes: [] } };
+    const dent = (side, geo, parent) => { const d = this.dents[side], ms = new THREE.Mesh(geo, d.m); ms.renderOrder = 2; ms.visible = false; d.meshes.push(ms); parent.add(ms); };
+    dent('right', setUV(wallGeo(sideOutline(1.02, true), 'x', -HW - 0.006, -1), (x, y, z) => [(z + HL) / 8, 0.5 + 0.5 * GV(y)]), g);
+    dent('left', setUV(wallGeo(sideOutline(1.02), 'x', HW + 0.006, 1), (x, y, z) => [(HL - z) / 8, 0.5 + 0.5 * GV(y)]), g);
+    dent('front', setUV(wallGeo(gf, 'z', HL + 0.006, 1), (x, y) => [(x + HW) / 2.5, 0.5 * GV(y)]), g);
 
     const roof = new THREE.Group(), rb = buckets();
     buildRoof(rb); emit(roof, rb);
@@ -1505,12 +1608,18 @@ export class RVView {
     const rg = new THREE.Shape(); rg.moveTo(-HW, A.y0); rg.lineTo(HW, A.y0); rg.lineTo(HW, 1.02); rg.lineTo(-HW, 1.02); rg.closePath();
     qb.grime.add(setUV(wallGeo(rg, 'z', -HL - 0.004, -1), (x, y) => [(HW - x) / 2.5, 0.5 * GV(y)]));
     emit(rear, qb);
+    dent('rear', setUV(wallGeo(rg, 'z', -HL - 0.006, -1), (x, y) => [(HW - x) / 2.5, 0.5 * GV(y)]), rear);
     g.add(rear);
     this.cutaway = [roof, rear];   // (the art previews lift these off to see in)
 
     this.doorPivot = new THREE.Group();
     this.doorPivot.position.set(-1.2, 0, D.DOOR_Z - D.DOOR_HALF);
     const db = buckets(); buildDoor(db); emit(this.doorPivot, db);
+    {
+      const dz0 = D.DOOR_Z - D.DOOR_HALF, L = D.DOOR_HALF * 2;
+      const ds = new THREE.Shape(); ds.moveTo(0.02, 0.02); ds.lineTo(L - 0.02, 0.02); ds.lineTo(L - 0.02, 1.02); ds.lineTo(0.02, 1.02); ds.closePath();
+      dent('right', setUV(wallGeo(ds, 'x', -0.036, -1), (x, y, z) => [(z + dz0 + HL) / 8, 0.5 + 0.5 * GV(y)]), this.doorPivot);
+    }
     g.add(this.doorPivot); this.cutaway.push(this.doorPivot);
     this.doorAng = 0;
 
@@ -1549,6 +1658,22 @@ export class RVView {
       g.add(odo);
     }
     this.odoLast = '';
+    // the RV's condition on a dial in the right-hand gauge slot: a brass bezel, a cream face banded amber
+    // 31-60 and red 0-30, a needle, a CHECK ENGINE lamp (lit at 30% or less, blinking broken down);
+    // backlit at night like the odometer, redrawn only when it changes
+    this.condCv = document.createElement('canvas'); this.condCv.width = this.condCv.height = 128;
+    this.condTex = canvasTex(this.condCv);
+    {
+      const n = new V3(0, Math.sin(GAUGE.tilt), -Math.cos(GAUGE.tilt));
+      this.condMat = new THREE.MeshLambertMaterial({ map: this.condTex, emissiveMap: this.condTex, emissive: 0x000000 });
+      const dial = new THREE.Mesh(new THREE.CircleGeometry(0.062, 24), this.condMat);
+      dial.position.set(0.62 + 0.29, GAUGE.y, GAUGE.z).addScaledVector(n, 0.032);
+      dial.rotation.set(GAUGE.tilt, PI, 0);
+      g.add(dial);
+    }
+    this.condLast = '';
+    this.smoke = new RVSmoke(scene);
+    this.t = 0;
 
     // wheels: one instanced draw for all four
     this.wheelMesh = new THREE.InstancedMesh(wheel, mat.trim, RV_WHEELS.length);
@@ -1600,6 +1725,61 @@ export class RVView {
     this.wheelMesh.instanceMatrix.needsUpdate = true;
   }
 
+  // the condition as it shows: the hazard lamps, the dial, dents a side, smoke out of the hatch
+  setCond(dt, rv, night, cond) {
+    const hp = cond?.hp ?? 100, brk = !!cond?.brk, blink = brk && this.t % 1 < 0.5;
+    this.mat.haz.emissive.setHex((brk ? blink : night) ? 0xffffff : 0x000000);
+    const lamp = hp > 30 ? 0 : brk && !blink ? 1 : 2;
+    const key = `${hp}|${lamp}`;
+    if (key !== this.condLast) { this.condLast = key; this.drawCond(hp, lamp); }
+    this.condMat.emissive.setHex(night ? 0x9a6a3a : 0x000000);
+    // dents: the RV's wear all over, more where it was hit (0 none, 1 the first knocks, 2 battered, 3 a wreck)
+    const wear = (100 - hp) * 0.75, z = cond?.zones || {};
+    for (const [side, d] of Object.entries(this.dents)) {
+      const k = Math.max(wear, (z[side] || 0) * 2), lv = k >= 70 ? 3 : k >= 35 ? 2 : k >= 8 ? 1 : 0;
+      if (d.lv === lv) continue;
+      d.lv = lv;
+      d.m.alphaTest = [0.999, 0.8, 0.5, 0.2][lv];
+      for (const ms of d.meshes) ms.visible = lv > 0;
+    }
+    // smoke: white wisps smoking, grey to black limping (a spark now and then), a black column broken down
+    const at = this._v.set(0.05, 0.45, -HL - 0.12).applyQuaternion(this.g.quaternion).add(this.g.position);
+    const band = hp <= 0 ? 3 : hp <= 30 ? 2 : hp <= 60 ? 1 : 0;
+    const rate = [0, 2.5 + (60 - hp) * 0.05, 5 + (30 - hp) * 0.1, 10][band];
+    const shade = [0, 0.05 + (60 - hp) / 30 * 0.3, 0.55 + (30 - hp) / 30 * 0.3, 0.9][band];
+    this.smoke.update(dt, at, rate, shade, band === 2 ? 1.4 : 0, band === 3 ? 1.6 : 1);
+  }
+  drawCond(hp, lamp) {
+    const g = this.condCv.getContext('2d'), S = 128, c = S / 2;
+    const ang = h => PI * 0.75 + Math.max(0, Math.min(100, h)) / 100 * PI * 1.5;
+    g.clearRect(0, 0, S, S);
+    // the brass bezel and the cream face
+    const bz = g.createLinearGradient(0, 0, 0, S); bz.addColorStop(0, '#e2c47c'); bz.addColorStop(0.5, '#a07a36'); bz.addColorStop(1, '#4e3418');
+    g.fillStyle = bz; g.beginPath(); g.arc(c, c, 63, 0, TAU); g.fill();
+    const fc = g.createRadialGradient(c - 10, c - 12, 4, c, c, 56); fc.addColorStop(0, '#fbf4e0'); fc.addColorStop(1, '#ddd0ae');
+    g.fillStyle = fc; g.beginPath(); g.arc(c, c, 54, 0, TAU); g.fill();
+    // the bands: red 0-30, amber 31-60, a pale green the rest
+    for (const [h0, h1, col] of [[0, 30, '#c0392b'], [30, 60, '#e0902a'], [60, 100, '#8aa868']]) {
+      g.strokeStyle = col; g.lineWidth = 9; g.beginPath(); g.arc(c, c, 45, ang(h0), ang(h1)); g.stroke();
+    }
+    // ticks every 10, numerals at 0 / 50 / 100
+    g.strokeStyle = '#2e1c10';
+    for (let h = 0; h <= 100; h += 10) {
+      const a = ang(h), r0 = h % 50 ? 38 : 34;
+      g.lineWidth = h % 50 ? 1.5 : 2.5; g.beginPath(); g.moveTo(c + Math.cos(a) * r0, c + Math.sin(a) * r0); g.lineTo(c + Math.cos(a) * 50, c + Math.sin(a) * 50); g.stroke();
+    }
+    g.fillStyle = '#2e1c10'; g.font = `900 13px ${LETTER_FONT}`; g.textAlign = 'center'; g.textBaseline = 'middle';
+    for (const h of [0, 50, 100]) g.fillText(String(h), c + Math.cos(ang(h)) * 26, c + Math.sin(ang(h)) * 26);
+    // the CHECK ENGINE lamp
+    g.fillStyle = lamp === 2 ? '#ff6a1a' : '#5a3a28'; g.beginPath(); g.roundRect(c - 26, c + 30, 52, 14, 4); g.fill();
+    g.fillStyle = lamp === 2 ? '#fff4d0' : '#8a6a52'; g.font = `900 8px ${LETTER_FONT}`; g.fillText('CHECK ENGINE', c, c + 37.5);
+    // the needle and its brass boss
+    const a = ang(hp);
+    g.strokeStyle = '#1e120a'; g.lineWidth = 3.5; g.lineCap = 'round';
+    g.beginPath(); g.moveTo(c - Math.cos(a) * 8, c - Math.sin(a) * 8); g.lineTo(c + Math.cos(a) * 46, c + Math.sin(a) * 46); g.stroke();
+    g.fillStyle = '#b08840'; g.beginPath(); g.arc(c, c, 6, 0, TAU); g.fill();
+    this.condTex.needsUpdate = true;
+  }
   drawOdo(odo, clockStr) {
     const g = this.odoCv.getContext('2d'), W = 384, H = 80;
     const gr = (x0, y0, x1, y1, stops) => { const l = g.createLinearGradient(x0, y0, x1, y1); for (const [t, c] of stops) l.addColorStop(t, c); return l; };
@@ -1629,8 +1809,10 @@ export class RVView {
     this.odoTex.needsUpdate = true;
   }
 
-  update(dt, rv, door, night, hook, odo, clockStr) {
+  // cond: { hp, brk, zones: { front, rear, left, right: % taken there this trip } } (main.js), or null
+  update(dt, rv, door, night, hook, odo, clockStr, cond = null) {
     if (!rv) return;
+    this.t += dt;
     if (atmo.biome !== this.biome) this.setBiome(atmo.biome);
     this.g.position.set(rv.p.x, rv.p.y, rv.p.z);
     this.g.quaternion.set(rv.q.x, rv.q.y, rv.q.z, rv.q.w);
@@ -1640,6 +1822,7 @@ export class RVView {
     this.updateWheels(rv);
     this.steeringWheel.rotation.z = rv.steer * 2.2;
     this.mat.lamps.emissive.setHex(night ? 0xffffff : 0x000000);
+    this.setCond(dt, rv, night, cond);
     this.odoMat.emissive.setHex(night ? 0x9a6a3a : 0x000000);
     for (const m of this.glowMeshes) m.visible = !!night;
     this.beam.intensity = night ? 40 : 0;
