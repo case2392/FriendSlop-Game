@@ -1,11 +1,13 @@
 // The controller's forgiveness (client/js/player.js on the page's own physics world): a jump a moment after
 // walking off an edge still works (coyote time) but not long after, and only once; a jump pressed a moment
-// before landing happens as you land (the buffer) but not one pressed long before.
+// before landing happens as you land (the buffer) but not one pressed long before. And the RV: you walk about
+// in it parked on uneven ground, and nothing inside it is climbed (its outside is).
 import './pagemods.mjs';
 const C = await import('../shared/constants.js');
 const { generateLeg } = await import('../shared/world.js');
 const { initPhys, LocalWorld } = await import('../client/js/phys.js');
 const { Me } = await import('../client/js/player.js');
+const { toWorld, toLocal } = await import('../shared/rv.js');
 let failed = false;
 const ok = m => console.log('✅', m);
 const fail = m => { console.error('❌', m); failed = true; };
@@ -58,6 +60,47 @@ const buffered = t => {
 };
 const early = buffered(0.1), tooEarly = buffered(0.4);
 check(early === 1 && tooEarly === 0, `movement: a jump pressed 100 ms before landing jumps as you land (${early}); pressed 400 ms before, it's dropped (${tooEarly})`);
+// the RV parked on ground a degree or two out of level, its pose wobbling by a few mm a frame as the server's
+// does: walk down its aisle (the page's copy of the RV was a kinematic body, and on one tilted like that the
+// controller stuck to the floor at every step: you got about only by jumping)
+const qOf = (yaw, pitch = 0, roll = 0) => {
+  const cy = Math.cos(yaw / 2), sy = Math.sin(yaw / 2), cp = Math.cos(pitch / 2), sp = Math.sin(pitch / 2), cr = Math.cos(roll / 2), sr = Math.sin(roll / 2);
+  return { w: cy * cp * cr + sy * sp * sr, x: cy * sp * cr + sy * cp * sr, y: sy * cp * cr - cy * sp * sr, z: cy * cp * sr - sy * sp * cr };
+};
+const aisle = [];
+for (const [pitch, roll] of [[0, 0], [0.012, 0], [0, 0.03], [0.03, -0.02], [-0.08, 0.04]]) {
+  const rv0 = { p: { x: at.x + 8, y: at.g + 0.9, z: at.z - 8 }, q: qOf(0.3, pitch, roll), v: { x: 0, y: 0, z: 0 } };
+  const me = new Me();
+  const s0 = toWorld(rv0.p, rv0.q, { x: -0.2, y: 0.03, z: -1.5 });
+  me.teleport(s0.x, s0.y, s0.z, 0.3);
+  let t = 0;
+  const go = (n, inp) => { for (let i = 0; i < n; i++, t += DT) {
+    const rv = { ...rv0, p: { ...rv0.p, y: rv0.p.y + 0.004 * Math.sin(t * 31) }, q: qOf(0.3, pitch + 0.002 * Math.sin(t * 17), roll) };
+    lw.setRV(rv.p, rv.q); lw.setDoor(true); lw.step();
+    me.update(DT, { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: false, ...inp }, lw, rv, null);
+  } };
+  go(20, {});
+  const z0 = toLocal(rv0.p, rv0.q, me.pos).z;
+  go(42, { f: 1 });   // 0.7 s
+  aisle.push({ pitch, roll, went: toLocal(rv0.p, rv0.q, me.pos).z - z0, jumped: me.events.some(e => e.k === 'jump') });
+}
+const short = aisle.filter(a => a.went < 2.2);
+check(!short.length, `movement: in the RV parked level or a degree or more out, 0.7 s down its aisle goes ${aisle.map(a => a.went.toFixed(1)).join(', ')} m (walking pace is ${C.PLAYER.WALK} m/s)`);
+// a hand on its walls: from inside (the shower stall's wall), nothing; from outside (its side), a climb
+{
+  const rv = { p: { x: at.x + 8, y: at.g + 0.9, z: at.z - 8 }, q: qOf(0, 0, 0), v: { x: 0, y: 0, z: 0 } };
+  lw.setRV(rv.p, rv.q); lw.setDoor(true); lw.step(); lw.step();
+  const tryGrab = (l, yaw) => {
+    const me = new Me(), w = toWorld(rv.p, rv.q, l);
+    me.teleport(w.x, w.y, w.z, yaw);
+    for (let i = 0; i < 10; i++) { lw.step(); me.update(DT, { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: false }, lw, rv, null); }
+    me.pitch = 0.1;
+    lw.step(); me.update(DT, { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: true }, lw, rv, null);
+    return me.mode;
+  };
+  const inside = tryGrab({ x: -0.1, y: 0.03, z: -2.25 }, -Math.PI / 2), outside = tryGrab({ x: 2.0, y: -0.85, z: 0 }, -Math.PI / 2);
+  check(inside === 'walk' && outside === 'climb', `movement: a hand on the RV's shower stall from inside climbs nothing (${inside}); on its side from outside, it climbs (${outside})`);
+}
 lw.free();
 if (failed) { console.error('💥 MOVEMENT TESTS FAILED'); process.exit(1); }
 console.log('All movement checks passed');

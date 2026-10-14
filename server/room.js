@@ -42,6 +42,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
 const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
+const HORN_MAX = 20;
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
 // a number from a client: finite and within +-lim, or 0
@@ -589,7 +590,7 @@ export class Room {
   }
 
   handle(p, m) {
-    if (this.spam(p, m.t)) return;
+    if (this.spam(p, m.t === 'horn' && m.on === 0 ? 'hornUp' : m.t)) return;   // (letting go of the horn is never too soon)
     switch (m.t) {
       case 'p': return this.onPose(p, m);
       case 'ready': p.ready = true; p.activeAt = this.t; return;
@@ -599,9 +600,12 @@ export class Room {
       case 'hd': this.sim.holdDist(p.id, m.d); return;
       case 'push': if (this.t - p.lastPush > 0.05) { p.lastPush = this.t; this.sim.push(p.id, m, p); } return;
       case 'drv': if (p.seat === 0) { p.drvAt = this.t; this.sim.setDrive(m); } return;
+      // the horn sounds while the driver holds H ({on: 1}, then {on: 0}); a message without on is a tap
       case 'horn':
+        if (m.on === 0) { if (this.hornBy === p.id) this.hornOff(); return; }
         if (p.seat !== 0) return;
-        this.broadcast({ t: 'ev', list: [{ k: 'horn' }] });
+        if (this.hornBy == null) { this.hornBy = p.id; this.broadcast({ t: 'ev', list: [{ k: 'horn', on: 1 }] }); }
+        this.hornUntil = this.t + (m.on === 1 ? HORN_MAX : 0.45);
         this.sim.mobs?.horn(this.sim.rv.translation(), this.partMods.hornK);   // (it scatters ringtails, and wakes a grumphorn; an Air Horn carries further)
         return;
       case 'use': return this.onUse(p, m);
@@ -1230,9 +1234,17 @@ export class Room {
 
   // ---- simulation -------------------------------------------------------------------------
 
+  hornOff() {
+    if (this.hornBy == null) return;
+    this.hornBy = null;
+    this.broadcast({ t: 'ev', list: [{ k: 'horn', on: 0 }] });
+  }
+
   tick(dt) {
     this.t += dt;
     const sim = this.sim;
+    // the horn stops when it's let go, its driver gets up or drops, or it's been held HORN_MAX s (a stuck key)
+    if (this.hornBy != null) { const h = this.players.get(this.hornBy); if (!h?.connected || h.seat !== 0 || this.t > this.hornUntil) this.hornOff(); }
     for (const p of this.players.values()) this.resolvePlayer(p);
     // nobody at the wheel, or a driver who stopped sending (frozen tab, minimized window, dead link)? it
     // coasts ("WHO'S DRIVING?!") until it's nearly stopped, then the parking brake catches

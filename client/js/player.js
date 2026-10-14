@@ -4,7 +4,7 @@
 
 import * as C from '/shared/constants.js';
 import { LOOT } from '/shared/loot.js';
-import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
+import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { G } from './phys.js';
 import { STOCK } from '/shared/garage.js';
 
@@ -22,6 +22,13 @@ const len = a => Math.hypot(a.x, a.y, a.z);
 const norm = a => { const l = len(a) || 1; return mul(a, 1 / l); };
 const wrap = a => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
 const CLIMBABLE = new Set(['terrain', 'static', 'rv', 'gate']);
+// what a hand can climb: the RV's outside, not its inside (its walls from in there, the shower, the bunks)
+function climbable(hit, rv) {
+  if (!hit || !CLIMBABLE.has(hit.kind)) return false;
+  if (hit.kind !== 'rv' || !rv) return true;
+  const l = toLocal(rv.p, rv.q, hit.point);
+  return !inCabin(l.x, l.y, l.z);
+}
 
 export class Me {
   constructor() {
@@ -247,11 +254,11 @@ export class Me {
       const eye = this.eye(rv);
       const lk = this.look();
       let hit = lw.ray(eye, lk, C.CLIMB.REACH + 0.55, G.WORLD | G.RV | G.FENCE, exclude, false);
-      if (!hit || !CLIMBABLE.has(hit.kind)) {
+      if (!climbable(hit, rv)) {
         const chest = v3(this.pos.x, this.pos.y + 1.1, this.pos.z);
         hit = lw.ray(chest, fwd, C.CLIMB.REACH, G.WORLD | G.RV | G.FENCE, exclude, false);
       }
-      if (hit && CLIMBABLE.has(hit.kind) && hit.normal.y < STEEP && hit.normal.y > -0.6) {
+      if (climbable(hit, rv) && hit.normal.y < STEEP && hit.normal.y > -0.6) {
         this.mode = 'climb';
         this.climb = { n: v3(hit.normal.x, hit.normal.y, hit.normal.z), rv: hit.kind === 'rv' };
         this.vel = v3();
@@ -318,7 +325,7 @@ export class Me {
     }
     const center = v3(this.pos.x, this.pos.y + CH, this.pos.z);
     const probe = lw.ray(add(center, mul(c.n, 0.35)), mul(c.n, -1), 1.7, G.WORLD | G.RV | G.FENCE, exclude, false);
-    if (!probe || !CLIMBABLE.has(probe.kind)) {
+    if (!climbable(probe, rv)) {
       if (inp.f > 0 && this.mantle(lw, center, c.n, exclude)) return;
       this.mode = 'walk'; this.climb = null; this.vel = v3(); this.regrabT = 0.2;
       return;

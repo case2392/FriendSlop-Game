@@ -2,7 +2,7 @@
 import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
 import { LOOT, fmt$ } from '/shared/loot.js';
-import { RV_DIM, RV_SEATS, RV_HATCH, toWorld, toLocal, insideRV, qYaw } from '/shared/rv.js';
+import { RV_DIM, RV_SEATS, RV_HATCH, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
 import * as net from './net.js';
 import * as voice from './voice.js';
@@ -362,7 +362,11 @@ document.addEventListener('pointerlockchange', () => {
 });
 // the driver's hands leave the controls: say so at once (a frozen or hidden page sends nothing at all,
 // and the server only lets go of a silent driver's throttle after a moment)
+// the horn sounds while H is held (the server stops it too if the driver gets up or drops)
+let hornHeld = false;
+function letGoOfTheHorn() { if (hornHeld) { hornHeld = false; net.send({ t: 'horn', on: 0 }); } }
 function letGoOfTheWheel() {
+  letGoOfTheHorn();
   if (me.mode === 'seat' && me.seat === 0) net.send({ t: 'drv', th: 0, st: 0, hb: 0 });
   if (fixHeld) { fixHeld = false; net.send({ t: 'fix', on: 0 }); }   // (and of the engine: a hidden tab runs no frames to say so)
 }
@@ -416,7 +420,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'q') onDrop();
   else if (k === 'f') { mapRaised = !mapRaised; }
   else if (k === 'r' && me.mode === 'seat' && me.seat === 0) net.send({ t: 'use', kind: 'reel' });
-  else if (k === 'h' && me.mode === 'seat' && me.seat === 0) net.send({ t: 'horn' });
+  else if (k === 'h' && me.mode === 'seat' && me.seat === 0) { if (!e.repeat) { hornHeld = true; net.send({ t: 'horn', on: 1 }); } }
   else if (k === 'v') voice.setPtt(true);
   else if (k === 'm') {
     if (!voice.V.on) toast('Voice chat is off. JOIN VOICE is at the bottom left (press Esc for the mouse).', '#fff', 4);
@@ -435,6 +439,7 @@ window.addEventListener('keyup', e => {
   if (k === 'v') voice.setPtt(false);
   if (k === 't') voice.setWalkieKey(false);
   if (k === 'e') reviveT = 0;
+  if (k === 'h') letGoOfTheHorn();
 });
 window.addEventListener('blur', () => { for (const k in keys) keys[k] = false; inp.grab = false; letGoOfTheWheel(); });
 
@@ -475,15 +480,19 @@ function nearestAnchor() {
   return best;
 }
 
+// by the door and looking its way (inside, facing the driver's seat with the door at your back, E isn't the door)
 function doorNear() {
   if (!S.rv) return false;
-  const l = toLocal(S.rv.p, S.rv.q, me.eye(S.rv));
-  return Math.hypot(l.x + 1.2, l.z - RV_DIM.DOOR_Z) < 2.2 && l.y > 0 && l.y < 2.6;
+  const eye = me.eye(S.rv), l = toLocal(S.rv.p, S.rv.q, eye);
+  if (!(Math.hypot(l.x + 1.2, l.z - RV_DIM.DOOR_Z) < 2.2 && l.y > 0 && l.y < 2.6)) return false;
+  const c = toWorld(S.rv.p, S.rv.q, { x: -1.2, y: 1.04, z: RV_DIM.DOOR_Z }), lk = me.look();
+  const dx = c.x - eye.x, dy = c.y - eye.y, dz = c.z - eye.z, d = Math.hypot(dx, dy, dz);
+  return d < 0.5 || (dx * lk.x + dy * lk.y + dz * lk.z) / d > 0.64;   // (within about 50 degrees of its middle)
 }
 
 function computeTarget() {
   if (!S.lw) return null;
-  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · [H] horn' : (mapWanted() ? '[E] get up (stand to read the map)' : '[E] get up') };
+  if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · hold [H] horn' : (mapWanted() ? '[E] get up (stand to read the map)' : '[E] get up') };
   if (me.mode === 'ko') return null;
   if (me.hasHook) {
     const a = nearestAnchor();
@@ -547,7 +556,8 @@ function computeTarget() {
     if (u === 'bunk') return { kind: 'rvuse', use: 'bunk', label: S.g?.ph === 'night' ? '[E] sleep (everyone in a bunk = next day)' : 'bunks (bedtime is after the Repo Man gets paid)' };
     if (u === 'winch') return { kind: 'rvuse', use: 'winch', label: S.hook?.state === 0 ? '[E] take the winch hook' : `[E] ${S.hook?.reeling ? 'stop' : 'start'} reeling in` };
     if (doorNear()) return { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` };
-    if (Math.abs(hit.normal.y) < 0.6 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
+    // (its outside: the way up to the roof. Nothing inside it is climbed)
+    if (Math.abs(hit.normal.y) < 0.6 && hit.toi < C.CLIMB.REACH + 0.6 && !inCabin(lh.x, lh.y, lh.z)) return { kind: 'climb', label: '[Hold LMB] climb' };
     return null;
   }
   if (fix && (hit.kind === 'terrain' || hit.kind === 'static')) return fix;
@@ -1205,7 +1215,7 @@ function onEvent(e) {
     // glovebox clicks, and the cards flip up at the bottom of the screen
     case 'stow': (S.glove ||= []).push({ cards: e.cards, kind: e.kind, day: S.g?.day, by: e.by }); revealCards(e); sfx.click(); break;
     case 'bill': sfx.bill(); break;
-    case 'horn': sfx.horn(); break;
+    case 'horn': sfx.horn(e.on == null ? null : !!e.on); break;
     case 'door': S.door = e.open; sfx.door(); if (e.pop && S.rv) { positional(S.rv.p, () => sfx.thunk(0.7), 50); if (me.par) shake(0.3); } break;
     // the RV took a knock (the server priced it): how much, where it landed, a thud, a jolt for whoever's aboard
     case 'rvhit': {
