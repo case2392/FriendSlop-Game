@@ -26,6 +26,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 import { Stage, Actor } from './actor.mjs';
+import { RV_PRICE } from '../shared/constants.js';   // (the five payments: what the RV cost)
 const argv = process.argv.slice(2);
 const opt = (k, d) => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : d; };
 const STEP_CMD = argv[0] || 'capture';
@@ -832,35 +833,41 @@ shot({
 });
 
 // ---- day 3 -----------------------------------------------------------------------------------------
-// Steve and Kyle carry the giant fiberglass dino head off (DINO WORLD / HEAD MISSING — REWARD)
+// the Slopasaurus (DINO WORLD / HANDS OFF THE HEAD): Kyle, up on its back, shoves its head off; it tumbles down
+// into the snow (thunk) while Steve backs away from under it
 shot({
-  id: 'dino', day: 3, secs: 2.4, pre: 0.8, fov: 58,
+  id: 'dino', day: 3, secs: 2.8, pre: 0.6, fov: 56,
   setup() {
     dbg({ op: 'mobs', on: false }); dbg({ op: 'rvhp', hp: 100 });
     dbg({ op: 'phase', ph: 'road' }); dbg({ op: 'clock', h: 11.0 });
     dbg({ op: 'tpRV', x: W.roadX(700), z: 700, yaw: 0 });
     offstage(bots.Dave);
-    const poi = W.pois.find(p => p.type === 'dino') || { x: 36, z: 729.5 };
-    let head = [...room.sim.props.values()].filter(p => p.type === 'dino').sort((a, b) => hyp(a.body.translation(), poi) - hyp(b.body.translation(), poi))[0];
-    if (!head) head = spawnProp('dino', poi.x - 3, H(poi.x - 3, poi.z) + 0.6, poi.z + 1.5, 1700);
-    this.head = head;
-    const c = head.body.translation(), toRoad = Math.sign(W.roadX(c.z) - c.x) || -1;
-    this.dir = toRoad;
-    const { Steve, Kyle } = bots;
-    Steve.at(c.x - toRoad * 1.3, c.z - 0.8, Math.atan2(toRoad, 0)); Kyle.at(c.x - toRoad * 1.3, c.z + 0.8, Math.atan2(toRoad, 0));
-    Steve.tick(1 / 60); Kyle.tick(1 / 60); room.tick(1 / 60);
-    this.a = grab(Steve, head, 0.35); this.b = grab(Kyle, head, 0.35);
-    this.s0 = { s: { x: Steve.pos.x, z: Steve.pos.z }, k: { x: Kyle.pos.x, z: Kyle.pos.z }, c };
-    log(`  dino head #${head.id}: ${this.a} ${this.b}`);
+    const poi = W.pois.find(p => p.type === 'dino'), D = poi.dino;
+    // (a point in the statue's frame: lx across, ly up from its ground, lz along it, its head end +lz)
+    this.at = (lx, ly, lz) => onTable(D, D.ry, lx, ly, lz);
+    this.D = D;
+    this.head = [...room.sim.props.values()].filter(p => p.type === 'dino').sort((a, b) => hyp(a.body.translation(), this.at(0, 6.9, 1.4)) - hyp(b.body.translation(), this.at(0, 6.9, 1.4)))[0];
+    log(`  the head: #${this.head?.id} at ${JSON.stringify(this.head?.body.translation())}`);
+    this.pushed = false;
   },
   tick(t) {
-    const { Steve, Kyle } = bots, u = Math.max(0, t - 0.3) * 1.1;
-    const s = this.s0;
-    const p = -Math.min(0.5, t * 0.6);
-    Steve.at(s.s.x + this.dir * u, s.s.z, Steve.yaw, { pitch: p }); Kyle.at(s.k.x + this.dir * u, s.k.z, Kyle.yaw, { pitch: p });
+    const { Steve, Kyle } = bots, D = this.D, k = this.at(0, 4.22, 0.25), h = this.at(0, 6.9, 1.4);
+    // Kyle stands on the dino's back behind its neck, reaching up for the head
+    Kyle.at(k.x, k.z, D.ry, { y: k.y, pitch: -0.75 });
+    // Steve in the snow in front, looking up; once it goes, he backs off out from under it
+    const s0 = this.at(-2.4, 0, 3.6), s1 = this.at(-3.6, 0, 5.4), s = t < 1.1 ? s0 : s1;
+    if (!Steve.fly && !Steve.downed) Steve.at(s.x, s.z, yawTo(s, h), { pitch: -0.6 });
+    if (!this.pushed && t > 0.8 && this.head) {
+      this.pushed = true;
+      Kyle.say({ t: 'shove' });
+      const b = this.head.body, m = b.mass(), f = { x: Math.sin(D.ry), z: Math.cos(D.ry) };
+      b.wakeUp?.();
+      b.applyImpulse({ x: f.x * m * 2.2, y: m * 0.6, z: f.z * m * 2.2 }, true);
+      b.setAngvel({ x: f.z * 2.2, y: 0.4, z: -f.x * 2.2 }, true);   // (tumbling forward)
+    }
   },
-  cam() { const c = this.s0.c; return { p: at(c.x + this.dir * 4.2, c.z - 5.6, 1.5), t: at(c.x + this.dir * 0.6, c.z + 0.6, 1.2) }; },
-  body() { const c = this.s0.c; return { x: c.x + this.dir * 8, z: c.z - 12 }; },
+  cam() { const c = this.at(8.5, 0, 9.5), t = this.at(0, 3.8, 1.8); return { p: { x: c.x, y: H(c.x, c.z) + 2.0, z: c.z }, t }; },
+  body() { const b = this.at(16, 0, 14); return { x: b.x, z: b.z }; },
 });
 
 // ---- day 4 -----------------------------------------------------------------------------------------
@@ -1108,7 +1115,7 @@ const OUTLINE = '0 0 3px #000, 2px 2px 0 #000, -2px -2px 0 #000, 2px -2px 0 #000
 // top, in its colour), 'zone' (a day's name and its payment), 'end' (under the logo)
 const CARDS = {};
 const card = (id, kind, text, extra = {}) => { CARDS[id] = { kind, text, ...extra }; };
-card('c_bought', 'big', 'YOU AND THE BOYS<br>BOUGHT A $250,000 RV.');
+card('c_bought', 'big', `YOU AND THE BOYS<br>BOUGHT A $${RV_PRICE.toLocaleString('en-US')} RV.`);
 card('c_payments', 'big', 'PAYMENTS ARE DUE EVERY NIGHT.');
 card('c_jobs', 'big', 'NONE OF YOU HAVE JOBS.');
 card('c_map', 'big', 'READ THE MAP.');
@@ -1229,7 +1236,7 @@ const EDL = [
   { shot: 'campfire', secs: 1.25, from: 12, cards: [['c_jobs', 0.05, 1.25]] },
   // the verbs
   { shot: 'mapfp', secs: 1.25, from: 10, cards: [['c_map', 0.05, 1.25]], sfx: [[0.05, 'grab', 0.8]] },
-  { shot: 'dino', secs: 1.25, from: 18, cards: [['c_haul', 0.05, 1.25]], sfx: [[0.1, 'thunk:1.4', 0.8]] },
+  { shot: 'dino', secs: 1.25, align: [evIs('dmg'), 1.0], cards: [['c_haul', 0.05, 1.25]], cues: [[evIs('dmg'), 'thunk:1.4', 1.0, -0.02]] },
   { shot: 'climb', secs: 1.25, from: 10, cards: [['c_climb', 0.05, 1.25]] },
   { shot: 'winch', secs: 1.25, from: 12, cards: [['c_winch', 0.05, 1.25]], sfx: [[0.05, 'hook', 0.9]] },
   { shot: 'pawn', secs: 2.5, align: [evIs('sold'), 1.1], cards: [['c_pawn', 0.05, 2.5]], cues: [[evIs('sold'), 'bell', 0.9, -0.12], [evIs('sold'), 'kaching', 1.0, 0.08]] },

@@ -675,15 +675,18 @@ export function generateLeg(seed, day, opts = {}) {
       lbox(F, ry, 0, 3.0, -1.5, 1.36, 1.2, 2.55, 'dino', '#5aa469', 'dino_torso');      // the pear-shaped body above it
       lbox(F, ry, 0, 3.6, -5.6, 0.5, 0.5, 2.2, 'dino', '#5aa469', 'dino_tail');
       for (const lx of [-1.1, 1.1]) for (const lz of [-3.4, 0.4]) lbox(F, ry, lx, 0.9, lz, 0.4, 0.9, 0.4, 'dino', '#4b8a58', 'dino_leg');
-      lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469', 'dino_neck');     // headless neck. the head is loot.
-      const h = F(1.5, 0, 3.4);
-      placeLoot('dino', h.x, heightAt(h.x, h.z), h.z, ry + 0.4);
+      lbox(F, ry, 0, 5.2, 1.4, 0.45, 1.3, 0.45, 'dino', '#5aa469', 'dino_neck');
+      // the head is loot, and it's back on its neck (stolen in 1987 and every few years since): 6.5 m up, out of
+      // a ringtail's reach and the bot's; climb the statue, or get the RV alongside and pull it from the roof.
+      // It's 120 kg: one pair of hands can't hold it, and a fall from up there costs it a few hundred dollars
+      const h = F(0, 6.5, 1.4);
+      placeLoot('dino', h.x, h.y, h.z, ry);
       for (let i = 0; i < 2; i++) {
         const w = F(-3 + rng() * 6, 0, 3 + rng() * 2);
         placeLoot(POI_LOOT.dino[1 + Math.floor(rng() * 2)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
       }
       const s = F(3.6, 1.6, 4.0);
-      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.8, h: 1.1, lines: ['DINO WORLD', 'HEAD MISSING — REWARD'], bg: '#5aa469', fg: '#fff', post: true });
+      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.8, h: 1.1, lines: ['DINO WORLD', 'HANDS OFF THE HEAD'], bg: '#5aa469', fg: '#fff', post: true });
     }
   }
 
@@ -1475,6 +1478,39 @@ export function generateLeg(seed, day, opts = {}) {
       if (Math.abs(B.g - A.g) / 1.9 > 0.4) continue;
       const lo = Math.min(A.g, B.g), hi = Math.max(A.g, B.g) + tall;
       box((A.x + B.x) / 2, (lo + hi) / 2, (A.z + B.z) / 2, 0.2, (hi - lo) / 2, 1.05, ry, 'invisible', null, 'fence');
+    }
+  }
+  // the signs on posts are solid too, the same way (part 'signpost'): a roadside board, its two posts outside it
+  // (client/js/town3d.js buildSigns), one box from the ground to the posts' tops; a billboard, a box per post
+  // (you can walk under its board). Signs on walls, painted on the ground or over a canopy have no posts
+  for (const s of signs) {
+    if (!s.post && !s.billboard) continue;
+    const hw = s.w / 2, hh = s.h / 2;
+    if (s.billboard) {
+      const yaw = Math.PI - s.ry, cs = Math.cos(yaw), sn = Math.sin(yaw), px = hw + 0.34;
+      for (const sx of [-1, 1]) {
+        const x = s.x + cs * sx * px, z = s.z - sn * sx * px, g = heightAt(x, z), top = s.y + hh + 0.65;
+        if (top > g) box(x, (g + top) / 2, z, 0.18, (top - g) / 2, 0.18, yaw, 'invisible', null, 'signpost');
+      }
+      continue;
+    }
+    const cs = Math.cos(s.ry), sn = Math.sin(s.ry), px = hw + 0.22;
+    const g = Math.min(heightAt(s.x + cs * px, s.z - sn * px), heightAt(s.x - cs * px, s.z + sn * px), heightAt(s.x, s.z)) - 0.1;
+    const top = s.y + hh + 0.55;
+    if (top > g) box(s.x, (g + top) / 2, s.z, px + 0.12, (top - g) / 2, 0.16, s.ry, 'invisible', null, 'signpost');
+  }
+  // anything already lying where a signpost now stands (a loose stone at a warning sign) is set down just clear
+  // of it, on the side it was on (no rng: everything else stays where it was)
+  for (const b of statics) {
+    if (b.part !== 'signpost') continue;
+    const c = Math.cos(b.ry), sn = Math.sin(b.ry);
+    for (const p of props) {
+      const L = LOOT[p.type], half = L ? (L.shape[0] === 'box' ? Math.max(L.shape[1], L.shape[3]) : L.shape[0] === 'cyl' ? L.shape[2] ?? L.shape[1] : L.shape[1]) : 0.3;
+      const dx = p.x - b.x, dz = p.z - b.z, lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+      if (Math.abs(lx) > b.hx + half + 0.15 || Math.abs(lz) > b.hz + half + 0.15) continue;
+      const nz = (lz < 0 ? -1 : 1) * (b.hz + half + 0.3);
+      p.x = b.x + lx * c + nz * sn; p.z = b.z - lx * sn + nz * c;
+      p.y = heightAt(p.x, p.z) + (L ? (L.shape[0] === 'box' ? L.shape[2] : L.shape[1]) : 0.3) + 0.06;
     }
   }
 

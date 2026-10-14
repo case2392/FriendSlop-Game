@@ -1,6 +1,6 @@
 # NO MONEY DOWN
 
-> You and the boys bought a $250,000 motorhome with no money down.
+> You and the boys bought a $30,500 motorhome with no money down.
 > Payments are due every night. None of you have jobs.
 
 A 1–6 player **first-person co-op road trip**, built for proximity voice and

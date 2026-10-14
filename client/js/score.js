@@ -322,6 +322,7 @@ export function createScore(ctx, out, { seed = 1 } = {}) {
     output: master,
     get theme() { return thName; },
     get levels() { return { ...lvl }; },
+    get targets() { return { ...want }; },   // (where each layer is headed: the levels follow at their own pace)
     start() { if (on) return; on = true; last.delete(master); master.gain.setTargetAtTime(1, ctx.currentTime, 0.6); timer ||= setInterval(tick, 50); tick(); },
     stop() { if (!on) return; on = false; last.delete(master); master.gain.setTargetAtTime(0, ctx.currentTime, 0.5); clearInterval(timer); timer = null; th = null; thName = null; pending = null; },
     // what's going on, every frame:

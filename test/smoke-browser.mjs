@@ -357,8 +357,9 @@ try {
     const bj = res.log.find(e => e.by === res.me && e.game === 'Blackjack'), fl = res.log.find(e => e.by === dave && e.game === 'Double or Nothing');
     check(bj && fl && res.bank === 2600 + bj.won + fl.won && /STEVE/.test(res.label),
       `the casino: Steve's blackjack (${bj?.won}) and Dave's coin (${fl?.won}) played at once out of one bank ($2,600 -> $${res.bank}); Steve's seat reads "${res.label}"`);
-    const casTune = await host.evaluate(() => window.__nmd.music?.score?.levels?.lead ?? -1);
-    check(casTune >= 0 && casTune < 0.15, `in the casino the score gives the floor to its band (the tune at ${casTune.toFixed(2)})`);
+    // (the target, not the level: the level eases on the page's frame clock, slow at the test's frame rate)
+    const casTune = await host.evaluate(() => window.__nmd.music?.score?.targets?.lead ?? -1);
+    check(casTune >= 0 && casTune < 0.01, `in the casino the score gives the floor to its band (the tune's target ${casTune.toFixed(2)})`);
     await joiner.evaluate(T => { const S = window.__nmd, B = T.bj, c = Math.cos(B.ry), s = Math.sin(B.ry), at = (lx, lz) => ({ x: B.table.x + lx * c + lz * s, z: B.table.z - lx * s + lz * c }); const p = at(-2.6, 3.4), t = at(0.2, 0.1); S.me.teleport(p.x, T.casino.y + 0.05, p.z, 0); S.aimAt(t.x, B.table.y - 0.1, t.z); }, T);
     await wait(joiner, 700);
     await shot(joiner, 'casino');

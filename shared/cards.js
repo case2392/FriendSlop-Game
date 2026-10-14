@@ -6,6 +6,7 @@
 //
 // Each set: 2 kit cards (the Garage's upgrades: one copy unlocks level I, two level II), 2 common, 1 uncommon,
 // 1 rare (rares drop only on Bad Credit trips). Pure: the server rolls them, the pages draw them.
+import { RV_PRICE } from './constants.js';
 
 export const SETS = [
   { n: 1, name: 'The Westmeadow Road', emblem: 'oak' },
@@ -24,7 +25,7 @@ export const CARDS = [
   { id: 'gnome', set: 1, kind: 'lore', rarity: 'common', name: 'Garden Gnome', line: "He's seen things.", art: 'p:gnome' },
   { id: 'toaster', set: 1, kind: 'lore', rarity: 'common', name: 'Chrome Toaster', line: 'Two slots. One works.', art: 'p:toaster' },
   { id: 'ed', set: 1, kind: 'lore', rarity: 'uncommon', name: 'Honest Ed', line: 'We buy anything. We pay for some of it.', art: 'n:ed' },
-  { id: 'slopmaster', set: 1, kind: 'lore', rarity: 'rare', name: 'The Slopmaster 9000', line: '$250,000. No money down.', art: 'rv' },
+  { id: 'slopmaster', set: 1, kind: 'lore', rarity: 'rare', name: 'The Slopmaster 9000', line: `$${RV_PRICE.toLocaleString('en-US')}. No money down.`, art: 'rv' },
   // 2: Goldenfield Pike
   { id: 'bullbar', set: 2, kind: 'kit', rarity: 'kit', name: 'Bull Bar', line: 'Iron on the nose. The front takes less of a knock.', art: 'e:bullbar' },
   { id: 'medic', set: 2, kind: 'kit', rarity: 'kit', name: 'Medic Bag', line: 'Up you get. Quicker than that.', art: 'e:medic' },

@@ -248,6 +248,18 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   check(['Georgia', 'Liberation Serif', 'DejaVu Sans', 'Arial Black', 'serif', 'sans-serif'].every(n => faces.includes(n)) && !faces.some(n => /px|\$|\{/.test(n)), `textures: the system font faces the families name are found for the cache key (${faces.length}: ${faces.join(', ')})`);
 }
 
+// --- what the RV cost: no money down, the five payments are its price, and everything that names it agrees ---
+{
+  const fs = await import('node:fs');
+  const { RV_PRICE } = await import('../shared/constants.js');
+  const { CARD } = await import('../shared/cards.js');
+  const price = `$${RV_PRICE.toLocaleString('en-US')}`, read = f => fs.readFileSync(new URL(`../${f}`, import.meta.url), 'utf8');
+  const where = ['client/index.html', 'README.md', 'docs/DESIGN.md', 'docs/STEAM.md'], says = where.filter(f => read(f).includes(price));
+  const stale = [...where, 'tools/trailer.mjs', 'shared/cards.js'].filter(f => /\$250,000|250000/.test(read(f)));
+  check(RV_PRICE === QUOTAS.reduce((a, b) => a + b, 0) && RV_PRICE === 30500 && says.length === where.length && CARD.slopmaster.line.startsWith(price) && !stale.length,
+    `the RV cost ${price}, the five payments added up; the menu, the README, the design, the Steam page and the Slopmaster card all say so${stale.length ? `; still $250,000: ${stale.join(', ')}` : ''}${says.length < where.length ? `; missing from ${where.filter(f => !says.includes(f)).join(', ')}` : ''}`);
+}
+
 // --- the save (shared/profile.js): checked on the way in, never thrown by junk, a trip counted once, and the
 // record rules (pure logic) ---
 {

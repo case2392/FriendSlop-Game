@@ -1,6 +1,7 @@
 // Fences are solid (shared/world.js: a thin invisible box per rail span). Checks world gen's boxes against the
 // fences drawn, that a walking player stops at one and a jump clears it (the page's own controller, client/js/
-// player.js, on the page's physics world), that loot thrown at one stops, and that the RV drives through.
+// player.js, on the page's physics world), that loot thrown at one stops, and that the RV drives through. And the
+// same for the signs on posts (part 'signpost'), and the dino's head sitting on its statue.
 import './pagemods.mjs';
 const C = await import('../shared/constants.js');
 const { generateLeg } = await import('../shared/world.js');
@@ -8,6 +9,7 @@ const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
 const { initPhys, LocalWorld } = await import('../client/js/phys.js');
 const { Me } = await import('../client/js/player.js');
+const { findSpots } = await import('../shared/finds.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -91,6 +93,52 @@ const across = p => (p.x - pick.x) * side.nx + (p.z - pick.z) * side.nz;
   const rp = sim.rv.translation(), moved = Math.hypot(rp.x - b.x, rp.z - b.z);
   check(cr < -b.hx && moved < 0.3 && Math.abs(rp.y - y0) < 0.4,
     `fences: a suitcase thrown at one stops on its side (${(-cr - b.hx).toFixed(2)} m short); the RV parked across one sits there (moved ${moved.toFixed(2)} m, rose ${(rp.y - y0).toFixed(2)} m)`);
+  sim.free?.();
+}
+
+// F4: every sign on posts has its box (a billboard one per post), and nothing world gen places (loot, tins) sits in one
+{
+  let signs = 0, boxes = 0, missing = 0;
+  const inside = [];
+  const within = (b, p, pad = 0) => { const dx = p.x - b.x, dz = p.z - b.z, c = Math.cos(b.ry), sn = Math.sin(b.ry), lx = dx * c - dz * sn, lz = dx * sn + dz * c; return Math.abs(lx) < b.hx + pad && Math.abs(lz) < b.hz + pad && p.y > b.y - b.hy - 0.5 && p.y < b.y + b.hy + 0.5; };
+  for (const seed of [777, 4242, 7]) for (let d = 1; d <= 5; d++) {
+    const W = generateLeg(seed, d), B = W.statics.filter(s => s.part === 'signpost');
+    boxes += B.length;
+    for (const sg of W.signs.filter(q => q.post || q.billboard)) {
+      signs++;
+      const near = B.filter(b => Math.hypot(b.x - sg.x, b.z - sg.z) < sg.w / 2 + 1);
+      if (near.length < (sg.billboard ? 2 : 1)) missing++;
+    }
+    for (const p of [...W.props, ...findSpots(W)]) if (B.some(b => within(b, p, 0.15))) inside.push(`${seed}/${d} ${p.type}`);
+  }
+  check(signs > 40 && !missing && !inside.length, `signs: ${boxes} solid signposts for the ${signs} signs on posts on 3 seeds x 5 days (${missing} missing); nothing placed inside one${inside.length ? `: ${inside.join(', ')}` : ''}`);
+}
+
+// F5: walking into the DINO WORLD sign (seed 777, day 3) stops you; without the signposts you'd walk through it
+{
+  const W3 = generateLeg(777, 3), sg = W3.signs.find(q => q.lines?.[0] === 'DINO WORLD');
+  const n = { x: Math.sin(sg.ry), z: Math.cos(sg.ry) }, off = p => (p.x - sg.x) * n.x + (p.z - sg.z) * n.z;
+  const walk = lw => {
+    const me = new Me(), st = { x: sg.x + n.x * 2.6, z: sg.z + n.z * 2.6 };
+    me.teleport(st.x, W3.heightAt(st.x, st.z) + 0.05, st.z, Math.atan2(-n.x, -n.z));
+    for (let i = 0; i < 150; i++) { lw.step(); me.update(1 / 60, { f: 1, r: 0, jump: false, sprint: false, crouch: false, grab: false }, lw, null, null); }
+    return off(me.pos);
+  };
+  const lw = new LocalWorld(W3), stopped = walk(lw); lw.free();
+  const lw0 = new LocalWorld({ ...W3, statics: W3.statics.filter(s => s.part !== 'signpost') }), through = walk(lw0); lw0.free();
+  check(sg && stopped > 0.15 && through < -1, `signs: walking into the DINO WORLD sign stops you ${stopped.toFixed(2)} m in front of it (without its posts solid you'd be ${(-through).toFixed(1)} m past)`);
+}
+
+// F6: the dino's head sits on its statue's neck (6.5 m up) and stays there
+{
+  const room = new Room('DINO', 777);
+  room.day = 2; room.nextDay();
+  const sim = room.sim, D = room.W.pois.find(p => p.type === 'dino')?.dino;
+  const head = [...sim.props.values()].find(p => p.type === 'dino');
+  const h0 = head?.body.translation(), up0 = h0 ? h0.y - D.y : 0;
+  for (let i = 0; i < 4 * C.SIM_HZ; i++) sim.step(1 / C.SIM_HZ, room.players);
+  const h1 = head?.body.translation(), moved = h1 ? Math.hypot(h1.x - h0.x, h1.y - h0.y, h1.z - h0.z) : 99;
+  check(D && head && up0 > 6.5 && moved < 0.15 && head.value === head.max, `the dino: its head sits on the statue's neck ${up0.toFixed(1)} m up, and after 4 s it's still there (moved ${moved.toFixed(2)} m, unchipped)`);
   sim.free?.();
 }
 

@@ -2614,7 +2614,7 @@ register('rs_plaque', {
     g.save(); g.textAlign = 'center'; g.textBaseline = 'middle';
     g.font = SERIF(30); g.fillStyle = rgba('#fff0c0', 0.5); g.fillText('SLOPASAURUS', w / 2 + 1, 38 + 1.5); g.fillStyle = '#3a2a14'; g.fillText('SLOPASAURUS', w / 2, 38);
     g.font = FONT(12); g.fillStyle = '#3a2a14';
-    { const txt = 'HEAD STOLEN 1987 · DO NOT CLIMB', m = g.measureText(txt).width, k = Math.min(1, (w - 44) / m); g.save(); g.translate(w / 2, 70); g.scale(k, 1); g.fillText(txt, 0, 0); g.restore(); }
+    { const txt = 'HEAD STOLEN 1987, 1994, 2011 · DO NOT CLIMB', m = g.measureText(txt).width, k = Math.min(1, (w - 44) / m); g.save(); g.translate(w / 2, 70); g.scale(k, 1); g.fillText(txt, 0, 0); g.restore(); }
     g.restore();
     for (let i = 0; i < 10; i++) blob(g, rnd() * w, rnd() * h, range(rnd, 4, 14), range(rnd, 3, 8), rnd() * 3, '#5a8a6a', 0.3, 0.3);
     for (const [x, y] of [[14, 14], [w - 14, 14], [14, h - 14], [w - 14, h - 14]]) rivet(g, x, y, 4, '#c8a050');
