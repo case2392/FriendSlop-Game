@@ -1726,6 +1726,7 @@ S.key = (k, down) => { keys[k] = !!down; };   // (a key held or let go, for the 
 S.uiOpen = () => uiOpen();   // (tests: a panel is up, and the game's keys are off)
 S.profile = profile; S.profileStatus = profileStatus;   // (tests: this player's save)
 S.beacon = beaconRange;   // (tests: how far loot glints reach, Keen Eye's)
+S.rvWorld = l => toWorld(S.rv.p, S.rv.q, l); S.rvYaw = () => qYaw(S.rv.q);   // (tests: a spot in the RV, wherever it's parked)
 S.target = () => target;
 S.send = m => net.send(m);
 S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?

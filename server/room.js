@@ -41,7 +41,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, kit: 0.2 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
 // a number from a client: finite and within +-lim, or 0

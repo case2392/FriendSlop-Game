@@ -117,14 +117,15 @@ try {
   // takes them; the host has them, and his page climbs on 0.76 of the stamina and sees glints from 38 m ----
   {
     const kit = await host.evaluate(() => {
-      const p = window.__nmd.profile();
+      const p = window.__nmd.profile(), ctp = document.getElementById('clickToPlay'), wasHidden = ctp.classList.contains('hidden');
       p.cards.chalk = 2; p.cards.eye = 1;
-      document.getElementById('clickToPlay').classList.remove('hidden');
+      ctp.classList.remove('hidden');
       document.getElementById('ctpGarage').click();
       document.querySelector('#garage .gtab[data-tab="kit"]').click();
       for (const id of ['chalk', 'eye']) document.querySelector(`#garageBody [data-perk="${id}"]`)?.click();
-      const shown = [...document.querySelectorAll('#garageBody .kit-item.on b')].map(b => b.textContent);
+      const shown = [...document.querySelectorAll('#garageBody .kit-item.on .kit-head b')].map(b => b.textContent);
       document.getElementById('garageClose').click();
+      ctp.classList.toggle('hidden', wasHidden);   // (closing a panel brings the click-to-play card back: not what the rest of the test had)
       return shown;
     });
     const echo = await host.waitForFunction(() => {
@@ -147,8 +148,8 @@ try {
   const rolesNow = (drv, nav) => host.evaluate(([drv, nav]) => window.__nmd.send({ t: 'dbg', op: 'roles', drv, nav }), [drv, nav]);
   await rolesNow(ids.steve, ids.dave);
   await host.waitForFunction(id => window.__nmd.meta?.roles?.drv === id, ids.steve, { timeout: 24000 });
-  await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); S.me.pitch = 0.05; });
-  await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x + 0.25, r.y + 0.1, r.z + 2.0, 0); S.aimAt(r.x + 0.62, r.y + 0.4, r.z + 2.85); });
+  await joiner.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.4, y: 0.1, z: -0.6 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); S.me.pitch = 0.05; });
+  await host.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: 0.25, y: 0.1, z: 2.0 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); const a = S.rvWorld({ x: 0.62, y: 0.4, z: 2.85 }); S.aimAt(a.x, a.y, a.z); });
   await wait(host, 900);
   await host.waitForFunction(() => window.__nmd.target()?.use === 'seat0', null, { timeout: 60000 });
   await host.evaluate(() => window.__nmd.press('use'));
@@ -227,7 +228,7 @@ try {
   await rolesNow(ids.dave, ids.steve);
   await joiner.evaluate(() => { window.__nmd.me.yaw += 0.2; });   // (Dave looks around: here, not away, so nobody stands in)
   await host.waitForFunction(id => window.__nmd.meta?.roles?.nav === id && !window.__nmd.meta.roles.drvAway, ids.steve, { timeout: 24000 });
-  await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
+  await host.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.1, y: 0.1, z: 2.25 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); });
   await wait(host, 900);
   const aimAtMap = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); S.aimAt(m.pose.p.x, m.pose.p.y, m.pose.p.z); });
   const mapAt = () => host.evaluate(() => { const S = window.__nmd; const m = [...S.props.values()].find(p => p.type === 'map'); return { p: m.pose.p, rv: { p: S.rv.p, q: S.rv.q } }; });
@@ -260,7 +261,7 @@ try {
   });
   check(!flash.up && flash.cleared, 'a refused grab never puts the map up, not even for the round trip');
   // Dave takes the wheel and stands on the brake: now Steve takes the map, and only Steve's screen shows it
-  await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); });
+  await joiner.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.4, y: 0.1, z: -0.6 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); });
   await wait(joiner, 900);
   const cue = toastSays(host, /Steve, grab the map/);
   await joiner.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
@@ -547,13 +548,13 @@ try {
   {
     await rolesNow(ids.dave, ids.steve);   // (still today's roles, set again after a reconnect and the town)
     await host.waitForFunction(id => window.__nmd.meta?.roles?.drv === id, ids.dave, { timeout: 24000 });
-    await joiner.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.4, r.y + 0.1, r.z - 0.6, 0); });
+    await joiner.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.4, y: 0.1, z: -0.6 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); });
     await wait(joiner, 900);
     await joiner.evaluate(() => window.__nmd.send({ t: 'use', kind: 'seat0' }));
     await joiner.waitForFunction(() => window.__nmd.me.mode === 'seat', null, { timeout: 24000 });
     const drv = await joiner.evaluate(() => window.__nmd.selfId);
     await host.waitForFunction(id => window.__nmd.g?.drv === id, drv, { timeout: 24000 });
-    await host.evaluate(() => { const S = window.__nmd; const r = S.rv.p; S.me.teleport(r.x - 0.1, r.y + 0.1, r.z + 2.25, 0); });
+    await host.evaluate(() => { const S = window.__nmd; const w = S.rvWorld({ x: -0.1, y: 0.1, z: 2.25 }); S.me.teleport(w.x, w.y, w.z, S.rvYaw()); });
     await wait(host, 900);
     await aimAtMap();
     await wait(host, 300);
