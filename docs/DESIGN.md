@@ -380,14 +380,40 @@ matters most. The face values below are **measured from the generator**
 | 5 | $15,000 balloon | 8 | ~$24,300 | 62% (you will be gambling) |
 
 The realistic haul is well short of face value: the clock, stops on mesa tops
-you have to climb to, loot that breaks on the way down, loot that slides
-around in the RV, and Ed's 80% for a load sold from the loading zone. A crew
-of bots that plays it straight (every stop it has time for, no casino; the
-full-run bot in the QA notes) pays days 1-3 on every seed tried and usually
-day 4, and is nowhere near the day-5 balloon: that one is the gamble, or a
-great run with surplus banked. Earlier quotas ($1,500 / $3,000 / $5,500 /
-$9,000) had the same bots missing day 2 or 3. The numbers still need real
-playtests with real friends before anyone trusts them (confidence: moderate).
+you have to climb to, loot that breaks on the way down, the ringtails, the
+Grumphorn and the rockfall eating the day, and Ed's 80% for a load sold from
+the loading zone.
+
+**Measured** (`tools/econbot.mjs`, October 2026: a crew of three bots plays
+whole trips through the real server, the wildlife on, every action a message
+a page could send; it carries what lies within 24 m of each stop and below
+2.5 m, the heavy things two-handed, as much as the RV holds, and never gambles;
+20 seeds):
+
+| Day | Reached | Paid | Pawned that day (mean / median) | Of what was loaded, sold |
+|---|---|---|---|---|
+| 1 | 20 | 20 (100%) | $3,139 / $3,242 | 98% |
+| 2 | 20 | 18 (90%) | $3,600 / $4,170 | 95% |
+| 3 | 18 | 17 (94%) | $3,847 / $4,035 | 98% |
+| 4 | 17 | 10 (59%) | $5,024 / $4,837 | 98% |
+| 5 | 10 | 0 | $4,763 / $4,960 | 98% |
+
+A trip pawns $16,853 on average (median $17,442). Without the casino the bot
+reaches day 5 on half the seeds and never pays the balloon: it ends $8,892
+short at the median, $1,520 at best. Gambling boldly instead (double or
+nothing at the coin flip whenever a payment is short, down to its last $100),
+the same crew gets to day 5 on 18 of 20 seeds and pays the balloon on 2: it
+wins one trip in ten.
+
+That is harder than these quotas were set for. They were tuned before the
+wildlife, the rockfall and the RV's condition existed, against a bot that paid
+days 1-3 on every seed and usually day 4; now day 4 is a coin flip without the
+casino, and even the casino rarely saves day 5. The bot is a floor, not a
+ceiling: it never climbs for loot, ranges no further than 24 m from a stop,
+and its boulder shove stalls short of the roadside 8 times in the 85 days it
+played. Real crews will haul more where they range further and less where they
+argue. Playtests decide (confidence that a practiced human crew out-hauls the
+bot: moderate; by how much: low).
 
 - Every casino game has a house edge (blackjack about 1–2% played sensibly,
   the coin flip 3%). The casino is variance you choose, never free money.
