@@ -68,7 +68,7 @@ export const THEMES = {
   snow:     { name: 'The High Pass', bpm: 84, meter: 3, swing: 0, chords: 'Dm Dm Bb C Dm Dm Gm A Dm F C Dm Bb C Dm Dm', melody: SNOW, lead: 'whistle', lead2: 'fiddle', groove: 'waltz', drums: 'waltz', bed: 'strings', key: 'Dm' },
   badlands: { name: 'Red Rock Lament', bpm: 80, meter: 4, swing: 0.08, chords: 'Am Am G Am Am Am F E Am C G Am F E Am Am', melody: BADLANDS, lead: 'steel', lead2: 'harmonica', groove: 'twangArp', drums: 'halftime', bed: 'drone', key: 'Am', tremolo: [5.2, 0.25] },
   desert:   { name: 'Lost Wages', bpm: 68, meter: 4, swing: 0, chords: 'E E F E Dm Dm E E Am G F E F G F E', melody: DESERT, answer: DESERT_ANSWER, lead: 'whistle', groove: 'spaghetti', drums: 'castanets', bed: 'choir', key: 'E', tremolo: [6.4, 0.75] },
-  night:    { name: 'Under the Stars', bpm: 72, meter: 3, swing: 0, roman: 'I I IV I I vi ii V I I IV I ii V I I', degrees: NIGHT, lead: 'harmonica', groove: 'lullaby', drums: null, bed: 'organ', soft: true },
+  night:    { name: 'Under the Stars', bpm: 72, meter: 3, swing: 0, roman: 'I I IV I I vi ii V I I IV I ii V I I', degrees: NIGHT, lead: 'harmonica', groove: 'lullaby', drums: null, bed: 'organ', soft: true, gain: 1.6 },
 };
 const PC = { C: 0, 'C#': 1, Db: 1, D: 2, 'D#': 3, Eb: 3, E: 4, F: 5, 'F#': 6, Gb: 6, G: 7, 'G#': 8, Ab: 8, A: 9, 'A#': 10, Bb: 10, B: 11 };
 const NAME = ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -315,13 +315,15 @@ export function createScore(ctx, out, { seed = 1 } = {}) {
     if (nextT < now) nextT = now + 0.05;    // (the page was asleep: start again from now)
     while (nextT < now + 0.3) nextT = scheduleBeat(nextT);
   }
-  const set = (g, v, tau) => g.gain.setTargetAtTime(v, ctx.currentTime, tau);
+  // (a gain is only touched when it has moved: update() runs every frame)
+  const last = new Map();
+  const set = (g, v, tau) => { const o = last.get(g); if (o != null && Math.abs(o - v) < 0.003) return; last.set(g, v); g.gain.setTargetAtTime(v, ctx.currentTime, tau); };
   return {
     output: master,
     get theme() { return thName; },
     get levels() { return { ...lvl }; },
-    start() { if (on) return; on = true; master.gain.setTargetAtTime(1, ctx.currentTime, 0.6); timer ||= setInterval(tick, 50); tick(); },
-    stop() { if (!on) return; on = false; master.gain.setTargetAtTime(0, ctx.currentTime, 0.5); clearInterval(timer); timer = null; th = null; thName = null; pending = null; },
+    start() { if (on) return; on = true; last.delete(master); master.gain.setTargetAtTime(1, ctx.currentTime, 0.6); timer ||= setInterval(tick, 50); tick(); },
+    stop() { if (!on) return; on = false; last.delete(master); master.gain.setTargetAtTime(0, ctx.currentTime, 0.5); clearInterval(timer); timer = null; th = null; thName = null; pending = null; },
     // what's going on, every frame:
     //   mode 'menu' (the full band, no rests) | 'play' | 'off'
     //   theme: the biome ('meadow'...) or 'night'; key: the biome's key, for the night's lullaby
@@ -360,7 +362,7 @@ export function createScore(ctx, out, { seed = 1 } = {}) {
       }
       // ducked under voices; knocked out: under water
       set(master, on ? (s.voice ? 0.5 : 1) * (s.ko ? 0.55 : 1) : 0, s.voice ? 0.12 : 0.8);
-      lp.frequency.setTargetAtTime(s.ko ? 480 : 20000, ctx.currentTime, 0.25);
+      if (lp.ko !== !!s.ko) { lp.ko = !!s.ko; lp.frequency.setTargetAtTime(s.ko ? 480 : 20000, ctx.currentTime, 0.25); }
     },
     // a one-shot, at once
     sting(name) { if (on) playSting(kits.sting, name, ctx.currentTime + 0.02, th); },

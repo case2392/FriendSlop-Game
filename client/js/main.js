@@ -12,6 +12,7 @@ import { settings, setSetting, onSettings, resetSettings, settingSpec } from './
 import { audioCtx, bus, panner, setListener } from './audio.js';
 import { updateAmbience, quietAmbience } from './ambience.js';
 import { createRadio } from './music.js';
+import { createScore, THEMES as SCORE_THEMES } from './score.js';
 import { setClutterQuality } from './terrain3d.js';
 import { initPhys, LocalWorld, G } from './phys.js';
 import { Me } from './player.js';
@@ -1152,7 +1153,7 @@ function meEvent(e) {
   else if (e.k === 'mantle') sfx.grab();
   else if (e.k === 'lurch') { sfx.thunk(Math.min(1, e.a / 20)); shake(Math.min(0.6, e.a / 40)); }
   else if (e.k === 'hat') { net.send({ t: 'hat', why: e.why }); sfx.clang(); shake(0.35); }
-  else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
+  else if (e.k === 'ko') { net.send({ t: 'ko', why: e.why }); sfx.ko(); sting('ko'); if (me.holding) onGrabRelease(); if (me.hasHook) { net.send({ t: 'use', kind: 'dropHook' }); me.hasHook = false; } }
   else if (e.k === 'wake') { net.send({ t: 'wake' }); sfx.wake(); }
 }
 net.on('seat', inOrder(m => {
@@ -1271,9 +1272,9 @@ function onMobEvent(e) {
   const p = S.props.get(e.id), at = p?.mesh.position;
   const near = at ? at.distanceTo(camera.position) : 99;
   switch (e.s) {
-    case 'wake': positional(at, () => sfx.bellow(), 90); break;
+    case 'wake': positional(at, () => sfx.bellow(), 90); if (near < 50) sting('wake'); break;
     case 'glare': positional(at, () => sfx.snort(), 40); break;
-    case 'charge': positional(at, () => { sfx.stampede(); sfx.clang(); }, 70); if (near < 10) shake(0.35); break;
+    case 'charge': positional(at, () => { sfx.stampede(); sfx.clang(); }, 70); if (near < 10) shake(0.35); if (near < 60) sting('charge'); break;
     case 'toss': positional(at, () => sfx.thunk(1), 60); if (near < 12) shake(0.5); break;
     case 'winded': positional(at, () => sfx.snort(), 30); if (at) puff(at.clone().add(new THREE.Vector3(0, 0.3, 0)), '#e8e4dc'); break;
     case 'leave': positional(at, () => sfx.clang(), 60); tutDone('grumph'); break;
@@ -1283,6 +1284,7 @@ function onMobEvent(e) {
     // jaws letting go, a squeal when they're held, stunned or run over
     case 'steal': {
       positional(at, () => sfx.yoink(), 45);
+      if (near < 40) sting('steal');
       const it = S.props.get(e.item);
       // (the stop's own loot that nobody had touched yet: not yours to lose, but there it goes)
       if (it) { floatText(it.mesh.position, e.ours === false || LOOT[it.type]?.find ? 'YOINK!' : `STOLEN ${fmt$(e.value)}`, '#ff6b5a'); markStolen(e.item); }
@@ -1306,6 +1308,7 @@ function onMobEvent(e) {
       if (!mid) break;
       positional(mid, () => sfx.rumble(), 110);
       if (mid.distanceTo(camera.position) < 45) shake(0.3);
+      if (mid.distanceTo(camera.position) < 90) { sting('rumble'); S.rumbleUntil = performance.now() + 5000; }
       for (let k = 0; k < 3; k++) setTimeout(() => { for (const p of rim) burst(p, '#a8957a', 5, 1.6, 0.3, 1.4); }, k * 450);
       break;
     }
@@ -1492,10 +1495,13 @@ function worldSounds(dt, rv, rvSpeed, others) {
   }
 }
 
-// Music: the menu plays the country station; in a trip, the RV's radio plays while someone drives (from
-// the dash: muffled from outside), switching to the 'midnight' station in the last hour before the
-// Repo Man; the casino has its lounge band. All of it is music.js, synthesized.
-const R = { menu: null, rv: null, casino: null };
+// Music. The score (score.js): the menu's main theme, then each biome's tune under the game, with layers
+// for what's going on near you (a Grumphorn asleep, waking, charging; ringtails creeping in; the clock), quiet
+// in town by the casino's band and in the RV while its radio plays, ducked under voices. The RV's radio plays
+// while someone drives (from the dash: muffled from outside), switching to the 'midnight' station in the last
+// hour before the Repo Man; the casino has its lounge band (music.js). All of it synthesized.
+const R = { rv: null, casino: null, score: null, paid: null };
+S.music = R;   // (the tests read it)
 function radioIn(out, seed, station) { const r = createRadio(audioCtx(), out, { seed, station }); r.on = false; r.station = station; return r; }
 function setRadio(r, on) { if (!r || r.on === on) return; r.on = on; if (on) r.start(0); else r.stop(); }
 function place(p, at) { if (p.positionX) { p.positionX.value = at.x; p.positionY.value = at.y; p.positionZ.value = at.z; } else p.setPosition(at.x, at.y, at.z); }
@@ -1503,19 +1509,40 @@ function newDayMusic() {
   // (a new day: a new tune; the old radios fade out and are let go)
   for (const k of ['rv', 'casino']) if (R[k]) { setRadio(R[k], false); const old = R[k]; setTimeout(() => { try { old.out.disconnect(); } catch {} }, 3000); R[k] = null; }
 }
-function updateMusic(rv, inMyRV) {
+// what the wildlife near you is up to, for the score: { sleep, alert, charge, thieves, rumble } 0..1
+function musicThreat() {
+  const T = { sleep: 0, alert: 0, charge: 0, thieves: 0, rumble: (S.rumbleUntil || 0) > performance.now() };
+  const near = (d, r0, r1) => Math.max(0, Math.min(1, (r1 - d) / (r1 - r0)));
+  for (const p of S.props.values()) {
+    if (p.type !== 'grumphorn' && p.type !== 'ringtail') continue;
+    const at = p.mesh.position, d = Math.hypot(at.x - me.pos.x, at.z - me.pos.z), st = (p.st ?? 0) & ST_MASK;
+    if (p.type === 'grumphorn') {
+      if (st === GST.SLEEP || st === GST.DOZE) T.sleep = Math.max(T.sleep, near(d, 8, 25));
+      else if (st === GST.RISE || st === GST.GLARE) T.alert = Math.max(T.alert, near(d, 15, 45));
+      else if (st === GST.CHARGE) T.charge = Math.max(T.charge, near(d, 25, 60));
+      else if (st === GST.WINDED || st === GST.ROAM || st === GST.TIPPED || st === GST.HELD) T.alert = Math.max(T.alert, 0.5 * near(d, 10, 35));
+    } else if (st === RST.SNEAK || st === RST.SNATCH || st === RST.RUN || st === RST.RAID || st === RST.INRV || st === RST.NIP) T.thieves = Math.max(T.thieves, near(d, 16, 32));
+  }
+  return T;
+}
+const sting = name => R.score?.sting(name);
+function updateMusic(rv, inMyRV, dt = 0.5) {
   const ctx = audioCtx();
   if (!ctx || ctx.state !== 'running') return;
-  if (!R.menu) R.menu = radioIn(bus.music, 7, 'country');
-  setRadio(R.menu, S.phase === 'menu');
-  if (S.phase !== 'game' || !S.W) { setRadio(R.rv, false); setRadio(R.casino, false); return; }
-  const g = S.g;
+  R.score ||= createScore(ctx, bus.music, { seed: 7 });
+  const g = S.g, play = S.phase === 'game' && S.W && g && g.ph !== 'over';
+  if (!play) {
+    R.score.update(dt, { mode: S.phase === 'menu' ? 'menu' : 'off', theme: 'title' });
+    setRadio(R.rv, false); setRadio(R.casino, false); R.paid = null;
+    return;
+  }
   if (!R.rv) {
     const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 20000;
-    const pan = panner({ x: 0, y: -1000, z: 0 }, { ref: 4, max: 70, out: bus.music });
+    const duck = ctx.createGain(); duck.connect(bus.music);
+    const pan = panner({ x: 0, y: -1000, z: 0 }, { ref: 4, max: 70, out: duck });
     lp.connect(pan);
     R.rv = radioIn(lp, (S.seed || 1) * 7 + (S.dayLabel || 1), 'country');
-    R.rv.lp = lp; R.rv.pan = pan; R.rv.out = pan;
+    R.rv.lp = lp; R.rv.pan = pan; R.rv.out = duck;
   }
   setRadio(R.rv, !!(settings.radio && g?.drv && rv && g.ph !== 'night' && g.ph !== 'over'));
   if (R.rv.on && rv) {
@@ -1535,10 +1562,28 @@ function updateMusic(rv, inMyRV) {
     }
     setRadio(R.casino, g?.ph !== 'over' && Math.hypot(cas.x - me.pos.x, cas.z - me.pos.z) < 50);
   }
+  // the score: the biome's tune (the night's lullaby after the payment), giving way to the casino's band and
+  // to the radio when you can hear it
+  const biome = S.W.biome, dCas = cas ? Math.hypot(cas.x - me.pos.x, cas.z - me.pos.z) : 999;
+  const rvD = rv ? Math.hypot(rv.p.x - me.pos.x, rv.p.z - me.pos.z) : 999;
+  const radio = R.rv.on ? (inMyRV ? 1 : 0.6 * Math.max(0, Math.min(1, (25 - rvD) / 15))) : 0;
+  R.score.update(dt, {
+    mode: settings.score ? 'play' : 'off',
+    theme: g.ph === 'night' ? 'night' : biome, key: SCORE_THEMES[biome]?.key,
+    town: g.ph === 'night' ? 0 : Math.max(0, Math.min(1, (45 - dCas) / 20)),
+    radio, threat: musicThreat(), ko: me.mode === 'ko',
+    urgency: g.ph === 'road' && !g.paid ? Math.max(0, Math.min(1, (g.clk - 22) / 1.75)) : 0,
+    voice: Object.values(voice.V.speaking || {}).some(Boolean),
+  });
+  // (a charge or a rockfall turns the radio down under the danger)
+  R.rv.out.gain.setTargetAtTime(1 - 0.8 * (R.score.levels.danger || 0), ctx.currentTime, 0.1);
+  // the payment made: a lick
+  if (R.paid === false && g.paid) sting('paid');
+  R.paid = !!g.paid;
 }
 // the menu's music starts with the first click (browsers keep audio off until one) or at once in the
 // desktop build
-const menuTick = () => { if (S.phase === 'menu') updateMusic(null, false); };
+const menuTick = () => { if (S.phase === 'menu') updateMusic(null, false, 0.5); };
 setInterval(menuTick, 500);
 window.addEventListener('pointerdown', () => initAudio(), { once: true, capture: true });
 if (DESK) initAudio();
@@ -1558,6 +1603,7 @@ const SETTINGS_UI = [
   ['sfx', 'Sound effects', 'range', 0, 1, 0.05, pct],
   ['amb', 'Ambience', 'range', 0, 1, 0.05, pct],
   ['voice', 'Voice chat', 'range', 0, 1, 0.05, pct],
+  ['score', 'Music while you play (each place has its tune; it follows the wildlife and the clock)', 'check'],
   ['radio', 'The RV radio plays while someone drives', 'check'],
   ['muteInBackground', 'Mute when the game is in the background', 'check'],
   ['Video'],
@@ -1948,7 +1994,7 @@ requestAnimationFrame(frame);
   probeQuality(dt);
   tutWatch(inMyRV);
   updateAmbience({ pos: camera.position, biome: S.W.biome, night, inside: inMyRV, fires: S.fires }, dt);
-  updateMusic(rv, inMyRV);
+  updateMusic(rv, inMyRV, dt);
   updateVoice(others);
   // walkie static when someone keys up
   const tx = new Set([...others].filter(([, s]) => s.flags & C.FLAG.WALKIE_TX).map(([id]) => id));
