@@ -28,7 +28,7 @@ const { initPhysics } = await import('../server/sim.js');
 const { RV_DIM, RV_SEAT_EXIT, toWorld, toLocal, qRotate, qYaw, insideRV } = await import('../shared/rv.js');
 const { GST, ST_MASK, RF } = await import('../shared/mobs.js');
 const { mulberry32 } = await import('../shared/rng.js');
-const { fmt$ } = await import('../shared/loot.js');
+const { LOOT, fmt$ } = await import('../shared/loot.js');
 import fs from 'node:fs';
 await initPhysics();
 
@@ -188,9 +188,22 @@ const floorY = (x, z) => (Math.abs(z - DZ) < 0.7 && x < -1.22 ? (x < -1.62 ? -0.
 
 // ---- getting in and out -------------------------------------------------------------------------------------
 const doorFoot = () => { const w = rvAt({ x: -2.6, y: 0, z: DZ }); return { x: w.x, y: ground(w.x, w.z), z: w.z }; };
-// open or shut the door (whoever is within reach of it)
+// nothing in the doorway (a door shut on something poking through it crushes it)
+function doorwayClear() {
+  for (const p of sim().props.values()) if (p.type !== 'map' && inDoorway(p, 0)) return false;
+  return true;
+}
+// a prop in the doorway (pad: m more on the inside, where the RV's first lurch slides it out of the open door)
+function inDoorway(p, pad = 0.25) {
+  const L = LOOT[p.type];
+  if (!L) return false;
+  const l = rvLocal(p.body.translation()), r = L.shape[0] === 'box' ? Math.max(L.shape[1], L.shape[2], L.shape[3]) : Math.max(L.shape[1], L.shape[2] || 0);
+  return l.x - r < -1.12 + pad && l.x + r > -1.3 && l.z + r > -0.32 - pad && l.z - r < 1.02 + pad && l.y > -0.6 && l.y < 2.2;
+}
+// open or shut the door (whoever is within reach of it); never shut on something in the doorway
 function setDoor(open) {
   if (sim().doorOpen === open) return true;
+  if (!open && !doorwayClear()) { health.doorLeftOpen++; return true; }
   const by = crew.find(b => !b.ko && b.seat == null && (() => { const l = rvLocal(b.world()); return Math.hypot(l.x + 1.2, l.z - DZ) < 3.0; })());
   if (by) by.use('door');
   return sim().doorOpen === open;
@@ -235,7 +248,48 @@ function* board() {
     for (const b of order) { if (b.seat == null && !b.ko) { yield* walkIn(b, RV_SEAT_EXIT[0]); b.use('seat0'); yield; if (b.seat === 0) break; } }
   }
   if (!crew.some(b => b.seat === 0)) fail('nobody could take the wheel');
+  // (something in the doorway: the door can't shut on it, and the road throws it out. A rider tidies it away)
+  if (!doorwayClear()) {
+    const i = order.findIndex(b => !b.ko && b.seat == null && b.frame === 'rv');
+    if (i >= 0) { yield* tidy(order[i]); yield* walkIn(order[i], i === 1 ? RV_SEAT_EXIT[1] : RIDE[(i - 2 + RIDE.length) % RIDE.length]); if (i === 1) { order[i].use('seat1'); yield; } }
+  }
   yield* until(() => setDoor(false), 3, 'shutting the door');
+}
+// a rider picks up what's in the doorway and sets it down at a free spot in the RV
+function* tidy(bot) {
+  for (let n = 0; n < 4; n++) {
+    const p = [...sim().props.values()].find(q => q.type !== 'map' && LOOT[q.type] && !q.holders.size && inDoorway(q, 0));
+    if (!p) return true;
+    const L = LOOT[p.type], half = halfOf(L);
+    if (hands(L) > 1) { trace(`  the ${p.type} is in the doorway, too heavy to tidy alone`); return false; }
+    const spot = packer.take(L, p.type);
+    if (!spot) { trace(`  nowhere to put the ${p.type} from the doorway`); return false; }
+    const at = rvLocal(p.body.translation());
+    yield* walkIn(bot, { x: -0.6, z: clamp(at.z, -0.2, 0.9) });
+    const w = p.body.translation(), d = reach(bot, w);
+    room.handle(bot.P, { t: 'grab', kind: 'prop', id: p.id, pt: [w.x, w.y, w.z], d });
+    bot.holdD = sim().holds.get(bot.id)?.dist ?? d;
+    if (held(bot) !== p.id) { packer.give(spot); room.handle(bot.P, { t: 'rel' }); trace(`  couldn't pick up the ${p.type} in the doorway`); return false; }
+    let GL = { ...at };
+    const over = Math.min(1.75 - half, Math.max(half + 0.12, spot.y + half + 0.12, packer.top() + half + 0.12));
+    for (const q of [{ x: at.x, y: over, z: at.z }, { x: -0.55, y: over, z: at.z }, { x: spot.x, y: over, z: spot.z }, { x: spot.x, y: spot.y + half + 0.01, z: spot.z }]) {
+      const from = { ...GL }, steps = Math.max(1, Math.round(Math.hypot(q.x - from.x, q.y - from.y, q.z - from.z) / 0.8 * HZ));
+      for (let i = 1; i <= steps; i++) {
+        GL = { x: from.x + (q.x - from.x) * i / steps, y: from.y + (q.y - from.y) * i / steps, z: from.z + (q.z - from.z) * i / steps };
+        const dx = GL.x - bot.feet.x, dz = GL.z - bot.feet.z, dd = Math.hypot(dx, dz);
+        if (dd > 1.1) stepLocal(bot, { x: clamp(GL.x - dx / dd * 0.9, -1.0, 1.0), z: clamp(GL.z - dz / dd * 0.9, -3.7, 2.4) }, C.PLAYER.WALK);
+        reach(bot, rvAt(GL));
+        yield;
+        if (held(bot) !== p.id) break;
+      }
+    }
+    for (let i = 0; i < 0.5 * HZ; i++) { reach(bot, rvAt(GL)); yield; }
+    room.handle(bot.P, { t: 'rel' }); bot.holdD = null;
+    packer.give(spot);
+    yield* wait(0.3);
+    trace(`  tidied the ${p.type} out of the doorway`);
+  }
+  return doorwayClear();
 }
 
 // ---- driving ------------------------------------------------------------------------------------------------
@@ -276,6 +330,7 @@ function legPlan() {
   const w = W(), out = [];
   for (const r of w.rockfalls || []) out.push({ k: 'honk', z: r.obz - 42, rf: r });
   for (const o of w.obstacles) out.push({ k: o.type, z: (o.z0 ?? o.z) - ({ gate: 8.5, boulder: 11, mud: 12, grade: 5.5 }[o.type] ?? 10), o });
+  for (const p of w.pois) if (p.type !== 'crash') out.push({ k: 'stop', z: p.z - DZ, poi: p });
   out.push({ k: 'town', z: w.LEN - 8 });
   return out.sort((a, b) => a.z - b.z);
 }
@@ -466,6 +521,443 @@ function* grade(o) {
   yield* board();
 }
 
+// ---- carrying ------------------------------------------------------------------------------------------------
+// The validated controller (scratch carry3 in the mapping run): the item's middle follows a planned point G; each
+// porter looks at G and sets its hold distance to reach it ({t:'hd'}) whenever it drifts by 3 cm; feet follow at
+// a page's carrying speed (2-handed x0.78, heavy x0.5); at the RV's open door the room's own helpers lift it
+// over the sill and turn it end-on. One thing through the door at a time.
+const halfOf = L => (L.shape[0] === 'box' ? L.shape[2] : L.shape[1]);
+// (for getting through doorways people turn things edge-on: a box plans with the middle of its narrow and
+// wide sides)
+const radiusOf = L => (L.shape[0] === 'box' ? (Math.min(L.shape[1], L.shape[3]) + Math.max(L.shape[1], L.shape[3])) / 2 : L.shape[0] === 'cyl' ? L.shape[2] : L.shape[1]);
+const speedOf = L => (L.cls === 'heavy' ? 0.5 : L.cls === '2h' ? 0.78 : 1) * C.PLAYER.WALK;
+const hands = L => (L.cls === 'heavy' && L.mass > 96 ? 2 : 1);   // (one pair of hands lifts 96.8 kg: 950 N)
+// Where it goes in the RV: fitted into what's free right now (RV-local), the deep end first. The floor's open
+// areas take anything; the bunks, the table, the counter, the benches and the icebox take small things. The
+// landing inside the door stays clear for the next one in, and so does the doorway (a door shut on something
+// poking through it crushes it).
+const AREAS = [
+  { x0: -1.1, x1: 0.7, z0: -1.7, z1: 0.25, y: 0 },          // the rear open floor
+  { x0: 0.7, x1: 1.12, z0: -0.55, z1: 0.25, y: 0 },          // (its corner by the icebox)
+  { x0: -0.35, x1: 1.12, z0: -2.9, z1: -1.45, y: 0 },        // the aisle by the shower
+  { x0: -0.55, x1: 0.3, z0: 0.8, z1: 2.5, y: 0 },            // the front aisle
+  { x0: -1.1, x1: 1.1, z0: -3.85, z1: -3.0, y: 0.56, small: true },   // the bed
+  { x0: -1.1, x1: 1.1, z0: -3.85, z1: -3.0, y: 1.5, small: true },    // the upper bunk
+  { x0: 0.4, x1: 1.15, z0: 0.8, z1: 1.5, y: 0.78, small: true },      // the table
+  { x0: -1.15, x1: -0.65, z0: 1.4, z1: 2.5, y: 0.92, small: true },   // the counter
+  { x0: 0.4, x1: 1.15, z0: 0.32, z1: 0.68, y: 0.44, small: true },    // the benches
+  { x0: 0.4, x1: 1.15, z0: 1.62, z1: 1.98, y: 0.44, small: true },
+  { x0: 0.75, x1: 1.12, z0: -1.38, z1: -0.62, y: 0.7, small: true },  // the icebox
+];
+const LANDING = { x0: -1.4, x1: -0.15, z0: -0.15, z1: 0.95 };
+const small = L => L.cls === '1h' || (L.cls === '2h' && L.mass <= 9 && halfOf(L) < 0.4);
+// a thing's footprint (its widest horizontal half-extent: it may turn as it's set down)
+const footOf = L => (L.shape[0] === 'box' ? Math.max(L.shape[1], L.shape[3]) : L.shape[0] === 'cyl' ? L.shape[2] : L.shape[1]);
+class Packer {
+  constructor() { this.held = []; }   // spots promised to things on their way in
+  take(L, type) {
+    const r = footOf(L) + 0.06, h = halfOf(L);
+    const here = sim().cargo().map(id => { const p = sim().props.get(id), l = rvLocal(p.body.translation()); return { x: l.x, y: l.y, z: l.z, r: footOf(LOOT[p.type]) + 0.04 }; });
+    const busy = [...here, ...this.held];
+    let best = null;
+    for (const A of AREAS) {
+      if (A.small && !small(L)) continue;
+      if (L.cls === 'heavy' && A.y > 0) continue;
+      for (let z = A.z0 + r; z <= A.z1 - r + 1e-6; z += 0.1) for (let x = A.x0 + r; x <= A.x1 - r + 1e-6; x += 0.1) {
+        if (x - r < LANDING.x1 && x + r > LANDING.x0 && z + r > LANDING.z0 && z - r < LANDING.z1) continue;
+        if (busy.some(b => Math.hypot(b.x - x, b.z - z) < b.r + r && Math.abs(b.y - (A.y + h)) < 0.9)) continue;
+        // (deepest first; among equals, nearest the middle; the floor before the furniture)
+        const score = z + Math.abs(x) * 0.05 + A.y * 0.5;
+        if (!best || score < best.score) best = { x, z, y: A.y, r, score };
+      }
+    }
+    if (!best) return null;
+    const spot = { x: best.x, z: best.z, y: best.y + h, r: best.r, top: best.y, idx: [] };
+    this.held.push(spot);
+    return { ...spot, y: best.y, ref: spot };
+  }
+  give(spot) { this.held = this.held.filter(s => s !== (spot.ref || spot)); }
+  // the highest top of anything in the RV now (a thing carried in goes over it)
+  top() { let t = 0; for (const id of sim().cargo()) { const p = sim().props.get(id), l = rvLocal(p.body.translation()); t = Math.max(t, l.y + halfOf(LOOT[p.type])); } return t; }
+}
+let packer = new Packer(), doorBusy = null;
+
+// what's solid for a carried thing's middle at (x, z): boxes taller than its bottom, posts and trees, rocks,
+// the RV; `lift`: its middle over the ground there
+function solidAt(x, z, r, half, lift, list) {
+  const g = ground(x, z), lo = g + lift - half - 0.04, hi = g + lift + half;
+  for (const s of list.statics) {
+    if (s.y + s.hy < lo || s.y - s.hy > hi) continue;
+    const c = Math.cos(s.ry || 0), sn = Math.sin(s.ry || 0), dx = x - s.x, dz = z - s.z;
+    const lx = dx * c - dz * sn, lz = dx * sn + dz * c;
+    const qx = Math.max(-s.hx, Math.min(s.hx, lx)), qz = Math.max(-s.hz, Math.min(s.hz, lz));
+    if (Math.hypot(lx - qx, lz - qz) < r) return true;
+  }
+  for (const cy of list.cyls) if (Math.hypot(x - cy.x, z - cy.z) < cy.r + r) return true;
+  for (const h of list.hulls) if (Math.hypot(x - h.x, z - h.z) < h.r * 0.8 + r) return true;
+  const l = rvLocal({ x, y: g + lift, z });
+  if (Math.abs(l.x) < RV_DIM.HALF_W + r && Math.abs(l.z) < RV_DIM.HALF_L + r) return true;
+  return false;
+}
+// a binary heap of (cost, cell)
+class Heap {
+  constructor() { this.c = []; this.k = []; }
+  get size() { return this.c.length; }
+  push(c, k) {
+    const C2 = this.c, K = this.k; let i = C2.length; C2.push(c); K.push(k);
+    while (i > 0) { const p = (i - 1) >> 1; if (C2[p] <= c) break; C2[i] = C2[p]; K[i] = K[p]; i = p; }
+    C2[i] = c; K[i] = k;
+  }
+  pop() {
+    const C2 = this.c, K = this.k, top = K[0], c = C2.pop(), k = K.pop(), n = C2.length;
+    if (n) {
+      let i = 0;
+      for (;;) { let m = 2 * i + 1; if (m >= n) break; if (m + 1 < n && C2[m + 1] < C2[m]) m++; if (C2[m] >= c) break; C2[i] = C2[m]; K[i] = K[m]; i = m; }
+      C2[i] = c; K[i] = k;
+    }
+    return top;
+  }
+}
+// the carried thing's path (world x/z points) from `from` to `to`: A* over a 0.35 m grid round everything solid,
+// on ground a porter can walk (no step steeper than 35 degrees), then pulled straight where it can be
+function carryPath(from, to, L, lift, squeeze = 1) {
+  const r = (radiusOf(L) + 0.1) * squeeze, half = halfOf(L), cs = 0.25;
+  const x0 = Math.min(from.x, to.x) - 8, z0 = Math.min(from.z, to.z) - 8, nx = Math.ceil((Math.max(from.x, to.x) + 8 - x0) / cs), nz = Math.ceil((Math.max(from.z, to.z) + 8 - z0) / cs);
+  if (nx * nz > 160000) return null;
+  const cx = i => x0 + (i + 0.5) * cs, cz = j => z0 + (j + 0.5) * cs;
+  const mid = { x: (from.x + to.x) / 2, z: (from.z + to.z) / 2 }, R = Math.hypot(from.x - to.x, from.z - to.z) / 2 + 14;
+  const list = {
+    statics: W().statics.filter(s => s.mat !== 'invisible' && Math.hypot(s.x - mid.x, s.z - mid.z) < R + Math.max(s.hx, s.hz)),
+    cyls: W().cyls.filter(c => Math.hypot(c.x - mid.x, c.z - mid.z) < R),
+    hulls: (W().hulls || []).filter(h => Math.hypot(h.x - mid.x, h.z - mid.z) < R + h.r),
+  };
+  const N = nx * nz, blocked = new Uint8Array(N), gy = new Float32Array(N);
+  for (let j = 0; j < nz; j++) for (let i = 0; i < nx; i++) { const k = j * nx + i; gy[k] = ground(cx(i), cz(j)); blocked[k] = solidAt(cx(i), cz(j), r, half, lift, list) ? 1 : 0; }
+  const cellOf = p => [clamp(Math.floor((p.x - x0) / cs), 0, nx - 1), clamp(Math.floor((p.z - z0) / cs), 0, nz - 1)];
+  const [si, sj] = cellOf(from), [ti, tj] = cellOf(to), sk = sj * nx + si, tk = tj * nx + ti;
+  blocked[sk] = 0; blocked[tk] = 0;   // (it starts and ends where it is)
+  const tan = Math.tan(35 * Math.PI / 180);
+  const g = new Float32Array(N).fill(Infinity), came = new Int32Array(N).fill(-1), shut = new Uint8Array(N), open = new Heap();
+  g[sk] = 0; open.push(0, sk);
+  const h = k => Math.hypot((k % nx) - ti, Math.floor(k / nx) - tj) * cs;
+  let found = false;
+  for (let it = 0; open.size && it < 400000; it++) {
+    const k = open.pop();
+    if (shut[k]) continue;
+    shut[k] = 1;
+    if (k === tk) { found = true; break; }
+    const i = k % nx, j = Math.floor(k / nx);
+    for (let dj = -1; dj <= 1; dj++) for (let di = -1; di <= 1; di++) {
+      if (!di && !dj) continue;
+      const a = i + di, b = j + dj;
+      if (a < 0 || b < 0 || a >= nx || b >= nz) continue;
+      const n = b * nx + a, step = Math.hypot(di, dj) * cs;
+      if (blocked[n] || Math.abs(gy[n] - gy[k]) > step * tan) continue;
+      const ng = g[k] + step;
+      if (ng < g[n]) { g[n] = ng; came[n] = k; open.push(ng + h(n), n); }
+    }
+  }
+  if (!found) return null;
+  const cells = [];
+  for (let k = tk; k !== -1; k = came[k]) cells.unshift({ x: cx(k % nx), z: cz(Math.floor(k / nx)) });
+  cells[0] = { x: from.x, z: from.z }; cells[cells.length - 1] = { x: to.x, z: to.z };
+  // pulled straight: from each point, as far along as a straight line stays clear and walkable
+  const clear = (a, b) => {
+    const n = Math.max(2, Math.ceil(hyp(a, b) / 0.15));
+    let py = ground(a.x, a.z);
+    for (let q = 1; q <= n; q++) {
+      const x = a.x + (b.x - a.x) * q / n, z = a.z + (b.z - a.z) * q / n, y = ground(x, z);
+      if (solidAt(x, z, r, half, lift, list) || Math.abs(y - py) > (hyp(a, b) / n) * tan) return false;
+      py = y;
+    }
+    return true;
+  };
+  const out = [cells[0]];
+  for (let q = 0; q < cells.length - 1;) {
+    let best = q + 1;
+    for (let e = cells.length - 1; e > q + 1; e--) if (clear(cells[q], cells[e])) { best = e; break; }
+    out.push(cells[best]); q = best;
+  }
+  return out;
+}
+// a point `s` m along a path (clamped to its ends), and the path's length
+const pathLen = P => { let L = 0; for (let i = 1; i < P.length; i++) L += hyp(P[i - 1], P[i]); return L; };
+function along(P, s) {
+  if (s <= 0) return { ...P[0] };
+  for (let i = 1; i < P.length; i++) { const d = hyp(P[i - 1], P[i]); if (s <= d) { const f = d > 1e-6 ? s / d : 0; return { x: P[i - 1].x + (P[i].x - P[i - 1].x) * f, z: P[i - 1].z + (P[i].z - P[i - 1].z) * f }; } s -= d; }
+  return { ...P[P.length - 1] };
+}
+// where a porter stands: the ground, or a floor it's on (a shop's slab, a trailer's floor or ramp)
+const FLOORS = new Set(['floor', 'trailer_floor', 'ramp']);
+function standY(x, z) {
+  let y = W().topAt ? W().topAt(x, z) : ground(x, z);
+  for (const s of W().statics) {
+    if (!FLOORS.has(s.part) || Math.abs(s.x - x) > s.hx + s.hz + 1 || Math.abs(s.z - z) > s.hx + s.hz + 1) continue;
+    const c = Math.cos(s.ry || 0), sn = Math.sin(s.ry || 0), dx = x - s.x, dz = z - s.z;
+    if (Math.abs(dx * c - dz * sn) < s.hx && Math.abs(dx * sn + dz * c) < s.hz) y = Math.max(y, s.y + s.hy);
+  }
+  return y;
+}
+// a porter's eye (world)
+const eyeOf = b => { const f = b.world(); return { x: f.x, y: f.y + (b.crouch ? 1.05 : C.PLAYER.EYE), z: f.z }; };
+// look at G and reach it: the hold distance follows the eye's distance to G
+function reach(b, G) {
+  const e = eyeOf(b), dx = G.x - e.x, dy = G.y - e.y, dz = G.z - e.z, d = Math.hypot(dx, dy, dz);
+  const yawW = Math.atan2(dx, dz);
+  b.yaw = b.frame === 'rv' ? wrap(yawW - qYaw(rvPose().q)) : yawW;
+  b.pitch = clamp(-Math.atan2(dy, Math.hypot(dx, dz)), -1.45, 1.45);
+  const want = clamp(d, C.GRAB.HOLD_MIN, C.GRAB.HOLD_MAX);
+  if (b.holdD == null || Math.abs(want - b.holdD) > 0.03) { b.holdD = want; room.handle(b.P, { t: 'hd', d: want }); }
+  return d;
+}
+// a porter's feet to a world point on foot (no faster than `v`), standing on whatever floor is there
+function stepToward(b, to, v) {
+  b.frame = 'ground'; b.seat = null; b.crouch = false;
+  const f = b.feet, dx = to.x - f.x, dz = to.z - f.z, d = Math.hypot(dx, dz), s = Math.min(d, v * DT);
+  const x = d > 1e-6 ? f.x + dx / d * s : f.x, z = d > 1e-6 ? f.z + dz / d * s : f.z;
+  b.feet = { x, y: standY(x, z), z };
+}
+// the same in the RV's frame on the door's line (the steps), switching between the ground and the RV
+function stepLocal(b, to, v) {
+  const cur = b.frame === 'rv' ? b.feet : (() => { const l = rvLocal(b.feet); return { x: l.x, y: l.y, z: l.z }; })();
+  const dx = to.x - cur.x, dz = to.z - cur.z, d = Math.hypot(dx, dz), s = Math.min(d, v * DT);
+  const x = d > 1e-6 ? cur.x + dx / d * s : cur.x, z = d > 1e-6 ? cur.z + dz / d * s : cur.z;
+  if (x <= -1.84) { const w = rvAt({ x, y: 0, z }); b.frame = 'ground'; b.feet = { x: w.x, y: ground(w.x, w.z), z: w.z }; }
+  else { b.frame = 'rv'; b.feet = { x, y: Math.abs(z - DZ) < 0.7 && x < -1.22 ? (x < -1.62 ? -0.85 : -0.42) : 0, z }; }
+  b.seat = null;
+}
+const held = b => sim().holds.get(b.id)?.id ?? null;
+
+// one item, from where it lies to its spot in the RV: false if it couldn't be (no way through, dropped, a jam)
+function* carry(team, prop, spot) {
+  const L = LOOT[prop.type], half = halfOf(L), v = speedOf(L) * 0.8, heavy = team.length > 1;
+  const c0 = prop.body.translation(), g0 = ground(c0.x, c0.z);
+  const lift = Math.max(1.0, 0.95 + half, (c0.y - half) - g0 + half + 0.12);
+  const door = () => rvAt({ x: -3.0, y: 0, z: DZ });
+  const P = carryPath({ x: c0.x, z: c0.z }, door(), L, lift) || carryPath({ x: c0.x, z: c0.z }, door(), L, lift, 0.6);
+  if (!P) { trace(`  no way to carry the ${prop.type} out (at ${c0.x.toFixed(1)}, ${(c0.y - ground(c0.x, c0.z)).toFixed(2)} up, ${c0.z.toFixed(1)})`); return false; }
+  const len = pathLen(P), dir0 = len > 0.1 ? { x: (along(P, 0.3).x - c0.x) / 0.3, z: (along(P, 0.3).z - c0.z) / 0.3 } : { x: 1, z: 0 };
+  // stances: one at 1.2 m along the way out; a second (heavy) 1.2 m behind it
+  const st = [along(P, 1.2), { x: c0.x - dir0.x * 1.2, z: c0.z - dir0.z * 1.2 }];
+  yield* all(...team.map((b, i) => walk(b, st[i], C.PLAYER.WALK, 0.1)));
+  for (const b of team) {
+    const cw = prop.body.translation(), d = reach(b, cw);
+    if (d > C.PLAYER.REACH + 0.75) { trace(`  ${b.name} can't reach the ${prop.type} (${d.toFixed(1)} m)`); return false; }
+    room.handle(b.P, { t: 'grab', kind: 'prop', id: prop.id, pt: [cw.x, cw.y, cw.z], d });
+    b.holdD = sim().holds.get(b.id)?.dist ?? d;
+  }
+  if (team.some(b => held(b) !== prop.id)) { for (const b of team) room.handle(b.P, { t: 'rel' }); trace(`  couldn't grab the ${prop.type}`); return false; }
+  const ok = () => sim().props.has(prop.id) && team.every(b => held(b) === prop.id);
+  let G = { x: c0.x, y: c0.y, z: c0.z }, sAt = 0;
+  const feetFor = () => {
+    team.forEach((b, i) => {
+      const w = heavy ? (i === 0 ? along(P, sAt + 1.3) : along(P, sAt - 1.3)) : along(P, sAt - 1.3);
+      stepToward(b, w, C.PLAYER.WALK);
+    });
+  };
+  // up to carrying height
+  const top = g0 + lift;
+  for (let i = 0; i < 4 * HZ && G.y < top - 1e-3; i++) { G.y = Math.min(top, G.y + 1.0 * DT); for (const b of team) reach(b, G); yield; if (!ok()) break; }
+  for (let i = 0; i < 0.3 * HZ; i++) { for (const b of team) reach(b, G); yield; }
+  // along the path to the door's foot
+  for (let i = 0; i < 120 * HZ && sAt < len && ok(); i++) {
+    // (one thing through the door at a time: wait 3 m short while it's taken)
+    if (doorBusy && doorBusy !== prop.id && len - sAt < 3) { for (const b of team) reach(b, G); yield; continue; }
+    sAt = Math.min(len, sAt + v * DT);
+    const p = along(P, sAt);
+    G = { x: p.x, y: ground(p.x, p.z) + lift, z: p.z };
+    feetFor();
+    for (const b of team) reach(b, G);
+    yield;
+  }
+  if (!ok()) { trace(`  lost the ${prop.type} on the way (${sim().props.has(prop.id) ? 'dropped' : 'broken'})`); for (const b of team) room.handle(b.P, { t: 'rel' }); return false; }
+  doorBusy = prop.id;
+  // the door: in the RV's frame from here (carry3's path), the door opened if it isn't
+  if (!sim().doorOpen) { const near = team.find(b => hyp(b.feet, doorFoot()) < 3.0) || team[0]; near.use('door'); yield; }
+  const Hs = half + 0.12, gl = rvLocal(G);
+  let GL = { x: gl.x, y: gl.y, z: gl.z };
+  const moveL = function* (pts, speed, settle = 0) {
+    for (const q of pts) {
+      const from = { ...GL }, n = Math.max(1, Math.round(Math.hypot(q.x - from.x, q.y - from.y, q.z - from.z) / speed * HZ));
+      for (let i = 1; i <= n; i++) {
+        GL = { x: from.x + (q.x - from.x) * i / n, y: from.y + (q.y - from.y) * i / n, z: from.z + (q.z - from.z) * i / n };
+        feetL(); const Gw = rvAt(GL); for (const b of team) reach(b, Gw); yield;
+        if (!ok()) return;
+      }
+    }
+    for (let i = 0; i < settle * HZ; i++) { feetL(); const Gw = rvAt(GL); for (const b of team) reach(b, Gw); yield; }
+  };
+  // carry3's feet: one porter 1.3 m behind it on the door's line, up the steps once it's in, then in behind it
+  // (within reach) to the spot; heavy: the lead backing in ahead of it, the back one behind it
+  const inside = g => { const dx = g.x - (-0.85), dz = g.z - DZ, d = Math.hypot(dx, dz); return d < 1.3 ? { x: -0.85, z: DZ } : { x: clamp(g.x - dx / d * 1.2, -1.0, 1.0), z: clamp(g.z - dz / d * 1.2, -3.7, 2.4) }; };
+  const feetL = () => {
+    const g = GL;
+    team.forEach((b, i) => {
+      let want;
+      if (!heavy) want = g.x < -2.0 ? { x: g.x - 1.3, z: g.z } : g.x < -1.0 ? { x: Math.max(g.x - 1.3, -2.4), z: DZ } : inside(g);
+      else if (i === 0) want = g.x < -3.2 ? { x: g.x + 1.3, z: g.z } : g.x < -1.3 ? { x: Math.min(-0.85, g.x + 1.3), z: DZ } : { x: clamp(g.x + 1.2, -0.6, 0.45), z: clamp(g.z + (g.z < -0.5 ? -1.0 : 0.6), -3.4, DZ) };
+      else want = g.x < -0.6 ? { x: Math.min(g.x - 1.3, -2.2), z: g.x < -3.2 ? g.z : DZ } : inside(g);
+      stepLocal(b, want, (heavy ? 0.5 : L.cls === '2h' ? 0.78 : 1) * C.PLAYER.WALK);
+    });
+  };
+  const gyL = rvLocal({ x: G.x, y: ground(G.x, G.z), z: G.z }).y;
+  yield* moveL([{ x: -3.0, y: Math.max(gyL + lift, Hs), z: DZ }, { x: -2.6, y: Hs, z: DZ }], heavy ? 1.76 : 3.5 * (L.cls === '2h' ? 0.78 : 1), heavy ? 2 : 0.3);
+  const dino = prop.type === 'dino';
+  if (dino) yield* moveL([{ x: -1.6, y: Hs, z: DZ }, { x: -1.2, y: 0.44 + half + 0.08, z: DZ }, { x: -0.2, y: 0.44 + half + 0.08, z: DZ }], 0.4, 0.3);
+  else yield* moveL([{ x: -0.55, y: Hs, z: DZ }], heavy ? 0.4 : 0.8, 0.3);
+  const sy = spot.y + half, over = Math.min(1.75 - half, Math.max(Hs, sy + 0.12, packer.top() + half + 0.12));
+  if (dino) yield* moveL([{ x: -0.2, y: Math.max(0.44 + half + 0.08, over), z: DZ }, { x: spot.x, y: Math.max(0.44 + half + 0.08, over), z: spot.z }], 0.4, 0.3);
+  else yield* moveL([{ x: -0.55, y: over, z: DZ }, { x: spot.x, y: over, z: Math.min(DZ, spot.z + 0.6) }, { x: spot.x, y: over, z: spot.z }], heavy ? 0.4 : 0.8, 0.3);
+  yield* moveL([{ x: spot.x, y: sy + 0.01, z: spot.z }], 0.3, 0.6);
+  const loaded = ok();
+  for (const b of team) { room.handle(b.P, { t: 'rel' }); b.holdD = null; }
+  packer.give(spot);
+  if (doorBusy === prop.id) doorBusy = null;
+  yield* wait(0.4);
+  const inRV = sim().cargo().includes(prop.id);
+  if (!loaded || !inRV) trace(`  the ${prop.type} didn't make it in (${!sim().props.has(prop.id) ? 'broken' : loaded ? 'fell out' : 'dropped'})`);
+  return inRV;
+}
+// everyone on foot back outside the door (after a carry)
+function* outOfRV(b) {
+  if (b.frame !== 'rv') return;
+  for (let i = 0; i < 6 * HZ; i++) { stepLocal(b, { x: -2.2, z: DZ }, C.PLAYER.WALK); yield; if (b.frame === 'ground') break; }
+}
+
+// ---- a stop -------------------------------------------------------------------------------------------------
+// its loot: loose and worth something, within 24 m, not on a ringtail's pile or within 7.5 m of a den from day 2
+// (they nip), not up on a butte (that's the crash site's own way down)
+function stopItems(poi) {
+  const dens = (W().dens || []).map(d => d);
+  const out = [];
+  for (const p of sim().props.values()) {
+    const L = LOOT[p.type];
+    if (!L || L.tool || p.value <= 0 || p.holders.size) continue;
+    const t = p.body.translation();
+    if (Math.hypot(t.x - poi.x, t.z - poi.z) > 24) continue;
+    if (sim().cargo().includes(p.id)) continue;
+    if (room.day >= 2 && dens.some(d => Math.hypot(d.x - t.x, d.z - t.z) < 7.5)) continue;
+    if (t.y - ground(t.x, t.z) > 2.5) continue;
+    const dist = Math.hypot(t.x - rvZ() * 0 - rvAt({ x: -3, y: 0, z: DZ }).x, t.z - rvAt({ x: -3, y: 0, z: DZ }).z);
+    out.push({ prop: p, L, dist, score: p.value / (2 * dist / speedOf(L) + 8) });
+  }
+  return out.sort((a, b) => b.score - a.score);
+}
+// is there time for `secs` more here, and the rest of the road and town, before midnight (with a margin)?
+function budgetOK(secs, restZ) {
+  const w = W(), road = Math.max(0, w.LEN - restZ) / 10;
+  const obs = legPlan().filter(e => e.z > restZ + 3).reduce((a, e) => a + ({ honk: 15, gate: 45, boulder: 35, mud: 45, grade: 60, stop: 0, town: 60 }[e.k] ?? 20), 0);
+  const left = (C.MIDNIGHT - room.clock) * C.HOUR_SEC;
+  return secs + road + obs + 0.75 * C.HOUR_SEC < left;
+}
+function* stopAt(poi) {
+  const zPark = poi.z - DZ, side = poi.side || Math.sign(poi.x - W().roadX(poi.z)) || -1;
+  if (!budgetOK(30, poi.z)) { trace(`  no time for the ${poi.type}`); return; }
+  // (pulled over toward it, the door abreast of its middle)
+  yield* driveTo(zPark, { vmax: vmaxFor, lat: z => (Math.abs(z - zPark) < 30 ? side * 2.4 : latFor(z)) });
+  const porters = crew.filter(b => !b.ko && b.seat !== 0);
+  if (!porters.length) return;
+  yield* all(...porters.map(b => climbOut(b)));
+  const tried = new Set();
+  let carried = 0;
+  for (let round = 0; round < 40; round++) {
+    const items = stopItems(poi).filter(x => !tried.has(x.prop.id));
+    if (!items.length) break;
+    // the heavy ones with every free pair of hands; the rest one each, all at once
+    const free = porters.filter(b => !b.ko);
+    const heavyIt = items.find(x => hands(x.L) > 1);
+    const jobs = [];
+    if (heavyIt && free.length >= 2) {
+      const spot = packer.take(heavyIt.L, heavyIt.prop.type);
+      tried.add(heavyIt.prop.id);
+      if (spot && budgetOK(2 * heavyIt.dist / speedOf(heavyIt.L) + 25, poi.z)) jobs.push({ team: free.slice(0, 2), it: heavyIt, spot });
+      else if (spot) packer.give(spot);
+    } else {
+      const light = items.filter(x => hands(x.L) === 1);
+      for (const b of free) {
+        const it = light.find(x => !tried.has(x.prop.id));
+        if (!it) break;
+        tried.add(it.prop.id);
+        const spot = packer.take(it.L, it.prop.type);
+        if (!spot || !budgetOK(2 * it.dist / speedOf(it.L) + 15, poi.z)) { if (spot) packer.give(spot); continue; }
+        jobs.push({ team: [b], it, spot });
+      }
+    }
+    if (!jobs.length) { if (heavyIt && free.length < 2 && items.every(x => hands(x.L) > 1)) break; continue; }
+    yield* all(...jobs.map(j => (function* () {
+      const v0 = Math.round(j.it.prop.value);
+      const ok = yield* carry(j.team, j.it.prop, j.spot);
+      if (ok) { carried++; dayLog.carried.push({ id: j.it.prop.id, type: j.it.prop.type, v0, vIn: Math.round(j.it.prop.value), poi: poi.type, stop: poi.z, spot: j.spot }); }
+      else { packer.give(j.spot); dayLog.failed.push(j.it.prop.type); }
+      for (const b of j.team) yield* outOfRV(b);
+    })()));
+  }
+  trace(`  ${poi.type}: ${carried} carried`);
+  yield* reload(poi, porters);
+  yield* board();
+}
+// anything carried in at this stop that rolled back out, or sits in the doorway (the first lurch throws it
+// out of the door that can't shut on it): carried in again, to a new spot
+function* reload(poi, porters) {
+  for (let sweep = 0; sweep < 3; sweep++) {
+    const inRV = new Set(sim().cargo());
+    const mine = dayLog.carried.filter(x => x.stop === poi.z && !x.fate && sim().props.get(x.id));
+    for (const x of mine) {
+      const p = sim().props.get(x.id), t = p.body.translation(), l = rvLocal(t);
+      if (!inRV.has(x.id) || inDoorway(p)) trace(`  ${x.type} #${x.id}: ${inRV.has(x.id) ? 'in the load' : 'not in the load'}${inDoorway(p) ? ', in the doorway' : ''}, RV-local ${l.x.toFixed(2)} ${l.y.toFixed(2)} ${l.z.toFixed(2)}, ${(t.y - ground(t.x, t.z)).toFixed(2)} m up`);
+    }
+    // (only what's on the ground out here: something in the RV can't be carried in from outside)
+    const loose = mine.filter(x => { const p = sim().props.get(x.id), t = p.body.translation(); return !inRV.has(x.id) && t.y - ground(t.x, t.z) < 0.8 && Math.abs(rvLocal(t).x) > RV_DIM.HALF_W + 0.3; });
+    if (!loose.length) return;
+    trace(`  ${loose.length} loose (${loose.map(x => x.type).join(', ')}): in again`);
+    health.reloads = (health.reloads || 0) + loose.length;
+    let free = porters.filter(b => !b.ko);
+    const jobs = [];
+    for (const x of loose) {
+      const p = sim().props.get(x.id), L = LOOT[p.type], n = hands(L);
+      if (free.length < n) continue;
+      packer.give(x.spot);
+      const spot = packer.take(L, p.type);
+      if (!spot) continue;
+      x.spot = spot;
+      jobs.push({ team: free.slice(0, n), p, x });
+      free = free.slice(n);
+    }
+    if (!jobs.length) return;
+    yield* all(...jobs.map(j => (function* () {
+      if (!(yield* carry(j.team, j.p, j.x.spot))) dayLog.failed.push(j.p.type);
+      for (const b of j.team) yield* outOfRV(b);
+    })()));
+  }
+}
+let dayLog = { carried: [], failed: [] };
+// (trace) the moment a thing carried in leaves the RV's load: where it was, and what the RV was doing
+let leaveTick = 0, lastIn = new Map();
+function watchLoad() {
+  const now = new Set(sim().cargo());
+  for (const x of dayLog.carried) {
+    if (x.fate) continue;
+    const p = sim().props.get(x.id);
+    if (!p) continue;
+    const was = lastIn.get(x.id);
+    if (now.has(x.id)) { const l = rvLocal(p.body.translation()); lastIn.set(x.id, { x: l.x, y: l.y, z: l.z }); continue; }
+    if (!was) continue;
+    lastIn.delete(x.id);
+    const q = rvPose().q, up = qRotate(q, { x: 0, y: 1, z: 0 });
+    trace(`  OUT: ${x.type} #${x.id} left the load (last RV-local ${was.x.toFixed(2)} ${was.y.toFixed(2)} ${was.z.toFixed(2)}); RV ${sim().rvSpeed().toFixed(1)} m/s at z ${sim().rv.translation().z.toFixed(0)}, tilt ${(Math.acos(Math.min(1, up.y)) * 57.3).toFixed(0)} deg, door ${sim().doorOpen ? 'open' : 'shut'}, hatch ${sim().hatchOpen ?? '?'}`);
+  }
+}
+// what became of each thing carried in (broken, stolen; the bell's sale is noted in the main loop)
+function ledgerEvents(evs) {
+  for (const e of evs) {
+    const c = dayLog.carried.find(x => x.id === e.id && !x.fate);
+    if (!c) continue;
+    if (e.k === 'break') c.fate = 'broken';
+    else if (e.k === 'dmg') c.knocks = (c.knocks || 0) + (e.lost || 0);
+    else if (e.k === 'mob' && e.s === 'steal') c.fate = 'stolen';
+  }
+}
+
 // ---- town and night -----------------------------------------------------------------------------------------
 // into Ed's loading zone (the lane on the shop's side), then the bell and the Repo Man
 function* town(day) {
@@ -477,6 +969,17 @@ function* town(day) {
   const bell = W().uses.find(u => u.kind === 'pawnBell'), pay = W().uses.find(u => u.kind === 'pay');
   const [seller, payer] = footCrew(2);
   const sold0 = room.dayStats.sold;
+  // (carried in but not in the RV's load now: where it went)
+  if (TRACE) {
+    const inRV = new Set(sim().cargo());
+    for (const x of dayLog.carried) {
+      if (x.fate || inRV.has(x.id)) continue;
+      const p = sim().props.get(x.id);
+      if (!p) { trace(`  missing #${x.id} ${x.type}: gone from the world`); continue; }
+      const t = p.body.translation(), l = rvLocal(t);
+      trace(`  outside the load #${x.id} ${x.type} $${x.vIn}: world z ${t.z.toFixed(1)}, RV-local ${l.x.toFixed(2)} ${l.y.toFixed(2)} ${l.z.toFixed(2)}`);
+    }
+  }
   yield* all(
     (function* () { yield* climbOut(seller); yield* walk(seller, { x: -12.5 + 0.8, z: LEN + 42 }); yield* walk(seller, { x: bell.x + 1.2, z: bell.z }); seller.useId(bell); yield; })(),
     payer && payer !== seller ? (function* () { yield* climbOut(payer); yield* walk(payer, { x: pay.x - 1.0, z: pay.z }); })() : null,
@@ -539,6 +1042,8 @@ function* night() {
 function* dayScript(out) {
   const d = { day: room.day, due: room.due, bank0: room.bank, hp0: Math.round(room.rvc.hp) };
   out.push(d);   // (filled in as the day goes: a day-5 payment ends the trip in the middle of it)
+  packer = new Packer(); doorBusy = null;
+  dayLog = d.log = { carried: [], failed: [] };
   if (BANK != null) { room.bank = Math.max(room.bank, BANK); d.bank0 = room.bank; }
   yield* board();
   for (const e of legPlan()) {
@@ -549,6 +1054,7 @@ function* dayScript(out) {
     else if (e.k === 'boulder') yield* boulder(e.o);
     else if (e.k === 'mud') yield* mud(e.o);
     else if (e.k === 'grade') yield* grade(e.o);
+    else if (e.k === 'stop') yield* stopAt(e.poi);
     else if (e.k === 'town') { yield* driveTo(e.z, { vmax: vmaxFor, lat: latFor, stop: false }); yield* town(d); }
     d.time = d.time || {};
     d.time[e.k] = (d.time[e.k] || 0) + room.t - t0;
@@ -568,12 +1074,16 @@ async function runTrip(seed) {
   while (room.phase !== 'over' && room.day <= D1) {
     const g = dayScript(days), day0 = room.day;
     for (;;) {
+      // (what's sold is gone once the bell is rung or the tick is over: note each thing's value first)
+      const vals = new Map(dayLog.carried.filter(x => !x.fate).map(x => [x.id, Math.round(sim().props.get(x.id)?.value ?? 0)]));
       const r = g.next();
       // a page's driver sends its pedals 20 times a second; the bot every tick
       const dv = driver();
       if (dv) room.handle(dv.P, { t: 'drv', ...pedals });
       for (const b of crew) b.pose();
       room.tick(DT);
+      if (TRACE && (++leaveTick % 5) === 0) watchLoad();
+      if (ev.length) { for (const e of ev) if (e.k === 'sold') for (const id of e.ids || []) { const x = dayLog.carried.find(y => y.id === id && !y.fate); if (x) { x.fate = 'sold'; x.sold = vals.get(id) ?? 0; } } ledgerEvents(ev.filter(e => e.k !== 'sold')); ev.length = 0; }
       if (r.done || room.phase === 'over') break;
     }
     if (room.day === day0 && room.phase !== 'over') { fail('the day never ended'); break; }
@@ -587,13 +1097,17 @@ async function runTrip(seed) {
 function fmtClock(h) { const hh = Math.floor(h) % 24, mm = Math.floor((h % 1) * 60); return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`; }
 
 // ---- main ---------------------------------------------------------------------------------------------------
-health = { fails: [], kos: 0 };
+health = { fails: [], kos: 0, doorLeftOpen: 0 };
 const trips = [];
 const t0 = Date.now();
 for (const seed of SEEDS) {
   const r = await runTrip(seed);
   trips.push(r);
-  for (const d of r.days) console.log(`seed ${seed} day ${d.day}: ${d.paid ? `paid at ${fmtClock(d.paidAt ?? 24)}` : 'NOT PAID'}, in town at ${d.arrive != null ? fmtClock(d.arrive) : '-'}, pawned ${fmt$(d.sold || 0)}, bank ${fmt$(d.bank0)} -> ${fmt$(d.bank)}, due ${fmt$(d.due)}, RV ${d.hp0}% -> ${d.hp}%${d.gus ? `, Gus ${fmt$(d.gus)}` : ''}; road ${Object.entries(d.time || {}).map(([k, v]) => `${k} ${v.toFixed(0)} s`).join(', ')}`);
+  for (const d of r.days) {
+    const cs = d.log?.carried || [], fate = k => cs.filter(x => x.fate === k);
+    d.fates = { sold: fate('sold').length, broken: fate('broken').length, stolen: fate('stolen').length, lost: cs.filter(x => !x.fate).length, inValue: cs.reduce((a, x) => a + x.vIn, 0), soldValue: fate('sold').reduce((a, x) => a + x.sold, 0) };
+    console.log(`seed ${seed} day ${d.day}: ${d.paid ? `paid at ${fmtClock(d.paidAt ?? 24)}` : 'NOT PAID'}, in town at ${d.arrive != null ? fmtClock(d.arrive) : '-'}, pawned ${fmt$(d.sold || 0)} (${cs.length} carried in worth ${fmt$(d.fates.inValue)}: ${d.fates.sold} sold for ${fmt$(d.fates.soldValue)}, ${d.fates.broken} broken, ${d.fates.stolen} stolen, ${d.fates.lost} lost${d.log?.failed.length ? `; ${d.log.failed.length} carries failed` : ''}), bank ${fmt$(d.bank0)} -> ${fmt$(d.bank)}, due ${fmt$(d.due)}, RV ${d.hp0}% -> ${d.hp}%${d.gus ? `, Gus ${fmt$(d.gus)}` : ''}; road ${Object.entries(d.time || {}).map(([k, v]) => `${k} ${v.toFixed(0)} s`).join(', ')}`);
+  }
   console.log(`seed ${seed}: ${r.won ? 'WON' : r.days.at(-1)?.paid ? `stopped after day ${r.days.at(-1).day}` : `lost on day ${r.days.at(-1)?.day}`} (${((Date.now() - t0) / 1000).toFixed(0)} s so far)`);
 }
 console.log(`\n${trips.length} trips, crew of ${CREW}, casino ${CASINO}: won ${trips.filter(t => t.won).length}`);
