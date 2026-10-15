@@ -27,7 +27,8 @@ import { Casino, SEAT_R } from './casino.js';
 import { fnv1a, isPid } from '../shared/profile.js';
 import { rollTin, rollCard, CONTAINER } from '../shared/cards.js';
 import { findSpots } from '../shared/finds.js';
-import { clampKit, kitMods, partMods, fitParts, spareLine } from '../shared/garage.js';
+import { clampKit, kitMods, fitParts, spareLine } from '../shared/garage.js';
+import { rvMods, UPGRADES, VENDORS, NITRO } from '../shared/shop.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -41,7 +42,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3 };
 const HORN_MAX = 20;
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
@@ -100,7 +101,8 @@ export class Room {
     // the RV's parts (shared/garage.js): none till it leaves camp on day 1, then the best each kind among
     // everyone aboard, for the whole trip
     this.fit = { parts: {}, by: {}, spares: [] };
-    this.partMods = partMods(null);
+    this.upg = {};                   // Gus's upgrades for the trip (shared/shop.js): a new trip, a new RV
+    this.partMods = rvMods(null, this.upg);
     for (const p of this.players.values()) this.enroll(p);   // (aboard as this trip begins)
     this.startDay([]);
     this.settleTerms();
@@ -118,6 +120,7 @@ export class Room {
     this.paid = false;
     this.due = C.dueOn(this.day, this.tier()) + this.loanAdd;   // (Gus's repairs on the loan)
     this.loanAdd = 0;
+    this.nos = NITRO.SHOTS;          // the Nitrous Kit's shots today
     this.rvc.inc = null; this.rvc.brokeN = 0; this.rvc.fix = 0; this.rvc.gusAsk = {};
     this.inTown = false;
     this.walkT = 0;
@@ -294,7 +297,7 @@ export class Room {
     this.departed = true;
     for (const p of this.players.values()) { const e = this.entry(p) || this.enroll(p); e.fromStart = true; e.kit = p.kit || clampKit(null); }
     this.fit = fitParts([...this.players.values()].map(p => ({ id: p.id, name: p.name, part: p.kit?.part })));
-    this.partMods = partMods(this.fit.parts);
+    this.partMods = rvMods(this.fit.parts, this.upg);
     this.sim.setParts(this.partMods);
     for (const sp of this.fit.spares) this.toast(`${spareLine(sp)}.`, '#ffd166', 5);
     this.sendMeta();   // (the parts, and the kits closed for the trip)
@@ -578,7 +581,7 @@ export class Room {
       players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, mic: p.mic ? 1 : 0, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
       // the trip: practice or not (what it records), and whose summary is still waiting for them
-      trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
+      trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), upg: Object.keys(this.upg), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
     });
   }
 
@@ -614,6 +617,8 @@ export class Room {
         return;
       case 'use': return this.onUse(p, m);
       case 'kit': return this.onKit(p, m);
+      case 'shopBuy': return this.shopBuy(p, m);
+      case 'nos': return this.nitro(p);
       case 'cas': return this.onCasino(p, m);
       case 'terms': return this.onTerms(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
@@ -646,13 +651,14 @@ export class Room {
     }
   }
 
-  // test-only levers (FRIENDSLOP_TEST=1): teleport the RV, set the clock / bank, spawn loot
+  // test-only levers (FRIENDSLOP_TEST=1): teleport the RV, set the clock / bank, pay the day, spawn loot
   debug(p, m) {
     const sim = this.sim;
     if (m.op === 'tpRV') sim.placeRV(+m.x, +m.z, +m.yaw || 0);
     else if (m.op === 'clock') this.clock = +m.h;
     else if (m.op === 'mapHome') sim.mapHome();
     else if (m.op === 'bank') this.bank = +m.v;
+    else if (m.op === 'pay' && !this.paid && this.phase !== 'over') { this.bank = Math.max(this.bank, this.due); this.pay(p); }
     else if (m.op === 'phase') this.phase = m.ph;
     else if (m.op === 'day') { this.day = Math.max(0, (+m.d | 0) - 1); this.nextDay(); }
     else if (m.op === 'roles') { this.setRoles(+m.drv || 0, +m.nav || 0); this.rolesCrew = this.crewKey(); }
@@ -916,6 +922,8 @@ export class Room {
       this.pay(p);
     } else if (u.kind === 'repair') {
       this.repair(p, u.arg);
+    } else if (u.kind === 'shop') {
+      if (VENDORS[u.arg]) this.send(p, { t: 'shop', v: u.arg });   // (the page opens the catalogue; buying is shopBuy)
     }
   }
 
@@ -930,6 +938,8 @@ export class Room {
     let amt = e.why === 'crash' ? C.crashDamage(e.dv) : Math.round(e.amt || 0);
     // a Bull Bar takes some of a head-on knock: a crash or a Grumphorn into the front
     if ((e.why === 'crash' || e.why === 'beast') && e.zone === 'front') amt = Math.round(amt * this.partMods.frontX);
+    // and a Reinforced Frame takes some of every crash, beast and rock
+    if (e.why === 'crash' || e.why === 'beast' || e.why === 'rock') amt = Math.round(amt * this.partMods.hitX);
     if (amt <= 0 || R.hp <= 0) return false;
     const drv = [...this.players.values()].find(q => q.seat === 0);
     if (!R.inc || now - R.inc.last > C.RVH.GAP) {
@@ -1044,6 +1054,39 @@ export class Room {
     R.hp = Math.min(100, R.hp + q.pts); R.fix = 0;
     this.sim.setRvCond(R.hp);
     this.toast(`Gus fixed ${q.pts}% ${paidHow}. RV ${R.hp}%.`, '#7CFC00', 4);
+  }
+
+  // a buy from a town shop ({ t: 'shopBuy', v: vendor, id }): standing at the vendor, from the shared bank.
+  // Gus fits RV upgrades only at night once the day's payment is made, with the RV at his lot (as he fixes it)
+  shopBuy(p, m) {
+    const V = Object.prototype.hasOwnProperty.call(VENDORS, m.v) ? VENDORS[m.v] : null, id = String(m.id || '');
+    if (!V || !V.goods.includes(id) || this.phase === 'over') return;
+    const at = this.W.town[V.at];
+    if (!at || !p.pos || Math.hypot(p.pos.x - at.x, p.pos.z - at.z) > V.r) return this.toast(`${V.who} can't hear you from there.`, '#fff', 3, p);
+    const U = UPGRADES[id];
+    if (this.upg[id]) return this.toast(`${V.who}: "It's already on there."`, '#fff', 3, p);
+    if (!this.paid || this.phase !== 'night') return this.toast(`${V.who}: "I don't touch an RV till the Repo Man's been paid."`, '#fff', 3, p);
+    const rt = this.sim.rv.translation();
+    if (Math.hypot(rt.x - at.x, rt.z - at.z) > C.RVH.GUS_R) return this.toast(`${V.who}: "Bring the RV round to the lot, then."`, '#fff', 3, p);
+    if (this.bank < U.price) return this.toast(`${V.who}: "${fmt$(U.price)}. The bank has ${fmt$(this.bank)}."`, '#ff8a80', 3, p);
+    this.bank -= U.price;
+    this.upg[id] = 1;
+    this.stats.shop = (this.stats.shop || 0) + U.price;
+    this.partMods = rvMods(this.fit.parts, this.upg);
+    this.sim.setParts(this.partMods);
+    this.broadcast({ t: 'ev', list: [{ k: 'upg', id, by: p.id }] });
+    this.toast(`${p.name} had ${V.who} fit the ${U.name} (${fmt$(U.price)}). ${U.line}`, p.color, 6);
+    this.sendMeta();
+  }
+  // N at the wheel with the Nitrous Kit fitted: a shot, while there are any today
+  nitro(p) {
+    const sim = this.sim;
+    if (p.seat !== 0 || !this.partMods.nitro || sim.t < sim.nitroUntil || this.phase === 'over') return;
+    if (this.nos <= 0) return this.toast('Out of nitrous till tomorrow.', '#fff', 2, p);
+    if (sim.rvMods.dead) return;
+    this.nos--;
+    sim.nitroUntil = sim.t + NITRO.T;
+    this.broadcast({ t: 'ev', list: [{ k: 'nos' }] });
   }
 
   // a play at one of the casino's games ({ t: 'cas', s: station, a: action, n: the Derby's lane }): the stake
@@ -1487,6 +1530,7 @@ export class Room {
       ...(this.rvc.hp <= 0 ? { brk: 1 } : {}),
       ...(this.rvc.fix > 0 ? { fix: Math.round(this.rvc.fix * 100) } : {}),
       ...(sim.t < sim.rvMods.stallUntil ? { stl: 1 } : {}),   // (limping, a knock has the engine stalled for a moment)
+      ...(this.partMods.nitro ? { nos: [this.nos, sim.t < sim.nitroUntil ? 1 : 0] } : {}),   // (the Nitrous Kit: shots left today, one going)
       ...(this.loanAdd > 0 ? { nxt: (this.day < C.DAYS ? C.dueOn(this.day + 1, this.tier()) : 0) + this.loanAdd } : {}),
     };
   }

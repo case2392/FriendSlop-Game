@@ -1759,6 +1759,10 @@ export class RVView {
     }
     this.condLast = '';
     this.smoke = new RVSmoke(scene);
+    // a shot of nitrous: blue-white cones of flame out of twin pipes under the back bumper (Gus's Nitrous Kit)
+    const fm = new THREE.MeshBasicMaterial({ color: 0x9fd8ff, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false });
+    const fg = new THREE.ConeGeometry(0.1, 0.9, 10, 1, true).rotateX(-PI / 2).translate(0, 0, -0.45);
+    this.flames = [-0.55, 0.55].map(x => { const f = new THREE.Mesh(fg, fm); f.position.set(x, 0.32, -HL - 0.05); f.visible = false; f.renderOrder = 3; g.add(f); return f; });
     this.t = 0;
 
     // wheels: one instanced draw for all four
@@ -1856,6 +1860,10 @@ export class RVView {
     const rate = [0, 2.5 + (60 - hp) * 0.05, 5 + (30 - hp) * 0.1, 10][band];
     const shade = [0, 0.05 + (60 - hp) / 30 * 0.3, 0.55 + (30 - hp) / 30 * 0.3, 0.9][band];
     this.smoke.update(dt, at, rate, shade, band === 2 ? 1.4 : 0, band === 3 ? 1.6 : 1);
+    for (const [i, f] of this.flames.entries()) {
+      f.visible = !!cond?.nos;
+      if (f.visible) { const k = 0.8 + 0.35 * Math.abs(Math.sin(this.t * 37 + i * 2.1)); f.scale.set(k, k, 0.7 + 0.6 * k); }
+    }
   }
   drawCond(hp, lamp) {
     const g = this.condCv.getContext('2d'), S = 128, c = S / 2;

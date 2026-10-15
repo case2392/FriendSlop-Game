@@ -192,6 +192,8 @@ export const sfx = {
   crank: () => { for (let i = 0; i < 5; i++) tone(118, 0.09, 'square', 0.08, 92, i * 0.13); noise(0.5, 300, 0.25, 900, 'lowpass', 0.7); tone(55, 0.6, 'sawtooth', 0.12, 82, 0.75); },
   ratchet: () => { for (let i = 0; i < 3; i++) noise(0.022, 3600, 0.22, null, 'highpass', i * 0.045); },
   shatter: () => { noise(0.5, 6000, 0.6, 1500, 'highpass'); for (let i = 0; i < 6; i++) tone(2000 + Math.random() * 3000, 0.08, 'sine', 0.12, null, Math.random() * 0.25); },
+  // a shot of nitrous: a rising roar and a hiss
+  nitro: () => { noise(1.4, 700, 0.32, 2600, 'bandpass'); tone(85, 1.3, 'sawtooth', 0.16, 170); },
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },
   bell: () => { tone(1568, 0.6, 'sine', 0.22); tone(2350, 0.4, 'sine', 0.08, null, 0.01); },
   bill: () => { [392, 370, 349, 262].forEach((f, i) => tone(f, i === 3 ? 0.6 : 0.22, 'sawtooth', 0.18, i === 3 ? 230 : null, i * 0.22)); },

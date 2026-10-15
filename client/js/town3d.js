@@ -22,6 +22,7 @@ import { signCanvas, muteColor } from './paint/architecture.js';
 import { Batch, ClusterBatch, Kit, mat, matrix, rng, sstep } from './town_kit.js';
 import { buildBuilding, STYLES, winMat, glassMat, lantern, barrel, flames, ITEMS } from './town_build.js';
 import { buildAprons, yardProp, YARD_PARTS, cartwheel, hayBale, apronMat } from './town_yard.js';
+import { UPGRADES, UPGRADE_IDS } from '/shared/shop.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const TAU = Math.PI * 2;
@@ -821,6 +822,53 @@ function gusBench(K, s) {
   peg(1.0, 1.2); K.cyl(iron, [1.0, 1.08, zf + 0.004], [1.0, 1.08, zf + 0.026], 0.12, 0.12, { sides: 14, tint: '#d0d4d8' });
 }
 
+// Gus's parts board: a slate on an A-frame easel, its top leaned back (the chalked list on its face is a
+// mesh of its own: gusBoardFace, with the 'shop' use point in front of it)
+const BOARD_TILT = -0.1, BOARD_Y = 1.0;
+function gusBoard(K, s, batch) {
+  const wd = mat('timber_dark');
+  for (const sx of [-1, 1]) K.cyl(wd, [sx * 0.43, 0, 0.13], [sx * 0.43, 1.52, -0.03], 0.03, 0.026, { sides: 6 });
+  K.cyl(wd, [0, 0, -0.5], [0, 1.47, -0.07], 0.028, 0.024, { sides: 6 });
+  K.cyl(wd, [-0.43, 0.42, 0.09], [0.43, 0.42, 0.09], 0.018, 0.018, { sides: 5 });   // the chalk ledge's stretcher
+  const F = new Kit(batch, K.root.clone().multiply(matrix(0, BOARD_Y, 0.05, 0, BOARD_TILT)), () => 1);
+  F.box(mat('board_rough'), 0.9, 0.92, 0.025, 0, 0, 0, { tile: 1, tint: '#2a2e2b' });
+  for (const sy of [-1, 1]) F.box(wd, 0.98, 0.05, 0.045, 0, sy * 0.485, 0.005, { grain: 'x' });
+  for (const sx of [-1, 1]) F.box(wd, 0.05, 0.92, 0.045, sx * 0.465, 0, 0.005, { grain: 'y' });
+  F.box(wd, 0.86, 0.025, 0.07, 0, -0.51, 0.04, { grain: 'x' });   // the ledge, a stub of chalk on it
+  F.box(mat('wood_light'), 0.07, 0.018, 0.018, 0.2, -0.488, 0.05, { tile: 0.3, tint: '#f2efe6' });
+}
+function boardCanvas(lines) {
+  const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#2a2e2b'; g.fillRect(0, 0, 512, 512);
+  // old chalk wiped round and round
+  let sd = 4321; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+  g.strokeStyle = 'rgba(230,230,220,0.05)'; g.lineWidth = 26;
+  for (let i = 0; i < 9; i++) { g.beginPath(); g.ellipse(70 + rnd() * 370, 80 + rnd() * 360, 60 + rnd() * 90, 30 + rnd() * 40, rnd() * 3, 0, TAU); g.stroke(); }
+  g.fillStyle = '#f1efe4'; g.textBaseline = 'middle';
+  g.font = 'bold 50px Georgia, serif'; g.textAlign = 'center'; g.fillText('GUS\'S PARTS', 256, 52);
+  g.font = 'italic 26px Georgia, serif'; g.fillStyle = 'rgba(241,239,228,0.85)'; g.fillText('fitted tonight · cash up front', 256, 96);
+  g.fillRect(70, 120, 372, 3);
+  g.font = '30px Georgia, serif';
+  lines.forEach(([name, price], i) => {
+    const y = 158 + i * 50;
+    g.textAlign = 'left'; g.fillStyle = '#f1efe4'; g.fillText(name, 34, y);
+    g.textAlign = 'right'; g.fillStyle = '#f6d77a'; g.fillText(price, 478, y);
+  });
+  g.textAlign = 'center'; g.font = 'italic 24px Georgia, serif'; g.fillStyle = 'rgba(241,239,228,0.8)'; g.fillText('press E to order', 256, 482);
+  return cv;
+}
+function gusBoardFace(T) {
+  const b = T.gusBoard;
+  if (!b || typeof document === 'undefined') return null;
+  const map = own(canvasTex(boardCanvas(UPGRADE_IDS.map(id => [UPGRADES[id].name, `$${UPGRADES[id].price}`]))));
+  const m = own(new THREE.MeshLambertMaterial({ map }));
+  const mesh = new THREE.Mesh(own(new THREE.PlaneGeometry(0.86, 0.86)), m);
+  matrix(b.x, b.y, b.z, b.ry).multiply(matrix(0, BOARD_Y, 0.05 + 0.0135, 0, BOARD_TILT)).decompose(mesh.position, mesh.quaternion, mesh.scale);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
 function furniture(s, batch, ctx) {
   const K = new Kit(batch, matrix(s.x, s.y - s.hy, s.z, s.ry), furnShade);
   const hx = s.hx, hy = s.hy, hz = s.hz, top = 2 * hy;
@@ -989,6 +1037,7 @@ function furniture(s, batch, ctx) {
   }
   if (s.part === 'casino_bar') { casinoBar(K, s, ctx); return; }
   if (s.part === 'gus_bench') { gusBench(K, s); return; }
+  if (s.part === 'gus_board') { gusBoard(K, s, batch); return; }
   // anything else: a sturdy painted crate-box at the same footprint
   K.box(mat('crate'), 2 * hx, top, 2 * hz, 0, hy, 0, { uv: 'keep' });
 }
@@ -1518,6 +1567,8 @@ export function buildStructures(W) {
 
   const dockBay = loadingBay(W);
   if (dockBay) local.add(dockBay.mesh);
+  const board = gusBoardFace(T);
+  if (board) local.add(board);
 
   // Gus, behind his bench by the RV lot (off to the vise end). His price label (main.js rewrites it) hangs past
   // the bench's far end at head height: clear of his face, of his nameplate above him and of the buttons'

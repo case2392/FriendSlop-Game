@@ -1294,6 +1294,14 @@ export function generateLeg(seed, day, opts = {}) {
     // (his two buttons sit on the front of the bench's top, 0.4 m apart: small targets, so they never overlap)
     use('repair', gx + 0.12, townY + 0.99, gz - 0.2, 'Gus: fix 25% (cash)', 'cash', 0.18);
     use('repair', gx + 0.12, townY + 0.99, gz + 0.2, 'Gus: fix 25% (on the loan)', 'loan', 0.18);
+    // his parts board: a chalkboard on an easel out on the lot side of the bench, facing the RV's door, the
+    // upgrades he fits chalked up with their prices (E on it opens his catalogue: client/js/shop.js)
+    const bx = gx + 1.7, bz = gz + 2.6;
+    town.gusBoard = { x: bx, z: bz, y: townY, ry };
+    tagNow = { town: 'gus' };
+    box(bx, townY + 0.75, bz, 0.5, 0.75, 0.16, ry, 'wood', '#3a3a36', 'gus_board');
+    tagNow = null;
+    use('shop', bx + 0.2, townY + 1.05, bz, 'Gus\'s parts board: RV upgrades', 'gus', 0.42);
   }
 
   // world edges

@@ -395,6 +395,23 @@ roof, then the RV; it made the first four days too forgiving.)
   loaded dice).
 - **The Repo Man** parks his tow truck outside. Pay early at the truck, or
   he collects at midnight.
+- **Gus's parts board** (playtest ask: "somewhere at the end where you can buy
+  upgrades... make the RV stronger, a better winch"). A chalkboard by his
+  bench at the RV lot; E opens his catalogue (shared/shop.js). He fits parts
+  at night, once the day is paid, with the RV on his lot (the same rule as his
+  repairs: the payment can't be what pays for them). They're the crew's, paid
+  from the shared bank, for the rest of the trip; a new trip has a new RV. On
+  top of the Garage's parts from Road Cards, which last for good. Six: a
+  Reinforced Frame ($450, crashes, beasts and rock -30%), a Heavy-Duty Winch
+  ($350, a 60 m cable, 1.5x the pull), a Big-Block V8 ($600, 1.25x the pull,
+  20 m/s top end), Mud Tires ($250, 2x the grip and half the drag in mud), a
+  Locker Padlock ($150, ringtails can't pry the locker) and a Nitrous Kit
+  ($400, N at the wheel: 4 s at 1.7x the pull and +4 m/s, three shots a day).
+  Priced against the surplus: on average the bot's first night leaves about
+  $2,300, its second about $1,100 more, and days 3 to 5 eat all of it
+  (section 8), so a crew that buys the V8 on night 1 is betting it hauls more
+  than $600 extra by day 5. test/shop.mjs measures each on the server's
+  physics.
 
 ### 7.6 Night
 
