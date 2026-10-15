@@ -21,6 +21,9 @@
 //          80% or better, you aboard): a pick is a copy of any card you're missing (never a rare)
 //   kit    what you take on a trip (shared/garage.js): { perks: [up to 3 perk ids], part: an RV part's id, or
 //          null for your best one }
+//   looks  (shared/looks.js) own: the looks you've unlocked, yours or a crew's you were with ('hat:brim',
+//          'rv:sky'...); wear: what you wear ({ hat, kit, dye }, null each: what your seat issues); rv: the paint
+//          you last put on an RV (a host's RV starts the trip in it)
 //   sum    an FNV-1a hash of the rest: it catches a torn write; it isn't anti-cheat (it's your save)
 //
 // Times: ROAD TIME is the game clock at each day's payment less 6:00, summed over the five days (a payment
@@ -29,6 +32,7 @@
 
 import { CARD, CARDS, maxCopies } from './cards.js';
 import { PERKS, PERK_IDS, PART_IDS, SLOTS, levelFrom } from './garage.js';
+import { cleanOwns, cleanWear, cleanPaint } from './looks.js';
 
 export const PROFILE_V = 1;
 export const MAX_BYTES = 64 * 1024;   // the most a save may take (a bigger one is refused, not trimmed)
@@ -66,7 +70,13 @@ export const crewKey = hashes => [...hashes].map(String).sort().join('.');
 // ---- the shape ---------------------------------------------------------------------------------------
 const board = () => ({ fast: null, splits: [null, null, null, null, null], haul: null, clean: null });
 export function fresh(pid, now = 0) {
-  return { v: PROFILE_V, pid, made: now, saved: now, rev: 0, best: { std: board(), bad: board() }, crews: [], seeds: [], life: Object.fromEntries(LIFE.map(k => [k, 0])), runs: [], cards: {}, seen: [], lost: {}, doubles: 0, picks: 0, kit: { perks: [], part: null } };
+  return { v: PROFILE_V, pid, made: now, saved: now, rev: 0, best: { std: board(), bad: board() }, crews: [], seeds: [], life: Object.fromEntries(LIFE.map(k => [k, 0])), runs: [], cards: {}, seen: [], lost: {}, doubles: 0, picks: 0, kit: { perks: [], part: null }, looks: freshLooks() };
+}
+const freshLooks = () => ({ own: [], wear: { hat: null, kit: null, dye: null }, rv: null });
+// a save's looks: only ones this version knows, worn only if owned
+export function cleanLooks(l) {
+  const own = cleanOwns(isObj(l) ? l.own : null), set = new Set(own), w = cleanWear(isObj(l) ? l.wear : null);
+  return { own, wear: { hat: w.hat != null && set.has(`hat:${w.hat}`) ? w.hat : null, kit: w.kit != null && set.has(`kit:${w.kit}`) ? w.kit : null, dye: w.dye != null && set.has(`dye:${w.dye}`) ? w.dye : null }, rv: cleanPaint(isObj(l) ? l.rv : null, set) };
 }
 
 function cleanBoard(b) {
@@ -105,7 +115,14 @@ export function validate(o) {
   if (isObj(o.lost)) for (const [id, d] of Object.entries(o.lost)) if (CARD[id] && !p.cards[id]) p.lost[id] = int(d, 1, 5, 1);
   p.doubles = int(o.doubles, 0, DOUBLES_PER_PICK - 1); p.picks = int(o.picks, 0, MAX_PICKS);
   if (isObj(o.kit)) p.kit = cleanKit(p, o.kit);
+  if (isObj(o.looks)) p.looks = cleanLooks(o.looks);
   return p;
+}
+// looks unlocked (a crew's buy, or the crew's on joining it): kept for good
+export function addLooks(prof, ids) {
+  const before = prof.looks.own.length;
+  prof.looks.own = cleanOwns([...prof.looks.own, ...(Array.isArray(ids) ? ids : [])]);
+  return prof.looks.own.length > before;
 }
 
 // to the text written to disk (with its sum)

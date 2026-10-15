@@ -6,7 +6,7 @@
 //     address: the Garage's Save tab names it, and Export / Import move a save between them)
 // It's written when a trip is credited, a pick is spent or the Garage's kit changes (and when an import
 // replaces it), never during play.
-import { PROFILE_V, MAX_BYTES, fresh, parse, serialize, validate, creditTrip, isPid, kitFor, spendPick, setKit } from '/shared/profile.js';
+import { PROFILE_V, MAX_BYTES, fresh, parse, serialize, validate, creditTrip, isPid, kitFor, spendPick, setKit, addLooks, cleanLooks } from '/shared/profile.js';
 
 const KEY = 'nmdProfile', BAK = 'nmdProfile.bak', BAD = 'nmdProfile.bad';
 const DESK = window.desktop?.profile || null;
@@ -70,7 +70,7 @@ export function save() {
 export const profile = () => prof;
 export const profileStatus = () => ({ status, readOnly, error: lastError, desktop: !!DESK, where: DESK ? 'this PC' : location.host });
 // what the host's server is told of it (shared/profile.js says why no more)
-export const forServer = () => ({ v: PROFILE_V, pid: prof.pid, wins: prof.life.wins, kit: kitFor(prof) });
+export const forServer = () => ({ v: PROFILE_V, pid: prof.pid, wins: prof.life.wins, kit: kitFor(prof), looks: prof.looks });
 // the kit's levels, as the host's server is told them (the Garage's KIT tab, a pick, a trip's unlocks)
 export const myKit = () => kitFor(prof);
 
@@ -87,6 +87,16 @@ export function changeKit(k) {
   if (JSON.stringify(prof.kit) === before) return false;
   save();
   return true;
+}
+
+// looks (shared/looks.js): what the crew has unlocked comes into this save for good; what I wear and the RV's
+// paint, as I last chose them (written only when they change)
+export function unlockLooks(ids) { if (!readOnly && addLooks(prof, ids)) save(); }
+export function keepLook({ wear, rv } = {}) {
+  if (readOnly) return;
+  const before = JSON.stringify(prof.looks);
+  prof.looks = cleanLooks({ ...prof.looks, ...(wear !== undefined ? { wear } : {}), ...(rv !== undefined ? { rv } : {}) });
+  if (JSON.stringify(prof.looks) !== before) save();
 }
 
 // a trip's summary from the server: into the save. Returns creditTrip's answer ({ counted, dup, newRecords })

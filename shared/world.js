@@ -1159,6 +1159,16 @@ export function generateLeg(seed, day, opts = {}) {
     use('shop', hu.x, y0 + 1.1, hu.z, 'Hardware: metal detectors and shovels', 'store', 0.5);
     const at = F(2.7, 0, 5.6), drop = F(1.6, 0.6, 5.3);
     town.hardware = { x: at.x, z: at.z, y: y0, ry: Math.PI / 2, rack: { x: hw.x, z: hw.z }, drop: { x: drop.x, y: y0 + 0.6, z: drop.z } };
+    // and its clothes rail, left of the door: hats on pegs, coats on hangers, a mirror (E: the clerk's clothes,
+    // shared/looks.js; what you wear is changed here and nowhere else)
+    const cr = F(-2.7, 0, 4.55);
+    tagNow = { town: 'store' };
+    lbox(F, Math.PI / 2, -2.7, 0.85, 4.55, 0.6, 0.85, 0.22, 'wood', '#7a5a3a', 'clothes_rail');
+    tagNow = null;
+    const cu = F(-2.7, 1.2, 5.0);
+    use('shop', cu.x, y0 + 1.2, cu.z, 'Clothes: hats, outfits and dyes (and the mirror)', 'tailor', 0.5);
+    const ct = F(-2.7, 0, 5.6);
+    town.tailor = { x: ct.x, z: ct.z, y: y0, ry: Math.PI / 2, rail: { x: cr.x, z: cr.z } };
   }
   // the casino
   {

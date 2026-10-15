@@ -246,7 +246,8 @@ export const KITS = [
   { shoulders: 'mantle', emblem: 'boot', beltX: 'flask', bracer: 'laced', chest: 'plain' },
   { shoulders: 'iron', emblem: 'lion', beltX: 'none', bracer: 'plain', chest: 'laced' },
 ];
-export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null, variant = null } = {}) {
+// wear (a player's look, shared/looks.js): { hat, kit, dye: a colour } over what their seat issued them
+export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null, variant = null, wear = null } = {}) {
   const lc = String(color).toLowerCase();
   if (!outfit) {
     outfit = lc === '#c0392b' ? 'ed' : lc === '#2e86ab' ? 'clerk' : (eyeColor || lc === '#111111') ? 'dealer' : scale >= 1.2 ? 'repo' : 'player';
@@ -255,15 +256,16 @@ export function resolveSpec(color = '#7CFC00', { hatIndex = 0, skinIndex = 0, sc
   const skin = ((skinIndex % 6) + 6) % 6;
   const look = { ...LOOKS[skin], ...(O.look || {}) };
   const tone = SKIN_TONES[skin];
-  let c = muted(color);
+  const dyeOf = outfit === 'player' && wear?.dye ? wear.dye : color;
+  let c = muted(dyeOf);
   if (outfit === 'dealer') c = '#2c2832';
   if (outfit === 'repo') c = '#5a4a36';
   if (outfit === 'ed') { const q = hsl(c); c = fromHsl(q.h, Math.min(q.s, 0.42), 0.27); }
-  const hat = O.hat || HATS[((hatIndex % 6) + 6) % 6];
-  const kitI = outfit === 'player' ? (((variant ?? hatIndex) % 6) + 6) % 6 : -1;
+  const hat = O.hat || (outfit === 'player' && wear?.hat) || HATS[((hatIndex % 6) + 6) % 6];
+  const kitI = outfit === 'player' ? (Number.isInteger(wear?.kit) ? wear.kit : (((variant ?? hatIndex) % 6) + 6) % 6) : -1;
   const kit = kitI >= 0 ? KITS[kitI] : {};
   const kitParts = kitI >= 0 ? { ...kit, kit: kitI, pauldrons: ['leather', 'iron', 'lames'].includes(kit.shoulders) ? 'both' : 'none', paulMetal: kit.shoulders === 'iron', mantle: kit.shoulders === 'mantle' } : {};
-  const spec = { ...O, outfit, color: c, bright: outfit === 'player' ? brightDye(color) : c, raw: color, skin, tone, look, hat, paulMetal: false, eyeGlow: eyeColor || null, ...kitParts };
+  const spec = { ...O, outfit, color: c, bright: outfit === 'player' ? brightDye(dyeOf) : c, raw: color, skin, tone, look, hat, paulMetal: false, eyeGlow: eyeColor || null, ...kitParts };
   spec.key = [outfit, c, skin, hat, eyeColor || '-', kitI].join('_').replace(/#/g, '');
   return spec;
 }

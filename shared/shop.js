@@ -43,6 +43,8 @@ export const GEAR_IDS = Object.keys(GEAR);
 export const VENDORS = {
   gus: { name: 'Gus\'s Garage', who: 'Gus', at: 'gus', r: 4.5, goods: UPGRADE_IDS },
   store: { name: 'Hardware', who: 'The clerk', at: 'hardware', r: 4, goods: GEAR_IDS, gear: true },
+  // the general store's clothes rail (shared/looks.js): hats, outfits and dyes, bought and changed only here
+  tailor: { name: 'Clothes Rail', who: 'The clerk', at: 'tailor', r: 4, goods: [], looks: ['hat', 'kit', 'dye'] },
 };
 export const goodsOf = v => (VENDORS[v]?.gear ? GEAR : UPGRADES);
 

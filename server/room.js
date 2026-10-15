@@ -30,6 +30,7 @@ import { findSpots } from '../shared/finds.js';
 import { clampKit, kitMods, fitParts, spareLine } from '../shared/garage.js';
 import { rvMods, UPGRADES, VENDORS, NITRO, GEAR } from '../shared/shop.js';
 import { buriedSpots, nearestCache, DIG, HOLE } from '../shared/dig.js';
+import { lookOf, cleanOwns, allowedWear, cleanPaint } from '../shared/looks.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -43,7 +44,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3, dig: DIG.CD, pull: 0.07, open: 0.3 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3, dig: DIG.CD, pull: 0.07, open: 0.3, lookBuy: 0.3, wear: 0.3, paint: 0.3 };
 const HORN_MAX = 20;
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
@@ -58,6 +59,10 @@ export class Room {
     this.players = new Map();
     this.hostId = null;
     this.closed = false;
+    // looks (shared/looks.js): every unlock anyone in this room has brought or bought (the crew's, for anyone
+    // to wear), and the RV's paint (its first player's saved one, till Gus repaints it)
+    this.looks = new Set();
+    this.rvPaint = null;
     this.t = 0;
     this.snapN = 0;
     this.roles = { drv: 0, nav: 0 };   // the day's driver and navigator (player ids; 0: nobody)
@@ -241,6 +246,14 @@ export class Room {
     // this profile came aboard with (leaving and rejoining doesn't swap it)
     const e = this.roster.get(pid);
     this.setKit(p, this.kitLocked() && e?.kit ? e.kit : clampKit(prof?.kit));
+    // looks: this save's unlocks join the crew's (and everyone's saves get them), it wears its own look as far
+    // as the crew's go, and the RV takes its paint if it has none yet; the crew's all go into this save
+    const L = prof?.looks, add = cleanOwns(L?.own).filter(id => !this.looks.has(id));
+    for (const id of add) this.looks.add(id);
+    if (add.length) this.broadcast({ t: 'unlock', ids: add });
+    p.wearing = allowedWear(L?.wear, this.looks);
+    if (this.rvPaint == null) this.rvPaint = cleanPaint(L?.rv, this.looks);
+    if (this.looks.size) this.send(p, { t: 'unlock', ids: [...this.looks] });
   }
   // ---- the loan terms ------------------------------------------------------------------------------
   // BAD CREDIT is the default for a crew made only of veterans: everyone here with C.BAD.WINS or more kept wins
@@ -585,10 +598,10 @@ export class Room {
     this.rolesKey = JSON.stringify(roles);   // (tick sends it again when this changes)
     this.broadcast({
       t: 'meta', code: this.code, host: this.hostId, roles,
-      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, mic: p.mic ? 1 : 0, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null })),
+      players: [...this.players.values()].filter(p => p.connected).map(p => ({ id: p.id, name: p.name, color: p.color, walkie: p.walkie, voice: p.voice, mic: p.mic ? 1 : 0, hat: p.hat ? 1 : 0, h: p.pid ? fnv1a(p.pid) : '', kit: p.kit || null, wear: p.wearing || null })),
       away: [...this.players.values()].filter(p => !p.connected).map(p => ({ id: p.id, name: p.name })),   // seats kept for players who dropped
       // the trip: practice or not (what it records), and whose summary is still waiting for them
-      trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), upg: Object.keys(this.upg), kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
+      trip: { practice: this.practice(), pending: this.undelivered(), tier: this.terms, askStd: this.askStd, parts: this.fit.parts, by: this.fit.by, spares: this.fit.spares.map(spareLine), upg: Object.keys(this.upg), looks: [...this.looks], rv: this.rvPaint, kitOpen: !this.kitLocked() && (this.phase === 'over' || (this.phase === 'camp' && this.day === 1)) },
     });
   }
 
@@ -628,6 +641,9 @@ export class Room {
       case 'nos': return this.nitro(p);
       case 'dig': return this.onDig(p, m);
       case 'open': return this.openChest(p, m);
+      case 'lookBuy': return this.lookBuy(p, m);
+      case 'wear': return this.wear(p, m);
+      case 'paint': return this.paintRV(p, m);
       case 'cas': return this.onCasino(p, m);
       case 'terms': return this.onTerms(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
@@ -1234,6 +1250,56 @@ export class Room {
     const ch = [];
     for (const h of this.holes.values()) if (h.st === HOLE.CHEST) ch.push([h.id, Math.round(h.prog * 100)]);
     return ch.length ? { chs: ch } : {};
+  }
+
+  // ---- looks (shared/looks.js): clothes at the general store's rail, paint at Gus's -------------------------
+  // standing at the vendor -> its point, or null (and they're told)
+  atVendor(p, v) {
+    const V = VENDORS[v], at = this.W.town[V.at];
+    if (at && p.pos && Math.hypot(p.pos.x - at.x, p.pos.z - at.z) <= V.r) return at;
+    this.toast(`${V.who} can't hear you from there.`, '#fff', 3, p);
+    return null;
+  }
+  // Gus paints the RV as he fits parts: at night once the day's paid, the RV on his lot
+  gusPaints(p) {
+    if (!this.paid || this.phase !== 'night') { this.toast('Gus: "I don\'t touch an RV till the Repo Man\'s been paid."', '#fff', 3, p); return false; }
+    const g = this.W.town.gus, rt = this.sim.rv.translation();
+    if (Math.hypot(rt.x - g.x, rt.z - g.z) > C.RVH.GUS_R) { this.toast('Gus: "Bring the RV round to the lot, then."', '#fff', 3, p); return false; }
+    return true;
+  }
+  // a look bought ({ t: 'lookBuy', id: 'hat:brim' | 'rv:sky'... }) from the shared bank: the crew's for good
+  // (everyone's save keeps it), and on at once: the buyer wears it, the RV gets the paint
+  lookBuy(p, m) {
+    const id = String(m.id || ''), L = lookOf(id);
+    if (!L || this.phase === 'over') return;
+    const rv = L.kind === 'rv';
+    if (!this.atVendor(p, rv ? 'gus' : 'tailor') || (rv && !this.gusPaints(p))) return;
+    if (this.looks.has(id)) return this.toast('The crew has that one already: put it on.', '#fff', 3, p);
+    if (this.bank < L.price) return this.toast(`${fmt$(L.price)}. The bank has ${fmt$(this.bank)}.`, '#ff8a80', 3, p);
+    this.bank -= L.price;
+    this.stats.shop = (this.stats.shop || 0) + L.price;
+    this.looks.add(id);
+    this.broadcast({ t: 'unlock', ids: [id] });
+    if (rv) this.rvPaint = L.id;
+    else p.wearing = allowedWear({ ...p.wearing, [L.kind]: L.kind === 'kit' ? Number(L.id) : L.id }, this.looks);
+    this.broadcast({ t: 'ev', list: [{ k: 'upg', id, by: p.id }] });
+    this.toast(rv ? `${p.name} had Gus paint the RV ${L.name} (${fmt$(L.price)}).` : `${p.name} bought the ${L.name} (${fmt$(L.price)}). It's the crew's now, for good.`, p.color, 5);
+    this.sendMeta();
+  }
+  // what to wear, at the clothes rail ({ t: 'wear', hat?, kit?, dye? }: an unlocked one, or null for what
+  // your seat issued you)
+  wear(p, m) {
+    if (this.phase === 'over' || !this.atVendor(p, 'tailor')) return;
+    const w = { ...p.wearing };
+    for (const k of ['hat', 'kit', 'dye']) if (m[k] !== undefined) w[k] = m[k];
+    p.wearing = allowedWear(w, this.looks);
+    this.sendMeta();
+  }
+  // the RV's paint, at Gus's ({ t: 'paint', id }: one the crew has, or null for the stock cream)
+  paintRV(p, m) {
+    if (this.phase === 'over' || !this.atVendor(p, 'gus') || !this.gusPaints(p)) return;
+    this.rvPaint = m.id == null ? null : cleanPaint(m.id, this.looks) ?? this.rvPaint;
+    this.sendMeta();
   }
 
   // N at the wheel with the Nitrous Kit fitted: a shot, while there are any today

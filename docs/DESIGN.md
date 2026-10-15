@@ -443,6 +443,20 @@ roof, then the RV; it made the first four days too forgiving.)
   their hands full), and it costs the time a stop would. Ed doesn't buy the
   gear back; it never goes in the locker, so it rides loose in the RV, and
   what's left on the road is gone. test/dig.mjs.
+- **Looks** (playtest ask: hats, outfits and colours for you and the RV,
+  shared by the party, changed only where they were bought). shared/looks.js
+  is the catalogue: 9 hats, the 6 outfit kits, 8 tabard dyes (the clothes
+  rail left of the general store's door) and 6 RV paints (Gus, at night once
+  paid, the RV on his lot, as his parts), $40 to $350. Unlocks are the
+  crew's: the room keeps one pool, every player's save adds to it on joining
+  and gets the whole pool back ({ t: 'unlock' }), so a hat bought on one trip
+  comes along on every later trip with anyone who was aboard. A player wears
+  { hat, kit, dye } (each null = what their seat issued), only from the
+  pool; the server keeps it on the player as `wearing` (not `look`: that's
+  where they're looking) and sends it in the meta, and the page builds the
+  character again in it. The dye is the tabard's only: the name tag and
+  the portrait keep the player's own colour, which is how the crew tells
+  each other apart. Cosmetic only, nothing changes the game. test/looks.mjs.
 
 ### 7.6 Night
 
