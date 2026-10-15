@@ -53,6 +53,7 @@ import { atmo, setSkyline } from './atmosphere.js';
 import { fbm, noise2 } from '/shared/rng.js';
 import { findSpots } from '/shared/finds.js';
 import { BIOME_BY_DAY } from '/shared/world.js';
+import { trackAt } from '/shared/tracks.js';
 import { buildButtes, butteGround, butteForms } from './terrain_butte.js';
 
 const CHUNK = 40;            // cells per terrain chunk side (100 m): few draw calls, still culls
@@ -999,10 +1000,18 @@ function vertexData(W, cfg, clearings) {
       const dz = (Hc(ix, iz + 1) - Hc(ix, iz - 1)) / ((Math.min(iz + 1, nz) - Math.max(iz - 1, 0)) * cell);
       const l = Math.hypot(dx, 1, dz);
       nrm[v * 3] = -dx / l; nrm[v * 3 + 1] = 1 / l; nrm[v * 3 + 2] = -dz / l;
-      // road space
+      // road space (or a side road's, where one is nearer: shared/tracks.js, a dirt track a little narrower)
       const hwz = roadHW(W, cfg, z), d = x - W.roadX(z);
       road[v * 4] = d / (2 * (hwz + SHOULDER)) + 0.5;
       road[v * 4 + 1] = Math.abs(d) - hwz;
+      if (W.tracks?.length) {
+        const t = trackAt(W.tracks, x, z, 12);
+        if (t.T && t.d - t.T.hw < road[v * 4 + 1]) {
+          const n = t.near, sd = (x - n.x) * n.tz - (z - n.z) * n.tx;   // (signed: which side of its line)
+          road[v * 4] = sd / (2 * (t.T.hw + SHOULDER)) + 0.5;
+          road[v * 4 + 1] = t.d - t.T.hw;
+        }
+      }
       const [nt, nv, n2] = lowNoise(W, x, z);
       road[v * 4 + 2] = nt; road[v * 4 + 3] = nv;
       // mud: on the road and its shoulders only (the mud texture is in road space, 10 m across, and
@@ -1586,6 +1595,7 @@ class Clutter {
     const W = this.W;
     if (x < W.X0 + 2 || x > W.X0 + W.nx * W.cell - 2 || z < W.Z0 + 2 || z > W.Z1 - 2) return false;
     if (Math.abs(x - W.roadX(z)) < roadHW(W, this.cfg, z) + roadPad) return false;
+    if (W.tracks?.length) { const t = trackAt(W.tracks, x, z, 10); if (t.T && t.d < t.T.hw + roadPad) return false; }   // (nor on the side roads)
     if (this.blocked(x, z)) return false;
     if (this.plots.length && this.plotDepth(x, z) > 0.3) return false;      // (the crop and its trodden headland)
     const e = 0.7, gx = W.heightAt(x + e, z) - W.heightAt(x - e, z), gz = W.heightAt(x, z + e) - W.heightAt(x, z - e);
@@ -1818,7 +1828,7 @@ function clearingsOf(W) {
   const out = [];
   if (W.camp?.fire) out.push({ x: W.camp.fire.x, z: W.camp.fire.z, r0: 3.2, r1: 7.5, k: 1 });
   if (W.town?.fire) out.push({ x: W.town.fire.x, z: W.town.fire.z, r0: 3.0, r1: 7, k: 1 });
-  for (const p of W.pois || []) if (p.type !== 'crash') out.push({ x: p.x, z: p.z, r0: 5.5, r1: 11, k: p.type === 'yard' ? 0.6 : 0.95 });
+  for (const p of W.pois || []) if (p.type !== 'crash') out.push(p.deep ? { x: p.x, z: p.z, r0: 9, r1: 17, k: 0.85 } : { x: p.x, z: p.z, r0: 5.5, r1: 11, k: p.type === 'yard' ? 0.6 : 0.95 });   // (a side road's stop: its whole yard trodden)
   for (const b of W.buildings || []) {
     const r = Math.max(b.w, b.dep) * 0.5;
     const dx = b.x + Math.sin(b.ry) * (b.dep * 0.5 + 1.5), dz = b.z + Math.cos(b.ry) * (b.dep * 0.5 + 1.5);
