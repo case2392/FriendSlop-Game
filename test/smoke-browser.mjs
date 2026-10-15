@@ -574,6 +574,9 @@ try {
   const tx3 = await back.evaluate(() => window.__nmd.texCache.stats());
   check(tx3.cacheHits > 50 && tx3.workerPaints < 10, `a second visit decoded ${tx3.cacheHits} textures from the cache (${tx3.workerPaints} painted by workers, ${tx3.pagePaints} by the page)`);
   await back.close();
+  // (a whole second world's textures and shaders go through the one software GPU the pages share: till it's
+  // through them, the other pages get no frames, and a reconnect or a click on them waits behind it)
+  for (const q of [host, joiner]) { const f0 = await q.evaluate(() => window.__nmd.frames); await q.waitForFunction(f => window.__nmd.frames > f + 10, f0, { timeout: 240000 }); }
 
   // ---- connections: a dropped socket comes back to the same seat; Ctrl is the game's; no 3D says so; the end of the server is said out loud ----
   const was = await joiner.evaluate(() => ({ id: window.__nmd.selfId, built: window.__nmd.builtAt }));
@@ -608,6 +611,7 @@ try {
     wss.on('connection', ws => ws.on('message', d => { if (JSON.parse(d).t === 'join' && ++joins === 1) ws.close(4005, 'lost'); }));
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const p = await ctx.newPage();
+    p.setDefaultTimeout(240000);   // (software GL, like every page here)
     p.on('pageerror', e => errors.push(`[Lost] ${e.message}`));
     await p.goto(`http://localhost:${PORT}/?ws=ws://127.0.0.1:${wss.address().port}`);
     await p.fill('#codeInput', code);
