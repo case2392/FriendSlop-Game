@@ -7,6 +7,7 @@ const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
 const { toWorld, qRotate, insideRV, RV_DIM } = await import('../shared/rv.js');
+const { rvMods } = await import('../shared/shop.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -1240,19 +1241,21 @@ function byTheRV(day, names = ['Ann'], side = -1) {
 }
 {
   // P1b: the RV's locker: the vase in it, not loose (sim.js stowStep); left open with nobody by it, a ringtail
-  // pries the locker open and takes it home. The door shut, the locker keeps it
+  // pries the locker open and takes it home. The door shut, the locker keeps it; and so does Gus's padlock on
+  // it with the door open (shared/shop.js)
   const res = [];
-  for (const shut of [false, true]) {
+  for (const how of ['open', 'shut', 'padlock']) {
     const { room, ps: [A], sim, m, vase } = byTheRV(2, ['Ann'], -1);
     sim.lockerOn = true;
     sim.stow(vase);
-    if (shut) sim.setDoor(false);
+    if (how === 'shut') sim.setDoor(false);
+    if (how === 'padlock') sim.setParts(rvMods(null, { lock: 1 }));
     let home = null;
     for (let i = 0; i < 60 * 45 && !home; i++) { tick(room, 1 / 60); home = mobEvs(A, 'stash').find(e => room.sim.props.get(e.item)?.type === 'vase'); }
     const D = sim.mobs.denOf(m), t = home && at(room, home.item);
-    res.push(shut ? (home || sim.locker.length !== 1 ? 'shut: TAKEN' : 'shut: kept') : (home && !sim.locker.length && Math.hypot(t.x - D.x, t.z - D.z) < 3 && room.dayStats.stolen > 0 ? 'open: taken home' : `open: FAILED (home ${!!home}, locker ${sim.locker.length}, stolen $${room.dayStats.stolen})`));
+    res.push(how !== 'open' ? (home || sim.locker.length !== 1 ? `${how}: TAKEN` : `${how}: kept`) : (home && !sim.locker.length && Math.hypot(t.x - D.x, t.z - D.z) < 3 && room.dayStats.stolen > 0 ? 'open: taken home' : `open: FAILED (home ${!!home}, locker ${sim.locker.length}, stolen $${room.dayStats.stolen})`));
   }
-  check(res.join() === 'open: taken home,shut: kept', `raids: a ringtail in the open RV pries the locker open and takes the vase home; with the door shut the locker keeps it (${res.join(', ')})`);
+  check(res.join() === 'open: taken home,shut: kept,padlock: kept', `raids: a ringtail in the open RV pries the locker open and takes the vase home; with the door shut, or a padlock on it, the locker keeps it (${res.join(', ')})`);
 }
 {
   // P2: a shut door, a bungee'd vase, someone by the door, or day 1: nothing goes

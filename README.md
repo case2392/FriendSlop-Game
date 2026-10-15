@@ -36,6 +36,21 @@ engine hatch on its back until it coughs back to life (one of you takes 8 second
 **Gus** fixes it by the RV lot in town at night, once the Repo Man is paid: 25% a press, for cash or on
 tomorrow's payment. It never ends a trip by itself: only a missed payment does.
 
+Gus also **upgrades** the RV, from the chalkboard of parts by his bench (`E` on it opens his catalogue),
+at night once the day is paid, paid from the shared bank, and fitted for the rest of the trip:
+
+| Upgrade | Price | What it does |
+|---|---|---|
+| Reinforced Frame | $450 | crashes, Grumphorn hits and falling rock cost the RV 30% less |
+| Heavy-Duty Winch | $350 | a 60 m cable (from 42) and half again the pull |
+| Big-Block V8 | $600 | a quarter more pull up the grades, a top end of 45 mph (from 38) |
+| Mud Tires | $250 | twice the grip in mud and half the drag |
+| Locker Padlock | $150 | ringtails can't pry the RV's locker open |
+| Nitrous Kit | $400 | `N` at the wheel: 4 s of a hard shove and 9 mph more, three shots a day |
+
+Every dollar there is a dollar short of the next payment: a crew with a good first night can buy speed,
+a crew scraping by can't.
+
 ## Beat your time, beat your haul
 
 Every trip is timed and counted. **Road time** is the clock at each day's payment less 6:00, added up over
@@ -181,7 +196,7 @@ on.
 | `E` | **pick up** loot (`E` again sets it down; `Q` drops it too); use: driver seat, door, winch, the RV's locker (takes its best thing out: loot set down in the RV goes in it), pawn bell, a casino game's button (sit down to play it), keypad, bunk (lies you down; `E` or walking gets you up). Hold it on a knocked-out friend to pick them up. |
 | **hold `LMB`** | **climb** any steep rock or wall (`Space` = lunge) |
 | `RMB` · wheel | throw (empty-handed: **shove**) · reach |
-| driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `E` get up (the RV keeps rolling) |
+| driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `N` nitrous (with Gus's kit) · `E` get up (the RV keeps rolling) |
 | `MMB` · `1-6` | ping · emotes (at a casino game the number keys play it: 1-4 the stake, 5 deal/hit/roll/pull; blackjack 6 stand, 7 double, 8 split; craps 7 odds behind the line; at the Derby 5-8 a ticket on ringtail 1-4) |
 | `V` · `M` · `T` | push-to-talk · mute · walkie-talkie |
 

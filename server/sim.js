@@ -24,7 +24,7 @@ const FULL_SHARE = 32;
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
 import { GROUPS, looseGroup } from './groups.js';
-import { partMods } from '../shared/garage.js';
+import { rvMods, NITRO } from '../shared/shop.js';
 
 // stuff people bump into but a 3-ton RV flattens
 const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
@@ -91,13 +91,14 @@ const halfMin = t => HALF_MIN[t] ??= (s => s[0] === 'box' ? Math.min(s[1], s[2],
 
 export class Sim {
   // carry: [{type, value, max, lx,ly,lz, q}] — loot that rode over from yesterday; finds: the day's Road Card
-  // tins (shared/finds.js); parts: the RV parts fitted for the trip (shared/garage.js partMods)
+  // tins (shared/finds.js); parts: the RV's parts and upgrades for the trip (shared/shop.js rvMods)
   constructor(W, { carry = [], spawnAt = null, cond = 100, finds = [], parts = null } = {}) {
     this.W = W;
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
     this.eq = new RAPIER.EventQueue(true);
     this.t = 0;
+    this.nitroUntil = 0;             // a shot of nitrous runs till then (the room fires it: shared/shop.js NITRO)
     this.props = new Map();          // id -> prop
     this.byCollider = new Map();     // collider handle -> prop id
     this.nextPropId = 5000;
@@ -134,7 +135,7 @@ export class Sim {
     const sp = spawnAt || { x: camp.x, z: camp.z, yaw: camp.yaw };
     this.buildRV(sp.x, W.heightAt(sp.x, sp.z) + 1.45, sp.z, sp.yaw);
     this.assist = false;             // the driver has Steady Hands II (the room sets it each tick)
-    this.setParts(parts || partMods(null));
+    this.setParts(parts || rvMods(null, null));
     for (const p of W.props) this.addProp(p.type, v3(p.x, p.y, p.z), yawQ(p.ry), p.value, p.value, p.id);
     this.hook = { state: 'stowed', body: null, len: 0, reeling: false, holder: null, anchor: null, attach: null };
     // yesterday's loot, back where it was in the RV
@@ -202,9 +203,9 @@ export class Sim {
     }
   }
 
-  // the RV's parts for the trip (fitted when it leaves camp on day 1): the Bull Bar's iron on the nose (its
-  // mass on the front bumper's collider), the winch's reel speed; the room reads the rest (the horn, the fix,
-  // the front's knocks)
+  // the RV's parts for the trip (fitted when it leaves camp on day 1) and Gus's upgrades (shared/shop.js
+  // rvMods): the Bull Bar's iron on the nose (its mass on the front bumper's collider), the winch's reel speed,
+  // cable and pull, the engine, the tyres in mud; the room reads the rest (the horn, the fix, the knocks)
   setParts(pm) {
     this.parts = pm;
     this.rvCols.bumperF.setMass(BUMPER_KG + pm.bullKg);
@@ -914,7 +915,7 @@ export class Sim {
       H.anchor = v3(best.x, best.y, best.z);
       H.attach = null;
       H.holder = null;
-      H.len = Math.min(C.WINCH.MAX_LEN, len(sub(H.anchor, this.winchWorld())) + 0.2);
+      H.len = Math.min(this.parts.cable, len(sub(H.anchor, this.winchWorld())) + 0.2);
       this.out.push({ k: 'hook', what: 'anchored', by: pid });
       return true;
     }
@@ -928,7 +929,7 @@ export class Sim {
         H.anchor = null;
         H.attach = { id: p.id, local: toLocal(p.body.translation(), p.body.rotation(), hp) };
         H.holder = null;
-        H.len = Math.min(C.WINCH.MAX_LEN, len(sub(hp, this.winchWorld())) + 0.2);
+        H.len = Math.min(this.parts.cable, len(sub(hp, this.winchWorld())) + 0.2);
         this.out.push({ k: 'hook', what: 'anchored', by: pid, prop: p.id });
         return true;
       }
@@ -991,7 +992,7 @@ export class Sim {
     // (up to the motor's rated pull: against a load it can't move it stalls there, the cable FORCE / STIFF m
     // stretched. It used to wind on regardless, storing metres of stretch, and flung the RV up a grade when it
     // broke free; the drum's speed limit below keeps even a full stretch from doing that)
-    if (H.reeling && d - H.len < C.WINCH.FORCE / C.WINCH.STIFF) {
+    if (H.reeling && d - H.len < this.parts.pull / C.WINCH.STIFF) {
       H.len = Math.max(0.6, H.len - this.parts.reel * dt);
     }
     // carried hook: the spool pays out freely
@@ -1004,8 +1005,8 @@ export class Sim {
         const vel = H.body.linvel();
         const k = 260, c = 24, m = H.body.mass();
         H.body.applyImpulse(mul(sub(mul(toBelt, k), mul(vel, c)), m * dt), true);
-        if (d > H.len) H.len = Math.min(C.WINCH.MAX_LEN, d);
-        if (d > C.WINCH.MAX_LEN + 1.5) { H.holder = null; this.out.push({ k: 'hook', what: 'yanked', by: pl.id }); }
+        if (d > H.len) H.len = Math.min(this.parts.cable, d);
+        if (d > this.parts.cable + 1.5) { H.holder = null; this.out.push({ k: 'hook', what: 'yanked', by: pl.id }); }
       }
     }
     // a hook flopping loose gets reeled home
@@ -1019,7 +1020,7 @@ export class Sim {
     else if (H.attach) { const p = this.props.get(H.attach.id); if (p) { otherBody = p.body; otherVel = p.body.velocityAtPoint(hp); } }
     const sep = (otherVel.x - rvVel.x) * dir.x + (otherVel.y - rvVel.y) * dir.y + (otherVel.z - rvVel.z) * dir.z;
     let T = C.WINCH.STIFF * (d - H.len) + C.WINCH.DAMP * Math.max(0, sep);
-    T = Math.min(T, C.WINCH.FORCE);
+    T = Math.min(T, this.parts.pull);
     // the drum winds no faster than its reel speed (faster with a Winch Motor fitted): a load already coming
     // faster than that (the RV breaking free of a snag, a loose hook flying home) pulls the cable along no
     // harder, so the pull fades out over OVERRUN m/s past it, and the RV comes up a grade at about the drum's
@@ -1073,11 +1074,12 @@ export class Sim {
     const { th, st, hb } = this.drive;
     let engine = 0, brake = 0.6;
     // (a worn RV is down on power where it shows, at speed: its top end; crawling up a crest or out of the mud
-    // it pulls as hard as ever)
-    const top = C.RV.TOP_SPEED * this.rvMods.top;
+    // it pulls as hard as ever. A V8 pulls harder and runs faster; a shot of nitrous, harder and faster still)
+    const nos = this.t < this.nitroUntil;
+    const top = C.RV.TOP_SPEED * this.parts.topX * this.rvMods.top + (nos ? NITRO.TOP : 0);
     if (th > 0.05) {
       if (sp < -0.6) brake = C.RV.BRAKE;   // still rolling backwards: brake first
-      else { engine = th * C.RV.ENGINE * (1 - Math.max(0, Math.min(1, sp / top)) ** 2); brake = 0; }
+      else { engine = th * C.RV.ENGINE * this.parts.engineX * (nos ? NITRO.PUSH : 1) * (1 - Math.max(0, Math.min(1, sp / top)) ** 2); brake = 0; }
     } else if (th < -0.05) {
       if (sp > 0.6) { brake = C.RV.BRAKE; }
       else { engine = th * C.RV.REVERSE * (1 - Math.max(0, Math.min(1, -sp / 6))); brake = 0; }
@@ -1106,13 +1108,13 @@ export class Sim {
       const cp = v.wheelIsInContact(i) ? v.wheelContactPoint(i) : null;
       const mud = cp && inMud(W, cp.x, cp.z);
       if (mud) mudWheels++;
-      v.setWheelFrictionSlip(i, mud ? C.RV.MUD_SLIP : C.RV.FRICTION_SLIP);
+      v.setWheelFrictionSlip(i, mud ? this.parts.mudSlip : C.RV.FRICTION_SLIP);
     });
     // mud sucks at the RV
     if (mudWheels) {
       const lv = this.rv.linvel();
       const hs = Math.hypot(lv.x, lv.z);
-      const k = C.RV.MUD_DRAG * (mudWheels / 4) * Math.min(1, hs / 0.6);
+      const k = C.RV.MUD_DRAG * this.parts.mudDragX * (mudWheels / 4) * Math.min(1, hs / 0.6);
       if (hs > 1e-3) this.rv.applyImpulse(v3(-lv.x / hs * k * dt, 0, -lv.z / hs * k * dt), true);
     }
     this.mudWheels = mudWheels;

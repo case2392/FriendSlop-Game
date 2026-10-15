@@ -30,6 +30,8 @@ import * as texPrep from './texprep.js';
 import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 import { profile, profileStatus, forServer, credit, myKit } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
+import { initShop, openShop, closeShop, renderShop, shopOpen } from './shop.js';
+import { UPGRADE_IDS } from '/shared/shop.js';
 import { cardHTML } from './cards.js';
 import { TINS } from '/shared/cards.js';
 import { fmtRoad, fmtClockH, crewBest } from '/shared/profile.js';
@@ -321,7 +323,7 @@ function fmtClock(h) {
 
 const canvas = $('canvas');
 const uiOpen = () => !$('keypad').classList.contains('hidden') || !$('voicePanel').classList.contains('hidden') || !!$('netModal')
-  || !$('settings').classList.contains('hidden') || !$('credits').classList.contains('hidden') || garageOpen();
+  || !$('settings').classList.contains('hidden') || !$('credits').classList.contains('hidden') || garageOpen() || shopOpen();
 canvas.addEventListener('click', () => { if (!uiOpen()) canvas.requestPointerLock?.(); });
 $('clickToPlay').addEventListener('click', e => { if (!e.target.closest('.ctp-row, .ctp-code') && !uiOpen()) canvas.requestPointerLock?.(); });
 // Esc: the pointer comes free and this card offers the rest (the world keeps going: it's co-op)
@@ -411,6 +413,8 @@ window.addEventListener('keydown', e => {
   if (S.phase === 'menu') return;
   // the Garage holds the game's keys while it's open (it closes on G or Esc; the voice keys still work)
   if (garageOpen() && !['g', 'escape', 'v', 't', 'm'].includes(k)) return;
+  // so does a shop's catalogue (Esc or E puts it away)
+  if (shopOpen()) { if (k === 'e') { closeShop(); return; } if (k === 'escape') closeShop(); else if (!['v', 't', 'm'].includes(k)) return; }   // (the voice keys still work)
   // the night's receipt (shown while the mouse is captured): any of these keys puts it away
   if (!$('receipt').classList.contains('hidden') && (k === 'e' || k === 'enter' || k === ' ' || k === 'escape')) { $('receipt').classList.add('hidden'); return; }
   if (k === 'e') onUse();
@@ -418,6 +422,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'f') { mapRaised = !mapRaised; }
   else if (k === 'r' && me.mode === 'seat' && me.seat === 0) net.send({ t: 'use', kind: 'reel' });
   else if (k === 'h' && me.mode === 'seat' && me.seat === 0) { if (!e.repeat) { hornHeld = true; net.send({ t: 'horn', on: 1 }); } }
+  else if (k === 'n' && me.mode === 'seat' && me.seat === 0 && S.g?.nos) net.send({ t: 'nos' });
   else if (k === 'v') voice.setPtt(true);
   else if (k === 'm') {
     if (!voice.V.mic) toast(voice.V.err || 'Your mic isn\'t on yet.', '#ffb4a2', 5);
@@ -428,7 +433,7 @@ window.addEventListener('keydown', e => {
   else if (k === 'g' && !e.repeat) { if (garageOpen()) closePanel('garage'); else openPanel('garage'); }   // (held down: not open-then-shut)
   else if (/^[1-8]$/.test(k) && casinoKey(Number(k))) { /* (at a casino station the number keys play it) */ }
   else if (/^[1-6]$/.test(k)) net.send({ t: 'emote', e: C.EMOTES[Number(k) - 1] });
-  else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); if (!locked) $('clickToPlay').classList.remove('slim'); }
+  else if (k === 'escape') { closeKeypad(); if (garageOpen()) closePanel('garage'); if (!locked && !shopOpen()) $('clickToPlay').classList.remove('slim'); }
 });
 window.addEventListener('keyup', e => {
   const k = keyName(e);
@@ -1303,6 +1308,9 @@ function onEvent(e) {
     case 'stow': (S.glove ||= []).push({ cards: e.cards, kind: e.kind, day: S.g?.day, by: e.by }); revealCards(e); sfx.click(); break;
     case 'bill': sfx.bill(); break;
     case 'horn': sfx.horn(e.on == null ? null : !!e.on); break;
+    // Gus fitted an upgrade (the toast says what); a shot of nitrous
+    case 'upg': sfx.ratchet(); sfx.kaching(); break;
+    case 'nos': if (S.rv) positional(S.rv.p, () => sfx.nitro(), 80); if (me.par) shake(0.25); break;
     case 'door': S.door = e.open; sfx.door(); if (e.pop && S.rv) { positional(S.rv.p, () => sfx.thunk(0.7), 50); if (me.par) shake(0.3); } break;
     // the RV took a knock (the server priced it): how much, where it landed, a thud, a jolt for whoever's aboard
     case 'rvhit': {
@@ -1762,6 +1770,7 @@ $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
 $('ctpGarage').onclick = () => openPanel('garage');
 $('ctpTerms').onclick = () => { sfx.click(); net.send({ t: 'terms', std: !S.meta?.trip?.askStd }); };
 $('garageClose').onclick = () => closePanel('garage');
+initShop({ open: openPanel, close: closePanel, send: m => net.send(m), state: () => ({ g: S.g, meta: S.meta }), click: () => sfx.click() });
 initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [], kitOpen: () => !S.meta || !!S.meta.trip?.kitOpen, onKit: sendKit });
 // my kit to the host's server (it takes it in camp on day 1 and during the game-over; otherwise it says so)
 function sendKit() { if (S.phase !== 'menu' && S.meta?.trip?.kitOpen) net.send({ t: 'kit', kit: myKit() }); }
@@ -2075,7 +2084,7 @@ requestAnimationFrame(frame);
   const night = S.g ? (S.g.ph === 'night' || S.g.clk >= 20.2) : false;
   const odo = rv ? rv.p.z : 0;   // the metres the map's ticks count, from the end of camp (it reads 0 in camp)
   // (the RV's condition as it shows: dents a side from the hits this page has seen, smoke, the dial, hazards)
-  const cond = S.g ? { hp: S.g.rvh ?? 100, brk: !!S.g.brk, zones: S.rvZones } : null;
+  const cond = S.g ? { hp: S.g.rvh ?? 100, brk: !!S.g.brk, zones: S.rvZones, nos: !!S.g.nos?.[1] } : null;
   rvView.groundAt = S.W.heightAt;
   rvView.update(dt, rv, S.door, night, S.hook, odo, S.g ? fmtClock(S.g.clk) : '', cond);
   rvView.setLocker(S.g?.lk?.[0] || 0, S.g?.lk?.[1] || 0);
@@ -2086,6 +2095,7 @@ requestAnimationFrame(frame);
   updateCasino(dt);
   updateTownLabels();
   updateDockBay(rv);
+  if (shopOpen()) renderShop();   // (the bank and what's fitted, as the server has them)
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
@@ -2359,6 +2369,8 @@ const myStation = () => {
   return { id, st, v };
 };
 net.on('cas', m => { S.casAt = m.at; sfx.click(); });
+// E at a town shop: its catalogue (client/js/shop.js)
+net.on('shop', m => { if (!garageOpen() && S.phase === 'game') { sfx.click(); openShop(m.v); } });
 // the number keys at a station: 1-4 set the stake (+$100, +$500, all in, clear); 5 deals (in your turn at
 // blackjack, hits), rolls or pulls; at blackjack 6 stands, 7 doubles, 8 splits; at craps 7 lays odds behind
 // the line; at the Derby 5-8 buy a ticket on ringtail 1-4
@@ -2665,7 +2677,7 @@ function hud(rv) {
   }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}${g?.nos ? ` · ${g.nos[1] ? 'NITROUS!' : g.nos[0] ? `nitrous ×${g.nos[0]} (${keyLabel('N')})` : 'nitrous: none left today'}` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
@@ -2823,6 +2835,8 @@ function questTracker(g) {
       L.push([`RV ${hp}%: Gus fixes ${q.pts}% by the lot for ${fmt$(q.cash)}, or ${fmt$(q.loan)} on ${g.day === C.DAYS - 1 ? 'the balloon payment' : 'tomorrow\'s payment'}`, '']);
     }
     if (g.nxt) L.push([`Tomorrow's payment: ${fmt$(g.nxt)} (with Gus's repairs)`, 'warn']);
+    const fitted = S.meta?.trip?.upg?.length || 0;
+    if (fitted < UPGRADE_IDS.length) L.push([`Gus's parts board by the RV lot: upgrades for the RV${fitted ? ` (${fitted} fitted)` : ''}`, '']);
   }
   const title = `Day ${Math.min(g.day, C.DAYS)}: ${town}`;
   const key = title + JSON.stringify(L);
