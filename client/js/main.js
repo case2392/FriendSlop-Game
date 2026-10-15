@@ -1083,9 +1083,17 @@ net.on('_close', ev => {
   if (ev.code === 4002) return endTrip('You joined this trip again from somewhere else.');
   reconnect();
 });
+// up out of a bunk: standing in the aisle in front of the bunks (never where you lay: in the bunk itself you
+// stood inside the bed's frame, the upper one with your head through the roof, and couldn't move)
+function outOfBunk() {
+  if (me.bunk == null) return;
+  me.bunk = null;
+  me.par = 1; me.lp = { x: 0.1, y: 0.05, z: -2.55 }; me.vel = { x: 0, y: 0, z: 0 };
+  if (S.rv) me.pos = toWorld(S.rv.p, S.rv.q, me.lp);
+}
 net.on('world', m => {
   me.hasHook = false;   // a new world comes with the hook on its winch
-  me.bunk = null;       // and you up out of bed
+  outOfBunk();          // and you up out of bed (still asleep at dawn, the server lays you back down: 'bed')
   me.holding = null;    // and with empty hands: a new day (or a seat taken back after a dropped connection)
                         // holds nothing for you. A map kept in hand overnight showed the next day's map in camp
   // back after a dropped connection, on the same day: the world is already built (the props, the
@@ -1239,10 +1247,7 @@ net.on('bed', inOrder(m => {
     if (me.holding) onGrabRelease();
     me.bunk = m.slot;
     me.yaw = (S.rv ? qYaw(S.rv.q) : me.yaw) - RV_BUNKS[m.slot].head * Math.PI / 2; me.pitch = -0.75;
-  } else if (me.bunk != null) {
-    me.bunk = null;
-    if (S.rv) { me.par = 1; me.lp = { x: 0.1, y: 0.05, z: -2.55 }; me.pos = toWorld(S.rv.p, S.rv.q, me.lp); }
-  }
+  } else outOfBunk();
   S.bedAsk = false;
 }));
 net.on('hooked', inOrder(m => { me.hasHook = !!m.on; if (m.on) sfx.hook(); }));

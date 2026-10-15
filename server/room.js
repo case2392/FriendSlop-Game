@@ -145,8 +145,12 @@ export class Room {
     // who's riding along? their RV-local pose survives the teleport
     this.day++;
     if (this.day > C.DAYS) return this.finish(this.paid);   // (a paid last day has already ended the run)
+    // who went to sleep stays lying in their bunk into the morning, till they get up (E, or a step): the new
+    // day took them out of it, and the page left them standing where they'd lain, in the bunk, stuck
+    const asleep = [...this.players.values()].filter(p => p.bed && p.connected).map(p => [p, p.bunk]);
     this.startDay(carry);
     this.broadcast(this.worldMsg());
+    for (const [p, slot] of asleep) { p.bed = true; p.bunk = slot; this.send(p, { t: 'bed', on: true, slot }); }
     this.broadcast({ t: 'props', list: this.sim.allProps() });
     this.spawnStragglers();
     this.toast(`DAY ${this.day} — ${fmt$(this.due)} due at midnight. Miss it and the Repo Man takes the RV.`, '#ffd166', 7);
@@ -830,7 +834,7 @@ export class Room {
     if (kind === 'dropHook') { sim.dropHook(p.id); this.send(p, { t: 'hooked', on: false }); return; }
     if (kind === 'bunk') {
       if (!inRV) return;
-      if (this.phase !== 'night') { this.toast('Not bedtime. The Repo Man doesn\'t sleep and neither do you.', '#fff', 3, p); return; }
+      if (this.phase !== 'night' && !p.bed) { this.toast('Not bedtime. The Repo Man doesn\'t sleep and neither do you.', '#fff', 3, p); return; }   // (up out of one, any time)
       p.bed = !p.bed;
       // (a bunk of your own while there's one free: shared/rv.js RV_BUNKS; the page lays you down in it)
       if (p.bed) {
