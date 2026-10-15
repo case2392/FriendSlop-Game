@@ -385,10 +385,11 @@ try {
     await host.waitForFunction(id => window.__nmd.g?.cas?.derby?.bets?.[window.__nmd.selfId] === 100 && window.__nmd.g.cas.derby.bets[id] === 100, dave, { timeout: 24000 });
     await digit(host, 7); await digit(joiner, 5);
     await host.waitForFunction(() => (window.__nmd.g?.cas?.derby?.tix || []).length === 2, null, { timeout: 24000 });
-    await host.waitForFunction(() => window.__nmd.g?.cas?.derby?.st === 'race' && window.__nmd.g.cas.derby.el > 2.5, null, { timeout: 60000 });
+    // (the finishing order kept as it runs: in a test it's shown for a second after it pays, and a slow frame read it gone)
+    await host.waitForFunction(() => { const d = window.__nmd.g?.cas?.derby; if (d?.order) window.__derbyOrder = d.order; return d?.st === 'race' && d.el > 2.5; }, null, { timeout: 60000 });
     await shot(host, 'derby', 200);
-    await host.waitForFunction(() => (window.__nmd.betLog || []).filter(e => e.game === 'the Ringtail Derby').length >= 2, null, { timeout: 60000 });
-    const derby = await host.evaluate(() => { const S = window.__nmd; return { order: S.g.cas.derby.order, log: S.betLog.filter(e => e.game === 'the Ringtail Derby').map(e => ({ won: e.won, by: e.by })), me: S.selfId }; });
+    await host.waitForFunction(() => { const d = window.__nmd.g?.cas?.derby; if (d?.order) window.__derbyOrder = d.order; return (window.__nmd.betLog || []).filter(e => e.game === 'the Ringtail Derby').length >= 2; }, null, { timeout: 60000 });
+    const derby = await host.evaluate(() => { const S = window.__nmd; return { order: window.__derbyOrder, log: S.betLog.filter(e => e.game === 'the Ringtail Derby').map(e => ({ won: e.won, by: e.by })), me: S.selfId }; });
     const paid = derby.log.find(e => e.by === derby.me)?.won, paidD = derby.log.find(e => e.by === dave)?.won;
     check(derby.order && paid === (derby.order[0] === 3 ? 280 : -100) && paidD === (derby.order[0] === 1 ? 280 : -100),
       `the Ringtail Derby: No. ${derby.order?.[0]} won; Steve's ticket on 3 ${paid >= 0 ? '+' : ''}${paid}, Dave's on 1 ${paidD >= 0 ? '+' : ''}${paidD}`);
