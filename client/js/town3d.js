@@ -11,7 +11,7 @@
 // Static geometry is merged per material and per spatial cluster (the town, each roadside stop, each
 // lone sign), so far clusters are culled. Roadside stuff (POI furniture, gates, anchors, camp) is in
 // roadside3d.js.
-// API: buildStructures(W) -> { group, near, npcs, pawnLabel, gusLabel, cas: { labels, coins, dice, cards },
+// API: buildStructures(W) -> { group, near, npcs, pawnLabel, gusLabel, dockBay, cas: { labels, coins, dice, cards },
 //      update(dt, t, camPos) } and PREVIEW. (main.js deals the cards, rolls the dice, spins the coins and runs
 //      the Derby's ringtails.)
 import { THREE, canvasTex, labelSprite, shadowy, tex } from './gfx.js';
@@ -1516,6 +1516,9 @@ export function buildStructures(W) {
     }
   }
 
+  const dockBay = loadingBay(W);
+  if (dockBay) local.add(dockBay.mesh);
+
   // Gus, behind his bench by the RV lot (off to the vise end). His price label (main.js rewrites it) hangs past
   // the bench's far end at head height: clear of his face, of his nameplate above him and of the buttons'
   // own labels over the bench
@@ -1699,7 +1702,71 @@ export function buildStructures(W) {
       }
       if (gp) gp.material.uniforms.uOpacity.value = (0.16 + 0.84 * night) * (1 + 0.06 * Math.sin(t * 9.1) * Math.sin(t * 5.3));
     },
-    pawnLabel, gusLabel, cas,
+    pawnLabel, gusLabel, cas, dockBay,
+  };
+}
+
+// ---- Ed's loading zone: a parking bay painted on the street ---------------------------------------------
+// The bay the RV parks in to sell its whole load (world.js town.dock; server/room.js docked: the RV's middle
+// within r of its middle, stopped). A sign said "park the RV here" and nothing on the ground did: a box
+// lined in road paint the RV's size, hatched across its far end, LOADING ZONE along it (read from the way
+// you drive into town). main.js lights it: brighter as the RV comes near, green once it's parked in it.
+// -> { mesh, show(state, t) } (state 0 idle, 1 the RV close, 2 parked), or null with no loading zone
+const BAY = { W: 3.8, L: 10, PAINT: '#f4d35e', PARKED: '#7CFC00' };
+function bayCanvas() {
+  const cv = document.createElement('canvas'), w = 512, h = Math.round(512 * BAY.L / BAY.W);
+  cv.width = w; cv.height = h;
+  const g = cv.getContext('2d');
+  g.fillStyle = '#fff'; g.strokeStyle = '#fff';
+  const line = 24, m = 14;
+  g.lineWidth = line; g.strokeRect(m + line / 2, m + line / 2, w - 2 * m - line, h - 2 * m - line);
+  // the far end hatched (the canvas's top is the far end: you drive in from its bottom)
+  g.save(); g.beginPath(); g.rect(m + line, m + line, w - 2 * (m + line), 150); g.clip();
+  g.lineWidth = 20; for (let x = -200; x < w + 200; x += 62) { g.beginPath(); g.moveTo(x, m + line); g.lineTo(x + 150, m + line + 150); g.stroke(); }
+  g.restore();
+  g.fillRect(m + line, m + line + 150, w - 2 * (m + line), 12);
+  // the words: tall and narrow as road paint is, nearest first (LOADING, then ZONE past it), ED'S small up top
+  const word = (t, y, px, sx = 1, sy = 1.9) => { g.save(); g.translate(w / 2, y); g.scale(sx, sy); g.font = `900 ${px}px Impact, "Arial Black", sans-serif`; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(t, 0, 0); g.restore(); };
+  word('ZONE', h * 0.45, 132, 1.12);
+  word('LOADING', h * 0.66, 104, 0.82);
+  word('ED\'S', h * 0.27, 70, 1, 1.5);
+  // an arrow in, at the near end
+  g.beginPath(); g.moveTo(w / 2, h * 0.79); g.lineTo(w / 2 + 70, h * 0.87); g.lineTo(w / 2 + 26, h * 0.87); g.lineTo(w / 2 + 26, h * 0.94); g.lineTo(w / 2 - 26, h * 0.94); g.lineTo(w / 2 - 26, h * 0.87); g.lineTo(w / 2 - 70, h * 0.87); g.closePath(); g.fill();
+  // worn: specks of the street showing through the paint
+  g.globalCompositeOperation = 'destination-out';
+  let sd = 1234567; const rnd = () => ((sd = (sd * 16807) % 2147483647) / 2147483647);
+  for (let i = 0; i < 2600; i++) { g.globalAlpha = 0.25 + rnd() * 0.6; const r = 0.6 + rnd() * 2.6; g.beginPath(); g.arc(rnd() * w, rnd() * h, r, 0, TAU); g.fill(); }
+  g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
+  return cv;
+}
+function loadingBay(W) {
+  const d = W.town?.dock;
+  if (!d || typeof document === 'undefined') return null;
+  // along the street there: the road's own heading at the bay
+  const rx = W.roadX ? (W.roadX(d.z + 3) - W.roadX(d.z - 3)) / 6 : 0, yaw = Math.atan2(rx, 1);
+  const map = own(canvasTex(bayCanvas()));
+  const m = own(new THREE.MeshLambertMaterial({ map, color: BAY.PAINT, emissive: BAY.PAINT, emissiveMap: map, emissiveIntensity: 0.12,
+    transparent: true, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  // laid on the street, its far end up the road (+z), draped over the ground a few millimetres up
+  const geo = own(new THREE.PlaneGeometry(BAY.W, BAY.L, 4, 10));
+  geo.rotateX(-Math.PI / 2); geo.rotateY(Math.PI + yaw);
+  const pos = geo.attributes.position;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i) + d.x, z = pos.getZ(i) + d.z;
+    pos.setXYZ(i, x, W.heightAt(x, z) + 0.035, z);
+  }
+  geo.computeVertexNormals(); geo.computeBoundingSphere();
+  const mesh = new THREE.Mesh(geo, m);
+  mesh.receiveShadow = true; mesh.renderOrder = 1;
+  const paint = new THREE.Color(BAY.PAINT), parked = new THREE.Color(BAY.PARKED);
+  let was = -1;
+  return {
+    mesh,
+    show(state, t) {
+      if (state !== was) { was = state; m.color.copy(state === 2 ? parked : paint); m.emissive.copy(m.color); }
+      // idle: just paint (a touch of glow, for the dusk); the RV close: a slow pulse; parked: lit steady
+      m.emissiveIntensity = state === 2 ? 0.75 : state === 1 ? 0.35 + 0.3 * (0.5 + 0.5 * Math.sin(t * 4.2)) : 0.12 + 0.25 * Math.max(0, Math.min(1, atmo.night || 0));
+    },
   };
 }
 

@@ -2078,6 +2078,7 @@ requestAnimationFrame(frame);
   updateWorld(S.wv, dt, time, camera.position);
   updateCasino(dt);
   updateTownLabels();
+  updateDockBay(rv);
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
@@ -2586,6 +2587,20 @@ function updateCasino(dt) {
   }
   casinoPanel(at, g);
 }
+// Ed's loading zone, painted on the street (town3d.js loadingBay): it pulses as the RV comes near and goes green
+// with the RV parked in it, as the server counts parked (room.js docked: its middle within r, stopped), and the
+// crew is told so once
+let bayParked = false, bayLeftAt = 0;
+function updateDockBay(rv) {
+  const bay = S.wv?.dockBay, d = S.W?.town?.dock;
+  if (!bay || !d) return;
+  const dist = rv ? Math.hypot(rv.p.x - d.x, rv.p.z - d.z) : 1e9, speed = rv ? Math.hypot(rv.v?.x || 0, rv.v?.z || 0) : 0;
+  const parked = dist < d.r && speed < 1.5;
+  bay.show(parked ? 2 : dist < 45 ? 1 : 0, time);
+  if (parked && !bayParked && time - bayLeftAt > 4) toast('Parked in Ed\'s loading zone. Ring the bell at his counter: he buys the RV\'s whole load.', '#7CFC00', 5);
+  if (!parked && bayParked) bayLeftAt = time;
+  bayParked = parked;
+}
 let lastCards = '';
 function updateTownLabels() {
   const w = S.wv, g = S.g;
@@ -2713,7 +2728,7 @@ function tutTip(g, town) {
   if (!tut.has('den') && S.W.day >= 2 && denNear(14)) return keysIn('Hint: ringtails nip anyone who comes close to their den, and you drop what you carry. [RMB] shove them off, or be quick');
   if (!tut.has('grab')) return 'Hint: press E on glittering junk to pick it up (E again sets it down)';
   if (!tut.has('load')) return 'Hint: carry your loot into the RV, then drive on';
-  if (!tut.has('pawn')) return `Hint: in ${town}, park in the pawn shop's loading zone (or carry loot to the counter) and ring the bell`;
+  if (!tut.has('pawn')) return `Hint: in ${town}, park the RV on the yellow LOADING ZONE painted in front of the pawn shop (or carry loot to the counter) and ring the bell`;
   return null;
 }
 // loose rock still up on the narrows ahead of me, within r metres
