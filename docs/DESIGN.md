@@ -412,6 +412,37 @@ roof, then the RV; it made the first four days too forgiving.)
   (section 8), so a crew that buys the V8 on night 1 is betting it hauls more
   than $600 extra by day 5. test/shop.mjs measures each on the server's
   physics.
+- **Hardware at the general store** (playtest ask: a shovel and a metal
+  detector that finds metal under the ground). A rack out front: a metal
+  detector $250, a shovel $100, the things themselves set down by the rack,
+  any hour. Each day has 6 + day caches buried (shared/dig.js, from its own
+  random stream off the generated world, so nothing else moves): half within
+  ~20 m of a stop (a stop down a side road three times as likely, and its
+  caches richer: fewer scrap heaps, more gold and lockboxes), the rest out on
+  the canyon floor, never on the road,
+  in the mud, on a track or under anything. Held, the detector beeps faster
+  and higher within 9 m of one and says DIG HERE inside 1.2 m (its sound is
+  sfx.detect: it shared a name with the reversing beep, which drowned it). A
+  held shovel digs where you look (LMB, held: a stroke each 0.45 s): each
+  stroke goes into the hole within 1.2 m (a new one at a cache in reach, else
+  where it landed), the spadeful flung onto the hole's pile (on the digger's
+  right), the pit drawn deeper a stroke at a time (its mouth clears the depth
+  buffer after the ground is drawn, so its walls and floor show below the
+  surface). Six strokes reach the bottom: bare ground has nothing; a cache
+  has its chest, which whoever holds E on (within 2.4 m) pulls up: 2.4 s
+  alone, shared by up to three, each press 6% more (mashing E beats holding
+  it: 81% in a second to 48%). It lands shut on the lip across from the pile;
+  E opens it where it lies (a shut chest isn't carried), what was in it pops
+  out unharmed (1.5 s with no knocks) and an old chest is left that Ed gives
+  $30 for. The page draws the holes from the dig events (the full list on
+  joining); the game state carries only the chests down holes and how far
+  they're up. What comes up is loot (scrap $40, copper $85, silver $220, coins $300, gold $420, a
+  lockbox $560, the day's 22% on top): about $255 a cache by the road and
+  $375 down a side road at day 1's prices (test/dig.mjs measures 1.46x over
+  25 legs; about one cache in six is down a side road). It's built for two (one sweeps, one digs, and each has
+  their hands full), and it costs the time a stop would. Ed doesn't buy the
+  gear back; it never goes in the locker, so it rides loose in the RV, and
+  what's left on the road is gone. test/dig.mjs.
 
 ### 7.6 Night
 

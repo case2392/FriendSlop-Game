@@ -319,7 +319,14 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .roster .pm[data-st=ko] .pn { color: #a8a094; }
 
 /* crosshair, prompts, hold bar */
-#crosshair, .prompt, .holdbar, .held, .drive, .stamina, .walkie { z-index: 5; }
+#crosshair, .prompt, .holdbar, .held, .drive, .stamina, .walkie, .detector { z-index: 5; }
+/* the metal detector's signal meter, under the crosshair while you hold one */
+.detector { position: absolute; left: 50%; top: calc(50% + 34px); transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 4px; background: rgba(20, 12, 6, 0.55); font: 11px var(--display, Georgia); letter-spacing: 1px; color: #f3e6c8; pointer-events: none; }
+.dt-bars { display: flex; gap: 2px; align-items: flex-end; }
+.dt-bars i { display: block; width: 5px; height: 12px; border-radius: 1px; background: rgba(243, 230, 200, 0.22); }
+.dt-bars i.on { background: #ffd166; }
+.detector.hot .dt-bars i.on { background: #7CFC00; }
+.detector.hot .dt-name::after { content: ' · DIG HERE'; color: #7CFC00; }
 #crosshair { position: absolute; left: 50%; top: 50%; width: 6px; height: 6px; margin: -3px 0 0 -3px; border-radius: 50%; background: #fff3d8; box-shadow: 0 0 0 1.5px rgba(20, 10, 4, 0.7), 0 0 4px rgba(0, 0, 0, 0.5); pointer-events: none; }
 .prompt, .held, .drive, .walkie { position: absolute; background: var(--tip); border-radius: 6px; pointer-events: none; white-space: nowrap; text-shadow: var(--outline-thin); }
 .prompt { left: 50%; top: calc(50% + 28px); transform: translateX(-50%); padding: 6px 14px; font-size: 16px; color: #fff; }

@@ -51,6 +51,20 @@ at night once the day is paid, paid from the shared bank, and fitted for the res
 Every dollar there is a dollar short of the next payment: a crew with a good first night can buy speed,
 a crew scraping by can't.
 
+## Buried metal
+
+The general store keeps **hardware** on a rack out front (`E` on it): a **metal detector** ($250) and a
+**shovel** ($100), set down by the rack when you buy them, any time of day. Every day's road has metal
+buried along it, half of it near the stops and the richest down the side roads: hold the detector and
+it beeps faster (and the signal meter under the crosshair fills) as its coil nears a cache; the meter
+says DIG HERE over one. Whoever holds the shovel digs where they look with `LMB` (hold it to keep digging):
+each spadeful flies onto a pile beside the hole as it goes down, and six strokes reach the bottom. Under
+a cache there's a **chest**: hold `E` on it to **pull** it up (mash `E` to yank it up quicker; two or
+three pulling go faster), and it lands on the lip. `E` opens it and what's inside pops out (scrap iron,
+copper wire, a silver or gold nugget, a jar of old coins, a rusty lockbox), loot like any other for Ed,
+and so is the old chest. Bare ground digs down to nothing. One holds the detector, one digs. Ed won't buy
+the gear back, and it doesn't go in the locker: keep it in the RV or it stays on the road.
+
 ## Beat your time, beat your haul
 
 Every trip is timed and counted. **Road time** is the clock at each day's payment less 6:00, added up over

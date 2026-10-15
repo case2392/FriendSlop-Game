@@ -22,7 +22,7 @@ import { signCanvas, muteColor } from './paint/architecture.js';
 import { Batch, ClusterBatch, Kit, mat, matrix, rng, sstep } from './town_kit.js';
 import { buildBuilding, STYLES, winMat, glassMat, lantern, barrel, flames, ITEMS } from './town_build.js';
 import { buildAprons, yardProp, YARD_PARTS, cartwheel, hayBale, apronMat } from './town_yard.js';
-import { UPGRADES, UPGRADE_IDS } from '/shared/shop.js';
+import { UPGRADES, UPGRADE_IDS, GEAR, GEAR_IDS } from '/shared/shop.js';
 
 const V3 = (x, y, z) => new THREE.Vector3(x, y, z);
 const TAU = Math.PI * 2;
@@ -837,6 +837,26 @@ function gusBoard(K, s, batch) {
   F.box(wd, 0.86, 0.025, 0.07, 0, -0.51, 0.04, { grain: 'x' });   // the ledge, a stub of chalk on it
   F.box(mat('wood_light'), 0.07, 0.018, 0.018, 0.2, -0.488, 0.05, { tile: 0.3, tint: '#f2efe6' });
 }
+// The general store's hardware rack out front (shared/shop.js GEAR): two posts and two rails, two shovels
+// and a metal detector leaned in it; its price board hangs off the top rail (the 'shop' use's tag)
+function toolRack(K, s) {
+  const wd = mat('timber_dark'), iron = mat('iron_wrought'), hx = s.hx, hz = s.hz;
+  for (const sx of [-1, 1]) K.box(wd, 0.07, 1.4, 0.07, sx * (hx - 0.04), 0.7, -hz + 0.06, { grain: 'y' });
+  for (const [y, z] of [[1.3, -hz + 0.06], [0.42, -hz + 0.06]]) K.box(wd, 2 * hx, 0.05, 0.05, 0, y, z, { grain: 'x' });
+  K.box(wd, 2 * hx - 0.04, 0.04, 2 * hz - 0.06, 0, 0.03, 0, { grain: 'x' });   // the trough at the foot
+  // two shovels, blades down in the trough, handles leaned on the top rail
+  for (const x of [-0.38, -0.12]) {
+    K.box(iron, 0.2, 0.3, 0.012, x, 0.2, 0.06, { tile: 0.4, tint: '#a8a8a0' });
+    K.cyl(wd, [x, 0.34, 0.05], [x + 0.03, 1.38, -hz + 0.12], 0.017, 0.016, { sides: 6, tint: '#c8a070' });
+    K.cyl(wd, [x - 0.05, 1.42, -hz + 0.1], [x + 0.09, 1.42, -hz + 0.12], 0.014, 0.014, { sides: 5, tint: '#c8a070' });
+  }
+  // the metal detector: its coil on the trough, the shaft up to the rail, the red box and the arm cuff
+  const dx = 0.3;
+  K.cyl(mat('metal_green'), [dx, 0.05, 0.05], [dx, 0.08, 0.05], 0.13, 0.13, { sides: 14, tint: '#2a2a2a' });
+  K.cyl(iron, [dx, 0.08, 0.05], [dx + 0.02, 1.36, -hz + 0.12], 0.012, 0.012, { sides: 6, tint: '#c0c4c8' });
+  K.box(mat('metal_red'), 0.09, 0.12, 0.07, dx + 0.015, 0.95, -0.02, { uv: 'keep' });
+  K.cyl(mat('metal_green'), [dx + 0.02, 1.2, -0.05], [dx + 0.02, 1.32, -0.07], 0.022, 0.022, { sides: 8, tint: '#2a2a2a' });
+}
 function boardCanvas(lines) {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
   const g = cv.getContext('2d');
@@ -1038,6 +1058,7 @@ function furniture(s, batch, ctx) {
   if (s.part === 'casino_bar') { casinoBar(K, s, ctx); return; }
   if (s.part === 'gus_bench') { gusBench(K, s); return; }
   if (s.part === 'gus_board') { gusBoard(K, s, batch); return; }
+  if (s.part === 'tool_rack') { toolRack(K, s); return; }
   // anything else: a sturdy painted crate-box at the same footprint
   K.box(mat('crate'), 2 * hx, top, 2 * hz, 0, hy, 0, { uv: 'keep' });
 }
@@ -1469,6 +1490,7 @@ export function buildStructures(W) {
   // price boards for the store's goods go into the sign atlas
   const tags = [];
   const store = W.buildings.find(b => b.kind === 'store');
+  for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'store') tags.push({ u, lines: ['HARDWARE', ...GEAR_IDS.map(id => `${GEAR[id].name.toUpperCase()} $${GEAR[id].price}`)], w: 0.78, h: 0.4 });
   for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES', hardhat: 'HARD HAT', cheese: 'CHEESE' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90', hardhat: '$80', cheese: '$30' }[u.arg] || ''], w: 0.46, h: 0.26 });
   const entry = T && W.signs.find(s => s.post && Math.abs(s.z - (T.z + 6)) < 3 && Math.abs(s.x - 7.5) < 3);
   const sctx = { attached, onCanopy, bInfo, glows, tags, plaques: plaqueSpots(W, T), style: S, styleName: style, tagRy: store ? store.ry : 0, townZ: T.z, entry };

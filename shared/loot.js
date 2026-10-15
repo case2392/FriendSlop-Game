@@ -46,6 +46,22 @@ export const LOOT = {
   cheese:   { name: 'Cheese Wheel',     shape: ['cyl', 0.07, 0.16],       mass: 5,   value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, bait: true },
   // what a grumphorn leaves behind when it's had enough
   cowbell:  { name: 'Brass Cowbell',    shape: ['cyl', 0.13, 0.11],       mass: 3,   value: 170,  frag: 0.15,cls: '1h',    tough: 20 },
+  // from the general store (shared/shop.js): a metal detector (it beeps over buried metal) and a shovel (LMB
+  // digs). Gear: worth nothing to Ed, never in the locker, and they ride along in the RV like the map. hold:
+  // how it's carried against your facing, however it lay (a quaternion: its foot tipped forward and down)
+  detector: { name: 'Metal Detector',   shape: ['box', 0.07, 0.55, 0.15], mass: 2.5, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, gear: 'detector', hold: [-0.4226, 0, 0, 0.9063] },
+  shovel:   { name: 'Shovel',           shape: ['box', 0.11, 0.62, 0.04], mass: 2.2, value: 0,    frag: 0,   cls: '1h',    tough: 99, tool: true, gear: 'shovel', hold: [-0.3827, 0, 0, 0.9239] },
+  // dug up (shared/dig.js): metal out of the ground. Ed buys it like any loot
+  scrap:    { name: 'Scrap Iron',       shape: ['box', 0.2, 0.07, 0.13],  mass: 9,   value: 40,   frag: 0,   cls: '1h',    tough: 99, dug: true },
+  copper:   { name: 'Copper Wire',      shape: ['cyl', 0.07, 0.15],       mass: 6,   value: 85,   frag: 0,   cls: '1h',    tough: 99, dug: true },
+  silver:   { name: 'Silver Nugget',    shape: ['ball', 0.065],           mass: 1.4, value: 220,  frag: 0,   cls: '1h',    tough: 99, dug: true },
+  gold:     { name: 'Gold Nugget',      shape: ['ball', 0.055],           mass: 1.2, value: 420,  frag: 0,   cls: '1h',    tough: 99, dug: true },
+  coins:    { name: 'Jar of Old Coins', shape: ['cyl', 0.12, 0.08],       mass: 4,   value: 300,  frag: 1.1, cls: '1h',    tough: 12, dug: true },
+  lockbox:  { name: 'Rusty Lockbox',    shape: ['box', 0.22, 0.13, 0.16], mass: 14,  value: 560,  frag: 0.15,cls: '2h',    tough: 22, dug: true },
+  // a cache's chest (shared/dig.js): dug down to, pulled up out of its hole, and opened where it lies (E opens
+  // it, it isn't picked up shut); opened, what was in it pops out and it's an old chest Ed gives a little for
+  chest:    { name: 'Buried Chest',     shape: ['box', 0.3, 0.19, 0.2],   mass: 24,  value: 0,    frag: 0,   cls: '2h',    tough: 99, tool: true, chest: true },
+  chestOpen:{ name: 'Old Chest',        shape: ['box', 0.3, 0.19, 0.2],   mass: 14,  value: 30,   frag: 0.2, cls: '2h',    tough: 25 },
 };
 
 export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);
@@ -53,6 +69,8 @@ export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);
 // not the map, which is read): held by its middle at chest height, just past your hands, turning as you turn.
 // The server holds it there (sim.js) and your page draws it there (main.js); the hands go round it (people.js)
 export const CARRY = { DROP: 0.3, HANDS: 0.34, MIN: 0.45, MAX: 2.2 };
+// gear's carry pose (LOOT[type].hold) as {x, y, z, w}, or null
+export const holdPose = type => { const h = LOOT[type]?.hold; return h ? { x: h[0], y: h[1], z: h[2], w: h[3] } : null; };
 export const carried = type => { const L = LOOT[type]; return !!L && !L.mob && L.cls !== 'heavy' && type !== 'map'; };
 // its farthest point from its middle (it clears your face however it's turned), and its half width
 export function carrySize(type) {
