@@ -128,6 +128,45 @@ check(roof.every(d => d > 2.2), `movement: on the RV's roof, the same 0.7 s goes
   check(riding && kept && me.par === 1 && Math.hypot(l.x - lp.x, l.z - lp.z) < 0.05 && Math.abs(l.y - lp.y) < 0.05,
     `movement: riding the RV into a new day (no RV for half a second, then it's at the new camp), you wake in it where you lay (${l.x.toFixed(2)}, ${l.y.toFixed(2)}, ${l.z.toFixed(2)} in the RV, was ${lp.x.toFixed(2)}, ${lp.y.toFixed(2)}, ${lp.z.toFixed(2)}; riding ${me.par === 1})`);
 }
+// a jump at any frame rate: a fast screen's first frame of a jump lifts you a few centimetres, and the snap to
+// the ground pulled you back down (at 144 fps it rose 5 cm). Steady and uneven frames, 30 to 240 a second
+{
+  const res = [];
+  for (const fps of [30, 60, 144, 240]) for (const uneven of [0, 1]) {
+    const me = new Me();
+    me.teleport(at.x + 6, at.g + 0.05, at.z + 6, 0);
+    const dtOf = i => (1 / fps) * (1 + (uneven ? ((i * 7919) % 13) / 13 - 0.5 : 0));
+    const go = (i, inp) => { lw.step(); me.update(dtOf(i), { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: false, ...inp }, lw, null, null); };
+    for (let i = 0; i < fps; i++) go(i, {});
+    const y0 = me.pos.y; let top = y0;
+    for (let i = 0; i < fps * 1.5; i++) { go(i, { jump: i === 0 }); top = Math.max(top, me.pos.y); }
+    res.push({ fps, uneven, rose: top - y0 });
+  }
+  check(res.every(r => r.rose > 1), `movement: a jump rises the same at any frame rate: ${res.map(r => `${r.fps}${r.uneven ? '~' : ''} ${r.rose.toFixed(2)}`).join(', ')} m (~ uneven frames)`);
+}
+
+// E to drive: the crosshair takes the driver's seat anywhere on it (the cushion, the space over it, its high back)
+// and the steering wheel for the seat, from where you'd stand in the cab; and the passenger's for shotgun. (Only
+// the cushion's bottom 48 cm used to: you aimed at the floor to drive)
+{
+  const { G } = await import('../client/js/phys.js');
+  const p = { x: at.x + 40, y: at.g + 20, z: at.z }, q = { x: 0, y: 0, z: 0, w: 1 };
+  lw.setRV(p, q); lw.step();
+  const aimAt = (from, to) => { const e = toWorld(p, q, from), t = toWorld(p, q, to), d = Math.hypot(t.x - e.x, t.y - e.y, t.z - e.z);
+    const h = lw.ray(e, { x: (t.x - e.x) / d, y: (t.y - e.y) / d, z: (t.z - e.z) / d }, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, null, true);
+    return h?.kind === 'rv' ? h.use : h?.kind || 'nothing'; };
+  const behind = { x: 0.15, y: 1.62, z: 1.75 }, aisle = { x: 0, y: 1.62, z: 2.9 };
+  const spots = [
+    ['the back, low', behind, { x: 0.62, y: 0.6, z: 2.56 }, 'seat0'], ['the back, high', behind, { x: 0.62, y: 1.22, z: 2.5 }, 'seat0'],
+    ['the cushion', aisle, { x: 0.62, y: 0.42, z: 2.9 }, 'seat0'], ['over the cushion', aisle, { x: 0.62, y: 0.65, z: 2.95 }, 'seat0'],
+    ['the wheel', aisle, { x: 0.62, y: 0.95, z: 3.22 }, 'seat0'], ['the wheel from behind', behind, { x: 0.62, y: 0.95, z: 3.22 }, 'seat0'],
+    ['the passenger\'s back', { x: -0.15, y: 1.62, z: 1.75 }, { x: -0.62, y: 1.0, z: 2.54 }, 'seat1'],
+  ];
+  const got = spots.map(([n, f, t, want]) => ({ n, use: aimAt(f, t), want }));
+  check(got.every(g => g.use === g.want), `movement: E to drive: the crosshair takes ${got.map(g => `${g.n} for ${g.use}`).join(', ')}`);
+  lw.setRV({ x: 0, y: -100, z: 0 }, q); lw.step();
+}
+
 // out of breath: Shift held on and on runs the stamina out, and then still held, it comes back (you're winded,
 // not sprinting) and the sprint with it; and Space jumps all the way through, empty or not
 {

@@ -12,7 +12,7 @@
 import RAPIER from '/vendor/rapier.mjs';
 import * as C from '/shared/constants.js';
 import { LOOT } from '/shared/loot.js';
-import { RV_PARTS } from '/shared/rv.js';
+import { RV_PARTS, RV_AIM } from '/shared/rv.js';
 
 export { RAPIER };
 let ready = null;
@@ -83,6 +83,12 @@ export class LocalWorld {
         .setCollisionGroups(grp(G.RV, 0xffff)), this.rv);
       this.info.set(c.handle, { kind: 'rv', part: name, use: o.use || null });
       this.rvCols[name] = c;
+    }
+    // (the seats' backs, the space over them and the wheel, for the crosshair alone: shared/rv.js RV_AIM)
+    for (const [name, hx, hy, hz, cx, cy, cz, use] of RV_AIM) {
+      const c = this.world.createCollider(RAPIER.ColliderDesc.cuboid(hx, hy, hz).setTranslation(cx, cy, cz)
+        .setSensor(true).setCollisionGroups(grp(G.USE, 0xffff)), this.rv);
+      this.info.set(c.handle, { kind: 'rv', part: name, use });
     }
 
     // the winch hook (only when it's out)
@@ -183,7 +189,7 @@ export class LocalWorld {
       this.cc.setMaxSlopeClimbAngle(a);
       this.cc.setMinSlopeSlideAngle(a);
       if (climbing) { this.cc.disableSnapToGround(); this.cc.disableAutostep(); }
-      else { this.cc.enableSnapToGround(0.32); this.cc.enableAutostep(C.PLAYER.STEP, 0.18, false); }
+      else { this.cc.enableSnapToGround(0.32); this.cc.enableAutostep(C.PLAYER.STEP, 0.18, false); this._noSnap = false; }
     }
     const pred = exclude ? (c => !exclude.has(c.handle)) : undefined, groups = grp(G.SELF, G.WORLD | G.RV | G.PROP | G.PLAYER | (riding ? 0 : G.FENCE));
     const hits = [];
@@ -202,6 +208,11 @@ export class LocalWorld {
     // now and then (Rapier's controller slid along the floor as if it were in the way), and each one stopped
     // you dead: indoors, on a building's floor, every second or so. (Across, steps up and slopes still work:
     // the autostep and the snap to the ground are in that pass too)
+    // Going up (a jump), no snap to the ground: on a fast screen a jump's first frame lifts you a few
+    // centimetres, well inside the snap, and the next frame's pass across pulled you straight back down
+    // (at 144 fps a jump rose 5 cm; at 60, 1.1 m)
+    const up = desired.y > 0;
+    if (up !== !!this._noSnap) { this._noSnap = up; if (up) this.cc.disableSnapToGround(); else this.cc.enableSnapToGround(0.32); }
     const a = pass({ x: desired.x, y: 0, z: desired.z }), ga = this.cc.computedGrounded();
     this.self.setTranslation({ x: center.x + a.x, y: center.y + a.y, z: center.z + a.z });
     const b = pass({ x: 0, y: desired.y, z: 0 });

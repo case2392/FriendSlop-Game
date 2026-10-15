@@ -991,6 +991,35 @@ const crashCost = (room, dv, zone) => {
     `rv: parked in Ed's loading zone, he offers $${offer} for the locker (80%) and buys it (+$${got}); it's empty after`);
 }
 
+// ---- set down in the RV, a thing goes in the locker from your hands: no drop to the floor first, so nothing
+// knocked off it (let go of at chest height, a vase fell to the floor and lost value on its way into the one place
+// nothing loses any). Thrown in the RV, it's thrown: it lands first ----
+{
+  const { room, ps: [A, B] } = crew(['Ann', 'Bo']);
+  const sim = room.sim, rq = sim.rv.rotation(), at = (x, y, z) => sim.rvToWorld({ x, y, z });
+  sim.lockerOn = true;
+  ride(room, A, 0.1, -0.5); ride(room, B, -0.1, 0.6);
+  tick(room, 0.3);
+  const vase = sim.addProp('vase', at(0.1, 1.15, -0.1), rq, 400, 400), vc = vase.body.translation();
+  room.handle(A, { t: 'grab', kind: 'prop', id: vase.id, pt: [vc.x, vc.y, vc.z], d: carryDist('vase') });
+  tick(room, 0.5);
+  const held = sim.holds.get(A.id)?.id === vase.id, hy = sim.rvToLocal(vase.body.translation()).y;
+  evs(A.conn, 'dmg'); evs(A.conn, 'stowed');
+  room.handle(A, { t: 'rel' });
+  const at0 = sim.locker.find(it => it.type === 'vase');
+  tick(room, 1);
+  const dmg = evs(A.conn, 'dmg').filter(e => e.id === vase.id), st = evs(A.conn, 'stowed');
+  check(held && hy > 0.6 && at0 && Math.round(at0.value) === 400 && !dmg.length && st.length === 1 && st[0].value === 400,
+    `rv: a vase set down in the RV from chest height (${hy.toFixed(2)} m up) goes in the locker at once, at its full $${at0 ? Math.round(at0.value) : '?'} (knocks: ${dmg.length})`);
+  const tv = sim.addProp('tv', at(-0.1, 1.15, 0.9), rq, 250, 260), tc = tv.body.translation();
+  room.handle(B, { t: 'grab', kind: 'prop', id: tv.id, pt: [tc.x, tc.y, tc.z], d: carryDist('tv') });
+  tick(room, 0.5);
+  room.handle(B, { t: 'rel', thr: 1, dir: [0, 0.2, -1] });
+  const thrownIn = sim.props.has(tv.id) && !sim.locker.some(it => it.type === 'tv');
+  tick(room, 3);
+  check(thrownIn && !sim.props.has(tv.id) && sim.locker.some(it => it.type === 'tv'), `rv: a TV thrown down the RV lands first (still loose as it flies: ${thrownIn}), then goes in the locker`);
+}
+
 // ---- bungee cords strap down what rides on the roof (the cabin's load is in the locker), and it stays strapped
 // overnight ----
 {

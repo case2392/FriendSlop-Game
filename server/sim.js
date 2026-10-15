@@ -611,10 +611,8 @@ export class Sim {
     const jaws = this.mobs?.carriedBy, wanted = this.mobs?.raidTargets?.();
     for (const p of [...this.props.values()]) {
       if (!lockable(p)) continue;
+      if (!this.stowable(p, rp, rq, jaws, wanted)) { this.stowT.delete(p.id); continue; }
       const t = p.body.translation();
-      if ((t.x - rp.x) ** 2 + (t.z - rp.z) ** 2 > 25 || p.holders.size || this.tied.has(p.id) || jaws?.has(p.id) || wanted?.has(p.id) || this.hook.attach?.id === p.id) { this.stowT.delete(p.id); continue; }
-      const l = toLocal(rp, rq, t);
-      if (!inCabin(l.x, l.y, l.z)) { this.stowT.delete(p.id); continue; }
       let still = this.riding.has(p.id) || p.body.isSleeping();
       if (!still) { const v = p.body.linvel(), r = this.rv.velocityAtPoint(t); still = Math.hypot(v.x - r.x, v.y - r.y, v.z - r.z) < 0.3; }
       if (!still) { this.stowT.delete(p.id); continue; }
@@ -622,6 +620,15 @@ export class Sim {
       if (k < STOW_T) { this.stowT.set(p.id, k); continue; }
       this.stow(p);
     }
+  }
+  // in the RV's cabin, and nobody else's: not in anyone's hands, bungee'd, on the winch, in a ringtail's jaws
+  // or what one's going in after
+  stowable(p, rp = this.rv.translation(), rq = this.rv.rotation(), jaws = this.mobs?.carriedBy, wanted = this.mobs?.raidTargets?.()) {
+    if (!lockable(p)) return false;
+    const t = p.body.translation();
+    if ((t.x - rp.x) ** 2 + (t.z - rp.z) ** 2 > 25 || p.holders.size || this.tied.has(p.id) || jaws?.has(p.id) || wanted?.has(p.id) || this.hook.attach?.id === p.id) return false;
+    const l = toLocal(rp, rq, t);
+    return inCabin(l.x, l.y, l.z);
   }
   stow(p) {
     this.stowT.delete(p.id);
@@ -762,6 +769,9 @@ export class Sim {
     p.holders.delete(pid);
     if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].adamp ?? (LOOT[p.type].mob ? 2 : 0.3));
     if (p.type === 'map') { this.dockMap(p); return; }   // (back on the dash: dockMap)
+    // set down in the RV (not thrown): into the locker from your hands. Let go of, it fell to the floor first,
+    // and the fall knocked value off it on its way to the one place nothing loses any
+    if (!throwDir && this.lockerOn && this.stowable(p)) { this.stow(p); return; }
     if (throwDir) {
       const m = p.body.mass();
       const imp = Math.min(m * C.GRAB.THROW, C.GRAB.THROW_IMPULSE_CAP);
