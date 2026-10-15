@@ -62,6 +62,16 @@ export const LOOT = {
   // it, it isn't picked up shut); opened, what was in it pops out and it's an old chest Ed gives a little for
   chest:    { name: 'Buried Chest',     shape: ['box', 0.3, 0.19, 0.2],   mass: 24,  value: 0,    frag: 0,   cls: '2h',    tough: 99, tool: true, chest: true },
   chestOpen:{ name: 'Old Chest',        shape: ['box', 0.3, 0.19, 0.2],   mass: 14,  value: 30,   frag: 0.2, cls: '2h',    tough: 25 },
+  // a stick of dynamite (the general store's hardware, shared/blast.js): LMB lights it, RMB throws it. Gear
+  dynamite: { name: 'Dynamite',         shape: ['box', 0.026, 0.1, 0.026], mass: 0.5, value: 0,   frag: 0,   cls: '1h',    tough: 99, tool: true, gear: 'dynamite', hold: [-0.2588, 0, 0, 0.9659], adamp: 3 },   // (a square collider: a round one rolls off down any slope)
+  // rock seamed with metal (shared/blast.js oreRocks): too big to move, blown apart by dynamite into its ore,
+  // which Ed buys like any loot. fixed: bedded in the ground, it never moves (server/sim.js addProp)
+  seamCopper: { name: 'Copper-Seamed Rock', shape: ['box', 0.8, 0.6, 0.7], mass: 4000, value: 0, frag: 0,   cls: 'heavy', tough: 99, tool: true, fixed: true, seam: 'copper' },
+  seamSilver: { name: 'Silver-Seamed Rock', shape: ['box', 0.8, 0.6, 0.7], mass: 4000, value: 0, frag: 0,   cls: 'heavy', tough: 99, tool: true, fixed: true, seam: 'silver' },
+  seamGold:   { name: 'Gold-Seamed Rock',   shape: ['box', 0.8, 0.6, 0.7], mass: 4000, value: 0, frag: 0,   cls: 'heavy', tough: 99, tool: true, fixed: true, seam: 'gold' },
+  copperOre:{ name: 'Copper Ore',       shape: ['box', 0.13, 0.1, 0.11], mass: 9,   value: 70,   frag: 0,   cls: '1h',    tough: 99, ore: true },
+  silverOre:{ name: 'Silver Ore',       shape: ['box', 0.12, 0.09, 0.1], mass: 8,   value: 160,  frag: 0,   cls: '1h',    tough: 99, ore: true },
+  goldOre:  { name: 'Gold Ore',         shape: ['box', 0.11, 0.09, 0.1], mass: 8,   value: 330,  frag: 0,   cls: '1h',    tough: 99, ore: true },
 };
 
 export const LOOT_KEYS = Object.keys(LOOT).filter(k => !LOOT[k].tool);

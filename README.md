@@ -65,6 +65,16 @@ copper wire, a silver or gold nugget, a jar of old coins, a rusty lockbox), loot
 and so is the old chest. Bare ground digs down to nothing. One holds the detector, one digs. Ed won't buy
 the gear back, and it doesn't go in the locker: keep it in the RV or it stays on the road.
 
+## Dynamite
+
+The hardware rack sells **dynamite** too ($60 a stick). Hold one and `LMB` lights the fuse: four seconds,
+sparking and hissing, then it goes off wherever it is, in your hands included, so `RMB` throws it. Out on
+the road there's rock **seamed with metal** (copper's green, silver's white, gold's yellow), too big to
+move: a stick beside one blows it apart into **ore** for Ed (and rubble). A stick by the narrows' boulder
+blows that to bits too, a way through without the winch, but it brings down any loose rock on the rim.
+Close in it knocks you out cold, further out off your feet; it throws loose things about, dents the RV
+if it's near, and sets off any other stick lying close. Not in town: the sheriff'd lock you up.
+
 ## Hats, outfits and paint
 
 Out front of the general store, left of the door, is a **clothes rail** (`E` on it): nine hats, the six outfits

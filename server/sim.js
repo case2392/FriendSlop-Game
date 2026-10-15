@@ -249,7 +249,9 @@ export class Sim {
     const L = LOOT[type];
     if (!L) return null;
     id = id ?? this.nextPropId++;
-    const bd = RAPIER.RigidBodyDesc.dynamic().setTranslation(pos.x, pos.y, pos.z).setRotation(q)
+    // (fixed: a seamed rock, four tonnes bedded in the ground. A dynamic one settles for its first second or so
+    // whatever it's spawned as, Rapier waking a body at its first contact, and rode in every snapshot meanwhile)
+    const bd = (L.fixed ? RAPIER.RigidBodyDesc.fixed() : RAPIER.RigidBodyDesc.dynamic()).setTranslation(pos.x, pos.y, pos.z).setRotation(q)
       .setLinearDamping(0.05).setAngularDamping(L.adamp ?? (L.mob ? 2 : 0.3)).setCcdEnabled(L.mass < 60 || !!L.mob);
     const body = this.world.createRigidBody(bd);
     const vol = shapeVolume(L.shape);
@@ -1496,7 +1498,7 @@ export class Sim {
     let k = 0;
     const c0 = this.fullAt || 0;
     for (const p of this.props.values()) {
-      const sleeping = p.body.isSleeping();
+      const sleeping = p.body.isSleeping() || p.body.isFixed();
       if (sleeping && p.sentSleep) {
         if (!full) continue;
         const i = k++;

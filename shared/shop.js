@@ -35,6 +35,8 @@ export const GEAR = {
     line: 'Hold it and it beeps over buried metal, faster the closer it gets. Then somebody digs.' },
   shovel:   { name: 'Shovel', price: 100,
     line: 'Hold it and LMB digs where you look (hold LMB to keep digging). At the bottom of a cache: a chest to pull up and open.' },
+  dynamite: { name: 'Dynamite', price: 60,
+    line: 'One stick. Hold it and LMB lights a 4-second fuse, RMB throws it. Blows a seamed rock (or the boulder) apart, and anyone too close off their feet.' },
 };
 export const GEAR_IDS = Object.keys(GEAR);
 

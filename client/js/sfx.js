@@ -195,6 +195,9 @@ export const sfx = {
   // the metal detector's beep (k: how strong the signal, 0-1: higher as it nears), a shovel biting dirt
   detect: (k = 0) => uiSound(() => tone(620 + 760 * k, 0.05, 'square', 0.07 + 0.05 * k)),   // (the metal detector's: higher as it nears)
   dig: (n = 0, end = false) => { noise(0.16, 500, 0.32, 180, 'lowpass'); if (n) tone(end ? 520 : 240, 0.06, 'triangle', 0.08, null, 0.05); },
+  // dynamite: a fuse fizzing, and the bang (k: how close, 0-1): a crack, a deep thump and a rolling rumble
+  fuse: () => noise(0.3, 4200, 0.07, 2600, 'bandpass'),
+  boom: (k = 1) => { noise(0.12, 3000, 0.55 * k, 400, 'lowpass'); tone(62, 0.9, 'sine', 0.75 * k, 28); noise(1.8, 420, 0.42 * k, 70, 'lowpass', 0.05); for (let i = 0; i < 4; i++) noise(0.06, 2400, 0.18 * k, null, 'bandpass', 0.25 + i * 0.13 + Math.random() * 0.08); },
   heave: () => { noise(0.3, 260, 0.2, 110, 'lowpass'); tone(90 + Math.random() * 25, 0.28, 'sawtooth', 0.05, 70); },   // (a chest dragged up its hole)
   // a shot of nitrous: a rising roar and a hiss
   nitro: () => { noise(1.4, 700, 0.32, 2600, 'bandpass'); tone(85, 1.3, 'sawtooth', 0.16, 170); },

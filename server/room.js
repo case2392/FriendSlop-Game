@@ -31,6 +31,7 @@ import { clampKit, kitMods, fitParts, spareLine } from '../shared/garage.js';
 import { rvMods, UPGRADES, VENDORS, NITRO, GEAR } from '../shared/shop.js';
 import { buriedSpots, nearestCache, DIG, HOLE } from '../shared/dig.js';
 import { lookOf, cleanOwns, allowedWear, cleanPaint } from '../shared/looks.js';
+import { BLAST, oreRocks, falloff, seamY } from '../shared/blast.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -44,7 +45,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3, dig: DIG.CD, pull: 0.07, open: 0.3, lookBuy: 0.3, wear: 0.3, paint: 0.3 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3, dig: DIG.CD, pull: 0.07, open: 0.3, lookBuy: 0.3, wear: 0.3, paint: 0.3, light: 0.3 };
 const HORN_MAX = 20;
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
@@ -142,6 +143,15 @@ export class Room {
     this.dug = new Set();
     this.holes = new Map();
     this.holeN = 0;
+    // rock seamed with metal (shared/blast.js): the day's, bedded where they lie (fixed bodies: LOOT seamCopper...)
+    // a little below the lowest ground under them, so no corner stands off a slope; and the sticks burning
+    this.ores = oreRocks(this.W);
+    this.oreAt = new Map();
+    for (const o of this.ores) {
+      const pr = this.sim.addProp(o.type, { x: o.x, y: seamY(this.W, o), z: o.z }, { x: 0, y: Math.sin(o.ry / 2), z: 0, w: Math.cos(o.ry / 2) }, 0, 0);
+      if (pr) this.oreAt.set(pr.id, o);
+    }
+    this.fuses = new Map();
     this.bedAt = null;
     this.receipt = null;
     for (const p of this.players.values()) {
@@ -641,6 +651,7 @@ export class Room {
       case 'nos': return this.nitro(p);
       case 'dig': return this.onDig(p, m);
       case 'open': return this.openChest(p, m);
+      case 'light': return this.lightFuse(p);
       case 'lookBuy': return this.lookBuy(p, m);
       case 'wear': return this.wear(p, m);
       case 'paint': return this.paintRV(p, m);
@@ -768,8 +779,8 @@ export class Room {
     p.activeAt = this.t;
     if (p.ko || p.seat != null) return;
     const type = m.kind === 'prop' ? this.sim.props.get(Number(m.id))?.type : null;
-    // (a chest is opened where it lies, not carried off shut: E on it opens it)
-    if (type === 'chest') { this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id }); return; }
+    // (a chest is opened where it lies, not carried off shut: E on it opens it; a seamed rock is four tonnes)
+    if (type === 'chest' || LOOT[type]?.seam) { this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id }); return; }
     const no = type === 'map' && this.mapRefusal(p);
     if (no) {
       this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id });
@@ -969,7 +980,7 @@ export class Room {
     // a Bull Bar takes some of a head-on knock: a crash or a Grumphorn into the front
     if ((e.why === 'crash' || e.why === 'beast') && e.zone === 'front') amt = Math.round(amt * this.partMods.frontX);
     // and a Reinforced Frame takes some of every crash, beast and rock
-    if (e.why === 'crash' || e.why === 'beast' || e.why === 'rock') amt = Math.round(amt * this.partMods.hitX);
+    if (e.why === 'crash' || e.why === 'beast' || e.why === 'rock' || e.why === 'blast') amt = Math.round(amt * this.partMods.hitX);
     if (amt <= 0 || R.hp <= 0) return false;
     const drv = [...this.players.values()].find(q => q.seat === 0);
     if (!R.inc || now - R.inc.last > C.RVH.GAP) {
@@ -994,7 +1005,7 @@ export class Room {
     this.sim.setRvCond(R.hp);
     const S = this.stats.rv, D = this.dayStats.rv;
     S.dmg += amt; D.dmg += amt;
-    const src = e.why === 'crash' ? (I.first.crash.by || 'nobody') : e.why === 'beast' ? 'the Grumphorn' : e.why === 'rock' ? 'rocks' : 'a ringtail';
+    const src = e.why === 'crash' ? (I.first.crash.by || 'nobody') : e.why === 'beast' ? 'the Grumphorn' : e.why === 'rock' ? 'rocks' : e.why === 'blast' ? 'dynamite' : 'a ringtail';
     D.src[src] = (D.src[src] || 0) + amt;
     if (e.why === 'crash' && (!S.worst || I.parts.crash > S.worst.amt)) S.worst = { amt: I.parts.crash, by: I.first.crash.by, what: I.first.crash.what, day: this.day };
     if (e.why === 'crash' && drv) { const en = this.entry(drv); if (en) en.rvDmg += amt; }
@@ -1027,8 +1038,9 @@ export class Room {
     if (k === 'crash') text = F.by ? `CRUNCH. ${F.by} put the RV into ${F.what || 'something'}` : `CRUNCH. The RV ran into ${F.what || 'something'} with nobody at the wheel`;
     else if (k === 'beast') text = F.how === 'charge' ? 'The Grumphorn charged the RV' : `${F.by || 'Somebody'} rammed the Grumphorn`;
     else if (k === 'rock') text = 'Rocks on the RV';
+    else if (k === 'blast') text = F.by ? `${F.by}'s dynamite went off by the RV` : 'Dynamite went off by the RV';
     else text = 'A ringtail broke out through a window';
-    const also = ks.slice(1).map(j => `${j === 'crash' ? (I.first.crash.by ? `${I.first.crash.by}'s crash` : 'a crash') : j === 'beast' ? 'the Grumphorn' : j === 'rock' ? 'rocks' : 'a ringtail'} -${I.parts[j]}%`);
+    const also = ks.slice(1).map(j => `${j === 'crash' ? (I.first.crash.by ? `${I.first.crash.by}'s crash` : 'a crash') : j === 'beast' ? 'the Grumphorn' : j === 'rock' ? 'rocks' : j === 'blast' ? 'dynamite' : 'a ringtail'} -${I.parts[j]}%`);
     this.toast(`${text}: -${I.parts[k]}%${also.length ? `, plus ${also.join(' and ')}` : ''} (RV ${Math.round(this.rvc.hp)}%).`, '#ffb74d', 4);
   }
   // broken down: whoever holds E at the engine hatch (on foot, awake, within FIX_R m of it, the RV standing
@@ -1245,6 +1257,97 @@ export class Room {
     const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
     this.toast(list ? `${p.name} opened the chest: ${list}! (about ${fmt$(worth)})` : `${p.name} opened the chest. Empty!`, '#ffd166', 5);
   }
+  // ---- dynamite (shared/blast.js) ----------------------------------------------------------------------------
+  // LMB with a stick in hand ({ t: 'light' }): its fuse burns BLAST.FUSE s, and it goes off wherever it is then
+  // (thrown, set down, or still in somebody's hands). Not in town: the sheriff'd have you
+  lightFuse(p) {
+    if (p.ko || !p.pos || this.phase === 'over') return;
+    const h = this.sim.holds.get(p.id), pr = h?.kind === 'prop' ? this.sim.props.get(h.id) : null;
+    if (!pr || pr.type !== 'dynamite' || this.fuses.has(pr.id)) return;
+    if (pr.body.translation().z > this.W.LEN - 30) return this.toast('Not in town: the sheriff\'d lock you up. Out on the road.', '#ff8a80', 3, p);
+    p.activeAt = this.t;
+    this.fuses.set(pr.id, { at: this.t + BLAST.FUSE, by: p.id });
+    this.broadcast({ t: 'ev', list: [{ k: 'fuse', id: pr.id, by: p.id }] });
+  }
+  fuseStep() {
+    for (const [id, f] of [...this.fuses]) if (this.t >= f.at) this.explode(id);
+  }
+  // a stick goes off: whoever's on foot near it is knocked off their feet (out, close in), loose things are
+  // thrown, a seamed rock or the boulder near it blown apart, the RV dented and shoved, the wildlife scattered,
+  // loose rock on a rim near it brought down, and any other stick close by goes off with it. Inside the RV it's
+  // the crew in there it knocks down; outside, the RV's walls keep it off them
+  explode(id) {
+    const sim = this.sim, pr = sim.props.get(id), f = this.fuses.get(id);
+    this.fuses.delete(id);
+    if (!pr) return;
+    const t = pr.body.translation(), at = { x: t.x, y: t.y, z: t.z }, by = f?.by ?? null, now = sim.t;
+    const inRV = (q => insideRV(q.x, q.y, q.z, 0.2))(sim.rvToLocal(at));
+    const walled = (x, y, z) => { const l = sim.rvToLocal({ x, y, z }); return insideRV(l.x, l.y, l.z, 0) !== inRV; };
+    sim.removeProp(id);
+    sim.out.push({ k: 'gone', ids: [id], how: 'boom' });
+    this.broadcast({ t: 'ev', list: [{ k: 'boom', at: [r3(at.x), r3(at.y), r3(at.z)], by }] });
+    for (const q of this.players.values()) {
+      if (!q.connected || !q.pos || q.seat != null) continue;
+      const qy = q.pos.y + 0.9, dx = q.pos.x - at.x, dy = qy - at.y, dz = q.pos.z - at.z, d = Math.hypot(dx, dy, dz);
+      if (d > BLAST.R || walled(q.pos.x, qy, q.pos.z)) continue;
+      const ko = d < BLAST.KO_R, h = Math.hypot(dx, dz) || 1, k = ko ? 7 : 3 + 4 * falloff(d, BLAST.R);
+      sim.knockCd?.set(q.id, now + 1.5);
+      const held = sim.holds.get(q.id);
+      if (held) { sim.release(q.id); sim.out.push({ k: 'slip', id: held.kind === 'prop' ? held.id : null, by: q.id, why: 'blast' }); }
+      sim.out.push({ k: 'knock', id: q.id, v: [r3(dx / h * k), ko ? 6 : 3.5, r3(dz / h * k)], ko, why: 'blast', by, rel: q.par ? 1 : 0 });
+    }
+    const broken = [];
+    for (const p of [...sim.props.values()]) {
+      const L = LOOT[p.type];
+      if (!L || L.mob) continue;
+      const pt = p.body.translation(), dx = pt.x - at.x, dy = pt.y - at.y, dz = pt.z - at.z, d = Math.hypot(dx, dy, dz);
+      if (L.seam || p.type === 'boulder') { if (d < BLAST.BREAK_R + (p.type === 'boulder' ? 0.8 : 0.4)) broken.push(p); continue; }
+      if (d > BLAST.R || walled(pt.x, pt.y, pt.z)) continue;
+      if (p.type === 'dynamite' && d < BLAST.CHAIN_R) { const g = this.fuses.get(p.id); if (!g || g.at > this.t + BLAST.CHAIN_T) this.fuses.set(p.id, { at: this.t + BLAST.CHAIN_T, by }); }
+      const v = BLAST.PUSH * falloff(d, BLAST.R), l = d || 1, m = p.body.mass();
+      p.body.applyImpulse({ x: dx / l * v * m, y: (Math.max(0.2, dy / l) + 0.5) * v * m * 0.7, z: dz / l * v * m }, true);
+    }
+    for (const p of broken) this.shatter(p, by);
+    // the RV: how near its body (a box round it) it went off; inside it, worse
+    const l = sim.rvToLocal(at);
+    const dRV = Math.hypot(Math.max(0, Math.abs(l.x) - RV_DIM.HALF_W), Math.max(0, l.y - RV_DIM.ROOF_Y, -l.y), Math.max(0, Math.abs(l.z) - RV_DIM.HALF_L));
+    if (dRV < BLAST.RV_R) {
+      const k = falloff(dRV, BLAST.RV_R), amt = Math.round(BLAST.RV_HIT * k * (inRV ? 1.5 : 1));
+      if (amt > 0) sim.out.push({ k: 'rvhit', why: 'blast', amt, what: 'dynamite', zone: 'side', at: [r3(at.x), r3(at.y), r3(at.z)] });
+      const rp = sim.rv.translation(), ux = rp.x - at.x, uz = rp.z - at.z, ul = Math.hypot(ux, uz) || 1, m = sim.rv.mass();
+      if (!inRV) sim.rv.applyImpulse({ x: ux / ul * m * 1.2 * k, y: m * 0.6 * k, z: uz / ul * m * 1.2 * k }, true);
+    }
+    sim.mobs?.horn(at, 3);
+    for (const r of sim.mobs?.rockfalls || []) if (r.st === 'armed' && Math.hypot(this.W.roadX(r.obz) - at.x, r.obz - at.z) < BLAST.ROCKFALL_R) sim.mobs.rfTrigger(r, 'blast');
+  }
+  // a seamed rock (or the boulder) blown apart: its ore and rubble flung out round where it stood
+  shatter(p, by) {
+    const sim = this.sim, t = p.body.translation(), o = this.oreAt.get(p.id), L = LOOT[p.type], boulder = p.type === 'boulder';
+    sim.removeProp(p.id);
+    sim.out.push({ k: 'gone', ids: [p.id], how: 'boom' });
+    this.oreAt.delete(p.id);
+    const items = o?.items || [], rubble = boulder ? 6 : 3, n = items.length + rubble, names = [];
+    let worth = 0;
+    const fling = (type, value, k) => {
+      const a = (k / n) * Math.PI * 2 + 0.4, ip = sim.addProp(type, { x: t.x + Math.cos(a) * 0.6, y: t.y + 0.3 + (k % 3) * 0.3, z: t.z + Math.sin(a) * 0.6 }, { x: 0, y: 0, z: 0, w: 1 }, value, value);
+      if (!ip) return false;
+      ip.body.setLinvel({ x: Math.cos(a) * 3.2, y: 4 + (k % 2), z: Math.sin(a) * 3.2 }, true);
+      sim.spare(ip, 1.5);
+      sim.out.push({ k: 'spawn', p: sim.describe(ip) });
+      return true;
+    };
+    items.forEach((it, k) => { if (fling(it.type, it.value, k)) { names.push(LOOT[it.type].name); worth += it.value; } });
+    for (let k = 0; k < rubble; k++) fling('stone', 0, items.length + k);
+    this.dayStats.ore = (this.dayStats.ore || 0) + worth;
+    this.stats.ore = (this.stats.ore || 0) + worth;
+    const who = this.players.get(by)?.name || 'Somebody';
+    if (boulder) return this.toast(`${who} blew the boulder to pieces: the road's open.`, '#ffd166', 5);
+    const counts = {};
+    for (const nm of names) counts[nm] = (counts[nm] || 0) + 1;
+    const list = Object.entries(counts).map(([nm, c]) => (c > 1 ? `${nm} x${c}` : nm)).join(', ');
+    this.toast(`${who} blew the ${L.name} apart: ${list || 'nothing in it'}! (about ${fmt$(worth)})`, '#ffd166', 5);
+  }
+
   // the chests down their holes and how far up they've been pulled (in the game state: few, and only while any)
   chestsView() {
     const ch = [];
@@ -1561,6 +1664,7 @@ export class Room {
     this.stowFinds();
     this.fixStep(dt);
     this.pullStep(dt);
+    this.fuseStep();
     // (an incident is told once it's over)
     if (this.rvc.inc && !this.rvc.inc.told && this.t - this.rvc.inc.last > C.RVH.GAP) this.tellIncident();
     for (const p of this.players.values()) this.resolvePlayer(p);
@@ -1757,6 +1861,7 @@ export class Room {
       ...(sim.t < sim.rvMods.stallUntil ? { stl: 1 } : {}),   // (limping, a knock has the engine stalled for a moment)
       ...(this.dug.size ? { dug: [...this.dug] } : {}),   // (the caches dug down to today: the detector's quiet over them)
       ...this.chestsView(),
+      ...(this.fuses.size ? { fz: [...this.fuses].map(([id, f]) => [id, Math.max(0, Math.round((f.at - this.t) * 10) / 10)]) } : {}),   // (the sticks burning, and how long they've got)
       ...(this.partMods.nitro ? { nos: [this.nos, sim.t < sim.nitroUntil ? 1 : 0] } : {}),   // (the Nitrous Kit: shots left today, one going)
       ...(this.loanAdd > 0 ? { nxt: (this.day < C.DAYS ? C.dueOn(this.day + 1, this.tier()) : 0) + this.loanAdd } : {}),
     };

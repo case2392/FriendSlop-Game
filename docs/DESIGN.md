@@ -443,6 +443,30 @@ roof, then the RV; it made the first four days too forgiving.)
   their hands full), and it costs the time a stop would. Ed doesn't buy the
   gear back; it never goes in the locker, so it rides loose in the RV, and
   what's left on the road is gone. test/dig.mjs.
+- **Dynamite** (playtest suggestion: dynamite to blow up rocks, and metals in
+  them to sell). shared/blast.js. A stick ($60 at the hardware rack, gear) is
+  lit with LMB in hand ({ t: 'light' }: the server checks it's held, not in
+  town) and goes off BLAST.FUSE (4 s) later wherever it is: in hand, set
+  down, or thrown (RMB). The bang: on foot within 2.6 m, knocked out; to
+  5.5 m, knocked off your feet (why 'blast': what you held goes flying);
+  the RV's walls keep a blast outside off whoever's inside, and one inside
+  it knocks them down. Loose things within 5.5 m are thrown (9 m/s right by
+  it, nothing at the edge), another stick within 2.2 m goes off with it
+  0.15 s later, the RV is dented up to 18% by its distance from the RV's
+  body (the Reinforced Frame takes 30%; told as dynamite), shoved, and the
+  wildlife scattered (mobs.horn). Seamed rocks: 2 + day a day (oreRocks:
+  their own random stream, 9 to 29 m off the road on open ground no more
+  than 0.45 m from high to low round it, 25 m apart, never on a cache),
+  copper 50%, silver 33%, gold 17%: four-tonne props nobody picks up, fixed
+  bodies bedded 0.15 m below the lowest ground under them (seamY; sent to
+  the pages once, like anything asleep, so seven of them on day 5 cost the
+  snapshots nothing); a blast within 3.2 m of one blows it into its ore
+  (copper $70, silver $160, gold $330, the day's 22% on top: a copper rock
+  $210 to $280, silver $320 to $390, gold $490 to $820, about $350 on
+  average at day 1's prices) and three stones of rubble. Within 4 m of
+  the narrows' boulder it's blown into six stones (a second way through),
+  and an armed rockfall within 18 m comes down (mobs.rfTrigger).
+  test/dynamite.mjs.
 - **Looks** (playtest ask: hats, outfits and colours for you and the RV,
   shared by the party, changed only where they were bought). shared/looks.js
   is the catalogue: 9 hats, the 6 outfit kits, 8 tabard dyes (the clothes

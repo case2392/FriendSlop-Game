@@ -358,6 +358,25 @@ const RUST = [1.6, 0.85, 0.55];
 // a cache's chest (LOOT.chest, chestOpen: a 0.6 x 0.38 x 0.4 m box): a plank body, a domed lid (half a log
 // along its length), two iron straps over the lot and a brass lock plate; open, the lid stands back past
 // upright on its hinge (the back top edge) and the inside is dark
+// a lump of ore: knobbly grey rock (a ball pushed in and out, flatter than it's wide) with the metal in crystals
+// and a seam across it (a second colour for copper: its green crust and the bright metal)
+function oreLump(reg, tint, tint2, r, seed) {
+  const B = new Build(), g = sphere(r, 12, 9), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const k = 1 + 0.18 * Math.sin(x * 41 + seed) * Math.cos(z * 37 + seed * 0.7) + 0.12 * Math.sin(y * 53 + seed * 1.3);
+    p.setXYZ(i, x * k, y * k * 0.75, z * k * 0.9);
+  }
+  B.add(g, R.iron, { tint: [0.72, 0.7, 0.68], crease: 70 });
+  for (let k = 0; k < 6; k++) {
+    const a = seed + k * 1.9, e = 0.25 + (k % 3) * 0.3, c = (k % 2 && tint2) ? tint2 : tint;
+    const x = Math.cos(a) * Math.cos(e) * r * 0.85, y = Math.sin(e) * r * 0.62, z = Math.sin(a) * Math.cos(e) * r * 0.78;
+    B.add(new THREE.OctahedronGeometry(r * (0.16 + (k % 3) * 0.05), 0), reg, { at: mat4(x, y, z, a, a * 0.7, 0), tint: c });
+  }
+  B.add(rbox(r * 1.7, r * 0.12, r * 0.22, r * 0.05), reg, { uv: 'box', at: mat4(0, r * 0.05, 0, 0.3, seed, 0.2), tint });
+  return B.done({ ao: 0.15, aoH: 0.04, fit: LOOT_FIT(r) });
+}
+const LOOT_FIT = r => [r * 1.0, r * 0.78, r * 0.88];
 function chestModel(open) {
   const B = new Build(), WD = [0.78, 0.6, 0.45], BAND = [0.62, 0.55, 0.5];
   B.add(rbox(0.6, 0.22, 0.4, 0.015), R.wood, { uv: 'box', at: mat4(0, -0.08, 0), tint: WD });
@@ -919,6 +938,20 @@ const BUILDERS = {
   // plate on the front. Open, the lid's swung back on its hinge and the inside is dark
   chest() { return chestModel(false); },
   chestOpen() { return chestModel(true); },
+  // a stick of dynamite: red paper, a printed band round its middle, darker crimped ends, a fuse curling out of
+  // the top (LOOT.dynamite: a 0.2 m stick; the fuse stands above it)
+  dynamite() {
+    const B = new Build();
+    B.add(cyl(0.026, 0.2, 12), R.red, { at: mat4(0, 0, 0), tint: [1.15, 0.55, 0.5] });
+    B.add(cyl(0.0265, 0.07, 12), R.ivory, { at: mat4(0, 0.005, 0), tint: [1.05, 0.98, 0.85] });
+    for (const y of [-0.098, 0.098]) B.add(cyl(0.024, 0.008, 12), R.red, { at: mat4(0, y, 0), tint: [0.7, 0.32, 0.3] });
+    B.add(tube([[0, 0.1, 0], [0.008, 0.125, 0.004], [0.018, 0.145, -0.006], [0.012, 0.165, -0.014]], 0.0035, 8, 5), R.strap, { tint: [0.55, 0.45, 0.35] });
+    return B.done({ ao: 0.1, aoH: 0.04 });
+  },
+  // ore blown out of a seamed rock (shared/blast.js): a lump of grey rock with the metal showing through
+  copperOre() { return oreLump(R.bronze, [1.0, 1.25, 0.95], [1.4, 0.8, 0.55], 0.13, 5); },
+  silverOre() { return oreLump(R.steel, [1.4, 1.42, 1.5], null, 0.12, 9); },
+  goldOre() { return oreLump(R.gilt, [1.3, 1.12, 0.7], null, 0.11, 17); },
 
   map() {      // the leather map case: a rolled edge, a strap with a buckle (the paper is a second mesh)
     const B = new Build();
@@ -1960,6 +1993,49 @@ function rockGeo(biome) {
   return g;
 }
 
+// the metal in a seamed rock: seams wandering over its face, flat bands of metal lying right on the rock's own
+// lumpy surface (the same bumps rockGeo gives it, for its biome), crystals of it poking out along them: copper
+// bright orange with a green crust here and there, silver white, gold yellow
+function seamVeins(metal, biome, hx, hy, hz) {
+  const M = { copper: [R.bronze, [1.8, 0.92, 0.5], [0.75, 1.45, 1.05]], silver: [R.steel, [1.65, 1.68, 1.75], null], gold: [R.gilt, [1.7, 1.38, 0.55], null] }[metal];
+  const rr = rngFrom('rock-' + biome), ph = Array.from({ length: 6 }, () => rr() * 6.283);
+  const bump = (x, y, z) => 1 + 0.13 * Math.sin(x * 2.3 + ph[0]) * Math.cos(z * 1.9 + ph[1]) + 0.09 * Math.sin(y * 3.1 + ph[2]) + 0.06 * Math.cos((x + z) * 2.7 + ph[3]);
+  // the rock's surface (and its outward normal) in the direction (u, v): the bumped ball, flattened as the
+  // rock is (rockGeo's 0.86, the prop's 1.12), stretched to the seamed rock's box
+  const surf = (u, v) => {
+    const x = Math.cos(u) * Math.cos(v), y = Math.sin(v), z = Math.sin(u) * Math.cos(v), k = bump(x, y, z);
+    const P = new V3(x * k * hx, y * k * 0.86 * 1.12 * hy, z * k * hz);
+    const N = new V3(P.x / (hx * hx), P.y / (hy * hy), P.z / (hz * hz)).normalize();
+    return { P, N };
+  };
+  const B = new Build(), rnd = rngFrom('seam-' + metal);
+  for (let k = 0; k < 10; k++) {
+    let u = rnd() * 6.283, v = -0.15 + rnd() * 0.85;
+    const du = (0.1 + rnd() * 0.12) * (rnd() < 0.5 ? -1 : 1), dv = (rnd() - 0.5) * 0.2, n = 9, w = 0.03 + rnd() * 0.04;
+    const pts = [];
+    for (let i = 0; i < n; i++) { pts.push(surf(u, v)); u += du; v = Math.max(-0.3, Math.min(1.2, v + dv + (rnd() - 0.5) * 0.08)); }
+    const pos = [], uv = [], idx = [];
+    pts.forEach((q, i) => {
+      const a = pts[Math.max(0, i - 1)].P, b = pts[Math.min(n - 1, i + 1)].P, T = b.clone().sub(a).normalize();
+      const side = T.clone().cross(q.N).normalize().multiplyScalar(w * (0.5 + 0.5 * Math.sin(i / (n - 1) * Math.PI)));
+      const c = q.P.clone().addScaledVector(q.N, 0.012);
+      pos.push(c.x + side.x, c.y + side.y, c.z + side.z, c.x - side.x, c.y - side.y, c.z - side.z);
+      uv.push(i / (n - 1), 0, i / (n - 1), 1);
+      if (i) { const o = (i - 1) * 2; idx.push(o, o + 2, o + 1, o + 1, o + 2, o + 3); }
+    });
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+    g.setIndex(idx); g.computeVertexNormals();
+    B.add(g, M[0], { tint: k % 3 === 2 && M[2] ? M[2] : M[1] });
+    for (let i = 1; i < n - 1; i += 2) {
+      const q = pts[i], c = q.P.clone().addScaledVector(q.N, 0.02);
+      B.add(new THREE.OctahedronGeometry(0.04 + rnd() * 0.04, 0), M[0], { at: mat4(c.x, c.y, c.z, rnd() * 3, rnd() * 3, 0), tint: M[1] });
+    }
+  }
+  return B.done({ ao: 0.04, aoH: 0.02 });
+}
+
 export function buildProp(type, W) {
   if (type === 'rock' || type === 'stone') {
     const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow', key = 'rock-' + biome;
@@ -1967,6 +2043,17 @@ export function buildProp(type, W) {
     const mesh = shadowy(new THREE.Mesh(geoCache.get(key), painted(`loot_boulder_${biome}`, { vertexColors: true })));
     if (type === 'stone') mesh.scale.set(0.62, 0.55, 0.62);   // (a smaller, flatter one of the same, just round its box)
     return mesh;
+  }
+  if (LOOT[type]?.seam) {
+    const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow', key = 'rock-' + biome, [hx, hy, hz] = LOOT[type].shape.slice(1), r0 = LOOT.rock.shape[1] * 1.08;
+    if (!geoCache.has(key)) geoCache.set(key, rockGeo(biome));
+    const grp = new THREE.Group();
+    const rock = shadowy(new THREE.Mesh(geoCache.get(key), painted(`loot_boulder_${biome}`, { vertexColors: true })));
+    rock.scale.set(hx / r0, hy / r0 * 1.12, hz / r0);
+    grp.add(rock);
+    if (!geoCache.has(type + biome)) geoCache.set(type + biome, seamVeins(LOOT[type].seam, biome, hx, hy, hz));
+    grp.add(shadowy(new THREE.Mesh(geoCache.get(type + biome), lootMat())));
+    return grp;
   }
   if (type === 'boulder') {
     const biome = BIOMES.includes(W?.biome) ? W.biome : 'meadow';

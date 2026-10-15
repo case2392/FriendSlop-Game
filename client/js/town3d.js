@@ -856,6 +856,9 @@ function toolRack(K, s) {
   K.cyl(iron, [dx, 0.08, 0.05], [dx + 0.02, 1.36, -hz + 0.12], 0.012, 0.012, { sides: 6, tint: '#c0c4c8' });
   K.box(mat('metal_red'), 0.09, 0.12, 0.07, dx + 0.015, 0.95, -0.02, { uv: 'keep' });
   K.cyl(mat('metal_green'), [dx + 0.02, 1.2, -0.05], [dx + 0.02, 1.32, -0.07], 0.022, 0.022, { sides: 8, tint: '#2a2a2a' });
+  // and a crate of dynamite on the trough between them, the sticks standing in it, their fuses up
+  K.box(mat('board_rough'), 0.2, 0.1, 0.13, 0.09, 0.1, 0.07, { tile: 0.4, tint: '#a07850' });
+  for (let i = 0; i < 6; i++) K.cyl(mat('metal_red'), [0.03 + (i % 3) * 0.055, 0.12, 0.04 + Math.floor(i / 3) * 0.06], [0.03 + (i % 3) * 0.055, 0.27, 0.04 + Math.floor(i / 3) * 0.06], 0.022, 0.022, { sides: 8, tint: '#c0302a' });
 }
 // The general store's clothes rail, left of the door (shared/looks.js): two posts and a bar, coats on
 // hangers in the dyes, a shelf of hats over it, and a tall mirror at the end
@@ -1517,7 +1520,7 @@ export function buildStructures(W) {
   const tags = [];
   const store = W.buildings.find(b => b.kind === 'store');
   for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'tailor') tags.push({ u, lines: ['CLOTHES', 'HATS · OUTFITS', 'DYES · THE MIRROR'], w: 0.78, h: 0.4 });
-  for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'store') tags.push({ u, lines: ['HARDWARE', ...GEAR_IDS.map(id => `${GEAR[id].name.toUpperCase()} $${GEAR[id].price}`)], w: 0.78, h: 0.4 });
+  for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'store') tags.push({ u, lines: ['HARDWARE', ...GEAR_IDS.map(id => `${GEAR[id].name.toUpperCase()} $${GEAR[id].price}`)], w: 0.78, h: 0.1 + 0.1 * GEAR_IDS.length });
   for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES', hardhat: 'HARD HAT', cheese: 'CHEESE' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90', hardhat: '$80', cheese: '$30' }[u.arg] || ''], w: 0.46, h: 0.26 });
   const entry = T && W.signs.find(s => s.post && Math.abs(s.z - (T.z + 6)) < 3 && Math.abs(s.x - 7.5) < 3);
   const sctx = { attached, onCanopy, bInfo, glows, tags, plaques: plaqueSpots(W, T), style: S, styleName: style, tagRy: store ? store.ry : 0, townZ: T.z, entry };
