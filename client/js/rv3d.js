@@ -1940,7 +1940,9 @@ export class RVView {
     this.doorAng += (target - this.doorAng) * Math.min(1, dt * 6);
     this.doorPivot.rotation.y = this.doorAng;
     this.updateWheels(rv);
-    this.steeringWheel.rotation.z = rv.steer * 2.2;
+    // (its own z runs forward, away from the driver: a left turn is a negative turn about it, as the driver
+    // sees it turn left)
+    this.steeringWheel.rotation.z = -rv.steer * 2.2;
     this.mat.lamps.emissive.setHex(night ? 0xffffff : 0x000000);
     this.setCond(dt, rv, night, cond);
     this.odoMat.emissive.setHex(night ? 0x9a6a3a : 0x000000);

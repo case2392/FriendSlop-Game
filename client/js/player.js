@@ -4,7 +4,7 @@
 
 import * as C from '/shared/constants.js';
 import { LOOT } from '/shared/loot.js';
-import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
+import { RV_DIM, RV_SEATS, RV_SEAT_EXIT, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw, qRotate, qConj } from '/shared/rv.js';
 import { G } from './phys.js';
 import { STOCK } from '/shared/garage.js';
 
@@ -41,9 +41,11 @@ export class Me {
     this.stamina = ST.MAX; this.stamMax = ST.MAX; this.regenT = 0;
     this.mods = STOCK;   // my kit's numbers (shared/garage.js kitMods), from the server's echo
     this.crouch = false; this.sprinting = false;
+    this.winded = false;         // ran out sprinting: no sprint till STAMINA.SPRINT_BACK
     this.climb = null;           // {n, rv}
     this.seat = null;
     this.bunk = null;            // asleep in a bunk: which (shared/rv.js RV_BUNKS), from the server's 'bed'
+    this.stairs = null;          // walking up or down the RV's door steps (doorStairs)
     this.koT = 0;
     this.holding = null;         // {id, type}
     this.hasHook = false;
@@ -67,7 +69,7 @@ export class Me {
     if (yaw != null) this.yaw = yaw;
     this.par = 0; this.lp = null;
     if (this.mode === 'climb' || this.mode === 'seat') this.mode = 'walk';
-    this.climb = null; this.bunk = null;
+    this.climb = null; this.bunk = null; this.stairs = null;
   }
 
   eye(rv) {
@@ -95,7 +97,7 @@ export class Me {
     if (this.mode === 'seat') return;
     const down = this.mode === 'ko', base = rel && this.par && rv?.v ? rv.v : v3();
     this.unparent(null);
-    this.par = 0; this.lp = null;
+    this.par = 0; this.lp = null; this.stairs = null;
     if (!down) this.mode = 'walk';
     this.climb = null;
     this.vel = v3(base.x + v[0], base.y + v[1], base.z + v[2]);
@@ -109,6 +111,7 @@ export class Me {
     // a hard hat on: it takes the knockout (once), and you just stagger
     if (this.hat && this.mode !== 'seat') { this.hat = false; this.events.push({ k: 'hat', why }); return; }
     (this.koLog ||= []).push({ why, pos: { ...this.pos }, vel: { ...this.vel }, par: this.par, mode: this.mode, t: performance.now() });
+    this.stairs = null;
     if (this.mode === 'seat') this.seat = null;
     this.mode = 'ko';
     this.koT = P.KO_TIME;
@@ -200,11 +203,61 @@ export class Me {
       this.reparent(lw, rv, exclude);
       return;
     }
+    if (this.mode === 'walk' && this.doorStairs(dt, inp, lw, rv)) { this.regen(dt); return; }
     this.lurch(dt, rv);
     if (this.mode === 'climb') this.climbStep(dt, inp, lw, rv, exclude);
     else this.walk(dt, inp, lw, rv, exclude, false);
     this.reparent(lw, rv, exclude);
     if (this.mode !== 'climb') this.regen(dt);
+  }
+
+  // The RV's door steps, walked: at its open door, walking at it from outside takes you up the steps and in,
+  // and walking out of it takes you down them, in stride. (Its steps are 43 cm risers on treads narrower than
+  // you are, with the RV's side over the top one: walking, you stopped dead at the first, and only a jump got
+  // you in.) A short walk along a set path in the RV's own frame, so it works with the RV rolling too.
+  // -> true while it has you
+  doorStairs(dt, inp, lw, rv) {
+    const D = RV_DIM;
+    if (!rv) { this.stairs = null; return false; }
+    if (!this.stairs) {
+      if (!this.grounded || (!inp.f && !inp.r) || !lw.doorOpen?.()) return false;
+      const l = toLocal(rv.p, rv.q, this.pos);
+      if (Math.abs(l.z - D.DOOR_Z) > D.DOOR_HALF - 0.1) return false;
+      // which way you're walking, in the RV's frame (+x: in through the door)
+      const w = v3(Math.sin(this.yaw) * inp.f - Math.cos(this.yaw) * inp.r, 0, Math.cos(this.yaw) * inp.f + Math.sin(this.yaw) * inp.r);
+      const dx = qRotate(qConj(rv.q), w).x / (Math.hypot(w.x, w.z) || 1);
+      const z = Math.max(D.DOOR_Z - 0.32, Math.min(D.DOOR_Z + 0.32, l.z));
+      if (dx > 0.5 && l.x > -2.7 && l.x < -1.05 && l.y < -0.25 && l.y > -2) {
+        this.stairs = { up: true, t: 0, dur: 0.6, a: l, b: v3(-0.85, 0.02, z) };
+      } else if (dx < -0.5 && l.x > -1.35 && l.x < -0.7 && l.y > -0.1 && l.y < 0.4) {
+        // (down to the ground at the foot of the steps, wherever that is on this ground)
+        const foot = toWorld(rv.p, rv.q, v3(-2.55, 0, z));
+        const hit = lw.ray(v3(foot.x, foot.y + 0.4, foot.z), v3(0, -1, 0), 3, G.WORLD, null, false);
+        const gy = hit ? toLocal(rv.p, rv.q, hit.point).y : -1.28;
+        this.stairs = { up: false, t: 0, dur: 0.5, a: l, b: v3(-2.55, gy + 0.03, z) };
+      } else return false;
+      this.events.push({ k: 'step' });
+    }
+    const s = this.stairs;
+    s.t += dt;
+    const u = Math.min(1, s.t / s.dur), ease = k => k * k * (3 - 2 * k);
+    // (going up, the climb leads the stride; going down, the stride leads the drop)
+    const lead = ease(Math.min(1, u * 1.4)), lag = ease(Math.max(0, u * 1.4 - 0.4));
+    const ry = s.up ? lead : lag, rx = s.up ? lag : lead;
+    this.par = 1;
+    this.lp = v3(s.a.x + (s.b.x - s.a.x) * rx, s.a.y + (s.b.y - s.a.y) * ry, s.a.z + (s.b.z - s.a.z) * rx);
+    this.pos = toWorld(rv.p, rv.q, this.lp);
+    this.vel = v3(); this.grounded = true; this.airT = 0; this.jumped = false;
+    if (u >= 1) {
+      this.stairs = null;
+      this.events.push({ k: 'step' });
+      if (!s.up) {   // on the ground now, outside: where the ground is now (the RV may have rolled on meanwhile)
+        const g = lw.ray(v3(this.pos.x, this.pos.y + 0.6, this.pos.z), v3(0, -1, 0), 1.2, G.WORLD, null, false);
+        if (g && g.point.y > this.pos.y - 0.03) this.pos.y = g.point.y + 0.03;
+        this.par = 0; this.lp = null; this.vel = v3(rv.v?.x || 0, 0, rv.v?.z || 0);
+      }
+    }
+    return true;
   }
 
   // Standing in the RV when it brakes hard (or hits a boulder) throws you around.
@@ -241,7 +294,11 @@ export class Me {
     if (wl > 1) w = mul(w, 1 / wl);
     this.crouch = !!inp.crouch && !limp;
     const cls = this.holding ? LOOT[this.holding.type]?.cls : null;
-    this.sprinting = !!inp.sprint && inp.f > 0 && !this.crouch && this.stamina > 1 && cls !== 'heavy' && this.grounded;
+    // run out and you're winded till some of it's back: held Shift used to sprint it away as fast as it came, and
+    // the bar sat empty for as long as you held it
+    if (this.stamina <= 1) this.winded = true;
+    else if (this.stamina >= Math.min(ST.SPRINT_BACK, this.stamMax * 0.6)) this.winded = false;
+    this.sprinting = !!inp.sprint && inp.f > 0 && !this.crouch && !this.winded && cls !== 'heavy' && this.grounded;
     let speed = this.crouch ? P.CROUCH : this.sprinting ? P.SPRINT : P.WALK;
     if (cls === '2h') speed *= 0.78;
     if (cls === 'heavy') speed *= 0.5;
@@ -257,10 +314,11 @@ export class Me {
     if (this.sprinting && wl > 0.1) this.spend(ST.SPRINT * dt);
 
     // a jump: on the ground, or a moment after walking off an edge (coyote time); pressed a moment before
-    // landing, it happens as you land (the buffer)
+    // landing, it happens as you land (the buffer). It costs stamina but never needs it: Space that sometimes
+    // did nothing (out of breath) read as a broken key
     this.jumpBuf = inp.jump ? P.JUMP_BUFFER : Math.max(0, this.jumpBuf - dt);
     const footing = this.grounded || (this.airT < P.COYOTE && !this.jumped);
-    if (this.jumpBuf > 0 && footing && this.stamina > 3 && !limp) {
+    if (this.jumpBuf > 0 && footing && !limp) {
       this.vel.y = P.JUMP * (this.buffT > 0 ? 1.08 : 1);
       this.grounded = false;
       this.jumped = true;
