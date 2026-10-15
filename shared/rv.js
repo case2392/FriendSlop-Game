@@ -91,6 +91,17 @@ export const RV_PARTS = [
   ['bumperR',   1.3, 0.16, 0.12,    0, -0.42, -4.06,  { mass: 25 }],
 ];
 
+// What the crosshair takes for a seat besides its cushion (seatDriver and seatPass above stop at 48 cm): the
+// space over the cushion between the arms, the high back, and the steering wheel. Only the pages have these,
+// as sensors: nobody bumps into them and nothing else looks for them (client/js/phys.js). With only the
+// cushion to aim at, E to drive took aiming at the floor. [name, hx, hy, hz, cx, cy, cz, use]
+export const RV_AIM = [];
+for (const [sx, use] of [[1, 'seat0'], [-1, 'seat1']]) {
+  RV_AIM.push([`${use}Over`, 0.34, 0.17, 0.3, sx * 0.62, 0.62, 2.86, use]);
+  RV_AIM.push([`${use}Back`, 0.34, 0.44, 0.12, sx * 0.62, 0.86, 2.56, use]);
+}
+RV_AIM.push(['wheel', 0.23, 0.17, 0.18, 0.62, 0.89, 3.22, 'seat0']);
+
 // Seats: where your eye goes (local).
 export const RV_SEATS = [
   { x: 0.62, y: 1.32, z: 2.82, driver: true },
