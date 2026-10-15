@@ -128,6 +128,33 @@ check(roof.every(d => d > 2.2), `movement: on the RV's roof, the same 0.7 s goes
   check(riding && kept && me.par === 1 && Math.hypot(l.x - lp.x, l.z - lp.z) < 0.05 && Math.abs(l.y - lp.y) < 0.05,
     `movement: riding the RV into a new day (no RV for half a second, then it's at the new camp), you wake in it where you lay (${l.x.toFixed(2)}, ${l.y.toFixed(2)}, ${l.z.toFixed(2)} in the RV, was ${lp.x.toFixed(2)}, ${lp.y.toFixed(2)}, ${lp.z.toFixed(2)}; riding ${me.par === 1})`);
 }
+// out of breath: Shift held on and on runs the stamina out, and then still held, it comes back (you're winded,
+// not sprinting) and the sprint with it; and Space jumps all the way through, empty or not
+{
+  const me = new Me(), S = C.STAMINA;
+  me.teleport(at.x, at.g + 0.05, at.z - 13, 0);
+  for (let i = 0; i < 30; i++) step(me, {});
+  let emptyAt = null, back = null, low = Infinity;
+  const jumpsAt = [];
+  for (let i = 0; i < 60 * 22; i++) {
+    const t = i * DT, run = { f: 1, sprint: true };
+    if (me.pos.z > at.z + 12 || me.pos.z < at.z - 14) me.yaw = me.pos.z > 0 ? Math.PI : 0;   // (pace the floor, not off it)
+    const jump = emptyAt != null && jumpsAt.length < 3 && t > emptyAt + 0.2 + jumpsAt.length * 1.2 && me.grounded;
+    const y0 = me.pos.y;
+    step(me, { ...run, jump });
+    if (me.events.some(e => e.k === 'jump')) jumpsAt.push({ t, st: me.stamina, y0, top: y0 });
+    for (const j of jumpsAt) if (t - j.t < 1) j.top = Math.max(j.top, me.pos.y);
+    me.events.length = 0;
+    low = Math.min(low, me.stamina);
+    if (emptyAt == null && me.stamina <= 1) emptyAt = t;
+    if (emptyAt != null && back == null && me.sprinting && t > emptyAt + 0.1) back = { t: t - emptyAt, st: me.stamina };
+  }
+  const rose = jumpsAt.map(j => j.top - j.y0);
+  check(emptyAt != null && emptyAt < 12 && back && back.st >= S.SPRINT_BACK - 1 && back.t < 4,
+    `movement: Shift held runs the stamina out (${emptyAt?.toFixed(1)} s) and, still held, it comes back to ${back?.st.toFixed(0)} and the sprint with it ${back?.t.toFixed(1)} s later`);
+  check(jumpsAt.length === 3 && rose.every(r => r > 1), `movement: and Space jumps out of breath too: ${rose.map(r => r.toFixed(2)).join(', ')} m (stamina ${jumpsAt.map(j => j.st.toFixed(0)).join(', ')})`);
+}
+
 lw.free();
 // indoors: the town's general store, walked through from its door (seed 7, day 3: the walk the playtest
 // felt stutter on), every step at full pace with only the floor underfoot
@@ -150,6 +177,52 @@ lw.free();
   lw2.free();
   check(indoor > 60 && cut === 0 && dist / (indoor * DT) > C.PLAYER.WALK * 0.93, `movement: across the general store's floor (${(indoor * DT).toFixed(1)} s with nothing else in the way) at ${(dist / Math.max(1, indoor) / DT).toFixed(2)} m/s, ${cut} steps cut short by the floor`);
 }
+// the RV's door steps, walked: parked at camp (by the server's own physics, on several days' ground), walking at
+// its open door from outside takes you up the steps and in, and walking out takes you down them, no jumping
+// (they're 43 cm risers on treads narrower than you: you stopped at the first one)
+{
+  process.env.FRIENDSLOP_TEST = '1'; process.env.FRIENDSLOP_NOMOBS = '1';
+  const { Room } = await import('../server/room.js');
+  const { initPhysics } = await import('../server/sim.js');
+  const { RV_DIM } = await import('../shared/rv.js');
+  await initPhysics();
+  const res = [];
+  for (const [seed, day] of [[777, 1], [4242, 3], [7, 2]]) {
+    const room = new Room('ST', seed);
+    if (day > 1) room.debug({ id: 0, name: 'x' }, { op: 'day', d: day });
+    for (let i = 0; i < 180; i++) room.tick(1 / 60);
+    const t = room.sim.rv.translation(), q = room.sim.rv.rotation();
+    const rv = { p: { x: t.x, y: t.y, z: t.z }, q: { x: q.x, y: q.y, z: q.z, w: q.w }, v: { x: 0, y: 0, z: 0 } };
+    const lw3 = new LocalWorld(room.W); lw3.setRV(rv.p, rv.q); lw3.setDoor(true); lw3.step();
+    const yawTo = sx => { const a = toWorld(rv.p, rv.q, { x: sx, y: 0, z: 0 }), o = toWorld(rv.p, rv.q, { x: 0, y: 0, z: 0 }); return Math.atan2(a.x - o.x, a.z - o.z); };
+    const me = new Me(), s0 = toWorld(rv.p, rv.q, { x: -2.9, y: 0, z: RV_DIM.DOOR_Z });
+    me.teleport(s0.x, room.W.heightAt(s0.x, s0.z) + 0.05, s0.z, yawTo(1));
+    let jumps = 0;
+    const walk = (secs, yaw) => { for (let i = 0; i < secs * 60; i++) { lw3.step(); me.yaw = yaw; me.update(DT, { f: 1, r: 0, jump: false, sprint: false, crouch: false, grab: false }, lw3, rv, null); jumps += me.events.filter(e => e.k === 'jump').length; me.events.length = 0; } return toLocal(rv.p, rv.q, me.pos); };
+    const a = walk(1.5, yawTo(1)), inside = a.x > -1 && a.y > -0.1 && me.par === 1;
+    const b = walk(1.5, yawTo(-1)), out = b.x < -2.2 && b.y < -0.9 && me.mode === 'walk';
+    // and back in, then out of it rolling at 6 m/s over this ground and dipping on a bump: down on the ground, not
+    // under it
+    walk(1.5, yawTo(1));
+    const fw = { x: toWorld(rv.p, rv.q, { x: 0, y: 0, z: 1 }).x - rv.p.x, z: toWorld(rv.p, rv.q, { x: 0, y: 0, z: 1 }).z - rv.p.z };
+    const lift = rv.p.y - room.W.heightAt(rv.p.x, rv.p.z), yawOut = yawTo(-1);
+    rv.v = { x: fw.x * 6, y: 0, z: fw.z * 6 };
+    let under = 0;
+    for (let i = 0; i < 90; i++) {
+      rv.p = { x: rv.p.x + rv.v.x * DT, y: 0, z: rv.p.z + rv.v.z * DT }; rv.p.y = room.W.heightAt(rv.p.x, rv.p.z) + lift - 0.3 * Math.min(1, i / 30);   // (dipping 30 cm on its springs over a bump as you go)
+      lw3.setRV(rv.p, rv.q); lw3.step();
+      if (i < 40) me.yaw = yawOut;
+      me.update(DT, { f: i < 40 ? 1 : 0, r: 0, jump: false, sprint: false, crouch: false, grab: false }, lw3, rv, null);
+      me.events.length = 0;
+      if (!me.par) under = Math.max(under, room.W.heightAt(me.pos.x, me.pos.z) - me.pos.y);
+    }
+    const rolled = !me.par && under < 0.05;
+    res.push({ ok: inside && out && rolled && !jumps, s: `${seed}/${day}: in to (${a.x.toFixed(1)}, ${a.y.toFixed(2)}), out to (${b.x.toFixed(1)}, ${b.y.toFixed(2)}); out rolling, ${under > 0 ? (under * 100).toFixed(1) + ' cm under' : 'on'} the ground` });
+    room.sim.free?.();
+  }
+  check(res.every(r => r.ok), `movement: walking at the RV's open door goes up its steps and in, and walking out goes down them (the RV parked, or rolling), no jump (${res.map(r => r.s).join('; ')})`);
+}
+
 if (failed) { console.error('💥 MOVEMENT TESTS FAILED'); process.exit(1); }
 console.log('All movement checks passed');
 process.exit(0);

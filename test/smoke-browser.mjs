@@ -385,10 +385,11 @@ try {
     await host.waitForFunction(id => window.__nmd.g?.cas?.derby?.bets?.[window.__nmd.selfId] === 100 && window.__nmd.g.cas.derby.bets[id] === 100, dave, { timeout: 24000 });
     await digit(host, 7); await digit(joiner, 5);
     await host.waitForFunction(() => (window.__nmd.g?.cas?.derby?.tix || []).length === 2, null, { timeout: 24000 });
-    await host.waitForFunction(() => window.__nmd.g?.cas?.derby?.st === 'race' && window.__nmd.g.cas.derby.el > 2.5, null, { timeout: 60000 });
+    // (the finishing order kept as it runs: in a test it's shown for a second after it pays, and a slow frame read it gone)
+    await host.waitForFunction(() => { const d = window.__nmd.g?.cas?.derby; if (d?.order) window.__derbyOrder = d.order; return d?.st === 'race' && d.el > 2.5; }, null, { timeout: 60000 });
     await shot(host, 'derby', 200);
-    await host.waitForFunction(() => (window.__nmd.betLog || []).filter(e => e.game === 'the Ringtail Derby').length >= 2, null, { timeout: 60000 });
-    const derby = await host.evaluate(() => { const S = window.__nmd; return { order: S.g.cas.derby.order, log: S.betLog.filter(e => e.game === 'the Ringtail Derby').map(e => ({ won: e.won, by: e.by })), me: S.selfId }; });
+    await host.waitForFunction(() => { const d = window.__nmd.g?.cas?.derby; if (d?.order) window.__derbyOrder = d.order; return (window.__nmd.betLog || []).filter(e => e.game === 'the Ringtail Derby').length >= 2; }, null, { timeout: 60000 });
+    const derby = await host.evaluate(() => { const S = window.__nmd; return { order: window.__derbyOrder, log: S.betLog.filter(e => e.game === 'the Ringtail Derby').map(e => ({ won: e.won, by: e.by })), me: S.selfId }; });
     const paid = derby.log.find(e => e.by === derby.me)?.won, paidD = derby.log.find(e => e.by === dave)?.won;
     check(derby.order && paid === (derby.order[0] === 3 ? 280 : -100) && paidD === (derby.order[0] === 1 ? 280 : -100),
       `the Ringtail Derby: No. ${derby.order?.[0]} won; Steve's ticket on 3 ${paid >= 0 ? '+' : ''}${paid}, Dave's on 1 ${paidD >= 0 ? '+' : ''}${paidD}`);
@@ -573,6 +574,9 @@ try {
   const tx3 = await back.evaluate(() => window.__nmd.texCache.stats());
   check(tx3.cacheHits > 50 && tx3.workerPaints < 10, `a second visit decoded ${tx3.cacheHits} textures from the cache (${tx3.workerPaints} painted by workers, ${tx3.pagePaints} by the page)`);
   await back.close();
+  // (a whole second world's textures and shaders go through the one software GPU the pages share: till it's
+  // through them, the other pages get no frames, and a reconnect or a click on them waits behind it)
+  for (const q of [host, joiner]) { const f0 = await q.evaluate(() => window.__nmd.frames); await q.waitForFunction(f => window.__nmd.frames > f + 10, f0, { timeout: 240000 }); }
 
   // ---- connections: a dropped socket comes back to the same seat; Ctrl is the game's; no 3D says so; the end of the server is said out loud ----
   const was = await joiner.evaluate(() => ({ id: window.__nmd.selfId, built: window.__nmd.builtAt }));
@@ -607,6 +611,7 @@ try {
     wss.on('connection', ws => ws.on('message', d => { if (JSON.parse(d).t === 'join' && ++joins === 1) ws.close(4005, 'lost'); }));
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } });
     const p = await ctx.newPage();
+    p.setDefaultTimeout(240000);   // (software GL, like every page here)
     p.on('pageerror', e => errors.push(`[Lost] ${e.message}`));
     await p.goto(`http://localhost:${PORT}/?ws=ws://127.0.0.1:${wss.address().port}`);
     await p.fill('#codeInput', code);

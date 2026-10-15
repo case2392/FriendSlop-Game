@@ -1884,23 +1884,21 @@ function liveMap(rv) {
   liveCv.__drawn = now;
   return liveCv;
 }
-// What I carry is drawn in my hands, where the server holds it (sim.js: its middle, chest height, my distance,
-// its turn against mine), from this frame's eye: the server's copy comes a round trip and the interpolation
-// late, so drawn as it says it trailed every turn, floating out ahead. Where the two part (it's caught on a
-// wall, or another pair of hands has it) the server's is drawn
-const _hq = new THREE.Quaternion(), _hq2 = new THREE.Quaternion();
+// (the turn of what you carry: its turn against yours, kept from when you picked it up)
 const qMul = (a, b) => ({ w: a.w * b.w - a.x * b.x - a.y * b.y - a.z * b.z, x: a.w * b.x + a.x * b.w + a.y * b.z - a.z * b.y, y: a.w * b.y - a.x * b.z + a.y * b.w + a.z * b.x, z: a.w * b.z + a.x * b.y - a.y * b.x + a.z * b.w });
 const yawQ = yaw => ({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) });
+// What you carry is in your hands, full stop: drawn where the server holds it (sim.js: its middle, chest
+// height, your distance) but from this frame's eye, turning as you turn, for as long as you hold it. (The
+// server's copy trails behind by your ping as you run: drawn from that, it lagged a metre behind you at a
+// sprint over a tunnel. If it snags on something and gets away, the server lets go of it for you, a 'slip',
+// and it's drawn where it really is again)
 function holdInHands(ex, ey, ez, look) {
   const h = me.holding, p = h?.carry && h.ok !== false ? S.props.get(h.id) : null;
-  if (!p?.pose || me.mode !== 'walk') return;
+  if (!p?.mesh || me.mode !== 'walk') return;
   const L = look, up = { x: -L.x * L.y, y: 1 - L.y * L.y, z: -L.z * L.y }, ul = Math.hypot(up.x, up.y, up.z) || 1, d = S.holdDist || carryDist(p.type);
-  const px = ex + L.x * d - up.x / ul * CARRY.DROP, py = ey + L.y * d - up.y / ul * CARRY.DROP, pz = ez + L.z * d - up.z / ul * CARRY.DROP;
-  const s = p.pose.p, off = Math.hypot(s.x - px, s.y - py, s.z - pz), w = Math.max(0, Math.min(1, (off - 0.3) / 0.5));
+  p.mesh.position.set(ex + L.x * d - up.x / ul * CARRY.DROP, ey + L.y * d - up.y / ul * CARRY.DROP, ez + L.z * d - up.z / ul * CARRY.DROP);
   const q = qMul(yawQ(me.yaw), h.rel);
-  p.mesh.position.set(px + (s.x - px) * w, py + (s.y - py) * w, pz + (s.z - pz) * w);
-  _hq.set(q.x, q.y, q.z, q.w); _hq2.set(p.pose.q.x, p.pose.q.y, p.pose.q.z, p.pose.q.w);
-  p.mesh.quaternion.copy(_hq.slerp(_hq2, w));
+  p.mesh.quaternion.set(q.x, q.y, q.z, q.w);
 }
 function cameraFeel(dt, eye) {
   const ease = me.mode === 'walk' && me.grounded && feel.y != null && Math.abs(eye.y - feel.y) < 0.7;

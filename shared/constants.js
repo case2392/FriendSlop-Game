@@ -64,6 +64,7 @@ export const PLAYER = {
 export const STAMINA = {
   MAX: 100,
   SPRINT: 11,               // per second
+  SPRINT_BACK: 30,          // run yourself out and you can't sprint again till it's back to this
   CLIMB_MOVE: 9.5,
   CLIMB_HANG: 3.5,
   LUNGE: 24,

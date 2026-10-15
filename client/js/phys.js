@@ -107,6 +107,7 @@ export class LocalWorld {
 
   // the door's collider: there only while the door is shut
   setDoor(open) { this.rvCols.door.setEnabled(!open); }
+  doorOpen() { return !this.rvCols.door.isEnabled(); }
 
   openGate(id) {
     const c = this.gateCols.get(id);
