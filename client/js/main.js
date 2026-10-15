@@ -1,7 +1,7 @@
 // NO MONEY DOWN — client entry.
 import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
-import { LOOT, fmt$, CARRY, carried, carryDist } from '/shared/loot.js';
+import { LOOT, fmt$, CARRY, carried, carryDist, holdPose } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, RV_HATCH, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { trackAt } from '/shared/tracks.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
@@ -32,6 +32,7 @@ import { profile, profileStatus, forServer, credit, myKit } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
 import { initShop, openShop, closeShop, renderShop, shopOpen } from './shop.js';
 import { UPGRADE_IDS } from '/shared/shop.js';
+import { buriedSpots, nearestCache, DIG, HOLE } from '/shared/dig.js';
 import { cardHTML } from './cards.js';
 import { TINS } from '/shared/cards.js';
 import { fmtRoad, fmtClockH, crewBest } from '/shared/profile.js';
@@ -53,6 +54,8 @@ const inp = { f: 0, r: 0, jump: false, sprint: false, crouch: false, grab: false
 let target = null;            // what the crosshair is on
 let reviveT = 0;
 let fixHeld = false;   // holding E at the engine hatch (the server counts the seconds: room.js fixStep)
+let pullHeld = null, heaveT = 0;   // the hole whose chest I'm holding E on (pulling it up: room.js pullStep)
+let digHeld = false;   // LMB down with a shovel in hand: it keeps digging (a stroke each DIG.CD)
 let mapRaised = true;
 let lastWalkieTx = new Set();
 let worldBuilding = false;
@@ -386,12 +389,12 @@ document.addEventListener('mousemove', e => {
 document.addEventListener('mousedown', e => {
   if (!isLocked()) return;
   initAudio();
-  if (e.button === 0) inp.grab = true;   // (held: climbing. Things are picked up and set down with E)
+  if (e.button === 0) { if (me.holding?.type === 'shovel' && me.holding.ok) { digHeld = true; digStroke(); } else inp.grab = true; }   // (held: climbing. Things are picked up and set down with E; a shovel digs, and keeps digging while it's held)
   if (e.button === 2) onThrow();
   if (e.button === 1) onPing();
 });
 document.addEventListener('mouseup', e => {
-  if (e.button === 0) inp.grab = false;
+  if (e.button === 0) { inp.grab = false; digHeld = false; }
 });
 document.addEventListener('contextmenu', e => { if (locked) e.preventDefault(); });
 document.addEventListener('wheel', e => {
@@ -505,11 +508,17 @@ function computeTarget() {
   const hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
   // broken down, and standing behind it: the engine hatch (looking at the RV's back, the ground or the sky)
   const fix = atHatch() ? { kind: 'fix', label: `[Hold E] fix the engine${S.g.fix ? ` (${S.g.fix}%)` : ''}` } : null;
+  // a chest down the hole you dug, in reach: hold E (or mash it) to pull it up
+  const down = !me.holding ? chestDown(eye, look) : null;
+  if (down && (!hit || hit.kind === 'terrain' || hit.kind === 'prop' && LOOT[S.props.get(hit.id)?.type]?.gear)) {
+    const pc = (S.g?.chs || []).find(c => c[0] === down.id)?.[1] || 0;
+    return { kind: 'pull', h: down.id, label: `[Hold E] PULL the chest out${pc ? ` (${pc}%)` : ''} · mash E to yank it · two pull faster` };
+  }
   // Keen Eye II: a thing's price read from further off than a hand reaches (nothing to grab there)
   if (!hit && !fix && !me.holding && me.mods.labelReach > C.PLAYER.REACH) {
     const far = S.lw.ray(eye, look, me.mods.labelReach, G.WORLD | G.RV | G.PROP, excludeSet(), true);
     const p = far?.kind === 'prop' ? S.props.get(far.id) : null, L = p && LOOT[p.type];
-    if (L && !L.mob && !L.find && p.type !== 'boulder' && p.type !== 'map') return { kind: 'peek', label: `${L.name} · ${fmt$(p.value)}${p.value < p.max ? ` (was ${fmt$(p.max)})` : ''}` };
+    if (L && !L.mob && !L.find && !L.gear && p.type !== 'boulder' && p.type !== 'map') return { kind: 'peek', label: `${L.name} · ${fmt$(p.value)}${p.value < p.max ? ` (was ${fmt$(p.max)})` : ''}` };
   }
   if (!hit) return fix || (doorNear() ? { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` } : null);
   if (hit.kind === 'prop') {
@@ -521,6 +530,8 @@ function computeTarget() {
     if (L.mob) return { kind: 'prop', id: p.id, hit, label: mobLabel(p) };
     if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[E] take the road map and call out the road to ${driverName()}` }; }
     if (L.find) return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name}: set it down in the RV to keep it (${TINS[L.find]} cards)` };
+    if (L.gear) return { kind: 'prop', id: p.id, hit, label: `[E] pick up the ${L.name}${L.gear === 'shovel' ? ' (LMB digs, hold it to keep digging)' : ' (it beeps over buried metal)'}` };
+    if (L.chest) return { kind: 'chest', id: p.id, label: '[E] OPEN the chest' };
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
     return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
@@ -658,7 +669,7 @@ function onGrabPress() {
     const carry = carried(p.type);
     S.holdDist = carry ? carryDist(p.type) : Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, t.hit.toi + 0.1));
     const q0 = p.pose?.q || { x: 0, y: 0, z: 0, w: 1 };
-    me.holding = { id: p.id, type: p.type, carry, rel: carry ? qMul(yawQ(-me.yaw), q0) : null };
+    me.holding = { id: p.id, type: p.type, carry, rel: carry ? holdPose(p.type) || qMul(yawQ(-me.yaw), q0) : null };
     if (p.type === 'ringtail') tutDone('ringtail');
     net.send({ t: 'grab', kind: 'prop', id: p.id, pt: [t.hit.point.x, t.hit.point.y, t.hit.point.z], d: S.holdDist });
     sfx.grab();
@@ -709,6 +720,8 @@ function onUse() {
   const t = target;
   if (!t) return;
   if (t.kind === 'prop') { onGrabPress(); return; }
+  if (t.kind === 'chest') { net.send({ t: 'open', id: t.id }); return; }
+  if (t.kind === 'pull') return;   // (E held: the frame's pull, below)
   if (t.kind === 'hookhold') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'hook') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'door') { net.send({ t: 'use', kind: 'door' }); return; }
@@ -1244,7 +1257,7 @@ net.on('given', inOrder(m => {
   if (me.mode !== 'walk') return;
   const carry = carried(m.type), q0 = Array.isArray(m.q) ? { x: m.q[0], y: m.q[1], z: m.q[2], w: m.q[3] } : { x: 0, y: 0, z: 0, w: 1 };
   S.holdDist = +m.d || carryDist(m.type);
-  me.holding = { id: m.id, type: m.type, carry, rel: carry ? qMul(yawQ(-me.yaw), q0) : null, ok: true };
+  me.holding = { id: m.id, type: m.type, carry, rel: carry ? holdPose(m.type) || qMul(yawQ(-me.yaw), q0) : null, ok: true };
   sfx.grab();
 }));
 // into a bunk (server/room.js): lying in it, on your back, looking down the bunk past your feet; out of it,
@@ -1278,6 +1291,7 @@ net.on('trip', inOrder(m => {
 }));
 // what's in the glovebox already (on joining a trip): its cards flipped up as they go in after that
 net.on('glovebox', inOrder(m => { S.glove = Array.isArray(m.list) ? m.list : []; }));
+net.on('holes', m => afterWorld(() => { for (const w of m.list || []) setHole(w); }));   // (the day's holes so far, on joining)
 net.on('ev', m => afterWorld(() => { for (const e of m.list) onEvent(e); }));
 
 function onEvent(e) {
@@ -1308,6 +1322,19 @@ function onEvent(e) {
     case 'stow': (S.glove ||= []).push({ cards: e.cards, kind: e.kind, day: S.g?.day, by: e.by }); revealCards(e); sfx.click(); break;
     case 'bill': sfx.bill(); break;
     case 'horn': sfx.horn(e.on == null ? null : !!e.on); break;
+    // a stroke of a shovel: dirt flies (n: strokes into a cache so far; 0, bare ground); a cache comes up
+    // a stroke of the shovel (or a chest hauled up out of its hole): the hole as it is now, the dirt flung on its pile
+    case 'dig': {
+      const h = setHole(e.h, e.y), at = { x: e.h[1], y: e.y + 0.05, z: e.h[2] };
+      if (e.pulled) { burst(at, '#6b4a2e', 14, 3, 1, 1); positional(at, () => { sfx.heave(); sfx.dig(DIG.STROKES, true); }, 30); break; }
+      if (h) flingDirt(h);
+      positional(at, () => sfx.dig(e.h[3], e.h[3] >= DIG.STROKES), 30);
+      if (e.h[4] === HOLE.CHEST) positional(at, () => sfx.kaching(), 30);   // (the clunk of the spade on its lid)
+      break;
+    }
+    case 'unhole': dropHole(e.id); break;
+    // a chest opened: what was in it flies out (its own spawns), a glint of gold and the creak of its lid
+    case 'chest': { const at = { x: e.at[0], y: e.at[1] + 0.3, z: e.at[2] }; burst(at, '#ffd166', 16, 3.2, 1, 1.1); positional(at, () => { sfx.creak(); sfx.kaching(); }, 40); break; }
     // Gus fitted an upgrade (the toast says what); a shot of nitrous
     case 'upg': sfx.ratchet(); sfx.kaching(); break;
     case 'nos': if (S.rv) positional(S.rv.p, () => sfx.nitro(), 80); if (me.par) shake(0.25); break;
@@ -1352,7 +1379,7 @@ function onEvent(e) {
     // somebody else knocked about: heard where they are (my own knock has its own sound)
     case 'thud': { const o = e.id !== S.selfId && S.others?.get(e.id); if (o) positional(o.pos, () => sfx.thunk(e.why === 'shove' ? 0.5 : 1), 40); break; }
     // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
-    case 'gone': for (const id of e.ids || []) removeProp(id, { color: '#cdbb9a', n: 12, speed: 2.5 }); break;
+    case 'gone': for (const id of e.ids || []) removeProp(id, e.how === 'open' ? null : { color: '#cdbb9a', n: 12, speed: 2.5 }); break;   // (a chest opened: its open self takes its place)
     case 'mob': onMobEvent(e); break;
     case 'bean': { const o = S.others?.get(e.id); positional(e.id === S.selfId ? null : o?.pos, () => sfx.bonk(), 40); break; }
     case 'shove': S.lastShove = e; positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
@@ -1515,6 +1542,180 @@ function burst(at, color, n = 12, speed = 4, grav = 1, life = 1.2) {
 }
 // steam from a nostril, dust from a hoof: a few chips drifting up and away
 const puff = (at, color) => burst(at, color, 4, 0.9, -0.08, 0.9);
+
+// ---- buried metal (shared/dig.js): the day's caches as every page works them out, the shovel, the detector
+const caches = () => { if (S.cachesOf !== S.W) { S.cachesOf = S.W; S.caches = S.W ? buriedSpots(S.W) : []; } return S.caches; };
+let digT = -1e9;
+// a stroke of the shovel where you look (the ground within reach), or the ground a step ahead
+function digStroke() {
+  const now = performance.now() / 1000;
+  if (now - digT < DIG.CD + 0.05 || !S.W || me.mode === 'seat') return;   // (a hair over the server's own spacing)
+  digT = now;
+  const o = camera.position, dir = camera.getWorldDirection(new THREE.Vector3());
+  let pt = null;
+  for (let t = 0.3; t <= DIG.REACH + 0.8 && !pt; t += 0.08) {
+    const x = o.x + dir.x * t, y = o.y + dir.y * t, z = o.z + dir.z * t, g = S.W.heightAt(x, z);
+    if (y <= g + 0.02 && Math.hypot(x - me.pos.x, z - me.pos.z) <= DIG.REACH) pt = [x, g, z];
+  }
+  if (!pt) { const x = me.pos.x + Math.sin(me.yaw) * 1.1, z = me.pos.z + Math.cos(me.yaw) * 1.1; pt = [x, S.W.heightAt(x, z), z]; }
+  net.send({ t: 'dig', pt });
+  tutDone('shovel');
+}
+// held, the detector listens under its coil (a step ahead of you): beeps that quicken and rise as it nears a
+// cache nobody has dug, and the signal meter under the crosshair
+let beepT = 0, signalWas = -1;
+function updateDetector(dt) {
+  const on = me.holding?.type === 'detector' && !!me.holding.ok && !!S.W && me.mode !== 'seat';
+  $('detector').classList.toggle('hidden', !on);
+  if (!on) { signalWas = -1; return; }
+  tutDone('detector');
+  const x = me.pos.x + Math.sin(me.yaw) * 0.9, z = me.pos.z + Math.cos(me.yaw) * 0.9;
+  const { d } = nearestCache(caches(), x, z, S.g?.dug);
+  const sg = Math.max(0, Math.min(1, 1 - d / DIG.RANGE)), bars = Math.round(sg * 8);
+  if (bars !== signalWas) { signalWas = bars; $('dtBars').innerHTML = Array.from({ length: 8 }, (_, i) => `<i class="${i < bars ? 'on' : ''}"></i>`).join(''); $('detector').classList.toggle('hot', d <= DIG.R); }
+  beepT -= dt;
+  if (sg > 0 && beepT <= 0) { sfx.detect(sg); beepT = Math.max(0.09, 1.15 - sg * 1.1); }
+}
+// holes: [id, x, z, strokes, state, pileX, pileZ] (the server's: room.js holeWire). Each is a pit going down a
+// stroke at a time, a lip of turned earth round it and the pile its dirt went on, growing as it lands; a
+// cache's chest sits at the bottom till it's pulled up. The ground isn't cut: the pit's walls, floor and chest
+// are seen only through its mouth (a fragment whose line of sight misses the circle is dropped), drawn just in
+// front of the ground along that line (so whatever stands in front of the hole still hides it), darker deeper
+const holes = new Map();
+const HOLE_R = 0.42;
+const holeProj = { value: null };   // (the camera's projection, for the pits' depth)
+const holeMats = () => (S.holeMats ||= {
+  wall: new THREE.MeshLambertMaterial({ color: 0x5a412c, side: THREE.BackSide }),
+  floor: new THREE.MeshLambertMaterial({ color: 0x3a2a1c }),
+  dirt: new THREE.MeshLambertMaterial({ color: 0x6b4a2e }),
+});
+function pitMaterial(base, h) {
+  const m = base.clone();
+  holeProj.value = camera.projectionMatrix;
+  m.onBeforeCompile = sh => {
+    Object.assign(sh.uniforms, { uHoleInv: { value: h.inv }, uHoleM: { value: h.mat }, uHoleR: { value: HOLE_R }, uHoleD: { value: DIG.DEPTH }, uHoleP: holeProj });
+    sh.vertexShader = sh.vertexShader.replace('#include <common>', '#include <common>\nvarying vec3 vHoleW;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvHoleW = (modelMatrix * vec4(transformed, 1.0)).xyz;');
+    sh.fragmentShader = sh.fragmentShader.replace('#include <common>', '#include <common>\nvarying vec3 vHoleW;\nuniform mat4 uHoleInv, uHoleM, uHoleP;\nuniform float uHoleR, uHoleD;')
+      .replace('void main() {', `void main() {
+  vec3 hp = (uHoleInv * vec4(vHoleW, 1.0)).xyz, hc = (uHoleInv * vec4(cameraPosition, 1.0)).xyz;
+  float holeDark = 1.0;
+  if (hp.y > 0.0) gl_FragDepth = gl_FragCoord.z;   // (above the ground: a chest coming up out of it)
+  else {
+    if (hc.y <= 0.0) discard;
+    vec3 hi = hc + (hp - hc) * (hc.y / max(1e-4, hc.y - hp.y));
+    if (dot(hi.xz, hi.xz) > uHoleR * uHoleR) discard;
+    vec3 dir = normalize(vHoleW - cameraPosition);
+    float b = length((uHoleM * vec4(hi, 1.0)).xyz - cameraPosition), a = length(vHoleW - cameraPosition);
+    vec4 cp = uHoleP * viewMatrix * vec4(cameraPosition + dir * (b - 0.05 + 0.04 * clamp((a - b) / 2.0, 0.0, 1.0)), 1.0);
+    gl_FragDepth = cp.z / cp.w * 0.5 + 0.5;
+    holeDark = 1.0 - 0.6 * clamp(-hp.y / uHoleD, 0.0, 1.0);
+  }`)
+      .replace('#include <dithering_fragment>', '#include <dithering_fragment>\ngl_FragColor.rgb *= holeDark;');
+  };
+  m.customProgramCacheKey = () => 'pit';
+  return m;
+}
+// a heap of turned earth: half a ball pushed in and out by a few fixed waves (clods), its foot flat on the ground
+const pileGeo = (() => {
+  const g = new THREE.SphereGeometry(1, 16, 8, 0, Math.PI * 2, 0, Math.PI / 2), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i), a = Math.atan2(z, x);
+    const k = 1 + 0.12 * Math.sin(a * 5 + y * 4) + 0.08 * Math.sin(a * 9 - y * 7) + 0.06 * Math.cos(a * 13 + y * 11);
+    p.setXYZ(i, x * k, y * (0.85 + 0.25 * Math.sin(a * 3) * y), z * k);
+  }
+  g.computeVertexNormals();
+  return g;
+})();
+// the ground's tilt at (x, z): a hole on a slope goes in square to it
+function groundQuat(x, z) {
+  const W = S.W, e = 0.4, n = new THREE.Vector3(W.heightAt(x - e, z) - W.heightAt(x + e, z), 2 * e, W.heightAt(x, z - e) - W.heightAt(x, z + e)).normalize();
+  return new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), n);
+}
+function setHole(w, y) {
+  if (!S.W || !Array.isArray(w)) return null;
+  const [id, x, z, n, st, px, pz] = w;
+  let h = holes.get(id);
+  if (!h) {
+    const M = holeMats(), g = new THREE.Group(), q = groundQuat(x, z), gy = y ?? S.W.heightAt(x, z);
+    g.position.set(x, gy, z); g.quaternion.copy(q); g.updateMatrixWorld(true);
+    h = { id, g, x, z, y: gy, px, pz, n: 0, st, W: S.W, depth: 0.05, want: 0.05, size: 0, wantSize: 0, chest: null, mat: g.matrixWorld.clone() };
+    h.inv = h.mat.clone().invert();
+    const pit = new THREE.Group(); g.add(pit);
+    const wall = new THREE.Mesh(new THREE.CylinderGeometry(HOLE_R, HOLE_R * 0.8, 1, 18, 1, true), pitMaterial(M.wall, h)); wall.position.y = -0.5; pit.add(wall);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(HOLE_R * 0.8, 18), pitMaterial(M.floor, h)); floor.rotation.x = -Math.PI / 2; floor.position.y = -1; pit.add(floor);
+    const lip = new THREE.Mesh(new THREE.TorusGeometry(HOLE_R + 0.1, 0.09, 6, 18), M.dirt); lip.rotation.x = -Math.PI / 2; lip.scale.set(1, 1, 0.45); lip.position.y = 0.02; g.add(lip);
+    const pile = new THREE.Mesh(pileGeo, M.dirt);
+    pile.position.set(px, S.W.heightAt(px, pz) - 0.02, pz); pile.scale.setScalar(0.001);
+    for (const o of [wall, floor, lip, pile]) { o.castShadow = false; o.receiveShadow = true; }
+    scene.add(g); scene.add(pile);
+    Object.assign(h, { pit, lip, pile });
+    holes.set(id, h);
+  }
+  h.n = n; h.st = st;
+  const k = Math.min(1, n / DIG.STROKES);
+  h.want = Math.max(0.05, DIG.DEPTH * k);
+  h.wantSize = k;
+  h.landAt = performance.now() / 1000 + 0.5;   // (the pile grows as the spadeful lands on it)
+  // a cache's chest at the bottom, till it's pulled up (then the real one's on the lip: the server's)
+  if (st === HOLE.CHEST && !h.chest) {
+    const c = buildProp('chest', S.W);
+    c.traverse(o => { if (o.isMesh && o.material?.isMeshLambertMaterial) { o.material = pitMaterial(o.material, h); o.castShadow = false; } else if (o !== c && !o.isGroup) o.visible = false; });
+    h.g.add(c); h.chest = c;
+  } else if (st !== HOLE.CHEST && h.chest) { h.g.remove(h.chest); h.chest = null; }
+  return h;
+}
+function dropHole(id) {
+  const h = holes.get(id);
+  if (!h) return;
+  scene.remove(h.g); scene.remove(h.pile);
+  h.g.traverse(o => { if (o.isMesh && h.chest !== o && !h.chest?.children?.includes(o)) { o.geometry?.dispose(); if (o.material !== holeMats().dirt) o.material?.dispose(); } });
+  holes.delete(id);
+}
+// a spadeful: clods out of the hole in an arc onto its pile
+function flingDirt(h) {
+  const T = 0.5, y0 = h.y + 0.1, py = S.W.heightAt(h.px, h.pz) + 0.15 + 0.25 * h.wantSize;
+  for (let i = 0; i < 9; i++) {
+    const m = new THREE.Mesh(chipGeo, flat(i % 3 ? '#6b4a2e' : '#4a3524'));
+    m.position.set(h.x + (Math.random() - 0.5) * 0.3, y0, h.z + (Math.random() - 0.5) * 0.3);
+    m.scale.setScalar(0.8 + Math.random() * 1.4);
+    scene.add(m);
+    const t = T * (0.85 + Math.random() * 0.3), dx = h.px - m.position.x + (Math.random() - 0.5) * 0.35, dz = h.pz - m.position.z + (Math.random() - 0.5) * 0.35;
+    particles.push({ m, v: new THREE.Vector3(dx / t, (py - y0 + 0.5 * 9.8 * t * t) / t, dz / t), life: t, g: 1 });
+  }
+  burst({ x: h.x, y: h.y + 0.1, z: h.z }, '#8a6a48', 4, 1.2, 0.4, 0.6);   // (and a little dust)
+}
+// each frame: the pits go down, the piles grow, the chests down them come up as they're pulled (and jiggle)
+function stepHoles(dt) {
+  const now = performance.now() / 1000, pulled = new Map((S.g?.chs || []).map(([id, pc]) => [id, pc / 100]));
+  for (const [id, h] of holes) {
+    if (h.W !== S.W) { dropHole(id); continue; }
+    h.depth += (h.want - h.depth) * Math.min(1, dt * 6);
+    h.pit.scale.set(1, h.depth, 1);
+    if (now >= h.landAt) h.size += (h.wantSize - h.size) * Math.min(1, dt * 5);
+    const s = 0.12 + 0.38 * h.size;
+    h.pile.scale.set(s * 1.25, 0.05 + 0.32 * h.size, s);
+    h.lip.scale.set(0.6 + 0.4 * Math.min(1, h.size * 2), 0.6 + 0.4 * Math.min(1, h.size * 2), 0.45);
+    if (h.chest) {
+      const pr = pulled.get(id) || 0, was = h.pr ?? pr;
+      h.pr = pr; h.jig = Math.max((h.jig || 0) - dt, pr > was ? 0.25 : 0);
+      h.chest.position.set(Math.sin(now * 47) * 0.02 * (h.jig > 0 ? 1 : 0), -DIG.DEPTH + 0.2 + (DIG.DEPTH - 0.25) * pr, 0);
+      h.chest.rotation.z = Math.sin(now * 31) * 0.05 * (h.jig > 0 ? 1 : 0);
+    }
+  }
+}
+// the buried chest you're looking at, within reach (E held pulls it): { h, label } or null
+function chestDown(eye, look) {
+  let best = null, bd = 0.7;
+  for (const h of holes.values()) {
+    if (h.st !== HOLE.CHEST || Math.hypot(h.x - me.pos.x, h.z - me.pos.z) > DIG.PULL_R) continue;
+    const cx = h.x - eye.x, cy = h.y - 0.2 - eye.y, cz = h.z - eye.z, t = cx * look.x + cy * look.y + cz * look.z;
+    if (t < 0 || t > C.PLAYER.REACH + 1.2) continue;
+    const d = Math.hypot(cx - look.x * t, cy - look.y * t, cz - look.z * t);
+    if (d < bd) { bd = d; best = h; }
+  }
+  return best;
+}
 const floaters = [];
 function floatText(at, text, color) {
   const s = labelSprite(text, color, 44);
@@ -1908,10 +2109,30 @@ const yawQ = yaw => ({ x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) })
 // server's copy trails behind by your ping as you run: drawn from that, it lagged a metre behind you at a
 // sprint over a tunnel. If it snags on something and gets away, the server lets go of it for you, a 'slip',
 // and it's drawn where it really is again)
+// a held tool (the detector, the shovel) in your own view: low on the right, following your aim, its working end
+// out ahead and down where you look (not end-on across the middle of it); a stroke of the shovel jabs it ahead.
+// Only your view: the others see it where the server holds it. (at: its middle, left, up and ahead of the eye;
+// ax: towards its grip end. The grip lands in the lower right corner, the coil or blade just under the crosshair)
+const TOOL_FP = { at: [-0.15, -0.375, 0.95], ax: new THREE.Vector3(-0.2, 0.15, -1).normalize() };
+const _tf = new THREE.Vector3(), _tu = new THREE.Vector3(), _tl = new THREE.Vector3(), _tm = new THREE.Matrix4(), _tq = new THREE.Quaternion(), _tq2 = new THREE.Quaternion();
+function toolInHands(p, ex, ey, ez, L, up, ul) {
+  _tf.set(L.x, L.y, L.z).normalize(); _tu.set(up.x / ul, up.y / ul, up.z / ul); _tl.crossVectors(_tu, _tf);
+  // a stroke (the shovel): driven in ahead and down, levered back and up, the spadeful tossed off to the right
+  const k = p.type === 'shovel' ? (performance.now() / 1000 - digT) / DIG.CD : 1, bell = (t, a, b) => (t > a && t < b ? Math.sin((t - a) / (b - a) * Math.PI) : 0);
+  const drive = bell(k, 0, 0.45), lift = bell(k, 0.35, 1), toss = bell(k, 0.55, 1);
+  const [a, b, c] = TOOL_FP.at, al = a - 0.16 * toss, au = b - 0.1 * drive + 0.16 * lift, af = c + 0.26 * drive - 0.08 * lift;
+  p.mesh.position.set(ex + _tl.x * al + _tu.x * au + _tf.x * af, ey + _tl.y * al + _tu.y * au + _tf.y * af, ez + _tl.z * al + _tu.z * au + _tf.z * af);
+  _tq.setFromRotationMatrix(_tm.makeBasis(_tl, _tu, _tf));
+  _tq2.setFromUnitVectors(_tu.set(0, 1, 0), TOOL_FP.ax);
+  _tq.multiply(_tq2);
+  if (drive || lift || toss) { _tq2.setFromAxisAngle(_tu.set(1, 0, 0), 0.35 * drive - 0.55 * lift); _tq.multiply(_tq2); _tq2.setFromAxisAngle(_tu.set(0, 1, 0), -0.6 * toss); _tq.multiply(_tq2); }
+  p.mesh.quaternion.copy(_tq);
+}
 function holdInHands(ex, ey, ez, look) {
   const h = me.holding, p = h?.carry && h.ok !== false ? S.props.get(h.id) : null;
   if (!p?.mesh || me.mode !== 'walk') return;
   const L = look, up = { x: -L.x * L.y, y: 1 - L.y * L.y, z: -L.z * L.y }, ul = Math.hypot(up.x, up.y, up.z) || 1, d = S.holdDist || carryDist(p.type);
+  if (LOOT[p.type]?.gear) return toolInHands(p, ex, ey, ez, L, up, ul);
   p.mesh.position.set(ex + L.x * d - up.x / ul * CARRY.DROP, ey + L.y * d - up.y / ul * CARRY.DROP, ez + L.z * d - up.z / ul * CARRY.DROP);
   const q = qMul(yawQ(me.yaw), h.rel);
   p.mesh.quaternion.set(q.x, q.y, q.z, q.w);
@@ -2096,6 +2317,9 @@ requestAnimationFrame(frame);
   updateTownLabels();
   updateDockBay(rv);
   if (shopOpen()) renderShop();   // (the bank and what's fitted, as the server has them)
+  updateDetector(dt);
+  stepHoles(dt);
+  if (digHeld) { if (me.holding?.type === 'shovel' && me.holding.ok && isLocked()) digStroke(); else digHeld = false; }
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
@@ -2122,8 +2346,18 @@ requestAnimationFrame(frame);
   // crosshair (a friend, a ringtail, loot); E let go, or I walked off (or it's running again): stop
   const fixWant = !!keys.e && atHatch() && (fixHeld || target?.kind === 'fix');
   if (fixWant !== fixHeld) { fixHeld = fixWant; net.send({ t: 'fix', on: fixWant ? 1 : 0 }); }
-  $('holdBar').classList.toggle('hidden', !(reviveT > 0 || fixHeld));
-  $('holdBar').firstElementChild.style.width = `${fixHeld ? Math.min(100, S.g?.fix || 0) : Math.min(100, reviveT / me.mods.holdT * 100)}%`;
+  // the same for a chest down its hole: E held on it pulls (each press pulls a little more), till it's up
+  const ph = pullHeld != null ? holes.get(pullHeld) : null;
+  const pullWant = keys.e ? (ph && ph.st === HOLE.CHEST && Math.hypot(ph.x - me.pos.x, ph.z - me.pos.z) <= DIG.PULL_R ? ph.id : target?.kind === 'pull' ? target.h : null) : null;
+  if (pullWant !== pullHeld) {
+    if (pullHeld != null) net.send({ t: 'pull', h: pullHeld, on: 0 });
+    pullHeld = pullWant;
+    if (pullHeld != null) { net.send({ t: 'pull', h: pullHeld, on: 1 }); sfx.heave(); heaveT = 0.5; }
+  }
+  if (pullHeld != null && (heaveT -= dt) <= 0) { sfx.heave(); heaveT = 0.55; }   // (the strain of it, while it's held)
+  const pullPc = pullHeld != null ? (S.g?.chs || []).find(c => c[0] === pullHeld)?.[1] ?? 0 : 0;
+  $('holdBar').classList.toggle('hidden', !(reviveT > 0 || fixHeld || pullHeld != null));
+  $('holdBar').firstElementChild.style.width = `${fixHeld ? Math.min(100, S.g?.fix || 0) : pullHeld != null ? pullPc : Math.min(100, reviveT / me.mods.holdT * 100)}%`;
 
   // fx
   for (let i = particles.length - 1; i >= 0; i--) {
@@ -2665,6 +2899,8 @@ function hud(rv) {
       : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [E] let go`
       : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off · [E] let go'
       : LOOT[p.type].find ? `${LOOT[p.type].name} · set it down in the RV to keep its cards · [E] set down · [RMB] throw`
+      : p.type === 'shovel' ? keysIn('SHOVEL · [LMB] dig where you look · [E] set down')
+      : p.type === 'detector' ? 'METAL DETECTOR · sweep it about: it beeps over buried metal · [E] set down'
       : `${LOOT[p.type].name} · ${fmt$(p.value)} · [E] set down · [RMB] throw · wheel: reach`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
@@ -2743,6 +2979,8 @@ function tutTip(g, town) {
   if (g.ph === 'camp') return tut.has('drive') || (roleOf('drv') && roleOf('drv') !== S.selfId) ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
   // reading the map with side roads on it: what the dashed tracks are (once the RV has been down one, known)
+  if (!tut.has('detector') && me.holding?.type === 'detector') return 'Hint: the metal detector beeps faster over buried metal. Sweep it about; where it screams, somebody with a shovel digs';
+  if (!tut.has('shovel') && me.holding?.type === 'shovel') return keysIn('Hint: [LMB] digs where you look (hold it to keep digging). Dig down on the spot the detector found: a chest at the bottom, [E] pulls it up');
   if (!tut.has('track') && S.W.tracks?.length && me.holding?.type === 'map' && mapRaised) return 'Hint: the dashed tracks on the map are side roads. The stops down them ($$$) are worth the drive: call the turn before the driver passes it';
   if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');
   if (!tut.has('ringtail') && critterNear('ringtail', 15)) return keysIn('Hint: ringtails steal loot nobody is watching. Stand facing your pile, grab the thief (it drops it), or [RMB] shove it');

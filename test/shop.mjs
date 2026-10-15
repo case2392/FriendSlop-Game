@@ -8,7 +8,7 @@ process.env.FRIENDSLOP_NOMOBS = '1';
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
-const { UPGRADES, UPGRADE_IDS, VENDORS, NITRO, HEAVY, rvMods } = await import('../shared/shop.js');
+const { UPGRADES, UPGRADE_IDS, VENDORS, NITRO, HEAVY, rvMods, goodsOf } = await import('../shared/shop.js');
 const { partMods } = await import('../shared/garage.js');
 const { qRotate } = await import('../shared/rv.js');
 
@@ -55,7 +55,7 @@ const roadYaw = (W, z) => Math.atan2(W.roadX(z + 3) - W.roadX(z - 3), 6);
   check(all.hitX === 0.7 && all.cable === HEAVY.CABLE && all.pull === C.WINCH.FORCE * HEAVY.PULL && all.engineX === 1.25 && Math.abs(all.topX * C.RV.TOP_SPEED - 20) < 1e-9 && all.mudSlip === 2 * C.RV.MUD_SLIP && all.mudDragX === 0.5 && all.padlock && all.nitro,
     `shop: Gus's ${UPGRADE_IDS.length} upgrades each set what their lines say (${UPGRADE_IDS.map(id => `${UPGRADES[id].name} $${UPGRADES[id].price}`).join(', ')})`);
   const junk = rvMods(null, { toString: 1, __proto__: { frame: 1 }, hull: 1 });
-  check(junk.hitX === 1 && Object.keys(VENDORS).every(v => VENDORS[v].goods.every(id => UPGRADES[id])), 'shop: an id that isn\'t on the list (or an inherited one) fits nothing');
+  check(junk.hitX === 1 && Object.keys(VENDORS).every(v => VENDORS[v].goods.every(id => Object.prototype.hasOwnProperty.call(goodsOf(v), id))), 'shop: an id that isn\'t on the list (or an inherited one) fits nothing; every vendor sells only its own catalogue');
 }
 
 // ---- buying ------------------------------------------------------------------------------------------

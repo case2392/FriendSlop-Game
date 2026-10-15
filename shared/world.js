@@ -1149,6 +1149,16 @@ export function generateLeg(seed, day, opts = {}) {
     const sg = F(0, 4.2, 4.1);
     signs.push({ x: sg.x, y: y0 + 4.2, z: sg.z, ry: Math.PI / 2, w: 4.4, h: 1.2, lines: ['GENERAL STORE', 'OPEN 24/7 (NOT 7)'], bg: '#ffffff', fg: '#1b4965' });
     town.clerk = F(0, 0, -3.0); town.clerk.y = y0; town.clerk.ry = Math.PI / 2;
+    // the hardware rack out front, right of the door: shovels and a metal detector leaned in it, a tag on top
+    // (E on it opens the clerk's hardware catalogue: shared/shop.js); what's bought is set down beside it
+    const hw = F(2.7, 0, 4.55);
+    tagNow = { town: 'store' };
+    lbox(F, Math.PI / 2, 2.7, 0.7, 4.55, 0.6, 0.7, 0.22, 'wood', '#7a5a3a', 'tool_rack');
+    tagNow = null;
+    const hu = F(2.7, 1.1, 5.0);
+    use('shop', hu.x, y0 + 1.1, hu.z, 'Hardware: metal detectors and shovels', 'store', 0.5);
+    const at = F(2.7, 0, 5.6), drop = F(1.6, 0.6, 5.3);
+    town.hardware = { x: at.x, z: at.z, y: y0, ry: Math.PI / 2, rack: { x: hw.x, z: hw.z }, drop: { x: drop.x, y: y0 + 0.6, z: drop.z } };
   }
   // the casino
   {

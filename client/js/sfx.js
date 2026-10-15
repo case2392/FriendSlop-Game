@@ -192,6 +192,10 @@ export const sfx = {
   crank: () => { for (let i = 0; i < 5; i++) tone(118, 0.09, 'square', 0.08, 92, i * 0.13); noise(0.5, 300, 0.25, 900, 'lowpass', 0.7); tone(55, 0.6, 'sawtooth', 0.12, 82, 0.75); },
   ratchet: () => { for (let i = 0; i < 3; i++) noise(0.022, 3600, 0.22, null, 'highpass', i * 0.045); },
   shatter: () => { noise(0.5, 6000, 0.6, 1500, 'highpass'); for (let i = 0; i < 6; i++) tone(2000 + Math.random() * 3000, 0.08, 'sine', 0.12, null, Math.random() * 0.25); },
+  // the metal detector's beep (k: how strong the signal, 0-1: higher as it nears), a shovel biting dirt
+  detect: (k = 0) => uiSound(() => tone(620 + 760 * k, 0.05, 'square', 0.07 + 0.05 * k)),   // (the metal detector's: higher as it nears)
+  dig: (n = 0, end = false) => { noise(0.16, 500, 0.32, 180, 'lowpass'); if (n) tone(end ? 520 : 240, 0.06, 'triangle', 0.08, null, 0.05); },
+  heave: () => { noise(0.3, 260, 0.2, 110, 'lowpass'); tone(90 + Math.random() * 25, 0.28, 'sawtooth', 0.05, 70); },   // (a chest dragged up its hole)
   // a shot of nitrous: a rising roar and a hiss
   nitro: () => { noise(1.4, 700, 0.32, 2600, 'bandpass'); tone(85, 1.3, 'sawtooth', 0.16, 170); },
   kaching: () => { tone(1320, 0.08, 'square', 0.25); tone(1760, 0.3, 'square', 0.25, null, 0.07); noise(0.15, 5000, 0.2, null, 'highpass', 0.05); },

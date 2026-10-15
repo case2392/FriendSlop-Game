@@ -28,7 +28,8 @@ import { fnv1a, isPid } from '../shared/profile.js';
 import { rollTin, rollCard, CONTAINER } from '../shared/cards.js';
 import { findSpots } from '../shared/finds.js';
 import { clampKit, kitMods, fitParts, spareLine } from '../shared/garage.js';
-import { rvMods, UPGRADES, VENDORS, NITRO } from '../shared/shop.js';
+import { rvMods, UPGRADES, VENDORS, NITRO, GEAR } from '../shared/shop.js';
+import { buriedSpots, nearestCache, DIG, HOLE } from '../shared/dig.js';
 
 let nextPlayerId = 1;
 const r3 = n => Math.round(n * 1000) / 1000;
@@ -42,7 +43,7 @@ const READY_WAIT = 60;           // snapshots wait this long at most for a clien
 // the least time between two of these from one player (a stuck key or a modified client can't flood the crew)
 // a held key or a modified client can't spam the crew with these (anything that sets state, like
 // 'voice', is never dropped: a lost 'voice off' would leave a mic open)
-const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3 };
+const COOLDOWN = { emote: 0.25, ping: 0.25, horn: 0.25, shove: 0.5, shopBuy: 0.3, nos: 0.3, dig: DIG.CD, pull: 0.07, open: 0.3 };
 const HORN_MAX = 20;
 const PENDING_TRIPS = 3, PENDING_PIDS = 64;   // trip messages held for a player who isn't here to take them
 const WALK_OUT = 30;   // m down the road from camp's exit: someone that far out on foot has started the day
@@ -131,6 +132,11 @@ export class Room {
     this.theftToastAt = new Map();   // den -> when the crew was last told
     this.casino = new Casino(this.W.town.casino_stations, this.rand);   // (a game each, one bank: server/casino.js)
     this.gatesOpen = new Set();
+    // buried metal (shared/dig.js): the day's caches, the ones dug down to, the holes in the ground today
+    this.caches = buriedSpots(this.W);
+    this.dug = new Set();
+    this.holes = new Map();
+    this.holeN = 0;
     this.bedAt = null;
     this.receipt = null;
     for (const p of this.players.values()) {
@@ -430,6 +436,7 @@ export class Room {
     this.send(p, { t: 'welcome', id: p.id, code: this.code });
     this.send(p, this.worldMsg());
     this.send(p, { t: 'props', list: this.sim.allProps() });
+    if (this.holes.size) this.send(p, { t: 'holes', list: [...this.holes.values()].map(holeWire) });
     const s = this.spawnFor(p);
     this.send(p, { t: 'tp', ...s });
     // joining at night or after the run ended: what everyone else is looking at
@@ -597,7 +604,7 @@ export class Room {
   }
 
   handle(p, m) {
-    if (this.spam(p, m.t === 'horn' && m.on === 0 ? 'hornUp' : m.t)) return;   // (letting go of the horn is never too soon)
+    if (this.spam(p, (m.t === 'horn' || m.t === 'pull') && m.on === 0 ? 'letGo' : m.t)) return;   // (letting go of the horn, or the chest, is never too soon)
     switch (m.t) {
       case 'p': return this.onPose(p, m);
       case 'ready': p.ready = true; p.activeAt = this.t; return;
@@ -619,11 +626,15 @@ export class Room {
       case 'kit': return this.onKit(p, m);
       case 'shopBuy': return this.shopBuy(p, m);
       case 'nos': return this.nitro(p);
+      case 'dig': return this.onDig(p, m);
+      case 'open': return this.openChest(p, m);
       case 'cas': return this.onCasino(p, m);
       case 'terms': return this.onTerms(p, m);
       case 'shove': p.activeAt = this.t; if (!p.ko && p.seat == null && p.pos) this.sim.shove(p, this.players); return;
       // holding E at the engine hatch of a broken-down RV, or letting go (fixStep does the work)
       case 'fix': p.activeAt = this.t; p.fixing = !!m.on; return;
+      // holding E on a cache's chest down its hole (each press pulls a little too), or letting go: pullStep
+      case 'pull': return this.onPull(p, m);
       case 'ko': return this.onKO(p, m);
       // the hard hat took a knockout (the page turned it into a knock): it's done for
       case 'hat':
@@ -740,7 +751,10 @@ export class Room {
   onGrab(p, m) {
     p.activeAt = this.t;
     if (p.ko || p.seat != null) return;
-    const no = m.kind === 'prop' && this.sim.props.get(Number(m.id))?.type === 'map' && this.mapRefusal(p);
+    const type = m.kind === 'prop' ? this.sim.props.get(Number(m.id))?.type : null;
+    // (a chest is opened where it lies, not carried off shut: E on it opens it)
+    if (type === 'chest') { this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id }); return; }
+    const no = type === 'map' && this.mapRefusal(p);
     if (no) {
       this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id });
       this.toast(no, '#fff', 3, p);
@@ -1063,6 +1077,7 @@ export class Room {
     if (!V || !V.goods.includes(id) || this.phase === 'over') return;
     const at = this.W.town[V.at];
     if (!at || !p.pos || Math.hypot(p.pos.x - at.x, p.pos.z - at.z) > V.r) return this.toast(`${V.who} can't hear you from there.`, '#fff', 3, p);
+    if (V.gear) return this.buyGear(p, V, id, at);
     const U = UPGRADES[id];
     if (this.upg[id]) return this.toast(`${V.who}: "It's already on there."`, '#fff', 3, p);
     if (!this.paid || this.phase !== 'night') return this.toast(`${V.who}: "I don't touch an RV till the Repo Man's been paid."`, '#fff', 3, p);
@@ -1078,6 +1093,149 @@ export class Room {
     this.toast(`${p.name} had ${V.who} fit the ${U.name} (${fmt$(U.price)}). ${U.line}`, p.color, 6);
     this.sendMeta();
   }
+  // the general store's hardware: the thing itself, set down by the rack out front (any hour; two if you like)
+  buyGear(p, V, id, at) {
+    const G = GEAR[id];
+    if (this.bank < G.price) return this.toast(`${V.who}: "${fmt$(G.price)}. The bank has ${fmt$(this.bank)}."`, '#ff8a80', 3, p);
+    const d = at.drop, k = (this.gearN = (this.gearN || 0) + 1) % 4;
+    // (laid down flat, a little further along the store's front than the last one)
+    const pr = this.sim.addProp(id, { x: d.x + Math.cos(at.ry) * 0.3 * k, y: d.y, z: d.z - Math.sin(at.ry) * 0.3 * k }, { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }, 0, 0);
+    if (!pr) return;
+    this.bank -= G.price;
+    this.stats.shop = (this.stats.shop || 0) + G.price;
+    this.sim.out.push({ k: 'spawn', p: this.sim.describe(pr) });
+    this.broadcast({ t: 'ev', list: [{ k: 'upg', id, by: p.id }] });
+    this.toast(`${p.name} bought a ${G.name} (${fmt$(G.price)}). It's by the rack out front. ${G.line}`, p.color, 6);
+  }
+  // a stroke of the shovel ({ t: 'dig', pt: where it lands }): the one holding a shovel, the ground in reach.
+  // It goes into the hole there (a new one if there's none: at a cache that's within reach, else where it
+  // landed), DIG.STROKES to the bottom: a cache's chest, or (bare ground) nothing. Each stroke's dirt goes on
+  // the hole's pile, on the digger's right as they first stood to it
+  onDig(p, m) {
+    if (p.ko || p.seat != null || !p.pos || this.phase === 'over') return;
+    const h0 = this.sim.holds.get(p.id), pr = h0?.kind === 'prop' ? this.sim.props.get(h0.id) : null;
+    if (!pr || pr.type !== 'shovel') return;
+    const pt = Array.isArray(m.pt) ? m.pt.slice(0, 3).map(Number) : null;
+    if (!pt || !pt.every(Number.isFinite)) return;
+    const [x, , z] = pt, y = this.W.heightAt(x, z);
+    if (Math.hypot(x - p.pos.x, z - p.pos.z) > DIG.REACH || Math.abs(pt[1] - y) > 0.8 || Math.abs(p.pos.y - y) > 2) return;
+    p.activeAt = this.t;
+    let h = null, hd = DIG.R;
+    for (const q of this.holes.values()) { const e = Math.hypot(q.x - x, q.z - z); if (e <= hd) { h = q; hd = e; } }
+    if (!h) {
+      const { c, d } = nearestCache(this.caches, x, z, this.dug);
+      h = c && d <= DIG.R ? this.newHole(c.x, c.z, c.id, p) : this.newHole(x, z, null, p);
+    }
+    if (h.st === HOLE.CHEST) return this.toast('A chest down there: hold E on it to pull it out.', '#fff', 2, p);
+    if (h.st !== HOLE.DUG) { if ((p.emptyDig = (p.emptyDig || 0) + 1) % 4 === 1) this.toast(h.st === HOLE.EMPTY ? 'Nothing down here. (A metal detector says where.)' : 'Dug out already.', '#fff', 3, p); return; }
+    h.n++;
+    if (h.n >= DIG.STROKES) {
+      if (h.cache != null) {
+        h.st = HOLE.CHEST; h.prog = 0;
+        this.dug.add(h.cache);
+        this.toast(`${p.name} hit something solid: a chest! Hold E on it to pull it out (two pull it faster).`, '#ffd166', 5);
+      } else {
+        h.st = HOLE.EMPTY;
+        this.toast('Nothing down here. (A metal detector says where.)', '#fff', 3, p);
+      }
+    }
+    this.broadcast({ t: 'ev', list: [{ k: 'dig', h: holeWire(h), y: r3(y), by: p.id }] });
+  }
+  // a hole: at (x, z), a cache's (its id) or bare ground's; its pile on the digger's right. The bare ones are
+  // kept to DIG.BARE a day (the oldest go: its page's hole goes with it)
+  newHole(x, z, cache, p) {
+    const dx = x - p.pos.x, dz = z - p.pos.z, l = Math.hypot(dx, dz) || 1;
+    const h = { id: ++this.holeN, x, z, cache, n: 0, st: HOLE.DUG, prog: 0, px: x - dz / l * 1.15, pz: z + dx / l * 1.15, chest: null };
+    if (cache == null) {
+      const bare = [...this.holes.values()].filter(q => q.cache == null);
+      if (bare.length >= DIG.BARE) { this.holes.delete(bare[0].id); this.broadcast({ t: 'ev', list: [{ k: 'unhole', id: bare[0].id }] }); }
+    }
+    this.holes.set(h.id, h);
+    return h;
+  }
+  // E held on a chest down its hole ({ t: 'pull', h, on }): pullStep pulls while it's held; each press also pulls
+  // a little (mashing E works too)
+  onPull(p, m) {
+    p.activeAt = this.t;
+    const h = this.holes.get(Number(m.h));
+    if (!m.on || !h || h.st !== HOLE.CHEST || !this.mayPull(p, h)) { p.pulling = null; return; }
+    p.pulling = h.id;
+    h.prog += DIG.PULL_TAP;
+    if (h.prog >= 1) this.unbury(h, [p.name]);
+  }
+  mayPull(p, h) {
+    return p.connected && !p.ko && p.seat == null && !p.par && !!p.pos && Math.hypot(p.pos.x - h.x, p.pos.z - h.z) <= DIG.PULL_R
+      && Math.abs(p.pos.y - this.W.heightAt(h.x, h.z)) < 2;
+  }
+  // whoever holds E on a chest pulls it up a little at a time, up to DIG.PULL_HANDS sharing it; letting go keeps
+  // what's done
+  pullStep(dt) {
+    for (const h of this.holes.values()) {
+      if (h.st !== HOLE.CHEST) continue;
+      const names = [];
+      for (const p of this.players.values()) if (p.pulling === h.id && this.mayPull(p, h)) names.push(p.name);
+      if (!names.length) continue;
+      h.prog += dt * Math.min(names.length, DIG.PULL_HANDS) / DIG.PULL_T;
+      if (h.prog >= 1) this.unbury(h, names);
+    }
+  }
+  // up it comes: the chest set down on the lip of its hole (across from the pile), shut. E opens it
+  unbury(h, names) {
+    h.st = HOLE.PULLED; h.prog = 1;
+    for (const p of this.players.values()) if (p.pulling === h.id) p.pulling = null;
+    const lx = h.x + (h.x - h.px) * 0.8, lz = h.z + (h.z - h.pz) * 0.8, y = this.W.heightAt(lx, lz);
+    const yaw = Math.atan2(h.x - lx, h.z - lz), q = { x: 0, y: Math.sin(yaw / 2), z: 0, w: Math.cos(yaw / 2) };
+    const pr = this.sim.addProp('chest', { x: lx, y: y + 0.3, z: lz }, q, 0, 0);
+    if (pr) {
+      pr.body.setLinvel({ x: (lx - h.x) * 1.5, y: 1.2, z: (lz - h.z) * 1.5 }, true);
+      this.sim.spare(pr, 1.5);
+      h.chest = pr.id;
+      this.sim.out.push({ k: 'spawn', p: this.sim.describe(pr) });
+    }
+    this.broadcast({ t: 'ev', list: [{ k: 'dig', h: holeWire(h), y: r3(this.W.heightAt(h.x, h.z)), pulled: 1 }] });
+    const who = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    this.toast(`${who} hauled up a chest! [E] opens it.`, '#ffd166', 5);
+  }
+  // E on a chest out of the ground ({ t: 'open', id }): what was buried in it pops out, and it's an old chest,
+  // empty (Ed gives a little for it). Whoever's nearest it may open it
+  openChest(p, m) {
+    if (p.ko || p.seat != null || !p.pos || this.phase === 'over') return;
+    const pr = this.sim.props.get(Number(m.id));
+    if (!pr || pr.type !== 'chest') return;
+    const t = pr.body.translation(), q = pr.body.rotation();
+    if (Math.hypot(t.x - p.pos.x, t.z - p.pos.z) > C.PLAYER.REACH + 0.8 || Math.abs(t.y - p.pos.y) > 2.5) return;
+    p.activeAt = this.t;
+    const h = [...this.holes.values()].find(o => o.chest === pr.id), c = h?.cache != null ? this.caches.find(o => o.id === h.cache) : null;
+    if (h) h.chest = null;
+    const dayX = 1 + 0.22 * (this.day - 1), shell = Math.round(LOOT.chestOpen.value * dayX / 5) * 5;
+    this.sim.removeProp(pr.id);
+    this.sim.out.push({ k: 'gone', ids: [pr.id], how: 'open' });   // (the open one takes its place)
+    const open = this.sim.addProp('chestOpen', { x: t.x, y: t.y + 0.02, z: t.z }, q, shell, shell);
+    if (open) { this.sim.spare(open, 1); this.sim.out.push({ k: 'spawn', p: this.sim.describe(open) }); }
+    const names = [];
+    let worth = 0;
+    (c?.items || []).forEach((it, k) => {
+      const a = k * 2.3 + (c.id || 0), L = LOOT[it.type];
+      const ip = this.sim.addProp(it.type, { x: t.x + Math.cos(a) * 0.12, y: t.y + 0.45 + k * 0.18, z: t.z + Math.sin(a) * 0.12 }, { x: 0, y: 0, z: 0, w: 1 }, it.value, it.value);
+      if (!ip) return;
+      ip.body.setLinvel({ x: Math.cos(a) * 1.1, y: 3.0, z: Math.sin(a) * 1.1 }, true);
+      this.sim.spare(ip, 1.5);   // (a jar of coins doesn't chip on its way out)
+      this.sim.out.push({ k: 'spawn', p: this.sim.describe(ip) });
+      names.push(L.name); worth += it.value;
+    });
+    this.dayStats.dug = (this.dayStats.dug || 0) + worth;
+    this.stats.dug = (this.stats.dug || 0) + worth;
+    this.broadcast({ t: 'ev', list: [{ k: 'chest', at: [r3(t.x), r3(t.y), r3(t.z)], by: p.id }] });
+    const list = names.length > 1 ? `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}` : names[0];
+    this.toast(list ? `${p.name} opened the chest: ${list}! (about ${fmt$(worth)})` : `${p.name} opened the chest. Empty!`, '#ffd166', 5);
+  }
+  // the chests down their holes and how far up they've been pulled (in the game state: few, and only while any)
+  chestsView() {
+    const ch = [];
+    for (const h of this.holes.values()) if (h.st === HOLE.CHEST) ch.push([h.id, Math.round(h.prog * 100)]);
+    return ch.length ? { chs: ch } : {};
+  }
+
   // N at the wheel with the Nitrous Kit fitted: a shot, while there are any today
   nitro(p) {
     const sim = this.sim;
@@ -1336,6 +1494,7 @@ export class Room {
     sim.step(dt, this.players);
     this.stowFinds();
     this.fixStep(dt);
+    this.pullStep(dt);
     // (an incident is told once it's over)
     if (this.rvc.inc && !this.rvc.inc.told && this.t - this.rvc.inc.last > C.RVH.GAP) this.tellIncident();
     for (const p of this.players.values()) this.resolvePlayer(p);
@@ -1530,6 +1689,8 @@ export class Room {
       ...(this.rvc.hp <= 0 ? { brk: 1 } : {}),
       ...(this.rvc.fix > 0 ? { fix: Math.round(this.rvc.fix * 100) } : {}),
       ...(sim.t < sim.rvMods.stallUntil ? { stl: 1 } : {}),   // (limping, a knock has the engine stalled for a moment)
+      ...(this.dug.size ? { dug: [...this.dug] } : {}),   // (the caches dug down to today: the detector's quiet over them)
+      ...this.chestsView(),
       ...(this.partMods.nitro ? { nos: [this.nos, sim.t < sim.nitroUntil ? 1 : 0] } : {}),   // (the Nitrous Kit: shots left today, one going)
       ...(this.loanAdd > 0 ? { nxt: (this.day < C.DAYS ? C.dueOn(this.day + 1, this.tier()) : 0) + this.loanAdd } : {}),
     };
@@ -1546,6 +1707,10 @@ export class Room {
     return { t: 's', tm: Math.round(this.t * 1000), rv: s.rv, pr: s.props, hk: s.hook, pl, g: this.gameState() };
   }
 }
+
+// a hole on the wire: [id, x, z, strokes, state (shared/dig.js HOLE), pile x, pile z]
+const r2 = v => Math.round(v * 100) / 100;
+export const holeWire = h => [h.id, r2(h.x), r2(h.z), h.n, h.st, r2(h.px), r2(h.pz)];
 
 export function fmtClock(h) {
   const hh = Math.floor(h) % 24, mm = Math.floor((h % 1) * 60);

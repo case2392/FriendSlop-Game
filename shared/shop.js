@@ -27,10 +27,24 @@ export const UPGRADES = {
 export const UPGRADE_IDS = Object.keys(UPGRADES);
 export const NITRO = { SHOTS: 3, T: 4, PUSH: 1.7, TOP: 4 };   // shots a day, s a shot, x the engine, +m/s top end
 
-// the vendors: where they stand (a W.town key), how close you must be to buy (m), what they sell
+// The general store's hardware (shared/dig.js): gear, a real thing set down by the rack out front, any time
+// the store's open (it always is); buy two shovels if you like. Worth nothing to Ed, and gone if it's left
+// behind: what rides in the RV comes along to the next day
+export const GEAR = {
+  detector: { name: 'Metal Detector', price: 250,
+    line: 'Hold it and it beeps over buried metal, faster the closer it gets. Then somebody digs.' },
+  shovel:   { name: 'Shovel', price: 100,
+    line: 'Hold it and LMB digs where you look (hold LMB to keep digging). At the bottom of a cache: a chest to pull up and open.' },
+};
+export const GEAR_IDS = Object.keys(GEAR);
+
+// the vendors: where they stand (a W.town key), how close you must be to buy (m), what they sell, and from
+// which list (gear: things to carry; else Gus's upgrades)
 export const VENDORS = {
   gus: { name: 'Gus\'s Garage', who: 'Gus', at: 'gus', r: 4.5, goods: UPGRADE_IDS },
+  store: { name: 'Hardware', who: 'The clerk', at: 'hardware', r: 4, goods: GEAR_IDS, gear: true },
 };
+export const goodsOf = v => (VENDORS[v]?.gear ? GEAR : UPGRADES);
 
 const has = (upg, id) => !!upg && Object.prototype.hasOwnProperty.call(upg, id) && UPGRADES[id] && !!upg[id];
 // the RV's numbers from the Garage's parts and the trip's upgrades together

@@ -355,6 +355,40 @@ export { Build, lathe, sphere, limb, loft, mat4, lootMat, taperTube, rbox };
 const GOLD = [1.18, 1.06, 0.78];
 const IRON = [1.25, 1.2, 1.15];
 const RUST = [1.6, 0.85, 0.55];
+// a cache's chest (LOOT.chest, chestOpen: a 0.6 x 0.38 x 0.4 m box): a plank body, a domed lid (half a log
+// along its length), two iron straps over the lot and a brass lock plate; open, the lid stands back past
+// upright on its hinge (the back top edge) and the inside is dark
+function chestModel(open) {
+  const B = new Build(), WD = [0.78, 0.6, 0.45], BAND = [0.62, 0.55, 0.5];
+  B.add(rbox(0.6, 0.22, 0.4, 0.015), R.wood, { uv: 'box', at: mat4(0, -0.08, 0), tint: WD });
+  for (const y of [-0.15, -0.05]) B.add(rbox(0.605, 0.012, 0.405, 0.004), R.wood, { uv: 'box', at: mat4(0, y, 0), tint: [0.55, 0.42, 0.32] });   // (the plank seams)
+  const lid = new THREE.CylinderGeometry(0.2, 0.2, 0.6, 16, 1, false, 0, Math.PI);
+  // closed: the half log on top, round side up; open: swung back 110 degrees about the hinge (y 0.03, z -0.2)
+  const th = open ? -1.92 : 0, hy = 0.03, hz = -0.2, cy = hy - 0.2 * Math.sin(th), cz = hz + 0.2 * Math.cos(th);
+  B.add(lid, R.wood, { at: mat4(0, cy, cz, th, 0, Math.PI / 2), tint: WD });
+  B.add(rbox(0.6, 0.012, 0.4, 0.003), R.wood, { uv: 'box', at: mat4(0, cy, cz, th, 0, 0), tint: [0.5, 0.38, 0.28] });   // (the lid's board: its inside, open)
+  for (const sx of [-0.19, 0.19]) {
+    B.add(rbox(0.04, 0.225, 0.41, 0.005), R.iron, { uv: 'box', at: mat4(sx, -0.08, 0), tint: BAND });
+    B.add(new THREE.CylinderGeometry(0.205, 0.205, 0.04, 16, 1, true, 0, Math.PI), R.iron, { at: mat4(sx, cy, cz, th, 0, Math.PI / 2), tint: BAND });
+  }
+  if (open) B.add(rbox(0.56, 0.01, 0.36, 0.003), R.iron, { uv: 'box', at: mat4(0, 0.022, 0), tint: [0.18, 0.15, 0.13] });   // (the dark inside)
+  else {
+    B.add(rbox(0.08, 0.1, 0.012, 0.004), R.brass, { uv: 'box', at: mat4(0, 0.0, 0.205) });
+    B.add(rbox(0.012, 0.03, 0.006, 0.002), R.iron, { uv: 'box', at: mat4(0, -0.01, 0.212), tint: [0.2, 0.18, 0.16] });   // (its keyhole)
+  }
+  return B.done({ ao: 0.25, aoH: 0.1 });
+}
+// a lumpy nugget dug out of the ground (silver, gold): a ball pushed in and out by a few fixed waves
+function nugget(reg, tint, r, seed) {
+  const B = new Build(), g = sphere(r, 12, 9), p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const k = 1 + 0.16 * Math.sin(x * 61 + seed) * Math.cos(z * 53 + seed * 0.7) + 0.1 * Math.sin(y * 71 + seed * 1.3);
+    p.setXYZ(i, x * k, y * k * 0.8, z * k);
+  }
+  B.add(g, reg, { tint, crease: 70 });
+  return B.done({ ao: 0.12, aoH: 0.03, fit: [r, r, r] });
+}
 
 function cardTin(body, tint) {
   const B = new Build();
@@ -814,6 +848,77 @@ const BUILDERS = {
     }
     return B.done({ ao: 0.28, aoH: 0.3, fit: [0.52, 0.45, 0.75] });
   },
+
+  // ---- the general store's hardware (shared/shop.js GEAR) and what it digs up (shared/dig.js) ----------
+  // a metal detector standing on its coil: a steel shaft with a rubber grip and an arm cuff at the top, the
+  // red control box with its dial on the front, the black search coil at the bottom, angled forward 50 degrees
+  // on its bracket as a real one is (held out ahead of you, main.js toolInHands, it rides flat over the ground)
+  detector() {
+    const B = new Build();
+    B.add(cyl(0.012, 0.92, 8), R.steel, { at: mat4(0, -0.01, 0.02, 0.06, 0, 0), tint: 1.05 });
+    B.add(cyl(0.02, 0.2, 10), R.rubber, { at: mat4(0, 0.33, 0.035), tint: 0.55 });
+    B.add(new THREE.TorusGeometry(0.045, 0.012, 6, 12, Math.PI), R.rubber, { at: mat4(0, 0.5, 0.0, Math.PI / 2, 0, 0), tint: 0.55 });
+    B.add(rbox(0.09, 0.12, 0.07, 0.015), R.red, { uv: 'box', at: mat4(0, 0.15, 0.06), tint: [1.0, 0.9, 0.85] });
+    B.add(cyl(0.026, 0.008, 12), R.glass, { at: mat4(0, 0.17, 0.097, Math.PI / 2, 0, 0), tint: [1.25, 1.2, 1.0] });
+    B.add(cyl(0.008, 0.012, 6), R.brass, { at: mat4(0.028, 0.115, 0.098, Math.PI / 2, 0, 0) });
+    B.add(lathe([[0, -0.012], [0.13, -0.012], [0.14, 0], [0.13, 0.012], [0, 0.014]], 18), R.bakelite, { at: mat4(0, -0.45, 0.04, 0.88, 0, 0), tint: 0.45, crease: 60 });
+    B.add(rbox(0.03, 0.05, 0.03, 0.006), R.steel, { uv: 'box', at: mat4(0, -0.45, 0.0) });
+    return B.done({ ao: 0.1, aoH: 0.08 });
+  },
+  // a shovel standing on its blade: the pointed steel blade, its socket up the ash handle, the D grip
+  shovel() {
+    const B = new Build();
+    const blade = [[-0.11, -0.3], [0.11, -0.3], [0.11, -0.5], [0.06, -0.58], [0, -0.62], [-0.06, -0.58], [-0.11, -0.5], [-0.11, -0.3]];
+    B.add(shapeFace(blade), R.steel, { uv: 'planar', axis: 'z', bounds: [-0.11, -0.62, 0.11, -0.3], at: mat4(0, 0, 0.006), tint: 0.95 });
+    B.add(shapeFace(blade.slice().reverse()), R.steel, { uv: 'planar', axis: 'z', bounds: [-0.11, -0.62, 0.11, -0.3], at: mat4(0, 0, -0.006), tint: 0.8 });
+    B.add(shapeBand(blade, -0.006, 0.006, [0, -0.45]), R.steel, { tint: 0.7 });
+    B.add(cyl(0.024, 0.14, 10, 0.018), R.steel, { at: mat4(0, -0.24, 0.0), tint: 0.75 });
+    B.add(cyl(0.017, 0.78, 8), R.wood, { at: mat4(0, 0.21, 0.0), tint: [1.15, 1.0, 0.8] });
+    B.add(new THREE.TorusGeometry(0.05, 0.012, 6, 12, Math.PI), R.wood, { at: mat4(0, 0.6, 0.0), tint: [1.15, 1.0, 0.8] });
+    B.add(cyl(0.012, 0.1, 6), R.wood, { at: mat4(0, 0.65, 0.0, 0, 0, Math.PI / 2), tint: [1.1, 0.95, 0.78] });
+    return B.done({ ao: 0.1, aoH: 0.08 });
+  },
+  // scrap iron: a bent strap, a length of rusty pipe and a plate with a bolt hole, in a heap
+  scrap() {
+    const B = new Build();
+    B.add(rbox(0.34, 0.025, 0.2, 0.006), R.iron, { uv: 'box', at: mat4(-0.02, -0.04, 0.02, 0, 0.3, 0.08), tint: RUST });
+    B.add(cyl(0.028, 0.38, 10), R.iron, { at: mat4(0.03, 0.0, -0.04, Math.PI / 2, 0.9, 0), tint: RUST });
+    B.add(rbox(0.3, 0.02, 0.04, 0.005), R.iron, { uv: 'box', at: mat4(0, 0.04, 0.05, 0, -0.5, -0.25), tint: [0.75, 0.62, 0.55] });
+    return B.done({ ao: 0.25, aoH: 0.06, fit: [0.2, 0.07, 0.13] });
+  },
+  // copper wire: a fat coil of it, the end sprung loose
+  copper() {
+    const B = new Build();
+    for (let k = 0; k < 6; k++) B.add(new THREE.TorusGeometry(0.12 + (k % 2) * 0.012, 0.014, 6, 24), R.bronze, { at: mat4(0, -0.05 + k * 0.02, 0, Math.PI / 2, k * 0.7, 0), tint: [1.35, 0.78, 0.5] });
+    B.add(tube([[0.13, 0.05, 0], [0.17, 0.08, 0.06], [0.14, 0.1, 0.14]], 0.008, 8, 5), R.bronze, { tint: [1.45, 0.85, 0.55] });
+    return B.done({ ao: 0.2, aoH: 0.05, fit: [0.15, 0.07, 0.15] });
+  },
+  silver() { return nugget(R.steel, [1.35, 1.38, 1.45], 0.065, 11); },
+  gold() { return nugget(R.gilt, [1.25, 1.1, 0.75], 0.055, 23); },
+  // a mason jar of old coins: the glass, the coins heaped in it, a rusty lid
+  coins() {
+    const B = new Build();
+    B.add(lathe([[0, -0.12], [0.074, -0.12], [0.08, -0.105], [0.08, 0.06], [0.07, 0.085], [0.06, 0.095], [0.06, 0.105]], 16), R.glass, { tint: [0.85, 1.0, 0.95] });
+    B.add(cyl(0.072, 0.15, 14), R.gilt, { at: mat4(0, -0.04, 0), tint: [1.05, 0.95, 0.72] });
+    for (let k = 0; k < 7; k++) { const a = k * 0.9; B.add(cyl(0.02, 0.004, 10), k % 3 ? R.gilt : R.steel, { at: mat4(Math.cos(a) * 0.04, 0.038, Math.sin(a) * 0.04, 0.3 * Math.sin(k), 0, 0.3 * Math.cos(k)), tint: k % 3 ? [1.2, 1.05, 0.7] : [1.2, 1.2, 1.25] }); }
+    B.add(cyl(0.064, 0.022, 14), R.iron, { at: mat4(0, 0.112, 0), tint: RUST });
+    return B.done({ ao: 0.15, aoH: 0.05, fit: [0.08, 0.12, 0.08] });
+  },
+  // a rusty iron lockbox: riveted corners, a strap round it, a hasp with a padlock still on it
+  lockbox() {
+    const B = new Build();
+    B.add(rbox(0.44, 0.24, 0.32, 0.02), R.iron, { uv: 'box', at: mat4(0, -0.01, 0), tint: RUST });
+    B.add(rbox(0.452, 0.04, 0.332, 0.012), R.iron, { uv: 'box', at: mat4(0, 0.08, 0), tint: [0.8, 0.62, 0.5] });
+    for (const sx of [-1, 1]) B.add(rbox(0.035, 0.25, 0.335, 0.006), R.iron, { uv: 'box', at: mat4(sx * 0.15, -0.01, 0), tint: [0.72, 0.58, 0.48] });
+    B.add(rbox(0.06, 0.08, 0.012, 0.004), R.brass, { uv: 'box', at: mat4(0, 0.03, 0.166), tint: [0.85, 0.75, 0.6] });
+    B.add(new THREE.TorusGeometry(0.022, 0.006, 6, 10, Math.PI), R.steel, { at: mat4(0, 0.0, 0.18), tint: 0.75 });
+    B.add(rbox(0.05, 0.045, 0.02, 0.008), R.brass, { uv: 'box', at: mat4(0, -0.035, 0.182) });
+    return B.done({ ao: 0.25, aoH: 0.08, fit: [0.22, 0.13, 0.16] });
+  },
+  // a cache's chest (shared/dig.js): dark planks, a domed lid, two iron straps round it all and a brass lock
+  // plate on the front. Open, the lid's swung back on its hinge and the inside is dark
+  chest() { return chestModel(false); },
+  chestOpen() { return chestModel(true); },
 
   map() {      // the leather map case: a rolled edge, a strap with a buckle (the paper is a second mesh)
     const B = new Build();

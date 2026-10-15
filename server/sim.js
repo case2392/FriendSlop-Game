@@ -9,7 +9,7 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as C from '../shared/constants.js';
-import { LOOT, CARRY, carried, carryDist } from '../shared/loot.js';
+import { LOOT, CARRY, carried, carryDist, holdPose } from '../shared/loot.js';
 import {
   RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_LOCKER, RV_HULL,
   toWorld, toLocal, insideRV, inCabin, qRotate, qConj, hitZone,
@@ -275,6 +275,8 @@ export class Sim {
     if (L.mob) this.mobCols.add(col.handle);
     return prop;
   }
+  // a thing the game itself just set down (dug up out of a hole): no knocks till it has landed
+  spare(p, secs) { p.knockUntil = this.t + secs; p.knockG = Infinity; }
 
   removeProp(id) {
     const p = this.props.get(id);
@@ -691,7 +693,7 @@ export class Sim {
       if (!p.mob) p.ours = true;   // (in the crew's hands once: theirs, so a ringtail taking it is a theft)
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();
-      const rel = carry ? qMulS(qConj(yawQ(Math.atan2(pl.look.x, pl.look.z))), p.body.rotation()) : null;   // (its turn against yours)
+      const rel = carry ? holdPose(p.type) || qMulS(qConj(yawQ(Math.atan2(pl.look.x, pl.look.z))), p.body.rotation()) : null;   // (its turn against yours; gear in its own pose)
       this.holds.set(pid, { kind: 'prop', id: p.id, local: carry ? v3() : local, dist, last: null, carry, rel });
       this.mobs?.onGrabbed(p, pid);
       return true;
