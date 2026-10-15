@@ -33,6 +33,7 @@ import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
 import { initShop, openShop, closeShop, renderShop, shopOpen } from './shop.js';
 import { UPGRADE_IDS } from '/shared/shop.js';
 import { buriedSpots, nearestCache, DIG, HOLE } from '/shared/dig.js';
+import { BLAST } from '/shared/blast.js';
 import { cardHTML } from './cards.js';
 import { TINS } from '/shared/cards.js';
 import { fmtRoad, fmtClockH, crewBest } from '/shared/profile.js';
@@ -389,7 +390,7 @@ document.addEventListener('mousemove', e => {
 document.addEventListener('mousedown', e => {
   if (!isLocked()) return;
   initAudio();
-  if (e.button === 0) { if (me.holding?.type === 'shovel' && me.holding.ok) { digHeld = true; digStroke(); } else inp.grab = true; }   // (held: climbing. Things are picked up and set down with E; a shovel digs, and keeps digging while it's held)
+  if (e.button === 0) { if (me.holding?.type === 'shovel' && me.holding.ok) { digHeld = true; digStroke(); } else if (me.holding?.type === 'dynamite' && me.holding.ok) { if (!fuseOf(me.holding.id)) { net.send({ t: 'light' }); tutDone('dynamite'); } } else inp.grab = true; }   // (held: climbing. Things are picked up and set down with E; a shovel digs, and keeps digging while it's held)
   if (e.button === 2) onThrow();
   if (e.button === 1) onPing();
 });
@@ -526,11 +527,13 @@ function computeTarget() {
     const p = S.props.get(hit.id);
     if (!p) return null;
     const L = LOOT[p.type];
-    if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), or winch it.' };
+    if (p.type === 'boulder') return { kind: 'prop', id: p.id, hit, label: 'A 2-ton rock. Shove it with friends (walk into it), winch it, or blow it up.' };
+    if (L.seam) return { kind: 'seam', label: `${L.name} · four tonnes · dynamite blows it apart (the ore's inside)` };
+    if (p.type === 'dynamite' && fuseOf(p.id)) return { kind: 'prop', id: p.id, hit, label: `LIT! ${fuseOf(p.id).toFixed(1)} s · [E] grab it and [RMB] throw it, or RUN` };
     if (L.mob) return { kind: 'prop', id: p.id, hit, label: mobLabel(p) };
     if (p.type === 'map') { const no = mapNo(); return no ? { kind: 'mapwait', label: no } : { kind: 'prop', id: p.id, hit, label: `[E] take the road map and call out the road to ${driverName()}` }; }
     if (L.find) return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name}: set it down in the RV to keep it (${TINS[L.find]} cards)` };
-    if (L.gear) return { kind: 'prop', id: p.id, hit, label: `[E] pick up the ${L.name}${L.gear === 'shovel' ? ' (LMB digs, hold it to keep digging)' : ' (it beeps over buried metal)'}` };
+    if (L.gear) return { kind: 'prop', id: p.id, hit, label: `[E] pick up the ${L.name}${L.gear === 'shovel' ? ' (LMB digs, hold it to keep digging)' : L.gear === 'dynamite' ? ' (LMB lights it, RMB throws it)' : ' (it beeps over buried metal)'}` };
     if (L.chest) return { kind: 'chest', id: p.id, label: '[E] OPEN the chest' };
     const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
@@ -1336,6 +1339,8 @@ function onEvent(e) {
       break;
     }
     case 'unhole': dropHole(e.id); break;
+    case 'fuse': { const p = S.props.get(e.id); if (p) positional(p.mesh.position, () => sfx.fuse(), 40); break; }
+    case 'boom': boom({ x: e.at[0], y: e.at[1], z: e.at[2] }); break;
     // a chest opened: what was in it flies out (its own spawns), a glint of gold and the creak of its lid
     case 'chest': { const at = { x: e.at[0], y: e.at[1] + 0.3, z: e.at[2] }; burst(at, '#ffd166', 16, 3.2, 1, 1.1); positional(at, () => { sfx.creak(); sfx.kaching(); }, 40); break; }
     // Gus fitted an upgrade (the toast says what); a shot of nitrous
@@ -1382,7 +1387,7 @@ function onEvent(e) {
     // somebody else knocked about: heard where they are (my own knock has its own sound)
     case 'thud': { const o = e.id !== S.selfId && S.others?.get(e.id); if (o) positional(o.pos, () => sfx.thunk(e.why === 'shove' ? 0.5 : 1), 40); break; }
     // the wildlife leaves for the night (or a critter gives up for the day): a puff of dust where each one was
-    case 'gone': for (const id of e.ids || []) removeProp(id, e.how === 'open' ? null : { color: '#cdbb9a', n: 12, speed: 2.5 }); break;   // (a chest opened: its open self takes its place)
+    case 'gone': for (const id of e.ids || []) removeProp(id, e.how === 'open' || e.how === 'boom' ? null : { color: '#cdbb9a', n: 12, speed: 2.5 }); break;   // (a chest opened: its open self takes its place; a bang makes its own mess)   // (a chest opened: its open self takes its place)
     case 'mob': onMobEvent(e); break;
     case 'bean': { const o = S.others?.get(e.id); positional(e.id === S.selfId ? null : o?.pos, () => sfx.bonk(), 40); break; }
     case 'shove': S.lastShove = e; positional({ x: e.at[0], y: e.at[1], z: e.at[2] }, () => { if (e.by !== S.selfId) sfx.whoosh(); if (e.hit) sfx.thunk(0.6); }); break;
@@ -1718,6 +1723,63 @@ function chestDown(eye, look) {
     if (d < bd) { bd = d; best = h; }
   }
   return best;
+}
+// ---- dynamite (shared/blast.js): the sticks burning (the server's: room.js fuses), their sparks and hiss, and
+// the bang: a fireball that swells and fades, smoke rolling up, clods and sparks, the boom, the ground shaking
+const fuseOf = id => (S.g?.fz || []).find(f => f[0] === id)?.[1] ?? null;
+const fxs = [];   // (timed effects: { t, life, step(k), done() })
+let hissT = 0;
+const _fz = new THREE.Vector3();
+function stepFuses(dt) {
+  hissT -= dt;
+  for (const [id] of S.g?.fz || []) {
+    const p = S.props.get(id);
+    if (!p?.mesh) continue;
+    _fz.set(0, 0.11, 0).applyQuaternion(p.mesh.quaternion).add(p.mesh.position);   // (the fuse's end: the stick's top)
+    const mine = me.holding?.id === id;
+    for (let i = 0; i < (mine ? 1 : 2); i++) {
+      const m = new THREE.Mesh(chipGeo, flat(i ? '#ffd166' : '#ffb347'));
+      m.position.copy(_fz); m.scale.setScalar((mine ? 0.1 : 0.16) + Math.random() * 0.12);
+      scene.add(m);
+      particles.push({ m, v: new THREE.Vector3((Math.random() - 0.5) * 1.6, 0.6 + Math.random() * 1.4, (Math.random() - 0.5) * 1.6), life: 0.18 + Math.random() * 0.15, g: 0.6 });
+    }
+    if (hissT <= 0) positional(p.mesh.position, () => sfx.fuse(), 35);
+  }
+  if (hissT <= 0) hissT = 0.32;
+  const fdt = dt * (S.fxRate ?? 1);   // (tests: slow motion, to see a half-second fireball on a slow GPU)
+  for (let i = fxs.length - 1; i >= 0; i--) {
+    const f = fxs[i];
+    f.t += fdt;
+    f.step(Math.min(1, f.t / f.life), fdt);
+    if (f.t >= f.life) { f.done(); fxs.splice(i, 1); }
+  }
+}
+const ballGeo = new THREE.SphereGeometry(1, 18, 12);
+function boom(at) {
+  const c = new THREE.Vector3(at.x, at.y + 0.3, at.z);
+  // the fireball: hot white-yellow to orange to nothing, swelling to the blast's size
+  const ball = new THREE.Mesh(ballGeo, new THREE.MeshBasicMaterial({ color: 0xff8a2a, transparent: true, opacity: 0.95, depthWrite: false, fog: false }));
+  const core = new THREE.Mesh(ballGeo, new THREE.MeshBasicMaterial({ color: 0xffe9a0, transparent: true, opacity: 1, depthWrite: false, fog: false }));
+  ball.position.copy(c); core.position.copy(c); ball.scale.setScalar(0.3); core.scale.setScalar(0.2); scene.add(ball); scene.add(core);
+  fxs.push({ t: 0, life: 0.55, step: k => {
+    ball.scale.setScalar(0.3 + 2.7 * Math.sqrt(k)); ball.material.opacity = 0.95 * (1 - k) ** 1.4; ball.material.color.setRGB(1, 0.54 - 0.25 * k, 0.16 - 0.1 * k);
+    core.scale.setScalar(0.2 + 1.6 * Math.sqrt(Math.min(1, k * 1.6))); core.material.opacity = Math.max(0, 1 - k * 2.2);
+  }, done: () => { scene.remove(ball); scene.remove(core); ball.material.dispose(); core.material.dispose(); } });
+  // the smoke: grey puffs that roll up, swell and thin out
+  for (let i = 0; i < 12; i++) {
+    const mat = new THREE.MeshLambertMaterial({ color: i % 3 ? 0x9a8f84 : 0x7a7068, transparent: true, opacity: 0.7, depthWrite: false });
+    const puff = new THREE.Mesh(ballGeo, mat), a = Math.random() * Math.PI * 2, r = Math.random() * 1.2;
+    puff.position.set(c.x + Math.cos(a) * r, c.y + Math.random() * 0.6, c.z + Math.sin(a) * r);
+    const s0 = 0.3 + Math.random() * 0.35, vy = 0.6 + Math.random() * 1.1, vx = Math.cos(a) * 0.5, vz = Math.sin(a) * 0.5, life = 1.6 + Math.random() * 1.2;
+    puff.scale.setScalar(s0); scene.add(puff);
+    fxs.push({ t: 0, life, step: (k, dt) => { puff.position.x += vx * dt; puff.position.y += vy * dt * (1 - k * 0.6); puff.position.z += vz * dt; puff.scale.setScalar(s0 * (1 + 2.2 * k)); mat.opacity = 0.7 * (1 - k) ** 2; }, done: () => { scene.remove(puff); mat.dispose(); } });
+  }
+  burst(c, '#6b5a48', 26, 9, 1, 1.4);   // clods
+  burst(c, '#3a3530', 10, 6, 1, 1.2);
+  burst(c, '#ffd166', 16, 8, 0.4, 0.45);   // sparks
+  const d = Math.hypot(c.x - camera.position.x, c.y - camera.position.y, c.z - camera.position.z);
+  positional(c, () => sfx.boom(Math.max(0.25, 1 - d / 160)), 220);
+  if (d < 45) shake(Math.min(1, 1.15 - d / 40));
 }
 const floaters = [];
 function floatText(at, text, color) {
@@ -2135,7 +2197,7 @@ function holdInHands(ex, ey, ez, look) {
   const h = me.holding, p = h?.carry && h.ok !== false ? S.props.get(h.id) : null;
   if (!p?.mesh || me.mode !== 'walk') return;
   const L = look, up = { x: -L.x * L.y, y: 1 - L.y * L.y, z: -L.z * L.y }, ul = Math.hypot(up.x, up.y, up.z) || 1, d = S.holdDist || carryDist(p.type);
-  if (LOOT[p.type]?.gear) return toolInHands(p, ex, ey, ez, L, up, ul);
+  if (p.type === 'shovel' || p.type === 'detector') return toolInHands(p, ex, ey, ez, L, up, ul);
   p.mesh.position.set(ex + L.x * d - up.x / ul * CARRY.DROP, ey + L.y * d - up.y / ul * CARRY.DROP, ez + L.z * d - up.z / ul * CARRY.DROP);
   const q = qMul(yawQ(me.yaw), h.rel);
   p.mesh.quaternion.set(q.x, q.y, q.z, q.w);
@@ -2177,6 +2239,7 @@ S.profile = profile; S.profileStatus = profileStatus;   // (tests: this player's
 S.beacon = beaconRange;   // (tests: how far loot glints reach, Keen Eye's)
 S.rvWorld = l => toWorld(S.rv.p, S.rv.q, l); S.rvYaw = () => qYaw(S.rv.q);   // (tests: a spot in the RV, wherever it's parked)
 S.target = () => target;
+S.boomFx = at => boom(at);   // (tests: the bang's look alone)
 S.send = m => net.send(m);
 S.mapUp = () => !!hands?.map?.visible;   // tests: is the road map up on this screen?
 S.renderer = () => renderer;   // tools read draw-call counts
@@ -2322,6 +2385,7 @@ requestAnimationFrame(frame);
   if (shopOpen()) renderShop();   // (the bank and what's fitted, as the server has them)
   updateDetector(dt);
   stepHoles(dt);
+  stepFuses(dt);
   if (digHeld) { if (me.holding?.type === 'shovel' && me.holding.ok && isLocked()) digStroke(); else digHeld = false; }
 
   // hands & map
@@ -2904,7 +2968,8 @@ function hud(rv) {
       : p.type === 'ringtail' ? `RINGTAIL · ${S.W?.day > 1 ? 'it bites if you hold it alone' : 'it wriggles'} · [RMB] throw it · [E] let go`
       : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off · [E] let go'
       : LOOT[p.type].find ? `${LOOT[p.type].name} · set it down in the RV to keep its cards · [E] set down · [RMB] throw`
-      : p.type === 'shovel' ? keysIn('SHOVEL · [LMB] dig where you look · [E] set down')
+      : p.type === 'shovel' ? keysIn('SHOVEL · [LMB] dig where you look (hold to keep digging) · [E] set down')
+      : p.type === 'dynamite' ? (fuseOf(p.id) ? `LIT! ${fuseOf(p.id).toFixed(1)} s · [RMB] THROW IT` : keysIn('DYNAMITE · [LMB] light the fuse (4 s) · [RMB] throw · [E] set down'))
       : p.type === 'detector' ? 'METAL DETECTOR · sweep it about: it beeps over buried metal · [E] set down'
       : `${LOOT[p.type].name} · ${fmt$(p.value)} · [E] set down · [RMB] throw · wheel: reach`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
@@ -2985,6 +3050,7 @@ function tutTip(g, town) {
   if (g.ph !== 'road') return null;
   // reading the map with side roads on it: what the dashed tracks are (once the RV has been down one, known)
   if (!tut.has('detector') && me.holding?.type === 'detector') return 'Hint: the metal detector beeps faster over buried metal. Sweep it about; where it screams, somebody with a shovel digs';
+  if (!tut.has('dynamite') && me.holding?.type === 'dynamite') return keysIn('Hint: [LMB] lights the fuse: 4 seconds, then [RMB] throw it at a seamed rock (or the boulder) and get well clear');
   if (!tut.has('shovel') && me.holding?.type === 'shovel') return keysIn('Hint: [LMB] digs where you look (hold it to keep digging). Dig down on the spot the detector found: a chest at the bottom, [E] pulls it up');
   if (!tut.has('track') && S.W.tracks?.length && me.holding?.type === 'map' && mapRaised) return 'Hint: the dashed tracks on the map are side roads. The stops down them ($$$) are worth the drive: call the turn before the driver passes it';
   if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');

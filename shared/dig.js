@@ -38,19 +38,19 @@ const KINDS = [
 // down a side road the cheap ones are rarer (a cache there is worth about half as much again as one by the road)
 const DEEP_W = { scrap: 0.25, copper: 0.5, silver: 1.3, coins: 1.5, gold: 2.2, lockbox: 2.2 };
 
-function mulberry32(a) {
+export function mulberry32(a) {
   return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
 
-// not on the road, nor in its mud, nor under anything, on ground gentle enough to dig
-function diggable(W, x, z) {
+// not on the road, nor in its mud, nor under anything, on ground gentle enough to dig (r: how much clear room)
+export function diggable(W, x, z, r = 1.2) {
   if (Math.abs(x) > 105 || z < 40 || z > W.LEN - 40) return false;
   if (Math.abs(x - W.roadX(z)) < 6) return false;
   for (const m of W.mud || []) if (z > m.z0 - 2 && z < m.z1 + 2 && Math.abs(x - W.roadX(z)) < m.hw + 2) return false;
   for (const T of W.tracks || []) if (nearTrack(T, x, z).d < T.hw + 1.5) return false;
   const y = W.heightAt(x, z);
   for (const [dx, dz] of [[0.8, 0], [-0.8, 0], [0, 0.8], [0, -0.8]]) if (Math.abs(W.heightAt(x + dx, z + dz) - y) > 0.4) return false;
-  return clearAt(W, x, y, z, 1.2);
+  return clearAt(W, x, y, z, r);
 }
 
 // the day's caches: 6 + day of them. About half by the stops (where people dropped things; a stop down a side
