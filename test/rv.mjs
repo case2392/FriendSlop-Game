@@ -1052,6 +1052,27 @@ const crashCost = (room, dv, zone) => {
     `bunks: Ann gets bunk ${a?.slot} and Bo bunk ${b?.slot}, each told to lie down; Ann gets up and Cy has her bunk (${c?.slot}); the crew sees who's where (${g2.bk.join(', ')})`);
 }
 
+// ---- asleep at dawn: still lying in your bunk in the new day (told so after the new world), and up out of it
+// whenever you like (E or a step), not only at bedtime. (The new day took sleepers out of their bunks, and
+// the page left them standing where they'd lain, inside the bunk's frame, stuck)
+{
+  const { room, ps: [A, B] } = crew(['Ann', 'Bo']);
+  room.phase = 'night';
+  ride(room, A, 0, -2.5); ride(room, B, 0.2, -2.0);
+  tick(room, 0.2);
+  room.handle(A, { t: 'use', kind: 'bunk' }); room.handle(B, { t: 'use', kind: 'bunk' });
+  const slots = [A.conn.last('bed')?.slot, B.conn.last('bed')?.slot];
+  const n0 = A.conn.sent.length;
+  room.nextDay();
+  const after = A.conn.sent.slice(n0), wi = after.findIndex(m => m.t === 'world'), bi = after.findIndex(m => m.t === 'bed');
+  const g = room.gameState(), lying = after[bi];
+  room.handle(A, { t: 'use', kind: 'bunk' });
+  const up = A.conn.last('bed'), g2 = room.gameState(), refused = toasts(A.conn, /Not bedtime/).length;
+  check(room.day === 2 && room.phase !== 'night' && wi >= 0 && bi > wi && lying?.on && lying.slot === slots[0] && g.beds.join() === [A.id, B.id].join()
+    && up && !up.on && !refused && g2.beds.join() === String(B.id),
+    `bunks: asleep at dawn, Ann wakes on day ${room.day} still in her bunk (told after the new world: ${bi > wi}; slot ${lying?.slot}), the crew sees both lying there; in the morning E gets her up (${up && !up.on}), Bo sleeps on`);
+}
+
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }
 console.log('\nall RV tests passed');
 process.exit(0);
