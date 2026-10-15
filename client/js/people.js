@@ -58,6 +58,7 @@
 import { THREE, painted, tex, labelSprite, canvasTex } from './gfx.js';
 import * as C from '/shared/constants.js';
 import { CARRY, carried, carrySize } from '/shared/loot.js';
+import { wearOf } from '/shared/looks.js';
 import { mergeGeometries } from '/vendor/BufferGeometryUtils.js';
 import { AW, AH, REG, HEAD_RINGS, HEAD_SCALE, headTh, headU, headV, hairWave, BEARD_TOP, GOATEE_TOP, MUSTACHES, mustacheAt, TORSO, TORSO_UP, hairlineDy, lerpTable, armV, ARM_LM, skirtV, dressV, DRESS_Y0, DRESS_Y1, APRON_Y0, APRON_Y1, resolveSpec, charAtlas, charGlow, handsAtlas, FP, labelColor } from './paint/characters.js';
 
@@ -1467,9 +1468,10 @@ function makeSkeleton(F) {
 
 // Root at the feet. Inner model faces local +x; root.rotation.y = -PI/2 turns it to face +z.
 // opts.outfit: 'player' | 'ed' | 'clerk' | 'dealer' | 'repo' | 'gus' (inferred from the old call
-// signatures in town3d.js when absent). opts.variant: a player's kit, 0-5 (defaults to hatIndex).
-export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null, variant = null } = {}) {
-  const spec = resolveSpec(color, { hatIndex, skinIndex, scale, eyeColor, outfit, variant });
+// signatures in town3d.js when absent). opts.variant: a player's kit, 0-5 (defaults to hatIndex). opts.wear: a
+// player's look (shared/looks.js) over what their seat issued them: { hat, kit, dye: a colour }
+export function buildCharacter(color, { hatIndex = 0, skinIndex = 0, scale = 1, eyeColor = null, outfit = null, variant = null, wear = null } = {}) {
+  const spec = resolveSpec(color, { hatIndex, skinIndex, scale, eyeColor, outfit, variant, wear });
   const F = frameOf(spec);
   const bones = makeSkeleton(F);
   const [body] = bones;
@@ -1694,17 +1696,34 @@ function playerPose(st, m) {
 // Paint a player's atlas and build their mesh ahead of time (e.g. when the lobby lists them),
 // so a player joining mid-game doesn't stall a frame while their look is painted.
 export function prewarmPlayer(p) {
-  const S = resolveSpec(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6 });
+  const S = resolveSpec(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6, wear: wearOf(p.wear) });
   charMaterial(S); charGeometry(S, frameOf(S));
 }
 
 const spring = (s, target, dt, k = 170, d = 11) => { s.v += (target - s.a) * k * dt; s.v *= Math.max(0, 1 - d * dt); s.a += s.v * dt; return s.a; };
 
 export class PlayerView {
+  // a new look (shared/looks.js, changed at the general store's clothes rail): the character built again in it
+  // (its atlas and geometry are cached by look), the name lifted to clear a tall hat
+  setLook(p) {
+    const key = JSON.stringify(p.wear || null);
+    if (key === this.lookKey) return;
+    this.lookKey = key;
+    const old = this.ch;
+    this.ch = buildCharacter(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6, wear: wearOf(p.wear) });
+    this.ch.driven = true;
+    this.ch.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
+    this.tilt.remove(old.root);
+    this.tilt.add(this.ch.root);
+    old.mesh.skeleton.dispose();
+    this.label.position.y = ['brim', 'straw', 'helm'].includes(this.ch.spec.hat) ? 2.09 : 2.02;
+    this.hardhat.position.y = this.label.position.y + 0.32;
+  }
   constructor(scene, p) {
     this.id = p.id;
     this.group = new THREE.Group();
-    this.ch = buildCharacter(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6 });
+    this.lookKey = JSON.stringify(p.wear || null);
+    this.ch = buildCharacter(p.color, { hatIndex: p.id % 6, skinIndex: (p.id * 7) % 6, variant: p.id % 6, wear: wearOf(p.wear) });
     this.ch.driven = true;
     this.ch.root.traverse(o => { if (o.isMesh) o.castShadow = true; });
     this.tilt = new THREE.Group();

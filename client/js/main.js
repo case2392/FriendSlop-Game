@@ -28,7 +28,7 @@ import { PlayerView, Hands, prewarmPlayer } from './people.js';
 import { zoneText, uiText, portraitAttrs } from './labels.js';
 import * as texPrep from './texprep.js';
 import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
-import { profile, profileStatus, forServer, credit, myKit } from './profile.js';
+import { profile, profileStatus, forServer, credit, myKit, unlockLooks, keepLook } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
 import { initShop, openShop, closeShop, renderShop, shopOpen } from './shop.js';
 import { UPGRADE_IDS } from '/shared/shop.js';
@@ -1155,6 +1155,9 @@ function onMeta(m) {
   // my kit as the host's server has it (the Garage's perks: shared/garage.js), and the RV's fitted parts
   if (mine) { S.myKit = mine.kit || null; me.mods = kitMods(S.myKit); }
   rvView?.setParts(m.trip?.parts || {});
+  // looks (shared/looks.js): the RV's paint; what I wear and the paint I rode under go in my save
+  rvView?.setPaint(m.trip?.rv ?? null);
+  if (mine) keepLook({ wear: mine.wear || null, rv: m.trip?.rv ?? null });
   // the loan terms: the trip leader can ask for Standard in day-1 camp (a crew of veterans is on Bad Credit)
   const termsBtn = $('ctpTerms'), canAsk = m.host === S.selfId && !!m.trip?.kitOpen && S.g?.ph !== 'over' && (m.trip.tier === 'bad' || m.trip.askStd);
   termsBtn.classList.toggle('hidden', !canAsk);
@@ -1169,7 +1172,7 @@ function onMeta(m) {
   for (const [id, v] of S.views) {
     const p = m.players.find(q => q.id === id);
     if (!p) { v.dispose(scene); S.views.delete(id); S.lw?.removePlayer(id); S.interp.dropPlayer(id); }
-    else v.setName(p.name, p.color);
+    else { v.setName(p.name, p.color); v.setLook(p); }
   }
   const html = m.players.map(p => `<div class="pm" data-id="${p.id}" style="--c:${p.color}"><span class="pf"${portraitAttrs(p.color, p.id)}><b>${escapeHtml((Array.from(String(p.name).trim())[0] || '?').toUpperCase())}</b>${p.id === m.host ? '<i class="ico ico-crown" title="trip leader"></i>' : ''}${p.id !== S.selfId ? '<i class="ico ico-vc"></i>' : ''}${p.walkie ? '<i class="ico ico-walkie" title="has a walkie"></i>' : ''}</span><span class="pn"><span class="nm">${escapeHtml(p.name)}</span>${m.roles?.drv === p.id ? '<em class="role">driver</em>' : m.roles?.nav === p.id ? '<em class="role">map</em>' : ''}</span><span class="pb"><i></i><em></em>${p.id === S.selfId ? '<s></s>' : ''}</span>${p.id !== S.selfId ? '<span class="pv"><button class="voice-btn pv-mute"></button><input class="pv-vol" type="range" min="0" max="1.5" step="0.05"><span class="pct"></span></span>' : ''}</div>`).join('');   // hud() drives the bars
   if (rosterDrag) rosterLater = html;   // (not under a finger dragging a volume: once it's let go)
@@ -1971,7 +1974,7 @@ $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
 $('ctpGarage').onclick = () => openPanel('garage');
 $('ctpTerms').onclick = () => { sfx.click(); net.send({ t: 'terms', std: !S.meta?.trip?.askStd }); };
 $('garageClose').onclick = () => closePanel('garage');
-initShop({ open: openPanel, close: closePanel, send: m => net.send(m), state: () => ({ g: S.g, meta: S.meta }), click: () => sfx.click() });
+initShop({ open: openPanel, close: closePanel, send: m => net.send(m), state: () => ({ g: S.g, meta: S.meta, self: S.selfId }), click: () => sfx.click() });
 initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [], kitOpen: () => !S.meta || !!S.meta.trip?.kitOpen, onKit: sendKit });
 // my kit to the host's server (it takes it in camp on day 1 and during the game-over; otherwise it says so)
 function sendKit() { if (S.phase !== 'menu' && S.meta?.trip?.kitOpen) net.send({ t: 'kit', kit: myKit() }); }
@@ -2604,6 +2607,8 @@ const myStation = () => {
 };
 net.on('cas', m => { S.casAt = m.at; sfx.click(); });
 // E at a town shop: its catalogue (client/js/shop.js)
+// looks the crew has unlocked (bought, or brought by whoever joined): into my save for good
+net.on('unlock', m => { if (Array.isArray(m.ids)) unlockLooks(m.ids); });
 net.on('shop', m => { if (!garageOpen() && S.phase === 'game') { sfx.click(); openShop(m.v); } });
 // the number keys at a station: 1-4 set the stake (+$100, +$500, all in, clear); 5 deals (in your turn at
 // blackjack, hits), rolls or pulls; at blackjack 6 stands, 7 doubles, 8 splits; at craps 7 lays odds behind

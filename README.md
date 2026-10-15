@@ -65,6 +65,16 @@ copper wire, a silver or gold nugget, a jar of old coins, a rusty lockbox), loot
 and so is the old chest. Bare ground digs down to nothing. One holds the detector, one digs. Ed won't buy
 the gear back, and it doesn't go in the locker: keep it in the RV or it stays on the road.
 
+## Hats, outfits and paint
+
+Out front of the general store, left of the door, is a **clothes rail** (`E` on it): nine hats, the six outfits
+(pauldrons, emblem, belt and bracers) and eight tabard dyes, $40 to $220 each from the shared bank. Gus
+also **paints the RV** (six colours, $250 to $350), at night once the day is paid, like his parts. What
+anyone buys is the **crew's**, for good: it goes into the save of everyone aboard, so whoever brings it on
+a later trip brings it for the whole crew, and anyone can wear it. You change only where it's sold (the
+clothes at the rail, the paint at Gus's), in any town on any day. Your name tag and party portrait keep
+your own colour, so the crew still knows who's who.
+
 ## Beat your time, beat your haul
 
 Every trip is timed and counted. **Road time** is the clock at each day's payment less 6:00, added up over

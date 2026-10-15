@@ -857,6 +857,31 @@ function toolRack(K, s) {
   K.box(mat('metal_red'), 0.09, 0.12, 0.07, dx + 0.015, 0.95, -0.02, { uv: 'keep' });
   K.cyl(mat('metal_green'), [dx + 0.02, 1.2, -0.05], [dx + 0.02, 1.32, -0.07], 0.022, 0.022, { sides: 8, tint: '#2a2a2a' });
 }
+// The general store's clothes rail, left of the door (shared/looks.js): two posts and a bar, coats on
+// hangers in the dyes, a shelf of hats over it, and a tall mirror at the end
+function clothesRail(K, s) {
+  const wd = mat('timber_dark'), iron = mat('iron_wrought'), hx = s.hx, hz = s.hz;
+  for (const sx of [-1, 1]) K.box(wd, 0.07, 1.7, 0.07, sx * (hx - 0.04), 0.85, -hz + 0.08, { grain: 'y' });
+  K.cyl(iron, [-hx + 0.04, 1.42, -hz + 0.14], [hx - 0.04, 1.42, -hz + 0.14], 0.014, 0.014, { sides: 6 });
+  K.box(wd, 2 * hx, 0.035, 0.24, 0, 1.7, -hz + 0.1, { grain: 'x' });   // the hat shelf on top
+  // coats on hangers, in a few of the dyes
+  const cols = ['#b0302a', '#2a3d7a', '#2f6a32', '#d2a12e', '#6a2f6e'];
+  cols.forEach((c, i) => {
+    const x = -hx + 0.16 + i * (2 * hx - 0.32) / (cols.length - 1);
+    K.cyl(iron, [x, 1.42, -hz + 0.14], [x, 1.36, -hz + 0.14], 0.006, 0.006, { sides: 4 });
+    K.box(mat('board_rough'), 0.2, 0.5, 0.06, x, 1.08, -hz + 0.14, { tile: 0.5, tint: c });
+    K.box(mat('board_rough'), 0.24, 0.05, 0.07, x, 1.34, -hz + 0.14, { tile: 0.5, tint: c });
+  });
+  // three hats on the shelf: a trail hat, a straw hat, a ball cap
+  for (const [x, c, brim, crown] of [[-0.35, '#5a3a22', 0.17, 0.09], [0.0, '#d8c070', 0.19, 0.07], [0.35, '#7a1f1f', 0.0, 0.08]]) {
+    if (brim) K.cyl(mat('board_rough'), [x, 1.72, -hz + 0.12], [x, 1.735, -hz + 0.12], brim, brim, { sides: 14, tint: c });
+    K.cyl(mat('board_rough'), [x, 1.72, -hz + 0.12], [x, 1.72 + crown, -hz + 0.12], 0.085, 0.07, { sides: 12, tint: c });
+    if (!brim) K.box(mat('board_rough'), 0.1, 0.012, 0.09, x, 1.725, -hz + 0.2, { tile: 0.4, tint: c });
+  }
+  // the mirror, on the end post
+  K.box(wd, 0.05, 1.0, 0.36, hx + 0.03, 1.0, -hz + 0.25, { grain: 'y' });
+  K.box(mat('lantern_glass'), 0.012, 0.9, 0.3, hx + 0.06, 1.0, -hz + 0.25, { tile: 1, tint: '#c8d8e0' });
+}
 function boardCanvas(lines) {
   const cv = document.createElement('canvas'); cv.width = 512; cv.height = 512;
   const g = cv.getContext('2d');
@@ -1059,6 +1084,7 @@ function furniture(s, batch, ctx) {
   if (s.part === 'gus_bench') { gusBench(K, s); return; }
   if (s.part === 'gus_board') { gusBoard(K, s, batch); return; }
   if (s.part === 'tool_rack') { toolRack(K, s); return; }
+  if (s.part === 'clothes_rail') { clothesRail(K, s); return; }
   // anything else: a sturdy painted crate-box at the same footprint
   K.box(mat('crate'), 2 * hx, top, 2 * hz, 0, hy, 0, { uv: 'keep' });
 }
@@ -1490,6 +1516,7 @@ export function buildStructures(W) {
   // price boards for the store's goods go into the sign atlas
   const tags = [];
   const store = W.buildings.find(b => b.kind === 'store');
+  for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'tailor') tags.push({ u, lines: ['CLOTHES', 'HATS · OUTFITS', 'DYES · THE MIRROR'], w: 0.78, h: 0.4 });
   for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'store') tags.push({ u, lines: ['HARDWARE', ...GEAR_IDS.map(id => `${GEAR[id].name.toUpperCase()} $${GEAR[id].price}`)], w: 0.78, h: 0.4 });
   for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES', hardhat: 'HARD HAT', cheese: 'CHEESE' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90', hardhat: '$80', cheese: '$30' }[u.arg] || ''], w: 0.46, h: 0.26 });
   const entry = T && W.signs.find(s => s.post && Math.abs(s.z - (T.z + 6)) < 3 && Math.abs(s.x - 7.5) < 3);

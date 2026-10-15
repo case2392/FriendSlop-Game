@@ -21,6 +21,7 @@ import { canvasFor, meta, rngFrom } from './paint/index.js';
 import { mergeGeometries, toCreasedNormals } from '/vendor/BufferGeometryUtils.js';
 import { RV_DIM, RV_WHEELS, SUSP_REST, RV_WINCH, RV_PARTS, RV_SEATS, RV_LOCKER } from '/shared/rv.js';
 import { Hands } from './people.js';
+import { RV_PAINTS } from '/shared/looks.js';
 import { RV_ART as A, TRIM, SOFT, LAMPS, BODY, LETTER_FONT, GLASS_U, GINGHAM_PLEATS } from './paint/vehicle.js';
 
 const D = RV_DIM, PI = Math.PI, TAU = PI * 2;
@@ -1622,7 +1623,7 @@ export class RVView {
 
     const trim = painted('rv_trim');
     const mat = {
-      body: painted('rv_body'),
+      body: painted('rv_body').clone(),   // (its own: the crew's paint tints it, shared/looks.js)
       tin: painted('rv_tin'),
       trim, itrim: trim,
       panel: painted('rv_paneling'),
@@ -1793,6 +1794,12 @@ export class RVView {
     repaintBodyWhenFontLoads();
   }
 
+  // the RV's paint (shared/looks.js RV_PAINTS id, or null for the stock cream): a tint over its painted panels
+  setPaint(id) {
+    if (id === this.paintId) return;
+    this.paintId = id;
+    this.mat.body.color.set(RV_PAINTS[id]?.col || '#ffffff');
+  }
   // the RV parts fitted for the trip ({ bullbar: 2, ... }: the server's meta, shared/garage.js)
   setParts(parts) {
     const key = JSON.stringify(parts || {});
