@@ -1089,7 +1089,8 @@ function outOfBunk() {
   if (me.bunk == null) return;
   me.bunk = null;
   me.par = 1; me.lp = { x: 0.1, y: 0.05, z: -2.55 }; me.vel = { x: 0, y: 0, z: 0 };
-  if (S.rv) me.pos = toWorld(S.rv.p, S.rv.q, me.lp);
+  me.pitch = 0;   // (on your feet looking down the aisle to the cab: not up at the ceiling, as you lay)
+  if (S.rv) { me.pos = toWorld(S.rv.p, S.rv.q, me.lp); me.yaw = qYaw(S.rv.q); }
 }
 net.on('world', m => {
   me.hasHook = false;   // a new world comes with the hook on its winch
