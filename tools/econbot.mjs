@@ -363,7 +363,7 @@ function legPlan() {
   const w = W(), out = [];
   for (const r of w.rockfalls || []) out.push({ k: 'honk', z: r.obz - 42, rf: r });
   for (const o of w.obstacles) out.push({ k: o.type, z: (o.z0 ?? o.z) - ({ gate: 8.5, boulder: 11, mud: 12, grade: 5.5 }[o.type] ?? 10), o });
-  for (const p of w.pois) if (p.type !== 'crash') out.push({ k: 'stop', z: p.z - DZ, poi: p });
+  for (const p of w.pois) if (p.type !== 'crash' && !p.deep) out.push({ k: 'stop', z: p.z - DZ, poi: p });   // (the side roads' stops: not on its way)
   out.push({ k: 'town', z: w.LEN - 8 });
   return out.sort((a, b) => a.z - b.z);
 }

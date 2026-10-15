@@ -6,7 +6,7 @@ process.env.FRIENDSLOP_NOLOCKER = '1';   // (loose loot in the RV's cabin, as be
 const C = await import('../shared/constants.js');
 const { Room } = await import('../server/room.js');
 const { initPhysics } = await import('../server/sim.js');
-const { toWorld, qRotate, insideRV } = await import('../shared/rv.js');
+const { toWorld, qRotate, insideRV, RV_DIM } = await import('../shared/rv.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -1159,12 +1159,16 @@ function firstLanding(day) {
 }
 {
   // MRV4: a rockfall over the parked RV: 3% for each rock that lands on it still coming down fast, once a
-  // rock; brought down by a honk 55 m back, nothing reaches it
-  const at0 = firstLanding(4);
+  // rock; brought down by a honk 55 m back, nothing reaches it. (Its rocks come loose right over the roof: from
+  // the fall's own spots, whether one clips an RV parked on the hillside or rolls under its sills is chaos that
+  // any change to the day's world reshuffles; this asks what one landing on it costs)
   const { room, ps: [A], W, mobs } = narrows(4, ['Ann']);
-  const rf = mobs.rockfalls[0], seen = rvHits(room);
-  room.sim.placeRV(at0.x, at0.z, Math.atan2(W.roadX(at0.z + 3) - W.roadX(at0.z - 3), 6));
+  const rf = mobs.rockfalls[0], seen = rvHits(room), z0 = rf.obz - 20;
+  room.sim.placeRV(W.roadX(z0), z0, Math.atan2(W.roadX(z0 + 3) - W.roadX(z0 - 3), 6));
   tick(room, 1);
+  const rp = room.sim.rv.translation(), rq = room.sim.rv.rotation();
+  // (on the rockfall's side of the roof's middle: pushed off the rim toward the road, each comes down on it)
+  rf.rim = [-3, -1.5, 0, 1.5, 3].map(dz => toWorld(rp, rq, { x: rf.side * 1.2, y: RV_DIM.ROOF_Y + 4, z: dz }));
   mobs.rfTrigger(rf, 'test');
   tick(room, 8);
   const rh = seen.filter(h => h.why === 'rock'), dented = rf.rocks.filter(r => r.rv).length;

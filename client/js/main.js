@@ -3,6 +3,7 @@ import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
 import { LOOT, fmt$, CARRY, carried, carryDist } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, RV_HATCH, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
+import { trackAt } from '/shared/tracks.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
 import * as net from './net.js';
 import * as voice from './voice.js';
@@ -2713,6 +2714,7 @@ function tutDone(k) { if (tut.has(k)) return; tut.add(k); try { localStorage.set
 function tutWatch(inMyRV) {
   if (me.mode === 'seat' && me.seat === 0) tutDone('drive');
   if (me.holding?.type === 'map' && me.holding.ok) tutDone('map');
+  if (S.rv && S.W?.tracks?.length && trackAt(S.W.tracks, S.rv.p.x, S.rv.p.z, 6).d < 4 && Math.abs(S.rv.p.x - S.W.roadX(S.rv.p.z)) > 12) tutDone('track');   // (been down a side road)
   if (me.holding && me.holding.type !== 'map') { tutDone('grab'); if (inMyRV) tutDone('load'); }
   if ((S.g?.pawn || 0) > 0 || (S.g?.dock || 0) > 0) tutDone('pawn');
 }
@@ -2728,6 +2730,8 @@ function tutTip(g, town) {
   if (!tut.has('map') && mapWanted()) return `Hint: you navigate today. ${driverName()} can't see the map: grab it off the dash and call out what's coming`;
   if (g.ph === 'camp') return tut.has('drive') || (roleOf('drv') && roleOf('drv') !== S.selfId) ? null : keysIn('Hint: [E] on the RV\'s driver seat, then drive out of camp (WASD)');
   if (g.ph !== 'road') return null;
+  // reading the map with side roads on it: what the dashed tracks are (once the RV has been down one, known)
+  if (!tut.has('track') && S.W.tracks?.length && me.holding?.type === 'map' && mapRaised) return 'Hint: the dashed tracks on the map are side roads. The stops down them ($$$) are worth the drive: call the turn before the driver passes it';
   if (!tut.has('grumph') && beastNear(35)) return keysIn('Hint: a Grumphorn! Crouch [C] to sneak past it, creep the RV by, or wear out its patience (ram it, winch it, pelt it)');
   if (!tut.has('ringtail') && critterNear('ringtail', 15)) return keysIn('Hint: ringtails steal loot nobody is watching. Stand facing your pile, grab the thief (it drops it), or [RMB] shove it');
   if (!tut.has('rock') && rockAhead(90)) return keysIn('Hint: loose rock above the narrows ahead. The driver honks [H] at the LOOSE ROCK sign, and it comes down before you get there');

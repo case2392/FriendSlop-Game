@@ -1205,9 +1205,16 @@ export function mapCanvas(W) {
   const roadY = px => { let best = road[0]; for (const q of road) if (Math.abs(q[0] - px) < Math.abs(best[0] - px)) best = q; return best[1]; };
   // the land along the road
   for (let i = 0; i < 80; i++) { const z = z0 + rnd() * (z1 - z0), x = Wd.roadX(z) + range(rnd, -42, 42); blob(g, X(z), Y(z, x), range(rnd, 18, 40), range(rnd, 12, 26), 0, pick(rnd, B.land), 0.42, 0.15); }
-  // margins: a lake (or a dry lake, or an oasis) where there's most room clear of the road and the
-  // title, compass and notes; forest masses (fields, mesas, dunes) in the other open margins
-  const dRoad = (px, py) => { let d = 1e9; for (const [a, b] of road) d = Math.min(d, Math.hypot((a - px) / 1.7, (b - py) / 0.8)); return d; };
+  // the side roads (shared/tracks.js): on the map in projected points, the land along them too
+  const tracks = (Wd.tracks || []).map(T => ({ T, pts: T.pts.map(q => [X(q.z), Y(q.z, q.x)]) }));
+  const trk = rngFrom(`map-tracks-${Wd.seed ?? 0}-${Wd.day}`);   // (its own stream: the rest of the sheet comes out as it did)
+  for (const t of tracks) for (let k = 0; k < t.pts.length; k += 6) { const [px, py] = t.pts[k]; blob(g, px, py, range(trk, 12, 22), range(trk, 9, 15), 0, pick(trk, B.land), 0.35, 0.12); }
+  const nearTrackPx = (px, py, r) => tracks.some(t => t.pts.some(([a, b]) => Math.hypot(a - px, b - py) < r));
+  // margins: a lake (or a dry lake, or an oasis) where there's most room clear of the road, the side roads
+  // and the title, compass and notes; forest masses (fields, mesas, dunes) in the other open margins
+  const lanes = [...road];
+  for (const t of tracks) { for (let k = 0; k < t.pts.length; k += 2) lanes.push(t.pts[k]); if (t.T.dest) lanes.push([X(t.T.dest.z), Y(t.T.dest.z, t.T.dest.x)]); }
+  const dRoad = (px, py) => { let d = 1e9; for (const [a, b] of lanes) d = Math.min(d, Math.hypot((a - px) / 1.7, (b - py) / 0.8)); return d; };
   const furniture = [[0, 0, 300, 70], [CW - 90, 0, CW, 100], [CW - 280, CH - 34, CW, CH], [0, CH - 56, 150, CH]];
   const inFurn = (px, py, m = 0) => furniture.some(([x0, y0, x1, y1]) => px > x0 - m && px < x1 + m && py > y0 - m * 0.5 && py < y1 + m * 0.5);
   let lake = null;
@@ -1258,7 +1265,7 @@ export function mapCanvas(W) {
     hills.push({ px: X(z) + range(rnd, -4, 4), py: Y(z, x), w: 11 * sc, h: 12 * sc, kind: pick(rnd, B.stamps) });
     if (rnd() < 0.15) hills.push({ px: X(z) + range(rnd, 4, 10), py: Y(z, x) + side * range(rnd, 4, 9), w: 8 * sc, h: 8 * sc, kind: pick(rnd, B.stamps) });
   }
-  for (let i = hills.length - 1; i >= 0; i--) if (inLake(hills[i].px, hills[i].py) || inFurn(hills[i].px, hills[i].py)) hills.splice(i, 1);
+  for (let i = hills.length - 1; i >= 0; i--) if (inLake(hills[i].px, hills[i].py) || inFurn(hills[i].px, hills[i].py) || nearTrackPx(hills[i].px, hills[i].py, hills[i].w * 0.6 + 5)) hills.splice(i, 1);
   hills.sort((a, b) => a.py - b.py);
   for (const h of hills) {
     hillStamp(g, h.kind, h.px, h.py, h.w, h.h, B.hill, rnd);
@@ -1275,6 +1282,13 @@ export function mapCanvas(W) {
   path(); g.strokeStyle = '#3a2a1e'; g.lineWidth = 8; g.stroke();
   path(); g.strokeStyle = '#c89a5e'; g.lineWidth = 5; g.stroke();
   path(); g.setLineDash([6, 7]); g.strokeStyle = 'rgba(90,58,30,0.6)'; g.lineWidth = 1; g.stroke(); g.setLineDash([]);
+  // the side roads: dirt tracks, inked dashed; a spur's end a ring
+  for (const t of tracks) {
+    const tp = () => { g.beginPath(); t.pts.forEach(([x, y], i) => i ? g.lineTo(x, y) : g.moveTo(x, y)); };
+    g.setLineDash([5, 3]); tp(); g.strokeStyle = '#3a2a1e'; g.lineWidth = 4.5; g.stroke();
+    tp(); g.strokeStyle = '#d6ad74'; g.lineWidth = 2.2; g.stroke(); g.setLineDash([]);
+    if (t.T.dest) { const [ex, ey] = t.pts[t.pts.length - 1]; g.beginPath(); g.arc(ex, ey, 3, 0, TAU); g.fillStyle = '#3a2a1e'; g.fill(); }
+  }
   g.restore();
   // ---- labels: every mark claims its box; each label takes the first free spot (then rings further
   // out, then the least crowded one) and gets a dotted leader when it lands away from its mark
@@ -1299,6 +1313,7 @@ export function mapCanvas(W) {
   const bannerW = 250;
   claim([8, 6, 8 + bannerW + 32, 76]); claim([CW - 80, 10, CW - 6, 92]); claim([12, CH - 50, 140, CH - 18]);
   for (const [x, y] of road) claim([x - 5, y - 5, x + 5, y + 5]);
+  for (const t of tracks) for (let k = 0; k < t.pts.length; k += 3) { const [x, y] = t.pts[k]; claim([x - 3, y - 3, x + 3, y + 3]); }
   if (lake) claim([lake.cx - lake.r * 1.6, lake.cy - lake.r * 0.7, lake.cx + lake.r * 1.6, lake.cy + lake.r * 0.7]);
   // distance ticks every 100 m from camp
   const ticks = [];
@@ -1314,12 +1329,22 @@ export function mapCanvas(W) {
   for (const [z, px, py] of ticks) { const [lx, ly] = place(px, py, 22, 10, [[0, 18], [0, -16], [12, 18], [-12, 18]]); inkText(g, String(z), lx, ly, { size: 9.5, weight: 'normal', clear: 0.5 }); }
   // the stops: a medallion on the spot, the name nearby (repeats numbered)
   // (a kind of stop that comes up more than once gets numbered medallions and one line in the legend)
-  const counts = {}, seen = {}; for (const s of stops) counts[s.type] = (counts[s.type] || 0) + 1;
+  const counts = {}, seen = {}; for (const s of stops) if (!s.deep) counts[s.type] = (counts[s.type] || 0) + 1;
   const legend = Object.keys(counts).filter(t => counts[t] > 1);
   const lsize = stops.length - legend.reduce((a, t) => a + counts[t], 0) > 6 ? 9 : 10.5;
   const dens = (Wd.dens || []).map(d => ({ px: X(d.z), py: Y(d.z, d.x), hoard: !!d.hoard })), rows = legend.length + (dens.length ? 1 : 0);
   if (rows) claim([12, CH - 56 - 14 * rows, 184, CH - 50]);
   for (const s of [...stops].sort((a, b) => a.z - b.z)) {
+    if (s.deep) {   // down a side road: its name, and that it's worth the drive
+      mapIcon(g, s.type, s.px, s.py, 1.05);
+      const nm = s.name || POI_NAMES[s.type], w = Math.max(textW(nm, 9.5), textW('$$$ (worth the drive)', 8.5)) + 6;
+      const out = Math.sign(s.py - Y(s.z)) || 1;
+      const [lx, ly] = place(s.px, s.py, w, 22, [[0, 26 * out], [0, 38 * out], [w / 2 + 18, 0], [-w / 2 - 18, 0], [0, -26 * out]]);
+      leader(s.px, s.py, lx, ly);
+      inkText(g, nm, lx, ly - 5, { size: 9.5, color: '#1e3a5a', clear: 0.7 });
+      inkText(g, '$$$ (worth the drive)', lx, ly + 7, { size: 8.5, italic: true, weight: 'normal', color: '#8a5a12', clear: 0.6 });
+      continue;
+    }
     seen[s.type] = (seen[s.type] || 0) + 1;
     const name = POI_NAMES[s.type] || s.type;
     mapIcon(g, s.type, s.px, s.py, 0.95);
@@ -1334,6 +1359,16 @@ export function mapCanvas(W) {
     leader(s.px, s.py, lx, ly);
     inkText(g, name, lx, ly - extra / 2, { size: lsize, color: '#1e3a5a', clear: 0.7 });
     if (extra) inkText(g, '(up the mesa)', lx, ly + 6, { size: 8.5, italic: true, weight: 'normal', color: '#1e3a5a' });
+  }
+  // the back roads: what they go round
+  for (const t of tracks) {
+    if (t.T.dest) continue;
+    const [mx, my] = t.pts[Math.floor(t.pts.length / 2)], what = t.T.round === 'gate' ? '(round the ranger gate)' : '(round the boulder)';
+    const w = Math.max(textW('OLD ROAD', 9.5), textW(what, 8.5)) + 6, out = Math.sign(my - Y(t.T.roundZ ?? 0)) || 1;
+    const [lx, ly] = place(mx, my, w, 22, [[0, 16 * out], [0, 26 * out], [w / 2 + 10, 0], [-w / 2 - 10, 0]]);
+    leader(mx, my, lx, ly);
+    inkText(g, 'OLD ROAD', lx, ly - 5, { size: 9.5, color: '#3a2a1e', clear: 0.7 });
+    inkText(g, what, lx, ly + 7, { size: 8.5, italic: true, weight: 'normal', color: '#3a2a1e', clear: 0.6 });
   }
   // ringtail dens: paw prints out past their stop
   for (const d of dens) {

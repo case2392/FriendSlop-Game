@@ -10,6 +10,7 @@ import { mulberry32, fbm, noise2, smoothstep, clamp, lerp } from './rng.js';
 import { LOOT, POI_LOOT } from './loot.js';
 import { butteParts, butteMains, polyExit, sdPoly, partHull } from './butte.js';
 import { PLAN as MOB_PLAN } from './mobs.js';
+import { TRACK, spline, finishTrack, nearTrack, nearBox } from './tracks.js';
 
 export const CELL = 2.5;
 export const HALF_W = 150;
@@ -488,10 +489,11 @@ export function generateLeg(seed, day, opts = {}) {
     tagNow = prevTag;
     return { F, y0, id };
   }
+  let deepMult = 1;   // (the stops down the side roads: worth the drive, see the side roads below)
   const placeLoot = (type, x, y, z, ry = 0, mult = 1) => {
     const L = LOOT[type];
     const dayMult = 1 + 0.22 * (day - 1);
-    const value = L.value ? Math.round(L.value * dayMult * mult * (0.85 + rng() * 0.4) / 5) * 5 : 0;
+    const value = L.value ? Math.round(L.value * dayMult * mult * deepMult * (0.85 + rng() * 0.4) / 5) * 5 : 0;
     const half = L.shape[0] === 'box' ? L.shape[2] : L.shape[0] === 'cyl' ? L.shape[1] : L.shape[1];
     props.push({ id: propId++, type, x, y: y + half + 0.06, z, ry, value });
   };
@@ -577,9 +579,10 @@ export function generateLeg(seed, day, opts = {}) {
   }
 
   // ---- points of interest: the buildings and the loot ---------------------------------
-  for (const p of pois) {
+  // (a function: the stops down the side roads are furnished the same way, last: furnishPoi below)
+  function furnishPoi(p) {
     const px = p.x;
-    const ry = p.side > 0 ? -Math.PI / 2 : Math.PI / 2;   // front faces the road
+    const ry = p.ry0 ?? (p.side > 0 ? -Math.PI / 2 : Math.PI / 2);   // front faces the road (or the track in)
     p.ry = ry;
     tagNow = { poi: p.id, poiType: p.type };
     if (p.type === 'gas') {
@@ -635,7 +638,7 @@ export function generateLeg(seed, day, opts = {}) {
         placeLoot(POI_LOOT.yard[Math.floor(rng() * POI_LOOT.yard.length)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
       }
       const s = F(0, 1.4, 3.6);
-      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.2, h: 0.9, lines: ['YARD SALE', 'EVERYTHING MUST GO'], bg: '#ffffff', fg: '#d0342c', post: true });
+      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.2, h: 0.9, lines: p.deep ? ['ESTATE SALE', 'NOBODY HOME'] : ['YARD SALE', 'EVERYTHING MUST GO'], bg: '#ffffff', fg: '#d0342c', post: true });
       decor.push({ k: 'umbrella', x: F(4.5, 0, -1).x, y: y0, z: F(4.5, 0, -1).z, ry });
     } else if (p.type === 'crash') {
       const M = p.mesa, y0 = M.base + M.h; p.y = y0;
@@ -691,9 +694,10 @@ export function generateLeg(seed, day, opts = {}) {
         placeLoot(POI_LOOT.dino[1 + Math.floor(rng() * 2)], w.x, heightAt(w.x, w.z), w.z, rng() * 6);
       }
       const s = F(3.6, 1.6, 4.0);
-      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.8, h: 1.1, lines: ['DINO WORLD', 'HANDS OFF THE HEAD'], bg: '#5aa469', fg: '#fff', post: true });
+      signs.push({ x: s.x, y: s.y, z: s.z, ry, w: 2.8, h: 1.1, lines: p.deep ? ['DINO WORLD', 'CLOSED 1987'] : ['DINO WORLD', 'HANDS OFF THE HEAD'], bg: '#5aa469', fg: '#fff', post: true });
     }
   }
+  for (const p of pois) furnishPoi(p);
 
   tagNow = null;
 
@@ -1467,7 +1471,203 @@ export function generateLeg(seed, day, opts = {}) {
     }
     return { dens, beds, rockfalls };
   }
-  const wild = opts.mobs === false ? { dens: [], beds: [], rockfalls: [] } : placeWildlife();
+  // (always placed, so the side roads below keep clear of it either way: without wildlife, what it added is
+  // taken away again, and the world is the same one without it)
+  const was = { signs: signs.length, props: props.length, decor: decor.length, statics: statics.length, cyls: cyls.length, propId };
+  const placed = placeWildlife();
+  placed.signs = signs.slice(was.signs);   // (its warning signs: the side roads keep clear of them either way)
+  // what the wildlife added, to put back at the end of each list once the side roads have had theirs (below)
+  const wildOwn = new Set([...signs.slice(was.signs), ...props.slice(was.props), ...decor.slice(was.decor)]);
+  if (opts.mobs === false) {
+    signs.length = was.signs; props.length = was.props; decor.length = was.decor; statics.length = was.statics; cyls.length = was.cyls;
+  }
+  propId = was.propId;   // (the side roads' things are numbered as they would be without the wildlife)
+  const wild = opts.mobs === false ? { dens: [], beds: [], rockfalls: [] } : placed;
+
+  // ---- side roads (W.tracks, shared/tracks.js): dirt tracks off the day's road, for the map to find ---------
+  // A spur turns off through a gap in the canyon wall into a pocket you can't see from the road, a stop at its
+  // end worth the drive (its loot at DEEP_MULT). A back road (from day 2) leaves before a ranger gate or a
+  // fallen boulder, runs along behind the canyon wall and comes back in after it: a way round, longer. The
+  // junctions get a sign that says little: the map says what's down them. Planned last, from their own random
+  // stream, round everything already placed, so nothing generated before them moves: the ground is cut down
+  // to the canyon floor along them (cutTracks), what grew in the cut is cleared, the stops are furnished
+  const DEEP_MULT = 1.7;
+  const tracks = opts.tracks === false ? [] : planTracks();
+  if (tracks.length) { cutTracks(); clearTracks(); furnishTracks(); }
+  // the wildlife's own things go last in each list (and its props are numbered after the side roads'), so the
+  // world with it is the world without it plus its things on the end (test/mobs.mjs checks)
+  if (opts.mobs !== false) {
+    for (const list of [signs, props, decor]) {
+      const rest = list.filter(x => !wildOwn.has(x)), own = list.filter(x => wildOwn.has(x));
+      list.length = 0; list.push(...rest, ...own);
+    }
+    const renum = new Map();
+    for (const p of props) if (wildOwn.has(p)) { renum.set(p.id, propId); p.id = propId++; }
+    for (const d of placed.dens) d.stash = d.stash.map(id => renum.get(id) ?? id);
+  }
+
+  function planTracks() {
+    const R = mulberry32((seed ^ Math.imul(day + 73, 0x165667B1)) >>> 0);
+    const out = [];
+    const sideIx = side => (side > 0 ? 1 : 0);
+    // the road's stretches a track mustn't turn off or come back in on: the grades' steps, the mud, the
+    // narrows (a gap cut in a narrows' wall would be a way round it), the camp and the town
+    const zOk = (za, zb) => {
+      for (let z = za; z <= zb; z += 4) {
+        if (z < 100 || z > LEN - 110) return false;
+        for (const o of obstacles) if (o.type === 'grade' ? z > o.z0 - 25 && z < o.z1 + 30 : o.type === 'mud' ? z > o.z - 15 && z < o.z + 57 : Math.abs(z - o.z) < 55) return false;
+      }
+      return true;
+    };
+    // and nowhere along it a grade's step (its floor is the road's height at its z: a 35 degree step there too),
+    // nor the mud (the whole valley floor there is mud: inMud)
+    const noStep = pts => pts.every(q => !obstacles.some(o => o.type === 'grade' && q.z > o.z0 - 25 && q.z < o.z1 + 30)
+      && !mud.some(m => q.z > m.z0 - 12 && q.z < m.z1 + 12 && Math.abs(q.x - roadX(q.z)) < m.hw + 12));
+    // what already stands that a track and its cut keep clear of: [x, z, r]
+    const keep = [];
+    for (const p of pois) keep.push([p.x, p.z, p.type === 'crash' ? (p.mesa?.bound || 14) + 10 : 17]);
+    for (const l of landmarks) keep.push([l.x, l.z, 7]);
+    for (const c of clearSpots) keep.push([c.x, c.z, c.r + 4]);
+    for (const a of anchors) keep.push([a.x, a.z, 6]);
+    for (const sg of opts.mobs === false ? [...signs, ...placed.signs] : signs) keep.push([sg.x, sg.z, 4]);
+    for (const d of placed.dens) keep.push([d.x, d.z, 9]);
+    for (const b of placed.beds) keep.push([b.x, b.z, 10]);
+    for (const r of placed.rockfalls) for (const q of r.rim) keep.push([q.x, q.z, 6 + TRACK.BANK]);   // (up on the wall, where the cut's banks run)
+    for (const b of buildings) keep.push([b.x, b.z, Math.hypot(b.w, b.dep) / 2 + 6]);
+    for (const g of gates) keep.push([g.x, g.z, 14]);
+    const reach = TRACK.CH + TRACK.BANK;   // the cut's whole reach either side of a track's line
+    // (what stands on the valley floor stands about at the cut floor's height already, so the track itself keeps
+    // clear of it, and its ditches; what stands up on a wall keeps clear of the banks too: its radius says so)
+    const clear = pts => pts.every(q => Math.abs(q.x) <= 112
+      && !keep.some(([x, z, r]) => Math.hypot(q.x - x, q.z - z) < r + TRACK.HW + 5) && !fields.some(f => inField(f, q.x, q.z, TRACK.HW + 4)));
+    const apart = pts => out.every(T => pts.every(q => T.pts.every(t => Math.hypot(q.x - t.x, q.z - t.z) > 2 * reach)));
+    // the floor along it: as gentle as the road's own (it is the road's height, roadY, at each point's z)
+    const gentle = pts => pts.every((q, i) => i === 0 || Math.abs(roadY(q.z) - roadY(pts[i - 1].z)) / TRACK.STEP < 0.09);
+
+    // a back road round a ranger gate or a fallen boulder (first: it has the fewest ways to fit)
+    if (day >= 2) {
+      const round = obstacles.filter(o => o.type === 'gate' || o.type === 'boulder').sort((a, b) => (b.type === 'gate') - (a.type === 'gate'));
+      for (const o of round) {
+        let made = null;
+        const gaps = [];
+        for (let ga = 85; ga <= 155; ga += 10) for (let gb = 85; gb <= 155; gb += 10) gaps.push([ga, gb]);
+        gaps.sort((a, b) => a[0] + a[1] - b[0] - b[1]);   // (the shortest way round that fits)
+        for (const [ga, gb] of gaps) {
+        const za = o.z - ga, zb = o.z + gb;
+        if (made || !zOk(za - 12, za + 26) || !zOk(zb - 26, zb + 12)) continue;
+        for (const side of R() < 0.5 ? [-1, 1] : [1, -1]) {
+          let wmax = 0, room = Infinity;
+          for (let z = za + 30; z <= zb - 30; z += 5) { wmax = Math.max(wmax, wallDist(sideIx(side), z)); room = Math.min(room, 104 - side * roadX(z)); }
+          const L = Math.min(wmax + 22, room);
+          if (L < 40) continue;
+          const ctl = [{ x: roadX(za), z: za }, { x: roadX(za + 12) + side * 5, z: za + 12 }, { x: roadX(za + 45) + side * L, z: za + 45 }];
+          for (let z = za + 70; z <= zb - 70; z += 25) ctl.push({ x: roadX(z) + side * L, z });
+          ctl.push({ x: roadX(zb - 45) + side * L, z: zb - 45 }, { x: roadX(zb - 12) + side * 5, z: zb - 12 }, { x: roadX(zb), z: zb });
+          const pts = spline(ctl);
+          if (!noStep(pts) || !clear(pts) || !apart(pts) || !gentle(pts)) continue;
+          made = finishTrack({ id: out.length, kind: 'loop', side, pts, hw: TRACK.HW, ch: TRACK.CH, bank: TRACK.BANK, dest: null, round: o.type, roundZ: o.z, sign: ['OLD ROAD', 'NOT MAINTAINED'] });
+          break;
+        }
+        }
+        if (made) { out.push(made); break; }
+      }
+    }
+    // spurs, to a stop round the back of the canyon wall
+    const KINDS = ['yard', 'junk', 'semi', 'dino', 'yard', 'junk'];
+    const NAMES = { yard: ['THE OLD MILLER PLACE', 'WIDOW HASKETT\'S', 'THE PRUITT HOMESTEAD'], junk: ['SKINNER\'S SALVAGE', 'THE BONEYARD'],
+      semi: ['THE WAGON WRECK', 'DEAD MAN\'S HAUL'], dino: ['LOST DINO WORLD'] };
+    const SIGNS = [['PRIVATE ROAD', 'KEEP OUT'], ['NO TRESPASSING', 'THIS MEANS YOU'], ['DEAD END', 'NO TURNAROUND'], ['POSTED', 'NO HUNTING']];
+    const nSpur = day >= 3 ? 3 : 2;
+    for (let tries = 0, n0 = out.length; tries < 200 && out.length - n0 < nSpur; tries++) {
+      const z0 = 110 + R() * (LEN - 340), side = R() < 0.5 ? -1 : 1;
+      const zd = z0 + 70 + R() * 40;
+      const kind = KINDS[Math.floor(R() * KINDS.length)], name = NAMES[kind][Math.floor(R() * NAMES[kind].length)];
+      const sign = SIGNS[Math.floor(R() * SIGNS.length)], want = 24 + R() * 22;
+      if (!zOk(z0 - 12, z0 + 26) || zd + 30 > LEN - 110) continue;
+      const wd = Math.max(wallDist(sideIx(side), z0 + 30), wallDist(sideIx(side), zd));
+      const xr = roadX(zd), L = Math.min(wd + want, 104 - side * xr);
+      if (L < wd + 16) continue;   // no room behind the wall
+      const xd = xr + side * L, zw = z0 + 0.42 * (zd - z0);
+      const ctl = [
+        { x: roadX(z0), z: z0 },
+        { x: roadX(z0 + 12) + side * 5, z: z0 + 12 },
+        { x: roadX(zw) + side * Math.min(wd + 4, L - 14), z: zw },
+        { x: xd - side * 7, z: zd - 16 },
+        { x: xd, z: zd },
+      ];
+      // (the track ends at the stop's edge, its yard: the stop's things stand in the middle of the clearing)
+      const pts = spline(ctl).filter(q => Math.hypot(q.x - xd, q.z - zd) > 11);
+      if (!noStep(pts) || !clear(pts) || !apart(pts) || !gentle(pts)) continue;
+      const dest = { x: xd, z: zd, r: TRACK.CLEAR, padY: roadY(zd) + 0.05, type: kind, name };
+      if (keep.some(([x, z, r]) => Math.hypot(xd - x, zd - z) < r + dest.r + 6) || fields.some(f => inField(f, xd, zd, dest.r + 4))) continue;
+      out.push(finishTrack({ id: out.length, kind: 'spur', side, pts, hw: TRACK.HW, ch: TRACK.CH, bank: TRACK.BANK, dest, sign }));
+    }
+    return out;
+  }
+  // how far past a track's cut floor (x, z) lies (negative: on the floor), the floor's own wander included
+  function cutE(T, x, z, near = nearTrack(T, x, z)) {
+    const dd = T.dest ? Math.hypot(x - T.dest.x, z - T.dest.z) - T.dest.r : Infinity;
+    return Math.min(near.d - T.ch, dd) + fbm(x / 9, z / 9, S + 23, 2) * 1.5;
+  }
+  // the ground cut down to the canyon floor along each track and round its clearing: a crowned track with
+  // shallow ditches, the floor's own gentle bumps beside it, flat round a stop, banks running up to the
+  // ground it was cut from (through the canyon wall, a notch)
+  function cutTracks() {
+    for (const T of tracks) {
+      const M = T.ch + T.bank + 3;
+      const ix0 = Math.max(0, Math.floor((T.bx0 - M - X0) / CELL)), ix1 = Math.min(nx, Math.ceil((T.bx1 + M - X0) / CELL));
+      const iz0 = Math.max(0, Math.floor((T.bz0 - M - Z0) / CELL)), iz1 = Math.min(nz, Math.ceil((T.bz1 + M - Z0) / CELL));
+      for (let ix = ix0; ix <= ix1; ix++) for (let iz = iz0; iz <= iz1; iz++) {
+        const x = X0 + ix * CELL, z = Z0 + iz * CELL, i = ix * (nz + 1) + iz;
+        const near = nearTrack(T, x, z), e = cutE(T, x, z, near);
+        if (e > T.bank) continue;
+        const d = near.d, dd = T.dest ? Math.hypot(x - T.dest.x, z - T.dest.z) : Infinity;
+        let f = roadY(z) - 0.2 * smoothstep(T.hw + 1, T.hw + 2.6, d) * (1 - smoothstep(T.hw + 4, T.hw + 7, d));
+        f += fbm(x / 30, z / 30, S + 27, 2) * B.bumps * 0.4 * smoothstep(T.hw + 3, T.ch + 3, d);
+        if (T.dest) f = lerp(f, T.dest.padY, 1 - smoothstep(T.dest.r - 8, T.dest.r, dd));
+        heights[i] = lerp(f, heights[i], smoothstep(0, T.bank, e));
+      }
+    }
+  }
+  // what grew where the ground was cut (trees, rocks and the rest, their colliders with them) is cleared; loot
+  // lying there is set back down on the new ground
+  function clearTracks() {
+    const inCut = (x, z) => tracks.some(T => nearBox(T, x, z, T.ch + T.bank + 4) && cutE(T, x, z) < T.bank + 1);
+    for (let i = decor.length - 1; i >= 0; i--) if (inCut(decor[i].x, decor[i].z)) decor.splice(i, 1);
+    const GREW = new Set(['tree', 'rock', 'deadtree', 'deadtree_decor', 'haybale', 'cactus', 'cairn']);
+    for (let i = cyls.length - 1; i >= 0; i--) if (GREW.has(cyls[i].mat) && inCut(cyls[i].x, cyls[i].z)) cyls.splice(i, 1);
+    for (let i = statics.length - 1; i >= 0; i--) {
+      const b = statics[i];
+      if (b.poi == null && b.bld == null && !b.town && (b.part === 'rock_ledge' || b.part === 'arch_span') && inCut(b.x, b.z)) statics.splice(i, 1);
+    }
+    for (const p of props) {
+      if (!inCut(p.x, p.z)) continue;
+      const L = LOOT[p.type], half = L ? (L.shape[0] === 'box' ? L.shape[2] : L.shape[1]) : 0.3;
+      p.y = heightAt(p.x, p.z) + half + 0.06;
+    }
+  }
+  // the stops at the spurs' ends (furnished like the roadside ones, their loot worth more), and the signs at
+  // the junctions
+  function furnishTracks() {
+    for (const T of tracks) {
+      if (T.dest) {
+        const d = T.dest, n = T.pts.length, a = T.pts[n - 1], b = T.pts[Math.max(0, n - 7)];
+        const p = { type: d.type, z: d.z, x: d.x, side: T.side, off: Math.abs(d.x - roadX(d.z)), id: pois.length, deep: true, name: d.name, track: T.id,
+          ry0: Math.atan2(b.x - a.x, b.z - a.z), padY: d.padY };   // (its front faces back up the track: the way you come in)
+        pois.push(p);
+        deepMult = DEEP_MULT;
+        furnishPoi(p);
+        deepMult = 1;
+        tagNow = null;
+        d.poi = p.id;
+      }
+      // the sign, beside the track a little way in, facing back out at the road
+      const at = T.pts[Math.min(T.pts.length - 1, 8)], back = T.pts[Math.min(T.pts.length - 1, 5)];
+      const tx = at.x - back.x, tz = at.z - back.z, tl = Math.hypot(tx, tz) || 1;
+      const sx = at.x - tz / tl * 4.3 * T.side, sz = at.z + tx / tl * 4.3 * T.side;
+      signs.push({ x: sx, y: heightAt(sx, sz) + 1.35, z: sz, ry: Math.atan2(-tx, -tz), w: 2.1, h: 0.85, lines: T.sign, bg: '#e8dcc0', fg: '#3b2a1a', post: true, track: T.id });
+    }
+  }
 
   // the fences are solid: one thin box per rail span, the very spans client/js/nature3d.js draws (posts 1.9 m
   // apart along the run's own z; a span steeper than 0.4 gets no rails, so no box), as wide as the rails either
@@ -1524,7 +1724,7 @@ export function generateLeg(seed, day, opts = {}) {
     roadX, roadY, heightAt, topAt, townY,
     obstacles, pois, mesas, statics, cyls, hulls, talus, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
-    dens: wild.dens, beds: wild.beds, rockfalls: wild.rockfalls,
+    dens: wild.dens, beds: wild.beds, rockfalls: wild.rockfalls, tracks,
   };
 }
 
