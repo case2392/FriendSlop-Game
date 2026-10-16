@@ -2359,6 +2359,25 @@ function holdInHands(ex, ey, ez, look) {
   const q = qMul(yawQ(me.yaw), h.rel);
   p.mesh.quaternion.set(q.x, q.y, q.z, q.w);
 }
+// The clothes rail's mirror: with its catalogue open you see yourself, as the crew does (in first person you
+// never do: playtest, "we bought outfits and it didn't change our outfits"). The camera turns round and stands
+// 2.7 m out in the street facing you, you on the left of the screen and the catalogue on the right
+// (style.css .dressing); Wear and Buy change you there and then. Shut it and you're back behind your eyes
+let mirror = null;   // { view: PlayerView } while it's up
+function mirrorStep(dt) {
+  const rail = S.W?.town?.tailor?.rail, p = S.meta?.players.find(q => q.id === S.selfId);
+  const on = !!rail && !!p && shopVendor() === 'tailor' && me.mode === 'walk' && !me.par;
+  $('shop').classList.toggle('dressing', on);
+  $('crosshair').classList.toggle('hidden', on);
+  if (!on) { if (mirror) { mirror.view.dispose(scene); mirror = null; } return null; }
+  if (!mirror) mirror = { view: new PlayerView(scene, p) };
+  mirror.view.setLook(p);
+  const dx = me.pos.x - rail.x, dz = me.pos.z - rail.z, dl = Math.hypot(dx, dz) || 1, ux = dx / dl, uz = dz / dl;
+  mirror.view.update(dt, time, { pos: me.pos, yaw: Math.atan2(ux, uz), pitch: 0, mode: C.MODE.WALK, flags: 0 });
+  mirror.view.label.visible = false;
+  // (looking back at you along -u, the camera's right is (uz, -ux): aimed that way of you, you stand left)
+  return { cam: { x: me.pos.x + ux * 2.7, y: me.pos.y + 1.4, z: me.pos.z + uz * 2.7 }, at: { x: me.pos.x + uz * 0.8, y: me.pos.y + 1.0, z: me.pos.z - ux * 0.8 } };
+}
 function cameraFeel(dt, eye) {
   const ease = me.mode === 'walk' && me.grounded && feel.y != null && Math.abs(eye.y - feel.y) < 0.7;
   feel.y = ease ? feel.y + (eye.y - feel.y) * Math.min(1, dt * 16) : eye.y;
@@ -2515,6 +2534,8 @@ requestAnimationFrame(frame);
     camera.lookAt(ex + Math.sin(me.yaw), ey + 0.9, ez + Math.cos(me.yaw));
     camera.rotation.z += Math.sin(time * 0.7) * 0.25;
   } else camera.lookAt(ex + look.x, ey + look.y, ez + look.z);
+  const mir = mirrorStep(dt);   // (at the clothes rail with its catalogue open: you, from the street)
+  if (mir) { camera.position.set(mir.cam.x, mir.cam.y, mir.cam.z); camera.lookAt(mir.at.x, mir.at.y, mir.at.z); }
   feel.fov += (settings.fov + (me.sprinting ? 6 : 0) - feel.fov) * Math.min(1, dt * 7);   // (the sprint's wider view eases in and out)
   camera.fov = feel.fov;
   camera.updateProjectionMatrix();
@@ -2560,6 +2581,7 @@ requestAnimationFrame(frame);
 
   // hands & map
   hands.update(dt, me, Math.abs(inp.f) + Math.abs(inp.r) > 0 && me.grounded, me.sprinting, rvView.steeringWheel);
+  if (mirror) hands.g.visible = false;   // (the camera's out in the street, looking at you)
   if (me.bunk != null) {
     hands.g.visible = false;   // (lying down: nothing in your hands to see)
     // walking (or jumping) gets you up, once
@@ -2571,7 +2593,7 @@ requestAnimationFrame(frame);
   if (reading) hands.showMap(liveMap(rv), true); else hands.hideMap();
 
   // what am I looking at
-  target = computeTarget();
+  target = mirror ? null : computeTarget();   // (in the mirror, the crosshair's nowhere: you're looking at yourself)
   $('prompt').textContent = keysIn(target?.label || '');
   $('prompt').classList.toggle('hidden', !target?.label || reading);   // the raised map covers the view
   if (target?.kind === 'revive' && keys.e && reviveT > 0) {
@@ -2782,21 +2804,30 @@ function earshotNudge(eye, others) {
 
 const TAU = Math.PI * 2;
 const cardTex = new Map();
+// (the rank and suit big in the top left corner, where a fanned hand leaves them showing, and again across the
+// middle; 256 px wide and filtered for the glancing look down at the felt: playtest, the cards were too hard to
+// read. The panel lists them too: casinoPanel)
 function cardTexture(code) {
   if (cardTex.has(code)) return cardTex.get(code);
-  const cv = document.createElement('canvas'); cv.width = 128; cv.height = 176;
+  const cv = document.createElement('canvas'); cv.width = 256; cv.height = 352;
   const g = cv.getContext('2d');
-  g.fillStyle = '#fff'; g.fillRect(0, 0, 128, 176);
-  g.strokeStyle = '#ccc'; g.lineWidth = 4; g.strokeRect(2, 2, 124, 172);
-  if (code === '??') { g.fillStyle = '#b8336a'; g.fillRect(10, 10, 108, 156); g.fillStyle = '#ffd166'; g.font = 'bold 50px serif'; g.textAlign = 'center'; g.fillText('$', 64, 105); }
-  else {
-    const red = /[♥♦]/.test(code);
-    g.fillStyle = red ? '#d62828' : '#111';
-    g.font = 'bold 54px serif'; g.textAlign = 'center';
-    g.fillText(code.slice(0, -1), 64, 78);
-    g.font = '60px serif'; g.fillText(code.slice(-1), 64, 148);
+  g.fillStyle = '#fffdf6'; g.fillRect(0, 0, 256, 352);
+  g.strokeStyle = '#9a9184'; g.lineWidth = 6; g.strokeRect(3, 3, 250, 346);
+  g.textAlign = 'center'; g.textBaseline = 'middle';
+  if (code === '??') {
+    g.fillStyle = '#b8336a'; g.fillRect(18, 18, 220, 316);
+    g.strokeStyle = '#ffd166'; g.lineWidth = 6; g.strokeRect(30, 30, 196, 292);
+    g.fillStyle = '#ffd166'; g.font = 'bold 110px serif'; g.fillText('$', 128, 182);
+  } else {
+    const red = /[♥♦]/.test(code), rank = code.slice(0, -1), suit = code.slice(-1);
+    g.fillStyle = red ? '#c81e1e' : '#111';
+    g.font = `bold ${rank.length > 1 ? 74 : 86}px Georgia, serif`; g.fillText(rank, 62, 66);
+    g.font = '72px serif'; g.fillText(suit, 62, 140);
+    g.font = `bold ${rank.length > 1 ? 120 : 140}px Georgia, serif`; g.fillText(rank, 158, 236);
+    g.font = '96px serif'; g.fillText(suit, 196, 312);
   }
   const t = new THREE.CanvasTexture(cv); t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy?.() || 1);
   cardTex.set(code, t);
   return t;
 }
@@ -2819,6 +2850,8 @@ function chipStack(group, amount, p) {
 const nameOfId = id => S.meta?.players.find(q => q.id === id)?.name || 'Somebody';
 const GAME_NAME = { bj: 'Blackjack', craps: 'Craps', flip: 'Double or Nothing', derby: 'The Ringtail Derby' };
 const OUT_WORD = { win: 'WIN', natural: 'BLACKJACK!', push: 'PUSH', lose: 'LOSE', bust: 'BUST' };
+// a card as the panel shows it (style.css .pc)
+const cardChip = c => (c === '??' ? '<span class="pc back"></span>' : `<span class="pc${/[♥♦]/.test(c) ? ' red' : ''}"><b>${c.slice(0, -1)}</b><i>${c.slice(-1)}</i></span>`);
 // blackjack on the page: a card's count (the server keeps the rules: server/blackjack.js), the table's round
 const cardVal = c => { const r = c.slice(0, -1); return r === 'A' ? 11 : r === '10' || r === 'J' || r === 'Q' || r === 'K' ? 10 : +r; };
 const bjTable = () => S.g?.cas?.bjt || { st: 'bet', dl: [] };
@@ -2870,10 +2903,16 @@ function casinoPanel(at, g) {
   let line = '', keysTxt = '';
   const K = (n, t) => `<kbd>${n}</kbd> ${t}`;
   const stakeKeys = [K(1, '+$100'), K(2, '+$500'), K(3, 'ALL IN'), K(4, 'clear')].join(' ');
+  let extra = '';
   if (k === 'bj') {
     // the table plays one round together: the count after the first DEAL, the cards round the seats, each
     // seat's turn in order, the dealer last (server/blackjack.js)
     const tb = bjTable(), hands = v.hands || [], tots = v.tots || [], inIt = hands.length > 0, mine = tb.st === 'turn' && tb.turn === at.id;
+    // the dealer's cards and yours, big (the felt's are small and far)
+    if (inIt || tb.dl?.length) {
+      const row = (who, codes, tot) => `<div><span class="cas-who">${who}</span>${codes.map(cardChip).join('')}<span class="cas-tot${tot > 21 ? ' bust' : ''}">${codes.length ? tot : ''}</span></div>`;
+      extra = `<div class="cas-cards">${row('Dealer', tb.dl || [], tb.dt || 0)}${hands.map((h, i) => row(hands.length > 1 ? `${tb.st === 'turn' && mine && tb.hand === i ? '▶ ' : ''}Hand ${i + 1}` : 'You', h, tots[i] ?? 0)).join('')}</div>`;
+    }
     const you = hands.length > 1 ? tots.map((t, i) => `hand ${i + 1}: ${t}`).join(', ') : `you ${tots[0] ?? '-'}`;
     const dl = tb.st === 'result' || tb.st === 'dealer' ? `the dealer ${tb.dt}` : `the dealer shows ${tb.dt || '-'}`;
     if (mine) {
@@ -2898,10 +2937,29 @@ function casinoPanel(at, g) {
       keysTxt = `${stakeKeys} ${K(5, 'DEAL')}`;
     }
   } else if (k === 'craps') {
-    const rolling = v.dice && !v.land;
-    const pays = { 4: '2 to 1', 10: '2 to 1', 5: '3 to 2', 9: '3 to 2', 6: '6 to 5', 8: '6 to 5' }[v.pt];
-    line = rolling ? 'Rolling…' : v.st === 'point' ? `The point is ${v.pt}: roll a ${v.pt} before a 7.${v.odds ? ` Odds ${fmt$(v.odds)} behind the line pay ${pays}.` : ` Odds behind the line pay ${pays}.`}` : v.st === 'result' ? `${v.won > 0 ? 'Winner' : 'Loser'}: ${v.dice ? v.dice[0] + v.dice[1] : ''} · ${v.won > 0 ? '+' : ''}${fmt$(v.won)}` : 'The pass line: a 7 or 11 wins even money, 2, 3 or 12 loses, anything else is the point.';
-    keysTxt = v.st === 'point' ? `${K(5, 'ROLL')} ${K(7, 'ODDS +bet')}` : `${stakeKeys} ${K(5, 'ROLL')}`;
+    // one game for the table (server/craps.js): bets on the line and ROLL ME IN, a short count, the shooter's
+    // throws (the dice go round the rails on a seven-out), the point
+    const ct = S.g?.cas?.crt || { st: 'bet' }, inIt = v.stake > 0, mine = ct.sh === at.id;
+    const shooter = ct.sh == null ? 'The house' : mine ? 'You' : seatName(ct.sh), sum = ct.dice ? ct.dice[0] + ct.dice[1] : 0;
+    const pays = { 4: '2 to 1', 10: '2 to 1', 5: '3 to 2', 9: '3 to 2', 6: '6 to 5', 8: '6 to 5' }[ct.pt];
+    const landed = ct.dice && ct.land;
+    if (landed && ct.st !== 'bet' && ct.st !== 'count') extra = `<div class="cas-cards"><div><span class="cas-who">${mine ? 'You' : shooter}</span>${ct.dice.map(d => `<span class="pc die"><b>${d}</b></span>`).join('')}<span class="cas-tot">${sum}</span></div></div>`;
+    const LAST = { natural: `${sum}: a natural, the line wins`, craps: `${sum}: craps, the line loses`, point: `${sum} is the point`, made: `${sum}: the point made`, 'seven-out': 'Seven out: the dice pass on', again: `${sum}: throw again` };
+    if (ct.st === 'roll') { line = `${mine ? 'You throw' : `${shooter} throws`}…${ct.pt ? ` (the point is ${ct.pt})` : ' (the come-out)'}`; keysTxt = ''; }
+    else if (ct.st === 'shoot') {
+      line = `${landed && ct.last ? `${LAST[ct.last]}. ` : ''}${ct.pt ? `The point is ${ct.pt}: a ${ct.pt} before a 7 wins.` : 'The come-out: 7 or 11 wins, 2, 3 or 12 loses.'} ${mine ? 'YOUR THROW' : `${shooter} ${shooter === 'You' ? 'have' : 'has'} the dice`}${ct.left != null ? ` (${ct.left} s)` : ''}`;
+      keysTxt = [mine && K(5, 'ROLL'), inIt && ct.pt && K(7, `ODDS +bet (pays ${pays})`)].filter(Boolean).join(' ') || (inIt ? 'Your bet rides the line' : 'A game\'s on: you\'re in the next come-out');
+    } else if (ct.st === 'result') {
+      line = `${ct.last ? LAST[ct.last] : ''}${inIt ? ` · ${v.won > 0 ? 'WINNER' : 'LOSER'} ${v.won > 0 ? '+' : ''}${fmt$(v.won)}` : ''}`;
+      keysTxt = 'The next come-out\'s coming';
+    } else if (ct.st === 'count') {
+      const ready = (ct.ready || []).includes(at.id);
+      line = ready ? `You're in. The dice go in ${ct.left ?? 0} s` : `Bets on the line: ROLL ME IN to be in this game (${ct.left ?? 0} s)`;
+      keysTxt = ready ? stakeKeys : `${stakeKeys} ${K(5, 'ROLL ME IN')}`;
+    } else {
+      line = `One table, one shooter${ct.sh ? ` (${shooter} ${shooter === 'You' ? 'have' : 'has'} the dice)` : ''}. The pass line: 7 or 11 wins even money, 2, 3 or 12 loses, anything else is the point.`;
+      keysTxt = `${stakeKeys} ${K(5, 'ROLL ME IN')}`;
+    }
   } else if (k === 'flip') {
     line = v.spin ? 'Flipping…' : v.st === 'result' ? (v.won > 0 ? `DOUBLED! +${fmt$(v.won)}` : `NOTHING. ${fmt$(v.won)}`) : 'Your stake doubles or it\'s gone. It stays set: pull again.';
     keysTxt = `${stakeKeys} ${K(5, 'PULL')}`;
@@ -2910,7 +2968,8 @@ function casinoPanel(at, g) {
     line = v.st === 'race' ? 'They\'re off!' : v.st === 'result' ? `No. ${v.order?.[0]} wins: tickets on it pay x3.8` : v.left != null ? `Off in ${v.left} s${mine.length ? ` · yours: ${mine.join(', ')}` : ''}` : 'Four ringtails, one winner, x3.8. The race runs 12 s after the first ticket.';
     keysTxt = `${stakeKeys} · a ticket on ${[1, 2, 3, 4].map(n => K(n + 4, `No. ${n}`)).join(' ')}`;
   }
-  const html = `<div class="cas-h">${title}<span>the bank ${fmt$(g.bank)}</span></div><div class="cas-l">${line}</div><div class="cas-b">${k === 'derby' ? 'Your ticket' : 'Bet'} <b>${fmt$(bet)}</b>${v.stake && ((k === 'bj' && v.hands && v.st !== 'result') || v.st === 'point' || v.spin) ? ` · in play ${fmt$(v.stake + (v.odds || 0))}` : ''}</div><div class="cas-k">${keysTxt}</div><div class="cas-x">Walk away to leave it</div>`;
+  const playing = v.stake && ((k === 'bj' && v.hands && v.st !== 'result') || (k === 'craps' && v.st !== 'result') || v.spin);
+  const html = `<div class="cas-h">${title}<span>the bank ${fmt$(g.bank)}</span></div><div class="cas-l">${line}</div>${extra}<div class="cas-b">${k === 'derby' ? 'Your ticket' : 'Bet'} <b>${fmt$(bet)}</b>${playing ? ` · in play ${fmt$(v.stake + (v.odds || 0))}` : ''}</div><div class="cas-k">${keysTxt}</div><div class="cas-x">Walk away to leave it</div>`;
   if (el.dataset.html !== html) { el.innerHTML = html; el.dataset.html = html; }
   el.classList.remove('hidden');
 }
@@ -3012,7 +3071,7 @@ function updateCasino(dt) {
   S.cas = cas;
   // the cards and chips are re-laid whenever any seat's hand or bet changes
   const tb = cas?.bjt;
-  const key = cas ? JSON.stringify([tb?.dl, T.bj.seats.map(s => { const v = cas[s.id]; return v ? [v.hands, v.bet, v.stake, v.st] : 0; }), T.craps.rails.map(r => [cas[r.id]?.bet, cas[r.id]?.stake, cas[r.id]?.odds, cas[r.id]?.st])]) : '';
+  const key = cas ? JSON.stringify([tb?.dl, T.bj.seats.map(s => { const v = cas[s.id]; return v ? [v.hands, v.bet, v.stake, v.st] : 0; }), T.craps.rails.map(r => [cas[r.id]?.bet, cas[r.id]?.stake, cas[r.id]?.odds])]) : '';
   if (key !== lastCards) {
     lastCards = key;
     while (c.cards.children.length) c.cards.remove(c.cards.children[0]);
@@ -3034,7 +3093,7 @@ function updateCasino(dt) {
     if (cas) for (const rail of T.craps.rails) {
       const v = cas[rail.id];
       if (!v) continue;
-      const on = v.st === 'point' || v.st === 'roll';
+      const on = v.stake > 0;   // (in the table's game: its line bet down)
       chipStack(c.cards, on ? v.stake : v.bet, onTable(T.craps.table, T.craps.ry, rail.dx, 0, 0.62));
       if (on && v.odds) chipStack(c.cards, v.odds, onTable(T.craps.table, T.craps.ry, rail.dx, 0, 0.5));   // (behind the line)
     }
@@ -3055,11 +3114,13 @@ function updateCasino(dt) {
       else if (tb.st === 'count') { const ready = (tb.ready || []).includes(id); t = `${who} · BET ${fmt$(v.bet)} · ${ready ? 'IN' : `DEAL? ${tb.left ?? 0} s`}`; col = ready ? '#fff' : '#ffd166'; }
       else t = `${who} · BET ${fmt$(v.bet)}`;
     } else if (v.k === 'craps') {
-      if (!who) { t = `RAIL ${n} · OPEN`; col = '#c8b890'; }
-      else if (v.dice && !v.land) t = `${who} · ROLLING…`;
-      else if (v.st === 'point') t = `${who} · POINT ${v.pt}`;
-      else if (v.st === 'result') { t = `${who} · ${v.won > 0 ? 'WINNER' : 'LOSER'} ${v.won > 0 ? '+' : ''}${fmt$(v.won)}`; col = moneyCol(v.won); }
-      else t = `${who} · BET ${fmt$(v.bet)}`;
+      const ct = cas.crt || {}, nm = who || `RAIL ${n}`, sh = ct.sh === id && v.o != null;
+      if (v.stake && ct.st === 'result') { t = `${nm} · ${v.won > 0 ? 'WINNER' : 'LOSER'} ${v.won > 0 ? '+' : ''}${fmt$(v.won)}`; col = moneyCol(v.won); }
+      else if (sh && (ct.st === 'shoot' || ct.st === 'roll')) { t = `${nm} · SHOOTER · ${ct.st === 'roll' ? 'ROLLING…' : ct.pt ? `POINT ${ct.pt}` : 'COME-OUT'}`; col = '#ffd166'; }
+      else if (v.stake) t = `${nm} · ${fmt$(v.stake + (v.odds || 0))} ON THE LINE${ct.pt ? ` · POINT ${ct.pt}` : ''}`;
+      else if (!who) { t = `RAIL ${n} · OPEN`; col = '#c8b890'; }
+      else if (ct.st === 'count') { const ready = (ct.ready || []).includes(id); t = `${who} · BET ${fmt$(v.bet)} · ${ready ? 'IN' : `IN? ${ct.left ?? 0} s`}`; col = ready ? '#fff' : '#ffd166'; }
+      else t = `${who} · BET ${fmt$(v.bet)}${sh ? ' · HAS THE DICE' : ''}`;
     } else if (v.k === 'flip') {
       if (v.spin) { t = 'FLIPPING…'; col = '#ffd166'; }
       else if (v.st === 'result') { t = v.won > 0 ? `DOUBLED! +${fmt$(v.won)}` : `NOTHING. ${fmt$(v.won)}`; col = moneyCol(v.won); }
@@ -3071,7 +3132,9 @@ function updateCasino(dt) {
     l.userData.set(t, col);
   }
   for (const [id, coin] of c.coins) coin.rotation.z += dt * (cas[id]?.spin ? 25 : 0.6);
-  for (const rail of T.craps.rails) placeDice(T, rail, c.dice.get(rail.id), cas[rail.id] || {});
+  // (the table's one pair, thrown from the shooter's rail: the first rail's when the house throws)
+  const ct = cas.crt || {}, from = T.craps.rails.find(r => r.id === ct.sh) || T.craps.rails[0];
+  for (const rail of T.craps.rails) placeDice(T, rail, c.dice.get(rail.id), rail === from ? ct : {});
   updateDerby(dt, cas.derby);
   const at = myStation();
   if (!at && S.casAt) {

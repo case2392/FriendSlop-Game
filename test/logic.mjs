@@ -6,6 +6,7 @@ import { generateLeg, butteRadius } from '../shared/world.js';
 import { QUOTAS, medBill } from '../shared/constants.js';
 import { BJTable, BJ, handTotal } from '../server/blackjack.js';
 import { Casino, FLIP_ODDS, DERBY, ODDS } from '../server/casino.js';
+import { CrapsTable, CR } from '../server/craps.js';
 import http from 'node:http';
 import { mulberry32 } from '../shared/rng.js';
 
@@ -215,11 +216,12 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     'casino: a seat is whoever sat down first; somebody else can\'t sit there or bet on it');
   play(A, 'bj1', 'b500'); play(B, 'craps1', 'b500'); play(B, 'craps1', 'b100'); play(Cy, 'flip1', 'b100'); play(Cy, 'flip1', 'b100');
   const bets = [cas.st.get('bj1').bet, cas.st.get('craps1').bet, cas.st.get('flip1').bet];
-  // (Ann's the only one at the table: her DEAL deals at once, and the stake goes down as the cards come)
+  // (Ann's the only one at the blackjack table and Bob the only one at the craps table: her DEAL deals at once,
+  // his ROLL ME IN starts the game at once, and their stakes go down on the tables' clocks)
   play(A, 'bj1', 'go'); const r2 = play(B, 'craps1', 'go'), r3 = play(Cy, 'flip1', 'go');
-  const bj0 = cas.tick(t, bank).find(x => x.spend != null);
-  settle([bj0].filter(Boolean));
-  const spent = (bj0?.spend || 0) + (r2.spend || 0) + (r3.spend || 0);
+  const down = cas.tick(t, bank).filter(x => x.spend != null);
+  settle(down);
+  const spent = down.reduce((a, x) => a + x.spend, 0) + (r2.spend || 0) + (r3.spend || 0);
   check(bets.join() === '500,600,200' && spent === 1300 && bank === 3000 - 1300,
     `casino: three games at once take their own stakes from the one bank ($${bets.join(', $')}: $${spent} out, bank $${bank})`);
   // Ann plays her hand out; the dice and the coin land on their own time
@@ -228,8 +230,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
     settle(cas.tick(t, bank));
     const T = cas.bj;
     if (T.state === 'turn' && T.current()?.id === 'bj1') play(A, 'bj1', handTotal(T.current().h.cards) < 15 ? 'hit' : 'stand');
-    const c = cas.st.get('craps1');
-    if (c.state === 'point' && !c.pend) play(B, 'craps1', 'go');
+    if (cas.cr.state === 'shoot' && cas.cr.shooter === 'craps1') play(B, 'craps1', 'go');   // (his throw)
   }
   const one = ['bj1', 'craps1', 'flip1'].map(id => settled(id));
   const net = done.reduce((a, x) => a + x.won, 0);
@@ -262,12 +263,13 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   at(D, 'craps2'); at(E, 'derby');
   cas2.sit(D, 'craps2');
   let bk = 5000, pointed = false, clock = 0;
+  const money = list => { for (const x of list) { if (x.spend != null) bk -= x.spend; else if (x.back != null) bk += x.back; } };
   cas2.act(D, 'craps2', 'b100', 0, clock, bk);
-  for (let k = 0; k < 50 && !pointed; k++) {
-    const g = cas2.act(D, 'craps2', 'go', 0, clock, bk); bk -= g.spend || 0;
-    clock += 5; for (const x of cas2.tick(clock)) bk += x.back;
-    pointed = cas2.st.get('craps2').state === 'point';
-    if (!pointed) { clock += 10; for (const x of cas2.tick(clock)) bk += x.back; }
+  for (let k = 0; k < 80 && !pointed; k++) {
+    const g = cas2.act(D, 'craps2', 'go', 0, clock, bk); bk -= g.spend || 0;   // (ROLL ME IN, then the throws)
+    clock += 5; money(cas2.tick(clock, bk));
+    pointed = cas2.cr.state === 'shoot' && cas2.cr.point > 0;
+    if (cas2.cr.state === 'result') { clock += 10; money(cas2.tick(clock, bk)); }
   }
   cas2.act(E, 'derby', 'b500', 0, clock, bk); const tk = cas2.act(E, 'derby', 'go', 3, clock, bk); bk -= tk.spend || 0;
   const inPlay = cas2.inPlay(), last = cas2.closeAll(clock + 1);
@@ -278,14 +280,14 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // the house's edge, played many times: the pass line wins 244 in 495, Double or Nothing 48.5%, a Derby ticket 1 in 4 at x3.8
   const cas3 = new Casino(spots, mulberry32(9)), P = mk(9, 'Pat');
   let wins = 0, games = 0, flips = 0, fw = 0, tt = 0;
-  const S = cas3.st.get('craps1'), Fm = cas3.st.get('flip2');
-  // (one game at a time: the craps first, then the coin; a refused roll or pull ends the loop short)
-  at(P, 'craps1'); cas3.sit(P, 'craps1'); S.bet = 100;
+  const Fm = cas3.st.get('flip2');
+  // (the craps table on its own, game after game: a line bet, thrown to a decision)
+  const CT = new CrapsTable(['craps1', 'craps2'], mulberry32(9));
   for (let i = 0; games < 20000 && i < 400000; i++) {
-    cas3.act(P, 'craps1', 'go', 0, tt, 1e9);
-    if (!S.pend) { tt += 1; continue; }
-    const r = cas3.crapsLand(S, tt);
-    if (r.length) { games++; if (r[0].won > 0) wins++; S.state = 'bet'; }
+    if (CT.state === 'bet') CT.begin(new Map([['craps1', 100]]), ['craps1'], tt);
+    CT.roll('craps1', tt); tt += CR.ROLL_T + 0.01;
+    const r = CT.step(tt, ['craps1']);
+    if (r) { games++; if (r[0].won > 0) wins++; tt += CR.RESULT_T + 0.01; CT.step(tt, ['craps1']); }
   }
   at(P, 'flip2'); cas3.sit(P, 'flip2'); Fm.bet = 100;
   for (let i = 0; flips < 20000 && i < 40000; i++) { if (cas3.act(P, 'flip2', 'go', 0, tt, 1e9).err) continue; const r = cas3.flipLand(Fm, tt); flips++; if (r[0].won > 0) fw++; Fm.state = 'bet'; }
@@ -295,26 +297,72 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
   // craps odds: behind the line once there's a point, up to 3x the line, paid at true odds (a 4 pays 2 to 1,
   // a 6 pays 6 to 5) on top of the line's even money; a seven-out takes the line and the odds
   {
-    const cas4 = new Casino(spots, mulberry32(1)), Q = mk(7, 'Quinn'), K = cas4.st.get('craps1');
+    const cas4 = new Casino(spots, mulberry32(1)), Q = mk(7, 'Quinn'), K = cas4.st.get('craps1'), T = cas4.cr;
     at(Q, 'craps1'); cas4.sit(Q, 'craps1'); K.bet = 100;
-    const point = (sum, bk) => { const g = cas4.act(Q, 'craps1', 'go', 0, 0, bk); K.pend = { at: 0, out: 'point', sum, p: Q }; cas4.crapsLand(K, 0); return g.spend; };
-    const odds = bk => cas4.act(Q, 'craps1', 'odds', 0, 0, bk);
-    const early = odds(1000).err;
-    const line = point(4, 1000), o = [odds(900), odds(800), odds(700)], full = odds(600).err;
-    K.pend = { at: 0, out: 'win', sum: 4, p: Q };
-    const w4 = cas4.crapsLand(K, 0)[0];
-    K.state = 'bet';
+    let ct = 0;
+    // (a throw of the sum wanted: the dice the table threw, made to say it)
+    const throwSum = sum => { T.roll(T.shooter, ct); T.pend.sum = sum; T.dice = [Math.min(6, sum - 1), sum - Math.min(6, sum - 1)]; ct += CR.ROLL_T + 0.01; return T.step(ct, ['craps1']); };
+    const point = (sum, bk) => {
+      if (T.state === 'result') { ct += CR.RESULT_T + 0.01; T.step(ct, ['craps1']); }
+      cas4.act(Q, 'craps1', 'go', 0, ct, bk);
+      const g = cas4.tick(ct, bk).find(x => x.spend != null);
+      throwSum(sum);
+      return g?.spend;
+    };
+    const odds = bk => cas4.act(Q, 'craps1', 'odds', 0, ct, bk);
+    const early = (cas4.act(Q, 'craps1', 'go', 0, ct, 1000), cas4.tick(ct, 1000), odds(1000).err);
+    throwSum(4);   // (that game's come-out: the point is 4)
+    const line = 100, o = [odds(900), odds(800), odds(700)], full = odds(600).err;
+    const w4 = throwSum(4)[0];
     point(6, 1000); odds(900); odds(800);
-    K.pend = { at: 0, out: 'win', sum: 6, p: Q };
-    const w6 = cas4.crapsLand(K, 0)[0];
-    K.state = 'bet';
+    const w6 = throwSum(6)[0];
     point(9, 1000); odds(900);
-    K.pend = { at: 0, out: 'lose', sum: 7, p: Q };
-    const l9 = cas4.crapsLand(K, 0)[0];
-    const short = (K.state = 'bet', point(10, 1000), odds(50));
+    const l9 = throwSum(7)[0];
+    point(10, 1000);
+    const short = odds(50);
     check(early && line === 100 && o.every(x => x.spend === 100) && full && w4.back === 1100 && w4.won === 700 && w6.back === 640 && w6.won === 340 && l9.back === 0 && l9.won === -200
       && short.err && ODDS[5] === 1.5 && ODDS[8] === 1.2,
       `casino: craps odds go behind the line only on a point, up to 3x; the 4 made pays the line 1 to 1 and $300 odds 2 to 1 (+$${w4.won}), the 6 pays $200 odds 6 to 5 (+$${w6.won}), a seven-out loses both (${l9.won})`);
+  }
+  // craps is one game for the table: two rails in, one shooter (the first rail round), the same throw settling
+  // both, the other rail told who has the dice; a seven-out passes the dice on, a slow shooter has the house
+  // throw for them, and a shooter who walks off hands the dice to the next rail
+  {
+    const cas5 = new Casino(spots, mulberry32(21)), A2 = mk(11, 'Ada'), B2 = mk(12, 'Ben'), pl5 = new Map([[11, A2], [12, B2]]), T = cas5.cr;
+    at(A2, 'craps1'); at(B2, 'craps2'); cas5.sit(A2, 'craps1'); cas5.sit(B2, 'craps2');
+    let b5 = 2000, c5 = 0;
+    const money = list => { for (const x of list) { if (x.spend != null) b5 -= x.spend; else if (x.back != null) b5 += x.back; } return list; };
+    cas5.act(A2, 'craps1', 'b100', 0, c5, b5); cas5.act(B2, 'craps2', 'b100', 0, c5, b5); cas5.act(B2, 'craps2', 'b100', 0, c5, b5);
+    const msg = cas5.act(A2, 'craps1', 'go', 0, c5, b5).msg, counting = T.state === 'count';
+    cas5.act(B2, 'craps2', 'go', 0, c5, b5);
+    money(cas5.tick(c5, b5));
+    const both = T.state === 'shoot' && T.stakes.get('craps1') === 100 && T.stakes.get('craps2') === 200 && b5 === 1700 && T.shooter === 'craps1';
+    const notYou = cas5.act(B2, 'craps2', 'go', 0, c5, b5).err || '';
+    // (throw till a decision: the same throw settles both rails the same way)
+    let res = null;
+    for (let k = 0; k < 40 && !res; k++) { cas5.act(A2, 'craps1', 'go', 0, c5, b5); c5 += CR.ROLL_T + 0.01; res = money(cas5.tick(c5, b5)).filter(x => x.back != null); if (!res.length) res = null; }
+    const same = res?.length === 2 && res[0].won / 100 === res[1].won / 200 && res.find(x => x.id === 'craps1')?.p === A2 && res.find(x => x.id === 'craps2')?.p === B2;
+    check(/Ada is in at Craps/.test(msg || '') && counting && both && /Ada has the dice/.test(notYou) && same,
+      `casino: craps at the table: Ada's ROLL ME IN starts the count, Ben's ends it, both line bets go down ($100, $200), Ada shoots (Ben told "${notYou}"), and one throw settles both (${res?.map(x => `${x.id} ${x.won >= 0 ? '+' : ''}${x.won}`).join(', ')})`);
+    // a seven-out passes the dice: a game with a point, then a 7
+    const T2 = new CrapsTable(['craps1', 'craps2'], mulberry32(3));
+    T2.begin(new Map([['craps1', 100], ['craps2', 100]]), ['craps1', 'craps2'], 0);
+    const thr = (sum, t) => { T2.roll(T2.shooter, t); T2.pend.sum = sum; return T2.step(t + CR.ROLL_T + 0.01, ['craps1', 'craps2']); };
+    const first = T2.shooter;
+    thr(8, 0); const keepOnPoint = T2.shooter; thr(7, 2);
+    const passed = T2.shooter, natural = (T2.step(10, ['craps1', 'craps2']), T2.begin(new Map([['craps1', 100]]), ['craps1', 'craps2'], 10), thr(11, 10), T2.shooter);
+    // a slow shooter: the house throws once SHOOT_T is up
+    const T3 = new CrapsTable(['craps1', 'craps2'], mulberry32(4));
+    T3.begin(new Map([['craps1', 100]]), ['craps1'], 0);
+    T3.step(CR.SHOOT_T - 0.5, ['craps1']); const waited = T3.state === 'shoot';
+    T3.step(CR.SHOOT_T + 0.01, ['craps1']); const thrown = T3.state === 'roll' && T3.pend?.by == null;
+    // the shooter walks off: the dice to the next rail in the game
+    const T4 = new CrapsTable(['craps1', 'craps2'], mulberry32(5));
+    T4.begin(new Map([['craps1', 100], ['craps2', 100]]), ['craps1', 'craps2'], 0);
+    T4.vacated('craps1', ['craps2'], 1);
+    check(first === 'craps1' && keepOnPoint === 'craps1' && passed === 'craps2' && natural === 'craps2' && waited && thrown && T4.shooter === 'craps2' && T4.until === 1 + CR.SHOOT_T,
+      `casino: the dice go round: rail 1 shoots, keeps them on the point, seven-out and rail 2 has them (and keeps them on a natural); a shooter slow past ${CR.SHOOT_T} s has the house throw; one who walks off hands them on (${T4.shooter})`);
+    cas5.release(pl5, c5);
   }
 }
 

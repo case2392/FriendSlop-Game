@@ -21,7 +21,7 @@ payment and he takes the RV.
 | ![carrying a CRT TV](docs/screenshots/carrying.jpg) | ![the paper road map](docs/screenshots/map.jpg) |
 | **Fragile physics loot.** Every bump costs money. | **One paper map, and the driver can't see it.** Each morning picks a driver and a navigator; the navigator calls out the road. |
 | ![the casino](docs/screenshots/casino.jpg) | ![the pawn counter](docs/screenshots/pawn.jpg) |
-| **The Lucky Slop.** Blackjack dealt round the table to the whole crew at once (double, split), craps with odds behind the line, Double or Nothing and the Ringtail Derby, all out of the *shared* bank. | **Honest Ed's Pawn.** Put it on the counter, ring the bell (or park in his loading zone: he buys the whole load). |
+| **The Lucky Slop.** Blackjack dealt round the table to the whole crew at once (double, split), craps at one table with one shooter and odds behind the line, Double or Nothing and the Ringtail Derby, all out of the *shared* bank. | **Honest Ed's Pawn.** Put it on the counter, ring the bell (or park in his loading zone: he buys the whole load). |
 | ![the Repo Man](docs/screenshots/repo-man.jpg) | ![night at the campfire](docs/screenshots/night.jpg) |
 | **The Repo Man** collects at midnight. | **Night.** Receipt, campfire, store, bunks, day 2. |
 
@@ -241,7 +241,7 @@ on.
 | **hold `LMB`** | **climb** any steep rock or wall (`Space` = lunge) |
 | `RMB` · wheel | throw (empty-handed: **shove**) · reach |
 | driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `N` nitrous (with Gus's kit) · `E` get up (the RV keeps rolling) |
-| `MMB` · `1-6` | ping · emotes (at a casino game the number keys play it: 1-4 the stake, 5 deal/hit/roll/pull; blackjack 6 stand, 7 double, 8 split; craps 7 odds behind the line; at the Derby 5-8 a ticket on ringtail 1-4) |
+| `MMB` · `1-6` | ping · emotes (at a casino game the number keys play it: 1-4 the stake, 5 deal/hit/roll (craps: ROLL ME IN, then the shooter's throw)/pull; blackjack 6 stand, 7 double, 8 split; craps 7 odds behind the line; at the Derby 5-8 a ticket on ringtail 1-4) |
 | `V` · `M` · `T` | push-to-talk · mute · walkie-talkie |
 
 **A day:** each morning picks a driver and a navigator at random (whoever
@@ -308,6 +308,7 @@ server/   host.js      every connection (the host's page, friends over Steam, br
                        push intents, winch cable + anchors + reel, impact damage, run-over checks
           room.js      the run: days, clock, shared bank, pawn, casino, store, Repo Man, KO bills
           casino.js    the casino: a game each on one bank (blackjack, craps, double or nothing, the Derby)
+          craps.js     the craps table: one game for the rails, one shooter, the dice going round
           blackjack.js the blackjack table: one round for every seat (the deal, turns, double, split, the dealer)
 client/   player.js    first-person controller: walk/sprint/jump, stamina climbing, riding the
                        moving RV (RV-local coordinates), lurching when it brakes, knockouts

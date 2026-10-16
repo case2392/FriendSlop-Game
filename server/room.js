@@ -1462,15 +1462,17 @@ export class Room {
     if (r.err) return this.toast(r.err, '#fff', 3, p);
     if (r.spend) {
       this.bank -= r.spend;
-      if ((st.kind === 'flip' || st.kind === 'craps') && m.a === 'go') this.broadcast({ t: 'ev', list: [{ k: st.kind === 'flip' ? 'flip' : 'dice', by: p.id, s: id, stake: r.spend }] });
+      if (st.kind === 'flip' && m.a === 'go') this.broadcast({ t: 'ev', list: [{ k: 'flip', by: p.id, s: id, stake: r.spend }] });
     }
+    if (r.roll) this.broadcast({ t: 'ev', list: [{ k: 'dice', by: p.id, s: r.roll }] });   // (the shooter threw)
     if (r.msg) this.toast(r.msg, '#ffd166', 3);
     this.casinoResults(r.results);
   }
   casinoResults(list) {
     for (const r of list || []) {
       if (r.msg) this.toast(r.msg, '#ffd166', 4);
-      if (r.spend != null) { this.bank -= r.spend; continue; }   // (a stake going down on the table's own clock: the deal)
+      if (r.roll) { this.broadcast({ t: 'ev', list: [{ k: 'dice', by: 0, s: r.roll }] }); continue; }   // (the house threw for a slow shooter)
+      if (r.spend != null) { this.bank -= r.spend; continue; }   // (a stake going down on the table's own clock: the deal, the come-out)
       if (r.back == null) continue;
       this.bank += r.back; this.betResult(r.won, r.game, r.p);
     }
