@@ -14,7 +14,7 @@ import {
   RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_LOCKER, RV_HULL,
   toWorld, toLocal, insideRV, inCabin, qRotate, qConj, hitZone,
 } from '../shared/rv.js';
-import { inMud } from '../shared/world.js';
+import { inMud, onIce } from '../shared/world.js';
 import { Mobs } from './mobs.js';
 import { GST } from '../shared/mobs.js';
 
@@ -95,6 +95,7 @@ export class Sim {
   // tins (shared/finds.js); parts: the RV's parts and upgrades for the trip (shared/shop.js rvMods)
   constructor(W, { carry = [], spawnAt = null, cond = 100, finds = [], parts = null } = {}) {
     this.W = W;
+    this.snowy = W.biome === 'snow';   // Frostpeak Pass: packed snow the stock tyres plough, and black ice (C.RV SNOW_DRAG, ICE_SLIP)
     this.world = new RAPIER.World(v3(0, -9.81, 0));
     this.world.timestep = 1 / C.SIM_HZ;
     this.eq = new RAPIER.EventQueue(true);
@@ -1122,24 +1123,29 @@ export class Sim {
       if (over > 0 && Math.sign(r) === Math.sign(steerTarget)) steerTarget *= Math.max(0, 1 - over * 8);
     }
     this.steer += (steerTarget - this.steer) * Math.min(1, dt * 5);
-    let mudWheels = 0;
+    let mudWheels = 0, iceWheels = 0, groundWheels = 0;
     RV_WHEELS.forEach(([, , , steer, drive], i) => {
       v.setWheelEngineForce(i, drive ? engine : 0);
       v.setWheelBrake(i, brake);
       if (steer) v.setWheelSteering(i, this.steer);
       const cp = v.wheelIsInContact(i) ? v.wheelContactPoint(i) : null;
-      const mud = cp && inMud(W, cp.x, cp.z);
+      const mud = cp && inMud(W, cp.x, cp.z), ice = !mud && cp && onIce(W, cp.x, cp.z);
+      if (cp) groundWheels++;
       if (mud) mudWheels++;
-      v.setWheelFrictionSlip(i, mud ? this.parts.mudSlip : C.RV.FRICTION_SLIP);
+      if (ice) iceWheels++;
+      v.setWheelFrictionSlip(i, mud ? this.parts.mudSlip : ice ? this.parts.iceSlip ?? C.RV.ICE_SLIP : C.RV.FRICTION_SLIP);
     });
-    // mud sucks at the RV
-    if (mudWheels) {
+    // mud sucks at the RV; on the snow day the stock tyres plough the packed snow (not on the ice: nothing to
+    // plough, it slides)
+    const snowWheels = this.snowy ? groundWheels - mudWheels - iceWheels : 0;
+    if (mudWheels || snowWheels) {
       const lv = this.rv.linvel();
       const hs = Math.hypot(lv.x, lv.z);
-      const k = C.RV.MUD_DRAG * this.parts.mudDragX * (mudWheels / 4) * Math.min(1, hs / 0.6);
-      if (hs > 1e-3) this.rv.applyImpulse(v3(-lv.x / hs * k * dt, 0, -lv.z / hs * k * dt), true);
+      const k = (C.RV.MUD_DRAG * this.parts.mudDragX * mudWheels + C.RV.SNOW_DRAG * (this.parts.snowDragX ?? 1) * snowWheels) / 4 * Math.min(1, hs / 0.6);
+      if (hs > 1e-3 && k > 0) this.rv.applyImpulse(v3(-lv.x / hs * k * dt, 0, -lv.z / hs * k * dt), true);
     }
     this.mudWheels = mudWheels;
+    this.iceWheels = iceWheels;
 
     // hands on things
     const turned = new Set();

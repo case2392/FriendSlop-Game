@@ -577,6 +577,13 @@ export function generateLeg(seed, day, opts = {}) {
       rimSlab(cx, cz, 3.4, 2.0);
     }
   }
+  // black ice on the snow day (icePatches), a warning sign before each stretch (with the obstacles' own signs,
+  // before the wildlife's: a world without the wildlife is the same world)
+  const ice = icePatches({ biome, LEN, obstacles, roadX });
+  for (const m of ice) {
+    const sz = m.z0 - 12, sx = roadX(sz) + 5.2;
+    signs.push({ x: sx, y: heightAt(sx, sz) + 2.1, z: sz, ry: 0, w: 2.6, h: 1.2, lines: ['BLACK ICE', 'NEXT 50 M'], bg: '#f2c14e', fg: '#1d1d1d', post: true });
+  }
 
   // ---- points of interest: the buildings and the loot ---------------------------------
   // (a function: the stops down the side roads are furnished the same way, last: furnishPoi below)
@@ -1747,13 +1754,14 @@ export function generateLeg(seed, day, opts = {}) {
     }
   }
 
-  return {
+  const W = {
     seed, day, LEN, Z0, Z1, X0, nx, nz, cell: CELL, heights, fields,
     roadX, roadY, heightAt, topAt, townY,
     obstacles, pois, mesas, statics, cyls, hulls, talus, decor, signs, uses, anchors, mud, gates, props,
     landmarks, camp, town, buildings, biome, biomeName: B.name, quota: null,
-    dens: wild.dens, beds: wild.beds, rockfalls: wild.rockfalls, tracks,
+    dens: wild.dens, beds: wild.beds, rockfalls: wild.rockfalls, tracks, ice,
   };
+  return W;
 }
 
 // A butte's main tier outline at its top (its body and lobes, convex masses that each hold the centre): how
@@ -1919,6 +1927,34 @@ export function bedExit(W, z, near = false) {
   for (const sd of [1, -1]) for (let off = 5; off <= 22; off += 0.5) { if (!walk(ez, sd, off)) break; if (off > best.off) best = { off, sd }; }
   const ex = W.roadX(ez) + best.sd * best.off;
   return { x: ex, y: W.heightAt(ex, ez), z: ez };
+}
+
+// Black ice on Frostpeak Pass (the snow day): ICE.N stretches of the road ICE.LEN m long where the stock tyres
+// have next to no grip (C.RV.ICE_SLIP: the RV slides wide on a bend, its brakes don't hold, and from slow it
+// barely gets going: push it, or Gus's Snow Tires grip as on dry road). On the day's curviest stretches clear
+// of the obstacles, the camp and the town, ICE.GAP m apart. No random draws: the same road, the same ice.
+// W: { biome, LEN, obstacles, roadX } (generateLeg calls it before the signs are made solid)
+export const ICE = { N: 3, LEN: 52, HW: 6, GAP: 70 };
+export function icePatches(W) {
+  if (W.biome !== 'snow') return [];
+  const L = ICE.LEN, near = (z, o) => o.type === 'mud' ? z + L > o.z0 - 25 && z < o.z1 + 25
+    : o.type === 'grade' ? z + L > o.z0 - 30 && z < o.z1 + 30 : z + L > o.z - 30 && z < o.z + 30;
+  const bend = z => Math.abs(W.roadX(z + 6) - 2 * W.roadX(z) + W.roadX(z - 6)) / 36;   // (1/radius, about)
+  const c = [];
+  for (let z = 80; z < W.LEN - 70 - L; z += 2) {
+    if (W.obstacles.some(o => near(z, o))) continue;
+    let k = 0;
+    for (let s = 0; s <= L; s += 4) k += bend(z + s);
+    c.push([z, k]);
+  }
+  c.sort((a, b) => b[1] - a[1]);
+  const out = [];
+  for (const [z] of c) { if (out.length >= ICE.N) break; if (out.every(p => Math.abs(p.z0 - z) > L + ICE.GAP)) out.push({ z0: z, z1: z + L, hw: ICE.HW }); }
+  return out.sort((a, b) => a.z0 - b.z0);
+}
+export function onIce(W, x, z) {
+  for (const m of W.ice || []) if (z >= m.z0 && z <= m.z1 && Math.abs(x - W.roadX(z)) < m.hw) return true;
+  return false;
 }
 
 export function inMud(W, x, z) {

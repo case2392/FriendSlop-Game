@@ -106,12 +106,14 @@ const payUp = room => { room.bank = Math.max(room.bank, room.due); room.pay(); t
 // ---- RV2: what must never count as a crash -------------------------------------------------------------------
 {
   // keyboard driving (steer only -1/0/+1) on each day's road, then a handbrake stop from cruise with ten
-  // loose things in the back, two of them safes
+  // loose things in the back, two of them safes (on Frostpeak Pass on Snow Tires: the stock tyres plough its
+  // snow too slowly to reach cruise in the time: test/snow.mjs)
   const LOOSE = ['safe', 'safe', 'tv', 'toaster', 'lamp', 'vase', 'gnome', 'trophy', 'tv', 'lamp'];
   const out = [];
   for (let day = 1; day <= 5; day++) {
     const { room, ps: [A] } = crew(['Ann'], day);
     const sim = room.sim, rp = sim.rv.translation(), rq = sim.rv.rotation();
+    if (day === 3) sim.setParts({ ...sim.parts, snowDragX: 0, iceSlip: C.RV.FRICTION_SLIP });
     LOOSE.forEach((type, i) => sim.addProp(type, toWorld(rp, rq, i < 2 ? { x: i ? 0.5 : -0.5, y: 0.6, z: -1.2 } : { x: -0.6 + ((i - 2) % 3) * 0.6, y: 0.5, z: -3.2 + Math.floor((i - 2) / 3) * 0.9 }), { x: 0, y: 0, z: 0, w: 1 }, 100, 100));
     tick(room, 1.5);
     // (the crew has the gate's code; the boulder is a real crash: stop short of it)

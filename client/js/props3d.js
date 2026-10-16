@@ -1516,6 +1516,17 @@ export function mapCanvas(W) {
     pawIcon(g, lx, ly - 5, 1.45);
     inkText(g, 'THE HOARD', lx, ly + 11, { size: 8.5, color: '#9a2a1e', clear: 0.6 });
   }
+  // the snow day's black ice: the road there washed over in pale blue, and ICE in blue ink beside it
+  for (const m of Wd.ice || []) {
+    g.save(); g.strokeStyle = 'rgba(110,170,225,0.8)'; g.lineWidth = 6; g.lineCap = 'round';
+    g.beginPath();
+    for (let z = m.z0; z <= m.z1 + 0.1; z += 4) { if (z === m.z0) g.moveTo(X(z), Y(z)); else g.lineTo(X(z), Y(z)); }
+    g.stroke(); g.restore();
+    const zm = (m.z0 + m.z1) / 2, px = X(zm), py = Y(zm), w = textW('ICE', 8.5) + 6;
+    claim([X(m.z0) - 3, py - 4, X(m.z1) + 3, py + 4]);
+    const [lx, ly] = place(px, py, w, 10, [[0, -13], [0, 13], [0, -24], [0, 24]]);
+    inkText(g, 'ICE', lx, ly, { size: 8.5, color: '#2a5a8a', clear: 0.6 });
+  }
   // obstacles in red ink: an X on the road, the sign and its name off to one side on a dotted leader. Where
   // a grumphorn sleeps past one, a horned head beside the sign; pencilled calls under the name for it, and for
   // loose rock on the rim (a honk well back brings it down first: far enough back not to wake the beast)

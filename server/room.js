@@ -1858,6 +1858,7 @@ export class Room {
       gates: [...this.gatesOpen], ...this.bedsView(),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,
+      ...(sim.iceWheels ? { ice: sim.iceWheels } : {}),   // (wheels on the snow day's black ice)
       thf: sim.mobs?.stolenValue() || 0,   // what the ringtails hold of yours right now
       rfd: sim.mobs?.rockfalls.filter(r => r.st !== 'armed').map(r => r.id) || [],   // the loose rock that's come down
       gb: this.gloveCards(),   // the cards in the glovebox

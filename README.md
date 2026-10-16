@@ -45,6 +45,7 @@ at night once the day is paid, paid from the shared bank, and fitted for the res
 | Heavy-Duty Winch | $350 | a 60 m cable (from 42) and half again the pull |
 | Big-Block V8 | $600 | a quarter more pull up the grades, a top end of 45 mph (from 38) |
 | Mud Tires | $250 | twice the grip in mud and half the drag |
+| Snow Tires | $300 | Frostpeak Pass (day 3): no ploughing through its snow (the stock tyres take about a quarter longer up there) and full grip on its black ice |
 | Locker Padlock | $150 | ringtails can't pry the RV's locker open |
 | Nitrous Kit | $400 | `N` at the wheel: 4 s of a hard shove and 9 mph more, three shots a day |
 
@@ -157,7 +158,7 @@ and town. You never see the same place twice in a run.
 |---|---|---|---|
 | 1 | The Westmeadow Road | Green meadows, huge gnarled oaks in groves, gray outcrops | **Paydirt**: timber-framed plaster, red shingle roofs |
 | 2 | Goldenfield Pike | Golden grass, fenced wheat and stubble fields with round bales, a windmill | **Busted Flats**: plank barns and farmsteads |
-| 3 | Frostpeak Pass | Snowfields, snow-laden pines, blue-gray granite | **Last Chance**: squat stone halls, iron braziers |
+| 3 | Frostpeak Pass | Snowfields, snow-laden pines, blue-gray granite; packed snow and black ice on the road (the stock tyres plough the one and slide on the other: Gus's Snow Tires grip) | **Last Chance**: squat stone halls, iron braziers |
 | 4 | The Redrock Badlands | Red strata, hoodoos, buttes, dead trees | **Snake Eyes**: log and plank outpost, palisades, hides |
 | 5 | The Lost Wages Flats | An open sea of dunes, sandstone arches and buttes, palms, bleached bones | **Lost Wages**: adobe, vigas, canvas awnings, goblin brass |
 
