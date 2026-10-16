@@ -361,12 +361,16 @@ roof, then the RV; it made the first four days too forgiving.)
   That's GWYF's comedy and it's ours too. Each player can be at a different
   game at the same time (one at blackjack, one at craps, one on the coin
   machine), all of it out of the one bank; the blackjack table plays its seats
-  together, one round. A station (a blackjack seat, a craps rail, a machine) is
-  yours once you press E at its button and stays yours till you walk off. A
-  game you leave half-played is played out the house's way: a hand stands, the
-  dice roll on. The number keys play it: 1-4 set the stake (+$100, +$500, ALL
-  IN, clear), 5 deals, hits, rolls or pulls; at blackjack 6 stands, 7 doubles,
-  8 splits; at craps 7 lays odds. The stake leaves the bank when it's played;
+  together, one round, and so does the craps table, one game, one shooter. A
+  station (a blackjack seat, a craps rail, a machine) is yours once you press
+  E at its button and stays yours till you walk off. A game you leave
+  half-played is played out the house's way: a hand stands, a line bet rides
+  the table's game. The number keys play it: 1-4 set the stake (+$100, +$500,
+  ALL IN, clear), 5 deals, hits, rolls (ROLL ME IN, then the shooter's throw)
+  or pulls; at blackjack 6 stands, 7 doubles, 8 splits; at craps 7 lays odds.
+  The panel shows the hands in play big (the dealer's and yours, with their
+  counts) and the dice as they land (playtest: the cards on the felt were too
+  hard to read; they're painted sharper now too, the rank in the corner). The stake leaves the bank when it's played;
   winnings come back when the game settles; the crew sees every result with the
   player's name.
   - **Blackjack.** One table, three seats, one round played together, the way
@@ -381,9 +385,16 @@ roof, then the RV; it made the first four days too forgiving.)
     each). Last he turns his card and draws to 17 (stands on every 17). A
     natural pays 3 to 2. A stake the bank can't cover on top of the others'
     sits that hand out.
-  - **Craps.** Two rails, the pass line: 7 or 11 on the come-out wins even
-    money, 2, 3 or 12 loses, anything else is the point; roll it again before a
-    7. The line pays even money (a 1.4% house edge). With a point up you can
+  - **Craps.** One table, two rails, one game for the table, the way a casino
+    runs it (server/craps.js; playtest: it should be table play like
+    blackjack). Bets go on the pass line; the first ROLL ME IN starts a 6 s
+    count for the other rail to get in (everyone at a rail with a bet down
+    saying so starts it at once). One shooter throws for the table, the dice
+    going round the rails: they pass on a seven-out (not on a natural or
+    craps), when the shooter walks off, and the house throws for a shooter who
+    sits on them 12 s. 7 or 11 on the come-out wins even money, 2, 3 or 12
+    loses, anything else is the point; throw it again before a 7. Every line
+    bet at the table settles on the same throw. The line pays even money (a 1.4% house edge). With a point up you can
     lay odds behind the line, a bet at a time up to 3x the line, paid at true
     odds: the harder the point, the more it pays (4 or 10 pays 2 to 1, 5 or 9
     3 to 2, 6 or 8 6 to 5), with no house edge on the odds. (The line itself
