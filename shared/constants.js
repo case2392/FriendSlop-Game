@@ -112,6 +112,8 @@ export const RV = {
   TOP_SPEED: 17,            // m/s
   STEER_MAX: 0.56,
   FRICTION_SLIP: 2.2,
+  ICE_SLIP: 0.06,           // stock tyres on Frostpeak Pass's black ice (shared/world.js icePatches); Snow Tires grip as on dry road
+  SNOW_DRAG: 1600,          // N: stock tyres ploughing the pass's packed snow (all day 3, off the ice): its road takes about a quarter longer (test/snow.mjs)
   MUD_SLIP: 0.16,
   MUD_DRAG: 11000,
 };

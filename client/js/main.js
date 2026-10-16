@@ -31,7 +31,7 @@ import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 import { profile, profileStatus, forServer, credit, myKit, unlockLooks, keepLook } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
 import { initShop, openShop, closeShop, renderShop, shopOpen, shopNote, shopVendor, openLocker, LOCKER } from './shop.js';
-import { UPGRADE_IDS } from '/shared/shop.js';
+import { UPGRADE_IDS, UPGRADES } from '/shared/shop.js';
 import { buriedSpots, nearestCache, DIG, HOLE } from '/shared/dig.js';
 import { BLAST } from '/shared/blast.js';
 import { cardHTML } from './cards.js';
@@ -611,7 +611,7 @@ function computeTarget() {
     // (its outside, on your feet beside it: hands on it to push it, out of the mud or off what it's stuck on;
     // and the way up to the roof. Nothing inside it is climbed)
     const outside = !me.par && !inCabin(lh.x, lh.y, lh.z);
-    if (outside && me.mode === 'walk' && !me.holding && hit.toi < 1.8 && lh.y < RV_DIM.WALL_H) return { kind: 'pushrv', label: `[E] ${S.g?.mud ? 'PUSH it out of the mud' : 'push the RV'} · [Hold LMB] climb` };
+    if (outside && me.mode === 'walk' && !me.holding && hit.toi < 1.8 && lh.y < RV_DIM.WALL_H) return { kind: 'pushrv', label: `[E] ${S.g?.mud ? 'PUSH it out of the mud' : S.g?.ice && !snowTires() ? 'PUSH it off the ice' : 'push the RV'} · [Hold LMB] climb` };
     if (outside && Math.abs(hit.normal.y) < 0.6 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
     return null;
   }
@@ -3022,7 +3022,7 @@ function hud(rv) {
   }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD: keep the gas on, the others push from behind' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}${g?.nos ? ` · ${g.nos[1] ? 'NITROUS!' : g.nos[0] ? `nitrous ×${g.nos[0]} (${keyLabel('N')})` : 'nitrous: none left today'}` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD: keep the gas on, the others push from behind' : ''}${g?.ice && !snowTires() ? ' · BLACK ICE: no grip, ease off' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}${g?.nos ? ` · ${g.nos[1] ? 'NITROUS!' : g.nos[0] ? `nitrous ×${g.nos[0]} (${keyLabel('N')})` : 'nitrous: none left today'}` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
@@ -3135,6 +3135,8 @@ function kitLine(kit) {
   if (!perks.length && !part) return '';
   return `Your kit: ${[perks.join(', '), part].filter(Boolean).join('; ')}`;
 }
+// Gus's Snow Tires fitted (the snow day's ice and snow: shared/shop.js rvMods)
+const snowTires = () => !!S.meta?.trip?.upg?.includes('snow');
 // in town: where the general store's stalls are, till you've been to each (they're easy to walk past)
 function storeLine(L) {
   const hw = !tut.has('hardware'), cl = !tut.has('clothes');
@@ -3158,6 +3160,7 @@ function questTracker(g) {
   // the RV's condition, while it matters: broken down (what to do), or worn
   const hp = g.rvh ?? 100;
   if ((g.ph === 'camp' || g.ph === 'road') && g.brk) L.push([keysIn('BROKEN DOWN: hold [E] at the engine hatch on the back of the RV'), 'warn']);
+  else if (g.ph === 'road' && g.ice && !snowTires() && !pushingRV) L.push([keysIn(me.mode === 'seat' && me.seat === 0 ? 'BLACK ICE: no grip, the brakes won\'t hold. Ease through; stuck? the others push' : 'BLACK ICE: if the RV can\'t get going, get out, [E] on its back and hold [W] to push'), 'warn']);
   else if (g.ph === 'road' && g.mud && !pushingRV) L.push([keysIn(me.mode === 'seat' && me.seat === 0 ? 'IN THE MUD: keep the gas on while the others push from behind' : 'IN THE MUD: get out, [E] on the back of the RV and hold [W] to push it (it takes two)'), 'warn']);
   else if ((g.ph === 'camp' || g.ph === 'road') && hp <= 60) L.push([`RV ${hp}%: ${hp > 30 ? 'smoking, down on power' : 'limping, a knock stalls it'}`, 'warn']);
   if (g.ph === 'camp') L.push([roleOf('drv') && roleOf('drv') !== S.selfId && !roleAway('drv') ? `${roleName('drv')} drives out of camp to start the clock` : 'Drive out of camp to start the clock', '']);
@@ -3194,6 +3197,8 @@ function questTracker(g) {
     if (g.nxt) L.push([`Tomorrow's payment: ${fmt$(g.nxt)} (with Gus's repairs)`, 'warn']);
     const fitted = S.meta?.trip?.upg?.length || 0;
     if (fitted < UPGRADE_IDS.length || !tut.has('gus')) L.push([`Gus's parts board by the RV lot: RV upgrades and paint${fitted ? ` (${fitted} fitted)` : ''}`, '']);
+    // (the night before the snow: what the stock tyres will do up there, and what Gus has for it)
+    if (g.day === 2 && !snowTires()) L.push([`Tomorrow: Frostpeak Pass, snow and black ice. The stock tyres plough the snow (a quarter slower) and slide on the ice: Gus's Snow Tires (${fmt$(UPGRADES.snow.price)}) grip`, 'warn']);
     storeLine(L);
   }
   const title = `Day ${Math.min(g.day, C.DAYS)}: ${town}`;

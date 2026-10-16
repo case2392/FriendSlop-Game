@@ -405,12 +405,27 @@ roof, then the RV; it made the first four days too forgiving.)
   at night, once the day is paid, with the RV on his lot (the same rule as his
   repairs: the payment can't be what pays for them). They're the crew's, paid
   from the shared bank, for the rest of the trip; a new trip has a new RV. On
-  top of the Garage's parts from Road Cards, which last for good. Six: a
+  top of the Garage's parts from Road Cards, which last for good. Seven: a
   Reinforced Frame ($450, crashes, beasts and rock -30%), a Heavy-Duty Winch
   ($350, a 60 m cable, 1.5x the pull), a Big-Block V8 ($600, 1.25x the pull,
-  20 m/s top end), Mud Tires ($250, 2x the grip and half the drag in mud), a
-  Locker Padlock ($150, ringtails can't pry the locker) and a Nitrous Kit
-  ($400, N at the wheel: 4 s at 1.7x the pull and +4 m/s, three shots a day).
+  20 m/s top end), Mud Tires ($250, 2x the grip and half the drag in mud),
+  Snow Tires ($300, for Frostpeak Pass: below), a Locker Padlock ($150,
+  ringtails can't pry the locker) and a Nitrous Kit ($400, N at the wheel:
+  4 s at 1.7x the pull and +4 m/s, three shots a day).
+- **Frostpeak Pass and the Snow Tires** (playtest ask: snow tires as an
+  upgrade, and they should matter on the snow day). Day 3's road is packed
+  snow the stock tyres plough (C.RV.SNOW_DRAG, 1600 N off the ice: its road
+  takes about a quarter longer, about 22 mph at its fastest against 28), with
+  three stretches of black ice 52 m long on its curviest bends clear of the
+  obstacles (shared/world.js icePatches, a BLACK ICE sign before each, pale
+  blue on the navigator's map): there the stock tyres have next to no grip
+  (C.RV.ICE_SLIP 0.06, 2.2 on dry road). The RV slides wide on the bend, its
+  brakes don't hold, and from a standstill it takes about 14 s to get off one
+  (two pushing: 6 s). Snow Tires take away both. Lowering the grip on the
+  whole road was tried first and did nothing: this RV's engine never asks
+  more of its tyres than a grip of 0.25 gives (measured), so the snow is drag
+  and the ice is where the grip goes. The night before, the tracker says what
+  the stock tyres will do up there and that Gus has them. test/snow.mjs.
   Priced against the surplus: on average the bot's first night leaves about
   $2,300, its second about $1,100 more, and days 3 to 5 eat all of it
   (section 8), so a crew that buys the V8 on night 1 is betting it hauls more

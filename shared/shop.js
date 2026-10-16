@@ -19,6 +19,8 @@ export const UPGRADES = {
     line: 'A quarter more pull up the grades, and a top end of 45 mph (from 38).' },
   tires:  { name: 'Mud Tires', price: 250,
     line: 'Twice the grip in mud, and half the drag.' },
+  snow:   { name: 'Snow Tires', price: 300,
+    line: 'For Frostpeak Pass (day 3): no ploughing through its snow (on the stock tyres the RV takes about a quarter longer up there), and full grip on its black ice, where they slide and spin.' },
   lock:   { name: 'Locker Padlock', price: 150,
     line: 'Ringtails can\'t pry the RV\'s locker open. (What lies loose in the RV is still fair game.)' },
   nitro:  { name: 'Nitrous Kit', price: 400,
@@ -63,6 +65,8 @@ export function rvMods(parts, upg) {
     topX: H('engine') ? 20 / RV.TOP_SPEED : 1,
     mudSlip: H('tires') ? RV.MUD_SLIP * 2 : RV.MUD_SLIP,
     mudDragX: H('tires') ? 0.5 : 1,
+    iceSlip: H('snow') ? RV.FRICTION_SLIP : RV.ICE_SLIP,
+    snowDragX: H('snow') ? 0 : 1,
     padlock: H('lock'),
     nitro: H('nitro'),
   };

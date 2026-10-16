@@ -50,9 +50,9 @@ const roadYaw = (W, z) => Math.atan2(W.roadX(z + 3) - W.roadX(z - 3), 6);
   const stock = rvMods(null, null), all = rvMods(null, Object.fromEntries(UPGRADE_IDS.map(id => [id, 1])));
   const base = partMods(null);
   const same = Object.keys(base).every(k => stock[k] === base[k]);
-  check(same && stock.hitX === 1 && stock.cable === C.WINCH.MAX_LEN && stock.pull === C.WINCH.FORCE && stock.engineX === 1 && stock.topX === 1 && stock.mudSlip === C.RV.MUD_SLIP && stock.mudDragX === 1 && !stock.padlock && !stock.nitro,
+  check(same && stock.hitX === 1 && stock.cable === C.WINCH.MAX_LEN && stock.pull === C.WINCH.FORCE && stock.engineX === 1 && stock.topX === 1 && stock.mudSlip === C.RV.MUD_SLIP && stock.mudDragX === 1 && stock.iceSlip === C.RV.ICE_SLIP && stock.snowDragX === 1 && !stock.padlock && !stock.nitro,
     'shop: with nothing bought the RV is the stock RV (the Garage\'s parts unchanged under it)');
-  check(all.hitX === 0.7 && all.cable === HEAVY.CABLE && all.pull === C.WINCH.FORCE * HEAVY.PULL && all.engineX === 1.25 && Math.abs(all.topX * C.RV.TOP_SPEED - 20) < 1e-9 && all.mudSlip === 2 * C.RV.MUD_SLIP && all.mudDragX === 0.5 && all.padlock && all.nitro,
+  check(all.hitX === 0.7 && all.cable === HEAVY.CABLE && all.pull === C.WINCH.FORCE * HEAVY.PULL && all.engineX === 1.25 && Math.abs(all.topX * C.RV.TOP_SPEED - 20) < 1e-9 && all.mudSlip === 2 * C.RV.MUD_SLIP && all.mudDragX === 0.5 && all.iceSlip === C.RV.FRICTION_SLIP && all.snowDragX === 0 && all.padlock && all.nitro,
     `shop: Gus's ${UPGRADE_IDS.length} upgrades each set what their lines say (${UPGRADE_IDS.map(id => `${UPGRADES[id].name} $${UPGRADES[id].price}`).join(', ')})`);
   const junk = rvMods(null, { toString: 1, __proto__: { frame: 1 }, hull: 1 });
   check(junk.hitX === 1 && Object.keys(VENDORS).every(v => VENDORS[v].goods.every(id => Object.prototype.hasOwnProperty.call(goodsOf(v), id))), 'shop: an id that isn\'t on the list (or an inherited one) fits nothing; every vendor sells only its own catalogue');
