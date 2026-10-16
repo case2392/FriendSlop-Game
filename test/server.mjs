@@ -261,6 +261,28 @@ const coinUp = (room, p, stake) => {
   check(one < 0.5 && two > 2, `sim: two shoving players move the boulder (${two.toFixed(1)} m in 15 s), one doesn't (${one.toFixed(2)} m)`);
 }
 {
+  // walking into light loot pushes it along at about a walking pace, not off into the distance (playtest:
+  // kicked loot flew; the same push as on the boulder threw a vase at 40 m/s)
+  const room = new Room('KICK', 4242);
+  const P = room.addPlayer(new FakeConn(), 'Kim').player; room.welcome(P);
+  room.phase = 'road';
+  tick(room, 0.5);
+  const W = room.W, c = W.camp.rv, x0 = c.x + 9, z0 = c.z - 4, y0 = W.heightAt(x0, z0);
+  const vase = room.sim.addProp('vase', { x: x0, y: y0 + 0.4, z: z0 }, { x: 0, y: 0, z: 0, w: 1 }, 100, 100);
+  tick(room, 1.5);
+  let vmax = 0;
+  for (let k = 0; k < 1.2 * C.SIM_HZ; k++) {
+    const t = vase.body.translation(), px = t.x - 0.7, py = W.heightAt(px, t.z);
+    room.onPose(P, { par: 0, x: px, y: py, z: t.z, yaw: Math.PI / 2, pitch: 0, m: 0, f: 0, v: [0, 0, 0] });
+    if (k % 5 === 0) room.handle(P, { t: 'push', kind: 'prop', id: vase.id, pt: [t.x - 0.15, t.y, t.z], dir: [1.4, 0, 0] });
+    room.tick(1 / C.SIM_HZ);
+    const v = vase.body.linvel(); vmax = Math.max(vmax, Math.hypot(v.x, v.y, v.z));
+  }
+  tick(room, 2);
+  const went = vase.body.translation().x - x0;
+  check(vmax <= C.PUSH_VMAX + 1 && went > 1 && went < 12, `sim: sprinting into a vase pushes it along (${went.toFixed(1)} m, ${vmax.toFixed(1)} m/s at most), not off into the distance`);
+}
+{
   // loading heavy loot: two friends carry a safe, then the dino head, to the open door and in (the lead
   // backing up the steps, the other behind it). Hands lift it over the sill, turn it end-on and steer it
   // to the middle of the 1.3 m doorway; it used to jam against the floor's edge a metre up and fall out.

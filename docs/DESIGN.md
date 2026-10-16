@@ -244,9 +244,9 @@ the difficulty curve stays in the quota.
 
 | Obstacle | What happens | Verb it demands | Inspiration |
 |---|---|---|---|
-| **The Grade** | A washed-out slope too steep for the engine | Someone climbs the cliff with the winch hook, clips it to the anchor post at the top, and the driver reels in | RVTY + PEAK |
+| **The Grade** | A washed-out slope too steep for the engine | Someone climbs the cliff with the winch hook, clips it to the anchor post at the top, and the driver reels in. E anywhere within 3.2 m of a clipped hook unhooks it (no aiming: clipped to a dead tree the hook sits in the trunk, and nobody could), and it winds itself home | RVTY + PEAK |
 | **The Boulder** | A one-ton rock in a narrow pass (a ROCKFALL sign warns you) | Two bodies shove it aside (one can't); alone, nudge it with the RV's bumper, or hook it and reel it while the RV stands angled | physics + headcount |
-| **The Mud Flat** | The wheels lose grip | Everyone out and push (E on the RV's back, hold W: the engine alone barely moves it, one pusher hardly more, two get it out: test/rv.mjs). Unloading heavy loot helps. | RVTY |
+| **The Mud Flat** | The wheels lose grip | Everyone out and push (E on the RV's back, then W: with the gas on the engine alone barely moves it, one pusher a little more, two get it out in about 17 s, three in 12; with no gas only three do: test/rv.mjs). Unloading heavy loot helps. | RVTY |
 | **The Ranger Gate** | Locked gate, 4-digit keypad | The code is brushed on a slab of rock up on the canyon rim (a sign at the gate says which rim). Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
 | *The Washout Gap* (M2) | A gap in the road | Carry planks from the junk pile and lay a bridge. The RV crosses on raycast wheels. | RVTY |
@@ -278,9 +278,16 @@ class**:
 - *One-hand* (gnome, lamp, cash register drawer): sprint while carrying.
 - *Two-hand* (TV, neon sign, vase): slow, blocks your view, drains climbing
   stamina.
-- *Heavy* (safe, slot machine, dino head): one person can only drag it. Two
-  grabbers lift it. Co-carrying isn't scripted; it falls out of summing the
-  spring forces.
+- *Heavy* (safe, slot machine, dino head): it takes two (playtest: one person
+  lifted it and it floated at arm's length). One of you takes an end and it
+  stays where it lies; with a second on the other end the hands hold it up
+  between them by its ends, at hand height, its long side along the line
+  between them (server/sim.js, shared/loot.js TANDEM). The two then go where
+  both lean, averaged (tandemVel, each page moving its own player by it with
+  the other's lean relayed by the server, 'tw'): together the same way, at a
+  heavy walk; pulling against each other along it, nowhere; one alone, the
+  pair at half pace; one leaning across it turns the pair about the other. A
+  third finds no room on it, and nobody throws it. test/carry.mjs.
 
 **Fragility.** Contact-force events above a threshold knock value off the
 item, and at zero it breaks. Loot sitting loose in a moving RV slides
@@ -731,10 +738,16 @@ Things the systems will produce without being scripted:
     expressed in RV-local coordinates. Everyone renders you relative to
     their own interpolated RV, so riders stay glued to it on every screen.
   - **Pushing** the RV or props is an *intent* (target, contact point,
-    direction) sent while you walk into it, or while your hands are on the
-    RV (E on its outside, then W; client/js/main.js pushStep: playtest, the
-    walk-into push was never explained), that the server turns into a set
-    force, whatever the page sends. Player proxies on the
+    direction) sent while you walk into it, which the server turns into a set
+    force (a prop goes no faster than PUSH_VMAX, about a walking pace: the
+    same shove sent a vase off at 40 m/s), or while your hands are on the RV
+    (E on its outside holds you there, going along with it; W pushes, A/D
+    sideways, S pulls; client/js/main.js pushStep). Hands on it, each pusher
+    gives PUSH_HOLD_RV while it goes slower than PUSH_RV_V[pushers - 1] their
+    way, and the parking brake is off while they push (sim.pushFree): parked
+    on level road one rolls it at a slow walk, each more a bit faster, and let
+    go the brake has it again (playtest: three pushing a parked RV moved it
+    0.1 m). test/rv.mjs. Player proxies on the
     server are sensors only, so a player standing in the road can't stop a
     3-ton RV like a wall. Instead the RV knocks them flying.
 - **Shared deterministic world generation** (`shared/world.js`): the server

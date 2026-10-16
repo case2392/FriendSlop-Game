@@ -12,7 +12,7 @@ import { RT, GH, RF } from './mobs.js';
 export const PERKS = {
   gloves: { name: 'Work Gloves', lv: [
     'Your grip holds till the thing is 2.2 m past your reach (from 1.6), and a ringtail you hold alone bites after 3 s (from 2).',
-    'And stronger hands: 1,045 N (from 950). You lift about 104 kg alone; the dino head and the safe still take two.'] },
+    'And stronger hands: 1,045 N (from 950), and with an end of the heavy loot (the safe, the slot machine, the dino head: always two of you) you carry your side 20% quicker.'] },
   chalk: { name: 'Climbing Chalk', lv: [
     'Climbing costs 12% less stamina: 8.4 a second on the move (from 9.5), 3.1 hanging (from 3.5).',
     'Climbing costs 24% less: 7.2 and 2.7 a second, and a lunge costs 20 (from 24).'] },
@@ -76,6 +76,7 @@ export function kitMods(kit) {
     slip: g ? 2.2 : 1.6,                               // m past your reach before a held thing gets away
     biteT: g ? 3 : RT.BITE_T,                          // s a ringtail you hold alone waits to bite
     fmax: g >= 2 ? Math.round(GRAB.FMAX * 1.1) : GRAB.FMAX,
+    haul: g >= 2 ? 1.2 : 1,                            // your lean, an end of the heavy loot in your hands (main.js myWish)
     climbMul: c >= 2 ? 0.76 : c ? 0.88 : 1,           // the climb's stamina drain
     lunge: c >= 2 ? 20 : STAMINA.LUNGE,
     tipWarn: s >= 1, assist: s >= 2,
