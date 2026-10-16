@@ -152,6 +152,7 @@ export class Room {
       if (pr) this.oreAt.set(pr.id, o);
     }
     this.fuses = new Map();
+    this.sim.burning = this.fuses;   // (a lit stick never goes in the locker)
     this.bedAt = null;
     this.receipt = null;
     for (const p of this.players.values()) {
@@ -460,6 +461,7 @@ export class Room {
     this.send(p, this.worldMsg());
     this.send(p, { t: 'props', list: this.sim.allProps() });
     if (this.holes.size) this.send(p, { t: 'holes', list: [...this.holes.values()].map(holeWire) });
+    this.send(p, { t: 'locker', list: this.sim.lockerList() });
     const s = this.spawnFor(p);
     this.send(p, { t: 'tp', ...s });
     // joining at night or after the run ended: what everyone else is looking at
@@ -833,13 +835,15 @@ export class Room {
       }
       return;
     }
-    // the RV's locker: the best thing in it out, into your hands (sim.js unstow; loot set down in the cabin
-    // goes back in by itself)
+    // the RV's locker: the thing picked from its list (m.item, the page's panel), or the best loot in it, out
+    // into your hands (sim.js unstow; what's set down in the cabin goes back in by itself)
     if (kind === 'locker') {
       if (!inRV || p.seat != null) return;
       if (sim.holds.has(p.id)) return this.toast('Your hands are full. Set it down in the RV and it goes in the locker.', '#fff', 3, p);
-      const pr = sim.unstow();
-      if (!pr) return this.toast('The locker\'s empty. Loot set down in the RV goes in it, safe from knocks.', '#fff', 3, p);
+      const i = m.item != null ? sim.lockerAt(Number(m.item)) : sim.lockerBest();
+      if (m.item != null && i < 0) return this.toast('That\'s not in the locker any more: somebody took it out.', '#fff', 3, p);
+      const pr = sim.unstow(i);
+      if (!pr) return this.toast('The locker\'s empty. Loot and gear set down in the RV go in it, safe from knocks.', '#fff', 3, p);
       const c = pr.body.translation(), d = carried(pr.type) ? carryDist(pr.type) : C.GRAB.HOLD_DEFAULT, q = pr.body.rotation();
       if (!sim.grab(p.id, p, { kind: 'prop', id: pr.id, pt: [c.x, c.y, c.z], d })) return;
       this.send(p, { t: 'given', id: pr.id, type: pr.type, d, q: [q.x, q.y, q.z, q.w] });
@@ -1578,7 +1582,7 @@ export class Room {
   sellCounter(by = 0, late = false) {
     const sim = this.sim, ids = sim.propsIn(this.W.town.pawn);
     const load = this.docked() ? sim.cargo().filter(id => !ids.includes(id)) : [];
-    const locked = this.docked() ? sim.locker.splice(0) : [];   // (the locker's whole, with the rest of the load)
+    const locked = this.docked() ? sim.lockerTake(it => !LOOT[it.type].tool) : [];   // (the locker's loot, with the rest of the load: the gear stays in it)
     if (!ids.length && !load.length && !locked.length) return 0;
     sim.mobs?.onSold([...ids, ...load]);   // (a stolen thing sold counts as got back)
     let total = 0, lot = 0;
@@ -1785,6 +1789,8 @@ export class Room {
       }
       if (pub.length) this.broadcast({ t: 'ev', list: pub });
     }
+    // what's in the RV's locker, when it changes (the pages' locker panel lists it)
+    if (sim.lockerDirty && this.sim === sim) { sim.lockerDirty = false; this.broadcast({ t: 'locker', list: sim.lockerList() }); }
     if (this.theftQ.size) this.flushThefts();
   }
 
@@ -1848,7 +1854,7 @@ export class Room {
       bank: Math.round(this.bank), due: this.due, paid: this.paid ? 1 : 0,
       town: this.inTown ? 1 : 0, door: sim.doorOpen ? 1 : 0,
       ...(this.inTown || this.phase === 'night' ? { cas: this.casino.view(this.t) } : {}), pawn, pawnIds, dock,
-      ...(lb >= 0 ? { lk: [sim.locker.length, sim.lockerValue(), sim.locker[lb].type] } : {}),   // (the locker: how many, worth, what comes out first)
+      ...(sim.locker.length ? { lk: [sim.locker.length, sim.lockerValue(), lb >= 0 ? sim.locker[lb].type : ''] } : {}),   // (the locker: how many, worth, its best loot)
       gates: [...this.gatesOpen], ...this.bedsView(),
       drv: [...this.players.values()].find(p => p.seat === 0)?.id ?? 0,
       mud: sim.mudWheels || 0,

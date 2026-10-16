@@ -1073,6 +1073,35 @@ const crashCost = (room, dv, zone) => {
     `bunks: asleep at dawn, Ann wakes on day ${room.day} still in her bunk (told after the new world: ${bi > wi}; slot ${lying?.slot}), the crew sees both lying there; in the morning E gets her up (${up && !up.on}), Bo sleeps on`);
 }
 
+{
+  // the mud: the gas on, the RV alone barely moves; one pushing from behind (the page's [E] on its back, then
+  // W: client/js/main.js pushStep, the same 'push' as walking into it) hardly more; two drive it out
+  const runs = [];
+  for (const pushers of [0, 1, 2]) {
+    const { room, ps } = crew(['Ann', 'Bo', 'Cy'], 2);
+    const W = room.W, sim = room.sim, mud = W.obstacles.find(o => o.type === 'mud');
+    const z0 = (mud.z0 + mud.z1) / 2 - 3;
+    sim.placeRV(W.roadX(z0), z0, roadYaw(W, z0));
+    room.phase = 'road';
+    tick(room, 1);
+    const [D, ...P] = ps, zs = sim.rv.translation().z;
+    D.seat = 0;
+    for (let i = 0; i < 8 * HZ; i++) {
+      room.handle(D, { t: 'drv', th: 1, st: 0, hb: 0 });
+      if (i % 5 === 0) for (let k = 0; k < pushers; k++) {
+        // (hands on its back wall, pushing the way it faces: what pushStep sends every 90 ms)
+        const at = sim.rvToWorld({ x: -0.5 + k, y: 0, z: -RV_DIM.HALF_L - 0.6 }), pt = sim.rvToWorld({ x: -0.5 + k, y: 1.0, z: -RV_DIM.HALF_L }), f = fwdOf(room);
+        room.onPose(P[k], { x: at.x, y: at.y, z: at.z, yaw: Math.atan2(f.x, f.z), pitch: 0, m: C.MODE.WALK, f: 0, v: [0, 0, 0] });
+        room.handle(P[k], { t: 'push', kind: 'rv', pt: [pt.x, pt.y, pt.z], dir: [f.x, 0, f.z] });
+      }
+      room.tick(1 / HZ);
+    }
+    runs.push(sim.rv.translation().z - zs);
+  }
+  check(runs[0] < 4 && runs[1] < 8 && runs[2] > 15,
+    `rv: stuck in the mud with the gas on, the RV alone goes ${runs[0].toFixed(1)} m in 8 s, with one pushing ${runs[1].toFixed(1)} m, with two pushing from behind ${runs[2].toFixed(1)} m: out`);
+}
+
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }
 console.log('\nall RV tests passed');
 process.exit(0);

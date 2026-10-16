@@ -246,7 +246,7 @@ the difficulty curve stays in the quota.
 |---|---|---|---|
 | **The Grade** | A washed-out slope too steep for the engine | Someone climbs the cliff with the winch hook, clips it to the anchor post at the top, and the driver reels in | RVTY + PEAK |
 | **The Boulder** | A one-ton rock in a narrow pass (a ROCKFALL sign warns you) | Two bodies shove it aside (one can't); alone, nudge it with the RV's bumper, or hook it and reel it while the RV stands angled | physics + headcount |
-| **The Mud Flat** | The wheels lose grip | Everyone out and push. Unloading heavy loot helps. | RVTY |
+| **The Mud Flat** | The wheels lose grip | Everyone out and push (E on the RV's back, hold W: the engine alone barely moves it, one pusher hardly more, two get it out: test/rv.mjs). Unloading heavy loot helps. | RVTY |
 | **The Ranger Gate** | Locked gate, 4-digit keypad | The code is brushed on a slab of rock up on the canyon rim (a sign at the gate says which rim). Someone climbs up and reads it down to whoever's at the keypad, by shouting or by walkie. | We Were Here + proximity voice |
 | *The Ledge Road* (M2) | Narrow road, invisible edge | A spotter walks ahead calling "left… LEFT… your OTHER left" | We Were Here |
 | *The Washout Gap* (M2) | A gap in the road | Carry planks from the junk pile and lay a bridge. The RV crosses on raycast wheels. | RVTY |
@@ -341,8 +341,12 @@ roof, then the RV; it made the first four days too forgiving.)
 - **The RV's locker** (playtest ask: loot in the RV kept losing value, and
   lay in the aisle to trip over): loot that comes to rest in the cabin goes
   in the locker by the bunks, out of the physics, safe from the road's
-  knocks. E on the locker hands you its best thing; Ed's loading zone buys
-  the whole locker with the load; it rides into the next day. The risk moves
+  knocks. E on the locker opens its list (client/js/shop.js, the server's
+  { t: 'locker', list } when it changes) and takes out the thing you pick,
+  into your hands; Ed's loading zone buys the locker's loot with the load;
+  it rides into the next day. The crew's gear goes in too (playtest: the
+  shovel and the dynamite had nowhere to go), but Ed's dock leaves it, no
+  ringtail pries it out, and a lit stick never goes in. The risk moves
   to getting the loot *to* the RV, and to the door: a ringtail that gets in
   pries the locker open. (Bungee cords now strap down what rides on the
   roof.)
@@ -441,8 +445,8 @@ roof, then the RV; it made the first four days too forgiving.)
   $375 down a side road at day 1's prices (test/dig.mjs measures 1.46x over
   25 legs; about one cache in six is down a side road). It's built for two (one sweeps, one digs, and each has
   their hands full), and it costs the time a stop would. Ed doesn't buy the
-  gear back; it never goes in the locker, so it rides loose in the RV, and
-  what's left on the road is gone. test/dig.mjs.
+  gear back; set down in the RV it goes in the locker (which keeps it when Ed
+  buys the load), and what's left on the road is gone. test/dig.mjs.
 - **Dynamite** (playtest suggestion: dynamite to blow up rocks, and metals in
   them to sell). shared/blast.js. A stick ($60 at the hardware rack, gear) is
   lit with LMB in hand ({ t: 'light' }: the server checks it's held, not in
@@ -703,7 +707,10 @@ Things the systems will produce without being scripted:
     expressed in RV-local coordinates. Everyone renders you relative to
     their own interpolated RV, so riders stay glued to it on every screen.
   - **Pushing** the RV or props is an *intent* (target, contact point,
-    direction) that the server turns into force. Player proxies on the
+    direction) sent while you walk into it, or while your hands are on the
+    RV (E on its outside, then W; client/js/main.js pushStep: playtest, the
+    walk-into push was never explained), that the server turns into a set
+    force, whatever the page sends. Player proxies on the
     server are sensors only, so a player standing in the road can't stop a
     3-ton RV like a wall. Instead the RV knocks them flying.
 - **Shared deterministic world generation** (`shared/world.js`): the server

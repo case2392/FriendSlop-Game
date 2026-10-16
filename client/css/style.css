@@ -626,6 +626,9 @@ input[type=radio]:checked { background: radial-gradient(circle at 36% 32%, #fff0
 .kit-item li.have { color: var(--ink); }
 .shop-bank { text-align: center; font-family: var(--display); font-size: 16px; color: var(--ink); margin: 0 0 4px; }
 .shop-got { font-family: var(--display); font-size: 13px; color: #2f6b2a; }
+/* what the server said to a press (or why a grey button can't buy now): main.js / shop.js shopNote */
+.shop-note { margin: 0 12px 6px; padding: 6px 10px; border-radius: 5px; text-align: center; font-family: var(--display); font-size: 15px; color: var(--ink); background: rgba(255, 246, 220, 0.75); border: 1px solid rgba(90, 58, 26, 0.45); }
+.shop-note.bad { color: var(--ink-red); background: rgba(255, 220, 200, 0.6); border-color: rgba(160, 40, 30, 0.45); }
 .shop-swatch { display: inline-block; width: 14px; height: 14px; margin-right: 7px; vertical-align: -2px; border-radius: 3px; border: 1px solid rgba(40, 24, 8, 0.55); }
 .parchment .hint.bad { color: var(--ink-red); }
 .kit-item li.have b { color: var(--ink-green); }

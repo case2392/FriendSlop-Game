@@ -30,7 +30,7 @@ import * as texPrep from './texprep.js';
 import { keyName, keyLabel, keysIn, relabelPage } from './keys.js';
 import { profile, profileStatus, forServer, credit, myKit, unlockLooks, keepLook } from './profile.js';
 import { initGarage, renderGarage, garageOpen, recordLines } from './garage.js';
-import { initShop, openShop, closeShop, renderShop, shopOpen } from './shop.js';
+import { initShop, openShop, closeShop, renderShop, shopOpen, shopNote, shopVendor, openLocker, LOCKER } from './shop.js';
 import { UPGRADE_IDS } from '/shared/shop.js';
 import { buriedSpots, nearestCache, DIG, HOLE } from '/shared/dig.js';
 import { BLAST } from '/shared/blast.js';
@@ -57,6 +57,7 @@ let reviveT = 0;
 let fixHeld = false;   // holding E at the engine hatch (the server counts the seconds: room.js fixStep)
 let pullHeld = null, heaveT = 0;   // the hole whose chest I'm holding E on (pulling it up: room.js pullStep)
 let digHeld = false;   // LMB down with a shovel in hand: it keeps digging (a stroke each DIG.CD)
+let pushingRV = false;   // hands on the RV's outside ([E] on it): W pushes it (pushStep)
 let mapRaised = true;
 let lastWalkieTx = new Set();
 let worldBuilding = false;
@@ -496,11 +497,39 @@ function doorNear() {
   return d < 0.5 || (dx * lk.x + dy * lk.y + dz * lk.z) / d > 0.64;   // (within about 50 degrees of its middle)
 }
 
+// pushing the RV: [E] on its outside puts your hands on it, and while you hold W you push it the way you face
+// (A and D angle the push): the server's push (sim.push, a set force each), the same one walking into it gives,
+// but sent while your hands are on it rather than only as you bump it. In the mud the engine alone barely
+// moves it, one pushing hardly more, two get it out. Off your feet, in a seat, picking something up, or a step
+// and a half back from it, and you've let go
+let pushSent = 0;
+function pushStep(now) {
+  S.pushing = false;
+  if (!pushingRV) return;
+  const rv = S.rv;
+  if (!rv || me.mode !== 'walk' || me.par || me.holding || me.bunk != null || uiOpen()) { pushingRV = false; return; }
+  const l = toLocal(rv.p, rv.q, me.pos), hw = RV_DIM.HALF_W, hl = RV_DIM.HALF_L;
+  const cx = Math.max(-hw, Math.min(hw, l.x)), cz = Math.max(-hl, Math.min(hl, l.z));
+  if (Math.hypot(l.x - cx, l.z - cz) > 1.5 || insideRV(l.x, l.y, l.z, 0)) { pushingRV = false; return; }
+  hands.shove();   // (palms out flat on it)
+  if (inp.f <= 0 && !inp.r) return;
+  // the way I push: as I'd walk (player.js), only ever into the RV
+  const y = me.yaw, f = Math.max(0, inp.f), wx = Math.sin(y) * f - Math.cos(y) * inp.r, wz = Math.cos(y) * f + Math.sin(y) * inp.r, wl = Math.hypot(wx, wz);
+  const pt = toWorld(rv.p, rv.q, { x: cx, y: Math.max(0.3, Math.min(RV_DIM.WALL_H - 0.2, l.y + 1.0)), z: cz });
+  const ix = pt.x - me.pos.x, iz = pt.z - me.pos.z, il = Math.hypot(ix, iz);
+  if (wl < 0.1 || (il > 0.05 && (wx * ix + wz * iz) / (wl * il) < 0.2)) return;
+  S.pushing = true;
+  if (now - pushSent < 90) return;
+  pushSent = now;
+  net.send({ t: 'push', kind: 'rv', pt: [pt.x, pt.y, pt.z], dir: [wx / wl, 0, wz / wl] });
+}
+
 function computeTarget() {
   if (!S.lw) return null;
   if (me.bunk != null) return { kind: 'bed', label: '[E] get up · everyone in a bunk starts the next day' };
   if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · hold [H] horn' : (mapWanted() ? '[E] get up (stand to read the map)' : '[E] get up') };
   if (me.mode === 'ko') return null;
+  if (pushingRV) return { kind: 'pushing', label: `PUSHING THE RV · hold [W] to push, aimed with the mouse ([A]/[D] angle it)${S.g?.mud ? ' · it takes two in the mud' : ''} · [E] let go` };
   if (me.hasHook) {
     const a = nearestAnchor();
     return { kind: 'hookhold', label: a ? (a.prop ? '[E] hook the winch onto it' : '[E] hook the winch here') : 'carrying the winch hook — find a post / dead tree · [Q] drop it' };
@@ -573,13 +602,17 @@ function computeTarget() {
     if (u === 'locker') {   // (server/sim.js stowStep: what's set down in the RV goes in it)
       const lk = S.g?.lk;
       if (me.holding) return { kind: 'rvuse', use: 'locker', label: '[E] set it down in the RV: it goes in the locker' };
-      return { kind: 'rvuse', use: 'locker', label: lk ? `[E] take out the ${LOOT[lk[2]]?.name || 'loot'} · the locker: ${lk[0]} thing${lk[0] > 1 ? 's' : ''}, ${fmt$(lk[1])}` : 'The locker: empty. Loot set down in the RV goes in it, safe from knocks.' };
+      return lk ? { kind: 'rvuse', use: 'locker', label: `[E] open the locker: ${lk[0]} thing${lk[0] > 1 ? 's' : ''}${lk[1] ? `, ${fmt$(lk[1])} of loot` : ''}` }
+        : { kind: 'lockerEmpty', label: 'The locker: empty. Loot and gear set down in the RV go in it, safe from knocks.' };
     }
     if (u === 'bunk') return { kind: 'rvuse', use: 'bunk', label: S.g?.ph === 'night' ? '[E] sleep (everyone in a bunk = next day)' : 'bunks (bedtime is after the Repo Man gets paid)' };
     if (u === 'winch') return { kind: 'rvuse', use: 'winch', label: S.hook?.state === 0 ? '[E] take the winch hook' : `[E] ${S.hook?.reeling ? 'stop' : 'start'} reeling in` };
     if (doorNear()) return { kind: 'door', label: `[E] ${S.door ? 'close' : 'open'} the door` };
-    // (its outside: the way up to the roof. Nothing inside it is climbed)
-    if (Math.abs(hit.normal.y) < 0.6 && hit.toi < C.CLIMB.REACH + 0.6 && !inCabin(lh.x, lh.y, lh.z)) return { kind: 'climb', label: '[Hold LMB] climb' };
+    // (its outside, on your feet beside it: hands on it to push it, out of the mud or off what it's stuck on;
+    // and the way up to the roof. Nothing inside it is climbed)
+    const outside = !me.par && !inCabin(lh.x, lh.y, lh.z);
+    if (outside && me.mode === 'walk' && !me.holding && hit.toi < 1.8 && lh.y < RV_DIM.WALL_H) return { kind: 'pushrv', label: `[E] ${S.g?.mud ? 'PUSH it out of the mud' : 'push the RV'} · [Hold LMB] climb` };
+    if (outside && Math.abs(hit.normal.y) < 0.6 && hit.toi < C.CLIMB.REACH + 0.6) return { kind: 'climb', label: '[Hold LMB] climb' };
     return null;
   }
   if (fix && (hit.kind === 'terrain' || hit.kind === 'static')) return fix;
@@ -725,9 +758,12 @@ function onUse() {
   if (t.kind === 'prop') { onGrabPress(); return; }
   if (t.kind === 'chest') { net.send({ t: 'open', id: t.id }); return; }
   if (t.kind === 'pull') return;   // (E held: the frame's pull, below)
+  if (t.kind === 'pushrv') { pushingRV = true; tutDone('push'); return; }
+  if (t.kind === 'pushing') { pushingRV = false; return; }
   if (t.kind === 'hookhold') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'hook') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'door') { net.send({ t: 'use', kind: 'door' }); return; }
+  if (t.kind === 'rvuse' && t.use === 'locker') { sfx.click(); openLocker(); return; }   // (its list: take out what you want)
   if (t.kind === 'rvuse') { net.send({ t: 'use', kind: t.use }); return; }
   if (t.kind === 'revive') { reviveT = 0.0001; return; }
   if (t.kind === 'use') {
@@ -1228,7 +1264,7 @@ net.on('s', m => {
   S.door = !!m.g.door;
   for (const id of m.g.gates) if (!S.gatesOpen.has(id)) { S.gatesOpen.add(id); S.lw.openGate(id); const gv = S.wv.gates.get(id); if (gv) gv.target = 1; }
 });
-net.on('toast', inOrder(m => toast(m.text, m.color, m.secs)));
+net.on('toast', inOrder(m => { toast(m.text, m.color, m.secs); if (shopOpen()) shopNote(m.text, m.color === '#ff8a80', m.secs); }));   // (the toasts are drawn behind a shop's panel: it says them too)
 net.on('knock', inOrder(m => {
   const n = me.events.length;
   me.knock(m.v, m.ko, m.why || 'rv', !!m.rel, S.rv);
@@ -2036,7 +2072,7 @@ $('garageBtn').onclick = () => { sfx.click(); openPanel('garage'); };
 $('ctpGarage').onclick = () => openPanel('garage');
 $('ctpTerms').onclick = () => { sfx.click(); net.send({ t: 'terms', std: !S.meta?.trip?.askStd }); };
 $('garageClose').onclick = () => closePanel('garage');
-initShop({ open: openPanel, close: closePanel, send: m => net.send(m), state: () => ({ g: S.g, meta: S.meta, self: S.selfId }), click: () => sfx.click() });
+initShop({ open: openPanel, close: closePanel, send: m => net.send(m), state: () => ({ g: S.g, meta: S.meta, self: S.selfId, rv: S.rv?.p, town: S.W?.town, locker: S.locker }), click: () => sfx.click() });
 initGarage({ canImport: () => S.phase === 'menu', glovebox: () => S.glove || [], kitOpen: () => !S.meta || !!S.meta.trip?.kitOpen, onKit: sendKit });
 // my kit to the host's server (it takes it in camp on day 1 and during the game-over; otherwise it says so)
 function sendKit() { if (S.phase !== 'menu' && S.meta?.trip?.kitOpen) net.send({ t: 'kit', kit: myKit() }); }
@@ -2311,7 +2347,8 @@ requestAnimationFrame(frame);
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
   me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
   for (const e of me.events) meEvent(e);
-  for (const p of me.pushes) net.send({ t: 'push', ...p });
+  pushStep(now);
+  for (const p of me.pushes) if (!(pushingRV && p.kind === 'rv')) net.send({ t: 'push', ...p });   // (hands on it: pushStep's push, not this one too)
   if (me.pos.y < (S.W.heightAt(me.pos.x, me.pos.z) - 20)) {
     // fell through the world somehow
     me.teleport(me.pos.x, S.W.heightAt(me.pos.x, me.pos.z) + 1, me.pos.z);
@@ -2322,7 +2359,7 @@ requestAnimationFrame(frame);
     lastPose = now;
     const pose = me.pose(rv);
     if (voice.V.walkieKey && S.myWalkie) pose.f |= C.FLAG.WALKIE_TX;
-    if (now < (S.shoveUntil || 0)) pose.f |= C.FLAG.SHOVE;
+    if (now < (S.shoveUntil || 0) || (pushingRV && S.pushing)) pose.f |= C.FLAG.SHOVE;   // (pushing: arms out, leaning in)
     net.send(pose);
   }
 
@@ -2382,6 +2419,7 @@ requestAnimationFrame(frame);
   updateCasino(dt);
   updateTownLabels();
   updateDockBay(rv);
+  if (shopVendor() === LOCKER && !(me.par && insideRV(...Object.values(me.lp || { x: 9, y: 9, z: 9 })))) closeShop();   // (the locker's list is for whoever's in the RV with it)
   if (shopOpen()) renderShop();   // (the bank and what's fitted, as the server has them)
   updateDetector(dt);
   stepHoles(dt);
@@ -2673,7 +2711,8 @@ net.on('cas', m => { S.casAt = m.at; sfx.click(); });
 // E at a town shop: its catalogue (client/js/shop.js)
 // looks the crew has unlocked (bought, or brought by whoever joined): into my save for good
 net.on('unlock', m => { if (Array.isArray(m.ids)) unlockLooks(m.ids); });
-net.on('shop', m => { if (!garageOpen() && S.phase === 'game') { sfx.click(); openShop(m.v); } });
+net.on('locker', m => { S.locker = Array.isArray(m.list) ? m.list : []; });   // (what's in the RV's locker: [[id, type, value]])
+net.on('shop', m => { if (!garageOpen() && S.phase === 'game') { sfx.click(); openShop(m.v); tutDone({ store: 'hardware', tailor: 'clothes', gus: 'gus' }[m.v] || 'shop'); } });
 // the number keys at a station: 1-4 set the stake (+$100, +$500, all in, clear); 5 deals (in your turn at
 // blackjack, hits), rolls or pulls; at blackjack 6 stands, 7 doubles, 8 splits; at craps 7 lays odds behind
 // the line; at the Derby 5-8 buy a ticket on ringtail 1-4
@@ -2983,7 +3022,7 @@ function hud(rv) {
   }
   const driving = me.mode === 'seat' && me.seat === 0;
   $('driveHint').classList.toggle('hidden', !driving);
-  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD — get the boys to push' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}${g?.nos ? ` · ${g.nos[1] ? 'NITROUS!' : g.nos[0] ? `nitrous ×${g.nos[0]} (${keyLabel('N')})` : 'nitrous: none left today'}` : ''}`;
+  if (driving && rv) $('driveHint').textContent = `${Math.round(Math.hypot(rv.v.x, rv.v.z) * 2.237)} mph${g?.brk ? ` · BROKEN DOWN: somebody hold ${keyLabel('E')} at the engine hatch on the back` : ''}${g?.mud ? ' · STUCK IN MUD: keep the gas on, the others push from behind' : ''}${S.hook && S.hook.state !== 0 ? ` · winch ${S.hook.reeling ? 'REELING' : 'slack'} (${keyLabel('R')})` : ''}${g?.nos ? ` · ${g.nos[1] ? 'NITROUS!' : g.nos[0] ? `nitrous ×${g.nos[0]} (${keyLabel('N')})` : 'nitrous: none left today'}` : ''}`;
   $('walkieHint').classList.toggle('hidden', !S.myWalkie);
   $('walkieHint').classList.toggle('tx', !!voice.V.walkieKey);
   questTracker(g);
@@ -3096,6 +3135,13 @@ function kitLine(kit) {
   if (!perks.length && !part) return '';
   return `Your kit: ${[perks.join(', '), part].filter(Boolean).join('; ')}`;
 }
+// in town: where the general store's stalls are, till you've been to each (they're easy to walk past)
+function storeLine(L) {
+  const hw = !tut.has('hardware'), cl = !tut.has('clothes');
+  if (hw && cl) L.push(['Out front of the General Store: hardware (shovels, detectors, dynamite) right of the door, clothes left of it', '']);
+  else if (hw) L.push(['Hardware (shovels, detectors, dynamite): the rack out front of the General Store', '']);
+  else if (cl) L.push(['Hats, outfits and dyes: the clothes rail out front of the General Store', '']);
+}
 function questTracker(g) {
   if (!g || !S.W || g.ph === 'over' || g.ph === 'menu') { $('tracker').classList.add('hidden'); questKey = ''; return; }
   const town = townName(S.W), L = [];
@@ -3112,6 +3158,7 @@ function questTracker(g) {
   // the RV's condition, while it matters: broken down (what to do), or worn
   const hp = g.rvh ?? 100;
   if ((g.ph === 'camp' || g.ph === 'road') && g.brk) L.push([keysIn('BROKEN DOWN: hold [E] at the engine hatch on the back of the RV'), 'warn']);
+  else if (g.ph === 'road' && g.mud && !pushingRV) L.push([keysIn(me.mode === 'seat' && me.seat === 0 ? 'IN THE MUD: keep the gas on while the others push from behind' : 'IN THE MUD: get out, [E] on the back of the RV and hold [W] to push it (it takes two)'), 'warn']);
   else if ((g.ph === 'camp' || g.ph === 'road') && hp <= 60) L.push([`RV ${hp}%: ${hp > 30 ? 'smoking, down on power' : 'limping, a knock stalls it'}`, 'warn']);
   if (g.ph === 'camp') L.push([roleOf('drv') && roleOf('drv') !== S.selfId && !roleAway('drv') ? `${roleName('drv')} drives out of camp to start the clock` : 'Drive out of camp to start the clock', '']);
   if (g.ph === 'camp' && g.day === 1) {
@@ -3134,6 +3181,7 @@ function questTracker(g) {
     L.push([`Money for the Repo Man: ${fmt$(Math.max(0, g.bank))}/${fmt$(g.due)}`, g.bank >= g.due ? 'done' : '']);
     L.push(['Pay the Repo Man before midnight', '']);
     if (g.thf > 0) L.push([`Ringtails have ${fmt$(g.thf)} of your stuff at their den`, 'warn']);
+    if (g.town) storeLine(L);
     if (g.gb > 0) L.push([`Glovebox: ${g.gb} Road Card${g.gb > 1 ? 's' : ''}. Yours if you pay off the RV on day 5`, '']);
   } else if (g.ph === 'night') {
     L.push([`Paid the Repo Man ${fmt$(g.due)}`, 'done']);
@@ -3145,7 +3193,8 @@ function questTracker(g) {
     }
     if (g.nxt) L.push([`Tomorrow's payment: ${fmt$(g.nxt)} (with Gus's repairs)`, 'warn']);
     const fitted = S.meta?.trip?.upg?.length || 0;
-    if (fitted < UPGRADE_IDS.length) L.push([`Gus's parts board by the RV lot: upgrades for the RV${fitted ? ` (${fitted} fitted)` : ''}`, '']);
+    if (fitted < UPGRADE_IDS.length || !tut.has('gus')) L.push([`Gus's parts board by the RV lot: RV upgrades and paint${fitted ? ` (${fitted} fitted)` : ''}`, '']);
+    storeLine(L);
   }
   const title = `Day ${Math.min(g.day, C.DAYS)}: ${town}`;
   const key = title + JSON.stringify(L);
