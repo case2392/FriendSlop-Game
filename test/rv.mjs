@@ -12,6 +12,7 @@ const { initPhysics } = await import('../server/sim.js');
 const { RV_HATCH, RV_WHEELS, RV_DIM, RV_MAP_SPOT, qRotate, qYaw, toWorld, toLocal, insideRV } = await import('../shared/rv.js');
 const { generateLeg } = await import('../shared/world.js');
 const { LOOT, CARRY, carryDist } = await import('../shared/loot.js');
+const { kitMods, STOCK } = await import('../shared/garage.js');
 
 let failed = false;
 const ok = m => console.log('✅', m);
@@ -839,13 +840,15 @@ const crashCost = (room, dv, zone) => {
     return { up, held };
   };
   const G2 = { perks: { gloves: 2 }, part: null };
-  const head1 = lift('dino', [G2]), slot1 = lift('slot', [G2]), head2 = lift('dino', [G2, null]), slotStock = lift('slot', [null]);
+  const head1 = lift('dino', [G2]), slot1 = lift('slot', [G2]), head2 = lift('dino', [G2, null]), slotStock = lift('slot', [null]), slot2 = lift('slot', [null, null]);
   check(Math.abs(stockReel - C.WINCH.REEL_SPEED) < 0.08 && Math.abs(fastReel - 2.4) < 0.08 && C.WINCH.MAX_LEN === 42,
     `garage: the winch reels ${stockReel.toFixed(2)} m/s stock, ${fastReel.toFixed(2)} m/s with a Winch Motor II (2.4); the cable is still ${C.WINCH.MAX_LEN} m`);
   check(fixT != null && Math.abs(fixT - 4) < 0.05, `garage: a Toolbox II fix takes ${fixT?.toFixed(2)} s alone (stock 8)`);
   check(stam[0] === 40 && stam[1] === 60, `garage: picked up by a friend, you get up with ${stam[0]} stamina; by one with a Medic Bag II, ${stam[1]}`);
-  check(head1.up < 0.3 && slot1.up >= 0.3 && head2.up >= 0.3 && slotStock.up >= 0.3,
-    `garage: Gloves II hands alone get the dino head ${head1.up.toFixed(2)} m up in 3 s (it takes two: ${head2.up.toFixed(2)} m), the slot machine ${slot1.up.toFixed(2)} m (stock hands ${slotStock.up.toFixed(2)} m)`);
+  // (two hold it by its ends at their hands' height, shared/loot.js TANDEM.HIGH: the 1.4 m slot machine comes
+  // a hand's breadth off the ground)
+  check(head1.up < 0.05 && slot1.up < 0.05 && slotStock.up < 0.05 && head2.up >= 0.3 && slot2.up >= 0.12 && STOCK.haul === 1 && kitMods(G2).haul > 1,
+    `garage: the heavy loot takes two, Gloves II or not: alone, the dino head ${head1.up.toFixed(2)} m up in 3 s, the slot machine ${slot1.up.toFixed(2)} m (stock hands ${slotStock.up.toFixed(2)} m); two, ${head2.up.toFixed(2)} m and ${slot2.up.toFixed(2)} m. Gloves II carries its end ${kitMods(G2).haul}x quicker`);
 }
 {
   // K7: Steady Hands II at the wheel: full lock held for 5 s at 13 m/s on open ground keeps the RV under
@@ -1075,33 +1078,84 @@ const crashCost = (room, dv, zone) => {
     `bunks: asleep at dawn, Ann wakes on day ${room.day} still in her bunk (told after the new world: ${bi > wi}; slot ${lying?.slot}), the crew sees both lying there; in the morning E gets her up (${up && !up.on}), Bo sleeps on`);
 }
 
-{
-  // the mud: the gas on, the RV alone barely moves; one pushing from behind (the page's [E] on its back, then
-  // W: client/js/main.js pushStep, the same 'push' as walking into it) hardly more; two drive it out
-  const runs = [];
-  for (const pushers of [0, 1, 2]) {
-    const { room, ps } = crew(['Ann', 'Bo', 'Cy'], 2);
-    const W = room.W, sim = room.sim, mud = W.obstacles.find(o => o.type === 'mud');
-    const z0 = (mud.z0 + mud.z1) / 2 - 3;
-    sim.placeRV(W.roadX(z0), z0, roadYaw(W, z0));
-    room.phase = 'road';
-    tick(room, 1);
-    const [D, ...P] = ps, zs = sim.rv.translation().z;
-    D.seat = 0;
-    for (let i = 0; i < 8 * HZ; i++) {
-      room.handle(D, { t: 'drv', th: 1, st: 0, hb: 0 });
-      if (i % 5 === 0) for (let k = 0; k < pushers; k++) {
-        // (hands on its back wall, pushing the way it faces: what pushStep sends every 90 ms)
-        const at = sim.rvToWorld({ x: -0.5 + k, y: 0, z: -RV_DIM.HALF_L - 0.6 }), pt = sim.rvToWorld({ x: -0.5 + k, y: 1.0, z: -RV_DIM.HALF_L }), f = fwdOf(room);
-        room.onPose(P[k], { x: at.x, y: at.y, z: at.z, yaw: Math.atan2(f.x, f.z), pitch: 0, m: C.MODE.WALK, f: 0, v: [0, 0, 0] });
-        room.handle(P[k], { t: 'push', kind: 'rv', pt: [pt.x, pt.y, pt.z], dir: [f.x, 0, f.z] });
-      }
-      room.tick(1 / HZ);
-    }
-    runs.push(sim.rv.translation().z - zs);
+// hands on the RV, pushing (the page's [E] on its outside, then WASD: client/js/main.js pushStep sends a push
+// with hold every 90 ms, here every 5 ticks): who pushes where, for how long, on a stretch of road or the mud
+function pushRun({ day = 2, where = 'road', gas = false, pushers = [], secs = 8, after = 0 }) {
+  const { room, ps } = crew(['Ann', 'Bo', 'Cy', 'Di'], day);
+  const W = room.W, sim = room.sim, mud = W.obstacles.find(o => o.type === 'mud');
+  const z0 = where === 'mud' ? (mud.z0 + mud.z1) / 2 - 3 : 150;
+  sim.placeRV(W.roadX(z0), z0, roadYaw(W, z0));
+  room.phase = 'road';
+  tick(room, 1);
+  const [D, ...P] = ps, zs = sim.rv.translation().z;
+  if (gas) D.seat = 0;
+  let top = 0, out = null;
+  for (let i = 0; i < secs * HZ; i++) {
+    if (gas) room.handle(D, { t: 'drv', th: 1, st: 0, hb: 0 });
+    if (i % 5 === 0) pushers.forEach(([lx, lz, dl], k) => {
+      // (standing at (lx, lz) on the RV, its back at z -HALF_L, pushing dl = [x, z] on it)
+      const at = sim.rvToWorld({ x: lx, y: 0, z: lz }), pt = sim.rvToWorld({ x: lx, y: 1.0, z: Math.max(-RV_DIM.HALF_L, Math.min(RV_DIM.HALF_L, lz)) });
+      const o = sim.rvToWorld({ x: 0, y: 0, z: 0 }), dw = sim.rvToWorld({ x: dl[0], y: 0, z: dl[1] }), f = fwdOf(room);
+      room.onPose(P[k], { x: at.x, y: at.y, z: at.z, yaw: Math.atan2(f.x, f.z), pitch: 0, m: C.MODE.WALK, f: 0, v: [0, 0, 0] });
+      room.handle(P[k], { t: 'push', kind: 'rv', pt: [pt.x, pt.y, pt.z], dir: [dw.x - o.x, 0, dw.z - o.z], hold: 1 });
+    });
+    room.tick(1 / HZ);
+    top = Math.max(top, Math.hypot(sim.rv.linvel().x, sim.rv.linvel().z));
+    if (out == null && where === 'mud' && sim.mudWheels === 0) out = i / HZ;
   }
-  check(runs[0] < 4 && runs[1] < 8 && runs[2] > 15,
-    `rv: stuck in the mud with the gas on, the RV alone goes ${runs[0].toFixed(1)} m in 8 s, with one pushing ${runs[1].toFixed(1)} m, with two pushing from behind ${runs[2].toFixed(1)} m: out`);
+  const went = sim.rv.translation().z - zs, v0 = Math.hypot(sim.rv.linvel().x, sim.rv.linvel().z);
+  tick(room, after);
+  return { went, top, out, v0, after: Math.hypot(sim.rv.linvel().x, sim.rv.linvel().z) };
+}
+const BACK = k => [-0.6 + k * 0.6, -RV_DIM.HALF_L - 0.7, [0, 1]];   // (on its back, pushing it the way it faces)
+
+{
+  // parked on the road (nobody at the wheel: the parking brake on), hands on its back: one rolls it at a slow
+  // walk, each more a bit faster (C.PUSH_RV_V); let go and the brake has it again. Two pushing against each
+  // other (one on its back, one on its nose) get nowhere
+  const runs = [0, 1, 2, 3].map(n => pushRun({ pushers: Array.from({ length: n }, (_, k) => BACK(k)), after: 1.5 }));
+  const tug = pushRun({ pushers: [BACK(0), [0, RV_DIM.HALF_L + 0.7, [0, -1]]] });
+  check(Math.abs(runs[0].went) < 0.3 && runs[1].went > 4 && runs[2].went > runs[1].went + 2 && runs[3].went > runs[2].went + 2
+    && runs.every((r, n) => r.top < (n ? C.PUSH_RV_V[n - 1] : 0) + 0.3) && runs.slice(1).every(r => r.v0 > 0.5 && r.after < 0.15) && Math.abs(tug.went) < 1,
+    `rv: parked, pushed by hand for 8 s: nobody ${runs[0].went.toFixed(1)} m, one ${runs[1].went.toFixed(1)} m, two ${runs[2].went.toFixed(1)} m, three ${runs[3].went.toFixed(1)} m (tops ${runs.map(r => r.top.toFixed(1)).join('/')} m/s); let go, stopped in 1.5 s (${runs.slice(1).map(r => r.after.toFixed(2)).join('/')} m/s); back against nose ${tug.went.toFixed(1)} m`);
+}
+
+{
+  // the mud: the gas on, the RV alone barely moves, one pushing from behind a little more; two drive it out,
+  // three sooner. With no gas one or two only inch it along
+  const runs = [0, 1, 2, 3].map(n => pushRun({ where: 'mud', gas: true, secs: 20, pushers: Array.from({ length: n }, (_, k) => BACK(k)) }));
+  const dry = [1, 2].map(n => pushRun({ where: 'mud', secs: 20, pushers: Array.from({ length: n }, (_, k) => BACK(k)) }));
+  check(runs[0].went < 8 && runs[0].out == null && runs[1].went > runs[0].went + 2 && runs[1].out == null && runs[2].out != null && runs[3].out != null && runs[3].out < runs[2].out
+    && dry.every(r => r.out == null && r.went > 1) && dry[1].went > dry[0].went,
+    `rv: stuck in the mud with the gas on, for 20 s: alone ${runs[0].went.toFixed(1)} m, one pushing ${runs[1].went.toFixed(1)} m, two out at ${runs[2].out?.toFixed(1)} s, three at ${runs[3].out?.toFixed(1)} s; no gas, one ${dry[0].went.toFixed(1)} m, two ${dry[1].went.toFixed(1)} m`);
+}
+
+{
+  // the winch clipped to a dead tree (the one past the mud), then unhooked by E from 2.8 m off on the tree's far
+  // side (the page offers it within WINCH.UNHOOK_R of the hook, no aiming: playtest, nobody could unhook it from
+  // a tree); loose, it winds itself home onto the bumper
+  const { room, ps: [A] } = crew(['Ann'], 2);
+  const W = room.W, sim = room.sim, mud = W.obstacles.find(o => o.type === 'mud'), anc = W.anchors.find(a => Math.abs(a.z - (mud.z1 + 20)) < 0.5);
+  const z0 = anc.z - 12;
+  sim.placeRV(W.roadX(z0), z0, roadYaw(W, z0));
+  room.phase = 'road';
+  tick(room, 1);
+  const stand = (x, z) => room.onPose(A, { x, y: W.heightAt(x, z), z, yaw: 0, pitch: 0, m: C.MODE.WALK, f: 0, v: [0, 0, 0] });
+  const w = sim.winchWorld();
+  stand(w.x, w.z + 0.6); tick(room, 0.1);
+  room.handle(A, { t: 'use', kind: 'winch' });
+  for (let i = 0; i <= 30; i++) { const f = i / 30; stand(w.x + (anc.x - 0.9 - w.x) * f, w.z + (anc.z - w.z) * f); tick(room, 0.05); }
+  room.handle(A, { t: 'use', kind: 'hook' });
+  tick(room, 0.2);
+  const hooked = sim.hook.state === 'anchored';
+  stand(anc.x + 2.8, anc.z); tick(room, 0.1);
+  room.handle(A, { t: 'use', kind: 'hook' });
+  tick(room, 0.1);
+  const loose = sim.hook.state === 'out' && sim.hook.holder == null && sim.hook.reeling;
+  let home = null;
+  for (let i = 0; i < 40 * HZ && home == null; i++) { room.tick(1 / HZ); if (sim.hook.state === 'stowed') home = i / HZ; }
+  check(hooked && loose && home != null && /unhooked the winch/.test(A.conn.sent.filter(m => m.t === 'toast').map(m => m.text).join('|')),
+    `rv: the winch clipped to a dead tree (${hooked}), unhooked by E from 2.8 m off its far side (${loose}), and wound itself home in ${home?.toFixed(1)} s`);
 }
 
 if (failed) { console.error('\nRV TESTS FAILED'); process.exit(1); }

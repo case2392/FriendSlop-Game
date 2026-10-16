@@ -86,7 +86,7 @@ export const CLIMB = {
 export const GRAB = {
   KP: 140,                  // spring toward the hand
   KD: 22,
-  FMAX: 950,                // newtons one person can pull with (lifts ~95 kg alone)
+  FMAX: 950,                // newtons one person can pull with (lifts ~95 kg alone; the heavy loot always takes two: shared/loot.js TANDEM)
   RV_FMAX: 1300,            // tugging the RV by its bumper
   HOLD_MIN: 1.0,
   HOLD_MAX: 2.6,
@@ -97,6 +97,12 @@ export const GRAB = {
 
 export const PUSH_FORCE_RV = 2600;      // per shoving player, newtons
 export const PUSH_FORCE_PROP = 520;
+export const PUSH_VMAX = 4;              // m/s: a thing walked into is pushed no faster than about a walking pace
+// hands on the RV ([E] on its outside, then WASD: client/js/main.js pushStep): each pusher's PUSH_HOLD_RV, given
+// while it goes slower than PUSH_RV_V[pushers - 1] m/s their way (fading over the last 30%), and the parking
+// brake off while they push. On level road one gets it rolling at a slow walk, each more a bit faster
+export const PUSH_RV_V = [1.2, 1.9, 2.5, 3.0];
+export const PUSH_HOLD_RV = 4500;        // N per pusher, hands on it
 
 // the shove: right mouse with empty hands. A cone in front of you (no aim needed): REACH m out, HALF_DEG
 // either side of where you look, at most MAX things. A friend gets a knock (never a KO by itself: a roof edge
@@ -126,6 +132,7 @@ export const WINCH = {
   DAMP: 9000,
   OVERRUN: 0.6,             // m/s: a load coming faster than the drum winds gets less pull, none this much faster
   ANCHOR_REACH: 1.6,
+  UNHOOK_R: 3.2,            // m from your feet to the clipped hook: E unhooks it (no aiming at the hook itself)
 };
 
 // ---- the RV's condition (0-100%, one per trip; it never ends a trip: only a missed payment does) ----------

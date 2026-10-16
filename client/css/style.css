@@ -473,6 +473,7 @@ input:not([type]), input[type=text], select { font-family: var(--ui); }
 .over > p:first-of-type { text-align: center; margin-bottom: 12px; }
 
 .help { width: 800px; }
+.help .cols { max-height: calc(92vh - 230px); overflow-y: auto; }   /* (on a short screen the text scrolls: the button never sits below the window) */
 .help .cols { display: flex; gap: 30px; }
 .help .cols > div { flex: 1; }
 .help p { font-size: 15px; }

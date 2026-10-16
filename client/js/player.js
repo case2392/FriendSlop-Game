@@ -303,8 +303,10 @@ export class Me {
     if (cls === '2h') speed *= 0.78;
     if (cls === 'heavy') speed *= 0.5;
     if (this.buffT > 0) speed *= 1.15;
-    const accel = this.grounded ? P.ACCEL_GROUND : P.ACCEL_AIR;
-    const tx = w.x * speed, tz = w.z * speed;
+    let accel = this.grounded ? P.ACCEL_GROUND : P.ACCEL_AIR, tx = w.x * speed, tz = w.z * speed;
+    // where the page says I go instead of where I'd walk: hands on the RV (held to it, going along with it) or
+    // an end of the heavy loot (the pair goes as both of us lean): main.js pushHold, tandemDrive
+    if (inp.drive) { tx = inp.drive.x; tz = inp.drive.z; accel = Math.max(accel, inp.drive.a || 0); }
     const ax = tx - this.vel.x, az = tz - this.vel.z;
     const al = Math.hypot(ax, az), amax = accel * dt;
     if (al > amax) { this.vel.x += ax / al * amax; this.vel.z += az / al * amax; }

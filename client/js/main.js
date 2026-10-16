@@ -1,7 +1,7 @@
 // NO MONEY DOWN — client entry.
 import * as C from '/shared/constants.js';
 import { generateLeg, BIOME_BY_DAY, BIOMES } from '/shared/world.js';
-import { LOOT, fmt$, CARRY, carried, carryDist, holdPose } from '/shared/loot.js';
+import { LOOT, fmt$, CARRY, carried, carryDist, holdPose, TANDEM, twoMan, longSide, tandemGap, tandemVel } from '/shared/loot.js';
 import { RV_DIM, RV_SEATS, RV_HATCH, RV_BUNKS, toWorld, toLocal, insideRV, inCabin, qYaw } from '/shared/rv.js';
 import { trackAt } from '/shared/tracks.js';
 import { isTripCode, normalizeTripCode, tripCodeIn, tripCodeError } from '/shared/tripcode.js';
@@ -57,7 +57,7 @@ let reviveT = 0;
 let fixHeld = false;   // holding E at the engine hatch (the server counts the seconds: room.js fixStep)
 let pullHeld = null, heaveT = 0;   // the hole whose chest I'm holding E on (pulling it up: room.js pullStep)
 let digHeld = false;   // LMB down with a shovel in hand: it keeps digging (a stroke each DIG.CD)
-let pushingRV = false;   // hands on the RV's outside ([E] on it): W pushes it (pushStep)
+let pushingRV = false;   // hands on the RV's outside ([E] on it): held there, WASD pushes it (pushStep)
 let mapRaised = true;
 let lastWalkieTx = new Set();
 let worldBuilding = false;
@@ -362,6 +362,7 @@ document.addEventListener('pointerlockchange', () => {
   if (!locked) $('clickToPlay').classList.toggle('slim', document.hidden || !document.hasFocus() || performance.now() - blurAt < 500);
   $('clickToPlay').classList.toggle('hidden', locked || S.phase === 'menu' || uiOpen());
   if (!locked) { inp.grab = false; for (const k in keys) keys[k] = false; letGoOfTheWheel(); }
+  else $('help').classList.add('hidden');   // (clicked into the game: it's read, or not wanted)
 });
 // the driver's hands leave the controls: say so at once (a frozen or hidden page sends nothing at all,
 // and the server only lets go of a silent driver's throttle after a moment)
@@ -416,6 +417,9 @@ window.addEventListener('keydown', e => {
   if (keys[k]) return;
   keys[k] = true;
   if (S.phase === 'menu') return;
+  // the controls page (shown on a first visit; F1): E, Esc, Enter or Space puts it away (F1 is the browser's
+  // own help in some browsers, and on a short screen its button could sit below the window)
+  if (!$('help').classList.contains('hidden') && (k === 'e' || k === 'escape' || k === 'enter' || k === ' ')) { $('help').classList.add('hidden'); return; }
   // the Garage holds the game's keys while it's open (it closes on G or Esc; the voice keys still work)
   if (garageOpen() && !['g', 'escape', 'v', 't', 'm'].includes(k)) return;
   // so does a shop's catalogue (Esc or E puts it away)
@@ -497,31 +501,125 @@ function doorNear() {
   return d < 0.5 || (dx * lk.x + dy * lk.y + dz * lk.z) / d > 0.64;   // (within about 50 degrees of its middle)
 }
 
-// pushing the RV: [E] on its outside puts your hands on it, and while you hold W you push it the way you face
-// (A and D angle the push): the server's push (sim.push, a set force each), the same one walking into it gives,
-// but sent while your hands are on it rather than only as you bump it. In the mud the engine alone barely
-// moves it, one pushing hardly more, two get it out. Off your feet, in a seat, picking something up, or a step
-// and a half back from it, and you've let go
-let pushSent = 0;
-function pushStep(now) {
-  S.pushing = false;
-  if (!pushingRV) return;
+// pushing the RV: [E] on its outside puts your hands on it and holds you there, going along with it as it
+// moves, till [E] again. W pushes it straight in, S pulls it back, A and D push it to your left and right
+// (with W, at an angle): the server's push (sim.push with hold), counted, the parking brake off while you
+// push. One pusher rolls it at a slow walk, each more a bit faster (C.PUSH_RV_V); in the mud the gas and two
+// get it out. Off your feet, in a seat, picking something up, kept off the spot, or the RV driven off faster
+// than anyone pushes, and you've let go
+let pushSent = 0, pushLock = null;   // { lx, lz: where I stand, on the RV; nx, nz: into it, on the RV; turn }
+const PUSH_STAND = C.PLAYER.RADIUS + 0.36;
+function takeHold() {
   const rv = S.rv;
-  if (!rv || me.mode !== 'walk' || me.par || me.holding || me.bunk != null || uiOpen()) { pushingRV = false; return; }
+  if (!rv) return;
   const l = toLocal(rv.p, rv.q, me.pos), hw = RV_DIM.HALF_W, hl = RV_DIM.HALF_L;
-  const cx = Math.max(-hw, Math.min(hw, l.x)), cz = Math.max(-hl, Math.min(hl, l.z));
-  if (Math.hypot(l.x - cx, l.z - cz) > 1.5 || insideRV(l.x, l.y, l.z, 0)) { pushingRV = false; return; }
+  const cl = (v, a) => Math.max(-a, Math.min(a, v));
+  // (the face I'm at: the one I'm furthest out past)
+  if (Math.abs(l.z) - hl >= Math.abs(l.x) - hw) { const s = Math.sign(l.z) || -1; pushLock = { lx: cl(l.x, hw - 0.3), lz: s * (hl + PUSH_STAND), nx: 0, nz: -s }; }
+  else { const s = Math.sign(l.x) || 1; pushLock = { lx: s * (hw + PUSH_STAND), lz: cl(l.z, hl - 0.4), nx: -s, nz: 0 }; }
+  pushLock.turn = 0.3;   // (s: turned to face it)
+  pushingRV = true;
+}
+function letGo() { pushingRV = false; pushLock = null; }
+// where my hands hold me this frame (for player.js walk), or null
+function pushHold(dt) {
+  const rv = S.rv, L = pushLock;
+  if (!pushingRV || !L) return null;
+  if (!rv || me.mode !== 'walk' || me.par || me.holding || me.hasHook || me.bunk != null || uiOpen() || Math.hypot(rv.v.x, rv.v.z) > C.PUSH_RV_V[C.PUSH_RV_V.length - 1] + 1) { letGo(); return null; }
+  const at = toWorld(rv.p, rv.q, { x: L.lx, y: 0, z: L.lz }), o = toWorld(rv.p, rv.q, { x: 0, y: 0, z: 0 }), n = toWorld(rv.p, rv.q, { x: L.nx, y: 0, z: L.nz });
+  const nx = n.x - o.x, nz = n.z - o.z;
+  if (Math.hypot(at.x - me.pos.x, at.z - me.pos.z) > 1.3) { letGo(); return null; }   // (kept off it: a rock, a friend, the ground falling away)
+  if (L.turn > 0) {   // (turning to face it as I take hold)
+    const want = Math.atan2(nx, nz), d = Math.atan2(Math.sin(want - me.yaw), Math.cos(want - me.yaw));
+    me.yaw += d * Math.min(1, dt / L.turn); L.turn = Math.max(0, L.turn - dt);
+  }
+  return { x: at.x, z: at.z, vx: rv.v.x, vz: rv.v.z, nx, nz };
+}
+function pushStep(now, h) {
+  S.pushing = false;
+  if (!pushingRV || !h) return;
   hands.shove();   // (palms out flat on it)
-  if (inp.f <= 0 && !inp.r) return;
-  // the way I push: as I'd walk (player.js), only ever into the RV
-  const y = me.yaw, f = Math.max(0, inp.f), wx = Math.sin(y) * f - Math.cos(y) * inp.r, wz = Math.cos(y) * f + Math.sin(y) * inp.r, wl = Math.hypot(wx, wz);
-  const pt = toWorld(rv.p, rv.q, { x: cx, y: Math.max(0.3, Math.min(RV_DIM.WALL_H - 0.2, l.y + 1.0)), z: cz });
-  const ix = pt.x - me.pos.x, iz = pt.z - me.pos.z, il = Math.hypot(ix, iz);
-  if (wl < 0.1 || (il > 0.05 && (wx * ix + wz * iz) / (wl * il) < 0.2)) return;
+  const f = (keys.w || keys.arrowup ? 1 : 0) - (keys.s || keys.arrowdown ? 1 : 0), r = (keys.d || keys.arrowright ? 1 : 0) - (keys.a || keys.arrowleft ? 1 : 0);
+  // (into it, and along it to my right: facing it, my right is (-nz, nx), as player.js walks)
+  const wx = h.nx * f - h.nz * r * 0.8, wz = h.nz * f + h.nx * r * 0.8, wl = Math.hypot(wx, wz);
+  if (wl < 0.1) return;
   S.pushing = true;
   if (now - pushSent < 90) return;
   pushSent = now;
-  net.send({ t: 'push', kind: 'rv', pt: [pt.x, pt.y, pt.z], dir: [wx / wl, 0, wz / wl] });
+  const rv = S.rv, l = toLocal(rv.p, rv.q, me.pos), L = pushLock;
+  const pt = toWorld(rv.p, rv.q, { x: L.lx + L.nx * PUSH_STAND, y: Math.max(0.3, Math.min(RV_DIM.WALL_H - 0.2, l.y + 1.0)), z: L.lz + L.nz * PUSH_STAND });
+  net.send({ t: 'push', kind: 'rv', pt: [pt.x, pt.y, pt.z], dir: [wx / wl, 0, wz / wl], hold: 1 });
+}
+// an end of the heavy loot (shared/loot.js TANDEM; the server holds it between us, sim.js). Alone, you hold
+// your end where it lies and can't walk off with it. With a friend on the other end, the two of you go where
+// you both lean, averaged: the same way, at a heavy walk; against each other along the load, nowhere; one
+// leaning across it turns the pair about the other. A step or more out of place and the load pulls you back
+// to its length apart. What the other leans comes from their page ('tw', through the server)
+function myWish() {
+  const f = inp.f, r = inp.r, y = me.yaw;
+  let wx = Math.sin(y) * f - Math.cos(y) * r, wz = Math.cos(y) * f + Math.sin(y) * r;
+  const wl = Math.hypot(wx, wz), sp = C.PLAYER.WALK * 0.5 * (inp.crouch ? 0.6 : 1) * (me.mods?.haul ?? 1);
+  if (wl > 1) { wx /= wl; wz /= wl; }
+  return { x: wx * sp, z: wz * sp };
+}
+function tandemDrive() {
+  const h = me.holding;
+  if (!h?.two || h.ok === false || me.mode !== 'walk') return null;
+  const w = myWish(), mate = h.partner != null ? S.others?.get(h.partner) : null;
+  S.myWish = w;
+  if (!mate) {
+    // (alone: my end stays where it is, and so, a step from it, do I)
+    const c = S.props.get(h.id)?.pose?.p;
+    if (!c) return null;
+    const dx = me.pos.x - c.x, dz = me.pos.z - c.z, dl = Math.hypot(dx, dz) || 1, out = (w.x * dx + w.z * dz) / dl;
+    if (dl > tandemGap(h.type) / 2 + 0.2 && out > 0) { w.x -= dx / dl * out; w.z -= dz / dl * out; }
+    return w;
+  }
+  const w2 = S.mateWish && S.mateWish.id === h.partner && performance.now() - S.mateWish.t < 1500 ? S.mateWish : { x: 0, z: 0 };
+  // (the other end's carrier as they are now: they're drawn about a tenth of a second behind)
+  const cx = (w.x + w2.x) / 2, cz = (w.z + w2.z) / 2;
+  return tandemVel(w, w2, { x: mate.pos.x + cx * 0.12 - me.pos.x, z: mate.pos.z + cz * 0.12 - me.pos.z }, tandemGap(h.type));
+}
+// on my screen, the load between my hands and theirs (the server's pose of it trails my own steps)
+function tandemInHands() {
+  const h = me.holding, p = h?.two && h.partner != null ? S.props.get(h.id) : null, mate = p && S.others?.get(h.partner);
+  if (!p?.mesh || !mate || me.mode !== 'walk') return;
+  let ux = mate.pos.x - me.pos.x, uz = mate.pos.z - me.pos.z;
+  const d = Math.hypot(ux, uz) || 1;
+  ux /= d; uz /= d;
+  p.mesh.position.set((me.pos.x + mate.pos.x) / 2, (me.pos.y + mate.pos.y) / 2 + TANDEM.HIGH, (me.pos.z + mate.pos.z) / 2);
+  // (its long side along us, each end the way round the server has it: whose end is whose)
+  const ls = longSide(p.type), q = p.pose?.q || { x: 0, y: 0, z: 0, w: 1 }, la = ls.ax === 'x' ? { x: 1, y: 0, z: 0 } : { x: 0, y: 0, z: 1 };
+  const lw = new THREE.Vector3(la.x, la.y, la.z).applyQuaternion(new THREE.Quaternion(q.x, q.y, q.z, q.w));
+  if (lw.x * ux + lw.z * uz < 0) { ux = -ux; uz = -uz; }
+  const yaw = ls.ax === 'z' ? Math.atan2(ux, uz) : Math.atan2(-uz, ux);
+  p.mesh.quaternion.set(0, Math.sin(yaw / 2), 0, Math.cos(yaw / 2));
+}
+// who holds the heavy loot's ends (the server's 'pair' news): prop id -> [player ids]
+const pairs = new Map();
+function onPair(e) {
+  if (e.ids.length) pairs.set(e.id, e.ids); else pairs.delete(e.id);
+  const h = me.holding;
+  if (h?.id !== e.id || !h.two || !e.ids.includes(S.selfId)) return;
+  const was = h.partner ?? null, now = e.ids.find(q => q !== S.selfId) ?? null;
+  h.partner = now;
+  const name = id => S.meta?.players.find(q => q.id === id)?.name || 'They';
+  const what = LOOT[h.type]?.name || 'it';
+  if (now != null && now !== was) toast(`${name(now)} has the other end of the ${what}. Move together: pull against each other and you go nowhere.`, '#7CFC00', 4);
+  else if (now == null && was != null) toast(`${name(was)} let go: the ${what}'s down. It takes two to lift.`, '#ffb4a2', 3);
+}
+
+// how many have their hands on the RV and are pushing (arms out, leaning in, by it), me included
+function pushersNow() {
+  let n = S.pushing ? 1 : 0;
+  const rv = S.rv;
+  if (!rv || !S.others) return n;
+  for (const o of S.others.values()) {
+    if (!(o.flags & C.FLAG.SHOVE) || o.mode !== C.MODE.WALK) continue;
+    const l = toLocal(rv.p, rv.q, o.pos);
+    if (Math.abs(l.x) < RV_DIM.HALF_W + 1.2 && Math.abs(l.z) < RV_DIM.HALF_L + 1.2) n++;
+  }
+  return n;
 }
 
 function computeTarget() {
@@ -529,13 +627,26 @@ function computeTarget() {
   if (me.bunk != null) return { kind: 'bed', label: '[E] get up · everyone in a bunk starts the next day' };
   if (me.mode === 'seat') return { kind: 'seat', label: me.seat === 0 ? '[E] get up · WASD drive · SPACE brake · [R] reel winch · hold [H] horn' : (mapWanted() ? '[E] get up (stand to read the map)' : '[E] get up') };
   if (me.mode === 'ko') return null;
-  if (pushingRV) return { kind: 'pushing', label: `PUSHING THE RV · hold [W] to push, aimed with the mouse ([A]/[D] angle it)${S.g?.mud ? ' · it takes two in the mud' : ''} · [E] let go` };
+  if (pushingRV) { const n = pushersNow(); return { kind: 'pushing', label: `HANDS ON THE RV · [W] push · [A]/[D] push it left/right · [S] pull · [E] let go${n ? ` · ${n} pushing` : ''}${S.g?.mud && n < 2 ? ' · in the mud it takes two (and the gas)' : ''}` }; }
   if (me.hasHook) {
     const a = nearestAnchor();
     return { kind: 'hookhold', label: a ? (a.prop ? '[E] hook the winch onto it' : '[E] hook the winch here') : 'carrying the winch hook — find a post / dead tree · [Q] drop it' };
   }
   const eye = me.eye(S.rv), look = me.look();
-  const hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
+  // the winch clipped to something, and I'm by it, more or less facing it: E unhooks it. (The hook is small,
+  // and clipped to a dead tree it sits in the trunk: the crosshair found the tree, and nobody could unhook it)
+  const hk = S.hook?.state === 2 && !me.holding && me.mode === 'walk' ? S.hook : null;
+  if (hk) {
+    const dx = hk.x - eye.x, dy = hk.y - eye.y, dz = hk.z - eye.z, d = Math.hypot(dx, dy, dz), feet = Math.hypot(hk.x - me.pos.x, hk.y - me.pos.y, hk.z - me.pos.z);
+    if (feet < C.WINCH.UNHOOK_R && (d < 0.8 || (dx * look.x + dy * look.y + dz * look.z) / d > 0.25)) return { kind: 'hook', label: '[E] UNHOOK the winch (it winds itself back in)' };
+  }
+  let hit = S.lw.ray(eye, look, C.PLAYER.REACH, G.WORLD | G.RV | G.PROP | G.PLAYER | G.USE | G.HOOK, excludeSet(), true);
+  // gear lying in a counter's or a rack's reach (what's bought at the hardware rack, set down by it): aimed at,
+  // it's picked up, not the rack's catalogue opened again (playtest: grabbing the dynamite opened the menu)
+  if (hit?.kind === 'use' && !me.holding) {
+    const ph = S.lw.ray(eye, look, C.PLAYER.REACH, G.PROP, excludeSet(), false);
+    if (ph?.kind === 'prop' && LOOT[S.props.get(ph.id)?.type]?.gear) hit = ph;
+  }
   // broken down, and standing behind it: the engine hatch (looking at the RV's back, the ground or the sky)
   const fix = atHatch() ? { kind: 'fix', label: `[Hold E] fix the engine${S.g.fix ? ` (${S.g.fix}%)` : ''}` } : null;
   // a chest down the hole you dug, in reach: hold E (or mash it) to pull it up
@@ -564,9 +675,13 @@ function computeTarget() {
     if (L.find) return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name}: set it down in the RV to keep it (${TINS[L.find]} cards)` };
     if (L.gear) return { kind: 'prop', id: p.id, hit, label: `[E] pick up the ${L.name}${L.gear === 'shovel' ? ' (LMB digs, hold it to keep digging)' : L.gear === 'dynamite' ? ' (LMB lights it, RMB throws it)' : ' (it beeps over buried metal)'}` };
     if (L.chest) return { kind: 'chest', id: p.id, label: '[E] OPEN the chest' };
-    const heavy = L.cls === 'heavy' ? ' — HEAVY, get a friend' : '';
     const dmg = p.value < p.max ? ` (was ${fmt$(p.max)})` : '';
-    return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name} · ${fmt$(p.value)}${dmg}${heavy}` };
+    if (twoMan(p.type)) {   // (an end each: shared/loot.js TANDEM)
+      const on = (pairs.get(p.id) || []).filter(q => q !== S.selfId), who = on.length ? S.meta?.players.find(q => q.id === on[0])?.name || 'Somebody' : null;
+      return on.length >= 2 ? { kind: 'peek', label: `${L.name} · ${fmt$(p.value)}${dmg} · two have it already` }
+        : { kind: 'prop', id: p.id, hit, label: who ? `[E] take the other end of the ${L.name}: ${who}'s waiting · ${fmt$(p.value)}${dmg}` : `[E] take an end of the ${L.name} · ${fmt$(p.value)}${dmg} · HEAVY: it takes two to lift` };
+    }
+    return { kind: 'prop', id: p.id, hit, label: `[E] pick up ${L.name} · ${fmt$(p.value)}${dmg}` };
   }
   if (hit.kind === 'use') {
     const u = S.W.uses[hit.id];
@@ -705,7 +820,7 @@ function onGrabPress() {
     const carry = carried(p.type);
     S.holdDist = carry ? carryDist(p.type) : Math.max(C.GRAB.HOLD_MIN, Math.min(C.GRAB.HOLD_MAX, t.hit.toi + 0.1));
     const q0 = p.pose?.q || { x: 0, y: 0, z: 0, w: 1 };
-    me.holding = { id: p.id, type: p.type, carry, rel: carry ? holdPose(p.type) || qMul(yawQ(-me.yaw), q0) : null };
+    me.holding = { id: p.id, type: p.type, carry, rel: carry ? holdPose(p.type) || qMul(yawQ(-me.yaw), q0) : null, two: twoMan(p.type), partner: null };
     if (p.type === 'ringtail') tutDone('ringtail');
     net.send({ t: 'grab', kind: 'prop', id: p.id, pt: [t.hit.point.x, t.hit.point.y, t.hit.point.z], d: S.holdDist });
     sfx.grab();
@@ -717,6 +832,7 @@ function onGrabRelease() {
 }
 function onThrow() {
   if (!me.holding) return onShove();
+  if (me.holding.two) return onDrop();   // (nobody throws a safe: it's set down)
   const l = me.look();
   net.send({ t: 'rel', thr: 1, dir: [l.x, l.y + 0.15, l.z] });
   me.holding = null;
@@ -758,8 +874,8 @@ function onUse() {
   if (t.kind === 'prop') { onGrabPress(); return; }
   if (t.kind === 'chest') { net.send({ t: 'open', id: t.id }); return; }
   if (t.kind === 'pull') return;   // (E held: the frame's pull, below)
-  if (t.kind === 'pushrv') { pushingRV = true; tutDone('push'); return; }
-  if (t.kind === 'pushing') { pushingRV = false; return; }
+  if (t.kind === 'pushrv') { takeHold(); tutDone('push'); return; }
+  if (t.kind === 'pushing') { letGo(); return; }
   if (t.kind === 'hookhold') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'hook') { net.send({ t: 'use', kind: 'hook' }); return; }
   if (t.kind === 'door') { net.send({ t: 'use', kind: 'door' }); return; }
@@ -805,7 +921,8 @@ const TIPS = [
   'Loot loses value every time it gets knocked about. Carry it gently.',
   'Hold the left mouse button on a rock wall to climb it. Space lunges up.',
   'Each morning picks a driver and a navigator. The driver can\'t see the map: the navigator reads it out.',
-  'Walk into the RV to push it out of the mud.',
+  'E on the RV\'s outside puts your hands on it: W pushes. One rolls it, each more pushes faster; in the mud it takes the gas and two.',
+  'A safe, a slot machine, the dino head: it takes two. An end each, and you go where you both lean.',
   'Crouch in the RV to brace for a crash: braced, a crash can\'t knock you out.',
   'A Grumphorn sleeps past an obstacle some days. Crouch past it, creep the RV by, or wear out its patience: ram it, winch it, throw junk at it.',
   'Right mouse with empty hands shoves whatever is in front of you: friends, loot, wildlife.',
@@ -894,6 +1011,7 @@ async function buildDay(m) {
   if (S.lw) S.lw.free();
   for (const p of S.props.values()) { scene.remove(p.mesh); p.view?.dispose(); }
   S.props.clear();
+  pairs.clear();
   freeDerby();
   S.casAt = null;
   S.W = W;
@@ -1295,11 +1413,13 @@ net.on('seat', inOrder(m => {
 // the server's answer to a grab: no, and the hands are empty again; yes, and (the map) its sheet can go up
 net.on('grabbed', inOrder(m => { if (me.holding?.id !== m.id) return; if (m.ok) me.holding.ok = true; else me.holding = null; }));
 // out of the RV's locker, straight into your hands (server/room.js: E on the locker)
+// the way whoever has the other end of the heavy loot leans (server/room.js onPose: their pose's w)
+net.on('tw', m => { S.mateWish = { id: m.id, x: +m.w?.[0] || 0, z: +m.w?.[1] || 0, t: performance.now() }; });
 net.on('given', inOrder(m => {
   if (me.mode !== 'walk') return;
   const carry = carried(m.type), q0 = Array.isArray(m.q) ? { x: m.q[0], y: m.q[1], z: m.q[2], w: m.q[3] } : { x: 0, y: 0, z: 0, w: 1 };
   S.holdDist = +m.d || carryDist(m.type);
-  me.holding = { id: m.id, type: m.type, carry, rel: carry ? holdPose(m.type) || qMul(yawQ(-me.yaw), q0) : null, ok: true };
+  me.holding = { id: m.id, type: m.type, carry, rel: carry ? holdPose(m.type) || qMul(yawQ(-me.yaw), q0) : null, ok: true, two: twoMan(m.type), partner: null };
   sfx.grab();
 }));
 // into a bunk (server/room.js): lying in it, on your back, looking down the bunk past your feet; out of it,
@@ -1413,6 +1533,7 @@ function onEvent(e) {
     case 'creak': sfx.creak(); break;
     case 'gate': sfx.gate(); break;
     case 'buzz': sfx.buzz(); break;
+    case 'pair': onPair(e); break;
     case 'slip': if (e.by === S.selfId) { me.holding = null; toast({ bean: 'Beaned! You dropped it.', bite: 'OW. It bit you, and you let go.', wriggle: 'It wriggled free.', nip: 'A ringtail nipped you, and you dropped it. Keep away from their den, or see them off first.', rock: 'A rock bowled you over, and you dropped it.' }[e.why] || 'It slipped out of your hands.', '#ffb4a2', e.why === 'nip' ? 4 : 2); } break;
     case 'throw': break;
     // a game settled: your own is a fanfare; a friend's win rings the till (the bank went up), a loss is quiet
@@ -2345,9 +2466,18 @@ requestAnimationFrame(frame);
   // (Ctrl crouches in the desktop build only: in a browser, crouch-walking on Ctrl+W closed the tab)
   inp.crouch = (!!DESK && !!keys.control) || !!keys.c || (!!S.kpCrouch && !$('keypad').classList.contains('hidden'));
   if (me.mode === 'seat') { inp.f = 0; inp.r = 0; inp.jump = false; }
-  me.update(dt, { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
+  const hold = pushHold(dt);   // (hands on the RV: held to it; WASD pushes it, pushStep, not me)
+  const pair = hold ? null : tandemDrive();   // (an end of the heavy loot: we go as both of us lean)
+  let drive = null;
+  if (hold) {
+    let cx = (hold.x - me.pos.x) * 8, cz = (hold.z - me.pos.z) * 8;
+    const cl = Math.hypot(cx, cz);
+    if (cl > 4) { cx *= 4 / cl; cz *= 4 / cl; }
+    drive = { x: hold.vx + cx, z: hold.vz + cz, a: 40 };
+  } else if (pair) drive = pair;
+  me.update(dt, drive ? { ...inp, f: 0, r: 0, jump: false, sprint: false, grab: false, drive } : { ...inp, grab: inp.grab && isLocked() }, S.lw, rv, moveExclude());
   for (const e of me.events) meEvent(e);
-  pushStep(now);
+  pushStep(now, hold);
   for (const p of me.pushes) if (!(pushingRV && p.kind === 'rv')) net.send({ t: 'push', ...p });   // (hands on it: pushStep's push, not this one too)
   if (me.pos.y < (S.W.heightAt(me.pos.x, me.pos.z) - 20)) {
     // fell through the world somehow
@@ -2360,6 +2490,7 @@ requestAnimationFrame(frame);
     const pose = me.pose(rv);
     if (voice.V.walkieKey && S.myWalkie) pose.f |= C.FLAG.WALKIE_TX;
     if (now < (S.shoveUntil || 0) || (pushingRV && S.pushing)) pose.f |= C.FLAG.SHOVE;   // (pushing: arms out, leaning in)
+    if (me.holding?.two && S.myWish) pose.w = [Math.round(S.myWish.x * 100) / 100, Math.round(S.myWish.z * 100) / 100];   // (the way I lean, for whoever has the other end)
     net.send(pose);
   }
 
@@ -2388,6 +2519,7 @@ requestAnimationFrame(frame);
   camera.fov = feel.fov;
   camera.updateProjectionMatrix();
   holdInHands(ex, ey, ez, look);
+  tandemInHands();
 
   // views of other players
   for (const [id, st] of others) {
@@ -3008,8 +3140,11 @@ function hud(rv) {
       : p.type === 'grumphorn' ? 'GRUMPHORN, by the horns · it will shake you off · [E] let go'
       : LOOT[p.type].find ? `${LOOT[p.type].name} · set it down in the RV to keep its cards · [E] set down · [RMB] throw`
       : p.type === 'shovel' ? keysIn('SHOVEL · [LMB] dig where you look (hold to keep digging) · [E] set down')
-      : p.type === 'dynamite' ? (fuseOf(p.id) ? `LIT! ${fuseOf(p.id).toFixed(1)} s · [RMB] THROW IT` : keysIn('DYNAMITE · [LMB] light the fuse (4 s) · [RMB] throw · [E] set down'))
+      : p.type === 'dynamite' ? (fuseOf(p.id) ? keysIn(`LIT! ${fuseOf(p.id).toFixed(1)} s · [RMB] THROW IT · [E] set it down`) : keysIn('DYNAMITE · [LMB] light the fuse (4 s) · [RMB] throw · [E] set down'))
       : p.type === 'detector' ? 'METAL DETECTOR · sweep it about: it beeps over buried metal · [E] set down'
+      : me.holding.two ? (me.holding.partner != null
+        ? `${LOOT[p.type].name.toUpperCase()}, WITH ${(S.meta?.players.find(q => q.id === me.holding.partner)?.name || 'A FRIEND').toUpperCase()} · ${fmt$(p.value)} · move together (pull against each other and you go nowhere) · [E] set down`
+        : `ONE END OF THE ${LOOT[p.type].name.toUpperCase()} · it takes two to lift: a friend on the other end · [E] let go`)
       : `${LOOT[p.type].name} · ${fmt$(p.value)} · [E] set down · [RMB] throw · wheel: reach`;
   } else if (me.hasHook) held = 'WINCH HOOK clipped to your belt';
   $('heldLabel').textContent = held;
@@ -3161,7 +3296,7 @@ function questTracker(g) {
   const hp = g.rvh ?? 100;
   if ((g.ph === 'camp' || g.ph === 'road') && g.brk) L.push([keysIn('BROKEN DOWN: hold [E] at the engine hatch on the back of the RV'), 'warn']);
   else if (g.ph === 'road' && g.ice && !snowTires() && !pushingRV) L.push([keysIn(me.mode === 'seat' && me.seat === 0 ? 'BLACK ICE: no grip, the brakes won\'t hold. Ease through; stuck? the others push' : 'BLACK ICE: if the RV can\'t get going, get out, [E] on its back and hold [W] to push'), 'warn']);
-  else if (g.ph === 'road' && g.mud && !pushingRV) L.push([keysIn(me.mode === 'seat' && me.seat === 0 ? 'IN THE MUD: keep the gas on while the others push from behind' : 'IN THE MUD: get out, [E] on the back of the RV and hold [W] to push it (it takes two)'), 'warn']);
+  else if (g.ph === 'road' && g.mud && !pushingRV) L.push([keysIn(me.mode === 'seat' && me.seat === 0 ? 'IN THE MUD: keep the gas on while the others push from behind' : 'IN THE MUD: get out, [E] on the back of the RV and hold [W] to push it (two and the gas get it out)'), 'warn']);
   else if ((g.ph === 'camp' || g.ph === 'road') && hp <= 60) L.push([`RV ${hp}%: ${hp > 30 ? 'smoking, down on power' : 'limping, a knock stalls it'}`, 'warn']);
   if (g.ph === 'camp') L.push([roleOf('drv') && roleOf('drv') !== S.selfId && !roleAway('drv') ? `${roleName('drv')} drives out of camp to start the clock` : 'Drive out of camp to start the clock', '']);
   if (g.ph === 'camp' && g.day === 1) {

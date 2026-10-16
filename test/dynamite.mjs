@@ -89,18 +89,24 @@ const clearX = W => z => W.roadX(z) + 1.5;
     `dynamite: today's ${rocks.length} seamed rocks lie where shared/blast.js put them, bedded in the ground (${bedded}), nobody picks one up, and once sent they're left out of the snapshots (${sent} in the next)`);
 }
 {
-  // a stick at the rack: $60, set down by it, and it's gear (Ed won't have it)
+  // a stick at the rack: $60, into the buyer's empty hands (their page told: 'given'), and it's gear (Ed won't
+  // have it); a second, their hands full, set down by the rack, further out from the store than the rack
+  // (playtest: the crosshair found the rack before a stick set down under it, and E opened the catalogue)
   const { room, ps: [A] } = crew(['Ann']);
   room.bank = 1000;
   const H = room.W.town.hardware;
   stand(room, A, H.x, H.z);
-  tick(room, 0.35); room.handle(A, { t: 'shopBuy', v: 'store', id: 'dynamite' });
+  tick(room, 0.35); A.conn.sent.length = 0; room.handle(A, { t: 'shopBuy', v: 'store', id: 'dynamite' });
   tick(room, 0.5);
-  const s = ofType(room, 'dynamite')[0];
-  check(!!s && room.bank === 1000 - GEAR.dynamite.price && Math.hypot(at(room, s.id).x - H.x, at(room, s.id).z - H.z) < 3 && s.value === 0,
-    `dynamite: a stick at the hardware rack, $${GEAR.dynamite.price} from the bank, set down by it`);
+  const s = ofType(room, 'dynamite')[0], given = A.conn.sent.some(m => m.t === 'given' && m.id === s?.id);
+  room.handle(A, { t: 'shopBuy', v: 'store', id: 'dynamite' });
+  tick(room, 1.5);
+  const s2 = ofType(room, 'dynamite').find(q => q.id !== s?.id), p2 = s2 && at(room, s2.id);
+  const out = p2 && ((p2.x - H.rack.x) * (H.x - H.rack.x) + (p2.z - H.rack.z) * (H.z - H.rack.z)) / Math.hypot(H.x - H.rack.x, H.z - H.rack.z);
+  check(!!s && room.sim.holds.get(A.id)?.id === s.id && given && room.bank === 1000 - 2 * GEAR.dynamite.price && Math.hypot(at(room, s.id).x - A.pos.x, at(room, s.id).z - A.pos.z) < 1.5 && s.value === 0
+    && !!s2 && Math.hypot(p2.x - H.x, p2.z - H.z) < 3 && out > 0.5,
+    `dynamite: a stick at the hardware rack, $${GEAR.dynamite.price} from the bank, into the buyer's hands (told: ${given}); a second, hands full, set down by the rack, ${out?.toFixed(2)} m out from it`);
   // and not lit in town: the sheriff
-  grabIt(room, A, s.id);
   room.handle(A, { t: 'light' });
   check(!room.fuses.size && /Not in town/.test(lastToast(A)), 'dynamite: not lit in town (the sheriff\'d lock you up)');
 }

@@ -9,7 +9,7 @@
 
 import RAPIER from '@dimforge/rapier3d-compat';
 import * as C from '../shared/constants.js';
-import { LOOT, CARRY, carried, carryDist, holdPose } from '../shared/loot.js';
+import { LOOT, CARRY, carried, carryDist, holdPose, TANDEM, twoMan, longSide } from '../shared/loot.js';
 import {
   RV_PARTS, RV_WHEELS, WHEEL_R, SUSP_REST, RV_WINCH, RV_DIM, RV_MAP_SPOT, RV_LOCKER, RV_HULL,
   toWorld, toLocal, insideRV, inCabin, qRotate, qConj, hitZone,
@@ -107,6 +107,7 @@ export class Sim {
     this.nextPropId = 5000;
     this.holds = new Map();          // playerId -> hold
     this.pushes = [];
+    this.rvPush = new Map();         // playerId -> hands on the RV: { lp (on it), d, until } (push, pushFree)
     this.out = [];                   // events for the room to broadcast
     this.drive = { th: 0, st: 0, hb: 0 };
     this.steer = 0;
@@ -702,22 +703,31 @@ export class Sim {
       // what one person carries is held in both hands by its middle (shared/loot.js CARRY), turning as you turn
       const carry = carried(p.type);
       if (carry) dist = Math.max(CARRY.MIN, Math.min(CARRY.MAX, num(m.d, 100) || carryDist(p.type)));
+      // (the heavy loot: an end each, and two's all that fit on it)
+      const two = twoMan(p.type), mate = two ? [...p.holders].map(q => this.holds.get(q)).find(o => o?.id === p.id) : null;
+      if (two && p.holders.size >= 2) return false;
       if (this.tied.has(p.id)) { this.world.removeImpulseJoint(this.tied.get(p.id), true); this.tied.delete(p.id); }
       this.undock(p);
       this.unride(p);
-      const local = toLocal(p.body.translation(), p.body.rotation(), pt);
+      let local = toLocal(p.body.translation(), p.body.rotation(), pt), end = 0;
       // clamp the grab point onto the object (hands, not telekinesis)
       local.x = Math.max(-1.2, Math.min(1.2, local.x));
       local.y = Math.max(-1.2, Math.min(1.2, local.y));
       local.z = Math.max(-1.2, Math.min(1.2, local.z));
+      if (two) {   // (the end nobody has, or the one nearer your hand)
+        const { ax, half } = longSide(p.type);
+        end = mate ? -mate.end : local[ax] >= 0 ? 1 : -1;
+        local = v3(); local[ax] = end * Math.max(0.05, half - 0.04);
+      }
       p.holders.add(pid);
       p.lastBy = pid;   // (who set it down: a tin's finder)
       if (!p.mob) p.ours = true;   // (in the crew's hands once: theirs, so a ringtail taking it is a theft)
       p.body.setAngularDamping(3.5);
       p.body.wakeUp();
       const rel = carry ? holdPose(p.type) || qMulS(qConj(yawQ(Math.atan2(pl.look.x, pl.look.z))), p.body.rotation()) : null;   // (its turn against yours; gear in its own pose)
-      this.holds.set(pid, { kind: 'prop', id: p.id, local: carry ? v3() : local, dist, last: null, carry, rel });
+      this.holds.set(pid, { kind: 'prop', id: p.id, local: carry ? v3() : local, dist, last: null, carry, rel, end });
       this.mobs?.onGrabbed(p, pid);
+      if (two) this.pairNews(p);
       return true;
     }
     if (m.kind === 'rv') {
@@ -792,6 +802,7 @@ export class Sim {
     const p = this.props.get(h.id);
     if (!p) return;
     p.holders.delete(pid);
+    if (twoMan(p.type)) { throwDir = null; this.pairNews(p); }   // (nobody throws a safe: let go of, it's down)
     if (p.holders.size === 0) p.body.setAngularDamping(LOOT[p.type].adamp ?? (LOOT[p.type].mob ? 2 : 0.3));
     if (p.type === 'map') { this.dockMap(p); return; }   // (back on the dash: dockMap)
     // set down in the RV (not thrown): into the locker from your hands. Let go of, it fell to the floor first,
@@ -810,6 +821,23 @@ export class Sim {
     this.mobs?.onReleased(p, pid, !!throwDir);
   }
 
+  // who has the heavy thing's ends now (everyone's pages: whoever holds an end moves with whoever holds the
+  // other, main.js tandemDrive)
+  pairNews(p) { this.out.push({ k: 'pair', id: p.id, ids: [...p.holders] }); }
+  // its holders on their feet: [{ pid, h, pl }]
+  pairOf(p, players) {
+    const out = [];
+    for (const pid of p.holders) { const h = this.holds.get(pid), pl = players.get(pid); if (h?.id === p.id && pl?.pos && !pl.ko) out.push({ pid, h, pl }); }
+    return out;
+  }
+  // turn a body toward a rotation (its spin eased toward the one that gets it there, k per second)
+  spinTo(body, want, k) {
+    let e = qMulS(want, qConj(body.rotation()));
+    if (e.w < 0) e = { x: -e.x, y: -e.y, z: -e.z, w: -e.w };
+    const sn = Math.hypot(e.x, e.y, e.z), f = sn > 1e-6 ? Math.min(2 * Math.atan2(sn, e.w) * k, 10) / sn : 0, w = body.angvel();
+    body.setAngvel(v3(w.x + (e.x * f - w.x) * 0.5, w.y + (e.y * f - w.y) * 0.5, w.z + (e.z * f - w.z) * 0.5), true);
+  }
+
   // A body pushing into the RV or a prop. The contact point comes from the client, so it has to be where
   // the pusher actually is and on the thing pushed: a point far off would give the force a huge lever arm
   // (rolling the RV over from across the map, and billing the crew for the tow).
@@ -820,8 +848,12 @@ export class Sim {
     if (n < 0.1) return;
     if (!pl?.pos || len(sub(pt, v3(pl.pos.x, pl.pos.y + 0.9, pl.pos.z))) > 2) return;
     if (m.kind === 'rv') {
-      if (len(sub(pt, this.rv.translation())) > 7) return;
-      this.pushes.push({ id: null, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
+      const rp = this.rv.translation();
+      if (len(sub(pt, rp)) > 7) return;
+      // (hands on it: pushing it along, counted, the parking brake let off. Bumping into it as you walk only
+      // leans on it)
+      if (m.hold) this.rvPush.set(pid, { lp: toLocal(rp, this.rv.rotation(), pt), d: mul(d, 1 / n), until: this.t + 0.2 });
+      else this.pushes.push({ id: null, pt, f: mul(d, C.PUSH_FORCE_RV / n), until: this.t + 0.16 });
     } else if (m.kind === 'prop') {
       const p = this.props.get(Number(m.id));
       if (!p || len(sub(pt, p.body.translation())) > 3) return;
@@ -830,6 +862,30 @@ export class Sim {
       if (p.mob) this.mobs?.onPushed(p, pid);
     }
   }
+
+  // how many have their hands on the RV, pushing (push with hold), now
+  rvPushers() {
+    for (const [pid, q] of this.rvPush) if (q.until <= this.t) this.rvPush.delete(pid);
+    return this.rvPush.size;
+  }
+  // pushed along and going with it, slower than they push it: no brake on it (the room's parking brake
+  // included). Rolling back against them (a grade too steep for so few), running away from them, or pushed
+  // as hard one way as the other, the brakes are back on
+  pushFree() {
+    const n = this.rvPushers();
+    if (!n) return false;
+    const v = this.rv.linvel();
+    let dx = 0, dz = 0;
+    for (const q of this.rvPush.values()) { dx += q.d.x; dz += q.d.z; }
+    const dl = Math.hypot(dx, dz);
+    if (dl < 0.3) return false;
+    const free = (v.x * dx + v.z * dz) / dl > -0.15 && Math.hypot(v.x, v.z) < C.PUSH_RV_V[Math.min(n, C.PUSH_RV_V.length) - 1] + 0.4;
+    if (free) this.pushedAt = this.t;
+    return free;
+  }
+  // let go of a moment ago: the parking brake catches it at a pushing pace, not only once it's nearly stopped
+  // (room.js)
+  justPushed() { return this.t - (this.pushedAt ?? -9) < 3; }
 
   // The shove (right mouse with empty hands): what's in a cone in front of the shover, nearest first, at most
   // SHOVE.MAX of them, and nothing behind a wall (a ray against the world and the RV). A friend on foot gets a
@@ -1096,7 +1152,8 @@ export class Sim {
     const v = this.vehicle;
     const sp = this.rvSpeed();
     const { th, st, hb } = this.drive;
-    let engine = 0, brake = 0.6;
+    const free = this.pushFree();   // (hands on it, pushing: out of gear, rolling)
+    let engine = 0, brake = free ? 0 : 0.6;
     // (a worn RV is down on power where it shows, at speed: its top end; crawling up a crest or out of the mud
     // it pulls as hard as ever. A V8 pulls harder and runs faster; a shot of nitrous, harder and faster still)
     const nos = this.t < this.nitroUntil;
@@ -1110,7 +1167,7 @@ export class Sim {
     }
     // broken down, or stalled, the engine gives nothing: it coasts, and S (no reverse gear to find) holds it on
     // the brakes
-    if (this.rvMods.dead || this.t < this.rvMods.stallUntil) { engine = 0; if (brake !== C.RV.BRAKE) brake = th < -0.05 ? C.RV.BRAKE : 0.6; }
+    if (this.rvMods.dead || this.t < this.rvMods.stallUntil) { engine = 0; if (brake !== C.RV.BRAKE) brake = th < -0.05 ? C.RV.BRAKE : free ? 0 : 0.6; }
     if (hb) { brake = C.RV.BRAKE * 1.6; engine = 0; }
     let steerTarget = st * C.RV.STEER_MAX * (1 - 0.5 * Math.min(1, Math.abs(sp) / C.RV.TOP_SPEED));
     // Steady Hands II at the wheel: stability control. At speed, no more lock than gives 0.8 g sideways on flat
@@ -1158,6 +1215,13 @@ export class Sim {
         const L = pl.look, up = v3(-L.x * L.y, 1 - L.y * L.y, -L.z * L.y), ul = len(up) || 1;
         target = sub(target, mul(up, CARRY.DROP / ul));
       }
+      // the heavy loot, an end each: yours in your hands, out in front of you toward the other end's, at
+      // TANDEM.HIGH (alone, you hold your end and it stays where it is)
+      const hp = h.kind === 'prop' ? this.props.get(h.id) : null, two = hp && twoMan(hp.type) ? this.pairOf(hp, players) : null;
+      if (two?.length === 2) {
+        const o = two.find(q => q.pid !== pid).pl, dx = o.pos.x - pl.pos.x, dz = o.pos.z - pl.pos.z, dl = Math.hypot(dx, dz) || 1;
+        target = v3(pl.pos.x + dx / dl * TANDEM.HANDS, pl.pos.y + TANDEM.HIGH, pl.pos.z + dz / dl * TANDEM.HANDS);
+      }
       const tv = h.last ? mul(sub(target, h.last), 1 / dt) : v3();
       const tvl = len(tv);
       if (tvl > 25) { tv.x *= 25 / tvl; tv.y *= 25 / tvl; tv.z *= 25 / tvl; }
@@ -1172,6 +1236,7 @@ export class Sim {
           this.out.push({ k: 'slip', id: p.id, by: pid });
           continue;
         }
+        if (two && two.length < 2) continue;   // (it takes two to lift)
         const n = p.holders.size || 1;
         const m = Math.min(body.mass() / n, 400);
         const vp = body.velocityAtPoint(gp);
@@ -1180,10 +1245,12 @@ export class Sim {
         // (and steered to the middle of the doorway)
         const goal = door ? add(target, qRotate(this.rv.rotation(), v3(0, lift, Math.max(-0.8, Math.min(0.8, RV_DIM.DOOR_Z - door.z))))) : target;
         let F = add(mul(add(mul(sub(goal, gp), C.GRAB.KP), mul(sub(tv, vp), C.GRAB.KD)), m), v3(0, m * 9.81, 0));
-        const fl = len(F), fmax = pl.mods?.fmax ?? C.GRAB.FMAX;   // (Work Gloves II: stronger hands)
+        // (Work Gloves II: stronger hands; an end of the heavy loot each, enough to hold your half of it up)
+        const fl = len(F), fmax = Math.max(pl.mods?.fmax ?? C.GRAB.FMAX, two ? 1.6 * m * 9.81 : 0);
         if (fl > fmax) {
-          if (lift > 0 && F.y > 0) {
-            // over the sill, the hands hold it up first and push it along with what strength is left
+          if ((lift > 0 || two) && F.y > 0) {
+            // over the sill (and an end of the heavy loot each, wherever), the hands hold it up first and push
+            // it along with what strength is left
             const fy = Math.min(F.y, fmax), fh = Math.hypot(F.x, F.z);
             const k = fh > 1e-6 ? Math.min(1, Math.sqrt(fmax ** 2 - fy * fy) / fh) : 0;
             F = v3(F.x * k, fy, F.z * k);
@@ -1192,6 +1259,12 @@ export class Sim {
         // at the door the hands guide it without wrenching it round (turnToDoor does the turning)
         if (door) body.applyImpulse(mul(F, dt), true);
         else body.applyImpulseAtPoint(mul(F, dt), gp, true);
+        // carried between two, its long side along the line between them, its end each in their hands, upright
+        if (two && !door && !turned.has(p.id)) {
+          turned.add(p.id);
+          const [A, B] = two[0].h.end < 0 ? two : [two[1], two[0]], ux = B.pl.pos.x - A.pl.pos.x, uz = B.pl.pos.z - A.pl.pos.z;
+          this.spinTo(body, yawQ(longSide(p.type).ax === 'z' ? Math.atan2(ux, uz) : Math.atan2(-uz, ux)), 6);
+        }
         // carried alone, it keeps its turn against yours (you turn, it turns with you)
         if (h.carry && n === 1 && !door) {
           const want = qMulS(yawQ(Math.atan2(pl.look.x, pl.look.z)), h.rel), q = body.rotation();
@@ -1213,8 +1286,26 @@ export class Sim {
 
     // shoves
     this.pushes = this.pushes.filter(p => p.until > this.t);
+    // hands on the RV: each pusher's force where their hands are, while it goes slower than so many push it
+    const np = this.rvPushers();
+    if (np) {
+      const rp = this.rv.translation(), rq = this.rv.rotation(), vm = C.PUSH_RV_V[Math.min(np, C.PUSH_RV_V.length) - 1];
+      for (const q of this.rvPush.values()) {
+        const pt = toWorld(rp, rq, q.lp), v = this.rv.velocityAtPoint(pt), vd = v.x * q.d.x + v.z * q.d.z;
+        const k = clamp((vm - vd) / (0.3 * vm), 0, 1);
+        if (k > 0) this.rv.applyImpulseAtPoint(mul(q.d, C.PUSH_HOLD_RV * k * dt), pt, true);
+      }
+    }
     // (a push names its prop, fetched each step: one sold, broken or gone for the night since is skipped)
-    for (const p of this.pushes) (p.id == null ? this.rv : this.props.get(p.id)?.body)?.applyImpulseAtPoint(mul(p.f, dt), p.pt, true);
+    for (const p of this.pushes) {
+      if (p.id == null) { this.rv.applyImpulseAtPoint(mul(p.f, dt), p.pt, true); continue; }
+      // a thing walked into goes along at about a walking pace, however light it is: the same push on a vase
+      // as on the boulder threw it at 40 m/s (playtest: kicked loot flew)
+      const b = this.props.get(p.id)?.body;
+      if (!b) continue;
+      const fl = len(p.f), d = mul(p.f, 1 / (fl || 1)), v = b.linvel(), room = C.PUSH_VMAX - (v.x * d.x + v.y * d.y + v.z * d.z);
+      if (room > 0) b.applyImpulseAtPoint(mul(d, Math.min(fl * dt, b.mass() * room)), p.pt, true);
+    }
 
     // the wildlife thinks and moves its legs (and jaws)
     this.mobs?.preStep(dt, players);

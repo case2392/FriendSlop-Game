@@ -91,6 +91,30 @@ export function carrySize(type) {
 }
 // how far from the eye its middle is held
 export const carryDist = type => Math.max(CARRY.MIN, CARRY.HANDS + carrySize(type).r * 0.85);
+// The heavy loot (a safe, a slot machine, the dino head): one of you takes an end and it stays put; two lift it
+// between them, an end each, held at HIGH m off the ground HANDS m out in front of each, and its long side
+// along the line between them (server/sim.js). The two then go where both want: together as one, the way you
+// both lean averaged, so pulling against each other along the load gets nowhere, and one alone turns the pair
+// (client/js/main.js tandemDrive); a step or more out of place, and the load pulls you back in
+export const TANDEM = { HANDS: 0.45, HIGH: 0.9, SLACK: 0.25, PULL: 2.5, TURN: 0.5 };
+export const twoMan = type => { const L = LOOT[type]; return !!L && L.cls === 'heavy' && !L.tool && !L.mob && !L.fixed; };
+// its long side: the local axis ('x' or 'z') and its half length
+export const longSide = type => { const [, a, , c] = LOOT[type].shape; return a >= c ? { ax: 'x', half: a } : { ax: 'z', half: c }; };
+// how far apart the two carrying it stand (feet to feet)
+export const tandemGap = type => 2 * longSide(type).half + 2 * TANDEM.HANDS;
+// How fast I go ({x, z} m/s), an end of it in my hands: w, the way I lean (WASD, m/s); w2, the way whoever has
+// the other end leans; d = {x, z}, from me to them; gap, tandemGap. The pair goes as both lean, averaged; the
+// difference across the load turns us (TURN: half of it each way), along it it cancels; and a step or more
+// (past SLACK) out of place, the load pulls us back to its length apart
+export function tandemVel(w, w2, d, gap) {
+  const dl = Math.hypot(d.x, d.z) || 1, ux = d.x / dl, uz = d.z / dl;
+  const dx = w.x - w2.x, dz = w.z - w2.z, along = dx * ux + dz * uz;
+  const e = dl - gap, pull = Math.sign(e) * Math.max(0, Math.abs(e) - TANDEM.SLACK) * TANDEM.PULL;
+  return {
+    x: (w.x + w2.x) / 2 + TANDEM.TURN * (dx - along * ux) / 2 + ux * pull,
+    z: (w.z + w2.z) / 2 + TANDEM.TURN * (dz - along * uz) / 2 + uz * pull,
+  };
+}
 // What each kind of stop tends to have lying around.
 export const POI_LOOT = {
   gas:   ['register', 'gnome', 'toaster', 'neon', 'tv', 'lamp', 'tire'],

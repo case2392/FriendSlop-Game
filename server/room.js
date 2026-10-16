@@ -19,7 +19,7 @@
 import crypto from 'node:crypto';
 import * as C from '../shared/constants.js';
 import { generateLeg } from '../shared/world.js';
-import { LOOT, fmt$, carried, carryDist } from '../shared/loot.js';
+import { LOOT, fmt$, carried, carryDist, twoMan } from '../shared/loot.js';
 import { RV_SEATS, RV_SEAT_EXIT, RV_DIM, RV_HATCH, RV_BUNKS, toWorld, qRotate, insideRV } from '../shared/rv.js';
 import { Sim } from './sim.js';
 import { STOP_NAMES } from '../shared/mobs.js';
@@ -747,9 +747,23 @@ export class Room {
     p.yaw = yaw; p.pitch = pitch;
     p.mode = num(m.m, 99) | 0; p.flags = num(m.f, 1e6) | 0;
     p.vel = { x: num(m.v?.[0], 60), y: num(m.v?.[1], 60), z: num(m.v?.[2], 60) };
+    if (Array.isArray(m.w)) this.leanOn(p, num(m.w[0], 20), num(m.w[1], 20));
     p.lp = p.par ? raw : null;
     p.raw = raw;
     this.resolvePlayer(p);
+  }
+
+  // the way p leans (WASD, in m/s) while they have an end of the heavy loot, passed to whoever has the other
+  // end (their page moves the pair as both lean: main.js tandemDrive), when it changes, and every half second
+  leanOn(p, x, z) {
+    const h = this.sim.holds.get(p.id), pr = h?.kind === 'prop' ? this.sim.props.get(h.id) : null;
+    if (!pr || !twoMan(pr.type)) return;
+    const mate = [...pr.holders].find(q => q !== p.id), to = mate != null ? this.players.get(mate) : null;
+    if (!to) return;
+    const was = p.leanSent;
+    if (was && Math.abs(was.x - x) + Math.abs(was.z - z) < 0.05 && this.t - was.t < 0.5) return;
+    p.leanSent = { x, z, t: this.t };
+    this.send(to, { t: 'tw', id: p.id, w: [x, z] });
   }
 
   // RV-local poses are re-anchored to the RV every tick (it moves under them)
@@ -783,6 +797,11 @@ export class Room {
     const type = m.kind === 'prop' ? this.sim.props.get(Number(m.id))?.type : null;
     // (a chest is opened where it lies, not carried off shut: E on it opens it; a seamed rock is four tonnes)
     if (type === 'chest' || LOOT[type]?.seam) { this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id }); return; }
+    if (twoMan(type) && [...(this.sim.props.get(Number(m.id))?.holders || [])].filter(q => q !== p.id).length >= 2) {
+      this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id });
+      this.toast('Two have it already: that\'s all the hands it takes.', '#fff', 3, p);
+      return;
+    }
     const no = type === 'map' && this.mapRefusal(p);
     if (no) {
       this.send(p, { t: 'grabbed', ok: false, kind: m.kind, id: m.id });
@@ -875,8 +894,10 @@ export class Room {
       if (H.state === 'out' && H.holder === p.id) {
         if (sim.anchorHook(p.id, p)) { this.send(p, { t: 'hooked', on: false }); this.toast(`${p.name} hooked the winch. Driver: R to reel in!`, p.color, 4); }
         else this.toast('Nothing to hook onto here — find a post, a dead tree, or a big rock.', '#fff', 3, p);
-      } else if (H.state === 'anchored' && dist3(p.pos, sim.hookPos()) < 3.2) {
+      } else if (H.state === 'anchored' && dist3(p.pos, sim.hookPos()) < C.WINCH.UNHOOK_R + 0.4) {
         sim.unhook();
+        sim.hook.reeling = true;   // (and it winds itself home: sim.stepWinch stows a loose hook reeled in)
+        this.toast(`${p.name} unhooked the winch. It's winding itself back in.`, p.color, 3);
       } else if (H.state === 'out' && H.holder == null && dist3(p.pos, sim.hookPos()) < 3.2) {
         if (sim.takeHook(p.id, p)) this.send(p, { t: 'hooked', on: true });
       }
@@ -1125,19 +1146,30 @@ export class Room {
     this.toast(`${p.name} had ${V.who} fit the ${U.name} (${fmt$(U.price)}). ${U.line}`, p.color, 6);
     this.sendMeta();
   }
-  // the general store's hardware: the thing itself, set down by the rack out front (any hour; two if you like)
+  // the general store's hardware: the thing itself, handed over (into the buyer's hands, if they're empty),
+  // else set down by the rack out front (any hour; two if you like)
   buyGear(p, V, id, at) {
-    const G = GEAR[id];
+    const G = GEAR[id], sim = this.sim;
     if (this.bank < G.price) return this.toast(`${V.who}: "${fmt$(G.price)}. The bank has ${fmt$(this.bank)}."`, '#ff8a80', 3, p);
-    const d = at.drop, k = (this.gearN = (this.gearN || 0) + 1) % 4;
-    // (laid down flat, a little further along the store's front than the last one)
-    const pr = this.sim.addProp(id, { x: d.x + Math.cos(at.ry) * 0.3 * k, y: d.y, z: d.z - Math.sin(at.ry) * 0.3 * k }, { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }, 0, 0);
+    const hand = !sim.holds.has(p.id) && !p.ko && p.seat == null && !!p.eye && !!p.pos;
+    let pr;
+    if (hand) {   // (made where the buyer stands, at their chest: no wall or rack in the way; the hands take it from there)
+      pr = sim.addProp(id, { x: p.pos.x, y: p.pos.y + 1.1, z: p.pos.z }, { x: 0, y: 0, z: 0, w: 1 }, 0, 0);
+    } else {
+      // (laid down flat, each a little further out from the store's front than the last: along it, they crept
+      // in under the rack, where the crosshair found the rack first)
+      const d = at.drop, k = (this.gearN = (this.gearN || 0) + 1) % 4, ox = at.x - at.rack.x, oz = at.z - at.rack.z, ol = Math.hypot(ox, oz) || 1;
+      pr = sim.addProp(id, { x: d.x + ox / ol * 0.3 * k, y: d.y, z: d.z + oz / ol * 0.3 * k }, { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }, 0, 0);
+    }
     if (!pr) return;
     this.bank -= G.price;
     this.stats.shop = (this.stats.shop || 0) + G.price;
-    this.sim.out.push({ k: 'spawn', p: this.sim.describe(pr) });
+    sim.out.push({ k: 'spawn', p: sim.describe(pr) });
     this.broadcast({ t: 'ev', list: [{ k: 'upg', id, by: p.id }] });
-    this.toast(`${p.name} bought a ${G.name} (${fmt$(G.price)}). It's by the rack out front. ${G.line}`, p.color, 6);
+    const d = carryDist(id), l = p.look || { x: 0, y: 0, z: 1 };
+    const given = hand && sim.grab(p.id, p, { kind: 'prop', id: pr.id, pt: [p.eye.x + l.x * 0.3, p.eye.y + l.y * 0.3, p.eye.z + l.z * 0.3], d });
+    if (given) this.send(p, { t: 'given', id: pr.id, type: pr.type, d, q: [0, 0, 0, 1] });
+    this.toast(`${p.name} bought a ${G.name} (${fmt$(G.price)}). ${given ? 'It\'s in their hands.' : 'It\'s by the rack out front.'} ${G.line}`, p.color, 6);
   }
   // a stroke of the shovel ({ t: 'dig', pt: where it lands }): the one holding a shovel, the ground in reach.
   // It goes into the hole there (a new one if there's none: at a cache that's within reach, else where it
@@ -1662,7 +1694,8 @@ export class Room {
     const drv = [...this.players.values()].find(p => p.seat === 0);
     // (a driver unheard from for a second has frozen or dropped: off the pedals. The page sends 20 a second
     // on its own timer, so even a PC drawing a frame a second keeps driving)
-    if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < 1.2 && !sim.hook.reeling ? 1 : 0 });
+    // (and while the crew has their hands on it, pushing it along, the parking brake is off: sim.pushFree)
+    if (!drv || this.t - drv.drvAt > 1.0) sim.setDrive({ th: 0, st: 0, hb: Math.abs(sim.rvSpeed()) < (sim.justPushed() ? C.PUSH_RV_V[C.PUSH_RV_V.length - 1] + 0.5 : 1.2) && !sim.hook.reeling && !sim.pushFree() ? 1 : 0 });
     sim.assist = !!drv?.mods?.assist;   // (Steady Hands II: the driver's own)
     sim.step(dt, this.players);
     this.stowFinds();

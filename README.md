@@ -237,7 +237,7 @@ on.
 | | |
 |---|---|
 | `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch (in the RV: **brace**, a crash can't knock you out) |
-| `E` | **pick up** loot (`E` again sets it down; `Q` drops it too); use: driver seat, door, winch, the RV's locker (the list of what's in it: take out what you want; anything set down in the RV goes in it), the RV's outside (**push** it: hold `W`, `E` lets go), pawn bell, a casino game's button (sit down to play it), keypad, bunk (lies you down; `E` or walking gets you up). Hold it on a knocked-out friend to pick them up. |
+| `E` | **pick up** loot (`E` again sets it down; `Q` drops it too; the heavy loot, a safe, a slot machine, the dino head, takes **two**: an end each, and the pair moves as you both lean); use: driver seat, door, winch (by the clipped hook, wherever you aim: **unhook** it, and it winds itself in), the RV's locker (the list of what's in it: take out what you want; anything set down in the RV goes in it), the RV's outside (hands on it, held there: **push** with `W`, `A`/`D` push it sideways, `S` pulls, `E` lets go; one rolls it, each more pushes faster), pawn bell, a casino game's button (sit down to play it), keypad, bunk (lies you down; `E` or walking gets you up). Hold it on a knocked-out friend to pick them up. |
 | **hold `LMB`** | **climb** any steep rock or wall (`Space` = lunge) |
 | `RMB` · wheel | throw (empty-handed: **shove**) · reach |
 | driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `N` nitrous (with Gus's kit) · `E` get up (the RV keeps rolling) |
@@ -250,7 +250,7 @@ has done a job less is likelier to get it), locked once the RV leaves camp
 camp → follow the road (the driver can't see
 the map: the navigator reads it out, matching the odometer to its 100 m
 marks; alone, you drive without it) → deal with
-what's broken (winch up the grade, push out of the mud (`E` on the RV's back, hold `W`: it takes two), shove or winch the
+what's broken (winch up the grade, push out of the mud (`E` on the RV's back, `W`: the gas and two get it out), shove or winch the
 boulder, crack the ranger gate) and with what lives there (see Wildlife below)
 → detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.
