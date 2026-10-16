@@ -28,8 +28,9 @@ import { rvMods, NITRO } from '../shared/shop.js';
 
 // stuff people bump into but a 3-ton RV flattens
 const FLIMSY = new Set(['cactus', 'haybale', 'deadtree_decor', 'cairn']);
-// what goes in the RV's locker: loot with a price (not a tool, a Road Card tin or a critter)
-const lockable = p => { const L = LOOT[p.type]; return !!L && p.max > 0 && !L.tool && !L.find && !L.mob; };
+// what goes in the RV's locker: loot with a price, and the crew's gear (a shovel, a detector, dynamite): not
+// another tool, a Road Card tin or a critter
+const lockable = p => { const L = LOOT[p.type]; return !!L && (p.max > 0 && !L.tool || !!L.gear) && !L.find && !L.mob; };
 const STOW_T = 0.6;   // s lying still in the RV's cabin before it's put in the locker
 
 const yawQ = ry => ({ x: 0, y: Math.sin(ry / 2), z: 0, w: Math.cos(ry / 2) });
@@ -118,7 +119,10 @@ export class Sim {
     this.mobCols = new Set();        // the wildlife's collider handles (the RV's wheels drive over them, not up them)
     this.riding = new Map();         // prop id -> its RV-local pose: loot riding the RV (rideStep)
     this.calm = new Map();           // prop id -> how long it has sat still in the moving RV
-    this.locker = [];                // the RV's locker: [{ type, value, max }], loot stowed out of the physics (stowStep)
+    this.locker = [];                // the RV's locker: [{ id, type, value, max }], loot and gear stowed out of the physics (stowStep)
+    this.lockerN = 0;                // (each thing in it gets an id: the page takes one out by it)
+    this.lockerDirty = true;         // (the room tells the pages what's in it when it changes)
+    this.burning = null;             // the room's lit sticks (Map id -> fuse): one never goes in the locker
     // (FRIENDSLOP_NOLOCKER: the tests of loose loot riding in the cabin, the walls holding it, raids on it)
     this.lockerOn = typeof process === 'undefined' || process.env.FRIENDSLOP_NOLOCKER !== '1';
     this.stowT = new Map();          // prop id -> how long it has lain still in the cabin
@@ -142,7 +146,7 @@ export class Sim {
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const toTie = [];
     for (const c of carry) {
-      if (c.locker) { this.locker.push({ type: c.type, value: c.value, max: c.max }); continue; }   // (still in the locker)
+      if (c.locker) { this.locker.push({ id: ++this.lockerN, type: c.type, value: c.value, max: c.max }); continue; }   // (still in the locker)
       const w = toWorld(rp, rq, v3(c.lx, c.ly + 0.04, c.lz));
       const q = mulQ(rq, c.q);
       const pr = this.addProp(c.type, w, q, c.value, c.max);
@@ -605,11 +609,11 @@ export class Sim {
   }
 
   // ---- the RV's locker ------------------------------------------------------------------------------
-  // Loot that comes to rest in the RV's cabin goes in the locker (STOW_T s still: something thrown in lands
-  // first): out of the physics, so the road's knocks and the RV's lurches can't touch it and nobody trips over
-  // it. Not what someone holds, what's bungee'd or on the winch, nor what a ringtail has in its jaws or is
-  // going in after. Ed buys the locker with the rest of the load at his loading zone; E on it takes the best
-  // thing out (unstow)
+  // Loot (and the crew's gear) that comes to rest in the RV's cabin goes in the locker (STOW_T s still:
+  // something thrown in lands first): out of the physics, so the road's knocks and the RV's lurches can't touch
+  // it and nobody trips over it. Not what someone holds, what's bungee'd or on the winch, a lit stick, nor what
+  // a ringtail has in its jaws or is going in after. Ed buys the locker's loot with the rest of the load at his
+  // loading zone (the gear stays in it); E on it lists what's in it, and takes out the one you pick (unstow)
   stowStep(dt) {
     if (!this.lockerOn) return;
     const rp = this.rv.translation(), rq = this.rv.rotation();
@@ -629,7 +633,7 @@ export class Sim {
   // in the RV's cabin, and nobody else's: not in anyone's hands, bungee'd, on the winch, in a ringtail's jaws
   // or what one's going in after
   stowable(p, rp = this.rv.translation(), rq = this.rv.rotation(), jaws = this.mobs?.carriedBy, wanted = this.mobs?.raidTargets?.()) {
-    if (!lockable(p)) return false;
+    if (!lockable(p) || this.burning?.has(p.id)) return false;
     const t = p.body.translation();
     if ((t.x - rp.x) ** 2 + (t.z - rp.z) ** 2 > 25 || p.holders.size || this.tied.has(p.id) || jaws?.has(p.id) || wanted?.has(p.id) || this.hook.attach?.id === p.id) return false;
     const l = toLocal(rp, rq, t);
@@ -637,25 +641,39 @@ export class Sim {
   }
   stow(p) {
     this.stowT.delete(p.id);
-    this.locker.push({ type: p.type, value: p.value, max: p.max });
+    this.locker.push({ id: ++this.lockerN, type: p.type, value: p.value, max: p.max });
+    this.lockerDirty = true;
     this.out.push({ k: 'stowed', id: p.id, type: p.type, value: Math.round(p.value), n: this.locker.length, total: this.lockerValue() });
     this.removeProp(p.id);
   }
   lockerValue() { return this.locker.reduce((a, it) => a + Math.round(it.value), 0); }
-  // the locker's most valuable thing (or the light ones' only: light, for a ringtail's jaws) -> its index or -1
+  // the locker's most valuable loot (or the light ones' only: light, for a ringtail's jaws; never the gear,
+  // which no ringtail wants) -> its index or -1
   lockerBest(light = false) {
     let i = -1;
     for (let k = 0; k < this.locker.length; k++) {
-      if (light && LOOT[this.locker[k].type].mass > 15) continue;
+      const L = LOOT[this.locker[k].type];
+      if (L.tool || (light && L.mass > 15)) continue;
       if (i < 0 || this.locker[k].value > this.locker[i].value) i = k;
     }
     return i;
+  }
+  // the locker's index of the thing with this id (the page's pick), or -1
+  lockerAt(id) { return this.locker.findIndex(it => it.id === id); }
+  // what's in it, for the pages: [[id, type, value]]
+  lockerList() { return this.locker.map(it => [it.id, it.type, Math.round(it.value)]); }
+  // take out of it what pick() says (Ed's sale: the loot, not the gear) -> what was taken
+  lockerTake(pick) {
+    const out = this.locker.filter(pick);
+    if (out.length) { this.locker = this.locker.filter(it => !pick(it)); this.lockerDirty = true; }
+    return out;
   }
   // a thing out of the locker, a real prop again: on its lid (taken out by hand), or on the floor in front of
   // it (pried out by a ringtail) -> the prop, or null
   unstow(i = this.lockerBest(), floor = false) {
     if (i < 0 || i >= this.locker.length) return null;
     const it = this.locker.splice(i, 1)[0], L = LOOT[it.type];
+    this.lockerDirty = true;
     const sh = L.shape, r = sh[0] === 'cap' ? sh[1] + sh[2] : Math.max(...sh.slice(1));   // (its biggest half-size: clear of the lid)
     const rp = this.rv.translation(), rq = this.rv.rotation();
     const at = toWorld(rp, rq, floor ? v3(RV_LOCKER.front - 0.1 - r, r + 0.05, RV_LOCKER.z) : v3(RV_LOCKER.x - 0.05, RV_LOCKER.y + r + 0.04, RV_LOCKER.z));

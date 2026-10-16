@@ -337,6 +337,7 @@ function buildSigns(W, batch, group, near, ctx) {
     faces.push({ lines: s.lines, w: s.w, h: s.h, px, bg: s.bg, fg: s.fg, style, seed: `${Math.round(s.x)},${Math.round(s.z)}` });
   }
   for (const t of ctx.tags) { t.fi = faces.length; faces.push({ lines: t.lines, w: t.w, h: t.h, px: 260, bg: '#e8d8b0', fg: '#2a1e18', style: 'board', seed: t.lines[0] }); }
+  for (const t of ctx.banners || []) { t.fi = faces.length; faces.push({ lines: t.lines, w: t.w, h: t.h, px: 420, bg: t.bg, fg: t.fg, style: 'board', seed: t.lines[0] }); }
   for (const t of ctx.plaques || []) { t.fi = faces.length; faces.push({ lines: t.lines, w: t.w, h: t.h, px: 200, bg: '#c8a050', fg: '#2e2008', style: 'plaque', seed: t.lines[0] }); }
   // painted pieces the buildings hang on their walls (the pawnbroker's map), from buildBuilding's faces
   const wallFaces = [...(ctx.bInfo ? ctx.bInfo.values() : [])].flatMap(i => i.faces || []);
@@ -358,6 +359,15 @@ function buildSigns(W, batch, group, near, ctx) {
     K.add(faceDim, remapUV(new THREE.PlaneGeometry(t.w, t.h), atlas.rect(t.fi)), { uv: 'keep', at: matrix(0, 0, 0.001), shade: false, cast: false });
     K.box(wood, 0.04, 0.24, 0.03, 0, -0.17, -0.03, { seg: [1, 1, 1] });
     K.pop();
+  }
+  // the store's stalls out front (the hardware rack, the clothes rail) each under a board on two tall posts,
+  // read from across the street: what's sold there (it's easy to walk past a rack by a door)
+  for (const t of ctx.banners || []) {
+    const K = new Kit(batch, matrix(t.x, t.y, t.z, ctx.tagRy || 0), () => 1);
+    for (const sx of [-1, 1]) K.box(wood, 0.08, t.top, 0.08, sx * (t.w / 2 + 0.06), t.top / 2, -0.16, { grain: 'y' });
+    K.box(wood, t.w + 0.26, 0.06, 0.09, 0, t.top - 0.03, -0.16, { grain: 'x' });
+    K.box(wood, t.w + 0.08, t.h + 0.08, 0.04, 0, t.top - 0.12 - t.h / 2, -0.12, { grain: 'x', seg: [1, 1, 1] });
+    K.add(faceDim, remapUV(new THREE.PlaneGeometry(t.w, t.h), atlas.rect(t.fi)), { uv: 'keep', at: matrix(0, t.top - 0.12 - t.h / 2, -0.099), shade: false, cast: false });
   }
   for (const t of ctx.plaques || []) {
     const K = new Kit(batch, matrix(t.u.x, t.u.y - 0.04 + t.lift, t.u.z, t.ry), () => 1);
@@ -1523,7 +1533,10 @@ export function buildStructures(W) {
   for (const u of W.uses) if (u.kind === 'shop' && u.arg === 'store') tags.push({ u, lines: ['HARDWARE', ...GEAR_IDS.map(id => `${GEAR[id].name.toUpperCase()} $${GEAR[id].price}`)], w: 0.78, h: 0.1 + 0.1 * GEAR_IDS.length });
   for (const u of W.uses) if (u.kind === 'buy') tags.push({ u, lines: [{ walkie: 'WALKIE', drink: 'ENERGY', bungee: 'BUNGEES', hardhat: 'HARD HAT', cheese: 'CHEESE' }[u.arg] || u.arg.toUpperCase(), { walkie: '$150', drink: '$40', bungee: '$90', hardhat: '$80', cheese: '$30' }[u.arg] || ''], w: 0.46, h: 0.26 });
   const entry = T && W.signs.find(s => s.post && Math.abs(s.z - (T.z + 6)) < 3 && Math.abs(s.x - 7.5) < 3);
-  const sctx = { attached, onCanopy, bInfo, glows, tags, plaques: plaqueSpots(W, T), style: S, styleName: style, tagRy: store ? store.ry : 0, townZ: T.z, entry };
+  const banners = [];
+  if (T?.hardware) banners.push({ x: T.hardware.rack.x, y: T.hardware.y, z: T.hardware.rack.z, top: 2.75, w: 1.3, h: 0.56, lines: ['HARDWARE', 'SHOVELS · DETECTORS · DYNAMITE'], bg: '#2b2d42', fg: '#f4d35e' });
+  if (T?.tailor) banners.push({ x: T.tailor.rail.x, y: T.tailor.y, z: T.tailor.rail.z, top: 2.75, w: 1.3, h: 0.56, lines: ['CLOTHES', 'HATS · OUTFITS · DYES'], bg: '#7a1f3d', fg: '#fff3d6' });
+  const sctx = { attached, onCanopy, bInfo, glows, tags, banners, plaques: plaqueSpots(W, T), style: S, styleName: style, tagRy: store ? store.ry : 0, townZ: T.z, entry };
   buildSigns(W, batch, group, near, sctx);
 
   for (const d of W.decor) if (d.k === 'lamp') lampPost(batch, d, style, glows);

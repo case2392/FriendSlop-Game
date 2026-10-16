@@ -53,8 +53,9 @@ a crew scraping by can't.
 
 ## Buried metal
 
-The general store keeps **hardware** on a rack out front (`E` on it): a **metal detector** ($250) and a
-**shovel** ($100), set down by the rack when you buy them, any time of day. Every day's road has metal
+The general store keeps **hardware** on a rack out front, right of the door under the HARDWARE board (`E` on
+it): a **metal detector** ($250) and a **shovel** ($100), set down by the rack when you buy them, any time of
+day. Every day's road has metal
 buried along it, half of it near the stops and the richest down the side roads: hold the detector and
 it beeps faster (and the signal meter under the crosshair fills) as its coil nears a cache; the meter
 says DIG HERE over one. Whoever holds the shovel digs where they look with `LMB` (hold it to keep digging):
@@ -63,7 +64,15 @@ a cache there's a **chest**: hold `E` on it to **pull** it up (mash `E` to yank 
 three pulling go faster), and it lands on the lip. `E` opens it and what's inside pops out (scrap iron,
 copper wire, a silver or gold nugget, a jar of old coins, a rusty lockbox), loot like any other for Ed,
 and so is the old chest. Bare ground digs down to nothing. One holds the detector, one digs. Ed won't buy
-the gear back, and it doesn't go in the locker: keep it in the RV or it stays on the road.
+the gear back; set it down in the RV and it goes in the **locker** with the loot (what's left on the road
+stays there).
+
+## The RV's locker
+
+Anything set down in the RV, loot and gear alike, goes in its **locker**, out of the way and safe from the
+road's knocks. `E` on the locker opens the list of everything in it (the gear by kind, the loot dearest first)
+and takes out whatever you pick, into your hands. Ed's loading zone buys the locker's loot with the rest of
+the load and leaves the gear in it; it all rides into the next day.
 
 ## Dynamite
 
@@ -227,7 +236,7 @@ on.
 | | |
 |---|---|
 | `WASD` `Shift` `Space` `C` | walk · sprint · jump · crouch (in the RV: **brace**, a crash can't knock you out) |
-| `E` | **pick up** loot (`E` again sets it down; `Q` drops it too); use: driver seat, door, winch, the RV's locker (takes its best thing out: loot set down in the RV goes in it), pawn bell, a casino game's button (sit down to play it), keypad, bunk (lies you down; `E` or walking gets you up). Hold it on a knocked-out friend to pick them up. |
+| `E` | **pick up** loot (`E` again sets it down; `Q` drops it too); use: driver seat, door, winch, the RV's locker (the list of what's in it: take out what you want; anything set down in the RV goes in it), the RV's outside (**push** it: hold `W`, `E` lets go), pawn bell, a casino game's button (sit down to play it), keypad, bunk (lies you down; `E` or walking gets you up). Hold it on a knocked-out friend to pick them up. |
 | **hold `LMB`** | **climb** any steep rock or wall (`Space` = lunge) |
 | `RMB` · wheel | throw (empty-handed: **shove**) · reach |
 | driving | `WASD` · `Space` brake · `R` reel the winch · `H` horn · `N` nitrous (with Gus's kit) · `E` get up (the RV keeps rolling) |
@@ -240,7 +249,7 @@ has done a job less is likelier to get it), locked once the RV leaves camp
 camp → follow the road (the driver can't see
 the map: the navigator reads it out, matching the odometer to its 100 m
 marks; alone, you drive without it) → deal with
-what's broken (winch up the grade, push out of the mud, shove or winch the
+what's broken (winch up the grade, push out of the mud (`E` on the RV's back, hold `W`: it takes two), shove or winch the
 boulder, crack the ranger gate) and with what lives there (see Wildlife below)
 → detour to stops for loot → town: pawn it,
 gamble it, pay the Repo Man → campfire, store, everyone in a bunk → next day.

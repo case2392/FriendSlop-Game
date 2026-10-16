@@ -179,18 +179,56 @@ const ofType = (room, type) => [...room.sim.props.values()].filter(p => p.type =
     `dig: Ed buys what came up and the old chest ($${sold}) and leaves the shovel on his counter`);
 }
 {
-  // the gear rides along in the RV into tomorrow (it never goes in the locker), and the detector's signal
+  // the gear goes in the RV's locker like loot (set down in the RV), the pages are told what's in it, it rides
+  // into tomorrow there and comes out picked from the list, into your hands; Ed's loading zone takes the
+  // locker's loot and leaves the gear; no ringtail pries it out; a lit stick never goes in. And the
+  // detector's signal
   const { room, ps: [A] } = crew(['Ann']);
-  const sim = room.sim, rp = sim.rv.translation(), rq = sim.rv.rotation();
-  const d = sim.addProp('detector', toWorld(rp, rq, { x: 0.3, y: 0.5, z: -1.5 }), { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 }, 0, 0);
+  let sim = room.sim;
+  const rp = sim.rv.translation(), rq = sim.rv.rotation(), flat = { x: 0, y: 0, z: Math.SQRT1_2, w: Math.SQRT1_2 };
+  const d = sim.addProp('detector', toWorld(rp, rq, { x: 0.3, y: 0.5, z: -1.5 }), flat, 0, 0);
+  const sh = sim.addProp('shovel', toWorld(rp, rq, { x: -0.3, y: 0.5, z: -2.2 }), flat, 0, 0);
+  const vase = sim.addProp('vase', toWorld(rp, rq, { x: 0, y: 0.5, z: -0.8 }), { x: 0, y: 0, z: 0, w: 1 }, 120, 120);
   tick(room, 2);
-  const stowed = sim.locker.some(it => it.type === 'detector');
+  const told = (A.conn.sent.filter(m => m.t === 'locker').slice(-1)[0]?.list || []).map(e => e[1]).sort().join();
+  const inIt = !sim.props.has(d.id) && !sim.props.has(sh.id) && !sim.props.has(vase.id) && sim.locker.map(it => it.type).sort().join() === 'detector,shovel,vase';
+  // (a ringtail after the locker gets the vase, never the gear: with only gear in it, nothing)
+  const pry = sim.locker[sim.lockerBest(true)]?.type;
+  const onlyGear = { ...sim, locker: sim.locker.filter(it => it.type !== 'vase') };
+  const pryGear = sim.lockerBest.call(onlyGear, true);
+  // Ed's loading zone: the vase goes, the gear stays
+  room.docked = () => true;
+  const sold = room.sellCounter(A.id);
+  const kept = sim.locker.map(it => it.type).sort().join();
+  delete room.docked;
   room.nextDay();
   tick(room, 0.5);
-  const rides = !stowed && ofType(room, 'detector').length === 1;
+  sim = room.sim;
+  const rides = sim.locker.map(it => it.type).sort().join() === 'detector,shovel';
+  // picked from the list: the shovel, into Ann's hands
+  room.onPose(A, { par: 1, x: 0.4, y: 0.05, z: -1.0, yaw: Math.PI, pitch: 0, m: C.MODE.WALK, f: 0, v: [0, 0, 0] });
+  tick(room, 0.1);
+  const pick = sim.locker.find(it => it.type === 'shovel');
+  room.handle(A, { t: 'use', kind: 'locker', item: pick.id });
+  tick(room, 0.1);
+  const h = sim.holds.get(A.id), out = h && sim.props.get(h.id)?.type === 'shovel' && sim.locker.length === 1 && sim.locker[0].type === 'detector';
+  // that one's gone now: asked for again, nothing (and told)
+  sim.release(A.id);
+  room.handle(A, { t: 'use', kind: 'locker', item: pick.id });
+  const gone = !sim.holds.get(A.id) && /not in the locker/.test(lastToast(A));
+  // a lit stick set down in the RV stays out of it (it's going off); once it isn't lit, in it goes
+  const rp2 = sim.rv.translation(), rq2 = sim.rv.rotation();
+  const st = sim.addProp('dynamite', toWorld(rp2, rq2, { x: 0, y: 0.4, z: 1.2 }), flat, 0, 0);
+  room.fuses.set(st.id, { at: room.t + 60, by: A.id });
+  tick(room, 2);
+  const litOut = sim.props.has(st.id);
+  room.fuses.delete(st.id);
+  tick(room, 2);
+  const unlitIn = !sim.props.has(st.id) && sim.locker.some(it => it.type === 'dynamite');
   const c = room.caches[0];
-  check(rides && nearestCache(room.caches, c.x, c.z, room.dug).d === 0,
-    `dig: a detector in the RV rides into tomorrow, loose (${rides}); the nearest cache to one is found ${nearestCache(room.caches, c.x + 2, c.z, room.dug).d.toFixed(1)} m off`);
+  check(inIt && told === 'detector,shovel,vase' && pry === 'vase' && pryGear === -1 && sold > 0 && kept === 'detector,shovel' && rides && out && gone && litOut && unlitIn
+    && nearestCache(room.caches, c.x, c.z, room.dug).d === 0,
+    `dig: a detector and a shovel set down in the RV go in its locker with the loot (${inIt}) and the pages are told (${told}); a ringtail would pry out the ${pry}, never the gear (${pryGear === -1}); Ed's loading zone takes the vase ($${sold}) and leaves ${kept}; they ride into tomorrow (${rides}); picked from the list the shovel comes out into Ann's hands (${out}), and not twice (${gone}); a lit stick stays out (${litOut}), unlit it goes in (${unlitIn}); the nearest cache to one is found ${nearestCache(room.caches, c.x + 2, c.z, room.dug).d.toFixed(1)} m off`);
 }
 
 if (failed) { console.error('💥 DIG TESTS FAILED'); process.exit(1); }
