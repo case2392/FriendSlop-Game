@@ -711,7 +711,16 @@ Things the systems will produce without being scripted:
   colliders, `DynamicRayCastVehicleController`), all loot props, the winch
   cable (soft rope constraint plus a reel motor), and grab springs (PD
   forces from each grabber's hand target, which is what makes co-carry
-  work). It steps at 60 Hz and sends snapshots at 20 Hz.
+  work). It steps at 60 Hz and sends snapshots at 20 Hz. A snapshot leaves
+  out what the pages already have where it is: things asleep (a full one
+  every so often resends them, 32 at a time), and things awake that haven't
+  moved a centimetre or turned a degree since they were last sent (the day's
+  loot settling in its first seconds made day 5's biggest snapshot 4,697 B
+  of the 4,752 a Steam message carries in four fragments; now 4,124).
+  Wildlife is always sent: its state changes while it stands still. A page
+  holds a thing left out where it last was till the snapshot before the
+  next one that has it (client/js/interp.js), so it doesn't drift from
+  there over the gap.
 - **Client authority over your own body** is the indie friendslop standard
   (PEAK and Lethal Company run on owner-authoritative netcode). Each client
   runs a *local* Rapier world: the same seeded terrain, plus kinematic

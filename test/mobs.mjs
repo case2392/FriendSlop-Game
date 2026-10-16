@@ -977,8 +977,37 @@ const grabIt = (room, P, id) => { const t = at(room, id); stand(room, P, t.x - 1
   });
   // (the mean: 2,520 B before the Hoard, whose six awake cost 150 B more than a den of three; the RV's
   // condition, 40 B more; and about 100 B more once things stopped breaking from being wedged against the
-  // RV's fittings (a knock is what the thing felt): two more of the twenty ride to the end)
+  // RV's fittings (a knock is what the thing felt): two more of the twenty ride to the end. The biggest was
+  // 4,697 B, the day's loot still settling (awake, not moving) in its first seconds, till an awake thing that
+  // hasn't moved stopped being sent again: 4,124 B, the mean 2,506 B)
   check(max <= 4752 && sum / n <= 2900, `ringtails: day 5 with every critter awake and 20 things loose in the RV, snapshots stay in 4 Steam fragments (max ${max} B, mean ${(sum / n).toFixed(0)} B)`);
+}
+{
+  // and what that takes (server/sim.js snapshot): an awake thing that hasn't moved since the pages last had it
+  // isn't sent again; moved a few centimetres, or turned a few degrees, it is; and a critter is sent awake
+  // whether it moves or not (its state changes standing still)
+  const { room, ps: [A] } = crew(['Ann']);
+  room.mobsOn = false;
+  const sim = room.sim, s = spot(room), y = room.W.heightAt(s.x, s.z);
+  const vase = sim.addProp('vase', { x: s.x, y: y + 0.4, z: s.z }, { x: 0, y: 0, z: 0, w: 1 }, 100, 100);
+  const rt = mobAt(room, A, 'ringtail', s.x + 4, s.z);
+  tick(room, 3);
+  const has = id => sim.snapshot().props.some(e => e[0] === id);
+  const keep = () => { vase.body.wakeUp(); vase.body.setLinvel({ x: 0, y: 0, z: 0 }, true); vase.body.setAngvel({ x: 0, y: 0, z: 0 }, true); };
+  keep(); const first = has(vase.id);
+  keep(); const again = has(vase.id), awake = !vase.body.isSleeping();
+  const t = vase.body.translation();
+  vase.body.setTranslation({ x: t.x + 0.03, y: t.y, z: t.z }, true); keep();
+  const moved = has(vase.id);
+  keep();
+  const a = 0.05;   // (about 6 degrees about y: it lay unturned)
+  vase.body.setRotation({ x: 0, y: Math.sin(a / 2), z: 0, w: Math.cos(a / 2) }, true); keep();
+  const turned = has(vase.id);
+  const mob = sim.props.get(rt);
+  mob.body.wakeUp();
+  const critter = has(rt) && has(rt);
+  check(first && awake && !again && moved && turned && critter,
+    `plumbing: an awake thing that hasn't moved since it was last sent is left out of the next snapshot (sent: ${first}, again: ${again}); moved 3 cm (${moved}) or turned 6 degrees (${turned}) it's sent; a critter is sent every time (${critter})`);
 }
 
 {

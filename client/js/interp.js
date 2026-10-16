@@ -38,6 +38,7 @@ export class Interp {
     this.props = new Map();
     this.players = new Map();
     this.lastTm = 0;
+    this.prevTm = null;   // (the snapshot before this one's time: see the props below)
   }
 
   push(m, now) {
@@ -49,6 +50,7 @@ export class Interp {
       this.offset = best;
       if (m.tm < this.lastTm) { this.rv.length = 0; this.hook.length = 0; this.props.clear(); this.players.clear(); }
     } else this.offset += (best - this.offset) * 0.05;
+    this.prevTm = this.lastTm && m.tm >= this.lastTm ? this.lastTm : null;
     this.lastTm = m.tm;
     const tm = m.tm;
     const r = m.rv;
@@ -60,8 +62,13 @@ export class Interp {
     for (const a of m.pr) {
       let buf = this.props.get(a[0]);
       if (!buf) { buf = []; this.props.set(a[0], buf); }
+      // (left out of the snapshots between, it lay where it last was till the one before this: so it holds
+      // there till then, rather than drifting from it over the whole gap. The server leaves out what's asleep,
+      // and what's awake but hasn't moved: server/sim.js snapshot)
+      const last = buf[buf.length - 1];
+      if (last && this.prevTm != null && last.tm < this.prevTm) buf.push({ ...last, tm: this.prevTm });
       buf.push({ tm, p: { x: a[1], y: a[2], z: a[3] }, q: { x: a[4], y: a[5], z: a[6], w: a[7] }, st: a[8] });   // st: wildlife's state
-      if (buf.length > KEEP) buf.shift();
+      while (buf.length > KEEP) buf.shift();
     }
     for (const a of m.pl) {
       let buf = this.players.get(a[0]);

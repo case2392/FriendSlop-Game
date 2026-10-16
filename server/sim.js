@@ -21,6 +21,7 @@ import { GST } from '../shared/mobs.js';
 let ready = null;
 // a full snapshot resends at most this many things lying still (the rest in the next ones, in turn)
 const FULL_SHARE = 32;
+const STILL_D = 0.01, STILL_Q = 4e-5;   // m, and 1 - |q.q'| (about a degree): an awake thing that hasn't moved this much since it was last sent isn't sent again (snapshot)
 export function initPhysics() { return (ready ||= RAPIER.init()); }
 
 import { GROUPS, looseGroup } from './groups.js';
@@ -1517,7 +1518,10 @@ export class Sim {
     }
     const rv = [r3(t.x), r3(t.y), r3(t.z), r4(q.x), r4(q.y), r4(q.z), r4(q.w), r3(lv.x), r3(lv.y), r3(lv.z), r3(this.steer), ...wheels];
     // (things lying still that the pages already have are left out; a full one every so often resends them, a
-    // share at a time, so it stays within the snapshot's size however much lies about)
+    // share at a time, so it stays within the snapshot's size however much lies about. So is a thing awake but
+    // where the pages already have it, within STILL_D m and about a degree: settling, or creeping on a slope.
+    // The day's loot settling for its first seconds rode in every snapshot of them, most of day 5's biggest.
+    // Wildlife is always sent: its state changes while it stands still)
     const props = [];
     let k = 0;
     const c0 = this.fullAt || 0;
@@ -1528,8 +1532,11 @@ export class Sim {
         const i = k++;
         if (i < c0 || i >= c0 + FULL_SHARE) continue;
       }
+      const pt = p.body.translation(), pq = p.body.rotation(), s = p.sentAt;
+      if (!sleeping && !p.mob && s && Math.abs(pt.x - s[0]) < STILL_D && Math.abs(pt.y - s[1]) < STILL_D && Math.abs(pt.z - s[2]) < STILL_D
+        && 1 - Math.abs(pq.x * s[3] + pq.y * s[4] + pq.z * s[5] + pq.w * s[6]) < STILL_Q) continue;
       p.sentSleep = sleeping;
-      const pt = p.body.translation(), pq = p.body.rotation();
+      p.sentAt = [pt.x, pt.y, pt.z, pq.x, pq.y, pq.z, pq.w];
       const e = [p.id, r3(pt.x), r3(pt.y), r3(pt.z), r4(pq.x), r4(pq.y), r4(pq.z), r4(pq.w)];
       if (p.mob) e.push(p.mob.wire());   // wildlife: its state (shared/mobs.js RST / GST, plus flag bits)
       props.push(e);
